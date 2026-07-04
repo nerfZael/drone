@@ -79,6 +79,7 @@ const state = {
   voiceRealtimeDataChannel: null,
   voiceRealtimeAudio: null,
   voiceRealtimeClientSessionId: '',
+  voiceRealtimeInputTranscript: '',
   voiceRealtimeGeneration: 0,
   voiceOutgoingReady: false,
   voiceReconnectAttempt: 0,
@@ -1838,8 +1839,79 @@ function resetVoiceStreamState() {
   state.voicePostStopStatus = '';
   state.recordingPaused = false;
   state.voiceRealtimeClientSessionId = '';
+  state.voiceRealtimeInputTranscript = '';
   pendingStreamBuffer.clear();
   resetVoiceCountdown();
+}
+
+function normalizeRealtimeTerminalText(text) {
+  return String(text || '')
+    .toLowerCase()
+    .replace(/[^a-z0-9'’]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function hasRealtimeTerminalPhrase(text) {
+  return /(?:^|\b)(?:that\s+is\s+it|that['’]s\s+it|thats\s+it)(?:\b|$)/i.test(normalizeRealtimeTerminalText(text));
+}
+
+function isRealtimeCommandOnlyTerminalPhrase(text) {
+  const normalized = normalizeRealtimeTerminalText(text);
+  const match = /(?:^|\b)(?:that\s+is\s+it|that['’]s\s+it|thats\s+it)(?:\b|$)/i.exec(normalized);
+  return Boolean(match && normalized.slice(0, match.index).trim() === '');
+}
+
+function realtimeInputTextFromItem(item) {
+  if (!item || item.type !== 'message' || item.role !== 'user' || !Array.isArray(item.content)) return '';
+  return item.content
+    .map((part) => (part?.type === 'input_text' || part?.type === 'text' ? String(part.text || '') : ''))
+    .filter(Boolean)
+    .join(' ');
+}
+
+function handleRealtimeWebRtcDataChannelEvent(raw) {
+  let event = null;
+  try {
+    event = JSON.parse(String(raw || ''));
+  } catch {
+    return;
+  }
+
+  const type = String(event?.type || '');
+  let transcript = '';
+  let commandOnlyPartial = false;
+  if (type === 'conversation.item.input_audio_transcription.delta') {
+    state.voiceRealtimeInputTranscript += String(event.delta || '');
+    transcript = state.voiceRealtimeInputTranscript;
+    commandOnlyPartial = true;
+  } else if (type === 'conversation.item.input_audio_transcription.completed' || type === 'conversation.item.input_audio_transcription.done') {
+    transcript = String(event.transcript || state.voiceRealtimeInputTranscript || '');
+    state.voiceRealtimeInputTranscript = '';
+  } else if (type === 'conversation.item.done' || type === 'conversation.item.added') {
+    transcript = realtimeInputTextFromItem(event.item);
+  }
+
+  if (!transcript || !hasRealtimeTerminalPhrase(transcript) || state.voiceStreamEnding) return;
+  const commandOnly = isRealtimeCommandOnlyTerminalPhrase(transcript);
+  if (commandOnlyPartial && !commandOnly) return;
+  const expectedGeneration = state.voiceRealtimeGeneration;
+  const expectedClientSessionId = state.voiceRealtimeClientSessionId;
+  const stop = () => {
+    if (
+      state.voiceStreamEnding ||
+      state.mode !== 'recording' ||
+      state.voiceTarget !== 'realtime' ||
+      state.voiceRealtimeGeneration !== expectedGeneration ||
+      state.voiceRealtimeClientSessionId !== expectedClientSessionId
+    ) return;
+    void stopMic('awake', { finalStatus: 'Realtime assistant stopped.', cue: 'stop_button' });
+  };
+  if (commandOnly) {
+    stop();
+  } else {
+    setTimeout(stop, 500);
+  }
 }
 
 async function cleanupLocalCapture() {
@@ -2688,6 +2760,7 @@ async function startRealtimeWebRtcMic(options = {}, previousMode = state.mode) {
     remoteAudio = document.createElement('audio');
     remoteAudio.autoplay = true;
     remoteAudio.playsInline = true;
+    remoteAudio.volume = 1;
     const outputDeviceId = state.config?.outputDeviceId || '';
     if (outputDeviceId && typeof remoteAudio.setSinkId === 'function') {
       await remoteAudio.setSinkId(outputDeviceId).catch(() => {});
@@ -2706,11 +2779,7 @@ async function startRealtimeWebRtcMic(options = {}, previousMode = state.mode) {
     for (const track of state.stream.getAudioTracks()) peer.addTrack(track, state.stream);
     dataChannel = peer.createDataChannel('oai-events');
     dataChannel.addEventListener('message', (event) => {
-      try {
-        JSON.parse(String(event.data || ''));
-      } catch {
-        // Ignore non-JSON realtime events.
-      }
+      handleRealtimeWebRtcDataChannelEvent(event.data);
     });
     const offer = await peer.createOffer();
     await peer.setLocalDescription(offer);
