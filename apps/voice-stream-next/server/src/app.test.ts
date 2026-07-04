@@ -167,7 +167,7 @@ describe('app configuration', () => {
           },
         },
         output: {
-          voice: 'marin',
+          voice: 'cedar',
         },
       },
     });
