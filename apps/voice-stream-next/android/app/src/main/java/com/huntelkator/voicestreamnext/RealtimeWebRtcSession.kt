@@ -25,6 +25,7 @@ class RealtimeWebRtcSession(
     private val clientSessionId: String,
     private val assistantProfileId: String?,
     private val onStatus: (String) -> Unit,
+    private val onClosed: () -> Unit = {},
 ) {
     private val closed = AtomicBoolean(false)
     private var eglBase: EglBase? = null
@@ -54,6 +55,9 @@ class RealtimeWebRtcSession(
             override fun onSignalingChange(state: PeerConnection.SignalingState?) = Unit
             override fun onIceConnectionChange(state: PeerConnection.IceConnectionState?) {
                 if (!closed.get() && state != null) onStatus("Realtime WebRTC: ${state.name.lowercase()}")
+                if (!closed.get() && (state == PeerConnection.IceConnectionState.DISCONNECTED || state == PeerConnection.IceConnectionState.FAILED || state == PeerConnection.IceConnectionState.CLOSED)) {
+                    onClosed()
+                }
             }
             override fun onIceConnectionReceivingChange(receiving: Boolean) = Unit
             override fun onIceGatheringChange(state: PeerConnection.IceGatheringState?) = Unit
@@ -99,11 +103,11 @@ class RealtimeWebRtcSession(
 
     private fun createOffer(peer: PeerConnection): SessionDescription {
         val latch = CountDownLatch(1)
-        var description: SessionDescription? = null
+        var offerDescription: SessionDescription? = null
         var failure: String? = null
         peer.createOffer(object : SimpleSdpObserver() {
-            override fun onCreateSuccess(desc: SessionDescription?) {
-                description = desc
+            override fun onCreateSuccess(description: SessionDescription?) {
+                offerDescription = description
                 latch.countDown()
             }
 
@@ -114,7 +118,7 @@ class RealtimeWebRtcSession(
         }, MediaConstraints())
         awaitSdp("createOffer", latch)
         if (!failure.isNullOrBlank()) throw IllegalStateException(failure)
-        return description ?: throw IllegalStateException(failure ?: "WebRTC offer was empty.")
+        return offerDescription ?: throw IllegalStateException(failure ?: "WebRTC offer was empty.")
     }
 
     private fun setLocalDescription(peer: PeerConnection, description: SessionDescription) {

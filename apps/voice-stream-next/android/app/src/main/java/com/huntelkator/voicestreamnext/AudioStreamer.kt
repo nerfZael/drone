@@ -316,6 +316,13 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                     clientSessionId = realtimeWebRtcClientSessionId,
                     assistantProfileId = assistantProfileId,
                     onStatus = { status -> mainHandler.post { onStatus(status) } },
+                    onClosed = {
+                        mainHandler.post {
+                            if (currentTarget == Constants.STREAM_TARGET_REALTIME && recording.get()) {
+                                endRecording(onStatus, "Awake: realtime assistant stopped.")
+                            }
+                        }
+                    },
                 )
                 realtimeWebRtcSession = realtime
                 val result = realtime.start()

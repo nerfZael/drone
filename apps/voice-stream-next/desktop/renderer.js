@@ -2700,7 +2700,7 @@ async function startRealtimeWebRtcMic(options = {}, previousMode = state.mode) {
     peer.onconnectionstatechange = () => {
       if (state.voiceRealtimePeer !== peer || !['failed', 'closed', 'disconnected'].includes(peer.connectionState)) return;
       if (state.mode === 'recording' && !state.voiceStreamEnding) {
-        showStatus(`Realtime WebRTC ${peer.connectionState}.`);
+        void finishRealtimeWebRtcFromServer(`Realtime assistant ${peer.connectionState}.`);
       }
     };
     for (const track of state.stream.getAudioTracks()) peer.addTrack(track, state.stream);
@@ -2869,6 +2869,16 @@ async function startMic(target = 'assistant', options = {}) {
     if (previousMode !== 'off') startWakeListener();
     throw err;
   }
+}
+
+async function finishRealtimeWebRtcFromServer(status = 'Realtime assistant stopped.') {
+  state.voiceStreamEnding = true;
+  clearVoiceReconnectTimer();
+  clearVoiceFinalizeTimer();
+  await cleanupLocalCapture();
+  pendingStreamBuffer.clear();
+  completeStoppedVoice('awake', status || 'Realtime assistant stopped.');
+  await loadDashboard().catch(() => {});
 }
 
 async function stopMic(nextMode = 'awake', options = {}) {

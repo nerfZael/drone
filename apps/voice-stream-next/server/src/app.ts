@@ -29,6 +29,7 @@ import { approvalCodeFromText } from './approval-code.js';
 import { pcm16ToWav, wavPcm16Data } from './wav.js';
 import { parseVoiceApprovalSettings, voiceApprovalSettingsResponse } from './voice-approval-settings.js';
 import { normalizeWakeConfirmationText, wakeConfirmationMatches } from './wake-confirmation.js';
+import { realtimeStopTranscript, realtimeStreamingTranscript } from './realtime-transcript.js';
 import {
   assistantAvailableToolSummaries,
   assistantRealtimeSessionConfig,
@@ -5054,23 +5055,37 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         },
         callbacks: {
           onUserTranscriptDelta: async (delta) => {
-            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', cleanText(delta.text));
+            const transcript = realtimeStreamingTranscript(delta.text);
+            if (transcript.stop && !transcript.hasText) {
+              emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
+              return;
+            }
+            if (transcript.hasText) emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', transcript.text);
           },
           onUserSpeechStarted: async () => {
             emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
             emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
           },
           onUserTranscript: async (transcript) => {
-            const text = cleanText(transcript);
-            if (!text) return;
+            const stopTranscript = realtimeStopTranscript(transcript);
+            const text = stopTranscript.stop ? stopTranscript.text : cleanText(transcript);
+            if (!text && !stopTranscript.stop) return;
             emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
-            addTranscript(device.userId, session.id, text);
-            const approvalCode = approvalCodeFromText(text);
-            if (approvalCode) addApprovalCode(device.userId, { voiceSessionId: session.id, code: approvalCode, source: device.deviceType });
-            db.addMessage(device.userId, activeAssistantThreadId, { role: 'user', content: text });
+            if (text) {
+              addTranscript(device.userId, session.id, text);
+              const approvalCode = approvalCodeFromText(text);
+              if (approvalCode) addApprovalCode(device.userId, { voiceSessionId: session.id, code: approvalCode, source: device.deviceType });
+              db.addMessage(device.userId, activeAssistantThreadId, { role: 'user', content: text });
+              emitAssistantChange('realtime_user_message_appended', activeAssistantThreadId, device.userId);
+            }
+            if (stopTranscript.stop) {
+              emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
+              finishRealtimeRunIfReady();
+              await closeRealtimeWebRtcSession(key, 'terminal phrase', { status: 'Realtime assistant stopped.' });
+              return;
+            }
             currentRealtimePrompt = text;
             ensureRealtimeRun();
-            emitAssistantChange('realtime_user_message_appended', activeAssistantThreadId, device.userId);
           },
           onAssistantTranscriptDelta: async (delta) => {
             emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', cleanText(delta.text));
@@ -5479,22 +5494,44 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       }
       if (type === 'conversation.item.input_audio_transcription.delta') {
         inputTranscript += String(event.delta ?? '');
-        emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', cleanText(inputTranscript));
+        const transcript = realtimeStreamingTranscript(inputTranscript);
+        if (transcript.stop && !transcript.hasText) {
+          emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
+          return;
+        }
+        if (transcript.hasText) emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', transcript.text);
         return;
       }
       if (type === 'conversation.item.input_audio_transcription.completed' || type === 'conversation.item.input_audio_transcription.done') {
-        const transcript = cleanText(event.transcript ?? inputTranscript);
-        if (transcript) {
+        const rawTranscript = cleanText(event.transcript ?? inputTranscript);
+        const stopTranscript = realtimeStopTranscript(rawTranscript);
+        const transcript = stopTranscript.stop ? stopTranscript.text : rawTranscript;
+        if (transcript || stopTranscript.stop) {
           inputTranscript = '';
           emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
-          db.addTranscript(device.userId, session.id, transcript);
-          emitAppEvent(device.userId, 'transcript_created', { voiceSessionId: session.id });
-          const approvalCode = approvalCodeFromText(transcript);
-          if (approvalCode) addApprovalCode(device.userId, { voiceSessionId: session.id, code: approvalCode, source: device.deviceType });
-          db.addMessage(device.userId, activeAssistantThreadId, { role: 'user', content: transcript });
+          if (transcript) {
+            db.addTranscript(device.userId, session.id, transcript);
+            emitAppEvent(device.userId, 'transcript_created', { voiceSessionId: session.id });
+            const approvalCode = approvalCodeFromText(transcript);
+            if (approvalCode) addApprovalCode(device.userId, { voiceSessionId: session.id, code: approvalCode, source: device.deviceType });
+            db.addMessage(device.userId, activeAssistantThreadId, { role: 'user', content: transcript });
+            emitAssistantChange('realtime_user_message_appended', activeAssistantThreadId, device.userId);
+          }
+          if (stopTranscript.stop) {
+            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
+            sendClient({
+              type: 'terminal_detected',
+              command: 'finish',
+              phrase: stopTranscript.hasText ? "that's it" : rawTranscript,
+              partialTranscriptChars: transcript.length,
+              detectedAt: new Date().toISOString(),
+            });
+            closeUpstream('terminal phrase');
+            socket.close(1000, 'terminal phrase');
+            return;
+          }
           currentRealtimePrompt = transcript;
           ensureRealtimeRun();
-          emitAssistantChange('realtime_user_message_appended', activeAssistantThreadId, device.userId);
           sendClient({ type: 'transcript_result', mode: 'realtime', transcript, status: 'Realtime transcript received.' });
         }
         return;

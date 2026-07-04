@@ -5,6 +5,7 @@ import path from 'node:path';
 import { binaryChunk, binarySize, buildApp, mergeTimestampedTranscriptText, mergeTranscriptText, openAiRealtimeAudioConfig, openAiSafetyIdentifier } from './app.js';
 import type { VoiceRecordingRecord } from './db.js';
 import { openAiRealtimeWebRtcSessionConfig, realtimeCallIdFromLocation } from './openai-realtime-webrtc.js';
+import { realtimeStopTranscript, realtimeStreamingTranscript } from './realtime-transcript.js';
 import { pcm16ToWav } from './wav.js';
 
 const originalEnv = {
@@ -178,6 +179,21 @@ describe('app configuration', () => {
     expect(realtimeCallIdFromLocation('/v1/realtime/calls/rtc_123456')).toBe('rtc_123456');
     expect(realtimeCallIdFromLocation('https://api.openai.com/v1/realtime/calls/rtc_abcdef?source=test')).toBe('rtc_abcdef');
     expect(realtimeCallIdFromLocation('')).toBe('');
+  });
+
+  test('detects realtime stop transcript phrases without persisting the command', () => {
+    expect(realtimeStopTranscript("that's it")).toEqual({ stop: true, text: '', hasText: false });
+    expect(realtimeStopTranscript('That is it.')).toEqual({ stop: true, text: '', hasText: false });
+    expect(realtimeStopTranscript('Please remember Julio, thats it.')).toEqual({
+      stop: true,
+      text: 'Please remember Julio',
+      hasText: true,
+    });
+    expect(realtimeStreamingTranscript('Please remember Julio, that is it.')).toEqual({
+      stop: true,
+      text: 'Please remember Julio',
+      hasText: true,
+    });
   });
 
   test('merges overlapping transcript text when wording is not identical', () => {
