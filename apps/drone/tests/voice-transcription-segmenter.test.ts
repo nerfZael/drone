@@ -8,6 +8,7 @@ describe('voice transcription command stripping', () => {
     expect(stripCommands('thats it').sleep).toBe(true);
     expect(stripCommands('that is it').sleep).toBe(true);
     expect(stripCommands("write this down that's it").text).toBe('write this down');
+    expect(stripCommands("write this down, that's it").text).toBe('write this down');
   });
 
   test('detects patch, clipboard, and abort commands', () => {
@@ -16,6 +17,7 @@ describe('voice transcription command stripping', () => {
     for (const phrase of ['ok stop', 'ok, stop', 'okay stop', 'okay, stop']) {
       expect(stripCommands(phrase).abort).toBe(true);
       expect(stripCommands(`keep this ${phrase}`).text).toBe('keep this');
+      expect(stripCommands(`keep this, ${phrase}`).text).toBe('keep this');
     }
   });
 

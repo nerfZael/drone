@@ -1406,12 +1406,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     (droneIds: string[]) => {
       const groups = new Set<string>();
       for (const droneId of droneIds) {
-        const group = String(droneByIdRef.current[droneId]?.group ?? '').trim();
-        if (!group) continue;
+        const drone = droneByIdRef.current[droneId];
+        if (!drone) continue;
+        const group = String(drone.group ?? '').trim() || 'Ungrouped';
         const parts = group.split('/').map((part) => part.trim()).filter(Boolean);
         for (let index = 0; index < parts.length; index += 1) {
           groups.add(parts.slice(0, index + 1).join('/'));
         }
+        const repoPath = String(drone.repoPath ?? '').trim();
+        groups.add(repoPath ? `repo:${repoPath}` : 'repo:ungrouped');
       }
       if (groups.size === 0) return;
       setCollapsedGroups((prev) => {

@@ -39,6 +39,7 @@ export type DesktopAssistantVoiceStatus = {
   };
   transcript?: {
     active: boolean;
+    target?: 'assistant' | 'patch' | 'clipboard' | null;
     status: 'idle' | 'collecting' | 'transcribing' | 'error';
     text: string;
     error: string | null;
@@ -59,6 +60,7 @@ export type DesktopAssistantVoiceStatus = {
   realtime?: {
     available: boolean;
     enabled: boolean;
+    webRtcSessionId?: string | null;
   };
 };
 
@@ -405,6 +407,39 @@ async function requestDesktopVoiceStop(): Promise<void> {
   }
 }
 
+async function requestDesktopVoiceStartRecording(): Promise<void> {
+  const now = Date.now();
+  if (toggleInFlight || now - lastToggleAt < 500) return;
+  toggleInFlight = true;
+  lastToggleAt = now;
+  try {
+    const response = await fetch('/api/assistant/desktop-voice/start-recording', { method: 'POST' });
+    if (!response.ok) {
+      let message = `Desktop voice recording failed (${response.status})`;
+      try {
+        const data = await response.json();
+        message = String(data?.error ?? message);
+      } catch {
+        // keep fallback
+      }
+      dispatchAssistantDesktopVoiceStatus({ mode: 'error', message });
+      return;
+    }
+    const status = (await response.json()) as DesktopAssistantVoiceStatus;
+    dispatchAssistantDesktopVoiceStatus(status);
+  } catch (error: any) {
+    dispatchAssistantDesktopVoiceStatus({ mode: 'error', message: error?.message ?? String(error) });
+  } finally {
+    toggleInFlight = false;
+  }
+}
+
+export function dispatchAssistantDesktopVoiceStartRecording(): void {
+  if (typeof window === 'undefined') return;
+  stopDesktopVoiceSpeech();
+  void requestDesktopVoiceStartRecording();
+}
+
 async function requestDesktopVoiceOff(): Promise<void> {
   const now = Date.now();
   if (toggleInFlight || now - lastToggleAt < 500) return;
@@ -538,6 +573,18 @@ export function dispatchAssistantDesktopVoiceStatus(status: DesktopAssistantVoic
   if (typeof window === 'undefined') return;
   if (status.mode === 'off' || status.mode === 'sleeping') stopDesktopVoiceSpeech();
   if (status.mode !== 'recording') stopDesktopVoiceWebRtc();
+  const webRtcSessionId = String(status.realtime?.webRtcSessionId ?? '').trim();
+  if (
+    status.mode === 'recording' &&
+    status.transcript?.target === 'assistant' &&
+    status.realtime?.enabled === true &&
+    webRtcSessionId &&
+    !currentRealtimeWebRtc &&
+    !realtimeWebRtcStartInFlight &&
+    realtimeWebRtcBrowserSessionId !== webRtcSessionId
+  ) {
+    void startDesktopVoiceWebRtc(webRtcSessionId);
+  }
   playCueForStatus(status);
   window.dispatchEvent(new CustomEvent<DesktopAssistantVoiceStatus>(ASSISTANT_DESKTOP_VOICE_STATUS_EVENT, { detail: status }));
 }

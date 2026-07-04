@@ -511,6 +511,7 @@ export type AssistantSnapshot = {
   accessScope: AssistantAccessScope;
   runningModels: Record<string, AssistantRunModel>;
   streamingMessage?: any;
+  streamingMessages?: any[];
 };
 
 export type AssistantSnapshotMode = 'full' | 'compact';
@@ -2354,7 +2355,7 @@ export class HubAssistantService {
   private runtimePromise: Promise<AssistantRuntime> | null = null;
   private activeAgents = new Map<string, any>();
   private queuePumpPromises = new Map<string, Promise<void>>();
-  private streamingMessages = new Map<string, any>();
+  private streamingMessages = new Map<string, Map<AssistantRealtimeMessageRole, any>>();
   private runningModels = new Map<string, AssistantRunModel>();
   private chatIdleSubscriptions: AssistantChatIdleSubscription[] = [];
   private chatIdleSubscriptionTimer: ReturnType<typeof setInterval> | null = null;
@@ -2405,6 +2406,36 @@ export class HubAssistantService {
         // Ignore a broken listener so one stale SSE client cannot block assistant work.
       }
     }
+  }
+
+  private setThreadStreamingMessage(threadId: string, message: any): void {
+    const role: AssistantRealtimeMessageRole = message?.role === 'user' ? 'user' : 'assistant';
+    let messages = this.streamingMessages.get(threadId);
+    if (!messages) {
+      messages = new Map<AssistantRealtimeMessageRole, any>();
+      this.streamingMessages.set(threadId, messages);
+    }
+    messages.set(role, sanitizeMessage(message));
+  }
+
+  private clearThreadStreamingMessages(threadId: string, role?: AssistantRealtimeMessageRole): boolean {
+    if (!role) return this.streamingMessages.delete(threadId);
+    const messages = this.streamingMessages.get(threadId);
+    if (!messages) return false;
+    const cleared = messages.delete(role);
+    if (messages.size === 0) this.streamingMessages.delete(threadId);
+    return cleared;
+  }
+
+  private threadStreamingMessages(threadId: string): any[] {
+    const messages = this.streamingMessages.get(threadId);
+    if (!messages) return [];
+    return (['user', 'assistant'] as const).map((role) => messages.get(role)).filter(Boolean).map(sanitizeMessage);
+  }
+
+  private primaryThreadStreamingMessage(threadId: string): any | null {
+    const messages = this.threadStreamingMessages(threadId);
+    return messages[messages.length - 1] ?? null;
   }
 
   private emitUiAction(uiAction: AssistantUiAction, threadId?: string): void {
@@ -2885,7 +2916,8 @@ export class HubAssistantService {
     await this.ensureLoaded();
     this.updateWaitingThreadStatuses();
     this.ensureChatIdleSubscriptionMonitor();
-    const streamingMessage = this.streamingMessages.get(this.activeThreadId);
+    const streamingMessages = this.threadStreamingMessages(this.activeThreadId);
+    const streamingMessage = this.primaryThreadStreamingMessage(this.activeThreadId);
     const compact = mode === 'compact';
     return {
       ok: true,
@@ -2897,7 +2929,7 @@ export class HubAssistantService {
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(this.activeAccessScope()),
       runningModels: Object.fromEntries([...this.runningModels.entries()].map(([threadId, model]) => [threadId, sanitizeMessage(model)])),
-      ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage) } : {}),
+      ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages } : {}),
     };
   }
 
@@ -2909,7 +2941,8 @@ export class HubAssistantService {
     if (options?.activate) this.activeThreadId = id;
     this.updateWaitingThreadStatuses();
     this.ensureChatIdleSubscriptionMonitor();
-    const streamingMessage = this.streamingMessages.get(id);
+    const streamingMessages = this.threadStreamingMessages(id);
+    const streamingMessage = this.primaryThreadStreamingMessage(id);
     return {
       ok: true,
       activeThreadId: id,
@@ -2922,7 +2955,7 @@ export class HubAssistantService {
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       runningModels: Object.fromEntries([...this.runningModels.entries()].map(([targetThreadId, model]) => [targetThreadId, sanitizeMessage(model)])),
-      ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage) } : {}),
+      ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages } : {}),
     };
   }
 
@@ -3232,7 +3265,7 @@ export class HubAssistantService {
     this.activeAgents.get(threadId)?.abort?.();
     this.activeAgents.delete(threadId);
     this.queuePumpPromises.delete(threadId);
-    this.streamingMessages.delete(threadId);
+    this.clearThreadStreamingMessages(threadId);
     this.overviewCache.delete(threadId);
     for (const key of [...this.overviewInFlight.keys()]) {
       if (key.startsWith(`${threadId}\u0000`)) this.overviewInFlight.delete(key);
@@ -3637,7 +3670,7 @@ export class HubAssistantService {
 
       agent.subscribe(async (event: any) => {
         if (event.type === 'message_update') {
-          this.streamingMessages.set(thread.id, sanitizeMessage(event.message));
+          this.setThreadStreamingMessage(thread.id, event.message);
         }
         if (event.type === 'message_start' && this.removeDeliveredSteeringPrompt(thread, event.message)) {
           thread.updatedAt = nowIso();
@@ -3646,9 +3679,9 @@ export class HubAssistantService {
         if (event.type === 'message_end' || event.type === 'agent_end' || event.type === 'turn_end') {
           thread.messages = agent.state.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
           if (agent.state.streamingMessage) {
-            this.streamingMessages.set(thread.id, sanitizeMessage(agent.state.streamingMessage));
+            this.setThreadStreamingMessage(thread.id, agent.state.streamingMessage);
           } else {
-            this.streamingMessages.delete(thread.id);
+            this.clearThreadStreamingMessages(thread.id);
           }
           const firstUser = thread.messages.find((message) => message?.role === 'user');
           if (thread.title === DEFAULT_THREAD_TITLE && firstUser) thread.title = titleFromPrompt(textFromMessage(firstUser));
@@ -3674,7 +3707,7 @@ export class HubAssistantService {
     } finally {
       if (agent) thread.messages = agent.state.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
       thread.updatedAt = nowIso();
-      this.streamingMessages.delete(thread.id);
+      this.clearThreadStreamingMessages(thread.id);
       const runningModel = this.runningModels.get(thread.id);
       if (runningModel?.promptId === queuedPrompt.id) this.runningModels.delete(thread.id);
       if (this.activeAgents.get(thread.id) === agent) this.activeAgents.delete(thread.id);
@@ -3914,8 +3947,7 @@ export class HubAssistantService {
     const text = cleanOptionalString(input.text);
     if (!text) return { ok: true, threadId: thread.id, accepted: false };
 
-    const streaming = this.streamingMessages.get(thread.id);
-    if (streaming?.role === role) this.streamingMessages.delete(thread.id);
+    this.clearThreadStreamingMessages(thread.id, role);
     thread.messages.push(sanitizeMessage(makeAssistantTextMessage(role, text)));
     thread.messages = thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
     if (thread.title === DEFAULT_THREAD_TITLE || thread.title === 'Voice thread' || thread.title === 'Realtime thread' || thread.title === 'Desktop realtime voice thread' || thread.title === 'Desktop realtime thread') {
@@ -3942,7 +3974,7 @@ export class HubAssistantService {
     const text = cleanOptionalString(input.text);
     if (!text) return { ok: true, threadId: thread.id, accepted: false };
 
-    this.streamingMessages.set(thread.id, sanitizeMessage(makeAssistantTextMessage(role, text)));
+    this.setThreadStreamingMessage(thread.id, makeAssistantTextMessage(role, text));
     thread.updatedAt = nowIso();
     this.activeThreadId = thread.id;
     this.emitChange('realtime_streaming_message', thread.id);
@@ -3953,7 +3985,7 @@ export class HubAssistantService {
     await this.ensureLoaded();
     const threadId = cleanOptionalString(input?.threadId) || (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
     const thread = this.getThread(threadId);
-    const cleared = this.streamingMessages.delete(thread.id);
+    const cleared = this.clearThreadStreamingMessages(thread.id);
     if (cleared) this.emitChange('realtime_streaming_message_cleared', thread.id);
     return { ok: true, threadId: thread.id, cleared };
   }
@@ -5131,7 +5163,8 @@ export class HubAssistantService {
     const id = cleanOptionalString(threadId) || this.activeThreadId;
     const targetThread = this.threads.find((thread) => thread.id === id) ?? firstThread(this.threads, this.activeThreadId);
     const snapshotThreadId = targetThread.id;
-    const streamingMessage = this.streamingMessages.get(snapshotThreadId);
+    const streamingMessages = this.threadStreamingMessages(snapshotThreadId);
+    const streamingMessage = this.primaryThreadStreamingMessage(snapshotThreadId);
     return {
       ok: true,
       activeThreadId: snapshotThreadId,
@@ -5144,7 +5177,7 @@ export class HubAssistantService {
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       runningModels: Object.fromEntries([...this.runningModels.entries()].map(([threadId, model]) => [threadId, sanitizeMessage(model)])),
-      ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage) } : {}),
+      ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages } : {}),
     };
   }
 
@@ -5162,8 +5195,8 @@ export class HubAssistantService {
   }
 
   private buildOverviewInput(thread: AssistantThread): string {
-    const streamingMessage = this.activeThreadId === thread.id ? this.streamingMessages.get(thread.id) : null;
-    const messages = streamingMessage ? [...thread.messages, sanitizeMessage(streamingMessage)] : thread.messages;
+    const streamingMessages = this.activeThreadId === thread.id ? this.threadStreamingMessages(thread.id) : [];
+    const messages = streamingMessages.length > 0 ? [...thread.messages, ...streamingMessages] : thread.messages;
     const approvals = this.pendingApprovals().filter((approval) => approval.threadId === thread.id && approval.status === 'pending');
     const queuedPrompts = Array.isArray(thread.queuedPrompts) ? thread.queuedPrompts : [];
     const runningModel = this.runningModels.get(thread.id) ?? null;

@@ -123,6 +123,7 @@ type DesktopVoiceStatus = {
   realtime: {
     available: boolean;
     enabled: boolean;
+    webRtcSessionId: string | null;
   };
   capture: {
     active: boolean;
@@ -1172,6 +1173,12 @@ export class DesktopVoiceService {
       realtime: {
         available: Boolean(this.opts.startRealtimeAssistant || this.opts.realtimeWebRtcAvailable),
         enabled: this.realtimeAssistantEnabled,
+        webRtcSessionId:
+          this.mode === 'recording' &&
+          this.promptCaptureTarget === 'assistant' &&
+          this.realtimeTransport === 'webrtc'
+            ? this.realtimeWebRtcBrowserSessionId
+            : null,
       },
       capture: this.capture.snapshot(),
     };
@@ -1271,6 +1278,20 @@ export class DesktopVoiceService {
     }
     if (this.mode === 'awake') return this.enterSleeping();
     if (this.mode === 'sleeping') return this.enterAwake();
+    return this.snapshot();
+  }
+
+  async startAssistantRecordingNow(): Promise<DesktopVoiceStatus> {
+    if (this.desktopVoiceSuspensionReason) return this.snapshot();
+    if (this.mode === 'recording' || this.mode === 'transcribing') return this.snapshot();
+    if (this.mode === 'off' || this.mode === 'error') {
+      this.start();
+    } else if (this.mode === 'sleeping') {
+      this.enterAwake();
+    } else {
+      this.ensureRecognitionActive();
+    }
+    await this.startPromptRecording('assistant');
     return this.snapshot();
   }
 

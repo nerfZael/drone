@@ -779,6 +779,31 @@ describe('assistant thread isolation', () => {
     });
   });
 
+  test('realtime user and assistant transcript deltas can stream at the same time', async () => {
+    await withTempDroneDataDir('assistant-realtime-dual-streaming-transcripts-', async () => {
+      const service = makeService();
+      installFakeRuntime(service, {});
+
+      const config = await service.realtimeSessionConfig({ source: 'desktop' });
+      await service.updateRealtimeStreamingMessage({ threadId: config.threadId, role: 'user', text: 'count to ten' });
+      await service.updateRealtimeStreamingMessage({ threadId: config.threadId, role: 'assistant', text: 'one two' });
+
+      const streaming = await service.threadSnapshot(config.threadId);
+      expect((streaming as any).streamingMessages.map((message: any) => message.role)).toEqual(['user', 'assistant']);
+      expect((streaming as any).streamingMessages.map((message: any) => message.content?.[0]?.text)).toEqual(['count to ten', 'one two']);
+
+      await service.appendRealtimeMessage({ threadId: config.threadId, role: 'user', text: 'count to ten' });
+      const userFinal = await service.threadSnapshot(config.threadId);
+      expect((userFinal as any).streamingMessages.map((message: any) => message.role)).toEqual(['assistant']);
+
+      await service.appendRealtimeMessage({ threadId: config.threadId, role: 'assistant', text: 'one two three' });
+      const assistantFinal = await service.threadSnapshot(config.threadId);
+      expect((assistantFinal as any).streamingMessages).toBeUndefined();
+      const thread = assistantFinal.threads.find((item) => item.id === config.threadId) as any;
+      expect(thread.messages.map((message: any) => message.role)).toEqual(['user', 'assistant']);
+    });
+  });
+
   test('create new thread tool can be enabled for normal assistant threads', async () => {
     await withTempDroneDataDir('assistant-normal-create-new-thread-', async () => {
       const service = makeService();

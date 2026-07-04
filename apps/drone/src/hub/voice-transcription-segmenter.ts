@@ -42,11 +42,11 @@ export function stripCommands(text: string): TranscriptCommandResult {
     lock = true;
     return ' ';
   });
-  cleaned = cleaned.replace(/\b(?:that's|thats|that\s+is)\s+it\b[\s,.:;!?-]*/gi, () => {
+  cleaned = cleaned.replace(/[\s,.:;!?-]*\b(?:that's|thats|that\s+is)\s+it\b[\s,.:;!?-]*/gi, () => {
     sleep = true;
     return ' ';
   });
-  cleaned = cleaned.replace(/\b(?:okay|ok)[\s,.:;!?-]+stop\b[\s,.:;!?-]*/gi, () => {
+  cleaned = cleaned.replace(/[\s,.:;!?-]*\b(?:okay|ok)[\s,.:;!?-]+stop\b[\s,.:;!?-]*/gi, () => {
     abort = true;
     return ' ';
   });

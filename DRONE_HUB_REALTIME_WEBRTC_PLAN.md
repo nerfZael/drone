@@ -126,6 +126,8 @@ Realtime messages are persisted directly into the assistant thread:
 
 Streaming transcript rows are intentionally ephemeral. They make the UI feel live, then disappear when the final transcript is appended to durable thread history. This avoids saving partial transcription guesses while still showing the user and assistant text as early as the Realtime sideband emits deltas.
 
+Streaming rows are role-aware. A user partial transcript and an assistant partial transcript can be visible at the same time, which better represents overlapping speech, barge-in, and assistant responses that begin immediately after user speech ends.
+
 The chat input in a Realtime thread does not submit to the standard assistant queue. It is enabled only when a live Realtime WebRTC data channel is open, and sends `conversation.item.create` plus `response.create` to the current Realtime conversation.
 
 ## Browser Responsibilities
@@ -210,10 +212,16 @@ Manual validation after build:
 - Latency fix: Realtime input and assistant transcript deltas now update the visible thread immediately as ephemeral streaming messages; final transcript events still write the durable messages.
 - Latency fix: Realtime transcription now defaults `gpt-realtime-whisper` to `delay: "minimal"` so trailing words are less likely to be held until final turn completion. Set `DRONE_HUB_OPENAI_REALTIME_TRANSCRIPTION_DELAY=low|medium|high|xhigh|default` if accuracy/stability needs to win over latency.
 - Stop-command fix: final Realtime user transcripts containing `that's it` / `that is it` stop the active WebRTC recording without submitting a prompt. Command-only stop transcripts are not saved as chat messages; if there is useful dictated content before the command, only the cleaned content is persisted.
+- Stop-command fix: partial Realtime transcript deltas now use the same command stripping policy as final transcripts, so command-only `that's it` deltas clear the streaming row instead of briefly appearing as chat text.
+- Transcript cleanup fix: command stripping now removes dangling punctuation before stop/abort commands, so `list my drones, that's it` persists as `list my drones`.
+- Review fix: WebRTC transcript, assistant, and tool callbacks are guarded by the per-session generation so late sideband events after stop/off/new-session do not mutate the thread.
+- Thread integration fix: Realtime streaming state is role-aware and exposes `streamingMessages` while keeping the legacy `streamingMessage` field for compatibility.
+- Recovery fix: pending WebRTC browser session ids are included in desktop voice status, and the browser starts WebRTC from status as well as from the one-shot SSE event. This prevents a missed `desktop_voice_webrtc_start` event from leaving the backend in recording mode without an OpenAI WebRTC call.
+- UX fix: the assistant sidebar now has a direct "start recording now" control in addition to the wake phrase. The wake phrase path remains unchanged, but users can enter assistant recording manually from off, sleeping, or awake states.
 
 ## Current Status
 
-Implementation complete for DroneHub. Backend WebRTC call creation, sideband tool handling, desktop voice lifecycle events, browser WebRTC setup, Realtime thread transcript persistence, streaming transcript delta display, typed Realtime data-channel messages, and focused tests are in place. VoiceStreamNext is intentionally not migrated yet.
+Implementation complete for DroneHub. Backend WebRTC call creation, sideband tool handling, desktop voice lifecycle events, browser WebRTC setup, Realtime thread transcript persistence, role-aware streaming transcript delta display, typed Realtime data-channel messages, stop-command filtering, stale callback guards, and focused tests are in place. VoiceStreamNext is intentionally not migrated yet.
 
 Verification completed:
 

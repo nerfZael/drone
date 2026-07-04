@@ -15,6 +15,7 @@ import {
   desktopAssistantVoiceHeardText,
   dispatchAssistantDesktopVoiceOff,
   dispatchAssistantDesktopVoiceRealtimeToggle,
+  dispatchAssistantDesktopVoiceStartRecording,
   dispatchAssistantDesktopVoiceToggle,
   isDesktopAssistantVoiceActive,
   isDesktopAssistantVoiceBusy,
@@ -158,6 +159,7 @@ type AssistantSnapshot = {
   accessScope?: AssistantAccessScope;
   runningModels?: Record<string, AssistantRunModel>;
   streamingMessage?: AssistantMessage;
+  streamingMessages?: AssistantMessage[];
 };
 
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
@@ -1430,6 +1432,7 @@ function AssistantThreadSidebar({
   onOpenPairing,
   desktopVoiceStatus,
   onToggleDesktopVoice,
+  onStartDesktopVoiceRecording,
   onStopDesktopVoice,
   onCollapse,
 }: {
@@ -1443,6 +1446,7 @@ function AssistantThreadSidebar({
   onOpenPairing: () => void;
   desktopVoiceStatus: DesktopAssistantVoiceStatus;
   onToggleDesktopVoice: () => void;
+  onStartDesktopVoiceRecording: () => void;
   onStopDesktopVoice: () => void;
   onCollapse: () => void;
 }) {
@@ -1578,6 +1582,27 @@ function AssistantThreadSidebar({
                 <path d="M5 11a7 7 0 0 0 14 0" />
                 <path d="M12 18v3" />
                 <path d="M8 21h8" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              onClick={onStartDesktopVoiceRecording}
+              disabled={desktopVoiceBusy}
+              aria-label="Start assistant recording now"
+              title={desktopVoiceBusy ? 'Assistant voice is already recording' : 'Start assistant recording now'}
+              className={`flex h-10 w-10 items-center justify-center rounded-full border transition-colors disabled:cursor-not-allowed disabled:opacity-50 ${
+                desktopVoiceStatus.mode === 'recording'
+                  ? 'border-[var(--accent-muted)] bg-[rgba(45,212,191,.12)] text-[var(--accent)]'
+                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]'
+              }`}
+            >
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0" />
+                <path d="M12 18v3" />
+                <path d="M8 21h8" />
+                <path d="M19 5v4" />
+                <path d="M17 7h4" />
               </svg>
             </button>
             {desktopVoiceRealtimeAvailable ? (
@@ -2521,10 +2546,15 @@ export function AssistantDock() {
     (activeThread?.status === 'waiting_for_chats_idle' || activeChatIdleSubscriptionsForThread.length > 0);
   const visibleMessages = React.useMemo(() => {
     const messages = activeThread?.messages ?? [];
-    const streaming = snapshot?.streamingMessage;
-    if (!streaming || (streaming.role !== 'assistant' && streaming.role !== 'user')) return messages;
-    return [...messages, streaming];
-  }, [activeThread?.messages, snapshot?.streamingMessage]);
+    const streamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
+      ? snapshot.streamingMessages
+      : snapshot?.streamingMessage
+        ? [snapshot.streamingMessage]
+        : [];
+    const visibleStreaming = streamingMessages.filter((streaming) => streaming.role === 'assistant' || streaming.role === 'user');
+    if (visibleStreaming.length === 0) return messages;
+    return [...messages, ...visibleStreaming];
+  }, [activeThread?.messages, snapshot?.streamingMessage, snapshot?.streamingMessages]);
   const visibleItems = React.useMemo(() => {
     const items = renderItemsFromMessages(visibleMessages);
     for (const prompt of activeThread?.queuedPrompts ?? []) {
@@ -2533,11 +2563,24 @@ export function AssistantDock() {
     return items;
   }, [activeThread?.queuedPrompts, visibleMessages]);
   const streamingAssistantSourceIndex = React.useMemo(() => {
-    const streaming = snapshot?.streamingMessage;
-    if (!streaming || streaming.role !== 'assistant') return -1;
-    return visibleMessages.length - 1;
-  }, [snapshot?.streamingMessage, visibleMessages]);
-  const showThinking = running && activePendingApprovals.length === 0 && !messageText(snapshot?.streamingMessage ?? { role: 'assistant' }).trim();
+    const streamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
+      ? snapshot.streamingMessages
+      : snapshot?.streamingMessage
+        ? [snapshot.streamingMessage]
+        : [];
+    const assistantStreamingOffset = streamingMessages.findIndex((streaming) => streaming.role === 'assistant');
+    if (assistantStreamingOffset < 0) return -1;
+    return (activeThread?.messages?.length ?? 0) + assistantStreamingOffset;
+  }, [activeThread?.messages?.length, snapshot?.streamingMessage, snapshot?.streamingMessages]);
+  const streamingAssistantMessage = React.useMemo(() => {
+    const streamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
+      ? snapshot.streamingMessages
+      : snapshot?.streamingMessage
+        ? [snapshot.streamingMessage]
+        : [];
+    return streamingMessages.find((streaming) => streaming.role === 'assistant') ?? null;
+  }, [snapshot?.streamingMessage, snapshot?.streamingMessages]);
+  const showThinking = running && activePendingApprovals.length === 0 && !messageText(streamingAssistantMessage ?? { role: 'assistant' }).trim();
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
   const refresh = React.useCallback(async (options: { silent?: boolean } = {}) => {
@@ -3547,6 +3590,7 @@ export function AssistantDock() {
           onOpenPairing={() => void openVoicePairing()}
           desktopVoiceStatus={desktopVoiceStatus}
           onToggleDesktopVoice={dispatchAssistantDesktopVoiceToggle}
+          onStartDesktopVoiceRecording={dispatchAssistantDesktopVoiceStartRecording}
           onStopDesktopVoice={dispatchAssistantDesktopVoiceOff}
           onCollapse={() => setThreadSidebarOpen(false)}
         />
