@@ -917,6 +917,7 @@ function AssistantThinkingRow() {
 
 const ASSISTANT_TOOL_CATEGORY_LABELS: Record<string, string> = {
   artifacts: 'Artifacts',
+  skills: 'Skills',
   speech: 'Speech',
   prompts: 'Prompts',
   settings: 'Settings',
@@ -934,11 +935,132 @@ const VOICE_RECORDING_MODE_ENTRIES: Array<{ id: VoiceRecordingsMode; label: stri
   { id: 'clipboard', label: 'Clipboard' },
 ];
 
+type AssistantToolGroup = {
+  id: string;
+  label: string;
+  detail: string;
+  tools: AssistantToolSummary[];
+};
+
+function assistantToolSourceKind(tool: AssistantToolSummary): 'built_in' | 'extension' | 'mcp' {
+  if (tool.sourceKind === 'extension' || tool.sourceKind === 'mcp') return tool.sourceKind;
+  if (tool.category === 'extensions' && tool.sourceId?.startsWith('mcp-')) return 'mcp';
+  if (tool.category === 'extensions' && tool.sourceId) return 'extension';
+  const inferredSourceId = tool.category === 'extensions' && tool.name.includes('__') ? tool.name.split('__')[0] : '';
+  if (inferredSourceId.startsWith('mcp-')) return 'mcp';
+  if (inferredSourceId) return 'extension';
+  return 'built_in';
+}
+
+function assistantToolGroups(tools: AssistantToolSummary[]): AssistantToolGroup[] {
+  const groups = new Map<string, AssistantToolGroup>();
+  for (const tool of tools) {
+    const sourceKind = assistantToolSourceKind(tool);
+    const sourceId = tool.sourceId || tool.name.split('__')[0] || tool.category;
+    const groupId = sourceKind === 'built_in' ? `category:${tool.category}` : `${sourceKind}:${sourceId}`;
+    const label = sourceKind === 'built_in'
+      ? ASSISTANT_TOOL_CATEGORY_LABELS[tool.category] ?? tool.category
+      : tool.sourceName || sourceId;
+    const detail = sourceKind === 'mcp' ? 'MCP server' : sourceKind === 'extension' ? 'Extension' : 'Built in';
+    const group = groups.get(groupId) ?? { id: groupId, label, detail, tools: [] };
+    group.tools.push(tool);
+    groups.set(groupId, group);
+  }
+  return Array.from(groups.values());
+}
+
+function AssistantToolSelectionList({
+  tools,
+  selectedToolNames,
+  disabled,
+  onSelectedToolNamesChange,
+  emptyLabel = 'No tools loaded.',
+}: {
+  tools: AssistantToolSummary[];
+  selectedToolNames: string[];
+  disabled: boolean;
+  onSelectedToolNamesChange: (toolNames: string[]) => void;
+  emptyLabel?: string;
+}) {
+  const selected = new Set(selectedToolNames);
+  const groups = React.useMemo(() => assistantToolGroups(tools), [tools]);
+
+  function updateTool(toolName: string, checked: boolean) {
+    const next = new Set(selectedToolNames);
+    if (checked) next.add(toolName);
+    else next.delete(toolName);
+    onSelectedToolNamesChange([...next]);
+  }
+
+  function updateGroup(groupTools: AssistantToolSummary[], checked: boolean) {
+    const next = new Set(selectedToolNames);
+    for (const tool of groupTools) {
+      if (checked) next.add(tool.name);
+      else next.delete(tool.name);
+    }
+    onSelectedToolNamesChange([...next]);
+  }
+
+  return (
+    <div className="grid gap-2">
+      {groups.map((group) => {
+        const selectedInGroup = group.tools.filter((tool) => selected.has(tool.name)).length;
+        return (
+          <section key={group.id} className="grid gap-1">
+            <div className="flex min-w-0 items-center gap-1.5 px-1">
+              <div className="min-w-0">
+                <div className="truncate font-display text-[9px] font-bold uppercase text-[var(--muted-dim)]">{group.label}</div>
+                <div className="text-[9px] uppercase text-[var(--muted-dim)]">{group.detail} · {selectedInGroup} / {group.tools.length}</div>
+              </div>
+              <div className="ml-auto flex shrink-0 gap-1">
+                <button type="button" className="h-6 border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 font-display text-[9px] font-bold uppercase text-[var(--muted)]" disabled={disabled || selectedInGroup === group.tools.length} onClick={() => updateGroup(group.tools, true)}>
+                  Select all
+                </button>
+                <button type="button" className="h-6 border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 font-display text-[9px] font-bold uppercase text-[var(--muted)]" disabled={disabled || selectedInGroup === 0} onClick={() => updateGroup(group.tools, false)}>
+                  Deselect all
+                </button>
+              </div>
+            </div>
+            <div className="grid gap-1">
+              {group.tools.map((tool) => {
+                const checked = selected.has(tool.name);
+                return (
+                  <label
+                    key={tool.name}
+                    className={cn(
+                      'flex min-w-0 cursor-pointer items-start gap-2 rounded-[5px] border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 py-1.5',
+                      checked && 'border-[rgba(139,92,246,.55)] bg-[rgba(139,92,246,.12)]',
+                    )}
+                    title={tool.description}
+                  >
+                    <input
+                      className="mt-px h-3.5 w-3.5 shrink-0 accent-[var(--accent)]"
+                      type="checkbox"
+                      checked={checked}
+                      disabled={disabled}
+                      onChange={(event) => updateTool(tool.name, event.currentTarget.checked)}
+                    />
+                    <span className="min-w-0">
+                      <strong className="block truncate text-[11px] font-semibold text-[var(--fg-secondary)]">{tool.label}</strong>
+                      <small className="mt-0.5 block text-[10px] leading-snug text-[var(--muted-dim)]">{tool.description}</small>
+                    </span>
+                  </label>
+                );
+              })}
+            </div>
+          </section>
+        );
+      })}
+      {tools.length === 0 ? <div className={assistantEmptyClass}>{emptyLabel}</div> : null}
+    </div>
+  );
+}
+
 function AssistantToolsPanel({
   tools,
   enabledTools,
   disabled,
-  onToggleTool,
+  onEnabledToolsChange,
   onEnableAll,
   onDisableAll,
   onClose,
@@ -946,22 +1068,11 @@ function AssistantToolsPanel({
   tools: AssistantToolSummary[];
   enabledTools: string[];
   disabled: boolean;
-  onToggleTool: (toolName: string, enabled: boolean) => void;
+  onEnabledToolsChange: (toolNames: string[]) => void;
   onEnableAll: () => void;
   onDisableAll: () => void;
   onClose: () => void;
 }) {
-  const enabled = new Set(enabledTools);
-  const categories = React.useMemo(() => {
-    const groups = new Map<string, AssistantToolSummary[]>();
-    for (const tool of tools) {
-      const current = groups.get(tool.category) ?? [];
-      current.push(tool);
-      groups.set(tool.category, current);
-    }
-    return Array.from(groups.entries());
-  }, [tools]);
-
   return (
     <div className="absolute right-2 top-[50px] z-[35] w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded-md border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_rgba(0,0,0,.48)] max-[620px]:fixed max-[620px]:inset-x-2 max-[620px]:bottom-2 max-[620px]:top-2 max-[620px]:w-auto">
       <div className="flex items-center justify-between gap-2.5 border-b border-[var(--border)] px-3 py-2">
@@ -977,38 +1088,7 @@ function AssistantToolsPanel({
         <span className="ml-auto text-[10px] text-[var(--muted-dim)]">{enabledTools.length} / {tools.length}</span>
       </div>
       <div className="max-h-[min(520px,calc(100vh-190px))] overflow-y-auto p-2 max-[620px]:max-h-none">
-        {categories.map(([category, categoryTools]) => (
-          <section key={category} className="mt-2 first:mt-0">
-            <div className="mb-1 px-1 font-display text-[9px] font-bold uppercase text-[var(--muted-dim)]">{ASSISTANT_TOOL_CATEGORY_LABELS[category] ?? category}</div>
-            <div className="grid gap-1">
-              {categoryTools.map((tool) => {
-                const checked = enabled.has(tool.name);
-                return (
-                  <label
-                    key={tool.name}
-                    className={cn(
-                      'flex min-w-0 cursor-pointer items-start gap-2 rounded-[5px] border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 py-1.5',
-                      checked && 'border-[rgba(139,92,246,.55)] bg-[rgba(139,92,246,.12)]',
-                    )}
-                    title={tool.description}
-                  >
-                    <input
-                      className="mt-px h-3.5 w-3.5 shrink-0 accent-[var(--accent)]"
-                      type="checkbox"
-                      checked={checked}
-                      disabled={disabled}
-                      onChange={(event) => onToggleTool(tool.name, event.target.checked)}
-                    />
-                    <span className="min-w-0">
-                      <strong className="block truncate text-[11px] font-semibold text-[var(--fg-secondary)]">{tool.label}</strong>
-                      <small className="mt-0.5 block text-[10px] leading-snug text-[var(--muted-dim)]">{tool.description}</small>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </section>
-        ))}
+        <AssistantToolSelectionList tools={tools} selectedToolNames={enabledTools} disabled={disabled} onSelectedToolNamesChange={onEnabledToolsChange} />
       </div>
     </div>
   );
@@ -1490,6 +1570,12 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const artifactsEventRefreshTimerRef = React.useRef<number | null>(null);
   const dashboardEventRefreshTimerRef = React.useRef<number | null>(null);
   const releaseEventRefreshTimerRef = React.useRef<number | null>(null);
+  const threadToolsSaveTimerRef = React.useRef<number | null>(null);
+  const threadToolsPendingRef = React.useRef<{ threadId: string; enabledTools: string[]; revision: number } | null>(null);
+  const threadToolsSaveRevisionRef = React.useRef(0);
+  const defaultToolsSaveTimerRef = React.useRef<number | null>(null);
+  const defaultToolsPendingRef = React.useRef<{ enabledTools: string[]; revision: number } | null>(null);
+  const defaultToolsSaveRevisionRef = React.useRef(0);
   const appEventsConnectedRef = React.useRef(false);
   const approvalResolvingIdsRef = React.useRef<Set<string>>(new Set());
   const promptSubmittingThreadIdsRef = React.useRef<Record<string, boolean>>({});
@@ -1509,6 +1595,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const composerRecordingStartIdRef = React.useRef(0);
   const composerRecordingThreadIdRef = React.useRef<string | null>(null);
   const sendMessageInFlightRef = React.useRef(false);
+
+  React.useEffect(() => () => {
+    if (threadToolsSaveTimerRef.current !== null) window.clearTimeout(threadToolsSaveTimerRef.current);
+    if (defaultToolsSaveTimerRef.current !== null) window.clearTimeout(defaultToolsSaveTimerRef.current);
+  }, []);
 
   const replaceDashboardRoute = React.useCallback((view: DashboardView, pane: SettingsPane) => {
     const path = dashboardRoutePath(view, pane);
@@ -1788,7 +1879,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       if (requestedThreadId && activeThreadIdRef.current && activeThreadIdRef.current !== requestedThreadId) {
         return snapshot;
       }
-      setAssistantSnapshotData(snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(snapshot));
       const nextThreadId = snapshot.activeThreadId ?? snapshot.threads[0]?.id ?? null;
       if (!activeThreadIdRef.current && nextThreadId) selectActiveThread(nextThreadId);
       const visibleThreadId = requestedThreadId ?? activeThreadIdRef.current ?? nextThreadId;
@@ -2048,7 +2139,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         }
         if ((promptEvent.type === 'snapshot' || promptEvent.type === 'approval_pending' || promptEvent.type === 'queued' || promptEvent.type === 'done') && promptEvent.snapshot) {
           const snapshot = promptEvent.snapshot as AssistantSnapshot;
-          setAssistantSnapshotData(snapshot);
+          setAssistantSnapshotData(snapshotWithPendingToolEdits(snapshot));
           const visibleThread = snapshot.threads.find((thread) => thread.id === threadId);
           if (visibleThread && threadId === activeThreadIdRef.current) setMessages(visibleThread.messages);
           if (promptEvent.type === 'done') clearThreadPromptStreaming(threadId);
@@ -2269,6 +2360,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     setBusy(true);
     setError(null);
     try {
+      if (!(await flushDefaultToolsSave())) return;
       const data = await client.request<{ ok: true; thread: AssistantThread; snapshot: AssistantSnapshot }>('/api/assistant/threads', {
         method: 'POST',
         body: JSON.stringify({
@@ -2278,7 +2370,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         }),
       });
       selectActiveThread(data.thread.id);
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       const createdThread = data.snapshot.threads.find((thread) => thread.id === data.thread.id) as AssistantThreadView | undefined;
       setMessages(createdThread?.messages ?? []);
       await loadDashboard({ includeAssistant: false });
@@ -2477,6 +2569,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     if (ownsStreamingState) clearThreadPromptStreaming(targetThreadId);
     scrollMessagesToBottom({ force: true });
     try {
+      if (threadToolsPendingRef.current?.threadId === targetThreadId && !(await flushThreadToolsSave())) return;
       const response = await client.stream(
         `/api/assistant/threads/${encodeURIComponent(targetThreadId)}/stream`,
         {
@@ -2521,7 +2614,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         if ((promptEvent.type === 'snapshot' || promptEvent.type === 'approval_pending' || promptEvent.type === 'queued' || promptEvent.type === 'done') && promptEvent.snapshot) {
           releasePromptSubmit();
           const snapshot = promptEvent.snapshot as AssistantSnapshot;
-          setAssistantSnapshotData(snapshot);
+          setAssistantSnapshotData(snapshotWithPendingToolEdits(snapshot));
           const visibleThread = snapshot.threads.find((thread) => thread.id === targetThreadId);
           if (visibleThread && activeThreadIdRef.current === targetThreadId) setMessages(visibleThread.messages);
           if (promptEvent.type === 'done' && ownsStreamingState) clearThreadPromptStreaming(targetThreadId);
@@ -2561,13 +2654,91 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           body: JSON.stringify(patch),
         },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       await loadDashboard();
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
       setBusy(false);
     }
+  }
+
+  function applyThreadEnabledTools(threadId: string, enabledTools: string[]) {
+    setAssistantSnapshotData((current) => current
+      ? {
+        ...current,
+        threads: current.threads.map((thread) => (thread.id === threadId ? { ...thread, enabledTools } : thread)),
+      }
+      : current);
+  }
+
+  function snapshotWithPendingToolEdits(snapshot: AssistantSnapshot): AssistantSnapshot {
+    let next = snapshot;
+    const pendingThreadTools = threadToolsPendingRef.current;
+    if (pendingThreadTools) {
+      next = {
+        ...next,
+        threads: next.threads.map((thread) => (thread.id === pendingThreadTools.threadId ? { ...thread, enabledTools: pendingThreadTools.enabledTools } : thread)),
+      };
+    }
+    const pendingDefaultTools = defaultToolsPendingRef.current;
+    if (pendingDefaultTools) {
+      next = {
+        ...next,
+        assistantSettings: { ...next.assistantSettings, defaultEnabledTools: pendingDefaultTools.enabledTools },
+      };
+    }
+    return next;
+  }
+
+  async function flushThreadToolsSave(): Promise<boolean> {
+    const pending = threadToolsPendingRef.current;
+    if (!pending) return true;
+    if (threadToolsSaveTimerRef.current !== null) {
+      window.clearTimeout(threadToolsSaveTimerRef.current);
+      threadToolsSaveTimerRef.current = null;
+    }
+    try {
+      const data = await client.request<{ ok: true; thread: AssistantThread; snapshot: AssistantSnapshot }>(
+        `/api/assistant/threads/${encodeURIComponent(pending.threadId)}`,
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ enabledTools: pending.enabledTools }),
+        },
+      );
+      const currentPending = threadToolsPendingRef.current;
+      const supersededSameThread = Boolean(currentPending && currentPending.threadId === pending.threadId && currentPending.revision !== pending.revision);
+      if (supersededSameThread) return false;
+      if (currentPending?.revision === pending.revision) threadToolsPendingRef.current = null;
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
+      return true;
+    } catch (err: any) {
+      const currentPending = threadToolsPendingRef.current;
+      const supersededSameThread = Boolean(currentPending && currentPending.threadId === pending.threadId && currentPending.revision !== pending.revision);
+      if (supersededSameThread) return false;
+      if (currentPending?.revision === pending.revision) threadToolsPendingRef.current = null;
+      setError(err?.message ?? String(err));
+      void loadAssistantSnapshot(pending.threadId);
+      return false;
+    }
+  }
+
+  function updateThreadEnabledTools(enabledTools: string[]) {
+    if (!activeThread) return;
+    const previousPending = threadToolsPendingRef.current;
+    if (previousPending && previousPending.threadId !== activeThread.id) void flushThreadToolsSave();
+    const nextEnabledTools = enabledTools.filter((toolName, index) => enabledTools.indexOf(toolName) === index);
+    const revision = threadToolsSaveRevisionRef.current + 1;
+    threadToolsSaveRevisionRef.current = revision;
+    threadToolsPendingRef.current = { threadId: activeThread.id, enabledTools: nextEnabledTools, revision };
+    setError(null);
+    setNotice(null);
+    applyThreadEnabledTools(activeThread.id, nextEnabledTools);
+    if (threadToolsSaveTimerRef.current !== null) window.clearTimeout(threadToolsSaveTimerRef.current);
+    threadToolsSaveTimerRef.current = window.setTimeout(() => {
+      threadToolsSaveTimerRef.current = null;
+      void flushThreadToolsSave();
+    }, 450);
   }
 
   async function startCodexConnect() {
@@ -2601,7 +2772,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           body: JSON.stringify({ state: codexConnectFlow.state, codeOrUrl: codexCodeDraft }),
         },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setCodexConnectFlow(null);
       setCodexCodeDraft('');
       setNotice('Connected Codex.');
@@ -2621,7 +2792,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         '/api/assistant/codex/connection',
         { method: 'DELETE' },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setCodexConnectFlow(null);
       setCodexCodeDraft('');
       setNotice('Disconnected Codex.');
@@ -2647,7 +2818,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         `/api/assistant/threads/${encodeURIComponent(threadId)}`,
         { method: 'DELETE' },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       const nextThreadId = data.snapshot.activeThreadId ?? data.snapshot.threads[0]?.id ?? null;
       selectActiveThread(nextThreadId);
       const visibleThread = data.snapshot.threads.find((thread) => thread.id === nextThreadId) ?? null;
@@ -2670,7 +2841,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         `/api/assistant/threads/${encodeURIComponent(queuedPrompt.threadId)}/queued/${encodeURIComponent(queuedPrompt.id)}`,
         { method: 'DELETE' },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setNotice('Cancelled queued prompt.');
       await loadDashboard();
     } catch (err: any) {
@@ -2697,7 +2868,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         `/api/assistant/approvals/${encodeURIComponent(approvalId)}/${approved ? 'approve' : 'deny'}`,
         { method: 'POST', body: '{}' },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       const visibleThread = data.snapshot.threads.find((thread) => thread.id === activeThreadIdRef.current);
       if (visibleThread) setMessages(visibleThread.messages);
       await loadDashboard();
@@ -2734,7 +2905,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/stop`,
         { method: 'POST', body: '{}' },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setNotice('Stopped active assistant run.');
     } catch (err: any) {
       setError(err?.message ?? String(err));
@@ -2823,7 +2994,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         body: JSON.stringify({ path: artifactPath, content: artifactContentDraft }),
       });
       setArtifacts(data.artifacts);
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       hydrateArtifactDraft(data.artifact);
       setNotice('Saved assistant artifact.');
     } catch (err: any) {
@@ -2847,7 +3018,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         },
       );
       setArtifacts(data.artifacts);
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       hydrateArtifactDraft(chooseDefaultArtifact(data.artifacts));
       setArtifactDeleteCandidate(null);
       setNotice('Deleted assistant artifact.');
@@ -2932,13 +3103,68 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       for (const field of options.clearPromptDirty ?? []) {
         assistantSettingsPromptDirtyRef.current[field] = false;
       }
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setNotice('Saved assistant settings.');
     } catch (err: any) {
       setError(err?.message ?? String(err));
     } finally {
       setBusy(false);
     }
+  }
+
+  function applyDefaultEnabledTools(enabledTools: string[]) {
+    setAssistantSnapshotData((current) => current
+      ? {
+        ...current,
+        assistantSettings: { ...current.assistantSettings, defaultEnabledTools: enabledTools },
+      }
+      : current);
+  }
+
+  async function flushDefaultToolsSave(): Promise<boolean> {
+    const pending = defaultToolsPendingRef.current;
+    if (!pending) return true;
+    if (defaultToolsSaveTimerRef.current !== null) {
+      window.clearTimeout(defaultToolsSaveTimerRef.current);
+      defaultToolsSaveTimerRef.current = null;
+    }
+    try {
+      const data = await client.request<{ ok: true; settings: AssistantSnapshot['assistantSettings']; snapshot: AssistantSnapshot }>(
+        '/api/assistant/settings',
+        {
+          method: 'PATCH',
+          body: JSON.stringify({ defaultEnabledTools: pending.enabledTools }),
+        },
+      );
+      if (defaultToolsSaveRevisionRef.current === pending.revision) {
+        defaultToolsPendingRef.current = null;
+        setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
+        return true;
+      }
+      return false;
+    } catch (err: any) {
+      if (defaultToolsSaveRevisionRef.current === pending.revision) {
+        setError(err?.message ?? String(err));
+        defaultToolsPendingRef.current = null;
+        void loadAssistantSnapshot(activeThreadIdRef.current);
+      }
+      return false;
+    }
+  }
+
+  function updateDefaultEnabledTools(enabledTools: string[]) {
+    const nextEnabledTools = enabledTools.filter((toolName, index) => enabledTools.indexOf(toolName) === index);
+    const revision = defaultToolsSaveRevisionRef.current + 1;
+    defaultToolsSaveRevisionRef.current = revision;
+    defaultToolsPendingRef.current = { enabledTools: nextEnabledTools, revision };
+    setError(null);
+    setNotice(null);
+    applyDefaultEnabledTools(nextEnabledTools);
+    if (defaultToolsSaveTimerRef.current !== null) window.clearTimeout(defaultToolsSaveTimerRef.current);
+    defaultToolsSaveTimerRef.current = window.setTimeout(() => {
+      defaultToolsSaveTimerRef.current = null;
+      void flushDefaultToolsSave();
+    }, 450);
   }
 
   function updateAssistantProfileDraft(profileId: string, patch: Partial<AssistantProfileDraft>) {
@@ -2963,7 +3189,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           body: JSON.stringify(assistantProfilePayloadFromDraft(draft)),
         },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setAssistantProfileDrafts((current) => ({ ...current, [data.profile.id]: profileDraftFromAssistantProfile(data.profile) }));
       setNotice('Saved assistant profile.');
     } catch (err: any) {
@@ -2988,7 +3214,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           enabled: true,
         }),
       });
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setAssistantProfileDrafts((current) => ({ ...current, [data.profile.id]: profileDraftFromAssistantProfile(data.profile) }));
       setSelectedAssistantProfileId(data.profile.id);
       setNotice('Created assistant profile.');
@@ -3012,7 +3238,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         method: 'POST',
         body: JSON.stringify({ apiKey }),
       });
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setApiKeyDrafts((current) => ({ ...current, [provider]: '' }));
       setNotice(`Saved ${assistantApiKeyProviderLabel(provider)} key.`);
     } catch (err: any) {
@@ -3027,7 +3253,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     setError(null);
     try {
       const data = await client.request<{ ok: true; snapshot: AssistantSnapshot }>(`/api/assistant/keys/${provider}`, { method: 'DELETE' });
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setNotice(`Deleted ${assistantApiKeyProviderLabel(provider)} key.`);
     } catch (err: any) {
       setError(err?.message ?? String(err));
@@ -3077,7 +3303,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         method: skillDraft.id ? 'PATCH' : 'POST',
         body: JSON.stringify(skillPayloadFromDraft(skillDraft)),
       });
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setSkillDraft(draftFromAssistantSkill(data.skill));
       setNotice(skillDraft.id ? 'Saved skill.' : 'Created skill.');
     } catch (err: any) {
@@ -3097,7 +3323,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         `/api/assistant/skills/${encodeURIComponent(skillDraft.id)}`,
         { method: 'DELETE' },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setSkillDraft(emptySkillDraft());
       setNotice('Deleted skill.');
     } catch (err: any) {
@@ -3121,7 +3347,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           body: JSON.stringify(route),
         },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setAssistantExtensions((current) => current
         ? { ...current, routes: [...current.routes.filter((item) => item.toolName !== data.route.toolName), data.route] }
         : current);
@@ -3148,7 +3374,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         '/api/assistant/settings',
         { method: 'PATCH', body: JSON.stringify({ voiceSystemPrompt: prompt }) },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setVoiceSystemPromptDraft(data.snapshot.assistantSettings.voiceSystemPrompt);
       setSystemPromptNotice('Saved default prompt.');
     } catch (err: any) {
@@ -3168,7 +3394,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         `/api/assistant/threads/${encodeURIComponent(activeThread.id)}`,
         { method: 'PATCH', body: JSON.stringify({ systemPrompt: threadSystemPromptDraft.trim() }) },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setThreadSystemPromptDraft(data.thread.systemPrompt ?? '');
       setSystemPromptNotice(data.thread.systemPrompt ? 'Saved thread prompt override.' : 'Thread now uses the default prompt.');
       await loadDashboard();
@@ -3193,7 +3419,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           body: JSON.stringify({ voiceSystemPrompt: prompt }),
         },
       );
-      setAssistantSnapshotData(data.snapshot);
+      setAssistantSnapshotData(snapshotWithPendingToolEdits(data.snapshot));
       setVoiceSystemPromptDraft(data.snapshot.assistantSettings.voiceSystemPrompt);
       setSystemPromptNotice('Saved thread prompt as the default.');
     } catch (err: any) {
@@ -3682,11 +3908,9 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     };
   };
   const activeWorkspaceTargetMeta = workspaceTargetMeta(activeWorkspaceTarget);
-  const enabledTools = new Set(activeThread?.enabledTools ?? []);
   const enabledToolNames = activeThread?.enabledTools ?? [];
   const availableTools = assistantSnapshotData?.availableTools ?? [];
   const assistantSkills = assistantSnapshotData?.skills ?? [];
-  const defaultEnabledTools = new Set(assistantSnapshotData?.assistantSettings.defaultEnabledTools ?? []);
   const defaultEnabledToolNames = assistantSnapshotData?.assistantSettings.defaultEnabledTools ?? [];
   const assistantProfiles = assistantSnapshotData?.assistantProfiles ?? dashboard?.assistantProfiles ?? [];
   const selectedAssistantProfile =
@@ -3697,7 +3921,6 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     ? assistantProfileDrafts[selectedAssistantProfile.id] ?? profileDraftFromAssistantProfile(selectedAssistantProfile)
     : null;
   const selectedProfileEnabledTools = selectedAssistantProfileDraft?.enabledTools ?? defaultEnabledToolNames;
-  const selectedProfileEnabledToolSet = new Set(selectedProfileEnabledTools);
   const enabledAssistantProfileCount = assistantProfiles.filter((profile) => profile.enabled).length;
   const enabledAssistantProfiles = assistantProfiles.filter((profile) => profile.enabled);
   const activeAssistantProfile =
@@ -4331,15 +4554,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
             tools={availableTools}
             enabledTools={enabledToolNames}
             disabled={busy}
-            onToggleTool={(toolName, checked) => {
-              const next = new Set(enabledTools);
-              if (checked) next.add(toolName);
-              else next.delete(toolName);
-              void updateThreadSettings({ enabledTools: [...next] });
+            onEnabledToolsChange={updateThreadEnabledTools}
+            onEnableAll={() => updateThreadEnabledTools(availableTools.map((tool) => tool.name))}
+            onDisableAll={() => updateThreadEnabledTools([])}
+            onClose={() => {
+              void flushThreadToolsSave();
+              setAssistantToolsOpen(false);
             }}
-            onEnableAll={() => void updateThreadSettings({ enabledTools: availableTools.map((tool) => tool.name) })}
-            onDisableAll={() => void updateThreadSettings({ enabledTools: [] })}
-            onClose={() => setAssistantToolsOpen(false)}
           />
         ) : null}
 
@@ -5000,37 +5221,13 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                             </button>
                           </div>
                         </div>
-                        <div className="grid max-h-[300px] gap-1 overflow-y-auto pr-1">
-                          {availableTools.map((tool) => {
-                            const checked = selectedProfileEnabledToolSet.has(tool.name);
-                            return (
-                              <label
-                                key={tool.name}
-                                className={cn(
-                                  'flex min-w-0 cursor-pointer items-start gap-2 rounded-[5px] border border-[var(--border-subtle)] bg-white/[.02] px-2 py-1.5',
-                                  checked && 'border-[rgba(139,92,246,.55)] bg-[rgba(139,92,246,.12)]',
-                                )}
-                              >
-                                <input
-                                  type="checkbox"
-                                  checked={checked}
-                                  disabled={busy}
-                                  onChange={(event) => {
-                                    const next = new Set(selectedAssistantProfileDraft.enabledTools ?? defaultEnabledToolNames);
-                                    if (event.currentTarget.checked) next.add(tool.name);
-                                    else next.delete(tool.name);
-                                    updateAssistantProfileDraft(selectedAssistantProfile.id, { enabledTools: [...next] });
-                                  }}
-                                  className="mt-0.5 h-3.5 w-3.5 accent-[var(--accent)]"
-                                />
-                                <span className="grid min-w-0 gap-px">
-                                  <strong className="truncate text-xs text-[var(--fg)]">{tool.label}</strong>
-                                  <small className="line-clamp-2 text-[11px] text-[var(--muted)]">{tool.description}</small>
-                                </span>
-                              </label>
-                            );
-                          })}
-                          {availableTools.length === 0 ? <div className={assistantEmptyClass}>No tools loaded.</div> : null}
+                        <div className="max-h-[300px] overflow-y-auto pr-1">
+                          <AssistantToolSelectionList
+                            tools={availableTools}
+                            selectedToolNames={selectedProfileEnabledTools}
+                            disabled={busy}
+                            onSelectedToolNamesChange={(toolNames) => updateAssistantProfileDraft(selectedAssistantProfile.id, { enabledTools: toolNames })}
+                          />
                         </div>
                       </div>
 
@@ -5210,46 +5407,23 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     <h2 className={assistantPanelTitleClass}>Global Tool Defaults</h2>
                   </div>
                   <div className="flex flex-wrap justify-end gap-1.5">
-                    <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void updateAssistantSettings({ defaultEnabledTools: availableTools.map((tool) => tool.name) })}>
+                    <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => updateDefaultEnabledTools(availableTools.map((tool) => tool.name))}>
                       Enable all
                     </button>
-                    <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => void updateAssistantSettings({ defaultEnabledTools: [] })}>
+                    <button type="button" className={assistantActionButtonClass} disabled={busy} onClick={() => updateDefaultEnabledTools([])}>
                       Disable all
                     </button>
                   </div>
                 </div>
                 <div className="grid gap-2">
                   <div className="text-[11px] text-[var(--muted)]">{defaultEnabledToolNames.length} / {availableTools.length} enabled for profiles using global defaults.</div>
-                  <div className="grid max-h-[360px] gap-1 overflow-y-auto pr-1">
-                    {availableTools.map((tool) => {
-                      const checked = defaultEnabledTools.has(tool.name);
-                      return (
-                        <label
-                          key={tool.name}
-                          className={cn(
-                            'flex min-w-0 cursor-pointer items-start gap-2 rounded-[5px] border border-[var(--border-subtle)] bg-white/[.02] px-2 py-1.5',
-                            checked && 'border-[rgba(139,92,246,.55)] bg-[rgba(139,92,246,.12)]',
-                          )}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            disabled={busy}
-                            onChange={(event) => {
-                              const next = new Set(defaultEnabledTools);
-                              if (event.currentTarget.checked) next.add(tool.name);
-                              else next.delete(tool.name);
-                              void updateAssistantSettings({ defaultEnabledTools: [...next] });
-                            }}
-                            className="mt-0.5 h-3.5 w-3.5 accent-[var(--accent)]"
-                          />
-                          <span className="grid min-w-0 gap-px">
-                            <strong className="truncate text-xs text-[var(--fg)]">{tool.label}</strong>
-                            <small className="line-clamp-2 text-[11px] text-[var(--muted)]">{tool.description}</small>
-                          </span>
-                        </label>
-                      );
-                    })}
+                  <div className="max-h-[360px] overflow-y-auto pr-1">
+                    <AssistantToolSelectionList
+                      tools={availableTools}
+                      selectedToolNames={defaultEnabledToolNames}
+                      disabled={busy}
+                      onSelectedToolNamesChange={updateDefaultEnabledTools}
+                    />
                   </div>
                 </div>
               </section>
