@@ -164,6 +164,13 @@ const ASSISTANT_TOOLS: AssistantToolSummary[] = [
     approval: 'never',
   },
   {
+    name: 'setVoiceMode',
+    label: 'Set voice mode',
+    category: 'settings',
+    description: 'Choose whether future voice turns for this assistant thread use standard or realtime voice.',
+    approval: 'never',
+  },
+  {
     name: 'web_search',
     label: 'Web search',
     category: 'web',
@@ -833,7 +840,7 @@ async function runModelDrivenTurn(
     db.updateRun(userId, run.id, { status: 'waiting_for_approval', error: null });
     return;
   }
-  ensureRequiredSpeakToolUsed(db, userId, threadId, run, thread);
+  ensureRequiredSpeakToolUsed(db, userId, threadId, run, db.thread(userId, threadId) ?? thread);
   finishRun(db, userId, threadId, run.id);
 }
 
@@ -1094,6 +1101,7 @@ async function executeAgentTool(
       runId: context.run.id,
       toolCallId: toolCall.id,
     });
+    if (toolName === 'setVoiceMode') context.thread = context.db.thread(context.userId, context.threadId) ?? latestThread;
     if (toolName === 'load_skill') {
       const skillToolNames = Array.isArray((result as any)?.toolNames) ? (result as any).toolNames.map((item: unknown) => String(item ?? '').trim()).filter(Boolean) : [];
       for (const skillToolName of skillToolNames) context.loadedSkillToolNames.add(skillToolName);
@@ -1476,6 +1484,22 @@ function responseToolDefinitions(
         strict: true,
       });
     }
+    if (toolName === 'setVoiceMode') {
+      definitions.push({
+        type: 'function',
+        name: 'setVoiceMode',
+        description: 'Set this assistant thread voice mode for future voice turns. Use standard for the normal record-then-reply voice flow, or realtime for live OpenAI Realtime voice.',
+        parameters: {
+          type: 'object',
+          properties: {
+            mode: { type: 'string', enum: ['standard', 'realtime'] },
+          },
+          required: ['mode'],
+          additionalProperties: false,
+        },
+        strict: true,
+      });
+    }
     if (toolName === 'create_new_thread') {
       definitions.push({
         type: 'function',
@@ -1708,6 +1732,10 @@ function cleanModel(raw: unknown, provider: string): string {
 function cleanThinkingLevel(raw: unknown): string {
   const value = String(raw ?? '').trim().toLowerCase();
   return ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'].includes(value) ? value : 'off';
+}
+
+function cleanVoiceMode(raw: unknown): 'standard' | 'realtime' {
+  return String(raw ?? '').trim().toLowerCase() === 'realtime' ? 'realtime' : 'standard';
 }
 
 function platformOpenAiApiKey(): string {
@@ -2000,6 +2028,18 @@ async function executeApprovedTool(
     const updated = db.updateThread(userId, thread.id, { thinkingLevel });
     return { ok: true, thinkingLevel: updated?.thinkingLevel ?? thinkingLevel };
   }
+  if (toolName === 'setVoiceMode') {
+    const mode = cleanVoiceMode(parsed.mode ?? parsed.voiceMode);
+    const updated = db.updateThread(userId, thread.id, { voiceMode: mode });
+    return {
+      ok: true,
+      voiceMode: updated?.voiceMode ?? mode,
+      threadId: thread.id,
+      message: mode === 'realtime'
+        ? 'Future voice turns for this thread will use realtime voice.'
+        : 'Future voice turns for this thread will use standard voice.',
+    };
+  }
   if (toolName === 'create_new_thread') {
     const title = String(parsed.title ?? '').trim() || 'New thread';
     const created = db.createThread(userId, {
@@ -2010,6 +2050,7 @@ async function executeApprovedTool(
       provider: thread.provider,
       model: thread.model,
       thinkingLevel: thread.thinkingLevel,
+      voiceMode: thread.voiceMode,
       promptDeliveryMode: thread.promptDeliveryMode,
     });
     return {
@@ -2315,7 +2356,7 @@ function ensureRequiredSpeakToolUsed(
 }
 
 function requiresSpeakTool(thread: AssistantThread): boolean {
-  return thread.voiceEnabled && thread.capabilities.speech && thread.enabledTools.includes('speak');
+  return thread.voiceEnabled && thread.voiceMode !== 'realtime' && thread.capabilities.speech && thread.enabledTools.includes('speak');
 }
 
 function runUsedSpeakTool(db: VoiceStreamNextDb, userId: string, threadId: string, runId: string): boolean {
@@ -2397,6 +2438,7 @@ function toolResultText(toolName: string, result: unknown): string {
   if (toolName === 'fetch_content') return String((result as any)?.answer ?? 'Content fetch completed.');
   if (toolName === 'update_system_prompt') return 'Thread system prompt updated.';
   if (toolName === 'set_thinking_level') return `Thinking level set to ${(result as any)?.thinkingLevel ?? 'off'}.`;
+  if (toolName === 'setVoiceMode') return `Voice mode set to ${(result as any)?.voiceMode ?? 'standard'}.`;
   if (toolName === 'create_new_thread') {
     const thread = (result as any)?.thread;
     return `Created a new thread: ${thread?.title ?? 'New thread'}. Future voice recordings will use it by default.`;

@@ -32,6 +32,7 @@ const ASSISTANT_HANDS_FREE_MODE_MIGRATION_VERSION = '20260605130000';
 const DESKTOP_AUTH_REMOTE_CLAIM_MIGRATION_VERSION = '20260606120000';
 const PENDING_DESKTOP_AUTH_DEVICES_MIGRATION_VERSION = '20260606123000';
 const LIVE_RECORDING_SEGMENTS_MIGRATION_VERSION = '20260612120000';
+const ASSISTANT_VOICE_MODE_MIGRATION_VERSION = '20260613120000';
 
 function migrationRows(db: VoiceStreamNextDb): Array<{ version: string; name: string; checksum: string }> {
   return db.db
@@ -79,6 +80,7 @@ describe('database migrations', () => {
       DESKTOP_AUTH_REMOTE_CLAIM_MIGRATION_VERSION,
       PENDING_DESKTOP_AUTH_DEVICES_MIGRATION_VERSION,
       LIVE_RECORDING_SEGMENTS_MIGRATION_VERSION,
+      ASSISTANT_VOICE_MODE_MIGRATION_VERSION,
     ]);
     expect(columnNames(db, 'devices')).toContain('revoked_at');
     expect(columnNames(db, 'devices')).toContain('installation_id');
@@ -104,6 +106,7 @@ describe('database migrations', () => {
     expect(columnNames(db, 'assistant_profiles')).toContain('default_hands_free_mode');
     expect(columnNames(db, 'voice_recording_segments')).toContain('recording_id');
     expect(columnNames(db, 'voice_recording_segments')).toContain('sequence');
+    expect(columnNames(db, 'assistant_threads')).toContain('voice_mode');
   });
 
   test('does not rerun already applied migrations', () => {
@@ -114,7 +117,7 @@ describe('database migrations', () => {
     const second = new VoiceStreamNextDb(filePath);
     dbs.push(second);
 
-    expect(migrationRows(second)).toHaveLength(23);
+    expect(migrationRows(second)).toHaveLength(24);
   });
 
   test('rejects changed migration checksums', () => {

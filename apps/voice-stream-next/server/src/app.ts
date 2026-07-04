@@ -261,6 +261,10 @@ function cleanVoiceStreamMode(raw: string): 'assistant' | 'patch' | 'clipboard' 
   return raw === 'patch' || raw === 'clipboard' || raw === 'smart' || raw === 'realtime' ? raw : 'assistant';
 }
 
+function cleanAssistantVoiceMode(raw: unknown): 'standard' | 'realtime' {
+  return cleanText(raw).toLowerCase() === 'realtime' ? 'realtime' : 'standard';
+}
+
 function cleanSpeechPlaybackTarget(raw: unknown): SpeechPlaybackTarget {
   const value = cleanText(raw, 'auto').toLowerCase();
   return value === 'web' || value === 'desktop' || value === 'android' || value === 'auto' ? value : 'auto';
@@ -4282,6 +4286,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         provider: requestedProvider || undefined,
         model: cleanText(body.model) || undefined,
         thinkingLevel: cleanText(body.thinkingLevel) || undefined,
+        voiceMode: body.voiceMode === undefined ? undefined : cleanAssistantVoiceMode(body.voiceMode),
         promptDeliveryMode: body.promptDeliveryMode === 'asap' ? 'asap' : 'queue',
       });
       emitAssistantChange('thread_created', thread.id, ctx.user.id);
@@ -4305,6 +4310,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       }
       if (body.thinkingLevel !== undefined) patch.thinkingLevel = cleanText(body.thinkingLevel, 'off') || 'off';
       if (body.voiceEnabled !== undefined) patch.voiceEnabled = true;
+      if (body.voiceMode !== undefined) patch.voiceMode = cleanAssistantVoiceMode(body.voiceMode);
       if (body.autoApprove !== undefined) patch.autoApprove = Boolean(body.autoApprove);
       if (body.handsFreeMode !== undefined) patch.handsFreeMode = Boolean(body.handsFreeMode);
       if (body.systemPrompt !== undefined) patch.systemPrompt = cleanText(body.systemPrompt) || null;

@@ -166,6 +166,7 @@ export type AssistantThread = {
   status?: 'idle' | 'running' | 'waiting_for_approval' | 'cancelled' | 'error';
   error?: string | null;
   voiceEnabled?: boolean;
+  voiceMode?: 'standard' | 'realtime' | null;
   autoApprove?: boolean;
   handsFreeMode?: boolean;
   systemPrompt?: string | null;

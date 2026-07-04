@@ -221,6 +221,25 @@ class VoiceStreamApi(private val context: Context) {
             .getString(Constants.PREF_HEY_SEBASTIAN_MODE, "classic") == "realtime"
     }
 
+    fun assistantVoiceTarget(assistantProfileId: String? = null): String {
+        val fallback = if (heySebastianRealtimeEnabled()) Constants.STREAM_TARGET_REALTIME else Constants.STREAM_TARGET_ASSISTANT
+        val deviceId = pairedDeviceId()
+        if (deviceId.isBlank()) return fallback
+        return try {
+            val query = assistantProfileId?.takeIf { it.isNotBlank() }
+                ?.let { "?assistantProfileId=${encode(it)}" }
+                ?: activeAssistantProfileQuery()
+            val json = deviceRequest("GET", "/api/devices/$deviceId/assistant/thread$query")
+            when (json.optJSONObject("thread")?.optString("voiceMode")?.lowercase()) {
+                "realtime" -> Constants.STREAM_TARGET_REALTIME
+                "standard" -> Constants.STREAM_TARGET_ASSISTANT
+                else -> fallback
+            }
+        } catch (_: Exception) {
+            fallback
+        }
+    }
+
     fun saveHeySebastianRealtimeEnabled(enabled: Boolean) {
         context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE).edit()
             .putString(Constants.PREF_HEY_SEBASTIAN_MODE, if (enabled) "realtime" else "classic")

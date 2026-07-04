@@ -806,6 +806,29 @@ describe('assistant parity runtime', () => {
     expect(session.assistantThreadId).toBe(created.id);
   });
 
+  test('sets voice mode from the assistant tool for future voice turns', async () => {
+    const db = tempDb('assistant-set-voice-mode');
+    dbs.push(db);
+    const user = testUser(db);
+    const thread = db.createThread(user.id, { title: 'Voice mode thread' });
+    process.env.VOICE_STREAM_NEXT_TEST_MODEL_TOOL_CALLS = JSON.stringify([
+      {
+        name: 'setVoiceMode',
+        arguments: { mode: 'realtime' },
+      },
+    ]);
+
+    const events: any[] = [];
+
+    await promptAssistantThread(db, user.id, thread.id, { prompt: 'Use realtime voice from now on.' }, (event) => events.push(event));
+
+    const updated = db.thread(user.id, thread.id);
+    expect(updated?.voiceMode).toBe('realtime');
+    expect(db.listToolCalls(user.id, thread.id).some((toolCall) => toolCall.toolName === 'setVoiceMode' && toolCall.status === 'completed')).toBe(true);
+    expect(db.listMessages(user.id, thread.id).some((message) => message.isError && message.content.includes('speak tool'))).toBe(false);
+    expect(events.some((event) => event.type === 'error' && String(event.error).includes('speak tool'))).toBe(false);
+  });
+
   test('pauses model-requested approval tools before execution', async () => {
     const db = tempDb('assistant-model-approval');
     dbs.push(db);
