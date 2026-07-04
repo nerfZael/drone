@@ -56,6 +56,21 @@ function toolApproval(serverConfig, toolName) {
   return approval || 'always';
 }
 
+function toolApprovalEvaluator(helpers, serverConfig, originalName, localName) {
+  if (typeof helpers?.approvalEvaluatorForTool !== 'function') return null;
+  try {
+    const evaluator = helpers.approvalEvaluatorForTool(serverConfig, originalName, localName);
+    return typeof evaluator === 'function' ? evaluator : null;
+  } catch (error) {
+    helpers?.log?.('mcp:approvalEvaluatorFailed', {
+      serverId: serverConfig.id,
+      toolName: originalName,
+      error: error?.message || String(error),
+    });
+    return null;
+  }
+}
+
 function mcpToolLabel(tool) {
   return String(tool.title || tool.annotations?.title || tool.name || 'MCP tool').trim();
 }
@@ -89,12 +104,14 @@ async function loadMcpServer(serverConfig, helpers) {
     if (!originalName || !localName) continue;
     if (seenLocalNames.has(localName)) throw new Error(`duplicate MCP tool name after normalization: ${originalName}`);
     seenLocalNames.add(localName);
+    const approval = toolApproval(serverConfig, originalName);
+    const approvalEvaluator = toolApprovalEvaluator(helpers, serverConfig, originalName, localName);
     manifest.tools.push({
       name: localName,
       label: mcpToolLabel(tool),
       description: mcpToolDescription(tool, serverConfig.name),
       inputSchema: normalizeMcpInputSchema(tool.inputSchema),
-      approval: toolApproval(serverConfig, originalName),
+      approval,
       supportedTargets: serverConfig.supportedTargets,
       defaultTarget: serverConfig.defaultTarget,
       ...(serverConfig.targetSlot ? { targetSlot: serverConfig.targetSlot } : {}),
@@ -103,13 +120,26 @@ async function loadMcpServer(serverConfig, helpers) {
       extensionId: serverConfig.extensionId,
       name: localName,
       originalName,
-      execute: (args, context = {}) =>
-        client.callTool({
+      execute: async (args, context = {}) => {
+        const result = await client.callTool({
           name: originalName,
           arguments: args && typeof args === 'object' && !Array.isArray(args) ? args : {},
           _meta: mcpRequestMeta(context),
-        }),
-      approval: null,
+        });
+        if (typeof helpers?.afterToolExecute === 'function') {
+          try {
+            await helpers.afterToolExecute(serverConfig, originalName, args, result, context);
+          } catch (error) {
+            log?.('mcp:afterToolExecuteFailed', {
+              serverId: serverConfig.id,
+              toolName: originalName,
+              error: error?.message || String(error),
+            });
+          }
+        }
+        return result;
+      },
+      approval: approvalEvaluator,
     });
   }
 

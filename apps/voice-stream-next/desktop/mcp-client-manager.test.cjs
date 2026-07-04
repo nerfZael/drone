@@ -124,4 +124,101 @@ describe('desktop MCP client manager', () => {
       'voice-stream-next/threadId': 'thread-1',
     });
   });
+
+  test('wires dynamic MCP approval evaluators and post-execute hooks', async () => {
+    const dir = makeTempDir();
+    const serverPath = writeFakeMcpServer(dir);
+    const afterToolExecuteCalls = [];
+    const loaded = await loadMcpServer({
+      id: 'fake',
+      extensionId: 'mcp-fake',
+      name: 'Fake MCP',
+      enabled: true,
+      transport: 'stdio',
+      command: process.execPath,
+      args: [serverPath],
+      cwd: dir,
+      env: {},
+      approval: 'always',
+      toolApprovals: { 'echo-value': 'dynamic' },
+      supportedTargets: ['device'],
+      defaultTarget: 'device',
+      targetSlot: '',
+    }, {
+      safeName(value) {
+        return String(value || '').replace(/[^a-z0-9_-]+/gi, '_').toLowerCase();
+      },
+      log() {},
+      approvalEvaluatorForTool(_serverConfig, originalName, localName) {
+        if (originalName !== 'echo-value' || localName !== 'echo-value') return null;
+        return async (args) => args.value !== 'safe';
+      },
+      afterToolExecute(serverConfig, originalName, args, result, context) {
+        afterToolExecuteCalls.push({ serverId: serverConfig.id, originalName, args, result, context });
+      },
+    });
+
+    try {
+      expect(loaded.manifest.tools[0].approval).toBe('dynamic');
+      await expect(loaded.toolExecutors[0].approval({ value: 'safe' })).resolves.toBe(false);
+      await expect(loaded.toolExecutors[0].approval({ value: 'risky' })).resolves.toBe(true);
+
+      await loaded.toolExecutors[0].execute({ value: 'safe' }, { threadId: 'thread-456' });
+
+      expect(afterToolExecuteCalls).toHaveLength(1);
+      expect(afterToolExecuteCalls[0].serverId).toBe('fake');
+      expect(afterToolExecuteCalls[0].originalName).toBe('echo-value');
+      expect(afterToolExecuteCalls[0].args).toEqual({ value: 'safe' });
+      expect(afterToolExecuteCalls[0].context).toEqual({ threadId: 'thread-456' });
+    } finally {
+      await loaded.deactivate();
+    }
+  });
+
+  test('keeps MCP tools usable when optional hooks fail', async () => {
+    const dir = makeTempDir();
+    const serverPath = writeFakeMcpServer(dir);
+    const logs = [];
+    const loaded = await loadMcpServer({
+      id: 'fake',
+      extensionId: 'mcp-fake',
+      name: 'Fake MCP',
+      enabled: true,
+      transport: 'stdio',
+      command: process.execPath,
+      args: [serverPath],
+      cwd: dir,
+      env: {},
+      approval: 'dynamic',
+      toolApprovals: {},
+      supportedTargets: ['device'],
+      defaultTarget: 'device',
+      targetSlot: '',
+    }, {
+      safeName(value) {
+        return String(value || '').replace(/[^a-z0-9_-]+/gi, '_').toLowerCase();
+      },
+      log(message, details) {
+        logs.push({ message, details });
+      },
+      approvalEvaluatorForTool() {
+        throw new Error('approval hook failed');
+      },
+      afterToolExecute() {
+        throw new Error('after hook failed');
+      },
+    });
+
+    try {
+      expect(loaded.toolExecutors[0].approval).toBeNull();
+
+      const result = await loaded.toolExecutors[0].execute({ value: 'still works' }, { threadId: 'thread-789' });
+
+      expect(JSON.parse(result.content[0].text)).toEqual({ value: 'still works', threadId: 'thread-789' });
+      expect(logs.map((entry) => entry.message)).toContain('mcp:approvalEvaluatorFailed');
+      expect(logs.map((entry) => entry.message)).toContain('mcp:afterToolExecuteFailed');
+    } finally {
+      await loaded.deactivate();
+    }
+  });
 });

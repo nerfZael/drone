@@ -1855,6 +1855,10 @@ function extensionConfigKey(extensionConfigs, mcpServerConfigs) {
   });
 }
 
+const DRONE_HUB_MCP_EXTENSION_ID = 'mcp-drone-hub';
+const DRONE_HUB_CREATED_DRONES_STATE_KEY = 'createdDrones';
+const DRONE_HUB_MAX_TRACKED_CREATED_DRONES = 500;
+
 function extensionStatePath() {
   return path.join(app.getPath('userData'), 'voice-stream-next-extension-state.json');
 }
@@ -1870,6 +1874,99 @@ function readExtensionState() {
 function writeExtensionState(state) {
   fs.mkdirSync(path.dirname(extensionStatePath()), { recursive: true });
   fs.writeFileSync(extensionStatePath(), JSON.stringify(state, null, 2));
+}
+
+function cleanStateText(value, fallback = '') {
+  const text = String(value ?? '').trim();
+  return text || fallback;
+}
+
+function isDroneHubMcpServer(serverConfig = {}) {
+  return serverConfig.id === 'drone-hub' || serverConfig.extensionId === DRONE_HUB_MCP_EXTENSION_ID;
+}
+
+function droneHubMcpExtensionStateId(serverConfig = {}) {
+  return cleanStateText(serverConfig.extensionId, DRONE_HUB_MCP_EXTENSION_ID);
+}
+
+function droneHubMcpDroneAliases(value) {
+  const aliases = [];
+  if (typeof value === 'string') {
+    const text = cleanStateText(value);
+    if (text) aliases.push(text);
+  } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+    for (const item of [value.id, value.name]) {
+      const text = cleanStateText(item);
+      if (text) aliases.push(text);
+    }
+  }
+  return [...new Set(aliases)];
+}
+
+function droneHubMcpToolResultData(result) {
+  if (result?.structuredContent && typeof result.structuredContent === 'object' && !Array.isArray(result.structuredContent)) return result.structuredContent;
+  const text = Array.isArray(result?.content)
+    ? cleanStateText(result.content.find((part) => part?.type === 'text' && typeof part.text === 'string')?.text)
+    : '';
+  if (!text) return {};
+  try {
+    const parsed = JSON.parse(text);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
+  } catch {
+    return {};
+  }
+}
+
+function rememberDroneHubMcpCreatedDrone(serverConfig, drone, sourceTool) {
+  const aliases = droneHubMcpDroneAliases(drone);
+  if (aliases.length === 0) return;
+  const extensionId = droneHubMcpExtensionStateId(serverConfig);
+  const state = readExtensionState();
+  const bucket = state[extensionId] && typeof state[extensionId] === 'object' && !Array.isArray(state[extensionId]) ? state[extensionId] : {};
+  const records = Array.isArray(bucket[DRONE_HUB_CREATED_DRONES_STATE_KEY]) ? bucket[DRONE_HUB_CREATED_DRONES_STATE_KEY] : [];
+  const nextRecords = records.filter((record) => {
+    const recordAliases = Array.isArray(record?.aliases) ? record.aliases.map((item) => cleanStateText(item)).filter(Boolean) : [];
+    return !recordAliases.some((alias) => aliases.includes(alias));
+  });
+  nextRecords.unshift({
+    id: cleanStateText(drone?.id) || aliases[0],
+    name: cleanStateText(drone?.name) || null,
+    aliases,
+    sourceTool: cleanStateText(sourceTool),
+    createdAt: new Date().toISOString(),
+  });
+  bucket[DRONE_HUB_CREATED_DRONES_STATE_KEY] = nextRecords.slice(0, DRONE_HUB_MAX_TRACKED_CREATED_DRONES);
+  state[extensionId] = bucket;
+  writeExtensionState(state);
+}
+
+function wasDroneHubMcpCreatedDrone(serverConfig, drone) {
+  const aliases = droneHubMcpDroneAliases(drone);
+  if (aliases.length === 0) return false;
+  const state = readExtensionState();
+  const extensionId = droneHubMcpExtensionStateId(serverConfig);
+  const bucket = state[extensionId] && typeof state[extensionId] === 'object' && !Array.isArray(state[extensionId]) ? state[extensionId] : {};
+  const records = Array.isArray(bucket[DRONE_HUB_CREATED_DRONES_STATE_KEY]) ? bucket[DRONE_HUB_CREATED_DRONES_STATE_KEY] : [];
+  return records.some((record) => {
+    const recordAliases = Array.isArray(record?.aliases) ? record.aliases.map((item) => cleanStateText(item)).filter(Boolean) : [];
+    return recordAliases.some((alias) => aliases.includes(alias));
+  });
+}
+
+function afterDroneHubMcpToolExecute(serverConfig, toolName, args, result) {
+  if (!isDroneHubMcpServer(serverConfig)) return;
+  if (toolName !== 'create_drone' && toolName !== 'clone_drone') return;
+  if (result?.isError === true) return;
+  const data = droneHubMcpToolResultData(result);
+  if (data.ok === false) return;
+  const returnedDrone = data.drone || (data.droneId || data.name ? { id: data.droneId, name: data.name } : null);
+  if (!returnedDrone) return;
+  rememberDroneHubMcpCreatedDrone(serverConfig, returnedDrone, toolName);
+}
+
+function droneHubMcpApprovalEvaluatorForTool(serverConfig, toolName) {
+  if (!isDroneHubMcpServer(serverConfig) || toolName !== 'send_message') return null;
+  return async (args) => !wasDroneHubMcpCreatedDrone(serverConfig, args?.drone);
 }
 
 async function postAssistantThreadPromptFromExtension(extensionId, threadId, prompt, options = {}) {
@@ -2188,6 +2285,24 @@ function workspaceExtensionEntry(existing = {}) {
   };
 }
 
+const DRONE_HUB_MCP_TOOL_APPROVAL_DEFAULTS = {
+  list_drones: 'never',
+  list_repos: 'never',
+  list_groups: 'never',
+  create_group: 'never',
+  set_drone_group: 'never',
+  rename_drones: 'never',
+  reorder_drones: 'never',
+  create_drone: 'never',
+  clone_drone: 'never',
+  list_chats: 'never',
+  create_chat: 'always',
+  send_message: 'dynamic',
+  subscribe_to_any_chat_idle: 'never',
+  subscribe_to_all_chats_idle: 'never',
+  read_chat: 'never',
+};
+
 function droneHubMcpServerEntry(existing = {}) {
   const existingToolApprovals = existing.toolApprovals && typeof existing.toolApprovals === 'object' && !Array.isArray(existing.toolApprovals)
     ? existing.toolApprovals
@@ -2204,21 +2319,7 @@ function droneHubMcpServerEntry(existing = {}) {
     enabled: true,
     approval: cleanExtensionApproval(existing.approval),
     toolApprovals: {
-      list_drones: 'never',
-      list_repos: 'never',
-      list_groups: 'never',
-      create_group: 'never',
-      set_drone_group: 'never',
-      rename_drones: 'never',
-      reorder_drones: 'never',
-      create_drone: 'never',
-      clone_drone: 'never',
-      list_chats: 'never',
-      create_chat: 'always',
-      send_message: 'always',
-      subscribe_to_any_chat_idle: 'never',
-      subscribe_to_all_chats_idle: 'never',
-      read_chat: 'never',
+      ...DRONE_HUB_MCP_TOOL_APPROVAL_DEFAULTS,
       ...Object.fromEntries(
         Object.entries(existingToolApprovals)
           .map(([key, value]) => [String(key), cleanExtensionApproval(value)])
@@ -2423,6 +2524,12 @@ async function loadDesktopExtensions(options = {}) {
           },
           onNotification(serverConfig, notification) {
             void handleMcpNotification(serverConfig, notification);
+          },
+          approvalEvaluatorForTool(serverConfig, toolName) {
+            return droneHubMcpApprovalEvaluatorForTool(serverConfig, toolName);
+          },
+          afterToolExecute(serverConfig, toolName, args, result) {
+            afterDroneHubMcpToolExecute(serverConfig, toolName, args, result);
           },
         });
         for (const tool of loadedMcpServer.toolExecutors) {
