@@ -969,6 +969,36 @@ describe('assistant parity runtime', () => {
     expect(events.some((event) => event.type === 'error')).toBe(true);
   });
 
+  test('disconnects Codex when the saved OAuth refresh token is invalid', async () => {
+    const db = tempDb('assistant-invalid-codex-auth');
+    dbs.push(db);
+    const user = testUser(db);
+    const thread = db.createThread(user.id, { title: 'Codex', provider: 'codex', model: 'gpt-5.5', enabledTools: [] });
+    db.upsertCodexConnection(user.id, {
+      accessToken: 'expired-access-token',
+      refreshToken: 'revoked-refresh-token',
+      accountId: 'acct_stale',
+      expiresAt: new Date(Date.now() - 60_000).toISOString(),
+    });
+    globalThis.fetch = (async () =>
+      new Response(JSON.stringify({ error: 'invalid_grant' }), {
+        status: 400,
+        headers: { 'content-type': 'application/json' },
+      })) as unknown as typeof fetch;
+
+    const events: any[] = [];
+    const snapshot = await promptAssistantThread(db, user.id, thread.id, { prompt: 'hello', provider: 'codex' }, (event) => events.push(event));
+    const assistantMessage = db.listMessages(user.id, thread.id).find((message) => message.role === 'assistant');
+
+    expect(db.codexConnection(user.id)).toBeNull();
+    expect(snapshot.codexConnection.connected).toBe(false);
+    expect(db.thread(user.id, thread.id)?.status).toBe('error');
+    expect(db.thread(user.id, thread.id)?.error).toContain('Reconnect Codex');
+    expect(assistantMessage?.isError).toBe(true);
+    expect(assistantMessage?.content).toContain('Reconnect Codex');
+    expect(events.find((event) => event.type === 'error')?.snapshot?.codexConnection.connected).toBe(false);
+  });
+
   test('shows provider errors without local fallback replies', async () => {
     const db = tempDb('assistant-provider-error');
     dbs.push(db);

@@ -3645,9 +3645,12 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const selectedDefaultModelLabel = assistantSettings
     ? modelSelectionLabel({ provider: defaultProvider, model: defaultModel, thinkingLevel: defaultThinkingLevel }, modelOptions)
     : 'Model';
+  const codexNeedsReconnect = activeProvider === 'codex' && !codexConnection.connected && /Codex authentication has expired|Connect Codex|Reconnect Codex/i.test(activeThread?.error ?? '');
   const providerAuthLabel = activeProvider === 'codex'
     ? codexConnection.connected
       ? `Codex connected${codexConnection.accountId ? ` · ${codexConnection.accountId}` : ''}`
+      : codexNeedsReconnect
+        ? 'Reconnect Codex'
       : 'Codex not connected'
     : 'OpenAI API key';
   const activeProviderMeta = providerOptions.find((provider) => provider.id === activeProvider) ?? providerOptions[0];

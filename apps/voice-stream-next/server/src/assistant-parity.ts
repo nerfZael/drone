@@ -593,7 +593,7 @@ export async function promptAssistantThread(
   try {
     await runModelDrivenTurn(db, userId, threadId, run, thread, { provider, model, thinkingLevel }, emit, { continueFromTranscript: true });
   } catch (error: any) {
-    const message = error?.message ?? String(error);
+    const message = handleModelRunFailure(db, userId, provider, error);
     failRun(db, userId, threadId, run.id, message);
     const assistantMessage = db.addMessage(userId, threadId, {
       role: 'assistant',
@@ -698,7 +698,7 @@ export async function resolveAssistantApproval(
           thinkingLevel: run.thinkingLevel,
         }, () => undefined, { continueFromTranscript: true, approvalContinuation: true, thread: latestThread });
       } catch (error: any) {
-        const message = error?.message ?? String(error);
+        const message = handleModelRunFailure(db, userId, run.provider, error);
         failRun(db, userId, pending.threadId, pending.runId, message);
         db.addMessage(userId, pending.threadId, {
           role: 'assistant',
@@ -1280,9 +1280,29 @@ async function codexAccessToken(db: VoiceStreamNextDb, userId: string): Promise<
     throw new Error('Codex is not connected. Connect Codex in assistant settings before using Codex models.');
   }
   if (Date.parse(connection.expiresAt) > Date.now() + 60_000) return connection.accessToken;
-  const refreshed = await refreshCodexAccessToken(connection.refreshToken);
+  let refreshed;
+  try {
+    refreshed = await refreshCodexAccessToken(connection.refreshToken);
+  } catch (error) {
+    if (isInvalidCodexAuthError(error)) db.deleteCodexConnection(userId);
+    throw error;
+  }
   const updated = db.upsertCodexConnection(userId, refreshed);
   return updated.accessToken;
+}
+
+function handleModelRunFailure(db: VoiceStreamNextDb, userId: string, provider: string, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (provider === 'codex' && isInvalidCodexAuthError(error)) {
+    db.deleteCodexConnection(userId);
+    return `Codex authentication has expired or was revoked. Reconnect Codex in assistant settings. Original error: ${message}`;
+  }
+  return message;
+}
+
+function isInvalidCodexAuthError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /authentication token has been invalidated|please try signing in again|invalid_grant|invalid[_ -]?token|token refresh failed \((?:400|401|403)\)|unauthorized/i.test(message);
 }
 
 function responseToolNames(tools: unknown[]): string[] {
