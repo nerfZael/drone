@@ -1344,6 +1344,57 @@ function chooseDefaultArtifact(artifacts: AssistantArtifactRecord[], preferredPa
   );
 }
 
+function optimisticApprovalSnapshot(snapshot: AssistantSnapshot, approvalId: string, approved: boolean): AssistantSnapshot {
+  const approval = snapshot.pendingApprovals.find((entry) => entry.id === approvalId);
+  if (!approval) return snapshot;
+  const resolvedThreadStatus: AssistantThread['status'] = approved ? 'running' : 'idle';
+  const resolvedRunStatus: AssistantThreadView['runs'][number]['status'] = approved ? 'running' : 'cancelled';
+  const now = new Date().toISOString();
+  return {
+    ...snapshot,
+    pendingApprovals: snapshot.pendingApprovals.filter((entry) => entry.id !== approvalId),
+    threads: snapshot.threads.map((thread) => {
+      if (thread.id !== approval.threadId) return thread;
+      return {
+        ...thread,
+        status: resolvedThreadStatus,
+        error: null,
+        runs: thread.runs.map((run) => {
+          if (approval.runId && run.id !== approval.runId) return run;
+          if (!approval.runId && run.status !== 'waiting_for_approval') return run;
+          return {
+            ...run,
+            status: resolvedRunStatus,
+            error: approved ? null : run.error,
+            cancelledAt: approved ? run.cancelledAt : run.cancelledAt ?? now,
+          };
+        }),
+        toolCalls: thread.toolCalls.map((call) =>
+          call.id === approval.toolCallId
+            ? { ...call, status: approved ? 'approved' : 'denied' }
+            : call,
+        ),
+      };
+    }),
+  };
+}
+
+function restoreOptimisticApprovalSnapshot(current: AssistantSnapshot, previous: AssistantSnapshot, approvalId: string): AssistantSnapshot {
+  const approval = previous.pendingApprovals.find((entry) => entry.id === approvalId);
+  if (!approval || current.pendingApprovals.some((entry) => entry.id === approvalId)) return current;
+  const previousPendingById = new Map(previous.pendingApprovals.map((entry) => [entry.id, entry]));
+  const currentPendingById = new Map(current.pendingApprovals.map((entry) => [entry.id, entry]));
+  currentPendingById.set(approval.id, approval);
+  const pendingApprovals = [
+    ...previous.pendingApprovals.filter((entry) => currentPendingById.has(entry.id)).map((entry) => currentPendingById.get(entry.id) ?? entry),
+    ...current.pendingApprovals.filter((entry) => !previousPendingById.has(entry.id)),
+  ];
+  return {
+    ...current,
+    pendingApprovals,
+  };
+}
+
 function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: React.ReactNode }) {
   useAssistantViewportHeight();
 
@@ -1383,6 +1434,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const [systemPromptNotice, setSystemPromptNotice] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [busy, setBusy] = React.useState(false);
+  const [approvalResolvingByThreadId, setApprovalResolvingByThreadId] = React.useState<Record<string, 'approve' | 'deny'>>({});
   const [toasts, setToasts] = React.useState<AppToast[]>([]);
   const [releaseUploadProgress, setReleaseUploadProgress] = React.useState<{
     platform: 'android' | 'desktop';
@@ -1439,6 +1491,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const dashboardEventRefreshTimerRef = React.useRef<number | null>(null);
   const releaseEventRefreshTimerRef = React.useRef<number | null>(null);
   const appEventsConnectedRef = React.useRef(false);
+  const approvalResolvingIdsRef = React.useRef<Set<string>>(new Set());
   const promptSubmittingThreadIdsRef = React.useRef<Record<string, boolean>>({});
   const streamingRequestThreadIdsRef = React.useRef<Record<string, boolean>>({});
   const scheduleAssistantEventRefreshRef = React.useRef<() => void>(() => {});
@@ -2628,21 +2681,46 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   }
 
   async function resolveApproval(approvalId: string, approved: boolean) {
+    if (approvalResolvingIdsRef.current.size > 0) return;
+    const previousSnapshot = assistantSnapshotData;
+    const approvalThreadId = previousSnapshot?.pendingApprovals.find((approval) => approval.id === approvalId)?.threadId ?? activeThread?.id ?? null;
+    approvalResolvingIdsRef.current.add(approvalId);
+    if (approvalThreadId) {
+      setApprovalResolvingByThreadId((current) => ({ ...current, [approvalThreadId]: approved ? 'approve' : 'deny' }));
+    }
     setBusy(true);
     setError(null);
+    setNotice(approved ? 'Approving assistant tool call…' : 'Denying assistant tool call…');
+    setAssistantSnapshotData((current) => (current ? optimisticApprovalSnapshot(current, approvalId, approved) : current));
     try {
       const data = await client.request<{ ok: true; snapshot: AssistantSnapshot }>(
         `/api/assistant/approvals/${encodeURIComponent(approvalId)}/${approved ? 'approve' : 'deny'}`,
         { method: 'POST', body: '{}' },
       );
       setAssistantSnapshotData(data.snapshot);
-      const visibleThread = data.snapshot.threads.find((thread) => thread.id === activeThread?.id);
+      const visibleThread = data.snapshot.threads.find((thread) => thread.id === activeThreadIdRef.current);
       if (visibleThread) setMessages(visibleThread.messages);
       await loadDashboard();
       setNotice(approved ? 'Approved assistant tool call.' : 'Denied assistant tool call.');
     } catch (err: any) {
+      try {
+        await loadAssistantSnapshot(activeThreadIdRef.current);
+      } catch {
+        if (previousSnapshot) {
+          setAssistantSnapshotData((current) => current ? restoreOptimisticApprovalSnapshot(current, previousSnapshot, approvalId) : previousSnapshot);
+        }
+      }
+      setNotice(null);
       setError(err?.message ?? String(err));
     } finally {
+      approvalResolvingIdsRef.current.delete(approvalId);
+      if (approvalThreadId) {
+        setApprovalResolvingByThreadId((current) => {
+          const next = { ...current };
+          delete next[approvalThreadId];
+          return next;
+        });
+      }
       setBusy(false);
     }
   }
@@ -3579,6 +3657,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const speechPlaybackTarget = dashboard?.settings.speechPlaybackTarget ?? speechPlayback?.preferredTarget ?? 'auto';
   const pendingApprovals = assistantSnapshotData?.pendingApprovals ?? [];
   const activePendingApprovals = pendingApprovals.filter((approval) => approval.threadId === activeThread?.id && approval.status === 'pending');
+  const activeApprovalResolvingAction = activeThread ? approvalResolvingByThreadId[activeThread.id] ?? null : null;
   const connectedDeviceIds = new Set((dashboard?.clientStatuses ?? []).map((status) => status.deviceId));
   const activeRuns = (activeThread as AssistantThreadView | null)?.runs?.filter((run) => run.status === 'running' || run.status === 'waiting_for_approval') ?? [];
   const queuedPrompts = (activeThread as AssistantThreadView | null)?.queuedPrompts ?? [];
@@ -4381,7 +4460,12 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       })}
                     </div>
                   ) : null}
-                  {activeThread && messages.length === 0 && queuedPrompts.length === 0 && activePendingApprovals.length === 0 && !showThinking ? <div className={assistantEmptyClass}>This thread is empty.</div> : null}
+                  {activeApprovalResolvingAction && activePendingApprovals.length === 0 && !showThinking ? (
+                    <div className="mx-3 rounded border border-[rgba(250,204,21,.16)] bg-[rgba(250,204,21,.035)] px-3 py-2 text-xs text-[var(--fg-secondary)]">
+                      {activeApprovalResolvingAction === 'approve' ? 'Approving tool call…' : 'Denying tool call…'}
+                    </div>
+                  ) : null}
+                  {activeThread && messages.length === 0 && queuedPrompts.length === 0 && activePendingApprovals.length === 0 && !activeApprovalResolvingAction && !showThinking ? <div className={assistantEmptyClass}>This thread is empty.</div> : null}
                   {!activeThread ? <div className={assistantEmptyClass}>Create a thread to start.</div> : null}
                 </div>
 
