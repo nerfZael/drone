@@ -15,10 +15,12 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 const DEFAULT_IDLE_FOR_MS = 1000;
 const DEFAULT_IDLE_POLL_INTERVAL_MS = 1000;
 const DEFAULT_IDLE_EXPIRES_IN_MS = 24 * 60 * 60 * 1000;
+const DEFAULT_HIGHLIGHT_DURATION_MS = 10_000;
 const MAX_IDLE_FOR_MS = 60_000;
 const MAX_IDLE_POLL_INTERVAL_MS = 30_000;
 const MAX_IDLE_EXPIRES_IN_MS = 24 * 60 * 60 * 1000;
 const MAX_IDLE_TARGETS = 20;
+const MAX_HIGHLIGHT_DURATION_MS = 60_000;
 
 type HubConnection = {
   baseUrl: string;
@@ -282,6 +284,28 @@ async function resolveDroneRefs(refs: string[]) {
       name: cleanString(match?.name),
       found: Boolean(match),
     };
+  });
+}
+
+async function resolveRequiredDroneIds(refs: string[]): Promise<string[]> {
+  const wantedRefs = normalizeOrderedStringList(refs);
+  if (wantedRefs.length === 0) throw new Error('at least one drone is required');
+  const resolved = await resolveDroneRefs(wantedRefs);
+  const unknown = resolved.filter((item) => !item.found).map((item) => item.ref);
+  if (unknown.length > 0) throw new Error(`unknown drone${unknown.length === 1 ? '' : 's'}: ${unknown.join(', ')}`);
+  return normalizeOrderedStringList(resolved.map((item) => item.id));
+}
+
+function normalizeHighlightDurationMs(value: unknown): number {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return DEFAULT_HIGHLIGHT_DURATION_MS;
+  return Math.max(1000, Math.min(MAX_HIGHLIGHT_DURATION_MS, Math.floor(number)));
+}
+
+async function emitUiAction(uiAction: Record<string, unknown>) {
+  return requestJson('/api/assistant/ui-action', {
+    method: 'POST',
+    body: JSON.stringify({ uiAction }),
   });
 }
 
@@ -895,6 +919,49 @@ function registerTools(server: McpServer) {
       afterDrone: z.string().optional(),
     },
   }, async (args) => toolResult(await reorderDronesInUiPreferences(args)));
+
+  const openDroneChat = async (args: any) => {
+    const droneRef = cleanString(args.droneId);
+    const [droneId] = await resolveRequiredDroneIds([droneRef]);
+    const chat = chatName(args.chatName);
+    if (chat !== 'default') {
+      const response = await requestJson(`/api/drones/${encodeURIComponent(droneId)}/chats`, { method: 'GET' });
+      const chats = Array.isArray(response?.chats) ? response.chats.map((name: any) => cleanString(name)).filter(Boolean) : [];
+      if (!chats.includes(chat)) throw new Error(`unknown chat: ${droneId}/${chat}`);
+    }
+    const response = await emitUiAction({ type: 'open_drone_chat', droneId, droneIds: [droneId], chatName: chat });
+    return toolResult({ ok: true, droneId, chatName: chat, uiAction: response?.uiAction ?? null });
+  };
+  const openDroneInputSchema = {
+    droneId: z.string(),
+    chatName: z.string().optional(),
+  };
+
+  server.registerTool('open_drone_chat', {
+    title: 'Open drone chat',
+    description: 'Open an existing drone chat in the Drone Hub UI. This is a UI navigation action and does not create a chat.',
+    inputSchema: openDroneInputSchema,
+  }, openDroneChat);
+
+  server.registerTool('open_drone', {
+    title: 'Open drone',
+    description: 'Open a drone chat in the Drone Hub UI. Alias for open_drone_chat; does not create a chat.',
+    inputSchema: openDroneInputSchema,
+  }, openDroneChat);
+
+  server.registerTool('highlight_drones', {
+    title: 'Highlight drones',
+    description: 'Temporarily highlight one or more drones in the Drone Hub UI and expand their collapsed group folders. Highlights default to 10 seconds.',
+    inputSchema: {
+      droneIds: z.array(z.string()),
+      durationMs: z.number().optional(),
+    },
+  }, async (args) => {
+    const droneIds = await resolveRequiredDroneIds(Array.isArray(args.droneIds) ? args.droneIds : []);
+    const durationMs = normalizeHighlightDurationMs(args.durationMs);
+    const response = await emitUiAction({ type: 'highlight_drones', droneIds, durationMs });
+    return toolResult({ ok: true, droneIds, durationMs, uiAction: response?.uiAction ?? null });
+  });
 
   server.registerTool('create_drone', {
     title: 'Create drone',
