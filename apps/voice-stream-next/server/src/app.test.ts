@@ -4,6 +4,7 @@ import path from 'node:path';
 
 import { binaryChunk, binarySize, buildApp, mergeTimestampedTranscriptText, mergeTranscriptText, openAiRealtimeAudioConfig, openAiSafetyIdentifier } from './app.js';
 import type { VoiceRecordingRecord } from './db.js';
+import { openAiRealtimeWebRtcSessionConfig, realtimeCallIdFromLocation } from './openai-realtime-webrtc.js';
 import { pcm16ToWav } from './wav.js';
 
 const originalEnv = {
@@ -133,6 +134,50 @@ describe('app configuration', () => {
         },
       },
     });
+  });
+
+  test('builds OpenAI Realtime WebRTC config without PCM transport formats', () => {
+    const config = openAiRealtimeWebRtcSessionConfig({
+      env: {},
+      instructions: 'Voice Stream realtime instructions',
+      tools: [{
+        type: 'function',
+        name: 'list_threads',
+        parameters: { type: 'object', properties: {} },
+      }],
+    });
+
+    expect(config).toMatchObject({
+      type: 'realtime',
+      model: 'gpt-realtime-2',
+      instructions: 'Voice Stream realtime instructions',
+      output_modalities: ['audio'],
+      tool_choice: 'auto',
+      audio: {
+        input: {
+          transcription: {
+            model: 'gpt-realtime-whisper',
+            delay: 'minimal',
+          },
+          turn_detection: {
+            type: 'semantic_vad',
+            eagerness: 'low',
+            create_response: true,
+            interrupt_response: true,
+          },
+        },
+        output: {
+          voice: 'marin',
+        },
+      },
+    });
+    expect(JSON.stringify(config)).not.toContain('audio/pcm');
+  });
+
+  test('parses OpenAI Realtime WebRTC call ids from Location headers', () => {
+    expect(realtimeCallIdFromLocation('/v1/realtime/calls/rtc_123456')).toBe('rtc_123456');
+    expect(realtimeCallIdFromLocation('https://api.openai.com/v1/realtime/calls/rtc_abcdef?source=test')).toBe('rtc_abcdef');
+    expect(realtimeCallIdFromLocation('')).toBe('');
   });
 
   test('merges overlapping transcript text when wording is not identical', () => {

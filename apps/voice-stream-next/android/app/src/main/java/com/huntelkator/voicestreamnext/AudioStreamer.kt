@@ -33,6 +33,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     private val outgoingReady = AtomicBoolean(false)
     private val reconnecting = AtomicBoolean(false)
     private val wakeConfirmationInFlight = AtomicBoolean(false)
+    private val realtimeWebRtcHandoff = AtomicBoolean(false)
     private val microphoneRouter = MicrophoneRouter(context)
     private val cuePlayer = LocalCuePlayer()
     private val preRollBuffer = PcmFrameBuffer(PRE_ROLL_FRAME_COUNT)
@@ -44,6 +45,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
 
     private var recorder: AudioRecord? = null
     private var socket: WebSocket? = null
+    private var realtimeWebRtcSession: RealtimeWebRtcSession? = null
     private var wakeDetector: VoskWakeWordDetector? = null
     private val approvalCodeRecognizer = ApprovalCodeRecognizer()
     private var approvalCodeSettings = ApprovalCodeSettings()
@@ -68,6 +70,8 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     @Volatile private var sleeping = false
     @Volatile private var currentMicrophone = "Mic: phone"
     @Volatile private var pendingAssistantProfileId: String? = null
+    @Volatile private var currentVoiceSessionId = ""
+    @Volatile private var realtimeWebRtcClientSessionId = ""
     @Volatile private var recordingStartedAtMs = 0L
     @Volatile private var recordingMaxDurationMs = 0L
     @Volatile private var lastUploadedRecognizerText = ""
@@ -148,6 +152,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         awakeMode = false
         sleeping = false
         beginRecordingWithSession(sessionId, cleanTarget, onStatus)
+        if (cleanTarget == Constants.STREAM_TARGET_REALTIME) return
         thread(name = "VoiceStreamNextAudio") {
             runRecorder(onStatus, detectWake = false)
         }
@@ -164,6 +169,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             recording.set(false)
             outgoingReady.set(false)
             stopRecordingCountdown()
+            closeRealtimeWebRtc(sendCancel = true)
             closeSocket("sleep requested", sendEnd = true)
             runCatching { recorder?.stop() }
             onStatus?.invoke("Off")
@@ -177,6 +183,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         cuePlayer.play(LocalCue.SLEEP)
         if (recording.get() && onStatus != null) {
             endRecording(onStatus, sleepingStatus())
+            closeRealtimeWebRtc(sendCancel = true)
         } else {
             onStatus?.invoke(sleepingStatus())
         }
@@ -190,6 +197,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         applyWakeDetectorSettingsIfReady()
         if (recording.get()) {
             endRecording(onStatus, awakeWaitingStatus())
+            closeRealtimeWebRtc(sendCancel = true)
             closeSocket("recording stopped", sendEnd = false)
         } else {
             onStatus(awakeWaitingStatus())
@@ -218,6 +226,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         resetApprovalCollection()
         wakeDetector?.release()
         wakeDetector = null
+        closeRealtimeWebRtc(sendCancel = true)
         closeSocket("stopped", sendEnd = true)
         runCatching { recorder?.stop() }
     }
@@ -275,15 +284,81 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         recordingStartedAtMs = SystemClock.elapsedRealtime()
         recordingMaxDurationMs = 0L
         mainHandler.removeCallbacks(recordingCountdownRunnable)
+        currentVoiceSessionId = sessionId
+        if (currentTarget == Constants.STREAM_TARGET_REALTIME) {
+            beginRealtimeWebRtcWithSession(sessionId, onStatus)
+            return
+        }
         currentSocketUrl = buildSocketUrl(api.loadConfig().serverUrl, api.pairedDeviceId(), api.pairedDeviceToken(), sessionId, currentTarget)
         onStatus(recordingStatus(currentTarget))
         connectSocket(currentSocketUrl, onStatus)
+    }
+
+    private fun beginRealtimeWebRtcWithSession(sessionId: String, onStatus: (String) -> Unit) {
+        outgoingReady.set(false)
+        pendingStreamBuffer.clear()
+        realtimeWebRtcClientSessionId = "android_${java.util.UUID.randomUUID().toString().replace("-", "")}"
+        val assistantProfileId = pendingAssistantProfileId
+        pendingAssistantProfileId = null
+        if (recorder != null) {
+            realtimeWebRtcHandoff.set(true)
+            wakeDetector?.release()
+            wakeDetector = null
+            runCatching { recorder?.stop() }
+            Thread.sleep(150)
+        }
+        thread(name = "VoiceStreamRealtimeWebRtc") {
+            try {
+                val realtime = RealtimeWebRtcSession(
+                    context = context,
+                    api = api,
+                    voiceSessionId = sessionId,
+                    clientSessionId = realtimeWebRtcClientSessionId,
+                    assistantProfileId = assistantProfileId,
+                    onStatus = { status -> mainHandler.post { onStatus(status) } },
+                )
+                realtimeWebRtcSession = realtime
+                val result = realtime.start()
+                if (result.maxDurationMs > 0L) {
+                    mainHandler.post { startRecordingCountdown(result.maxDurationMs, onStatus) }
+                }
+                api.uploadLog(
+                    "Android realtime WebRTC session connected",
+                    JSONObject()
+                        .put("voiceSessionId", sessionId)
+                        .put("clientSessionId", realtimeWebRtcClientSessionId)
+                        .put("callId", result.callId),
+                )
+            } catch (error: Exception) {
+                ClientLog.w("AudioStreamer", "Realtime WebRTC failed", error)
+                recording.set(false)
+                outgoingReady.set(false)
+                stopRecordingCountdown()
+                closeRealtimeWebRtc(sendCancel = true)
+                val message = error.message?.takeIf { it.isNotBlank() } ?: error.javaClass.simpleName
+                uploadVoiceStartFailure(Constants.STREAM_TARGET_REALTIME, message, error)
+                mainHandler.post {
+                    onStatus("Realtime voice failed to start: $message")
+                    if (awakeMode && active.get()) restartAwakeRecorder(onStatus)
+                }
+            } finally {
+                realtimeWebRtcHandoff.set(false)
+            }
+        }
+        onStatus(recordingStatus(Constants.STREAM_TARGET_REALTIME))
     }
 
     private fun endRecording(onStatus: (String) -> Unit, status: String) {
         if (!recording.getAndSet(false)) return
         outgoingReady.set(false)
         stopRecordingCountdown()
+        if (currentTarget == Constants.STREAM_TARGET_REALTIME) {
+            closeRealtimeWebRtc(sendCancel = true)
+            pendingStreamBuffer.clear()
+            onStatus(status)
+            if (awakeMode && active.get() && !sleeping) restartAwakeRecorder(onStatus)
+            return
+        }
         sendEnd("recording ended")
         pendingStreamBuffer.clear()
         onStatus(status)
@@ -537,6 +612,40 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         recordingMaxDurationMs = 0L
     }
 
+    private fun closeRealtimeWebRtc(sendCancel: Boolean) {
+        val session = realtimeWebRtcSession
+        val voiceSessionId = currentVoiceSessionId
+        val clientSessionId = realtimeWebRtcClientSessionId
+        realtimeWebRtcSession = null
+        if (session != null) {
+            thread(name = "VoiceStreamRealtimeWebRtcClose") {
+                session.close(sendCancel)
+            }
+        } else if (sendCancel && voiceSessionId.isNotBlank() && clientSessionId.isNotBlank()) {
+            thread(name = "VoiceStreamRealtimeWebRtcCancel") {
+                runCatching { api.cancelRealtimeWebRtcSession(voiceSessionId, clientSessionId) }
+            }
+        }
+        realtimeWebRtcClientSessionId = ""
+        if (currentTarget == Constants.STREAM_TARGET_REALTIME) currentVoiceSessionId = ""
+    }
+
+    private fun restartAwakeRecorder(onStatus: (String) -> Unit) {
+        if (!active.get() || !awakeMode) return
+        wakeDetector?.release()
+        wakeDetector = VoskWakeWordDetector(
+            context,
+            { status -> onStatus(status) },
+            { text -> mainHandler.post { handleLocalRecognizerText(text, onStatus) } },
+        ).also { detector ->
+            applyWakeDetectorSettingsIfReady()
+            detector.prepare()
+        }
+        thread(name = "VoiceStreamNextAwakeAudio") {
+            runRecorder(onStatus, detectWake = true)
+        }
+    }
+
     private fun delayLabel(delayMs: Long): String {
         return if (delayMs < 1000L) "${delayMs}ms" else "${delayMs / 1000L}s"
     }
@@ -585,14 +694,17 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
             runCatching { audioRecord.stop() }
             runCatching { audioRecord.release() }
             if (recorder === audioRecord) recorder = null
-            active.set(false)
-            recording.set(false)
-            outgoingReady.set(false)
-            reconnecting.set(false)
-            wakeConfirmationInFlight.set(false)
-            closeSocket("recorder stopped", sendEnd = false)
-            wakeDetector?.release()
-            wakeDetector = null
+            if (!realtimeWebRtcHandoff.get()) {
+                active.set(false)
+                recording.set(false)
+                outgoingReady.set(false)
+                reconnecting.set(false)
+                wakeConfirmationInFlight.set(false)
+                closeRealtimeWebRtc(sendCancel = true)
+                closeSocket("recorder stopped", sendEnd = false)
+                wakeDetector?.release()
+                wakeDetector = null
+            }
         }
     }
 
@@ -921,6 +1033,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
     }
 
     private fun sendOrBufferFrame(frame: ByteArray) {
+        if (currentTarget == Constants.STREAM_TARGET_REALTIME) return
         if (outgoingReady.get()) {
             flushPendingFrames()
             socket?.send(frame.toByteString())

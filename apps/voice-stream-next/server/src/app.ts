@@ -69,6 +69,10 @@ import {
 import { buildPairingPayload, buildUpdatePayload, minClientVersion, pairingExpiresAt, parseClientVersion } from './pairing.js';
 import { ControlChannelRegistry, type SpeechAudioCommand } from './control-channel.js';
 import type { DeviceAuthResult } from './db.js';
+import {
+  createOpenAiRealtimeWebRtcSession,
+  type OpenAiRealtimeWebRtcSession,
+} from './openai-realtime-webrtc.js';
 
 type AppOptions = {
   logger?: boolean;
@@ -119,6 +123,7 @@ const OPENAI_REALTIME_AUDIO_SAMPLE_RATE = 24_000;
 
 type AppEventType =
   | 'assistant_changed'
+  | 'assistant_realtime_streaming'
   | 'device_changed'
   | 'device_connected'
   | 'device_disconnected'
@@ -1476,6 +1481,15 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   const speechEventClients = new Set<{ id: string; res: any; userId: string; connectedAt: string }>();
   const releaseUploadSessions = new Map<string, ReleaseUploadSession>();
   const liveRecordingSessions = new Map<string, LiveRecordingSession>();
+  const realtimeWebRtcSessions = new Map<string, {
+    userId: string;
+    deviceId: string;
+    voiceSessionId: string;
+    clientSessionId: string;
+    session: OpenAiRealtimeWebRtcSession;
+    timeout: ReturnType<typeof setTimeout>;
+    closed: boolean;
+  }>();
   let appEventSequence = 0;
   const clerkEnabled = Boolean(process.env.CLERK_SECRET_KEY?.trim());
   const port = parsePort(process.env.PORT ?? process.env.VOICE_STREAM_NEXT_API_PORT, 3299);
@@ -1554,6 +1568,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     emitAppEvent(userId ?? null, 'assistant_changed', { reason, ...(threadId ? { threadId } : {}) });
   };
 
+  const emitAssistantRealtimeStreaming = (userId: string, threadId: string, role: 'user' | 'assistant', text: string) => {
+    emitAppEvent(userId, 'assistant_realtime_streaming', { threadId, role, text });
+  };
+
   const emitDeviceSettingsChanged = (userId: string, settings: string, reason?: string) => {
     for (const device of db.listDevices(userId)) {
       if (device.revokedAt) continue;
@@ -1593,6 +1611,43 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   const addTranscript = (userId: string, voiceSessionId: string, text: string) => {
     db.addTranscript(userId, voiceSessionId, text);
     emitAppEvent(userId, 'transcript_created', { voiceSessionId });
+  };
+
+  const realtimeWebRtcSessionKey = (voiceSessionId: string, clientSessionId: string): string => `${voiceSessionId}:${clientSessionId}`;
+
+  const closeRealtimeWebRtcSession = async (
+    key: string,
+    reason: string,
+    opts: { cancelPeer?: boolean; status?: string } = {},
+  ): Promise<boolean> => {
+    const active = realtimeWebRtcSessions.get(key);
+    if (!active || active.closed) return false;
+    active.closed = true;
+    realtimeWebRtcSessions.delete(key);
+    clearTimeout(active.timeout);
+    if (opts.cancelPeer !== false) await active.session.cancel().catch(() => {});
+    db.endVoiceSession(active.userId, active.voiceSessionId);
+    db.upsertClientStatus(active.userId, active.deviceId, {
+      mode: 'awake',
+      status: opts.status || 'Realtime voice disconnected',
+      protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
+    });
+    emitAppEvent(active.userId, 'client_status_changed', { deviceId: active.deviceId, mode: 'awake' });
+    addLog(active.userId, {
+      deviceId: active.deviceId,
+      source: 'realtime_webrtc',
+      level: 'info',
+      message: 'Realtime WebRTC voice session closed',
+      detailsJson: JSON.stringify({ voiceSessionId: active.voiceSessionId, clientSessionId: active.clientSessionId, reason }),
+    });
+    return true;
+  };
+
+  const closeRealtimeWebRtcSessionsForVoiceSession = async (voiceSessionId: string, reason: string): Promise<void> => {
+    const keys = [...realtimeWebRtcSessions.values()]
+      .filter((active) => active.voiceSessionId === voiceSessionId)
+      .map((active) => realtimeWebRtcSessionKey(active.voiceSessionId, active.clientSessionId));
+    for (const key of keys) await closeRealtimeWebRtcSession(key, reason);
   };
 
   const persistVoiceStreamRecording = (opts: {
@@ -2041,6 +2096,11 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     }));
 
   app.addHook('onClose', async () => {
+    for (const active of realtimeWebRtcSessions.values()) {
+      clearTimeout(active.timeout);
+      await active.session.cancel().catch(() => {});
+    }
+    realtimeWebRtcSessions.clear();
     setAssistantExternalToolExecutor(null);
     setAssistantExternalToolApprovalEvaluator(null);
     setAssistantSpeakPlaybackResolver(null);
@@ -2067,6 +2127,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       'application/zip',
       'application/x-apple-diskimage',
       'application/vnd.microsoft.portable-executable',
+      'application/sdp',
     ],
     { parseAs: 'buffer', bodyLimit: uploadLimitBytes() },
     (_req, body, done) => done(null, body),
@@ -4853,6 +4914,298 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   },
   );
 
+  app.post('/api/voice/realtime/webrtc-session', async (req, reply) => {
+    const query = (req.query ?? {}) as Record<string, unknown>;
+    const deviceId = queryValue(query.deviceId);
+    const token = queryValue(query.token);
+    const installationId = cleanText(query.installationId) || null;
+    const requestedSessionId = queryValue(query.sessionId);
+    const assistantProfileId = queryValue(query.assistantProfileId) || null;
+    const clientSessionId = cleanText(req.headers['x-voice-realtime-session-id'] || query.clientSessionId);
+    if (!clientSessionId) {
+      reply.code(400).send({ ok: false, error: 'clientSessionId is required' });
+      return;
+    }
+    const verifiedDevice = verifyDeviceAuth(db, deviceId, token, parseClientVersion(query.clientVersion, parseClientVersion(query.protocolVersion, null)));
+    if (!verifiedDevice.ok) {
+      reply.code(verifiedDevice.reason === 'client_too_old' ? 426 : 401).send({
+        ok: false,
+        error: deviceAuthFailureMessage(verifiedDevice),
+        reason: verifiedDevice.reason,
+        minClientVersion: verifiedDevice.reason === 'client_too_old' ? verifiedDevice.minClientVersion : undefined,
+      });
+      return;
+    }
+    const device = resolveDeviceInstallation(db, verifiedDevice.device, installationId, token);
+    const credential = resolveOpenAiRealtimeCredential(db, device.userId);
+    if (!credential) {
+      reply.code(400).send({ ok: false, error: 'OpenAI Realtime is not configured. Add your OpenAI key in assistant settings or set OPENAI_API_KEY / VOICE_STREAM_NEXT_OPENAI_API_KEY on the Voice Stream server.' });
+      return;
+    }
+    const sdpOffer = Buffer.isBuffer(req.body)
+      ? req.body.toString('utf8')
+      : req.body instanceof Uint8Array
+        ? Buffer.from(req.body).toString('utf8')
+        : String(req.body ?? '');
+    if (!sdpOffer.trim()) {
+      reply.code(400).send({ ok: false, error: 'WebRTC SDP offer is empty.' });
+      return;
+    }
+
+    const requestedSession = requestedSessionId ? db.voiceSessionForDevice(device.userId, device.id, requestedSessionId) : null;
+    if (requestedSessionId && !requestedSession) {
+      reply.code(404).send({ ok: false, error: 'unknown voice session' });
+      return;
+    }
+    if (!requestedSession) {
+      try {
+        requireVoiceSessionSpeechReadiness(db, device.userId, 'realtime');
+      } catch (error: any) {
+        reply.code(Number(error?.statusCode ?? 402) || 402).send({
+          ok: false,
+          error: error?.message ?? String(error),
+          reason: error?.reason ?? 'voice_session_unavailable',
+        });
+        return;
+      }
+    }
+    const session = requestedSession ?? db.createVoiceSession(device.userId, device.id, 'realtime', { assistantProfileId });
+    const key = realtimeWebRtcSessionKey(session.id, clientSessionId);
+    await closeRealtimeWebRtcSessionsForVoiceSession(session.id, 'superseded by new WebRTC session');
+
+    const model = openAiRealtimeModel();
+    let activeAssistantThreadId = session.assistantThreadId;
+    let currentRealtimeRunId: string | null = null;
+    let currentRealtimePrompt = '';
+    let currentRealtimeRunHasPendingApproval = false;
+    let createdSession: OpenAiRealtimeWebRtcSession | null = null;
+    let activeStored = false;
+
+    const realtimeSessionSettings = (): { instructions: string; tools: any[] } => {
+      const config = assistantRealtimeSessionConfig(db, device.userId, activeAssistantThreadId);
+      return {
+        instructions: [config.instructions, openAiRealtimeInstructions()].filter(Boolean).join('\n\n'),
+        tools: Array.isArray(config.tools) ? config.tools as any[] : [],
+      };
+    };
+    const ensureRealtimeRun = (): string => {
+      if (currentRealtimeRunId) return currentRealtimeRunId;
+      const thread = db.thread(device.userId, activeAssistantThreadId);
+      const run = db.createRun(device.userId, activeAssistantThreadId, {
+        prompt: currentRealtimePrompt || 'Realtime voice turn',
+        provider: 'openai',
+        model,
+        thinkingLevel: thread?.thinkingLevel ?? 'off',
+      });
+      currentRealtimeRunId = run.id;
+      currentRealtimeRunHasPendingApproval = false;
+      emitAssistantChange('voice_thread_prompted', activeAssistantThreadId, device.userId);
+      return run.id;
+    };
+    const finishRealtimeRunIfReady = (): void => {
+      if (!currentRealtimeRunId || currentRealtimeRunHasPendingApproval) return;
+      finishAssistantRealtimeRun(db, device.userId, activeAssistantThreadId, currentRealtimeRunId);
+      currentRealtimeRunId = null;
+      currentRealtimePrompt = '';
+    };
+    const failRealtimeRun = (message: string): void => {
+      if (!currentRealtimeRunId) return;
+      failAssistantRealtimeRun(db, device.userId, activeAssistantThreadId, currentRealtimeRunId, message);
+      currentRealtimeRunId = null;
+      currentRealtimePrompt = '';
+      currentRealtimeRunHasPendingApproval = false;
+    };
+
+    try {
+      const settings = realtimeSessionSettings();
+      const sessionObject = await createOpenAiRealtimeWebRtcSession({
+        apiKey: credential.apiKey,
+        sdpOffer,
+        safetyIdentifier: openAiSafetyIdentifier(device.userId, device.id),
+        model,
+        instructions: settings.instructions,
+        tools: settings.tools as any,
+        executeTool: async (call) => {
+          const previousThreadId = activeAssistantThreadId;
+          const result = await executeAssistantRealtimeTool(
+            db,
+            device.userId,
+            activeAssistantThreadId,
+            ensureRealtimeRun(),
+            call.id,
+            call.name,
+            call.arguments,
+            {
+              onToolCall: (event) => emitAssistantChange('realtime_tool_call', event.threadId, device.userId),
+              onToolResult: (event) => emitAssistantChange(event.isError ? 'realtime_tool_failed' : 'realtime_tool_result', event.threadId, device.userId),
+            },
+          );
+          currentRealtimeRunHasPendingApproval = currentRealtimeRunHasPendingApproval || result.approvalPending;
+          if (result.threadId !== activeAssistantThreadId) {
+            finishRealtimeRunIfReady();
+            activeAssistantThreadId = result.threadId;
+            currentRealtimeRunId = null;
+            currentRealtimePrompt = '';
+            currentRealtimeRunHasPendingApproval = false;
+            emitAssistantChange('realtime_tool_thread_changed', previousThreadId, device.userId);
+            emitAssistantChange('realtime_tool_thread_changed', activeAssistantThreadId, device.userId);
+          }
+          return result.output;
+        },
+        callbacks: {
+          onUserTranscriptDelta: async (delta) => {
+            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', cleanText(delta.text));
+          },
+          onUserSpeechStarted: async () => {
+            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
+            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
+          },
+          onUserTranscript: async (transcript) => {
+            const text = cleanText(transcript);
+            if (!text) return;
+            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
+            addTranscript(device.userId, session.id, text);
+            const approvalCode = approvalCodeFromText(text);
+            if (approvalCode) addApprovalCode(device.userId, { voiceSessionId: session.id, code: approvalCode, source: device.deviceType });
+            db.addMessage(device.userId, activeAssistantThreadId, { role: 'user', content: text });
+            currentRealtimePrompt = text;
+            ensureRealtimeRun();
+            emitAssistantChange('realtime_user_message_appended', activeAssistantThreadId, device.userId);
+          },
+          onAssistantTranscriptDelta: async (delta) => {
+            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', cleanText(delta.text));
+          },
+          onAssistantTranscript: async (assistantText) => {
+            const text = cleanText(assistantText);
+            if (!text) return;
+            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
+            db.addMessage(device.userId, activeAssistantThreadId, {
+              role: 'assistant',
+              content: text,
+              spokenText: text,
+            });
+            emitAssistantChange('realtime_assistant_message_appended', activeAssistantThreadId, device.userId);
+            finishRealtimeRunIfReady();
+          },
+          onStatus: async (status) => {
+            db.upsertClientStatus(device.userId, device.id, {
+              mode: 'recording',
+              status: cleanText(status, 'Realtime voice is listening.'),
+              protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
+            });
+            emitAppEvent(device.userId, 'client_status_changed', { deviceId: device.id, mode: 'recording' });
+          },
+          onError: async (message) => {
+            const error = cleanText(message, 'OpenAI Realtime failed.');
+            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
+            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
+            failRealtimeRun(error);
+            emitAssistantChange('realtime_failed', activeAssistantThreadId, device.userId);
+            addLog(device.userId, {
+              deviceId: device.id,
+              source: 'realtime_webrtc',
+              level: 'error',
+              message: 'OpenAI Realtime WebRTC error',
+              detailsJson: JSON.stringify({ voiceSessionId: session.id, clientSessionId, error }),
+            });
+            await closeRealtimeWebRtcSession(key, 'sideband error', {
+              status: 'Realtime voice failed',
+            });
+          },
+          onClose: async () => {
+            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
+            emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
+            finishRealtimeRunIfReady();
+            await closeRealtimeWebRtcSession(key, 'sideband closed', { cancelPeer: false });
+          },
+        },
+      });
+      createdSession = sessionObject;
+      const timeout = setTimeout(() => {
+        void closeRealtimeWebRtcSession(key, 'duration limit', { status: 'Realtime voice reached the server duration limit.' });
+      }, MAX_STREAM_DURATION_MS);
+      timeout.unref?.();
+      realtimeWebRtcSessions.set(key, {
+        userId: device.userId,
+        deviceId: device.id,
+        voiceSessionId: session.id,
+        clientSessionId,
+        session: sessionObject,
+        timeout,
+        closed: false,
+      });
+      activeStored = true;
+      db.upsertClientStatus(device.userId, device.id, {
+        mode: 'recording',
+        status: 'Realtime voice connected',
+        protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
+      });
+      emitAppEvent(device.userId, 'client_status_changed', { deviceId: device.id, mode: 'recording' });
+      addLog(device.userId, {
+        deviceId: device.id,
+        source: device.deviceType,
+        level: 'info',
+        message: 'Realtime WebRTC voice session connected',
+        detailsJson: JSON.stringify({ voiceSessionId: session.id, clientSessionId, model, credentialSource: credential.source, callId: sessionObject.callId }),
+      });
+      reply.send({
+        ok: true,
+        mode: 'realtime',
+        model,
+        callId: sessionObject.callId,
+        voiceSessionId: session.id,
+        assistantThreadId: activeAssistantThreadId,
+        maxDurationMs: MAX_STREAM_DURATION_MS,
+        sdpAnswer: sessionObject.sdpAnswer,
+      });
+    } catch (error: any) {
+      if (createdSession && !activeStored) await createdSession.cancel().catch(() => {});
+      const message = error?.message ?? String(error);
+      addLog(device.userId, {
+        deviceId: device.id,
+        source: 'realtime_webrtc',
+        level: 'error',
+        message: 'Realtime WebRTC voice session failed',
+        detailsJson: JSON.stringify({ voiceSessionId: session.id, clientSessionId, error: message }),
+      });
+      reply.code(/OpenAI Realtime is not configured/i.test(message) ? 400 : 502).send({ ok: false, error: message });
+    }
+  });
+
+  app.post('/api/voice/realtime/webrtc-session/cancel', async (req, reply) => {
+    const body = jsonBody(req);
+    const query = (req.query ?? {}) as Record<string, unknown>;
+    const deviceId = cleanText(body.deviceId || query.deviceId);
+    const token = cleanText(body.token || query.token || req.headers['x-voice-device-token']);
+    const installationId = cleanText(body.installationId || query.installationId || req.headers['x-voice-installation-id']) || null;
+    const voiceSessionId = cleanText(body.sessionId || query.sessionId);
+    const clientSessionId = cleanText(req.headers['x-voice-realtime-session-id'] || body.clientSessionId || query.clientSessionId);
+    if (!voiceSessionId || !clientSessionId) {
+      reply.code(400).send({ ok: false, error: 'sessionId and clientSessionId are required' });
+      return;
+    }
+    const verifiedDevice = verifyDeviceAuth(db, deviceId, token, parseClientVersion(body.clientVersion, parseClientVersion(query.clientVersion, parseClientVersion(body.protocolVersion, parseClientVersion(query.protocolVersion, null)))));
+    if (!verifiedDevice.ok) {
+      reply.code(verifiedDevice.reason === 'client_too_old' ? 426 : 401).send({
+        ok: false,
+        error: deviceAuthFailureMessage(verifiedDevice),
+        reason: verifiedDevice.reason,
+        minClientVersion: verifiedDevice.reason === 'client_too_old' ? verifiedDevice.minClientVersion : undefined,
+      });
+      return;
+    }
+    const device = resolveDeviceInstallation(db, verifiedDevice.device, installationId, token);
+    const active = realtimeWebRtcSessions.get(realtimeWebRtcSessionKey(voiceSessionId, clientSessionId));
+    if (!active || active.userId !== device.userId || active.deviceId !== device.id) {
+      reply.send({ ok: true, cancelled: false });
+      return;
+    }
+    const cancelled = await closeRealtimeWebRtcSession(realtimeWebRtcSessionKey(voiceSessionId, clientSessionId), 'client cancelled', {
+      status: 'Realtime voice cancelled',
+    });
+    reply.send({ ok: true, cancelled });
+  });
+
   app.get('/api/voice/realtime', { websocket: true }, (socket, req) => {
     const query = (req.query ?? {}) as Record<string, unknown>;
     const deviceId = queryValue(query.deviceId);
@@ -4957,6 +5310,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       for (const call of calls) {
         try {
           sendClient({ type: 'assistant_status', phase: 'tool_call', status: `Realtime is using ${call.name}.`, threadId: activeAssistantThreadId });
+          const previousThreadId = activeAssistantThreadId;
           const result = await executeAssistantRealtimeTool(
             db,
             device.userId,
@@ -4965,6 +5319,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             call.id,
             call.name,
             parseRealtimeFunctionArguments(call.argumentsJson),
+            {
+              onToolCall: (event) => emitAssistantChange('realtime_tool_call', event.threadId, device.userId),
+              onToolResult: (event) => emitAssistantChange(event.isError ? 'realtime_tool_failed' : 'realtime_tool_result', event.threadId, device.userId),
+            },
           );
           currentRealtimeRunHasPendingApproval = currentRealtimeRunHasPendingApproval || result.approvalPending;
           if (result.threadId !== activeAssistantThreadId) {
@@ -4973,6 +5331,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             currentRealtimeRunId = null;
             currentRealtimePrompt = '';
             currentRealtimeRunHasPendingApproval = false;
+            emitAssistantChange('realtime_tool_thread_changed', previousThreadId, device.userId);
+            emitAssistantChange('realtime_tool_thread_changed', activeAssistantThreadId, device.userId);
           }
           sendUpstream({
             type: 'conversation.item.create',
@@ -5100,6 +5460,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (type === 'error' || type.endsWith('_error') || event?.error?.message) {
         const message = cleanText(event?.error?.message ?? event?.message, 'OpenAI Realtime failed');
         sendClient({ type: 'assistant_error', error: message });
+        emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
+        emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
         failRealtimeRun(message);
         addLog(device.userId, {
           deviceId: device.id,
@@ -5110,14 +5472,21 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         });
         return;
       }
+      if (type === 'input_audio_buffer.speech_started') {
+        emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
+        emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
+        return;
+      }
       if (type === 'conversation.item.input_audio_transcription.delta') {
         inputTranscript += String(event.delta ?? '');
+        emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', cleanText(inputTranscript));
         return;
       }
       if (type === 'conversation.item.input_audio_transcription.completed' || type === 'conversation.item.input_audio_transcription.done') {
         const transcript = cleanText(event.transcript ?? inputTranscript);
         if (transcript) {
           inputTranscript = '';
+          emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
           db.addTranscript(device.userId, session.id, transcript);
           emitAppEvent(device.userId, 'transcript_created', { voiceSessionId: session.id });
           const approvalCode = approvalCodeFromText(transcript);
@@ -5125,6 +5494,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           db.addMessage(device.userId, activeAssistantThreadId, { role: 'user', content: transcript });
           currentRealtimePrompt = transcript;
           ensureRealtimeRun();
+          emitAssistantChange('realtime_user_message_appended', activeAssistantThreadId, device.userId);
           sendClient({ type: 'transcript_result', mode: 'realtime', transcript, status: 'Realtime transcript received.' });
         }
         return;
@@ -5144,18 +5514,20 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       }
       if (type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') {
         outputTranscript += String(event.delta ?? '');
+        emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', cleanText(outputTranscript));
         return;
       }
       if (type === 'response.output_audio_transcript.done' || type === 'response.audio_transcript.done') {
         const assistantText = cleanText(event.transcript ?? outputTranscript);
         outputTranscript = '';
         if (assistantText) {
+          emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
           db.addMessage(device.userId, activeAssistantThreadId, {
             role: 'assistant',
             content: assistantText,
             spokenText: assistantText,
           });
-          emitAssistantChange('voice_thread_prompted', activeAssistantThreadId, device.userId);
+          emitAssistantChange('realtime_assistant_message_appended', activeAssistantThreadId, device.userId);
           sendClient({ type: 'assistant_result', transcript: '', assistantText, runtime: `openai:${model}` });
         }
         return;
@@ -5188,6 +5560,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
 
     upstream.on('close', (code, reason) => {
       upstreamReady = false;
+      emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
+      emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
       if (!clientClosed && (socket as any).readyState === 1) {
         socket.close(1000, reason.toString() || `OpenAI Realtime closed (${code})`);
       }
@@ -5195,6 +5569,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     upstream.on('error', (error) => {
       const message = error instanceof Error ? error.message : String(error);
       sendClient({ type: 'assistant_error', error: message });
+      emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
+      emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
       addLog(device.userId, {
         deviceId: device.id,
         source: device.deviceType,
@@ -5242,6 +5618,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       clearTimeout(durationLimit);
       clientClosed = true;
       closeUpstream('client disconnected');
+      emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
+      emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
       if (currentRealtimeRunId && !currentRealtimeRunHasPendingApproval) failRealtimeRun('Realtime voice disconnected before the assistant finished.');
       db.endVoiceSession(device.userId, session.id);
       db.upsertClientStatus(device.userId, device.id, {

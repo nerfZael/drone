@@ -322,6 +322,11 @@ export type AssistantRealtimeToolResult = {
   toolsChanged: boolean;
 };
 
+export type AssistantRealtimeToolEvents = {
+  onToolCall?: (event: { threadId: string; toolCallId: string; modelToolCallId: string; toolName: string }) => void | Promise<void>;
+  onToolResult?: (event: { threadId: string; toolCallId: string; toolName: string; isError: boolean }) => void | Promise<void>;
+};
+
 export function assistantRealtimeSessionConfig(db: VoiceStreamNextDb, userId: string, threadId: string): AssistantRealtimeSessionConfig {
   const thread = db.thread(userId, threadId);
   if (!thread) throw Object.assign(new Error('unknown assistant thread'), { statusCode: 404 });
@@ -371,6 +376,7 @@ export async function executeAssistantRealtimeTool(
   modelToolCallId: string,
   rawToolName: string,
   rawArgs: unknown,
+  events: AssistantRealtimeToolEvents = {},
 ): Promise<AssistantRealtimeToolResult> {
   const thread = db.thread(userId, threadId);
   if (!thread) throw Object.assign(new Error('unknown assistant thread'), { statusCode: 404 });
@@ -405,6 +411,7 @@ export async function executeAssistantRealtimeTool(
       label: toolLabel(toolName, db, userId),
       args,
     });
+    await events.onToolCall?.({ threadId, toolCallId: toolCall.id, modelToolCallId, toolName });
     return {
       output: JSON.stringify({
         ok: false,
@@ -421,6 +428,7 @@ export async function executeAssistantRealtimeTool(
   }
 
   try {
+    await events.onToolCall?.({ threadId, toolCallId: toolCall.id, modelToolCallId, toolName });
     const latestThread = db.thread(userId, threadId) ?? thread;
     const result = await executeApprovedTool(db, userId, latestThread, toolName, args, {
       runId,
@@ -434,6 +442,7 @@ export async function executeAssistantRealtimeTool(
       content: toolResultText(toolName, result),
       contentJson: JSON.stringify(result),
     });
+    await events.onToolResult?.({ threadId, toolCallId: updatedToolCall.id, toolName, isError: false });
     return {
       output: safeStringify({ ok: true, summary: toolResultText(toolName, result), result }),
       result,
@@ -453,6 +462,7 @@ export async function executeAssistantRealtimeTool(
       content: failure.error,
       contentJson: JSON.stringify(failure),
     });
+    await events.onToolResult?.({ threadId, toolCallId: toolCall.id, toolName, isError: true });
     throw error;
   }
 }

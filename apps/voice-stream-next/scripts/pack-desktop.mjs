@@ -60,8 +60,31 @@ function parseEnvValue(raw) {
 }
 
 function packageRoot(packageName, fromDir = appDir) {
-  const packageJson = requireFromApp.resolve(`${packageName}/package.json`, { paths: [fromDir, repoRoot] });
-  return path.dirname(packageJson);
+  const paths = [fromDir, repoRoot];
+  try {
+    const packageJson = requireFromApp.resolve(`${packageName}/package.json`, { paths });
+    const packageDir = packageRootFrom(packageJson, packageName);
+    if (packageDir) return packageDir;
+  } catch {
+    // Some packages do not export package.json. Fall back to the resolved entrypoint.
+  }
+  const entrypoint = requireFromApp.resolve(packageName, { paths });
+  const packageDir = packageRootFrom(entrypoint, packageName);
+  if (packageDir) return packageDir;
+  throw new Error(`Could not find package root for ${packageName}`);
+}
+
+function packageRootFrom(resolvedPath, packageName) {
+  let current = fs.statSync(resolvedPath).isDirectory() ? resolvedPath : path.dirname(resolvedPath);
+  while (current && current !== path.dirname(current)) {
+    const manifestPath = path.join(current, 'package.json');
+    if (fs.existsSync(manifestPath)) {
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8'));
+      if (manifest.name === packageName) return current;
+    }
+    current = path.dirname(current);
+  }
+  return '';
 }
 
 function copyRuntimePackage(packageName, fromDir = appDir) {

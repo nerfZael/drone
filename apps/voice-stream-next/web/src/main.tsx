@@ -115,6 +115,8 @@ type AppEvent = {
   sequence: number;
   at: string;
   threadId?: string;
+  role?: 'user' | 'assistant';
+  text?: string;
   platform?: 'android' | 'desktop';
 };
 type SseMessage = { event: string; data: unknown };
@@ -403,6 +405,8 @@ type AppToast = {
 type AssistantStreamingDraft = {
   reply: string;
   thinking: string;
+  realtimeUser: string;
+  realtimeAssistant: string;
 };
 
 type ComposerRecordingStatus = 'idle' | 'starting' | 'recording' | 'paused' | 'transcribing';
@@ -1543,6 +1547,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const activeThreadStreaming = activeThread ? streamingByThreadId[activeThread.id] : null;
   const streamingReply = activeThreadStreaming?.reply ?? '';
   const streamingThinking = activeThreadStreaming?.thinking ?? '';
+  const realtimeUserStreaming = activeThreadStreaming?.realtimeUser ?? '';
+  const realtimeAssistantStreaming = activeThreadStreaming?.realtimeAssistant ?? '';
   const activePromptSubmitting = activeThread ? Boolean(promptSubmittingByThreadId[activeThread.id]) : false;
   const composerRecordingActive = composerRecordingStatus !== 'idle';
   const composerRecordingCanPauseOrStop = composerRecordingStatus === 'recording' || composerRecordingStatus === 'paused';
@@ -1607,23 +1613,56 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     promptSubmittingThreadIdsRef.current = next;
     setPromptSubmittingByThreadId(next);
   }, []);
-  const clearThreadStreaming = React.useCallback((threadId: string) => {
+  const clearThreadPromptStreaming = React.useCallback((threadId: string) => {
     setStreamingByThreadId((current) => {
-      if (!current[threadId]) return current;
-      const next = { ...current };
-      delete next[threadId];
-      return next;
+      const existing = current[threadId];
+      if (!existing) return current;
+      const nextDraft: AssistantStreamingDraft = {
+        ...existing,
+        reply: '',
+        thinking: '',
+      };
+      if (!nextDraft.realtimeUser && !nextDraft.realtimeAssistant) {
+        const next = { ...current };
+        delete next[threadId];
+        return next;
+      }
+      return {
+        ...current,
+        [threadId]: nextDraft,
+      };
     });
   }, []);
   const appendThreadStreaming = React.useCallback((threadId: string, patch: Partial<AssistantStreamingDraft>) => {
     setStreamingByThreadId((current) => {
-      const existing = current[threadId] ?? { reply: '', thinking: '' };
+      const existing = current[threadId] ?? { reply: '', thinking: '', realtimeUser: '', realtimeAssistant: '' };
       return {
         ...current,
         [threadId]: {
           reply: patch.reply === undefined ? existing.reply : `${existing.reply}${patch.reply}`,
           thinking: patch.thinking === undefined ? existing.thinking : `${existing.thinking}${patch.thinking}`,
+          realtimeUser: patch.realtimeUser === undefined ? existing.realtimeUser : patch.realtimeUser,
+          realtimeAssistant: patch.realtimeAssistant === undefined ? existing.realtimeAssistant : patch.realtimeAssistant,
         },
+      };
+    });
+  }, []);
+  const setThreadRealtimeStreaming = React.useCallback((threadId: string, role: 'user' | 'assistant', text: string) => {
+    setStreamingByThreadId((current) => {
+      const existing = current[threadId] ?? { reply: '', thinking: '', realtimeUser: '', realtimeAssistant: '' };
+      const nextDraft: AssistantStreamingDraft = {
+        ...existing,
+        [role === 'user' ? 'realtimeUser' : 'realtimeAssistant']: text,
+      };
+      if (!nextDraft.reply && !nextDraft.thinking && !nextDraft.realtimeUser && !nextDraft.realtimeAssistant) {
+        if (!current[threadId]) return current;
+        const next = { ...current };
+        delete next[threadId];
+        return next;
+      }
+      return {
+        ...current,
+        [threadId]: nextDraft,
       };
     });
   }, []);
@@ -1926,6 +1965,12 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     let retryTimer: number | null = null;
 
     const handleAppEvent = (event: AppEvent) => {
+      if (event.type === 'assistant_realtime_streaming') {
+        if (!event.threadId || (event.role !== 'user' && event.role !== 'assistant')) return;
+        setThreadRealtimeStreaming(event.threadId, event.role, String(event.text ?? ''));
+        if (event.threadId === activeThreadIdRef.current) scrollMessagesToBottom();
+        return;
+      }
       if (event.type === 'assistant_changed') {
         scheduleAssistantEventRefreshRef.current();
         if (!event.threadId || event.threadId === activeThreadIdRef.current) {
@@ -2104,6 +2149,10 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       streamingReply.slice(-80),
       streamingThinking.length,
       streamingThinking.slice(-80),
+      realtimeUserStreaming.length,
+      realtimeUserStreaming.slice(-80),
+      realtimeAssistantStreaming.length,
+      realtimeAssistantStreaming.slice(-80),
       (thread?.runs ?? []).map((run) => [run.id, run.status, run.startedAt, run.completedAt ?? '', run.cancelledAt ?? ''].join(':')).join('|'),
       (thread?.queuedPrompts ?? []).map((prompt) => [prompt.id, prompt.createdAt, prompt.prompt?.length ?? 0].join(':')).join('|'),
       pendingApprovalsForThread.map((approval) => [approval.id, approval.toolName, approval.createdAt].join(':')).join('|'),
@@ -2111,7 +2160,16 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     if (signature === messageScrollSignatureRef.current) return;
     messageScrollSignatureRef.current = signature;
     scrollMessagesToBottom();
-  }, [activeThread, assistantSnapshotData?.pendingApprovals, messages, scrollMessagesToBottom, streamingReply, streamingThinking]);
+  }, [
+    activeThread,
+    assistantSnapshotData?.pendingApprovals,
+    messages,
+    realtimeAssistantStreaming,
+    realtimeUserStreaming,
+    scrollMessagesToBottom,
+    streamingReply,
+    streamingThinking,
+  ]);
 
   async function createThread() {
     setBusy(true);
@@ -2322,7 +2380,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     };
     setPromptSubmitting(targetThreadId, true);
     setError(null);
-    if (ownsStreamingState) clearThreadStreaming(targetThreadId);
+    if (ownsStreamingState) clearThreadPromptStreaming(targetThreadId);
     scrollMessagesToBottom({ force: true });
     try {
       const response = await client.stream(
@@ -2372,7 +2430,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
           setAssistantSnapshotData(snapshot);
           const visibleThread = snapshot.threads.find((thread) => thread.id === targetThreadId);
           if (visibleThread && activeThreadIdRef.current === targetThreadId) setMessages(visibleThread.messages);
-          if (promptEvent.type === 'done' && ownsStreamingState) clearThreadStreaming(targetThreadId);
+          if (promptEvent.type === 'done' && ownsStreamingState) clearThreadPromptStreaming(targetThreadId);
           return;
         }
         if (promptEvent.type === 'error') {
@@ -2385,7 +2443,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
       setError(err?.message ?? String(err));
     } finally {
       releasePromptSubmit();
-      if (ownsStreamingState) clearThreadStreaming(targetThreadId);
+      if (ownsStreamingState) clearThreadPromptStreaming(targetThreadId);
       if (ownsStreamingState) {
         const next = { ...streamingRequestThreadIdsRef.current };
         delete next[targetThreadId];
@@ -3594,14 +3652,28 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     : 'OpenAI API key';
   const activeProviderMeta = providerOptions.find((provider) => provider.id === activeProvider) ?? providerOptions[0];
   const activeRunningModel = activeRuns[0];
-  const streamingMessage: AssistantMessage | null = streamingReply || streamingThinking
+  const assistantStreamingText = streamingReply || realtimeAssistantStreaming;
+  const streamingUserMessage: AssistantMessage | null = realtimeUserStreaming
+    ? {
+        id: 'streaming-user-message',
+        role: 'user',
+        content: realtimeUserStreaming,
+        contentJson: null,
+        toolName: null,
+        toolCallId: null,
+        isError: false,
+        spokenText: null,
+        createdAt: new Date().toISOString(),
+      }
+    : null;
+  const streamingMessage: AssistantMessage | null = assistantStreamingText || streamingThinking
     ? {
         id: 'streaming-assistant-message',
         role: 'assistant',
-        content: streamingReply,
+        content: assistantStreamingText,
         contentJson: JSON.stringify([
           ...(streamingThinking ? [{ type: 'thinking', thinking: streamingThinking }] : []),
-          ...(streamingReply ? [{ type: 'text', text: streamingReply }] : []),
+          ...(assistantStreamingText ? [{ type: 'text', text: assistantStreamingText }] : []),
         ]),
         toolName: null,
         toolCallId: null,
@@ -3610,7 +3682,8 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         createdAt: new Date().toISOString(),
       }
     : null;
-  const visibleAssistantMessages = streamingMessage ? [...messages, streamingMessage] : messages;
+  const streamingMessages = [streamingUserMessage, streamingMessage].filter((message): message is AssistantMessage => Boolean(message));
+  const visibleAssistantMessages = streamingMessages.length > 0 ? [...messages, ...streamingMessages] : messages;
   const assistantRenderItems = renderItemsFromMessages(visibleAssistantMessages);
   const showThinking = Boolean(activeThread) && activeRuns.length > 0 && activePendingApprovals.length === 0 && !messageText(streamingMessage ?? undefined).trim();
   const activeRunningModelLabel = activeRunningModel
@@ -4201,7 +4274,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                 >
                   {assistantRenderItems.map((item) =>
                     item.type === 'message' ? (
-                      <AssistantMessageRow key={item.key} message={item.message} streaming={item.message.id === streamingMessage?.id} />
+                      <AssistantMessageRow key={item.key} message={item.message} streaming={item.message.id === streamingUserMessage?.id || item.message.id === streamingMessage?.id} />
                     ) : (
                       <ToolActivityMessage key={item.key} call={item.call} result={item.result} />
                     ),

@@ -5,8 +5,8 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
-val androidVersionCode = 37
-val androidVersionName = "0.1.36"
+val androidVersionCode = 41
+val androidVersionName = "0.1.40"
 val configuredAndroidServerUrl = System.getenv("VOICE_STREAM_NEXT_ANDROID_SERVER_URL")
     ?.takeIf { it.isNotBlank() }
     ?: System.getenv("VOICE_STREAM_NEXT_SERVER_URL")?.takeIf { it.isNotBlank() }
@@ -85,6 +85,7 @@ dependencies {
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.10.2")
     implementation("com.squareup.okhttp3:okhttp:4.12.0")
     implementation("com.clerk:clerk-android-api:1.0.13")
+    implementation("io.getstream:stream-webrtc-android:1.3.8")
     implementation("com.alphacephei:vosk-android:0.3.47")
     implementation("com.journeyapps:zxing-android-embedded:4.3.0")
     testImplementation("junit:junit:4.13.2")

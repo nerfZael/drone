@@ -63,6 +63,11 @@ data class WakeConfirmationResult(
 )
 data class DashboardSummary(val displayName: String, val threadCount: Int, val deviceCount: Int, val logCount: Int, val logs: List<String>)
 data class AssistantExchange(val userMessage: String, val assistantMessage: String)
+data class RealtimeWebRtcStartResult(
+    val callId: String,
+    val sdpAnswer: String,
+    val maxDurationMs: Long,
+)
 data class AssistantThreadSummary(
     val id: String,
     val title: String,
@@ -542,6 +547,73 @@ class VoiceStreamApi(private val context: Context) {
         return session.getString("id")
     }
 
+    fun startRealtimeWebRtcSession(sessionId: String, clientSessionId: String, sdpOffer: String, assistantProfileId: String? = null): RealtimeWebRtcStartResult {
+        val deviceId = pairedDeviceId()
+        val token = pairedDeviceToken()
+        if (deviceId.isBlank() || token.isBlank()) throw IOException("Pair this device before starting realtime voice.")
+        val query = mutableListOf(
+            "deviceId=${encode(deviceId)}",
+            "token=${encode(token)}",
+            "installationId=${encode(installationId())}",
+            "sessionId=${encode(sessionId)}",
+            "clientSessionId=${encode(clientSessionId)}",
+            "clientVersion=${BuildConfig.VERSION_CODE}",
+            "protocolVersion=1",
+        )
+        if (!assistantProfileId.isNullOrBlank()) query += "assistantProfileId=${encode(assistantProfileId)}"
+        val config = loadConfig()
+        val path = "/api/voice/realtime/webrtc-session?${query.joinToString("&")}"
+        val builder = Request.Builder()
+            .url("${config.serverUrl.trimEnd('/')}$path")
+            .header("content-type", "application/sdp")
+            .header("x-voice-device-token", token)
+            .header("x-voice-installation-id", installationId())
+            .header("x-voice-client-version", BuildConfig.VERSION_CODE.toString())
+            .header("x-voice-realtime-session-id", clientSessionId)
+            .post(sdpOffer.toRequestBody("application/sdp".toMediaType()))
+        client.newCall(builder.build()).execute().use { response ->
+            val text = response.body.string()
+            if (!response.isSuccessful) {
+                throw IOException(ApiJsonResponse.errorMessage(text, "HTTP ${response.code}"))
+            }
+            val json = ApiJsonResponse.parseObject(text, "POST", path)
+            return RealtimeWebRtcStartResult(
+                callId = json.optString("callId"),
+                sdpAnswer = json.getString("sdpAnswer"),
+                maxDurationMs = json.optLong("maxDurationMs", 0L),
+            )
+        }
+    }
+
+    fun cancelRealtimeWebRtcSession(sessionId: String, clientSessionId: String) {
+        val deviceId = pairedDeviceId()
+        val token = pairedDeviceToken()
+        if (deviceId.isBlank() || token.isBlank() || sessionId.isBlank() || clientSessionId.isBlank()) return
+        val body = JSONObject()
+            .put("deviceId", deviceId)
+            .put("token", token)
+            .put("installationId", installationId())
+            .put("sessionId", sessionId)
+            .put("clientSessionId", clientSessionId)
+            .put("clientVersion", BuildConfig.VERSION_CODE)
+            .put("protocolVersion", 1)
+        val config = loadConfig()
+        val path = "/api/voice/realtime/webrtc-session/cancel"
+        val builder = Request.Builder()
+            .url("${config.serverUrl.trimEnd('/')}$path")
+            .header("content-type", "application/json")
+            .header("x-voice-device-token", token)
+            .header("x-voice-installation-id", installationId())
+            .header("x-voice-client-version", BuildConfig.VERSION_CODE.toString())
+            .header("x-voice-realtime-session-id", clientSessionId)
+            .post(body.toString().toRequestBody(JSON))
+        client.newCall(builder.build()).execute().use { response ->
+            if (!response.isSuccessful) {
+                throw IOException(ApiJsonResponse.errorMessage(response.body.string(), "HTTP ${response.code}"))
+            }
+        }
+    }
+
     fun voiceApprovalSettings(): VoiceApprovalSettings {
         val json = voiceApprovalSettingsJson()
         val settings = json.getJSONObject("settings")
@@ -812,6 +884,8 @@ class VoiceStreamApi(private val context: Context) {
         if (profileId.isBlank()) return ""
         return "?assistantProfileId=${URLEncoder.encode(profileId, Charsets.UTF_8.name())}"
     }
+
+    private fun encode(value: String): String = URLEncoder.encode(value, Charsets.UTF_8.name())
 
     private fun parseAssistantThread(json: JSONObject, fallbackArtifactsCount: Int): AssistantThreadSummary {
         return AssistantThreadSummary(

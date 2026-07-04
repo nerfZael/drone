@@ -75,6 +75,11 @@ const state = {
   audioContext: null,
   processor: null,
   voiceSocket: null,
+  voiceRealtimePeer: null,
+  voiceRealtimeDataChannel: null,
+  voiceRealtimeAudio: null,
+  voiceRealtimeClientSessionId: '',
+  voiceRealtimeGeneration: 0,
   voiceOutgoingReady: false,
   voiceReconnectAttempt: 0,
   voiceReconnecting: false,
@@ -1832,11 +1837,13 @@ function resetVoiceStreamState() {
   state.voicePostStopMode = 'awake';
   state.voicePostStopStatus = '';
   state.recordingPaused = false;
+  state.voiceRealtimeClientSessionId = '';
   pendingStreamBuffer.clear();
   resetVoiceCountdown();
 }
 
 async function cleanupLocalCapture() {
+  stopRealtimeWebRtcLocal();
   if (state.processor) {
     state.processor.disconnect();
   }
@@ -1852,6 +1859,66 @@ async function cleanupLocalCapture() {
   state.recordingPaused = false;
   cancelAnimationFrame(state.meterFrame);
   els.meterBar.style.width = '0%';
+}
+
+function stopRealtimeWebRtcLocal() {
+  state.voiceRealtimeGeneration += 1;
+  const dataChannel = state.voiceRealtimeDataChannel;
+  const peer = state.voiceRealtimePeer;
+  const audio = state.voiceRealtimeAudio;
+  state.voiceRealtimeDataChannel = null;
+  state.voiceRealtimePeer = null;
+  state.voiceRealtimeAudio = null;
+  if (dataChannel) {
+    try {
+      dataChannel.close();
+    } catch {
+      // Ignore close races.
+    }
+  }
+  if (peer) {
+    try {
+      peer.close();
+    } catch {
+      // Ignore close races.
+    }
+  }
+  if (audio) {
+    try {
+      audio.pause();
+      audio.srcObject = null;
+      audio.remove();
+    } catch {
+      // Ignore audio cleanup races.
+    }
+  }
+}
+
+async function cancelRealtimeWebRtcServer(reason = 'desktop cancelled') {
+  if (!state.voiceSessionId || !state.voiceRealtimeClientSessionId || !state.config?.deviceId || !state.config?.deviceToken) return;
+  const params = new URLSearchParams({
+    deviceId: state.config.deviceId,
+    token: state.config.deviceToken,
+    installationId: state.config.installationId || '',
+    sessionId: state.voiceSessionId,
+    clientSessionId: state.voiceRealtimeClientSessionId,
+    clientVersion: '1',
+    protocolVersion: '1',
+  });
+  await api(`/api/voice/realtime/webrtc-session/cancel?${params.toString()}`, {
+    method: 'POST',
+    suppressAuthGuidance: true,
+    headers: { 'x-voice-realtime-session-id': state.voiceRealtimeClientSessionId },
+    body: JSON.stringify({
+      deviceId: state.config.deviceId,
+      token: state.config.deviceToken,
+      installationId: state.config.installationId || '',
+      sessionId: state.voiceSessionId,
+      clientSessionId: state.voiceRealtimeClientSessionId,
+      reason,
+      protocolVersion: 1,
+    }),
+  }).catch(() => {});
 }
 
 function escapeHtml(value) {
@@ -2591,11 +2658,155 @@ async function createVoiceSession(target, assistantProfileId = null) {
   }
 }
 
+async function startRealtimeWebRtcMic(options = {}, previousMode = state.mode) {
+  resetVoiceStreamState();
+  state.voiceStreamStarting = true;
+  state.voiceTarget = 'realtime';
+  state.voiceAssistantProfileId = options.assistantProfileId || null;
+  const startGeneration = state.voiceRealtimeGeneration + 1;
+  state.voiceRealtimeGeneration = startGeneration;
+  const assertCurrent = () => {
+    if (state.voiceRealtimeGeneration !== startGeneration) throw new Error('Realtime WebRTC setup was cancelled.');
+  };
+  let peer = null;
+  let dataChannel = null;
+  let remoteAudio = null;
+  try {
+    const session = await createVoiceSession('realtime', state.voiceAssistantProfileId);
+    state.voiceSessionId = session.session.id;
+    state.voiceRealtimeClientSessionId = crypto.randomUUID();
+    if (options.cue) playLocalVoiceCue(options.cue);
+    stopWakeListener();
+    state.stream = await getMicrophoneStream();
+    const context = new AudioContext();
+    state.audioContext = context;
+    const source = context.createMediaStreamSource(state.stream);
+    state.analyser = context.createAnalyser();
+    state.analyser.fftSize = 256;
+    source.connect(state.analyser);
+    peer = new RTCPeerConnection();
+    remoteAudio = document.createElement('audio');
+    remoteAudio.autoplay = true;
+    remoteAudio.playsInline = true;
+    const outputDeviceId = state.config?.outputDeviceId || '';
+    if (outputDeviceId && typeof remoteAudio.setSinkId === 'function') {
+      await remoteAudio.setSinkId(outputDeviceId).catch(() => {});
+    }
+    peer.ontrack = (event) => {
+      if (!remoteAudio) return;
+      remoteAudio.srcObject = event.streams[0] || new MediaStream([event.track]);
+      remoteAudio.play().catch(() => {});
+    };
+    peer.onconnectionstatechange = () => {
+      if (state.voiceRealtimePeer !== peer || !['failed', 'closed', 'disconnected'].includes(peer.connectionState)) return;
+      if (state.mode === 'recording' && !state.voiceStreamEnding) {
+        showStatus(`Realtime WebRTC ${peer.connectionState}.`);
+      }
+    };
+    for (const track of state.stream.getAudioTracks()) peer.addTrack(track, state.stream);
+    dataChannel = peer.createDataChannel('oai-events');
+    dataChannel.addEventListener('message', (event) => {
+      try {
+        JSON.parse(String(event.data || ''));
+      } catch {
+        // Ignore non-JSON realtime events.
+      }
+    });
+    const offer = await peer.createOffer();
+    await peer.setLocalDescription(offer);
+    assertCurrent();
+    const sdp = offer.sdp || peer.localDescription?.sdp || '';
+    if (!sdp.trim()) throw new Error('WebRTC SDP offer is empty.');
+    const params = new URLSearchParams({
+      deviceId: state.config.deviceId,
+      token: state.config.deviceToken,
+      installationId: state.config.installationId || '',
+      sessionId: state.voiceSessionId,
+      clientSessionId: state.voiceRealtimeClientSessionId,
+      clientVersion: '1',
+      protocolVersion: '1',
+    });
+    if (state.voiceAssistantProfileId) params.set('assistantProfileId', state.voiceAssistantProfileId);
+    const payload = await api(`/api/voice/realtime/webrtc-session?${params.toString()}`, {
+      method: 'POST',
+      suppressAuthGuidance: true,
+      headers: {
+        'content-type': 'application/sdp',
+        'x-voice-realtime-session-id': state.voiceRealtimeClientSessionId,
+      },
+      body: sdp,
+    });
+    assertCurrent();
+    const sdpAnswer = typeof payload?.sdpAnswer === 'string' ? payload.sdpAnswer : '';
+    if (!sdpAnswer.trim()) throw new Error('WebRTC realtime setup returned an empty SDP answer.');
+    await peer.setRemoteDescription({ type: 'answer', sdp: sdpAnswer });
+    assertCurrent();
+    state.voiceRealtimePeer = peer;
+    state.voiceRealtimeDataChannel = dataChannel;
+    state.voiceRealtimeAudio = remoteAudio;
+    state.voiceStreamStarting = false;
+    state.voiceStreamMaxDurationMs = Number(payload?.maxDurationMs) || null;
+    setMode('recording', recordingStatus('realtime'));
+    beginVoiceCountdown(payload?.maxDurationMs);
+    renderMeter();
+    await api('/api/logs', {
+      method: 'POST',
+      suppressAuthGuidance: true,
+      body: JSON.stringify({
+        deviceId: state.config.deviceId,
+        token: state.config.deviceToken,
+        installationId: state.config.installationId || '',
+        source: 'desktop',
+        level: 'info',
+        message: 'Desktop realtime WebRTC microphone capture started',
+        details: { voiceSessionId: state.voiceSessionId, clientSessionId: state.voiceRealtimeClientSessionId, callId: payload?.callId || '' },
+        protocolVersion: 1,
+      }),
+    }).catch(() => {});
+  } catch (err) {
+    if (dataChannel) {
+      try {
+        dataChannel.close();
+      } catch {
+        // Ignore close races.
+      }
+    }
+    if (peer) {
+      try {
+        peer.close();
+      } catch {
+        // Ignore close races.
+      }
+    }
+    if (remoteAudio) {
+      remoteAudio.pause();
+      remoteAudio.srcObject = null;
+      remoteAudio.remove();
+    }
+    await cancelRealtimeWebRtcServer('desktop setup failed');
+    await cleanupLocalCapture();
+    state.voiceSocket = null;
+    state.voiceSessionId = null;
+    state.voiceAssistantProfileId = null;
+    state.voiceStreamStarting = false;
+    resetVoiceStreamState();
+    const status = voiceStartFailureStatus(err);
+    const returnMode = previousMode === 'off' || previousMode === 'sleeping' ? previousMode : 'awake';
+    setMode(returnMode, status);
+    if (previousMode !== 'off') startWakeListener();
+    throw err;
+  }
+}
+
 async function startMic(target = 'assistant', options = {}) {
   const previousMode = state.mode;
   state.voiceTarget = cleanVoiceTarget(target);
   state.voiceAssistantProfileId = options.assistantProfileId || null;
   state.voiceSuppressCommands = options.ignoreCommands === true;
+  if (state.voiceTarget === 'realtime') {
+    await startRealtimeWebRtcMic(options, previousMode);
+    return;
+  }
   resetVoiceStreamState();
   pendingStreamBuffer.pushAll(preRollBuffer.drain());
   state.voiceStreamStarting = true;
@@ -2661,6 +2872,20 @@ async function startMic(target = 'assistant', options = {}) {
 }
 
 async function stopMic(nextMode = 'awake', options = {}) {
+  if (state.voiceTarget === 'realtime' && (state.voiceRealtimePeer || state.voiceStreamStarting || state.voiceSessionId)) {
+    state.voiceStreamEnding = true;
+    clearVoiceReconnectTimer();
+    clearVoiceFinalizeTimer();
+    await cancelRealtimeWebRtcServer('desktop stopped');
+    await cleanupLocalCapture();
+    pendingStreamBuffer.clear();
+    if (options.cue !== null) {
+      playLocalVoiceCue(options.cue ?? 'stop_button');
+    }
+    completeStoppedVoice(nextMode, options.finalStatus || 'Realtime assistant stopped.');
+    await loadDashboard().catch(() => {});
+    return;
+  }
   state.voiceStreamEnding = true;
   clearVoiceReconnectTimer();
   const localSocket = state.voiceSocket;
@@ -2712,6 +2937,33 @@ async function stopMic(nextMode = 'awake', options = {}) {
 }
 
 async function cancelMic(nextMode = 'off', status = 'Off.', options = {}) {
+  if (state.voiceTarget === 'realtime' && (state.voiceRealtimePeer || state.voiceStreamStarting || state.voiceSessionId)) {
+    state.voiceStreamEnding = true;
+    clearVoiceReconnectTimer();
+    clearVoiceFinalizeTimer();
+    await cancelRealtimeWebRtcServer(options.reason || 'desktop cancelled');
+    await cleanupLocalCapture();
+    pendingStreamBuffer.clear();
+    if (options.cue !== null) {
+      playLocalVoiceCue(options.cue ?? 'stop_button');
+    }
+    completeStoppedVoice(nextMode, status);
+    await api('/api/logs', {
+      method: 'POST',
+      suppressAuthGuidance: true,
+      body: JSON.stringify({
+        deviceId: state.config.deviceId,
+        token: state.config.deviceToken,
+        installationId: state.config.installationId || '',
+        source: 'desktop',
+        level: 'info',
+        message: 'Desktop realtime WebRTC capture cancelled',
+        details: { target: state.voiceTarget },
+        protocolVersion: 1,
+      }),
+    }).catch(() => {});
+    return;
+  }
   state.voiceStreamEnding = true;
   clearVoiceReconnectTimer();
   clearVoiceFinalizeTimer();
