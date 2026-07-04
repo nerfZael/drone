@@ -14077,14 +14077,17 @@ export async function startDroneHubApiServer(opts: {
       const chats = Object.keys(chatObj);
       if (chats.length === 0) chats.push('default');
       const activity = summarizeDroneActivity(d);
+      const busyChats = busyChatNamesForDrone(d, id);
+      const hubPhase = String((d as any)?.hub?.phase ?? '').trim();
       out.push({
         id,
         name: String((d as any)?.name ?? id).trim() || id,
         group: String((d as any)?.group ?? '').trim() || null,
         runtime: normalizeDroneRuntime((d as any)?.runtime),
         repoPath: String((d as any)?.repoPath ?? '').trim(),
-        status: String((d as any)?.hub?.phase ?? 'ready').trim() || 'ready',
+        status: hubPhase || (busyChats.length > 0 ? 'busy' : 'ready'),
         chats,
+        ...(busyChats.length > 0 ? { busyChats, busy: true } : {}),
         ...(activity.lastActivityAt ? { lastActivityAt: activity.lastActivityAt } : {}),
         ...(activity.lastMessageAt ? { lastMessageAt: activity.lastMessageAt } : {}),
         ...(activity.lastActivityChat ? { lastActivityChat: activity.lastActivityChat } : {}),
