@@ -178,10 +178,11 @@ class VoiceSessionService : Service() {
                     stopVoice()
                     return@thread
                 }
-                val sessionId = api.createVoiceSession(deviceId, target)
+                val resolvedTarget = if (target == Constants.STREAM_TARGET_ASSISTANT) api.assistantVoiceTarget() else target
+                val sessionId = api.createVoiceSession(deviceId, resolvedTarget)
                 api.uploadLog("Android foreground voice service started")
-                ClientLog.i("Service", "Voice session started target=$target sessionId=$sessionId")
-                streamer.start(sessionId, target) { status ->
+                ClientLog.i("Service", "Voice session started target=$resolvedTarget sessionId=$sessionId")
+                streamer.start(sessionId, resolvedTarget) { status ->
                     val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
                     manager.notify(NOTIFICATION_ID, notification(status))
                     publishStatus(status, modeFromStatus(status), currentMicrophone, lastApprovalStatus)

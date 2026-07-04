@@ -17,6 +17,7 @@ import {
 } from './assistant-extensions.js';
 
 export type SpeechPlaybackTarget = 'auto' | 'web' | 'desktop' | 'android';
+export type AssistantVoiceMode = 'standard' | 'realtime';
 
 export type UserProfile = {
   id: string;
@@ -145,6 +146,7 @@ export type AssistantThread = {
   status: AssistantRunStatus;
   error: string | null;
   voiceEnabled: boolean;
+  voiceMode: AssistantVoiceMode | null;
   autoApprove: boolean;
   handsFreeMode: boolean;
   systemPrompt: string | null;
@@ -689,6 +691,7 @@ const ASSISTANT_DEFAULT_ENABLED_TOOLS = [
   'get_system_prompt',
   'update_system_prompt',
   'set_thinking_level',
+  'setVoiceMode',
   'web_search',
   'fetch_content',
   'create_new_thread',
@@ -746,6 +749,13 @@ function normalizeRunStatus(raw: unknown): AssistantRunStatus {
 
 function normalizePromptDeliveryMode(raw: unknown): 'queue' | 'asap' {
   return String(raw ?? '').trim() === 'asap' ? 'asap' : 'queue';
+}
+
+function normalizeAssistantVoiceMode(raw: unknown): AssistantVoiceMode | null {
+  const value = String(raw ?? '').trim().toLowerCase();
+  if (value === 'realtime') return 'realtime';
+  if (value === 'standard') return 'standard';
+  return null;
 }
 
 function normalizeAssistantWakePhrase(raw: unknown): string {
@@ -910,6 +920,7 @@ function rowThread(row: any): AssistantThread {
     status: normalizeRunStatus(row.status),
     error: row.error == null ? null : String(row.error),
     voiceEnabled: true,
+    voiceMode: normalizeAssistantVoiceMode(row.voice_mode),
     autoApprove: asBool(row.auto_approve),
     handsFreeMode: asBool(row.hands_free_mode),
     systemPrompt: row.system_prompt == null ? null : String(row.system_prompt),
@@ -4318,6 +4329,7 @@ export class VoiceStreamNextDb {
       deviceId?: string | null;
       assistantProfileId?: string | null;
       voiceEnabled?: boolean;
+      voiceMode?: AssistantVoiceMode | null;
       provider?: string;
       model?: string;
       thinkingLevel?: string;
@@ -4353,6 +4365,7 @@ export class VoiceStreamNextDb {
           status,
           error,
           voice_enabled,
+          voice_mode,
           auto_approve,
           hands_free_mode,
           system_prompt,
@@ -4375,6 +4388,7 @@ export class VoiceStreamNextDb {
           'idle',
           NULL,
           $voiceEnabled,
+          $voiceMode,
           $autoApprove,
           $handsFreeMode,
           NULL,
@@ -4397,6 +4411,7 @@ export class VoiceStreamNextDb {
         $model: model,
         $thinkingLevel: input.thinkingLevel?.trim() || settings.defaultThinkingLevel,
         $voiceEnabled: 1,
+        $voiceMode: normalizeAssistantVoiceMode(input.voiceMode),
         $autoApprove: input.autoApprove ? 1 : 0,
         $handsFreeMode: (input.handsFreeMode ?? profile.defaultHandsFreeMode) ? 1 : 0,
         $enabledToolsJson: JSON.stringify(enabledTools),
@@ -4434,7 +4449,7 @@ export class VoiceStreamNextDb {
   updateThread(
     userId: string,
     threadId: string,
-    input: Partial<Pick<AssistantThread, 'title' | 'assistantProfileId' | 'provider' | 'model' | 'thinkingLevel' | 'status' | 'error' | 'voiceEnabled' | 'autoApprove' | 'handsFreeMode' | 'systemPrompt' | 'enabledTools' | 'capabilities' | 'promptDeliveryMode'>>,
+    input: Partial<Pick<AssistantThread, 'title' | 'assistantProfileId' | 'provider' | 'model' | 'thinkingLevel' | 'status' | 'error' | 'voiceEnabled' | 'voiceMode' | 'autoApprove' | 'handsFreeMode' | 'systemPrompt' | 'enabledTools' | 'capabilities' | 'promptDeliveryMode'>>,
   ): AssistantThread | null {
     const current = this.thread(userId, threadId);
     if (!current) return null;
@@ -4458,6 +4473,7 @@ export class VoiceStreamNextDb {
             status = $status,
             error = $error,
             voice_enabled = $voiceEnabled,
+            voice_mode = $voiceMode,
             auto_approve = $autoApprove,
             hands_free_mode = $handsFreeMode,
             system_prompt = $systemPrompt,
@@ -4477,6 +4493,7 @@ export class VoiceStreamNextDb {
         $status: input.status ?? current.status,
         $error: input.error === undefined ? current.error : input.error,
         $voiceEnabled: 1,
+        $voiceMode: input.voiceMode === undefined ? current.voiceMode : normalizeAssistantVoiceMode(input.voiceMode),
         $autoApprove: (input.autoApprove ?? current.autoApprove) ? 1 : 0,
         $handsFreeMode: (input.handsFreeMode ?? current.handsFreeMode) ? 1 : 0,
         $systemPrompt: input.systemPrompt === undefined ? current.systemPrompt : input.systemPrompt,
