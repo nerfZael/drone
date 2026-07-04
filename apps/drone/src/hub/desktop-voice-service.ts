@@ -1254,9 +1254,21 @@ export class DesktopVoiceService {
 
   async speak(text: string): Promise<boolean> {
     const trimmed = String(text ?? '').trim();
-    if (!trimmed || this.desktopSubscriberCount <= 0) return false;
+    if (!trimmed || this.desktopSubscriberCount <= 0) {
+      desktopVoiceWarn('desktop voice speak skipped', {
+        reason: !trimmed ? 'empty_text' : 'no_desktop_subscriber',
+        textChars: trimmed.length,
+        desktopSubscriberCount: this.desktopSubscriberCount,
+      });
+      return false;
+    }
     if (this.opts.synthesizeSpeechWav) {
       const wav = await this.opts.synthesizeSpeechWav(trimmed);
+      desktopVoiceLog('desktop voice speak audio emitted', {
+        textChars: trimmed.length,
+        audioBytes: wav.byteLength,
+        desktopSubscriberCount: this.desktopSubscriberCount,
+      });
       this.emitDesktopVoiceEvent({
         type: 'desktop_voice_speak_audio',
         text: trimmed,
@@ -1265,6 +1277,10 @@ export class DesktopVoiceService {
       } satisfies DesktopVoiceEvent);
       return true;
     }
+    desktopVoiceLog('desktop voice speak text emitted', {
+      textChars: trimmed.length,
+      desktopSubscriberCount: this.desktopSubscriberCount,
+    });
     this.emitDesktopVoiceEvent({ type: 'desktop_voice_speak', text: trimmed } satisfies DesktopVoiceEvent);
     return true;
   }

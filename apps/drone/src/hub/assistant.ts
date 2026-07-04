@@ -5,6 +5,7 @@ import path from 'node:path';
 import { droneRootPath } from '../host/paths';
 import { loadRegistry, withRegistryLock } from '../host/registry';
 import {
+  hubLog,
   providerDisplayName,
   resolveExaApiKeySettings,
   resolveEffectiveProviderApiKeySettings,
@@ -134,6 +135,7 @@ export type AssistantChatIdleSubscription = {
   id: string;
   threadId: string;
   toolCallId: string | null;
+  voiceSource: AssistantVoiceSource | null;
   mode: AssistantChatIdleWaitMode;
   targets: AssistantChatIdleTarget[];
   createdAt: string;
@@ -632,6 +634,7 @@ const CHAT_IDLE_DEFAULT_IDLE_FOR_MS = 1000;
 const CHAT_IDLE_SUBSCRIPTION_EXPIRES_AFTER_MS = 24 * 60 * 60 * 1000;
 const CHAT_IDLE_MAX_SUBSCRIPTIONS = 200;
 const CHAT_IDLE_MAX_TARGETS = 20;
+const ASSISTANT_VOICE_AUTO_SPEAK_MAX_CHARS = 600;
 const DRONE_READY_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 const DRONE_READY_POLL_INTERVAL_MS = 250;
 const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30_000;
@@ -915,6 +918,28 @@ function textFromMessage(message: any): string {
     .map((part) => (part?.type === 'text' ? String(part.text ?? '') : ''))
     .filter(Boolean)
     .join('\n');
+}
+
+function messageHasToolCall(message: any, toolName: string): boolean {
+  const content = Array.isArray(message?.content) ? message.content : [];
+  return content.some((part: any) => part?.type === 'toolCall' && String(part?.name ?? '').trim() === toolName);
+}
+
+function messageHasAnyToolCall(message: any): boolean {
+  const content = Array.isArray(message?.content) ? message.content : [];
+  return content.some((part: any) => part?.type === 'toolCall');
+}
+
+function assistantMessageKey(message: any): string {
+  const content = Array.isArray(message?.content) ? message.content : [];
+  const contentKey = content
+    .map((part: any) => {
+      if (part?.type === 'toolCall') return `tool:${String(part?.id ?? '')}:${String(part?.name ?? '')}`;
+      if (part?.type === 'text') return `text:${String(part?.text ?? '').slice(0, 240)}`;
+      return String(part?.type ?? '');
+    })
+    .join('|');
+  return `${String(message?.role ?? '')}:${String(message?.timestamp ?? '')}:${contentKey}`;
 }
 
 function stripAssistantReplayState(message: any): any {
@@ -2158,6 +2183,7 @@ function normalizeChatIdleSubscription(raw: any): AssistantChatIdleSubscription 
     id,
     threadId,
     toolCallId: cleanOptionalString(raw.toolCallId) || null,
+    voiceSource: normalizeAssistantVoiceSource(raw.voiceSource),
     mode: normalizeAssistantChatIdleWaitMode(raw.mode, 'all'),
     targets,
     createdAt,
@@ -2175,6 +2201,7 @@ function normalizeChatIdleSubscription(raw: any): AssistantChatIdleSubscription 
 function sanitizeChatIdleSubscription(subscription: AssistantChatIdleSubscription): AssistantChatIdleSubscription {
   return {
     ...subscription,
+    voiceSource: normalizeAssistantVoiceSource(subscription.voiceSource),
     mode: normalizeAssistantChatIdleWaitMode(subscription.mode, 'all'),
     targets: subscription.targets.map((target) => ({ droneId: target.droneId, chatName: normalizeChatNameForAssistant(target.chatName) })),
     lastResult: subscription.lastResult ? sanitizeMessage(subscription.lastResult) : null,
@@ -2515,6 +2542,15 @@ export class HubAssistantService {
       model: thread.model,
       thinkingLevel: thread.thinkingLevel,
       deliveryMode: 'queue',
+      voiceSource: subscription.voiceSource,
+    });
+    hubLog('info', 'assistant chat-idle continuation queued', {
+      threadId: thread.id,
+      subscriptionId: subscription.id,
+      voiceEnabled: thread.voiceEnabled,
+      voiceSource: subscription.voiceSource,
+      targets: subscription.targets,
+      reasons: result.targets.map((target) => ({ droneId: target.droneId, chatName: target.chatName, reason: target.reason })),
     });
     thread.updatedAt = nowIso();
     if (this.activeAgents.has(thread.id) || this.queuePumpPromises.has(thread.id)) return;
@@ -3365,6 +3401,7 @@ export class HubAssistantService {
     toolCallId: string,
     params: any,
     mode: AssistantChatIdleWaitMode,
+    voiceSource: AssistantVoiceSource | null,
   ): Promise<{ content: Array<{ type: 'text'; text: string }>; details: { ok: true; subscription: AssistantChatIdleSubscription } }> {
     const rawTargets = Array.isArray(params?.targets) ? params.targets : [];
     if (rawTargets.length === 0) throw new Error('missing targets');
@@ -3385,6 +3422,7 @@ export class HubAssistantService {
       mode,
       targets,
       idleForMs: params?.idleForMs,
+      voiceSource,
     });
     return {
       content: [
@@ -3403,6 +3441,7 @@ export class HubAssistantService {
     mode?: unknown;
     targets: AssistantChatIdleTarget[];
     idleForMs?: unknown;
+    voiceSource?: unknown;
   }): Promise<AssistantChatIdleSubscription> {
     await this.ensureLoaded();
     const thread = this.getThread(input.threadId);
@@ -3424,6 +3463,7 @@ export class HubAssistantService {
       id: makeAssistantId('chat_idle_sub'),
       threadId: thread.id,
       toolCallId: cleanOptionalString(input.toolCallId) || null,
+      voiceSource: normalizeAssistantVoiceSource(input.voiceSource),
       mode,
       targets,
       createdAt: new Date(now).toISOString(),
@@ -3436,6 +3476,16 @@ export class HubAssistantService {
       expiredAt: null,
       lastResult: null,
     };
+    hubLog('info', 'assistant chat-idle subscription created', {
+      threadId: thread.id,
+      subscriptionId: subscription.id,
+      mode: subscription.mode,
+      voiceEnabled: thread.voiceEnabled,
+      voiceSource: subscription.voiceSource,
+      targets: subscription.targets,
+      idleForMs: subscription.idleForMs,
+      expiresAt: subscription.expiresAt,
+    });
     this.chatIdleSubscriptions.push(subscription);
     this.chatIdleSubscriptions = this.chatIdleSubscriptions.slice(-CHAT_IDLE_MAX_SUBSCRIPTIONS);
     if (thread.status !== 'running' && thread.status !== 'waiting_for_approval' && thread.status !== 'error') {
@@ -3614,6 +3664,7 @@ export class HubAssistantService {
     const runProvider = queuedPrompt.provider;
     const runModel = queuedPrompt.model;
     const runThinkingLevel = queuedPrompt.thinkingLevel;
+    const previousMessageKeys = new Set(thread.messages.map(assistantMessageKey));
     let agent: any = null;
 
     try {
@@ -3697,6 +3748,8 @@ export class HubAssistantService {
       });
 
       await agent.prompt(queuedPrompt.prompt);
+      thread.messages = agent.state.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
+      await this.maybeSpeakVoicePromptResult(thread, queuedPrompt, previousMessageKeys);
       if ((thread.status as AssistantThreadStatus) !== 'error') {
         thread.status = this.activeChatIdleSubscriptions(thread.id).length > 0 ? 'waiting_for_chats_idle' : 'idle';
       }
@@ -3718,6 +3771,70 @@ export class HubAssistantService {
       }
       await this.persist();
       await onEvent?.({ type: 'snapshot', snapshot: await this.threadSnapshot(thread.id) });
+    }
+  }
+
+  private async maybeSpeakVoicePromptResult(thread: AssistantThread, queuedPrompt: AssistantQueuedPrompt, previousMessageKeys: Set<string>): Promise<void> {
+    if (!thread.voiceEnabled) return;
+    const voiceSource = queuedPrompt.voiceSource ?? null;
+    const newMessages = thread.messages.filter((message) => !previousMessageKeys.has(assistantMessageKey(message)));
+    const speakAlreadyUsed = newMessages.some((message) => messageHasToolCall(message, 'speak'));
+    const latestTextMessage = [...newMessages]
+      .reverse()
+      .find((message) => message?.role === 'assistant' && !message?.errorMessage && !messageHasAnyToolCall(message) && textFromMessage(message).trim());
+    const text = latestTextMessage ? textFromMessage(latestTextMessage).trim() : '';
+    const baseLog = {
+      threadId: thread.id,
+      promptId: queuedPrompt.id,
+      voiceSource,
+      provider: queuedPrompt.provider,
+      model: queuedPrompt.model,
+      newMessageCount: newMessages.length,
+      textChars: text.length,
+    };
+
+    if (speakAlreadyUsed) {
+      hubLog('info', 'assistant voice auto-speak skipped: speak tool already used', baseLog);
+      return;
+    }
+    if (!text) {
+      hubLog('info', 'assistant voice auto-speak skipped: no final text', baseLog);
+      return;
+    }
+    if (!voiceSource) {
+      hubLog('warn', 'assistant voice auto-speak skipped: missing voice source', {
+        ...baseLog,
+        textPreview: text.slice(0, 160),
+      });
+      return;
+    }
+    if (text.length > ASSISTANT_VOICE_AUTO_SPEAK_MAX_CHARS) {
+      hubLog('info', 'assistant voice auto-speak skipped: text too long', {
+        ...baseLog,
+        maxChars: ASSISTANT_VOICE_AUTO_SPEAK_MAX_CHARS,
+        textPreview: text.slice(0, 160),
+      });
+      return;
+    }
+    const speak = this.tools.speak;
+    if (typeof speak !== 'function') {
+      hubLog('warn', 'assistant voice auto-speak skipped: speak callback unavailable', baseLog);
+      return;
+    }
+    try {
+      const result = await speak({ threadId: thread.id, text, source: voiceSource });
+      hubLog('info', 'assistant voice auto-speak emitted', {
+        ...baseLog,
+        target: (result as any)?.target ?? null,
+        fallbackFrom: (result as any)?.fallbackFrom ?? null,
+        textPreview: text.slice(0, 160),
+      });
+    } catch (error: any) {
+      hubLog('warn', 'assistant voice auto-speak failed', {
+        ...baseLog,
+        error: String(error?.message ?? error ?? ''),
+        textPreview: text.slice(0, 160),
+      });
     }
   }
 
@@ -4579,7 +4696,7 @@ export class HubAssistantService {
           'Subscribe to one or more drone chats and resume this assistant thread as soon as any target chat is idle. This returns immediately so you can continue other work.',
         parameters: makeSubscribeToChatsIdleParameters(Type),
         execute: async (toolCallId: string, params: any) => {
-          return await this.subscribeToChatsIdleFromTool(threadId, toolCallId, params, 'any');
+          return await this.subscribeToChatsIdleFromTool(threadId, toolCallId, params, 'any', voiceSource);
         },
       },
       {
@@ -4589,7 +4706,7 @@ export class HubAssistantService {
           'Subscribe to one or more drone chats and resume this assistant thread only after every target chat is idle. This returns immediately so you can continue other work.',
         parameters: makeSubscribeToChatsIdleParameters(Type),
         execute: async (toolCallId: string, params: any) => {
-          return await this.subscribeToChatsIdleFromTool(threadId, toolCallId, params, 'all');
+          return await this.subscribeToChatsIdleFromTool(threadId, toolCallId, params, 'all', voiceSource);
         },
       },
       {
@@ -4605,7 +4722,20 @@ export class HubAssistantService {
           if (!text) throw new Error('missing text');
           const speak = this.tools.speak;
           if (typeof speak !== 'function') throw new Error('voice speak tool unavailable');
+          hubLog('info', 'assistant speak tool requested', {
+            threadId,
+            voiceSource,
+            textChars: text.length,
+            textPreview: text.slice(0, 160),
+          });
           const result = await speak({ threadId, text, source: voiceSource });
+          hubLog('info', 'assistant speak tool emitted', {
+            threadId,
+            voiceSource,
+            target: (result as any)?.target ?? null,
+            fallbackFrom: (result as any)?.fallbackFrom ?? null,
+            textChars: text.length,
+          });
           return {
             content: [{ type: 'text', text: `Sent spoken reply (${text.length} chars).` }],
             details: result,

@@ -126,6 +126,42 @@ function reportDesktopVoiceBrowserEvent(event: string, message?: string): void {
   });
 }
 
+function realtimeEventSummary(event: any): string {
+  const type = String(event?.type ?? '').trim();
+  const responseId = String(event?.response?.id ?? event?.response_id ?? '').trim();
+  const itemId = String(event?.item?.id ?? event?.item_id ?? '').trim();
+  const text = String(event?.transcript ?? event?.text ?? '').trim();
+  const error = String(event?.error?.message ?? event?.message ?? '').trim();
+  const output = Array.isArray(event?.response?.output) ? event.response.output : [];
+  const functionCalls = output.filter((item: any) => String(item?.type ?? '') === 'function_call').length +
+    (String(event?.item?.type ?? '') === 'function_call' ? 1 : 0);
+  return JSON.stringify({
+    type,
+    ...(responseId ? { responseId } : {}),
+    ...(itemId ? { itemId } : {}),
+    ...(text ? { textChars: text.length } : {}),
+    ...(functionCalls ? { functionCalls } : {}),
+    ...(error ? { error: error.slice(0, 240) } : {}),
+  });
+}
+
+function shouldReportRealtimeDataChannelEvent(type: string): boolean {
+  if (!type) return false;
+  if (type.endsWith('.delta')) return false;
+  return (
+    type === 'error' ||
+    type.endsWith('_error') ||
+    type === 'response.created' ||
+    type === 'response.done' ||
+    type === 'response.output_audio_transcript.done' ||
+    type === 'response.audio_transcript.done' ||
+    type === 'conversation.item.input_audio_transcription.completed' ||
+    type === 'conversation.item.input_audio_transcription.done' ||
+    type === 'input_audio_buffer.speech_started' ||
+    type === 'response.output_item.done'
+  );
+}
+
 function cueForTransition(previous: DesktopAssistantVoiceStatus | null, next: DesktopAssistantVoiceStatus): LocalVoiceCue | null {
   if (!previous) return null;
   if (previous.updatedAt === next.updatedAt && previous.mode === next.mode && previous.message === next.message) return null;
@@ -197,10 +233,17 @@ function stopDesktopVoiceWebRtc(): void {
 }
 
 function handleRealtimeDataChannelEvent(raw: string): void {
+  let event: any = null;
   try {
-    JSON.parse(raw);
+    event = JSON.parse(raw);
   } catch {
     // Ignore malformed realtime event payloads.
+    reportDesktopVoiceBrowserEvent('webrtc-datachannel-malformed-message');
+    return;
+  }
+  const type = String(event?.type ?? '').trim();
+  if (shouldReportRealtimeDataChannelEvent(type)) {
+    reportDesktopVoiceBrowserEvent('webrtc-datachannel-event', realtimeEventSummary(event));
   }
 }
 
@@ -253,9 +296,12 @@ async function startDesktopVoiceWebRtc(sessionId: string): Promise<void> {
     audio.autoplay = true;
     (audio as any).playsInline = true;
     pc.ontrack = (event) => {
+      reportDesktopVoiceBrowserEvent('webrtc-audio-track-received', String(event.track?.kind ?? ''));
       if (!audio) return;
       audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-      audio.play().catch(() => {});
+      audio.play()
+        .then(() => reportDesktopVoiceBrowserEvent('webrtc-audio-play-started'))
+        .catch((error) => reportDesktopVoiceBrowserEvent('webrtc-audio-play-failed', error?.message ?? String(error)));
     };
     for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
     dataChannel = pc.createDataChannel('oai-events');
