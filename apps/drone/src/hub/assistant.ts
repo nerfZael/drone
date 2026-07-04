@@ -2484,6 +2484,11 @@ export class HubAssistantService {
     }
   }
 
+  emitExternalUiAction(uiAction: AssistantUiAction, threadId?: string): { ok: true; uiAction: AssistantUiAction } {
+    this.emitUiAction(uiAction, threadId);
+    return { ok: true, uiAction };
+  }
+
   private activeChatIdleSubscriptions(threadId?: string): AssistantChatIdleSubscription[] {
     const id = cleanOptionalString(threadId);
     return this.chatIdleSubscriptions.filter((subscription) => {

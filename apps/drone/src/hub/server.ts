@@ -381,6 +381,7 @@ import {
   type AssistantReorderDronesResult,
   type AssistantSetDroneGroupResult,
   type AssistantSetDroneGroupsResult,
+  type AssistantUiAction,
   type AssistantVoiceSource,
 } from './assistant';
 
@@ -16614,6 +16615,63 @@ export async function startDroneHubApiServer(opts: {
         };
         assistantService.updateAppContext(body ?? {});
         json(res, 200, { ok: true });
+        return;
+      }
+
+      if (pathname === '/api/assistant/ui-action' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+          return;
+        }
+
+        try {
+          const rawAction = body?.uiAction && typeof body.uiAction === 'object' ? body.uiAction : body;
+          const actionType = String(rawAction?.type ?? '').trim();
+          const at = new Date().toISOString();
+          let uiAction: AssistantUiAction;
+
+          if (actionType === 'open_drone_chat') {
+            const droneRef = String(rawAction?.droneId ?? rawAction?.drone ?? '').trim();
+            const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+            if (!resolved) throw new Error(`unknown drone: ${droneRef || 'missing drone'}`);
+            const droneId = resolved.id;
+            const chatName = String(rawAction?.chatName ?? rawAction?.chat ?? '').trim() || 'default';
+            uiAction = { type: 'open_drone_chat', droneId, droneIds: [droneId], chatName, at };
+          } else if (actionType === 'highlight_drones') {
+            const rawDroneRefs = [
+              ...(Array.isArray(rawAction?.droneIds) ? rawAction.droneIds : []),
+              ...(Array.isArray(rawAction?.drones) ? rawAction.drones : []),
+              rawAction?.droneId,
+              rawAction?.drone,
+            ];
+            const droneRefs = Array.from(
+              new Set(
+                rawDroneRefs
+                  .map((item: unknown) => String(item ?? '').trim())
+                  .filter(Boolean),
+              ),
+            );
+            const droneIds: string[] = [];
+            for (const droneRef of droneRefs) {
+              const resolved = await resolveDroneOrPendingForReadRef(droneRef);
+              if (!resolved) throw new Error(`unknown drone: ${droneRef}`);
+              if (!droneIds.includes(resolved.id)) droneIds.push(resolved.id);
+            }
+            if (droneIds.length === 0) throw new Error('droneIds is required');
+            const durationRaw = Number(rawAction?.durationMs);
+            const durationMs = Number.isFinite(durationRaw) ? Math.max(1000, Math.min(60_000, Math.floor(durationRaw))) : 10_000;
+            uiAction = { type: 'highlight_drones', droneIds, durationMs, at };
+          } else {
+            throw new Error(`unsupported ui action: ${actionType || 'missing type'}`);
+          }
+
+          json(res, 200, assistantService.emitExternalUiAction(uiAction, String(body?.threadId ?? '').trim() || undefined));
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
         return;
       }
 
