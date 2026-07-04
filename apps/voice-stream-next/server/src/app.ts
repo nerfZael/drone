@@ -72,6 +72,7 @@ import { ControlChannelRegistry, type SpeechAudioCommand } from './control-chann
 import type { DeviceAuthResult } from './db.js';
 import {
   createOpenAiRealtimeWebRtcSession,
+  DEFAULT_OPENAI_REALTIME_VOICE,
   type OpenAiRealtimeWebRtcSession,
 } from './openai-realtime-webrtc.js';
 
@@ -687,7 +688,7 @@ function openAiRealtimeModel(): string {
 }
 
 function openAiRealtimeVoice(): string {
-  return process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_VOICE?.trim() || process.env.OPENAI_REALTIME_VOICE?.trim() || 'marin';
+  return process.env.VOICE_STREAM_NEXT_OPENAI_REALTIME_VOICE?.trim() || process.env.OPENAI_REALTIME_VOICE?.trim() || DEFAULT_OPENAI_REALTIME_VOICE;
 }
 
 function openAiRealtimeInstructions(): string {

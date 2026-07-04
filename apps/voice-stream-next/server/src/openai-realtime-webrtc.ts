@@ -4,6 +4,7 @@ import WebSocket from 'ws';
 
 const OPENAI_REALTIME_URL = 'wss://api.openai.com/v1/realtime';
 const OPENAI_REALTIME_CALLS_URL = 'https://api.openai.com/v1/realtime/calls';
+export const DEFAULT_OPENAI_REALTIME_VOICE = 'cedar';
 
 export type OpenAiRealtimeTranscriptDelta = {
   text: string;
@@ -80,7 +81,7 @@ function realtimeModel(env: NodeJS.ProcessEnv): string {
 }
 
 function realtimeVoice(env: NodeJS.ProcessEnv): string {
-  return String(env.VOICE_STREAM_NEXT_OPENAI_REALTIME_VOICE ?? env.OPENAI_REALTIME_VOICE ?? 'marin').trim() || 'marin';
+  return String(env.VOICE_STREAM_NEXT_OPENAI_REALTIME_VOICE ?? env.OPENAI_REALTIME_VOICE ?? DEFAULT_OPENAI_REALTIME_VOICE).trim() || DEFAULT_OPENAI_REALTIME_VOICE;
 }
 
 function realtimeTranscriptionModel(env: NodeJS.ProcessEnv): string {
