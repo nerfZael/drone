@@ -19,6 +19,10 @@ type UseUiPreferencesSettingsArgs = {
   requestJson: RequestJson;
 };
 
+export type UseUiPreferencesSettingsResult = {
+  reloadUiPreferences: () => Promise<void>;
+};
+
 const SAVE_DEBOUNCE_MS = 400;
 
 function normalizeSidebarGroupingMode(value: unknown): SidebarGroupingMode {
@@ -152,7 +156,7 @@ export function restoreUiPreferencesFromPersistedStorage(
   }
 }
 
-export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettingsArgs): void {
+export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettingsArgs): UseUiPreferencesSettingsResult {
   const {
     sidebarGroupingMode,
     sidebarDensityMode,
@@ -357,4 +361,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       window.clearTimeout(timeout);
     };
   }, [requestJson, snapshot]);
+
+  return { reloadUiPreferences };
 }

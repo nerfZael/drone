@@ -168,6 +168,44 @@ describe('assistant system prompt settings', () => {
     });
   });
 
+  test('migrates prior default tool lists to include current assistant UI tools', async () => {
+    await withTempDroneDataDir('assistant-current-default-tool-migration-', async (droneDataDir) => {
+      const currentDefaultTools = ((await makeAssistantService().snapshot()).threads[0] as any).enabledTools as string[];
+      const newlyDefaultedTools = ['open_drone_chat', 'highlight_drones', 'create_group', 'set_drone_groups', 'reorder_drones'];
+      const priorDefaultTools = currentDefaultTools.filter((name) => !newlyDefaultedTools.includes(name));
+
+      await fs.writeFile(
+        path.join(droneDataDir, 'assistant.json'),
+        JSON.stringify(
+          {
+            activeThreadId: 'thread-old-default',
+            threads: [
+              {
+                id: 'thread-old-default',
+                title: 'old default tools',
+                createdAt: '2026-01-02T03:04:05.000Z',
+                updatedAt: '2026-01-02T03:04:05.000Z',
+                provider: 'openai',
+                model: 'gpt-5.5',
+                enabledTools: priorDefaultTools,
+                messages: [],
+              },
+            ],
+          },
+          null,
+          2,
+        ),
+        'utf8',
+      );
+
+      const snapshot = await makeAssistantService().snapshot();
+      const thread = snapshot.threads.find((item) => item.id === 'thread-old-default') as any;
+      for (const tool of newlyDefaultedTools) {
+        expect(thread.enabledTools).toContain(tool);
+      }
+    });
+  });
+
   test('updates thread prompts independently and can promote one to the global prompt', async () => {
     await withTempDroneDataDir('assistant-thread-system-prompt-', async () => {
       const service = makeAssistantService();

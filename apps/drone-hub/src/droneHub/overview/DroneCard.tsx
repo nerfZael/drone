@@ -32,6 +32,7 @@ type DroneCardProps = {
   deleteBusy?: boolean;
   statusHint?: string;
   unreadAgentMessage?: boolean;
+  highlighted?: boolean;
   active?: boolean;
   activeIndicatorStyle?: 'dot' | 'edge';
   leadingIcon?: React.ReactNode;
@@ -75,6 +76,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.deleteBusy) === Boolean(b.deleteBusy) &&
     (a.statusHint ?? '') === (b.statusHint ?? '') &&
     Boolean(a.unreadAgentMessage) === Boolean(b.unreadAgentMessage) &&
+    Boolean(a.highlighted) === Boolean(b.highlighted) &&
     Boolean(a.active) === Boolean(b.active) &&
     (a.activeIndicatorStyle ?? 'dot') === (b.activeIndicatorStyle ?? 'dot') &&
     (a.selectionTone ?? 'accent') === (b.selectionTone ?? 'accent') &&
@@ -110,6 +112,7 @@ export const DroneCard = React.memo(function DroneCard({
   deleteBusy,
   statusHint,
   unreadAgentMessage,
+  highlighted,
   active,
   activeIndicatorStyle,
   leadingIcon,
@@ -190,9 +193,13 @@ export const DroneCard = React.memo(function DroneCard({
           ? selectedTone === 'muted'
             ? 'bg-[rgba(255,255,255,.045)] border-[rgba(255,255,255,.08)]'
             : 'bg-[var(--selected)] border-[var(--accent-muted)]'
-          : 'border-transparent hover:bg-[rgba(255,255,255,.03)] hover:border-[rgba(255,255,255,.06)]'
+          : highlighted
+            ? 'bg-[rgba(255,214,102,.10)] border-[rgba(255,214,102,.62)]'
+            : 'border-transparent hover:bg-[rgba(255,255,255,.03)] hover:border-[rgba(255,255,255,.06)]'
       } ${draggable ? 'cursor-grab touch-none active:cursor-grabbing' : ''} ${
         dragging ? 'opacity-35' : ''
+      } ${
+        highlighted ? 'shadow-[0_0_0_1px_rgba(255,214,102,.28),0_0_18px_rgba(255,214,102,.14)]' : ''
       } focus:outline-none focus-visible:outline-none`}
     >
       {/* Accent edge for selected state or open-chat state when requested */}

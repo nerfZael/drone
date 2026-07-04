@@ -68,6 +68,29 @@ export type AssistantRenameDronesResult = {
   total: number;
 };
 
+export type AssistantCreateGroupResult = {
+  ok: true;
+  group: string;
+  created: boolean;
+  createdAt?: string | null;
+  groupOrder?: unknown;
+};
+
+export type AssistantSetDroneGroupsResult = {
+  assignments: Array<{ group: string | null; droneIds: string[]; result: AssistantSetDroneGroupResult }>;
+  moved: AssistantSetDroneGroupResult['moved'];
+  rejected: AssistantSetDroneGroupResult['rejected'];
+  total: number;
+};
+
+export type AssistantReorderDronesResult = {
+  ok: true;
+  group: string;
+  drones: Array<{ id: string; name: string }>;
+  sidebarDroneOrder?: string[];
+  sidebarNodeOrder?: string[];
+};
+
 type AssistantThread = {
   id: string;
   title: string;
@@ -183,11 +206,17 @@ type AssistantPromptEvent =
   | { type: 'approval_pending'; approval: AssistantApproval; snapshot: AssistantSnapshot }
   | { type: 'error'; threadId?: string; error: string };
 
+export type AssistantUiAction =
+  | { type: 'open_drone_chat'; droneId: string; droneIds: string[]; chatName: string; at: string }
+  | { type: 'highlight_drones'; droneIds: string[]; durationMs: number; at: string }
+  | { type: 'reload_ui_preferences'; at: string };
+
 export type AssistantChangeEvent = {
   type: 'assistant_changed';
   sequence: number;
   reason: string;
   threadId?: string;
+  uiAction?: AssistantUiAction;
   at: string;
 };
 
@@ -195,7 +224,10 @@ type AssistantToolCallbacks = {
   listDrones: () => Promise<AssistantDroneSummary[]>;
   createDrone: (opts: any) => Promise<AssistantCreateDroneResult>;
   createChat: (opts: { droneId: string; chatName: string }) => Promise<AssistantCreateChatResult>;
+  createGroup?: (opts: { group: string }) => Promise<AssistantCreateGroupResult>;
   setDroneGroup: (opts: { droneIds: string[]; group: string | null }) => Promise<AssistantSetDroneGroupResult>;
+  setDroneGroups?: (opts: { assignments: Array<{ droneIds: string[]; group: string | null }> }) => Promise<AssistantSetDroneGroupsResult>;
+  reorderDrones?: (opts: { droneIds: string[]; group?: string | null; beforeDroneId?: string | null; afterDroneId?: string | null }) => Promise<AssistantReorderDronesResult>;
   renameDrones: (opts: { renames: Array<{ droneId: string; newName: string }> }) => Promise<AssistantRenameDronesResult>;
   messageDrone: (opts: {
     droneId: string;
@@ -630,11 +662,12 @@ const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Use bash only when a command is the right tool for inspection, tests, builds, or small scripted checks in an accessible container drone. Bash is approval-gated, non-interactive, and not for background processes.',
   'Use set_thinking_level when the user asks to change how much the assistant thinks. It changes this assistant thread to another supported thinking level for the same selected model and does not require approval.',
   'Use create_new_thread only when the user explicitly asks to start, open, create, clear, reset, or switch to a new assistant thread or session.',
+  'Use create_group for empty groups, set_drone_group for moving one batch to one group, set_drone_groups when different drones need different groups or no group, reorder_drones for sidebar order, open_drone_chat for UI navigation, and highlight_drones to visually point out drones for about 10 seconds.',
   'File paths are interpreted by drone id plus path. Relative paths resolve inside the target drone workspace, usually the repo root for repo-backed drones.',
   'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
   ASSISTANT_CHAT_IDLE_PROMPT_LINE,
   'Do not load more chat pages than needed. Start with the latest page.',
-  'Creating or cloning drones and creating chats do not require approval, and assistant-created drones must use the container (Docker) runtime. Renaming drones, changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
+  'Creating or cloning drones, creating chats, creating groups, opening chats, highlighting drones, and reordering the sidebar do not require approval. Assistant-created drones must use the container (Docker) runtime. Renaming drones, changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
   'File write tools require write access to the target drone and should be used carefully for concrete code or content edits.',
   'If an approval-gated write tool returns successfully, the user already approved that action. Do not ask for the same approval again.',
   'Realtime threads can use speak to send short spoken replies back to the voice device that started the request.',
@@ -671,6 +704,11 @@ const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
   { name: 'create_drone', label: 'Create drone', category: 'actions', description: 'Create a new container drone.' },
   { name: 'clone_drone', label: 'Clone drone', category: 'actions', description: 'Clone an existing container drone into a new container drone.' },
   { name: 'create_chat', label: 'Create chat', category: 'actions', description: 'Create a new chat in an existing drone.' },
+  { name: 'open_drone_chat', label: 'Open drone chat', category: 'actions', description: 'Open an existing drone chat in the Drone Hub UI.' },
+  { name: 'highlight_drones', label: 'Highlight drones', category: 'actions', description: 'Temporarily highlight one or more drones in the Drone Hub UI.' },
+  { name: 'create_group', label: 'Create group', category: 'actions', description: 'Create an empty Drone Hub group.' },
+  { name: 'set_drone_groups', label: 'Set drone groups', category: 'actions', description: 'Move different drones into different groups, or clear groups, after approval.' },
+  { name: 'reorder_drones', label: 'Reorder drones', category: 'actions', description: 'Reorder drones in the sidebar.' },
   { name: 'rename_drones', label: 'Rename drones', category: 'actions', description: 'Rename one or more drones after user approval.' },
   { name: 'set_drone_group', label: 'Set drone group', category: 'actions', description: 'Move drones to a group after user approval.' },
   { name: 'message_drone', label: 'Send user message to drone', category: 'actions', description: 'Send a user message to a drone chat after approval.' },
@@ -679,6 +717,14 @@ const ASSISTANT_ALL_TOOL_NAMES = ASSISTANT_TOOL_SUMMARIES.map((tool) => tool.nam
 const ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_ALL_TOOL_NAMES.filter(
   (name) => name !== 'get_system_prompt' && name !== 'update_system_prompt' && name !== 'set_thinking_level' && name !== 'create_new_thread' && name !== 'speak',
 );
+const ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES = [
+  'rename_drones',
+  'open_drone_chat',
+  'highlight_drones',
+  'create_group',
+  'set_drone_groups',
+  'reorder_drones',
+];
 const ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'create_chat');
 const ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES
   .filter((name) => name !== 'subscribe_to_any_chat_idle' && name !== 'subscribe_to_all_chats_idle')
@@ -1074,6 +1120,58 @@ function normalizeAssistantRenameRequests(raw: unknown): Array<{ droneId: string
   return result;
 }
 
+function normalizeAssistantGroupValue(raw: unknown): string | null {
+  const group = cleanOptionalString(raw);
+  return group && group.toLowerCase() !== 'ungrouped' ? group : null;
+}
+
+function hasAssistantGroupValue(raw: unknown): boolean {
+  return typeof raw === 'string';
+}
+
+function normalizeAssistantSetDroneGroupAssignments(raw: unknown): Array<{ droneRefs: string[]; group: string | null }> {
+  const input = raw && typeof raw === 'object' ? raw as any : {};
+  const rawAssignments = Array.isArray(input.assignments) ? input.assignments : [];
+  const source =
+    rawAssignments.length > 0
+      ? rawAssignments
+      : Array.isArray(input.droneIds) || Array.isArray(input.drones) || cleanOptionalString(input.droneId ?? input.drone ?? input.id)
+        ? [{ droneIds: input.droneIds ?? input.drones, droneId: input.droneId ?? input.drone ?? input.id, group: input.group }]
+        : [];
+  const result: Array<{ droneRefs: string[]; group: string | null }> = [];
+  for (const item of source) {
+    const entry = item && typeof item === 'object' ? item as any : {};
+    const rawRefs = Array.isArray(entry.droneIds)
+      ? entry.droneIds
+      : Array.isArray(entry.drones)
+        ? entry.drones
+        : [];
+    const fallbackRef = cleanOptionalString(entry.droneId ?? entry.drone ?? entry.id);
+    const droneRefs = Array.from(
+      new Set([...rawRefs.map((ref: any) => cleanOptionalString(ref)), fallbackRef].filter(Boolean)),
+    );
+    if (droneRefs.length === 0) continue;
+    const clearGroup = entry.clearGroup === true || String(entry.clearGroup ?? '').trim() === '1';
+    if (!clearGroup && !hasAssistantGroupValue(entry.group)) throw new Error('group is required unless clearGroup is true');
+    result.push({ droneRefs, group: clearGroup ? null : normalizeAssistantGroupValue(entry.group) });
+  }
+  if (result.length === 0) throw new Error('missing drone group assignments');
+  return result;
+}
+
+function normalizeAssistantReorderDroneRefs(raw: unknown): string[] {
+  const input = raw && typeof raw === 'object' ? raw as any : {};
+  const rawRefs = Array.isArray(input.droneIds)
+    ? input.droneIds
+    : Array.isArray(input.drones)
+      ? input.drones
+      : [];
+  const fallbackRef = cleanOptionalString(input.droneId ?? input.drone ?? input.id);
+  const refs = Array.from(new Set([...rawRefs.map((ref: any) => cleanOptionalString(ref)), fallbackRef].filter(Boolean)));
+  if (refs.length === 0) throw new Error('missing drones');
+  return refs;
+}
+
 function normalizeAssistantDroneFilePath(raw: unknown): string {
   const value = String(raw ?? '').trim();
   if (!value) throw new Error('missing file path');
@@ -1307,8 +1405,8 @@ function normalizeStoredAssistantEnabledTools(
   const base = normalizeAssistantEnabledTools(raw);
   const rawNames = new Set(Array.isArray(raw) ? raw.map((name) => String(name ?? '').trim()).filter(Boolean) : []);
   const rawNamesForDefaultComparison = new Set(rawNames);
-  if (!rawNamesForDefaultComparison.has('rename_drones')) {
-    rawNamesForDefaultComparison.add('rename_drones');
+  for (const name of ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES) {
+    if (!rawNamesForDefaultComparison.has(name)) rawNamesForDefaultComparison.add(name);
   }
   const hadLegacyDefaultTools =
     rawNames.size > 0 && (
@@ -1348,6 +1446,29 @@ function normalizeStoredAssistantEnabledTools(
   );
   if (hadPreFetchContentDefaultTools) {
     appendUniqueEnabledTool(base, 'fetch_content');
+  }
+  const missingDefaultMigrationTools = ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES.filter((name) => !rawNames.has(name));
+  const hadPreCurrentDefaultTools = missingDefaultMigrationTools.length > 0 && (
+    sameToolSet(rawNamesForDefaultComparison, ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+  );
+  if (hadPreCurrentDefaultTools) {
+    for (const name of missingDefaultMigrationTools) appendUniqueEnabledTool(base, name);
   }
   const hadPreRenameDefaultTools = !rawNames.has('rename_drones') && (
     sameToolSetWithout(rawNames, ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
@@ -2282,6 +2403,24 @@ export class HubAssistantService {
         listener(event);
       } catch {
         // Ignore a broken listener so one stale SSE client cannot block assistant work.
+      }
+    }
+  }
+
+  private emitUiAction(uiAction: AssistantUiAction, threadId?: string): void {
+    const event: AssistantChangeEvent = {
+      type: 'assistant_changed',
+      sequence: ++this.changeSequence,
+      reason: 'ui_action',
+      ...(threadId ? { threadId } : {}),
+      uiAction,
+      at: nowIso(),
+    };
+    for (const listener of this.changeListeners) {
+      try {
+        listener(event);
+      } catch {
+        // Ignore stale SSE clients.
       }
     }
   }
@@ -4531,6 +4670,78 @@ export class HubAssistantService {
         },
       },
       {
+        name: 'open_drone_chat',
+        label: 'Open drone chat',
+        description:
+          'Open an existing drone chat in the Drone Hub UI. This is a UI navigation action and does not create a chat.',
+        parameters: Type.Object({
+          droneId: Type.String({ description: 'Target drone id or visible name.' }),
+          chatName: Type.Optional(Type.String({ description: 'Chat name. Defaults to default.' })),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          const droneId = await this.requireDroneInScope(params?.droneId, 'read', threadId);
+          const chatName = normalizeChatNameForAssistant(params?.chatName);
+          const regAny: any = await loadRegistry();
+          const { drone } = droneEntryByAssistantId(regAny, droneId);
+          const chats = drone?.chats && typeof drone.chats === 'object' ? Object.keys(drone.chats) : [];
+          if (chatName !== 'default' && !chats.includes(chatName)) throw new Error(`unknown chat: ${droneId}/${chatName}`);
+          this.emitUiAction({ type: 'open_drone_chat', droneId, droneIds: [droneId], chatName, at: nowIso() }, threadId);
+          return {
+            content: [{ type: 'text', text: `Opened ${droneId}/${chatName} in Drone Hub.` }],
+            details: { ok: true, droneId, chatName },
+          };
+        },
+      },
+      {
+        name: 'highlight_drones',
+        label: 'Highlight drones',
+        description:
+          'Temporarily highlight one or more drones in the Drone Hub UI and expand their collapsed group folders. Highlights default to 10 seconds.',
+        parameters: Type.Object({
+          droneIds: Type.Array(Type.String({ description: 'Drone id or visible name.' }), { minItems: 1 }),
+          durationMs: Type.Optional(Type.Number({ description: 'Highlight duration in milliseconds. Defaults to 10000; max 60000.' })),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          const regAny: any = await loadRegistry();
+          const rawList = Array.isArray(params?.droneIds) ? params.droneIds : [];
+          if (rawList.length === 0) throw new Error('missing droneIds');
+          const droneIds: string[] = Array.from(new Set<string>(rawList.map((item: any) => droneIdByAssistantRef(regAny, item))));
+          const allowed = this.allowedDroneIdSet('read', threadId);
+          if (allowed) {
+            const denied = droneIds.filter((id) => !allowed.has(id));
+            if (denied.length > 0) throw new Error(`assistant scope does not include drone: ${denied.join(', ')}`);
+          }
+          const durationRaw = Number(params?.durationMs);
+          const durationMs = Number.isFinite(durationRaw) ? Math.max(1000, Math.min(60_000, Math.floor(durationRaw))) : 10_000;
+          this.emitUiAction({ type: 'highlight_drones', droneIds, durationMs, at: nowIso() }, threadId);
+          return {
+            content: [{ type: 'text', text: `Highlighted ${droneIds.length} drone${droneIds.length === 1 ? '' : 's'} for ${durationMs}ms.` }],
+            details: { ok: true, droneIds, durationMs },
+          };
+        },
+      },
+      {
+        name: 'create_group',
+        label: 'Create group',
+        description:
+          'Create an empty Drone Hub group. New groups are placed at the top of their parent folder in sidebar order.',
+        parameters: Type.Object({
+          group: Type.Optional(Type.String({ description: 'Group name or path.' })),
+          name: Type.Optional(Type.String({ description: 'Alias for group.' })),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          const group = cleanOptionalString(params?.group ?? params?.name);
+          if (!group) throw new Error('missing group');
+          if (!this.tools.createGroup) throw new Error('create group tool unavailable');
+          const result = await this.tools.createGroup({ group });
+          this.emitUiAction({ type: 'reload_ui_preferences', at: nowIso() }, threadId);
+          return {
+            content: [{ type: 'text', text: `${result.created ? 'Created' : 'Found existing'} group ${result.group}.` }],
+            details: result,
+          };
+        },
+      },
+      {
         name: 'set_drone_group',
         label: 'Set drone group',
         description: 'Move one or more existing drones to a group, or clear their group. This requires user approval.',
@@ -4548,8 +4759,9 @@ export class HubAssistantService {
             const denied = droneIds.filter((id) => !allowed.has(id));
             if (denied.length > 0) throw new Error(`assistant scope does not include drone: ${denied.join(', ')}`);
           }
-          const group = cleanOptionalString(params?.group) || null;
+          const group = normalizeAssistantGroupValue(params?.group);
           const result = await this.tools.setDroneGroup({ droneIds, group });
+          this.emitUiAction({ type: 'reload_ui_preferences', at: nowIso() }, threadId);
           return {
             content: [
               {
@@ -4557,6 +4769,99 @@ export class HubAssistantService {
                 text: `Approved and updated group for ${result.moved.length} drone${result.moved.length === 1 ? '' : 's'}.`,
               },
             ],
+            details: result,
+          };
+        },
+      },
+      {
+        name: 'set_drone_groups',
+        label: 'Set drone groups',
+        description:
+          'Move different drones into different groups in one request, or clear groups. Each assignment has droneIds/drones and group; pass clearGroup=true or empty group for no group. This requires user approval.',
+        parameters: Type.Object({
+          assignments: Type.Array(Type.Object({
+            droneIds: Type.Optional(Type.Array(Type.String({ description: 'Drone id or visible name.' }))),
+            drones: Type.Optional(Type.Array(Type.String({ description: 'Alias for droneIds.' }))),
+            droneId: Type.Optional(Type.String({ description: 'Single drone id or visible name.' })),
+            drone: Type.Optional(Type.String({ description: 'Alias for droneId.' })),
+            group: Type.Optional(Type.String({ description: 'Target group. Empty or Ungrouped clears group.' })),
+            clearGroup: Type.Optional(Type.Boolean({ description: 'Clear group for this assignment.' })),
+          }), { minItems: 1 }),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          const regAny: any = await loadRegistry();
+          const normalized = normalizeAssistantSetDroneGroupAssignments(params ?? {});
+          const assignments = normalized.map((assignment) => ({
+            group: assignment.group,
+            droneIds: Array.from(new Set(assignment.droneRefs.map((ref) => droneIdByAssistantRef(regAny, ref)))),
+          })).filter((assignment) => assignment.droneIds.length > 0);
+          if (assignments.length === 0) throw new Error('missing drone group assignments');
+          const allowed = this.allowedDroneIdSet('write', threadId);
+          if (allowed) {
+            const denied = assignments.flatMap((assignment) => assignment.droneIds).filter((id) => !allowed.has(id));
+            if (denied.length > 0) throw new Error(`assistant scope does not include drone: ${Array.from(new Set(denied)).join(', ')}`);
+          }
+          const runSetDroneGroups = this.tools.setDroneGroups;
+          const result = runSetDroneGroups
+            ? await runSetDroneGroups({ assignments })
+            : {
+                assignments: await Promise.all(assignments.map(async (assignment) => ({
+                  ...assignment,
+                  result: await this.tools.setDroneGroup({ droneIds: assignment.droneIds, group: assignment.group }),
+                }))),
+                moved: [] as AssistantSetDroneGroupResult['moved'],
+                rejected: [] as AssistantSetDroneGroupResult['rejected'],
+                total: assignments.reduce((sum, assignment) => sum + assignment.droneIds.length, 0),
+              };
+          if (!runSetDroneGroups) {
+            result.moved = result.assignments.flatMap((assignment) => assignment.result.moved);
+            result.rejected = result.assignments.flatMap((assignment) => assignment.result.rejected);
+          }
+          this.emitUiAction({ type: 'reload_ui_preferences', at: nowIso() }, threadId);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Approved and updated groups for ${result.moved.length} drone${result.moved.length === 1 ? '' : 's'}${result.rejected.length > 0 ? `; ${result.rejected.length} failed` : ''}.`,
+              },
+            ],
+            details: result,
+          };
+        },
+      },
+      {
+        name: 'reorder_drones',
+        label: 'Reorder drones',
+        description:
+          'Reorder drones in the sidebar. Omit group, or pass Ungrouped, for ungrouped drones; pass a group path to reorder within that group. Drones move to the top unless beforeDrone or afterDrone is provided.',
+        parameters: Type.Object({
+          drones: Type.Optional(Type.Array(Type.String({ description: 'Drone id or visible name in the desired order.' }))),
+          droneIds: Type.Optional(Type.Array(Type.String({ description: 'Alias for drones.' }))),
+          group: Type.Optional(Type.String({ description: 'Group scope. Empty or Ungrouped means ungrouped/root.' })),
+          beforeDrone: Type.Optional(Type.String({ description: 'Place before this drone id/name.' })),
+          afterDrone: Type.Optional(Type.String({ description: 'Place after this drone id/name.' })),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          if (!this.tools.reorderDrones) throw new Error('reorder drones tool unavailable');
+          if (cleanOptionalString(params?.beforeDrone) && cleanOptionalString(params?.afterDrone)) throw new Error('use either beforeDrone or afterDrone, not both');
+          const regAny: any = await loadRegistry();
+          const droneIds = normalizeAssistantReorderDroneRefs(params ?? {}).map((ref) => droneIdByAssistantRef(regAny, ref));
+          const beforeDroneId = cleanOptionalString(params?.beforeDrone) ? droneIdByAssistantRef(regAny, params.beforeDrone) : null;
+          const afterDroneId = cleanOptionalString(params?.afterDrone) ? droneIdByAssistantRef(regAny, params.afterDrone) : null;
+          const allowed = this.allowedDroneIdSet('read', threadId);
+          if (allowed) {
+            const denied = [...droneIds, beforeDroneId, afterDroneId].filter((id): id is string => Boolean(id && !allowed.has(id)));
+            if (denied.length > 0) throw new Error(`assistant scope does not include drone: ${denied.join(', ')}`);
+          }
+          const result = await this.tools.reorderDrones({
+            droneIds,
+            group: normalizeAssistantGroupValue(params?.group) ?? 'Ungrouped',
+            beforeDroneId,
+            afterDroneId,
+          });
+          this.emitUiAction({ type: 'reload_ui_preferences', at: nowIso() }, threadId);
+          return {
+            content: [{ type: 'text', text: `Reordered ${result.drones.length} drone${result.drones.length === 1 ? '' : 's'} in ${result.group}.` }],
             details: result,
           };
         },
@@ -4644,11 +4949,13 @@ export class HubAssistantService {
     signal?: AbortSignal,
   ): Promise<{ block?: boolean; reason?: string } | undefined> {
     const toolName = String(ctx?.toolCall?.name ?? '').trim();
-    if (toolName !== 'message_drone' && toolName !== 'set_drone_group' && toolName !== 'rename_drones' && toolName !== 'bash') return undefined;
+    if (toolName !== 'message_drone' && toolName !== 'set_drone_group' && toolName !== 'set_drone_groups' && toolName !== 'rename_drones' && toolName !== 'bash') return undefined;
     if (this.getThread(threadId).autoApprove) return undefined;
     const label =
       toolName === 'set_drone_group'
         ? 'Set drone group'
+        : toolName === 'set_drone_groups'
+          ? 'Set drone groups'
         : toolName === 'rename_drones'
           ? 'Rename drones'
           : toolName === 'bash'
@@ -4694,8 +5001,27 @@ export class HubAssistantService {
             requested: ctx?.args ?? {},
             resolved: {
               drones: droneIds.map((id) => ({ id, name: droneNameById.get(id) ?? id })),
-              group: cleanOptionalString(ctx?.args?.group) || null,
+              group: normalizeAssistantGroupValue(ctx?.args?.group),
             },
+          };
+        } else if (toolName === 'set_drone_groups') {
+          const regAny: any = await loadRegistry();
+          const normalized = normalizeAssistantSetDroneGroupAssignments(ctx?.args ?? {});
+          const drones = await this.tools.listDrones();
+          const droneNameById = new Map(drones.map((drone) => [drone.id, drone.name]));
+          const assignments = normalized.map((assignment) => ({
+            group: assignment.group,
+            drones: Array.from(new Set(assignment.droneRefs.map((ref) => droneIdByAssistantRef(regAny, ref))))
+              .map((id) => ({ id, name: droneNameById.get(id) ?? id })),
+          }));
+          const allowed = this.allowedDroneIdSet('write', threadId);
+          if (allowed) {
+            const denied = assignments.flatMap((assignment) => assignment.drones.map((drone) => drone.id)).filter((id) => !allowed.has(id));
+            if (denied.length > 0) throw new Error(`assistant scope does not include drone: ${Array.from(new Set(denied)).join(', ')}`);
+          }
+          approvalArgs = {
+            requested: ctx?.args ?? {},
+            resolved: { assignments },
           };
         } else if (toolName === 'rename_drones') {
           const regAny: any = await loadRegistry();

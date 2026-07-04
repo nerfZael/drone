@@ -79,6 +79,7 @@ type GroupedSidebarTreeProps = {
   droneById: Record<string, DroneSummary>;
   selectedDroneIds: string[];
   selectedDroneSet: Set<string>;
+  highlightedDroneIds: Set<string>;
   selectedDrone: string | null;
   activeChatName: string;
   selectedSidebarNodeId: string | null;
@@ -665,6 +666,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     uiDroneName,
     selectedDroneIds,
     selectedDroneSet,
+    highlightedDroneIds,
     visibleDroneOrder,
     sidebarChatOrderByDrone,
     busyChatNodeIdSet,
@@ -793,6 +795,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             density={sidebarDensityMode}
             displayName={uiDroneName(drone.name)}
             selected={selected}
+            highlighted={highlightedDroneIds.has(drone.id)}
             active={showOpenDefaultChatIndicator}
             activeIndicatorStyle="edge"
             leadingIcon={<IconDrone className={densityClasses.icon} />}
@@ -2031,6 +2034,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.folderEditor,
       props.folderEditorInputRef,
       props.hiddenSidebarGroupTokenSet,
+      props.highlightedDroneIds,
       props.movingDroneGroups,
       props.onBlurChatEditor,
       props.onBlurFolderEditor,

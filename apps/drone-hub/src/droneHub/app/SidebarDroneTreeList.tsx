@@ -40,6 +40,7 @@ export type SidebarDroneTreeListProps = {
   draftSidebarPlaceholderId: string;
   selectedDroneIds: string[];
   selectedDroneSet: Set<string>;
+  highlightedDroneIds: Set<string>;
   selectedDrone: string | null;
   activeChatName: string;
   busyChatNodeIdSet: Set<string>;
@@ -93,6 +94,7 @@ type SidebarDroneRowProps = {
   sidebarDensityMode: SidebarDensityMode;
   selectedDroneIds: string[];
   selectedDroneSet: Set<string>;
+  highlightedDroneIds: Set<string>;
   deletingDrones: Record<string, boolean>;
   renamingDrones: Record<string, boolean>;
   settingBaseImages: Record<string, boolean>;
@@ -262,6 +264,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
   sidebarDensityMode,
   selectedDroneIds,
   selectedDroneSet,
+  highlightedDroneIds,
   deletingDrones,
   renamingDrones,
   settingBaseImages,
@@ -343,6 +346,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           displayName={uiDroneName(drone.name)}
           statusHint={isOptimistic ? 'queued' : undefined}
           selected={selectedDroneSet.has(drone.id)}
+          highlighted={highlightedDroneIds.has(drone.id)}
           busy={busy}
           unreadAgentMessage={unread}
           showGroup={showGroup}
@@ -610,6 +614,7 @@ function SidebarDroneNode({
   draftSidebarPlaceholderId,
   selectedDroneIds,
   selectedDroneSet,
+  highlightedDroneIds,
   selectedDrone,
   activeChatName,
   busyChatNodeIdSet,
@@ -715,6 +720,7 @@ function SidebarDroneNode({
         sidebarDensityMode={sidebarDensityMode}
         selectedDroneIds={selectedDroneIds}
         selectedDroneSet={selectedDroneSet}
+        highlightedDroneIds={highlightedDroneIds}
         deletingDrones={deletingDrones}
         renamingDrones={renamingDrones}
         settingBaseImages={settingBaseImages}
@@ -827,6 +833,7 @@ function SidebarDroneNode({
               draftSidebarPlaceholderId={draftSidebarPlaceholderId}
               selectedDroneIds={selectedDroneIds}
               selectedDroneSet={selectedDroneSet}
+              highlightedDroneIds={highlightedDroneIds}
               selectedDrone={selectedDrone}
               activeChatName={activeChatName}
               busyChatNodeIdSet={busyChatNodeIdSet}
@@ -887,6 +894,7 @@ export function SidebarDroneTreeList({
   draftSidebarPlaceholderId,
   selectedDroneIds,
   selectedDroneSet,
+  highlightedDroneIds,
   selectedDrone,
   activeChatName,
   busyChatNodeIdSet,
@@ -1297,6 +1305,7 @@ export function SidebarDroneTreeList({
           draftSidebarPlaceholderId={draftSidebarPlaceholderId}
           selectedDroneIds={selectedDroneIds}
           selectedDroneSet={selectedDroneSet}
+          highlightedDroneIds={highlightedDroneIds}
           selectedDrone={selectedDrone}
           activeChatName={activeChatName}
           busyChatNodeIdSet={busyChatNodeIdSet}

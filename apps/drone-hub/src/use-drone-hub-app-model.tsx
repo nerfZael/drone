@@ -251,6 +251,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setNameSuggestToast,
     setTerminalMenuOpen,
   } = useDroneHubAppModelUiState();
+  const [highlightedDroneIds, setHighlightedDroneIds] = React.useState<Set<string>>(() => new Set());
+  const highlightClearTimerRef = React.useRef<number | null>(null);
+  const droneByIdRef = React.useRef<Record<string, DroneSummary>>({});
   const {
     polledDrones,
     drones,
@@ -274,6 +277,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setActiveRepoPath,
     setChatHeaderRepoPath,
   });
+  React.useEffect(() => {
+    droneByIdRef.current = droneById;
+  }, [droneById]);
   const {
     createOpen,
     creating,
@@ -569,7 +575,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     enabled: kanbanBoardOpen,
     requestJson,
   });
-  useUiPreferencesSettings({ requestJson });
+  const { reloadUiPreferences } = useUiPreferencesSettings({ requestJson });
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
   const setupStatusState = useSetupStatus(requestJson);
   const { llmSettings } = llmSettingsState;
@@ -1396,6 +1402,89 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       // Context reporting is best effort; assistant chat still works without it.
     });
   }, [appView, currentDrone?.id, currentDrone?.name, selectedChat]);
+  const expandGroupsForDroneIds = React.useCallback(
+    (droneIds: string[]) => {
+      const groups = new Set<string>();
+      for (const droneId of droneIds) {
+        const group = String(droneByIdRef.current[droneId]?.group ?? '').trim();
+        if (!group) continue;
+        const parts = group.split('/').map((part) => part.trim()).filter(Boolean);
+        for (let index = 0; index < parts.length; index += 1) {
+          groups.add(parts.slice(0, index + 1).join('/'));
+        }
+      }
+      if (groups.size === 0) return;
+      setCollapsedGroups((prev) => {
+        let changed = false;
+        const next = { ...prev };
+        for (const group of groups) {
+          if (!next[group]) continue;
+          next[group] = false;
+          changed = true;
+        }
+        return changed ? next : prev;
+      });
+    },
+    [setCollapsedGroups],
+  );
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
+    let closed = false;
+    const source = new window.EventSource('/api/assistant/events');
+    const handleAssistantChange = (event: MessageEvent) => {
+      if (closed) return;
+      let data: any = null;
+      try {
+        data = JSON.parse(event.data);
+      } catch {
+        return;
+      }
+      const action = data?.uiAction && typeof data.uiAction === 'object' ? data.uiAction : null;
+      if (!action) return;
+      if (action.type === 'reload_ui_preferences') {
+        void reloadUiPreferences();
+        return;
+      }
+      const droneIds: string[] = Array.from(
+        new Set(
+          (Array.isArray(action.droneIds) ? action.droneIds : [action.droneId])
+            .map((item: unknown) => String(item ?? '').trim())
+            .filter((droneId: string): droneId is string => Boolean(droneId && droneByIdRef.current[droneId])),
+        ),
+      );
+      if (droneIds.length === 0) return;
+      expandGroupsForDroneIds(droneIds);
+      if (action.type === 'open_drone_chat') {
+        const droneId = droneIds[0];
+        const chatName = String(action.chatName ?? '').trim() || 'default';
+        selectDroneChat(droneId, chatName);
+      } else if (action.type === 'highlight_drones') {
+        setHighlightedDroneIds(new Set(droneIds));
+        if (highlightClearTimerRef.current != null) window.clearTimeout(highlightClearTimerRef.current);
+        const durationMsRaw = Number(action.durationMs);
+        const durationMs = Number.isFinite(durationMsRaw) ? Math.max(1000, Math.min(60_000, Math.floor(durationMsRaw))) : 10_000;
+        highlightClearTimerRef.current = window.setTimeout(() => {
+          highlightClearTimerRef.current = null;
+          setHighlightedDroneIds(new Set());
+        }, durationMs);
+      }
+    };
+    source.addEventListener('assistant_change', handleAssistantChange);
+    return () => {
+      closed = true;
+      source.close();
+    };
+  }, [expandGroupsForDroneIds, reloadUiPreferences, selectDroneChat]);
+  React.useEffect(
+    () => () => {
+      if (typeof window === 'undefined') return;
+      if (highlightClearTimerRef.current != null) {
+        window.clearTimeout(highlightClearTimerRef.current);
+        highlightClearTimerRef.current = null;
+      }
+    },
+    [],
+  );
   React.useEffect(() => {
     const selectedNodeId = createCanvasChatNodeId(String(selectedDrone ?? '').trim(), String(selectedChat ?? '').trim() || 'default');
     if (!selectedNodeId) return;
@@ -3304,6 +3393,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarDrones,
     sidebarOptimisticDroneIdSet,
     selectedDroneSet,
+    highlightedDroneIds,
     busyChatNodeIdSet,
     unreadAgentMessageByChatNodeId,
     deletingDrones,

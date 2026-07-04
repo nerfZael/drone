@@ -233,6 +233,7 @@ function RemoteHubSidebarComponent({
       sidebarDrones={viewModel.sidebarDrones}
       sidebarOptimisticDroneIdSet={EMPTY_DRONE_SET}
       selectedDroneSet={viewModel.selectedDroneSet}
+      highlightedDroneIds={EMPTY_DRONE_SET}
       busyChatNodeIdSet={busyChatNodeIdSet}
       unreadAgentMessageByChatNodeId={EMPTY_RECORD}
       deletingDrones={EMPTY_RECORD}

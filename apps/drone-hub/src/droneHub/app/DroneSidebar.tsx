@@ -201,6 +201,7 @@ function ReadOnlySidebarGroups({
   sidebarDensityMode,
   selectedDrone,
   selectedDroneSet,
+  highlightedDroneIds,
   activeChatName,
   showAllChats,
   collapsedGroups,
@@ -213,6 +214,7 @@ function ReadOnlySidebarGroups({
   sidebarDensityMode: SidebarDensityMode;
   selectedDrone: string | null;
   selectedDroneSet: Set<string>;
+  highlightedDroneIds: Set<string>;
   activeChatName: string;
   showAllChats: boolean;
   collapsedGroups: Record<string, boolean>;
@@ -285,6 +287,7 @@ function ReadOnlySidebarGroups({
                         density={sidebarDensityMode}
                         displayName={displayName}
                         selected={selected}
+                        highlighted={highlightedDroneIds.has(droneId)}
                         active={selectedDrone === droneId && hasOnlyDefaultChat && activeChatName === 'default'}
                         activeIndicatorStyle="edge"
                         leadingIcon={
@@ -426,6 +429,7 @@ function StaticReadOnlySidebarTree({
   sidebarChatOrderByDrone,
   selectedDrone,
   selectedDroneSet,
+  highlightedDroneIds,
   activeChatName,
   busyChatNodeIdSet,
   unreadAgentMessageByChatNodeId,
@@ -441,6 +445,7 @@ function StaticReadOnlySidebarTree({
   sidebarChatOrderByDrone: Record<string, string[]>;
   selectedDrone: string | null;
   selectedDroneSet: Set<string>;
+  highlightedDroneIds: Set<string>;
   activeChatName: string;
   busyChatNodeIdSet: Set<string>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
@@ -482,6 +487,7 @@ function StaticReadOnlySidebarTree({
           density={sidebarDensityMode}
           displayName={uiDroneName(drone.name)}
           selected={selected}
+          highlighted={highlightedDroneIds.has(drone.id)}
           active={selectedDrone === drone.id && hasOnlyDefaultChat && activeChatName === 'default'}
           activeIndicatorStyle="edge"
           leadingIcon={
@@ -1346,6 +1352,7 @@ export type DroneSidebarProps = {
   sidebarDrones: DroneSummary[];
   sidebarOptimisticDroneIdSet: Set<string>;
   selectedDroneSet: Set<string>;
+  highlightedDroneIds: Set<string>;
   busyChatNodeIdSet: Set<string>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
   deletingDrones: Record<string, boolean>;
@@ -1430,6 +1437,7 @@ export function DroneSidebar({
   sidebarDrones,
   sidebarOptimisticDroneIdSet,
   selectedDroneSet,
+  highlightedDroneIds,
   busyChatNodeIdSet,
   unreadAgentMessageByChatNodeId,
   deletingDrones,
@@ -1962,6 +1970,7 @@ export function DroneSidebar({
       draftSidebarPlaceholderId: DRAFT_SIDEBAR_PLACEHOLDER_ID,
       selectedDroneIds,
       selectedDroneSet,
+      highlightedDroneIds,
       selectedDrone,
       activeChatName,
       sidebarDndEnabled,
@@ -2013,6 +2022,7 @@ export function DroneSidebar({
       selectedDrone,
       selectedDroneIds,
       selectedDroneSet,
+      highlightedDroneIds,
       sidebarDndEnabled,
       setCollapsedDroneSections,
       settingBaseImages,
@@ -2609,6 +2619,7 @@ export function DroneSidebar({
                 sidebarChatOrderByDrone={sidebarChatOrderByDrone}
                 selectedDrone={selectedDrone}
                 selectedDroneSet={selectedDroneSet}
+                highlightedDroneIds={highlightedDroneIds}
                 activeChatName={activeChatName}
                 busyChatNodeIdSet={busyChatNodeIdSet}
                 unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
@@ -2624,6 +2635,7 @@ export function DroneSidebar({
                 sidebarDensityMode={sidebarDensityMode}
                 selectedDrone={selectedDrone}
                 selectedDroneSet={selectedDroneSet}
+                highlightedDroneIds={highlightedDroneIds}
                 activeChatName={activeChatName}
                 showAllChats={readOnlyMode === 'read-only-chats'}
                 collapsedGroups={collapsedGroups}
@@ -2710,6 +2722,7 @@ export function DroneSidebar({
                       droneById={sidebarDroneById}
                       selectedDroneIds={selectedDroneIds}
                       selectedDroneSet={selectedDroneSet}
+                      highlightedDroneIds={highlightedDroneIds}
                       selectedDrone={selectedDrone}
                       activeChatName={activeChatName}
                       selectedSidebarNodeId={selectedSidebarNodeId}
