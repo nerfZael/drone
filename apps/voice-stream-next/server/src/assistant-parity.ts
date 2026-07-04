@@ -344,7 +344,22 @@ export function assistantRealtimeSessionConfig(db: VoiceStreamNextDb, userId: st
 
 function realtimeToolDefinition(tool: unknown): unknown {
   if (!tool || typeof tool !== 'object' || Array.isArray(tool)) return tool;
-  const { strict: _strict, ...rest } = tool as Record<string, unknown>;
+  const source = tool as Record<string, unknown>;
+  if (source.type === 'function') {
+    const nestedFunction = source.function && typeof source.function === 'object' && !Array.isArray(source.function)
+      ? source.function as Record<string, unknown>
+      : null;
+    const name = source.name ?? nestedFunction?.name;
+    const description = source.description ?? nestedFunction?.description;
+    const parameters = source.parameters ?? nestedFunction?.parameters;
+    return {
+      type: 'function',
+      ...(name !== undefined && { name }),
+      ...(description !== undefined && { description }),
+      ...(parameters !== undefined && { parameters }),
+    };
+  }
+  const { strict: _strict, ...rest } = source;
   return rest;
 }
 

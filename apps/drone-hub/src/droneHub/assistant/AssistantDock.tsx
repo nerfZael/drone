@@ -9,14 +9,16 @@ import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { IconFile, iconForFilePath } from '../icons';
 import {
-  ASSISTANT_DESKTOP_VOICE_TRANSCRIPT_SEGMENT_EVENT,
+  canSendAssistantDesktopVoiceRealtimeText,
   desktopAssistantVoiceControlLabel,
   desktopAssistantVoiceControlTitle,
   desktopAssistantVoiceHeardText,
+  dispatchAssistantDesktopVoiceOff,
+  dispatchAssistantDesktopVoiceRealtimeToggle,
   dispatchAssistantDesktopVoiceToggle,
-  dispatchAssistantDesktopVoiceStop,
   isDesktopAssistantVoiceActive,
   isDesktopAssistantVoiceBusy,
+  sendAssistantDesktopVoiceRealtimeText,
   subscribeAssistantDesktopVoiceStatus,
   type DesktopAssistantVoiceStatus,
 } from './desktop-assistant-voice';
@@ -1450,6 +1452,8 @@ function AssistantThreadSidebar({
   const desktopVoiceHeardText = desktopAssistantVoiceHeardText(desktopVoiceStatus);
   const desktopVoiceLabel = desktopAssistantVoiceControlLabel(desktopVoiceStatus);
   const desktopVoiceMainTitle = desktopAssistantVoiceControlTitle(desktopVoiceStatus);
+  const desktopVoiceRealtimeAvailable = desktopVoiceStatus.realtime?.available === true;
+  const desktopVoiceRealtimeEnabled = desktopVoiceStatus.realtime?.enabled === true;
   return (
     <aside className="flex w-52 max-w-[46%] min-w-0 flex-shrink-0 flex-col border-r border-[var(--border)] bg-[rgba(0,0,0,.14)]">
       <div className="flex h-11 flex-shrink-0 items-center gap-2 border-b border-[var(--border)] px-2">
@@ -1466,9 +1470,9 @@ function AssistantThreadSidebar({
         </div>
         <div className="min-w-0 flex-1">
           <div className="truncate text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
-            {voiceMode ? 'Voice' : 'Threads'}
+            {voiceMode ? 'Realtime' : 'Standard'}
           </div>
-          <div className="text-[10px] text-[var(--muted-dim)]">{threads.length || 0} {voiceMode ? 'voice' : 'normal'}</div>
+          <div className="text-[10px] text-[var(--muted-dim)]">{threads.length || 0} {voiceMode ? 'realtime' : 'standard'}</div>
         </div>
         <button
           type="button"
@@ -1488,12 +1492,12 @@ function AssistantThreadSidebar({
           style={{ fontFamily: 'var(--display)' }}
         >
           <IconPlus className="h-3.5 w-3.5" />
-          {voiceMode ? 'New Voice Thread' : 'New Thread'}
+          {voiceMode ? 'New Realtime Thread' : 'New Standard Thread'}
         </button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto p-1.5">
         {threads.length === 0 ? (
-          <div className="px-2 py-3 text-[11px] text-[var(--muted-dim)]">{voiceMode ? 'No voice threads yet.' : 'No assistant threads yet.'}</div>
+          <div className="px-2 py-3 text-[11px] text-[var(--muted-dim)]">{voiceMode ? 'No realtime threads yet.' : 'No standard threads yet.'}</div>
         ) : (
           <div className="space-y-1">
             {threads.map((thread) => {
@@ -1549,34 +1553,58 @@ function AssistantThreadSidebar({
       </div>
       <div className="flex-shrink-0 space-y-2 border-t border-[var(--border)] p-2">
         <div className="flex flex-col items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 py-3">
-          <button
-            type="button"
-            onClick={onToggleDesktopVoice}
-            aria-pressed={desktopVoiceActive && desktopVoiceStatus.mode !== 'sleeping'}
-            aria-label="Toggle desktop assistant voice awake or sleep"
-            title={desktopVoiceMainTitle}
-            className={`relative flex h-16 w-16 items-center justify-center rounded-full border transition-all duration-200 ${
-              desktopVoiceStatus.mode === 'error'
-                ? 'border-[rgba(255,90,90,.5)] bg-[rgba(255,90,90,.1)] text-[var(--red)]'
-                : desktopVoiceStatus.mode === 'sleeping'
-                  ? 'border-[rgba(148,163,184,.45)] bg-[rgba(148,163,184,.08)] text-[var(--muted)]'
-                : desktopVoiceActive
-                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_24px_rgba(45,212,191,.22)]'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.035)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]'
-            }`}
-          >
-            {desktopVoiceBusy ? (
-              <span className="absolute inset-0 rounded-full bg-[var(--accent)] opacity-20 animate-ping" aria-hidden="true" />
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={onToggleDesktopVoice}
+              aria-pressed={desktopVoiceActive && desktopVoiceStatus.mode !== 'sleeping'}
+              aria-label="Toggle desktop assistant voice awake or sleep"
+              title={desktopVoiceMainTitle}
+              className={`relative flex h-16 w-16 items-center justify-center rounded-full border transition-all duration-200 ${
+                desktopVoiceStatus.mode === 'error'
+                  ? 'border-[rgba(255,90,90,.5)] bg-[rgba(255,90,90,.1)] text-[var(--red)]'
+                  : desktopVoiceStatus.mode === 'sleeping'
+                    ? 'border-[rgba(148,163,184,.45)] bg-[rgba(148,163,184,.08)] text-[var(--muted)]'
+                  : desktopVoiceActive
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_24px_rgba(45,212,191,.22)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.035)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]'
+              }`}
+            >
+              {desktopVoiceBusy ? (
+                <span className="absolute inset-0 rounded-full bg-[var(--accent)] opacity-20 animate-ping" aria-hidden="true" />
+              ) : null}
+              <svg viewBox="0 0 24 24" aria-hidden="true" className="relative h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="9" y="3" width="6" height="11" rx="3" />
+                <path d="M5 11a7 7 0 0 0 14 0" />
+                <path d="M12 18v3" />
+                <path d="M8 21h8" />
+              </svg>
+            </button>
+            {desktopVoiceRealtimeAvailable ? (
+              <button
+                type="button"
+                onClick={dispatchAssistantDesktopVoiceRealtimeToggle}
+                aria-pressed={desktopVoiceRealtimeEnabled}
+                aria-label={desktopVoiceRealtimeEnabled ? 'Turn off realtime assistant voice' : 'Turn on realtime assistant voice'}
+                title={desktopVoiceRealtimeEnabled ? 'Realtime assistant voice is on' : 'Realtime assistant voice is off'}
+                className={`flex h-10 w-10 items-center justify-center rounded-full border transition-colors ${
+                  desktopVoiceRealtimeEnabled
+                    ? 'border-[var(--accent-muted)] bg-[rgba(45,212,191,.12)] text-[var(--accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]'
+                }`}
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true" className="h-[18px] w-[18px]" fill="none" stroke="currentColor" strokeWidth="2">
+                  <path d="M4 12a8 8 0 0 1 8-8" />
+                  <path d="M4 12a8 8 0 0 0 8 8" />
+                  <path d="M20 12a8 8 0 0 0-8-8" />
+                  <path d="M20 12a8 8 0 0 1-8 8" />
+                  <path d="M8 12h8" />
+                </svg>
+              </button>
             ) : null}
-            <svg viewBox="0 0 24 24" aria-hidden="true" className="relative h-7 w-7" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="9" y="3" width="6" height="11" rx="3" />
-              <path d="M5 11a7 7 0 0 0 14 0" />
-              <path d="M12 18v3" />
-              <path d="M8 21h8" />
-            </svg>
-          </button>
+          </div>
           <div className="max-w-full truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
-            {desktopVoiceLabel}
+            {desktopVoiceRealtimeEnabled ? `${desktopVoiceLabel} / RT` : desktopVoiceLabel}
           </div>
           {desktopVoiceActive ? (
             <button
@@ -1603,7 +1631,7 @@ function AssistantThreadSidebar({
           type="button"
           onClick={() => onModeChange(voiceMode ? 'normal' : 'voice')}
           aria-pressed={voiceMode}
-          title={voiceMode ? 'Show normal assistant threads' : 'Show voice assistant threads'}
+          title={voiceMode ? 'Show standard assistant threads' : 'Show realtime assistant threads'}
           className={`flex min-h-[44px] w-full items-center justify-center gap-2 rounded border px-2 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
             voiceMode
               ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_18px_rgba(167,139,250,.16)]'
@@ -1616,7 +1644,7 @@ function AssistantThreadSidebar({
             <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
             <path d="M12 19v3" />
           </svg>
-          {voiceMode ? 'Voice Mode' : 'Voice'}
+          {voiceMode ? 'Realtime Mode' : 'Realtime'}
         </button>
         {voiceMode ? (
           <button
@@ -1963,7 +1991,7 @@ function AssistantSystemPromptModal({
               Assistant system prompts
             </div>
             <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
-              Thread changes affect only the current thread. Global changes apply to new normal or voice threads.
+              Thread changes affect only the current thread. Global changes apply to new standard or realtime threads.
             </div>
           </div>
           <button
@@ -2021,13 +2049,13 @@ function AssistantSystemPromptModal({
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                   >
-                    {item === 'normal' ? 'Normal' : 'Voice'}
+                    {item === 'normal' ? 'Standard' : 'Realtime'}
                   </button>
                 ))}
               </div>
             ) : null}
             <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">
-              {mode === 'global' && globalPromptKind === 'voice' ? 'Voice prompt' : 'Prompt'}
+              {mode === 'global' && globalPromptKind === 'voice' ? 'Realtime prompt' : 'Prompt'}
             </span>
             <textarea
               value={activeDraft}
@@ -2124,7 +2152,7 @@ function AssistantSystemPromptModal({
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
-                {saving ? 'Saving...' : globalPromptKind === 'voice' ? 'Save for new voice threads' : 'Save for new normal threads'}
+                {saving ? 'Saving...' : globalPromptKind === 'voice' ? 'Save for new realtime threads' : 'Save for new standard threads'}
               </button>
             </>
           )}
@@ -2473,6 +2501,8 @@ export function AssistantDock() {
   const autoApprove = Boolean(activeThread?.autoApprove);
   const voiceEnabled = Boolean(activeThread?.voiceEnabled);
   voiceEnabledRef.current = voiceEnabled;
+  const realtimeTextReady = voiceEnabled && canSendAssistantDesktopVoiceRealtimeText();
+  const realtimeTextBlocked = voiceEnabled && !realtimeTextReady;
   const promptDeliveryMode: AssistantPromptDeliveryMode = activeThread?.promptDeliveryMode === 'asap' ? 'asap' : 'queue';
   const activeAccessScope: AssistantAccessScope | null = activeThread?.accessScope ?? snapshot?.accessScope ?? null;
   const activeAccessScopeDroneIdsKey = activeAccessScope?.droneIds?.join('\u0000') ?? '';
@@ -2492,9 +2522,9 @@ export function AssistantDock() {
   const visibleMessages = React.useMemo(() => {
     const messages = activeThread?.messages ?? [];
     const streaming = snapshot?.streamingMessage;
-    if (!streaming || streaming.role !== 'assistant' || activeThread?.status === 'idle') return messages;
+    if (!streaming || (streaming.role !== 'assistant' && streaming.role !== 'user')) return messages;
     return [...messages, streaming];
-  }, [activeThread?.messages, activeThread?.status, snapshot?.streamingMessage]);
+  }, [activeThread?.messages, snapshot?.streamingMessage]);
   const visibleItems = React.useMemo(() => {
     const items = renderItemsFromMessages(visibleMessages);
     for (const prompt of activeThread?.queuedPrompts ?? []) {
@@ -2504,9 +2534,9 @@ export function AssistantDock() {
   }, [activeThread?.queuedPrompts, visibleMessages]);
   const streamingAssistantSourceIndex = React.useMemo(() => {
     const streaming = snapshot?.streamingMessage;
-    if (!streaming || streaming.role !== 'assistant' || activeThread?.status === 'idle') return -1;
+    if (!streaming || streaming.role !== 'assistant') return -1;
     return visibleMessages.length - 1;
-  }, [activeThread?.status, snapshot?.streamingMessage, visibleMessages]);
+  }, [snapshot?.streamingMessage, visibleMessages]);
   const showThinking = running && activePendingApprovals.length === 0 && !messageText(snapshot?.streamingMessage ?? { role: 'assistant' }).trim();
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
@@ -2564,15 +2594,6 @@ export function AssistantDock() {
     setVoiceDraftActive(true);
     setDraft(next);
   }, []);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const handler = (event: Event) => {
-      appendVoiceTranscriptSegment((event as CustomEvent<string>).detail, { requireVoiceEnabled: false });
-    };
-    window.addEventListener(ASSISTANT_DESKTOP_VOICE_TRANSCRIPT_SEGMENT_EVENT, handler);
-    return () => window.removeEventListener(ASSISTANT_DESKTOP_VOICE_TRANSCRIPT_SEGMENT_EVENT, handler);
-  }, [appendVoiceTranscriptSegment]);
 
   const scheduleAssistantEventRefresh = React.useCallback(() => {
     if (typeof window === 'undefined') return;
@@ -2653,7 +2674,7 @@ export function AssistantDock() {
           },
         };
       });
-      setSystemPromptNotice(promptType === 'voice' ? 'Saved. New voice assistant threads will use this prompt.' : 'Saved. New normal assistant threads will use this prompt.');
+      setSystemPromptNotice(promptType === 'voice' ? 'Saved. New realtime assistant threads will use this prompt.' : 'Saved. New standard assistant threads will use this prompt.');
     } catch (err: any) {
       setSystemPromptError(err?.message ?? String(err));
     } finally {
@@ -2702,7 +2723,7 @@ export function AssistantDock() {
       setSystemPromptDraft(data.assistantSystemPrompt.prompt);
       setVoiceSystemPromptDraft(data.assistantVoiceSystemPrompt.prompt);
       await loadSystemPromptSettings();
-      setSystemPromptNotice(activeThread?.voiceEnabled ? 'Promoted. New voice assistant threads will use this prompt.' : 'Promoted. New normal assistant threads will use this prompt.');
+      setSystemPromptNotice(activeThread?.voiceEnabled ? 'Promoted. New realtime assistant threads will use this prompt.' : 'Promoted. New standard assistant threads will use this prompt.');
       void refresh();
     } catch (err: any) {
       setSystemPromptError(err?.message ?? String(err));
@@ -3173,7 +3194,7 @@ export function AssistantDock() {
           activeDroneId: activeDroneId || null,
           activeChatName: activeDroneId ? String(selectedChat ?? '').trim() || 'default' : null,
           voiceEnabled: assistantPanelMode === 'voice',
-          title: assistantPanelMode === 'voice' ? 'Voice thread' : undefined,
+          title: assistantPanelMode === 'voice' ? 'Realtime thread' : undefined,
         }),
       });
       setSnapshot(next);
@@ -3244,6 +3265,21 @@ export function AssistantDock() {
     const prompt = draft.trim();
     if (!prompt) return;
     setError(null);
+    if (activeThread.voiceEnabled) {
+      try {
+        if (!sendAssistantDesktopVoiceRealtimeText(prompt)) {
+          setError('Realtime voice is not connected. Start realtime voice before sending text in this thread.');
+          return;
+        }
+        setDraft('');
+        scrollAssistantToBottom({ force: true });
+        refocusInputWhenIdleRef.current = true;
+        void refresh({ silent: true });
+      } catch (err: any) {
+        setError(err?.message ?? String(err));
+      }
+      return;
+    }
     if (!(await waitForScopeSave())) return;
     setDraft('');
     scrollAssistantToBottom({ force: true });
@@ -3511,7 +3547,7 @@ export function AssistantDock() {
           onOpenPairing={() => void openVoicePairing()}
           desktopVoiceStatus={desktopVoiceStatus}
           onToggleDesktopVoice={dispatchAssistantDesktopVoiceToggle}
-          onStopDesktopVoice={dispatchAssistantDesktopVoiceStop}
+          onStopDesktopVoice={dispatchAssistantDesktopVoiceOff}
           onCollapse={() => setThreadSidebarOpen(false)}
         />
       ) : null}
@@ -3661,8 +3697,8 @@ export function AssistantDock() {
             onClick={() => void updateThread({ voiceEnabled: !voiceEnabled })}
             disabled={!activeThread}
             aria-pressed={voiceEnabled}
-            aria-label="Toggle voice mode"
-            title={voiceEnabled ? 'Voice mode is on' : 'Voice mode is off'}
+            aria-label="Toggle realtime thread mode"
+            title={voiceEnabled ? 'Realtime mode is on' : 'Realtime mode is off'}
             className={`h-8 w-8 flex-shrink-0 rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
               voiceEnabled
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
@@ -4012,9 +4048,13 @@ export function AssistantDock() {
                 if (!assistantChatIdleHold) void sendPrompt();
               }
             }}
-            disabled={!activeThread}
+            disabled={!activeThread || realtimeTextBlocked}
             placeholder={
-              assistantChatIdleHold
+              realtimeTextBlocked
+                ? desktopVoiceStatus.realtime?.enabled === true
+                  ? 'Start realtime voice to type in this thread'
+                  : 'Turn on realtime voice to type in this thread'
+                : assistantChatIdleHold
                 ? 'Stop subscription below to send a message'
                 : running
                   ? promptDeliveryMode === 'asap'
@@ -4059,7 +4099,7 @@ export function AssistantDock() {
               <button
                 type="button"
                 onClick={() => void sendPrompt()}
-                disabled={!draft.trim() || !activeThread || scopeSyncBusy}
+                disabled={!draft.trim() || !activeThread || scopeSyncBusy || realtimeTextBlocked}
                 className="h-7 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)] disabled:opacity-40"
                 style={{ fontFamily: 'var(--display)' }}
               >

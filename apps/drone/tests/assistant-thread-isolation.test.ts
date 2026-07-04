@@ -683,6 +683,102 @@ describe('assistant thread isolation', () => {
     });
   });
 
+  test('realtime session exposes enabled voice tools and executes them through assistant service', async () => {
+    await withTempDroneDataDir('assistant-realtime-tools-', async () => {
+      const service = new HubAssistantService({
+        listDrones: async () => [
+          { id: 'drone-a', name: 'Drone A', group: null, runtime: 'container', repoPath: '/tmp/drone-a', status: 'ready', chats: ['default'] },
+        ],
+        createDrone: async () => {
+          throw new Error('not implemented');
+        },
+        createChat: async () => {
+          throw new Error('not implemented');
+        },
+        setDroneGroup: async () => {
+          throw new Error('not implemented');
+        },
+        messageDrone: async () => {
+          throw new Error('not implemented');
+        },
+      });
+      installFakeRuntime(service, {});
+
+      const config = await service.realtimeSessionConfig({ source: 'desktop' });
+      const toolNames = config.tools.map((tool) => tool.name);
+
+      expect(config.threadId).toBeTruthy();
+      expect(config.instructions).toContain('OpenAI Realtime audio');
+      expect(toolNames).toContain('list_drones');
+      expect(toolNames).not.toContain('speak');
+      expect(config.tools.some((tool: any) => Object.prototype.hasOwnProperty.call(tool, 'strict'))).toBe(false);
+
+      const result = await service.executeRealtimeTool({
+        threadId: config.threadId,
+        toolCallId: 'call_list_drones',
+        toolName: 'list_drones',
+        arguments: {},
+        source: 'desktop',
+      });
+
+      expect(result.output).toContain('Drone A');
+      expect((result.result as any).drones[0].id).toBe('drone-a');
+
+      const afterTool = await service.threadSnapshot(config.threadId);
+      const thread = afterTool.threads.find((item) => item.id === config.threadId) as any;
+      expect(thread.messages.some((message: any) =>
+        message.role === 'assistant' &&
+        Array.isArray(message.content) &&
+        message.content.some((part: any) => part.type === 'toolCall' && part.id === 'call_list_drones' && part.name === 'list_drones'),
+      )).toBe(true);
+      expect(thread.messages.some((message: any) =>
+        message.role === 'toolResult' &&
+        message.toolCallId === 'call_list_drones' &&
+        message.toolName === 'list_drones',
+      )).toBe(true);
+    });
+  });
+
+  test('realtime transcripts are appended as normal assistant thread messages', async () => {
+    await withTempDroneDataDir('assistant-realtime-transcripts-', async () => {
+      const service = makeService();
+      installFakeRuntime(service, {});
+
+      const config = await service.realtimeSessionConfig({ source: 'desktop' });
+      await service.appendRealtimeMessage({ threadId: config.threadId, role: 'user', text: 'show me the drone list' });
+      await service.appendRealtimeMessage({ threadId: config.threadId, role: 'assistant', text: 'I can do that.' });
+
+      const snapshot = await service.threadSnapshot(config.threadId);
+      const thread = snapshot.threads.find((item) => item.id === config.threadId) as any;
+      expect(thread.messages.map((message: any) => message.role)).toEqual(['user', 'assistant']);
+      expect(thread.messages[0].content[0].text).toBe('show me the drone list');
+      expect(thread.messages[1].content[0].text).toBe('I can do that.');
+      expect(thread.title).toBe('show me the drone list');
+    });
+  });
+
+  test('realtime transcript deltas appear as streaming messages until final transcript is appended', async () => {
+    await withTempDroneDataDir('assistant-realtime-streaming-transcripts-', async () => {
+      const service = makeService();
+      installFakeRuntime(service, {});
+
+      const config = await service.realtimeSessionConfig({ source: 'desktop' });
+      await service.updateRealtimeStreamingMessage({ threadId: config.threadId, role: 'user', text: 'show me' });
+
+      const streaming = await service.threadSnapshot(config.threadId);
+      expect((streaming as any).streamingMessage?.role).toBe('user');
+      expect((streaming as any).streamingMessage?.content?.[0]?.text).toBe('show me');
+
+      await service.appendRealtimeMessage({ threadId: config.threadId, role: 'user', text: 'show me the drones' });
+      const final = await service.threadSnapshot(config.threadId);
+      expect((final as any).streamingMessage).toBeUndefined();
+      const thread = final.threads.find((item) => item.id === config.threadId) as any;
+      expect(thread.messages).toHaveLength(1);
+      expect(thread.messages[0].role).toBe('user');
+      expect(thread.messages[0].content[0].text).toBe('show me the drones');
+    });
+  });
+
   test('create new thread tool can be enabled for normal assistant threads', async () => {
     await withTempDroneDataDir('assistant-normal-create-new-thread-', async () => {
       const service = makeService();

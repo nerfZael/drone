@@ -199,7 +199,8 @@ import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from './groq-tr
 import { buildGroqTtsConfig, synthesizeTextWavWithGroq } from './groq-tts';
 import { DesktopVoiceService } from './desktop-voice-service';
 import { desktopVoiceModelStatus, removeDesktopVoiceModel, startDesktopVoiceModelInstall } from './desktop-voice-models';
-import { createOpenAiRealtimeAssistantSession, isOpenAiRealtimeAssistantEnabled } from './openai-realtime-assistant';
+import { createOpenAiRealtimeAssistantSession, createOpenAiRealtimeWebRtcAssistantSession, type OpenAiRealtimeWebRtcAssistantSession } from './openai-realtime-assistant';
+import { hasTranscriptContent, normalizeTranscriptWhitespace, stripCommands } from './voice-transcription-segmenter';
 import { assertDroneDaemonRuntimeReady, resolveDroneDaemonRuntimeDir } from './drone-daemon-runtime';
 import {
   createHubShellSessionName,
@@ -277,6 +278,7 @@ import {
   resolveEffectiveDeleteActionSettings,
   resolveEffectiveLlmProvider,
   resolveEffectiveVoiceApprovalSettings,
+  resolveEffectiveVoiceRealtimeSettings,
   resolveEffectiveVoiceTranscriptionSettings,
   resolveFilesystemSettingsResponse,
   resolveEffectiveProviderApiKeySettings,
@@ -296,6 +298,7 @@ import {
   upsertStoredProviderApiKey,
   upsertStoredVoiceApprovalSettings,
   upsertStoredVoiceActivationSettings,
+  upsertStoredVoiceRealtimeSettings,
   upsertStoredVoiceTranscriptionSettings,
   upsertVoiceStreamPairingPassword,
   upsertStoredTaskPlaybookButtonSettings,
@@ -13925,8 +13928,7 @@ export async function startDroneHubApiServer(opts: {
   const desktopRealtimeAssistantInstructions = () => [
     'You are Sebastian, the Drone Hub desktop voice assistant.',
     'Keep spoken replies short and natural.',
-    'The final user transcript is also sent into the normal Drone Hub voice thread, so avoid claiming you used Drone Hub tools directly from this realtime session.',
-    'If the user asks you to perform an action that needs Drone Hub tools, acknowledge briefly that you are sending it to the hub assistant.',
+    'Use Drone Hub tools directly when they are needed, and summarize tool results briefly.',
   ].join(' ');
   const isAndroidSpeakUnavailable = (error: unknown): boolean => {
     const anyError = error as any;
@@ -14120,6 +14122,15 @@ export async function startDroneHubApiServer(opts: {
     listDroneChangedFiles: async ({ droneId }) => await assistantListDroneChangedFiles({ droneId }),
   });
   let desktopVoicePatchSessionId: string | null = null;
+  let desktopRealtimeWebRtcSession: OpenAiRealtimeWebRtcAssistantSession | null = null;
+  let desktopRealtimeWebRtcSessionGeneration = 0;
+  const cancelDesktopRealtimeWebRtcSession = async (): Promise<void> => {
+    desktopRealtimeWebRtcSessionGeneration += 1;
+    const session = desktopRealtimeWebRtcSession;
+    desktopRealtimeWebRtcSession = null;
+    if (!session) return;
+    await session.cancel();
+  };
   desktopVoiceService = new DesktopVoiceService({
     transcribeWav: async (wav) => {
       const groqSettings = await resolveGroqApiKeySettings();
@@ -14129,23 +14140,68 @@ export async function startDroneHubApiServer(opts: {
     submitAssistantPrompt: async (prompt) => {
       await assistantService.submitVoicePrompt({ prompt, title: 'Desktop voice thread', source: 'desktop' });
     },
-    ...(isOpenAiRealtimeAssistantEnabled()
-      ? {
-          startRealtimeAssistant: async (callbacks) => {
-            const openaiSettings = await resolveEffectiveProviderApiKeySettings('openai');
-            if (!openaiSettings.apiKey) throw new Error('OpenAI API key is not configured. Add it in Drone Hub settings.');
-            hubLog('info', 'desktop realtime assistant session starting', {
-              model: String(process.env.DRONE_HUB_OPENAI_REALTIME_MODEL ?? process.env.OPENAI_REALTIME_MODEL ?? 'gpt-realtime-2'),
-              credentialSource: openaiSettings.source,
-            });
-            return await createOpenAiRealtimeAssistantSession({
-              apiKey: openaiSettings.apiKey,
-              instructions: desktopRealtimeAssistantInstructions(),
-              callbacks,
-            });
+    startRealtimeAssistant: async (callbacks) => {
+      const openaiSettings = await resolveEffectiveProviderApiKeySettings('openai');
+      if (!openaiSettings.apiKey) throw new Error('OpenAI API key is not configured. Add it in Drone Hub settings.');
+      const realtimeConfig = await assistantService.realtimeSessionConfig({ source: 'desktop' });
+      let realtimeThreadId = realtimeConfig.threadId;
+      hubLog('info', 'desktop realtime assistant session starting', {
+        model: String(process.env.DRONE_HUB_OPENAI_REALTIME_MODEL ?? process.env.OPENAI_REALTIME_MODEL ?? 'gpt-realtime-2'),
+        credentialSource: openaiSettings.source,
+        threadId: realtimeThreadId,
+        toolCount: realtimeConfig.tools.length,
+      });
+      return await createOpenAiRealtimeAssistantSession({
+        apiKey: openaiSettings.apiKey,
+        instructions: [desktopRealtimeAssistantInstructions(), realtimeConfig.instructions].join('\n\n'),
+        tools: realtimeConfig.tools,
+        executeTool: async (call) => {
+          const result = await assistantService.executeRealtimeTool({
+            threadId: realtimeThreadId,
+            toolCallId: call.id,
+            toolName: call.name,
+            arguments: call.arguments,
+            source: 'desktop',
+          });
+          const nextThreadId = String((result.result as any)?.threadId ?? '').trim();
+          if (nextThreadId) realtimeThreadId = nextThreadId;
+          return result.output;
+        },
+        callbacks: {
+          ...callbacks,
+          onUserTranscriptDelta: async (delta) => {
+            await callbacks.onUserTranscriptDelta?.(delta);
+            await assistantService.updateRealtimeStreamingMessage({ threadId: realtimeThreadId, role: 'user', text: delta.text });
           },
-        }
-      : {}),
+          onUserTranscript: async (text) => {
+            const stopTranscript = realtimeStopTranscript(text);
+            await callbacks.onUserTranscript?.(text);
+            if (stopTranscript.stop) {
+              await assistantService.clearRealtimeStreamingMessage({ threadId: realtimeThreadId });
+              if (hasTranscriptContent(stopTranscript.text)) {
+                await assistantService.appendRealtimeMessage({ threadId: realtimeThreadId, role: 'user', text: stopTranscript.text });
+              }
+              return;
+            }
+            await assistantService.appendRealtimeMessage({ threadId: realtimeThreadId, role: 'user', text });
+          },
+          onUserSpeechStarted: async () => {
+            await callbacks.onUserSpeechStarted?.();
+            await assistantService.clearRealtimeStreamingMessage({ threadId: realtimeThreadId });
+          },
+          onAssistantTranscriptDelta: async (delta) => {
+            await callbacks.onAssistantTranscriptDelta?.(delta);
+            await assistantService.updateRealtimeStreamingMessage({ threadId: realtimeThreadId, role: 'assistant', text: delta.text });
+          },
+          onAssistantTranscript: async (text) => {
+            await callbacks.onAssistantTranscript?.(text);
+            await assistantService.appendRealtimeMessage({ threadId: realtimeThreadId, role: 'assistant', text });
+          },
+        },
+      });
+    },
+    realtimeWebRtcAvailable: true,
+    cancelRealtimeWebRtcAssistant: cancelDesktopRealtimeWebRtcSession,
     startChatPatch: async () => {
       desktopVoicePatchSessionId = beginVoicePatchSession('desktop').sessionId;
     },
@@ -14172,11 +14228,127 @@ export async function startDroneHubApiServer(opts: {
   const reloadDesktopVoiceTranscriptionSettings = async () => {
     desktopVoiceService.setVoiceTranscriptionSettings(await resolveEffectiveVoiceTranscriptionSettings());
   };
+  const reloadDesktopVoiceRealtimeSettings = async () => {
+    desktopVoiceService.setRealtimeAssistantEnabled((await resolveEffectiveVoiceRealtimeSettings()).enabled);
+  };
+  const realtimeStopTranscript = (text: string): { stop: boolean; text: string } => {
+    const command = stripCommands(text);
+    return {
+      stop: command.sleep,
+      text: normalizeTranscriptWhitespace(command.text),
+    };
+  };
+  const desktopVoiceRequestMeta = (req: http.IncomingMessage): Record<string, unknown> => ({
+    mode: desktopVoiceService.snapshot().mode,
+    target: desktopVoiceService.snapshot().transcript.target,
+    realtimeEnabled: desktopVoiceService.snapshot().realtime.enabled,
+    webRtcSessionId: String(req.headers['x-drone-desktop-voice-webrtc-session-id'] ?? '').slice(0, 80) || null,
+    referer: String(req.headers.referer ?? req.headers.referrer ?? '').slice(0, 200) || null,
+    userAgent: String(req.headers['user-agent'] ?? '').slice(0, 200) || null,
+  });
+  const logDesktopVoiceControl = (req: http.IncomingMessage, action: string, extra?: Record<string, unknown>): void => {
+    hubLog('info', `desktop voice ${action} requested`, {
+      ...desktopVoiceRequestMeta(req),
+      ...(extra ?? {}),
+    });
+  };
+  const createDesktopRealtimeWebRtcSession = async (sdpOffer: string): Promise<OpenAiRealtimeWebRtcAssistantSession> => {
+    const openaiSettings = await resolveEffectiveProviderApiKeySettings('openai');
+    if (!openaiSettings.apiKey) throw new Error('OpenAI API key is not configured. Add it in Drone Hub settings.');
+    const realtimeConfig = await assistantService.realtimeSessionConfig({ source: 'desktop' });
+    let realtimeThreadId = realtimeConfig.threadId;
+    hubLog('info', 'desktop realtime assistant WebRTC session starting', {
+      model: String(process.env.DRONE_HUB_OPENAI_REALTIME_MODEL ?? process.env.OPENAI_REALTIME_MODEL ?? 'gpt-realtime-2'),
+      credentialSource: openaiSettings.source,
+      threadId: realtimeThreadId,
+      toolCount: realtimeConfig.tools.length,
+    });
+    await cancelDesktopRealtimeWebRtcSession();
+    const generation = desktopRealtimeWebRtcSessionGeneration;
+    let createdSession: OpenAiRealtimeWebRtcAssistantSession | null = null;
+    const realtimeCallbacks = desktopVoiceService.createRealtimeAssistantCallbacks();
+    const persistRealtimeTranscript = {
+      onUserTranscriptDelta: async (delta: { text: string }) => {
+        await realtimeCallbacks.onUserTranscriptDelta?.(delta);
+        await assistantService.updateRealtimeStreamingMessage({ threadId: realtimeThreadId, role: 'user', text: delta.text });
+      },
+      onUserTranscript: async (text: string) => {
+        const stopTranscript = realtimeStopTranscript(text);
+        await realtimeCallbacks.onUserTranscript?.(text);
+        if (stopTranscript.stop) {
+          await assistantService.clearRealtimeStreamingMessage({ threadId: realtimeThreadId });
+          if (hasTranscriptContent(stopTranscript.text)) {
+            await assistantService.appendRealtimeMessage({ threadId: realtimeThreadId, role: 'user', text: stopTranscript.text });
+          }
+          return;
+        }
+        await assistantService.appendRealtimeMessage({ threadId: realtimeThreadId, role: 'user', text });
+      },
+      onUserSpeechStarted: async () => {
+        await realtimeCallbacks.onUserSpeechStarted?.();
+        await assistantService.clearRealtimeStreamingMessage({ threadId: realtimeThreadId });
+      },
+      onAssistantTranscriptDelta: async (delta: { text: string }) => {
+        await realtimeCallbacks.onAssistantTranscriptDelta?.(delta);
+        await assistantService.updateRealtimeStreamingMessage({ threadId: realtimeThreadId, role: 'assistant', text: delta.text });
+      },
+      onAssistantTranscript: async (text: string) => {
+        await realtimeCallbacks.onAssistantTranscript?.(text);
+        await assistantService.appendRealtimeMessage({ threadId: realtimeThreadId, role: 'assistant', text });
+      },
+    };
+    const session = await createOpenAiRealtimeWebRtcAssistantSession({
+      apiKey: openaiSettings.apiKey,
+      sdpOffer,
+      instructions: [desktopRealtimeAssistantInstructions(), realtimeConfig.instructions].join('\n\n'),
+      tools: realtimeConfig.tools,
+      executeTool: async (call) => {
+        const result = await assistantService.executeRealtimeTool({
+          threadId: realtimeThreadId,
+          toolCallId: call.id,
+          toolName: call.name,
+          arguments: call.arguments,
+          source: 'desktop',
+        });
+        const nextThreadId = String((result.result as any)?.threadId ?? '').trim();
+        if (nextThreadId) realtimeThreadId = nextThreadId;
+        return result.output;
+      },
+      callbacks: {
+        ...realtimeCallbacks,
+        ...persistRealtimeTranscript,
+        onError: async (message) => {
+          await realtimeCallbacks.onError?.(message);
+          if (createdSession && desktopRealtimeWebRtcSession === createdSession) desktopRealtimeWebRtcSession = null;
+        },
+        onClose: async () => {
+          await realtimeCallbacks.onClose?.();
+          if (createdSession && desktopRealtimeWebRtcSession === createdSession) desktopRealtimeWebRtcSession = null;
+        },
+      },
+    });
+    createdSession = session;
+    const status = desktopVoiceService.snapshot();
+    if (
+      desktopRealtimeWebRtcSessionGeneration !== generation ||
+      status.mode !== 'recording' ||
+      status.transcript.target !== 'assistant' ||
+      status.realtime.enabled !== true
+    ) {
+      await session.cancel();
+      throw new Error('Desktop assistant voice WebRTC setup was cancelled.');
+    }
+    desktopRealtimeWebRtcSession = session;
+    return session;
+  };
   void reloadDesktopVoiceApprovalSettings().catch((error: any) => {
     hubLog('warn', 'Failed to apply desktop voice approval settings', { error: String(error?.message ?? error ?? '') });
   });
   void reloadDesktopVoiceTranscriptionSettings().catch((error: any) => {
     hubLog('warn', 'Failed to apply desktop voice transcription settings', { error: String(error?.message ?? error ?? '') });
+  });
+  void reloadDesktopVoiceRealtimeSettings().catch((error: any) => {
+    hubLog('warn', 'Failed to apply desktop voice realtime settings', { error: String(error?.message ?? error ?? '') });
   });
 
   type VoicePatchState = {
@@ -15633,9 +15805,65 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
+      if (pathname === '/api/assistant/desktop-voice/realtime/webrtc-session' && method === 'POST') {
+        try {
+          logDesktopVoiceControl(req, 'webrtc-session');
+          const status = desktopVoiceService.snapshot();
+          if (status.realtime.enabled !== true) {
+            json(res, 409, { ok: false, error: 'Realtime assistant voice is off.' });
+            return;
+          }
+          if (status.mode !== 'recording' || status.transcript.target !== 'assistant') {
+            json(res, 409, { ok: false, error: 'Desktop assistant voice is not waiting for a realtime WebRTC session.' });
+            return;
+          }
+          const browserSessionId = String(req.headers['x-drone-desktop-voice-webrtc-session-id'] ?? '').trim();
+          if (!desktopVoiceService.isCurrentRealtimeWebRtcBrowserSession(browserSessionId)) {
+            json(res, 409, { ok: false, error: 'Desktop assistant voice WebRTC session is stale.' });
+            return;
+          }
+          const sdpOffer = (await readRawBody(req, { maxBytes: 512 * 1024 })).toString('utf8');
+          if (!sdpOffer.trim()) throw new Error('WebRTC SDP offer is empty.');
+          const session = await createDesktopRealtimeWebRtcSession(sdpOffer);
+          desktopVoiceService.markRealtimeWebRtcAssistantConnected();
+          hubLog('info', 'desktop voice WebRTC session ready', {
+            mode: desktopVoiceService.snapshot().mode,
+            callId: session.callId,
+          });
+          json(res, 200, {
+            ok: true,
+            callId: session.callId,
+            sdpAnswer: session.sdpAnswer,
+          });
+        } catch (e: any) {
+          hubLog('warn', 'desktop voice WebRTC session request failed', {
+            ...desktopVoiceRequestMeta(req),
+            error: e?.message ?? String(e),
+          });
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/desktop-voice/realtime' && method === 'POST') {
+        try {
+          const body = await readJsonBody(req);
+          logDesktopVoiceControl(req, 'realtime-toggle', { enabled: body?.enabled === true });
+          await upsertStoredVoiceRealtimeSettings({ enabled: body?.enabled === true });
+          await reloadDesktopVoiceRealtimeSettings();
+          json(res, 200, desktopVoiceService.snapshot());
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
       if (pathname === '/api/assistant/desktop-voice/toggle' && method === 'POST') {
         try {
-          json(res, 200, desktopVoiceService.toggle());
+          logDesktopVoiceControl(req, 'toggle');
+          const status = desktopVoiceService.toggle();
+          hubLog('info', 'desktop voice toggle completed', { mode: status.mode, target: status.transcript.target });
+          json(res, 200, status);
         } catch (e: any) {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
         }
@@ -15689,8 +15917,73 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
+      if (pathname === '/api/assistant/desktop-voice/off' && method === 'POST') {
+        logDesktopVoiceControl(req, 'off');
+        const status = desktopVoiceService.stop();
+        hubLog('info', 'desktop voice off completed', { mode: status.mode, target: status.transcript.target });
+        json(res, 200, status);
+        return;
+      }
+
       if (pathname === '/api/assistant/desktop-voice/stop' && method === 'POST') {
-        json(res, 200, desktopVoiceService.stop());
+        try {
+          logDesktopVoiceControl(req, 'stop');
+          const status = desktopVoiceService.snapshot();
+          const nextStatus = status.mode === 'recording' || status.mode === 'transcribing'
+            ? await desktopVoiceService.cancelActiveRecording()
+            : desktopVoiceService.stop();
+          hubLog('info', 'desktop voice stop completed', {
+            previousMode: status.mode,
+            behavior: status.mode === 'recording' || status.mode === 'transcribing' ? 'cancel-recording' : 'off',
+            mode: nextStatus.mode,
+            target: nextStatus.transcript.target,
+          });
+          json(res, 200, nextStatus);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/desktop-voice/cancel-recording' && method === 'POST') {
+        try {
+          logDesktopVoiceControl(req, 'cancel-recording');
+          const statusBefore = desktopVoiceService.snapshot();
+          const currentWebRtcSessionId = desktopVoiceService.currentRealtimeWebRtcBrowserSessionId();
+          if (
+            statusBefore.mode === 'recording' &&
+            statusBefore.transcript.target === 'assistant' &&
+            currentWebRtcSessionId &&
+            !desktopVoiceService.isCurrentRealtimeWebRtcBrowserSession(req.headers['x-drone-desktop-voice-webrtc-session-id'])
+          ) {
+            hubLog('info', 'desktop voice stale cancel-recording ignored', {
+              ...desktopVoiceRequestMeta(req),
+              currentWebRtcSessionId,
+            });
+            json(res, 200, statusBefore);
+            return;
+          }
+          const status = await desktopVoiceService.cancelActiveRecording();
+          hubLog('info', 'desktop voice cancel-recording completed', { mode: status.mode, target: status.transcript.target });
+          json(res, 200, status);
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/desktop-voice/client-event' && method === 'POST') {
+        try {
+          const body = await readJsonBody(req);
+          hubLog('info', 'desktop voice browser event', {
+            ...desktopVoiceRequestMeta(req),
+            event: String(body?.event ?? '').slice(0, 120),
+            message: String(body?.message ?? '').slice(0, 500) || null,
+          });
+          json(res, 200, { ok: true });
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
         return;
       }
 
@@ -15717,6 +16010,12 @@ export async function startDroneHubApiServer(opts: {
               contentType: event.contentType,
               audioBase64: event.audioBase64,
             });
+          } else if (event.type === 'desktop_voice_stop_audio') {
+            writeAssistantSseEvent(res, event.type, {});
+          } else if (event.type === 'desktop_voice_webrtc_start') {
+            writeAssistantSseEvent(res, event.type, { sessionId: event.sessionId });
+          } else if (event.type === 'desktop_voice_webrtc_stop') {
+            writeAssistantSseEvent(res, event.type, {});
           } else {
             writeAssistantSseEvent(res, event.type, event.status);
           }
@@ -16637,7 +16936,12 @@ export async function startDroneHubApiServer(opts: {
               await upsertStoredVoiceActivationSettings(body.voiceActivation);
               notifyVoiceApprovalSettingsChanged();
             }
-            if (voiceApprovalPayload == null && body?.voiceTranscription == null && body?.voiceActivation == null) {
+            if (body?.voiceRealtime != null) {
+              await upsertStoredVoiceRealtimeSettings(body.voiceRealtime);
+              await reloadDesktopVoiceRealtimeSettings();
+              notifyVoiceApprovalSettingsChanged();
+            }
+            if (voiceApprovalPayload == null && body?.voiceTranscription == null && body?.voiceActivation == null && body?.voiceRealtime == null) {
               throw new Error('No voice settings payload provided');
             }
             json(res, 200, await resolveVoiceApprovalSettingsResponse());

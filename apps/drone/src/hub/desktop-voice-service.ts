@@ -4,6 +4,7 @@ import { EventEmitter } from 'node:events';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { existsSync, promises as fs } from 'node:fs';
+import crypto from 'node:crypto';
 
 import { type DesktopVoiceClipboardMode, type DesktopVoiceCue, type DesktopVoiceMode } from './desktop-voice-behavior';
 import { PcmRingBuffer } from './pcm-ring-buffer';
@@ -62,6 +63,7 @@ type VoiceClipboardTrace = {
 };
 
 type DesktopVoiceCaptureTarget = 'assistant' | 'patch' | 'clipboard';
+type DesktopVoiceRealtimeTransport = 'websocket' | 'webrtc';
 
 export type DesktopVoiceRealtimeSession = {
   appendPcm: (pcm: Buffer) => void | Promise<void>;
@@ -71,7 +73,10 @@ export type DesktopVoiceRealtimeSession = {
 
 export type DesktopVoiceRealtimeCallbacks = {
   onUserTranscript: (text: string) => void | Promise<void>;
+  onUserTranscriptDelta?: (delta: { text: string; itemId?: string; responseId?: string }) => void | Promise<void>;
+  onUserSpeechStarted: () => void | Promise<void>;
   onAssistantTranscript: (text: string) => void | Promise<void>;
+  onAssistantTranscriptDelta?: (delta: { text: string; itemId?: string; responseId?: string }) => void | Promise<void>;
   onAssistantAudio: (audio: { wav: Buffer; text: string }) => void | Promise<void>;
   onStatus: (message: string) => void | Promise<void>;
   onError: (message: string) => void | Promise<void>;
@@ -115,6 +120,10 @@ type DesktopVoiceStatus = {
   };
   clipboardResultText?: string;
   lastApprovalCode?: string;
+  realtime: {
+    available: boolean;
+    enabled: boolean;
+  };
   capture: {
     active: boolean;
     backend: string | null;
@@ -144,18 +153,29 @@ type DesktopVoiceEvent = {
   text: string;
   contentType: 'audio/wav';
   audioBase64: string;
+} | {
+  type: 'desktop_voice_stop_audio';
+} | {
+  type: 'desktop_voice_webrtc_start';
+  sessionId: string;
+} | {
+  type: 'desktop_voice_webrtc_stop';
 };
 
 type DesktopVoiceServiceOptions = {
   transcribeWav: (wav: Buffer) => Promise<{ text: string; model: string }>;
   submitAssistantPrompt: (prompt: string) => Promise<void>;
   startRealtimeAssistant?: (callbacks: DesktopVoiceRealtimeCallbacks) => Promise<DesktopVoiceRealtimeSession>;
+  realtimeWebRtcAvailable?: boolean;
+  cancelRealtimeWebRtcAssistant?: () => Promise<void>;
+  realtimeWebRtcStartTimeoutMs?: number;
   startChatPatch?: () => Promise<void>;
   submitChatPatch?: (prompt: string) => Promise<void>;
   abortChatPatch?: () => Promise<void>;
   synthesizeSpeechWav?: (text: string) => Promise<Buffer>;
   clipboardRecorder?: ClipboardAudioRecorder;
   voiceTranscription?: VoiceTranscriptionSettings;
+  realtimeAssistantEnabled?: boolean;
 };
 
 const VOSK_WAKE_GRAMMAR = [
@@ -193,6 +213,7 @@ const VOSK_WAKE_GRAMMAR = [
   'nine',
   '[unk]',
 ] as const;
+const REALTIME_ASSISTANT_RETRY_SUPPRESSION_MS = 8_000;
 
 function formatDigitsForSpeech(code: string): string {
   const words: Record<string, string> = {
@@ -282,6 +303,10 @@ function promptPreRollMs(): number {
 
 function desktopVoiceEventReplayLimit(): number {
   return positiveIntEnvValue('DRONE_DESKTOP_VOICE_EVENT_REPLAY_LIMIT', 64);
+}
+
+function realtimeWebRtcStartTimeoutMs(): number {
+  return positiveIntEnvValue('DRONE_DESKTOP_VOICE_WEBRTC_START_TIMEOUT_MS', 12_000);
 }
 
 function pcmBytesForMs(ms: number, sampleRateHz = 16_000, channels = 1): number {
@@ -1047,6 +1072,7 @@ export class DesktopVoiceService {
   private promptTranscriptUpdatedAt: string | null = null;
   private realtimeSession: DesktopVoiceRealtimeSession | null = null;
   private realtimeStarting = false;
+  private realtimeTransport: DesktopVoiceRealtimeTransport | null = null;
   private readonly clipboardRecorder: ClipboardAudioRecorder;
   private clipboardSessionId = 0;
   private clipboardRecordingStartedAtMs = 0;
@@ -1067,10 +1093,14 @@ export class DesktopVoiceService {
   private promptCommandSuppressedUntil = 0;
   private approvalSettings: VoiceApprovalSettings = VOICE_APPROVAL_SETTINGS_DEFAULT;
   private voiceTranscriptionFinalMode: VoiceTranscriptionFinalMode = VOICE_TRANSCRIPTION_SETTINGS_DEFAULT.finalMode;
+  private realtimeAssistantEnabled = false;
+  private realtimeWebRtcStartTimer: NodeJS.Timeout | null = null;
+  private realtimeWebRtcBrowserSessionId: string | null = null;
 
   constructor(private readonly opts: DesktopVoiceServiceOptions) {
     this.clipboardRecorder = opts.clipboardRecorder ?? new ClipboardWavRecorder();
     this.voiceTranscriptionFinalMode = opts.voiceTranscription?.finalMode ?? VOICE_TRANSCRIPTION_SETTINGS_DEFAULT.finalMode;
+    this.realtimeAssistantEnabled = opts.realtimeAssistantEnabled === true;
     this.capture.on('change', () => this.emitChange());
     this.capture.on('audio', (chunk: Buffer) => this.handleAudio(chunk));
     this.capture.on('error-state', (message) => {
@@ -1139,6 +1169,10 @@ export class DesktopVoiceService {
         error: this.clipboardError,
       },
       ...(this.lastApprovalCode ? { lastApprovalCode: this.lastApprovalCode } : {}),
+      realtime: {
+        available: Boolean(this.opts.startRealtimeAssistant || this.opts.realtimeWebRtcAvailable),
+        enabled: this.realtimeAssistantEnabled,
+      },
       capture: this.capture.snapshot(),
     };
   }
@@ -1165,6 +1199,39 @@ export class DesktopVoiceService {
     this.touch();
     this.emitChange();
     return this.snapshot();
+  }
+
+  setRealtimeAssistantEnabled(enabled: boolean): DesktopVoiceStatus {
+    this.realtimeAssistantEnabled = enabled === true && Boolean(this.opts.startRealtimeAssistant || this.opts.realtimeWebRtcAvailable);
+    this.touch();
+    this.emitChange();
+    return this.snapshot();
+  }
+
+  createRealtimeAssistantCallbacks(): DesktopVoiceRealtimeCallbacks {
+    return {
+      onUserTranscript: async (text) => {
+        await this.handleRealtimeUserTranscript(text);
+      },
+      onUserSpeechStarted: async () => {
+        this.handleRealtimeUserSpeechStarted();
+      },
+      onAssistantTranscript: async (text) => {
+        this.handleRealtimeAssistantTranscript(text);
+      },
+      onAssistantAudio: async (audio) => {
+        this.handleRealtimeAssistantAudio(audio);
+      },
+      onStatus: async (message) => {
+        this.handleRealtimeStatus(message);
+      },
+      onError: async (message) => {
+        this.handleRealtimeError(message);
+      },
+      onClose: async () => {
+        this.handleRealtimeClosed();
+      },
+    };
   }
 
   subscribe(listener: (event: DesktopVoiceEvent) => void): () => void {
@@ -1267,6 +1334,32 @@ export class DesktopVoiceService {
     this.touch();
     this.emitChange();
     return this.snapshot();
+  }
+
+  async cancelActiveRecording(): Promise<DesktopVoiceStatus> {
+    if (this.mode === 'recording' || this.mode === 'transcribing') {
+      await this.abortPromptRecordingFromTranscript();
+    }
+    return this.snapshot();
+  }
+
+  markRealtimeWebRtcAssistantConnected(): void {
+    if (this.realtimeTransport !== 'webrtc' || this.mode !== 'recording' || this.promptCaptureTarget !== 'assistant') return;
+    this.clearRealtimeWebRtcStartupTimer();
+    desktopVoiceLog('realtime assistant WebRTC connected');
+    this.message = 'Awake: realtime assistant is listening.';
+    this.touch();
+    this.emitChange();
+  }
+
+  currentRealtimeWebRtcBrowserSessionId(): string | null {
+    return this.realtimeWebRtcBrowserSessionId;
+  }
+
+  isCurrentRealtimeWebRtcBrowserSession(sessionIdRaw: unknown): boolean {
+    const expected = this.realtimeWebRtcBrowserSessionId;
+    const received = String(sessionIdRaw ?? '').trim();
+    return Boolean(expected && received && received === expected);
   }
 
   async toggleClipboardRecording(trace: VoiceClipboardTrace = {}): Promise<DesktopVoiceStatus> {
@@ -1396,6 +1489,10 @@ export class DesktopVoiceService {
     if (this.mode === 'off' || this.mode === 'error') return;
     this.touch();
     this.emitChange();
+    if (this.mode === 'recording' || this.mode === 'transcribing') {
+      desktopVoiceLog('recognizer command ignored while recording', { text, mode: this.mode });
+      return;
+    }
 
     const approvalUpdate = this.approvalRecognizer.accept(text, Date.now());
     this.handleApprovalUpdate(approvalUpdate);
@@ -1529,7 +1626,11 @@ export class DesktopVoiceService {
   }
 
   private async startPromptRecording(target: DesktopVoiceCaptureTarget): Promise<void> {
-    if (target === 'assistant' && this.opts.startRealtimeAssistant) {
+    if (target === 'assistant' && this.realtimeAssistantEnabled && this.opts.realtimeWebRtcAvailable) {
+      await this.startRealtimeWebRtcAssistantRecording();
+      return;
+    }
+    if (target === 'assistant' && this.opts.startRealtimeAssistant && this.realtimeAssistantEnabled) {
       await this.startRealtimeAssistantRecording();
       return;
     }
@@ -1562,6 +1663,7 @@ export class DesktopVoiceService {
   private async startRealtimeAssistantRecording(): Promise<void> {
     const startRealtimeAssistant = this.opts.startRealtimeAssistant;
     if (!startRealtimeAssistant || this.realtimeSession || this.realtimeStarting) return;
+    this.realtimeTransport = 'websocket';
     this.mode = 'recording';
     this.message = 'Awake: starting realtime assistant.';
     this.promptChunks = [];
@@ -1574,26 +1676,7 @@ export class DesktopVoiceService {
     this.emitChange();
 
     try {
-      const session = await startRealtimeAssistant({
-        onUserTranscript: async (text) => {
-          await this.handleRealtimeUserTranscript(text);
-        },
-        onAssistantTranscript: async (text) => {
-          this.handleRealtimeAssistantTranscript(text);
-        },
-        onAssistantAudio: async (audio) => {
-          this.handleRealtimeAssistantAudio(audio);
-        },
-        onStatus: async (message) => {
-          this.handleRealtimeStatus(message);
-        },
-        onError: async (message) => {
-          this.handleRealtimeError(message);
-        },
-        onClose: async () => {
-          this.handleRealtimeClosed();
-        },
-      });
+      const session = await startRealtimeAssistant(this.createRealtimeAssistantCallbacks());
       if (!this.realtimeStarting || this.mode !== 'recording' || this.promptCaptureTarget !== 'assistant') {
         await session.cancel();
         return;
@@ -1610,12 +1693,83 @@ export class DesktopVoiceService {
       this.emitChange();
     } catch (error: any) {
       this.realtimeStarting = false;
+      this.realtimeTransport = null;
       this.realtimeSession = null;
       this.promptChunks = [];
       this.promptCaptureTarget = null;
       this.mode = 'awake';
       this.message = `Realtime assistant failed: ${error?.message ?? String(error)}`;
-      this.suppressPromptCommandsBriefly();
+      desktopVoiceWarn('realtime assistant start failed', { error: error?.message ?? String(error) });
+      this.suppressPromptCommandsBriefly(REALTIME_ASSISTANT_RETRY_SUPPRESSION_MS);
+      this.touch();
+      this.emitChange();
+    }
+  }
+
+  private async startRealtimeWebRtcAssistantRecording(): Promise<void> {
+    if (this.realtimeSession || this.realtimeStarting) return;
+    this.realtimeTransport = 'webrtc';
+    this.realtimeSession = {
+      appendPcm: () => {},
+      stop: async () => {},
+      cancel: async () => {},
+    };
+    this.mode = 'recording';
+    this.message = 'Awake: starting realtime assistant.';
+    this.promptChunks = [];
+    this.promptPreRollBuffer.drain();
+    this.resetPromptTranscription();
+    this.promptCaptureTarget = 'assistant';
+    this.realtimeWebRtcBrowserSessionId = crypto.randomUUID();
+    this.emitLocalCue('wake');
+    desktopVoiceLog('realtime assistant WebRTC browser setup requested', {
+      timeoutMs: this.opts.realtimeWebRtcStartTimeoutMs ?? realtimeWebRtcStartTimeoutMs(),
+      sessionId: this.realtimeWebRtcBrowserSessionId,
+    });
+    this.emitDesktopVoiceEvent({
+      type: 'desktop_voice_webrtc_start',
+      sessionId: this.realtimeWebRtcBrowserSessionId,
+    } satisfies DesktopVoiceEvent);
+    this.startRealtimeWebRtcStartupTimer();
+    this.touch();
+    this.emitChange();
+  }
+
+  private startRealtimeWebRtcStartupTimer(): void {
+    this.clearRealtimeWebRtcStartupTimer();
+    const timeoutMs = this.opts.realtimeWebRtcStartTimeoutMs ?? realtimeWebRtcStartTimeoutMs();
+    this.realtimeWebRtcStartTimer = setTimeout(() => {
+      this.realtimeWebRtcStartTimer = null;
+      void this.handleRealtimeWebRtcStartupTimeout();
+    }, timeoutMs);
+    this.realtimeWebRtcStartTimer.unref?.();
+  }
+
+  private clearRealtimeWebRtcStartupTimer(): void {
+    if (!this.realtimeWebRtcStartTimer) return;
+    clearTimeout(this.realtimeWebRtcStartTimer);
+    this.realtimeWebRtcStartTimer = null;
+  }
+
+  private async handleRealtimeWebRtcStartupTimeout(): Promise<void> {
+    if (this.realtimeTransport !== 'webrtc' || this.mode !== 'recording' || this.promptCaptureTarget !== 'assistant') return;
+    desktopVoiceWarn('realtime assistant WebRTC browser setup timed out');
+    await this.cancelRealtimeSession();
+    this.promptChunks = [];
+    this.resetPromptTranscription();
+    this.promptCaptureTarget = null;
+    this.realtimeWebRtcBrowserSessionId = null;
+    this.mode = 'awake';
+    this.message = 'Awake: realtime assistant WebRTC setup timed out.';
+    this.suppressPromptCommandsBriefly(REALTIME_ASSISTANT_RETRY_SUPPRESSION_MS);
+    this.touch();
+    this.emitChange();
+  }
+
+  private handleRealtimeUserSpeechStarted(): void {
+    this.emitDesktopVoiceEvent({ type: 'desktop_voice_stop_audio' } satisfies DesktopVoiceEvent);
+    if (this.mode === 'recording' && this.promptCaptureTarget === 'assistant') {
+      this.message = 'Awake: realtime assistant is listening.';
       this.touch();
       this.emitChange();
     }
@@ -1624,11 +1778,17 @@ export class DesktopVoiceService {
   private async handleRealtimeUserTranscript(textRaw: string): Promise<void> {
     const text = normalizeTranscriptWhitespace(textRaw);
     if (!hasTranscriptContent(text)) return;
+    const command = stripCommands(text);
+    if (this.realtimeAssistantEnabled && this.mode === 'recording' && this.promptCaptureTarget === 'assistant' && command.sleep) {
+      await this.stopRealtimeRecordingFromTranscript();
+      return;
+    }
     this.promptTranscriptText = this.promptTranscriptText ? `${this.promptTranscriptText}\n${text}` : text;
     this.promptTranscriptUpdatedAt = new Date().toISOString();
     this.emitDesktopVoiceEvent({ type: 'desktop_voice_transcript_segment', text } satisfies DesktopVoiceEvent);
     this.touch();
     this.emitChange();
+    if (this.realtimeAssistantEnabled) return;
     try {
       await this.opts.submitAssistantPrompt(text);
     } catch (error: any) {
@@ -1637,6 +1797,21 @@ export class DesktopVoiceService {
       this.touch();
       this.emitChange();
     }
+  }
+
+  private async stopRealtimeRecordingFromTranscript(): Promise<void> {
+    await this.cancelRealtimeSession();
+    this.promptChunks = [];
+    this.promptSegments = [];
+    this.promptSegmenter.reset();
+    this.promptTranscribing = false;
+    this.promptTranscriptText = '';
+    this.promptCaptureTarget = null;
+    this.mode = 'awake';
+    this.message = 'Awake: realtime assistant stopped.';
+    this.suppressPromptCommandsBriefly();
+    this.touch();
+    this.emitChange();
   }
 
   private handleRealtimeAssistantTranscript(textRaw: string): void {
@@ -1660,6 +1835,7 @@ export class DesktopVoiceService {
   private handleRealtimeStatus(messageRaw: string): void {
     const message = normalizeTranscriptWhitespace(messageRaw);
     if (!message || this.mode !== 'recording' || this.promptCaptureTarget !== 'assistant') return;
+    if (this.realtimeTransport === 'webrtc') this.clearRealtimeWebRtcStartupTimer();
     this.message = `Awake: ${message.charAt(0).toLowerCase()}${message.slice(1)}`;
     this.touch();
     this.emitChange();
@@ -1667,26 +1843,36 @@ export class DesktopVoiceService {
 
   private handleRealtimeError(messageRaw: string): void {
     const message = normalizeTranscriptWhitespace(messageRaw) || 'OpenAI Realtime failed.';
+    this.clearRealtimeWebRtcStartupTimer();
+    if (this.realtimeTransport === 'webrtc') this.emitDesktopVoiceEvent({ type: 'desktop_voice_webrtc_stop' } satisfies DesktopVoiceEvent);
     this.realtimeSession = null;
     this.realtimeStarting = false;
+    this.realtimeTransport = null;
+    this.realtimeWebRtcBrowserSessionId = null;
     this.promptChunks = [];
     this.promptCaptureTarget = null;
     this.mode = 'awake';
     this.message = `Realtime assistant failed: ${message}`;
-    this.suppressPromptCommandsBriefly();
+    desktopVoiceWarn('realtime assistant error', { error: message });
+    this.suppressPromptCommandsBriefly(REALTIME_ASSISTANT_RETRY_SUPPRESSION_MS);
     this.touch();
     this.emitChange();
   }
 
   private handleRealtimeClosed(): void {
+    this.clearRealtimeWebRtcStartupTimer();
+    if (this.realtimeTransport === 'webrtc') this.emitDesktopVoiceEvent({ type: 'desktop_voice_webrtc_stop' } satisfies DesktopVoiceEvent);
     this.realtimeSession = null;
     this.realtimeStarting = false;
+    this.realtimeTransport = null;
+    this.realtimeWebRtcBrowserSessionId = null;
     this.promptChunks = [];
     if (this.mode === 'recording' && this.promptCaptureTarget === 'assistant') {
+      desktopVoiceWarn('realtime assistant closed while recording');
       this.mode = 'awake';
       this.message = 'Awake: realtime assistant ended.';
       this.promptCaptureTarget = null;
-      this.suppressPromptCommandsBriefly();
+      this.suppressPromptCommandsBriefly(REALTIME_ASSISTANT_RETRY_SUPPRESSION_MS);
       this.touch();
       this.emitChange();
     }
@@ -1824,10 +2010,22 @@ export class DesktopVoiceService {
   }
 
   private async cancelRealtimeSession(): Promise<boolean> {
+    this.clearRealtimeWebRtcStartupTimer();
     const session = this.realtimeSession;
     const wasRealtime = Boolean(session || this.realtimeStarting);
+    const transport = this.realtimeTransport;
     this.realtimeSession = null;
     this.realtimeStarting = false;
+    this.realtimeTransport = null;
+    this.realtimeWebRtcBrowserSessionId = null;
+    if (transport === 'webrtc') {
+      this.emitDesktopVoiceEvent({ type: 'desktop_voice_webrtc_stop' } satisfies DesktopVoiceEvent);
+      try {
+        await this.opts.cancelRealtimeWebRtcAssistant?.();
+      } catch (error: any) {
+        desktopVoiceWarn('realtime assistant WebRTC cancel failed', { error: error?.message ?? String(error) });
+      }
+    }
     if (session) {
       try {
         await session.cancel();
@@ -1983,8 +2181,9 @@ export class DesktopVoiceService {
     this.emitChange();
   }
 
-  private suppressPromptCommandsBriefly(): void {
-    this.promptCommandSuppressedUntil = Date.now() + Math.max(0, this.approvalSettings.postPromptCommandSuppressionMs);
+  private suppressPromptCommandsBriefly(msRaw?: number): void {
+    const ms = msRaw == null ? this.approvalSettings.postPromptCommandSuppressionMs : msRaw;
+    this.promptCommandSuppressedUntil = Date.now() + Math.max(0, ms);
   }
 
   private async stopClipboardRecording(): Promise<string | null> {
@@ -2107,7 +2306,14 @@ export class DesktopVoiceService {
   }
 
   private emitDesktopVoiceEvent(event: DesktopVoiceEvent): void {
-    if (event.type !== 'desktop_voice_status') this.bufferEventForReplay(event);
+    if (
+      event.type !== 'desktop_voice_status' &&
+      event.type !== 'desktop_voice_stop_audio' &&
+      event.type !== 'desktop_voice_webrtc_start' &&
+      event.type !== 'desktop_voice_webrtc_stop'
+    ) {
+      this.bufferEventForReplay(event);
+    }
     this.events.emit('event', event);
   }
 

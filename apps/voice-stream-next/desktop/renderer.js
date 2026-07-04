@@ -3770,7 +3770,6 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
     void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'ignored', reason: 'assistant playback' });
     return;
   }
-  if (state.mode !== 'sleeping' && acceptApprovalText(text, finalizeNow)) return;
   if (state.mode === 'recording') {
     showStatus('Recording. Wake commands are ignored until capture stops.');
     void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'ignored', reason: 'recording' });
@@ -3783,6 +3782,7 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
     void logDesktopEvent('info', 'Wake phrase ignored while recording is paused', { text });
     return;
   }
+  if (state.mode !== 'sleeping' && acceptApprovalText(text, finalizeNow)) return;
   if (state.mode === 'sleeping') {
     const sleepMatch = stableSleepPhraseMatch(text, settings, finalResult);
     if (sleepMatch.status === 'matched') {

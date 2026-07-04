@@ -184,6 +184,38 @@ describe('DesktopVoiceService', () => {
     expect(service.snapshot().message).toContain('Sleep:');
   });
 
+  test('ignores recognizer commands while a prompt is already recording', () => {
+    let realtimeStarts = 0;
+    const service = new DesktopVoiceService({
+      transcribeWav: async () => ({ text: '', model: 'test' }),
+      submitAssistantPrompt: async () => {},
+      realtimeAssistantEnabled: true,
+      startRealtimeAssistant: async () => {
+        realtimeStarts += 1;
+        return {
+          appendPcm: () => {},
+          stop: async () => {},
+          cancel: async () => {},
+        };
+      },
+    });
+    (service as any).mode = 'recording';
+    (service as any).promptCaptureTarget = 'assistant';
+    (service as any).message = 'Awake: recording assistant voice prompt.';
+
+    (service as any).handleRecognizedText('hey sebastian', true);
+    (service as any).handleRecognizedText('status', true);
+    (service as any).handleRecognizedText(`approval code ${VOICE_APPROVAL_SETTINGS_DEFAULT.lockedOffCode}`, true);
+    (service as any).handleRecognizedText('go to sleep', true);
+
+    const status = service.snapshot();
+    expect(status.mode).toBe('recording');
+    expect(status.transcript.target).toBe('assistant');
+    expect(status.message).toBe('Awake: recording assistant voice prompt.');
+    expect(status.lastApprovalCode).toBeUndefined();
+    expect(realtimeStarts).toBe(0);
+  });
+
   test('awake legacy lock code no longer changes desktop voice mode', () => {
     const service = new DesktopVoiceService({
       transcribeWav: async () => ({ text: '', model: 'test' }),
@@ -553,6 +585,7 @@ describe('DesktopVoiceService', () => {
       submitAssistantPrompt: async (prompt) => {
         submitted.push(prompt);
       },
+      realtimeAssistantEnabled: true,
       startRealtimeAssistant: async (cb) => {
         callbacks = cb;
         return {
@@ -575,15 +608,213 @@ describe('DesktopVoiceService', () => {
     (service as any).handleAudio(liveAudio);
     await callbacks.onUserTranscript('check the build');
     await callbacks.onAssistantAudio({ wav: Buffer.from('assistant-wav'), text: 'On it.' });
+    await callbacks.onUserSpeechStarted();
     unsubscribe();
 
     expect(service.snapshot().mode).toBe('recording');
     expect(service.snapshot().transcript.target).toBe('assistant');
     expect(appended).toEqual([preRoll, liveAudio]);
-    expect(submitted).toEqual(['check the build']);
+    expect(submitted).toEqual([]);
     expect(events.some((event) => event.type === 'desktop_voice_transcript_segment' && event.text === 'check the build')).toBe(true);
     const audioEvent = events.find((event) => event.type === 'desktop_voice_speak_audio');
     expect(audioEvent?.audioBase64).toBe(Buffer.from('assistant-wav').toString('base64'));
+    expect(events.some((event) => event.type === 'desktop_voice_stop_audio')).toBe(true);
+  });
+
+  test('starts browser WebRTC realtime capture when available', async () => {
+    let websocketStarts = 0;
+    let webrtcCancels = 0;
+    const service = new DesktopVoiceService({
+      transcribeWav: async () => ({ text: 'should not transcribe', model: 'test' }),
+      submitAssistantPrompt: async () => {},
+      realtimeAssistantEnabled: true,
+      realtimeWebRtcAvailable: true,
+      cancelRealtimeWebRtcAssistant: async () => {
+        webrtcCancels += 1;
+      },
+      startRealtimeAssistant: async () => {
+        websocketStarts += 1;
+        return {
+          appendPcm: () => {},
+          stop: async () => {},
+          cancel: async () => {},
+        };
+      },
+    });
+    const events: any[] = [];
+    const unsubscribe = service.subscribe((event) => events.push(event));
+    (service as any).mode = 'awake';
+
+    await (service as any).startPromptRecording('assistant');
+    (service as any).handleAudio(Buffer.alloc(320, 7));
+    await (service as any).abortPromptRecordingFromTranscript();
+    unsubscribe();
+
+    expect(websocketStarts).toBe(0);
+    expect(webrtcCancels).toBe(1);
+    expect(service.snapshot().mode).toBe('awake');
+    expect(events.some((event) => event.type === 'desktop_voice_webrtc_start')).toBe(true);
+    expect(events.some((event) => event.type === 'desktop_voice_webrtc_stop')).toBe(true);
+  });
+
+  test('that is it stops realtime capture without submitting a prompt', async () => {
+    let webrtcCancels = 0;
+    let submitted = 0;
+    const service = new DesktopVoiceService({
+      transcribeWav: async () => ({ text: 'should not transcribe', model: 'test' }),
+      submitAssistantPrompt: async () => {
+        submitted += 1;
+      },
+      realtimeAssistantEnabled: true,
+      realtimeWebRtcAvailable: true,
+      cancelRealtimeWebRtcAssistant: async () => {
+        webrtcCancels += 1;
+      },
+    });
+    const events: any[] = [];
+    const unsubscribe = service.subscribe((event) => events.push(event));
+    (service as any).mode = 'recording';
+    (service as any).promptCaptureTarget = 'assistant';
+    (service as any).realtimeTransport = 'webrtc';
+    (service as any).realtimeStarting = true;
+
+    await service.createRealtimeAssistantCallbacks().onUserTranscript("that's it");
+    unsubscribe();
+
+    expect(webrtcCancels).toBe(1);
+    expect(submitted).toBe(0);
+    expect(service.snapshot().mode).toBe('awake');
+    expect(service.snapshot().transcript.target).toBe(null);
+    expect(service.snapshot().message).toBe('Awake: realtime assistant stopped.');
+    expect(events.some((event) => event.type === 'desktop_voice_webrtc_stop')).toBe(true);
+    expect(events.some((event) => event.type === 'desktop_voice_transcript_segment')).toBe(false);
+  });
+
+  test('cancels browser WebRTC realtime capture when setup never connects', async () => {
+    let webrtcCancels = 0;
+    const service = new DesktopVoiceService({
+      transcribeWav: async () => ({ text: 'should not transcribe', model: 'test' }),
+      submitAssistantPrompt: async () => {},
+      realtimeAssistantEnabled: true,
+      realtimeWebRtcAvailable: true,
+      realtimeWebRtcStartTimeoutMs: 5,
+      cancelRealtimeWebRtcAssistant: async () => {
+        webrtcCancels += 1;
+      },
+    });
+    const events: any[] = [];
+    const unsubscribe = service.subscribe((event) => events.push(event));
+    (service as any).mode = 'awake';
+
+    await (service as any).startPromptRecording('assistant');
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    unsubscribe();
+
+    expect(webrtcCancels).toBe(1);
+    expect(service.snapshot().mode).toBe('awake');
+    expect(service.snapshot().transcript.target).toBe(null);
+    expect(service.snapshot().message).toBe('Awake: realtime assistant WebRTC setup timed out.');
+    expect(events.some((event) => event.type === 'desktop_voice_webrtc_start')).toBe(true);
+    expect(events.some((event) => event.type === 'desktop_voice_webrtc_stop')).toBe(true);
+  });
+
+  test('keeps browser WebRTC realtime capture active after setup connects', async () => {
+    let webrtcCancels = 0;
+    const service = new DesktopVoiceService({
+      transcribeWav: async () => ({ text: 'should not transcribe', model: 'test' }),
+      submitAssistantPrompt: async () => {},
+      realtimeAssistantEnabled: true,
+      realtimeWebRtcAvailable: true,
+      realtimeWebRtcStartTimeoutMs: 5,
+      cancelRealtimeWebRtcAssistant: async () => {
+        webrtcCancels += 1;
+      },
+    });
+    (service as any).mode = 'awake';
+
+    await (service as any).startPromptRecording('assistant');
+    service.markRealtimeWebRtcAssistantConnected();
+    await new Promise((resolve) => setTimeout(resolve, 25));
+
+    expect(webrtcCancels).toBe(0);
+    expect(service.snapshot().mode).toBe('recording');
+    expect(service.snapshot().transcript.target).toBe('assistant');
+    expect(service.snapshot().message).toBe('Awake: realtime assistant is listening.');
+  });
+
+  test('cancel active recording keeps desktop voice awake instead of off', async () => {
+    let webrtcCancels = 0;
+    const service = new DesktopVoiceService({
+      transcribeWav: async () => ({ text: 'should not transcribe', model: 'test' }),
+      submitAssistantPrompt: async () => {},
+      realtimeAssistantEnabled: true,
+      realtimeWebRtcAvailable: true,
+      cancelRealtimeWebRtcAssistant: async () => {
+        webrtcCancels += 1;
+      },
+    });
+    (service as any).mode = 'awake';
+
+    await (service as any).startPromptRecording('assistant');
+    const status = await service.cancelActiveRecording();
+
+    expect(webrtcCancels).toBe(1);
+    expect(status.mode).toBe('awake');
+    expect(status.transcript.target).toBe(null);
+    expect(status.supportsWakeWords).toBe(false);
+  });
+
+  test('uses normal assistant prompt capture when realtime assistant is disabled', async () => {
+    let realtimeStarts = 0;
+    const service = new DesktopVoiceService({
+      transcribeWav: async () => ({ text: '', model: 'test' }),
+      submitAssistantPrompt: async () => {},
+      startRealtimeAssistant: async () => {
+        realtimeStarts += 1;
+        return {
+          appendPcm: () => {},
+          stop: async () => {},
+          cancel: async () => {},
+        };
+      },
+    });
+    (service as any).mode = 'awake';
+
+    await (service as any).startPromptRecording('assistant');
+
+    expect(realtimeStarts).toBe(0);
+    expect(service.snapshot().mode).toBe('recording');
+    expect(service.snapshot().realtime).toEqual({ available: true, enabled: false });
+  });
+
+  test('can suppress normal assistant prompt submit for direct realtime tools', async () => {
+    const submitted: string[] = [];
+    let callbacks: any = null;
+    const service = new DesktopVoiceService({
+      transcribeWav: async () => ({ text: '', model: 'test' }),
+      submitAssistantPrompt: async (prompt) => {
+        submitted.push(prompt);
+      },
+      realtimeAssistantEnabled: true,
+      startRealtimeAssistant: async (cb) => {
+        callbacks = cb;
+        return {
+          appendPcm: () => {},
+          stop: async () => {},
+          cancel: async () => {},
+        };
+      },
+    });
+    const events: any[] = [];
+    const unsubscribe = service.subscribe((event) => events.push(event));
+    (service as any).mode = 'awake';
+
+    await (service as any).startPromptRecording('assistant');
+    await callbacks.onUserTranscript('list my drones');
+    unsubscribe();
+
+    expect(submitted).toEqual([]);
+    expect(events.some((event) => event.type === 'desktop_voice_transcript_segment' && event.text === 'list my drones')).toBe(true);
   });
 
   test('cancels realtime assistant capture without transcribing buffered audio', async () => {
@@ -595,6 +826,7 @@ describe('DesktopVoiceService', () => {
         return { text: 'ignored', model: 'test' };
       },
       submitAssistantPrompt: async () => {},
+      realtimeAssistantEnabled: true,
       startRealtimeAssistant: async () => ({
         appendPcm: () => {},
         stop: async () => {},

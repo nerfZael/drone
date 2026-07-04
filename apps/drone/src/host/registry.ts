@@ -201,6 +201,10 @@ type DroneRegistryV1 = {
       realTimeAliases?: string[];
       updatedAt?: string;
     };
+    voiceRealtime?: {
+      enabled?: boolean;
+      updatedAt?: string;
+    };
     filesystem?: {
       uploadMaxBytes?: number;
       updatedAt?: string;

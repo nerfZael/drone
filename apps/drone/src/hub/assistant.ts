@@ -498,6 +498,32 @@ export type AssistantToolSummary = {
   category: 'context' | 'prompts' | 'files' | 'chats' | 'drones' | 'actions';
 };
 
+export type AssistantRealtimeFunctionTool = {
+  type: 'function';
+  name: string;
+  description?: string;
+  parameters: Record<string, unknown>;
+};
+
+export type AssistantRealtimeSessionConfig = {
+  ok: true;
+  threadId: string;
+  created: boolean;
+  instructions: string;
+  tools: AssistantRealtimeFunctionTool[];
+};
+
+export type AssistantRealtimeToolExecutionResult = {
+  ok: true;
+  threadId: string;
+  toolCallId: string;
+  toolName: string;
+  output: string;
+  result: unknown;
+};
+
+export type AssistantRealtimeMessageRole = 'user' | 'assistant';
+
 export type AssistantSystemPromptSettings = {
   ok: true;
   assistantSystemPrompt: {
@@ -611,7 +637,7 @@ const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Creating or cloning drones and creating chats do not require approval, and assistant-created drones must use the container (Docker) runtime. Renaming drones, changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
   'File write tools require write access to the target drone and should be used carefully for concrete code or content edits.',
   'If an approval-gated write tool returns successfully, the user already approved that action. Do not ask for the same approval again.',
-  'Voice threads can use speak to send short spoken replies back to the voice device that started the request.',
+  'Realtime threads can use speak to send short spoken replies back to the voice device that started the request.',
   'When creating a drone, omit fields you want inherited from the current open drone. Runtime is always container even if the source drone uses host runtime. Only set repoBranchSource=remote when the user asked for a remote branch and you have a remoteBranch value.',
   'Use clone_drone when the user asks for a copy of an existing ready container drone. Create and clone return after the new drone is ready; if you provided an initial message, subscribe to the new drone default chat when you need to resume after the drone responds.',
   'Do not claim a drone completed work unless the drone transcript or user says so.',
@@ -794,6 +820,34 @@ function makeAssistantUserMessage(prompt: string): any {
   return {
     role: 'user',
     content: [{ type: 'text', text: prompt }],
+    timestamp: Date.now(),
+  };
+}
+
+function makeAssistantTextMessage(role: AssistantRealtimeMessageRole, text: string): any {
+  return {
+    role,
+    content: [{ type: 'text', text }],
+    timestamp: Date.now(),
+  };
+}
+
+function makeAssistantToolCallMessage(toolCallId: string, toolName: string, args: unknown): any {
+  return {
+    role: 'assistant',
+    content: [{ type: 'toolCall', id: toolCallId, name: toolName, arguments: sanitizeMessage(args) }],
+    timestamp: Date.now(),
+  };
+}
+
+function makeAssistantToolResultMessage(toolCallId: string, toolName: string, result: unknown, error?: unknown): any {
+  const errorText = cleanOptionalString(error);
+  return {
+    role: 'toolResult',
+    content: [{ type: 'text', text: errorText || assistantRealtimeToolOutput(result) }],
+    toolName,
+    toolCallId,
+    ...(errorText ? { isError: true, errorMessage: errorText } : {}),
     timestamp: Date.now(),
   };
 }
@@ -1860,6 +1914,58 @@ function sanitizeMessage(message: any): any {
   return JSON.parse(JSON.stringify(message));
 }
 
+function jsonCloneObject(raw: unknown): Record<string, unknown> {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { type: 'object', properties: {}, required: [] };
+  try {
+    const cloned = JSON.parse(JSON.stringify(raw));
+    return cloned && typeof cloned === 'object' && !Array.isArray(cloned)
+      ? cloned
+      : { type: 'object', properties: {}, required: [] };
+  } catch {
+    return { type: 'object', properties: {}, required: [] };
+  }
+}
+
+function assistantRealtimeToolDefinition(tool: any): AssistantRealtimeFunctionTool {
+  return {
+    type: 'function',
+    name: String(tool?.name ?? '').trim(),
+    ...(String(tool?.description ?? '').trim() ? { description: String(tool.description).trim() } : {}),
+    parameters: jsonCloneObject(tool?.parameters),
+  };
+}
+
+function parseAssistantRealtimeToolArguments(raw: unknown): unknown {
+  if (raw == null || raw === '') return {};
+  if (typeof raw === 'string') {
+    try {
+      const parsed = JSON.parse(raw);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return raw && typeof raw === 'object' ? raw : {};
+}
+
+function assistantRealtimeToolOutput(value: unknown): string {
+  const result = value && typeof value === 'object' ? value as any : {};
+  const content = Array.isArray(result.content) ? result.content : [];
+  const text = content
+    .map((part: any) => (part?.type === 'text' ? String(part.text ?? '') : ''))
+    .filter(Boolean)
+    .join('\n\n');
+  const payload = {
+    ...(text ? { text } : {}),
+    result: result.details ?? value,
+  };
+  try {
+    return JSON.stringify(sanitizeMessage(payload)).slice(0, 30_000);
+  } catch {
+    return String(text || value || '').slice(0, 30_000);
+  }
+}
+
 function makeAssistantAccessScope(input?: { readMode?: unknown; writeMode?: unknown; droneIds?: unknown; updatedAt?: unknown }): AssistantAccessScope {
   const readMode = String(input?.readMode ?? '').trim().toLowerCase() === 'selected' ? 'selected' : 'all';
   const writeMode = String(input?.writeMode ?? '').trim().toLowerCase() === 'selected' ? 'selected' : 'all';
@@ -2720,7 +2826,7 @@ export class HubAssistantService {
     const thread = this.makeThread({
       provider,
       model: defaultModelForProvider(provider),
-      title: String(input?.title ?? '').trim() || 'Voice thread',
+      title: String(input?.title ?? '').trim() || 'Realtime thread',
       voiceEnabled: true,
       accessScope: this.defaultAccessScopeForNewThread({ voiceEnabled: true }),
     });
@@ -2734,7 +2840,7 @@ export class HubAssistantService {
     await this.ensureLoaded();
     const previousThread = this.getThread(threadId);
     const voiceEnabled = normalizeAssistantVoiceEnabled(previousThread.voiceEnabled);
-    const title = cleanOptionalString(input?.title) || (voiceEnabled ? 'Voice thread' : DEFAULT_THREAD_TITLE);
+    const title = cleanOptionalString(input?.title) || (voiceEnabled ? 'Realtime thread' : DEFAULT_THREAD_TITLE);
     const thread = this.makeThread({
       provider: previousThread.provider,
       model: previousThread.model,
@@ -3634,6 +3740,152 @@ export class HubAssistantService {
     }
   }
 
+  async realtimeSessionConfig(input?: { source?: AssistantVoiceSource | null; title?: unknown }): Promise<AssistantRealtimeSessionConfig> {
+    const voiceThread = await this.ensureLatestVoiceThread({ title: input?.title ?? 'Desktop realtime thread' });
+    const runtime = await this.runtime();
+    const tools = this.buildTools(runtime, voiceThread.threadId, input?.source ?? null)
+      .filter((tool: any) => String(tool?.name ?? '') !== 'speak')
+      .map(assistantRealtimeToolDefinition)
+      .filter((tool) => tool.name);
+    const instructions = [
+      this.systemPrompt(voiceThread.threadId),
+      'You are speaking directly through OpenAI Realtime audio. Keep spoken replies short and natural.',
+      'Use the available Drone Hub tools directly when they are needed. Do not say you are sending the request to another assistant unless a tool result explicitly says it queued work.',
+      'Do not call a speak tool; audio output is already handled by the Realtime session.',
+    ].join('\n\n');
+    return {
+      ok: true,
+      threadId: voiceThread.threadId,
+      created: voiceThread.created,
+      instructions,
+      tools,
+    };
+  }
+
+  async appendRealtimeMessage(input: {
+    threadId?: unknown;
+    role?: unknown;
+    text?: unknown;
+  }): Promise<{ ok: true; threadId: string; accepted: boolean }> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(input.threadId) || (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
+    const thread = this.getThread(threadId);
+    const roleRaw = cleanOptionalString(input.role).toLowerCase();
+    const role: AssistantRealtimeMessageRole = roleRaw === 'assistant' ? 'assistant' : 'user';
+    const text = cleanOptionalString(input.text);
+    if (!text) return { ok: true, threadId: thread.id, accepted: false };
+
+    const streaming = this.streamingMessages.get(thread.id);
+    if (streaming?.role === role) this.streamingMessages.delete(thread.id);
+    thread.messages.push(sanitizeMessage(makeAssistantTextMessage(role, text)));
+    thread.messages = thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
+    if (thread.title === DEFAULT_THREAD_TITLE || thread.title === 'Voice thread' || thread.title === 'Realtime thread' || thread.title === 'Desktop realtime voice thread' || thread.title === 'Desktop realtime thread') {
+      const firstUser = thread.messages.find((message) => message?.role === 'user');
+      if (firstUser) thread.title = titleFromPrompt(textFromMessage(firstUser));
+    }
+    thread.updatedAt = nowIso();
+    this.activeThreadId = thread.id;
+    this.emitChange('realtime_message_appended', thread.id);
+    await this.persist();
+    return { ok: true, threadId: thread.id, accepted: true };
+  }
+
+  async updateRealtimeStreamingMessage(input: {
+    threadId?: unknown;
+    role?: unknown;
+    text?: unknown;
+  }): Promise<{ ok: true; threadId: string; accepted: boolean }> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(input.threadId) || (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
+    const thread = this.getThread(threadId);
+    const roleRaw = cleanOptionalString(input.role).toLowerCase();
+    const role: AssistantRealtimeMessageRole = roleRaw === 'assistant' ? 'assistant' : 'user';
+    const text = cleanOptionalString(input.text);
+    if (!text) return { ok: true, threadId: thread.id, accepted: false };
+
+    this.streamingMessages.set(thread.id, sanitizeMessage(makeAssistantTextMessage(role, text)));
+    thread.updatedAt = nowIso();
+    this.activeThreadId = thread.id;
+    this.emitChange('realtime_streaming_message', thread.id);
+    return { ok: true, threadId: thread.id, accepted: true };
+  }
+
+  async clearRealtimeStreamingMessage(input?: { threadId?: unknown }): Promise<{ ok: true; threadId: string; cleared: boolean }> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(input?.threadId) || (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
+    const thread = this.getThread(threadId);
+    const cleared = this.streamingMessages.delete(thread.id);
+    if (cleared) this.emitChange('realtime_streaming_message_cleared', thread.id);
+    return { ok: true, threadId: thread.id, cleared };
+  }
+
+  async executeRealtimeTool(input: {
+    threadId?: unknown;
+    toolCallId?: unknown;
+    toolName?: unknown;
+    arguments?: unknown;
+    source?: AssistantVoiceSource | null;
+    signal?: AbortSignal;
+  }): Promise<AssistantRealtimeToolExecutionResult> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(input.threadId) || (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
+    const thread = this.getThread(threadId);
+    const toolName = cleanOptionalString(input.toolName);
+    if (!toolName) throw new Error('missing realtime tool name');
+    if (!thread.enabledTools.includes(toolName)) throw new Error(`assistant tool is not enabled: ${toolName}`);
+
+    const runtime = await this.runtime();
+    const tools = this.buildTools(runtime, thread.id, input.source ?? null);
+    const tool = tools.find((item: any) => String(item?.name ?? '') === toolName);
+    if (!tool || toolName === 'speak') throw new Error(`assistant realtime tool unavailable: ${toolName}`);
+
+    const toolCallId = cleanOptionalString(input.toolCallId) || makeAssistantId('realtime-tool');
+    const args = parseAssistantRealtimeToolArguments(input.arguments);
+    const alreadyHasToolCall = thread.messages.some((message) =>
+      message?.role === 'assistant' &&
+      Array.isArray(message?.content) &&
+      message.content.some((part: any) => part?.type === 'toolCall' && String(part?.id ?? '') === toolCallId),
+    );
+    if (!alreadyHasToolCall) {
+      thread.messages.push(sanitizeMessage(makeAssistantToolCallMessage(toolCallId, toolName, args)));
+      thread.messages = thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
+      thread.updatedAt = nowIso();
+      await this.persist();
+    }
+
+    try {
+      const before = await this.beforeToolCall(
+        thread.id,
+        { toolCall: { id: toolCallId, name: toolName }, args },
+        undefined,
+        input.signal,
+      );
+      if (before?.block) throw new Error(before.reason || `assistant tool blocked: ${toolName}`);
+
+      const result = await tool.execute(toolCallId, args, input.signal);
+      thread.messages.push(sanitizeMessage(makeAssistantToolResultMessage(toolCallId, toolName, result)));
+      thread.messages = thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
+      thread.updatedAt = nowIso();
+      await this.persist();
+      return {
+        ok: true,
+        threadId: thread.id,
+        toolCallId,
+        toolName,
+        output: assistantRealtimeToolOutput(result),
+        result: sanitizeMessage(result?.details ?? result),
+      };
+    } catch (error: any) {
+      const message = cleanOptionalString(error?.message ?? error) || `${toolName} failed.`;
+      thread.messages.push(sanitizeMessage(makeAssistantToolResultMessage(toolCallId, toolName, { ok: false, error: message }, message)));
+      thread.messages = thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
+      thread.updatedAt = nowIso();
+      thread.error = message;
+      await this.persist();
+      throw error;
+    }
+  }
+
   private buildTools(
     runtime: AssistantRuntime,
     threadId: string,
@@ -3848,7 +4100,7 @@ export class HubAssistantService {
         name: 'create_new_thread',
         label: 'Create new thread',
         description:
-          'Open a fresh assistant thread. Only use this after the user explicitly asks to start, open, create, clear, reset, or switch to a new assistant thread or session. In voice mode, the new voice thread becomes the default target for future voice transcriptions.',
+          'Open a fresh assistant thread. Only use this after the user explicitly asks to start, open, create, clear, reset, or switch to a new assistant thread or session. In realtime mode, the new realtime thread becomes the default target for future voice transcriptions.',
         parameters: Type.Object({
           title: Type.Optional(Type.String({ description: 'Optional title for the new thread. Omit unless the user gave a title.' })),
         }),
@@ -3860,7 +4112,7 @@ export class HubAssistantService {
               {
                 type: 'text',
                 text: result.thread.voiceEnabled
-                  ? `Created a new voice thread: ${result.thread.title}. Future voice transcriptions will use it by default.`
+                  ? `Created a new realtime thread: ${result.thread.title}. Future voice transcriptions will use it by default.`
                   : `Created a new assistant thread: ${result.thread.title}.`,
               },
             ],

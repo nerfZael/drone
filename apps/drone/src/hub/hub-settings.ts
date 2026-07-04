@@ -142,6 +142,7 @@ export type VoiceApprovalSettingsSource = 'settings' | 'default';
 export type VoiceTranscriptionFinalMode = 'full-recording' | 'segments';
 export type VoiceTranscriptionSettingsSource = 'settings' | 'default';
 export type VoiceActivationSettingsSource = 'settings' | 'default';
+export type VoiceRealtimeSettingsSource = 'settings' | 'default';
 export type VoiceApprovalSettings = {
   triggerPhrase: string;
   unlockCode: string;
@@ -172,6 +173,13 @@ export type VoiceActivationSettings = {
 };
 export type EffectiveVoiceActivationSettings = VoiceActivationSettings & {
   source: VoiceActivationSettingsSource;
+  updatedAt: string | null;
+};
+export type VoiceRealtimeSettings = {
+  enabled: boolean;
+};
+export type EffectiveVoiceRealtimeSettings = VoiceRealtimeSettings & {
+  source: VoiceRealtimeSettingsSource;
   updatedAt: string | null;
 };
 export type { KanbanBoardTaskType, KanbanBoardCard, KanbanBoardLane, KanbanBoardSettings };
@@ -250,6 +258,9 @@ export const VOICE_TRANSCRIPTION_SETTINGS_DEFAULT: VoiceTranscriptionSettings = 
 export const VOICE_ACTIVATION_SETTINGS_DEFAULT: VoiceActivationSettings = {
   normalAliases: ['hey Sebastian', 'hay Sebastian'],
   realTimeAliases: ['Sebastian enter real-time mode', 'Sebastian enter realtime mode'],
+};
+export const VOICE_REALTIME_SETTINGS_DEFAULT: VoiceRealtimeSettings = {
+  enabled: false,
 };
 export const VOICE_APPROVAL_SETTINGS_LIMITS = {
   triggerPhraseMaxChars: 64,
@@ -524,6 +535,13 @@ function parseVoiceActivationSettings(raw: unknown, opts?: { fallbackEmpty?: boo
   return { normalAliases, realTimeAliases };
 }
 
+function parseVoiceRealtimeSettings(raw: unknown): VoiceRealtimeSettings | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as Record<string, unknown>;
+  if (typeof value.enabled !== 'boolean') return null;
+  return { enabled: value.enabled };
+}
+
 function voiceApprovalSettingsEqual(a: VoiceApprovalSettings, b: VoiceApprovalSettings): boolean {
   return (
     a.triggerPhrase === b.triggerPhrase &&
@@ -550,6 +568,10 @@ function stringArraysEqual(a: string[], b: string[]): boolean {
 
 function voiceActivationSettingsEqual(a: VoiceActivationSettings, b: VoiceActivationSettings): boolean {
   return stringArraysEqual(a.normalAliases, b.normalAliases) && stringArraysEqual(a.realTimeAliases, b.realTimeAliases);
+}
+
+function voiceRealtimeSettingsEqual(a: VoiceRealtimeSettings, b: VoiceRealtimeSettings): boolean {
+  return a.enabled === b.enabled;
 }
 
 export function normalizeAgentMessageAutoContinuePrompt(raw: unknown): string {
@@ -1307,9 +1329,11 @@ export async function resolveVoiceApprovalSettingsResponse(): Promise<{
   voiceApproval: EffectiveVoiceApprovalSettings;
   voiceTranscription: EffectiveVoiceTranscriptionSettings;
   voiceActivation: EffectiveVoiceActivationSettings;
+  voiceRealtime: EffectiveVoiceRealtimeSettings;
   defaults: VoiceApprovalSettings;
   transcriptionDefaults: VoiceTranscriptionSettings;
   activationDefaults: VoiceActivationSettings;
+  realtimeDefaults: VoiceRealtimeSettings;
   limits: typeof VOICE_APPROVAL_SETTINGS_LIMITS;
 }> {
   return {
@@ -1321,9 +1345,11 @@ export async function resolveVoiceApprovalSettingsResponse(): Promise<{
     voiceApproval: await resolveEffectiveVoiceApprovalSettings(),
     voiceTranscription: await resolveEffectiveVoiceTranscriptionSettings(),
     voiceActivation: await resolveEffectiveVoiceActivationSettings(),
+    voiceRealtime: await resolveEffectiveVoiceRealtimeSettings(),
     defaults: VOICE_APPROVAL_SETTINGS_DEFAULT,
     transcriptionDefaults: VOICE_TRANSCRIPTION_SETTINGS_DEFAULT,
     activationDefaults: VOICE_ACTIVATION_SETTINGS_DEFAULT,
+    realtimeDefaults: VOICE_REALTIME_SETTINGS_DEFAULT,
     limits: VOICE_APPROVAL_SETTINGS_LIMITS,
   };
 }
@@ -1409,6 +1435,49 @@ export async function resolveEffectiveVoiceActivationSettings(): Promise<Effecti
   const stored = await getStoredVoiceActivationSettings();
   return {
     ...(stored.settings ?? VOICE_ACTIVATION_SETTINGS_DEFAULT),
+    source: stored.settings ? 'settings' : 'default',
+    updatedAt: stored.settings ? stored.updatedAt : null,
+  };
+}
+
+async function getStoredVoiceRealtimeSettings(): Promise<{
+  settings: VoiceRealtimeSettings | null;
+  updatedAt: string | null;
+}> {
+  const reg = await loadRegistry();
+  const raw = reg.settings?.voiceRealtime;
+  const settings = parseVoiceRealtimeSettings(raw);
+  const updatedAtRaw = raw?.updatedAt;
+  return {
+    settings,
+    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+  };
+}
+
+export async function upsertStoredVoiceRealtimeSettings(settingsRaw: unknown): Promise<void> {
+  const settings = parseVoiceRealtimeSettings(settingsRaw);
+  if (!settings) {
+    throw new Error('Invalid voice realtime settings.');
+  }
+  const updatedAt = new Date().toISOString();
+  await updateRegistry((reg) => {
+    reg.settings ??= {};
+    if (voiceRealtimeSettingsEqual(settings, VOICE_REALTIME_SETTINGS_DEFAULT)) {
+      delete reg.settings.voiceRealtime;
+      if (Object.keys(reg.settings).length === 0) delete reg.settings;
+      return;
+    }
+    reg.settings.voiceRealtime = {
+      ...settings,
+      updatedAt,
+    };
+  });
+}
+
+export async function resolveEffectiveVoiceRealtimeSettings(): Promise<EffectiveVoiceRealtimeSettings> {
+  const stored = await getStoredVoiceRealtimeSettings();
+  return {
+    ...(stored.settings ?? VOICE_REALTIME_SETTINGS_DEFAULT),
     source: stored.settings ? 'settings' : 'default',
     updatedAt: stored.settings ? stored.updatedAt : null,
   };

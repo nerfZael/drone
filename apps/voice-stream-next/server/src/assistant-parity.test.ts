@@ -310,6 +310,11 @@ describe('assistant parity runtime', () => {
     expect(config.tools.some((tool: any) => tool.name === 'load_skill')).toBe(true);
     expect(config.tools.some((tool: any) => tool.name === extensionTool)).toBe(true);
     expect(config.tools.some((tool: any) => Object.prototype.hasOwnProperty.call(tool, 'strict'))).toBe(false);
+    const loadSkillTool = config.tools.find((tool: any) => tool.name === 'load_skill') as any;
+    const extensionDefinition = config.tools.find((tool: any) => tool.name === extensionTool) as any;
+    expect(Object.keys(loadSkillTool).sort()).toEqual(['description', 'name', 'parameters', 'type']);
+    expect(Object.keys(extensionDefinition).sort()).toEqual(['description', 'name', 'parameters', 'type']);
+    expect(extensionDefinition.parameters.properties.text).toEqual({ type: 'string' });
   });
 
   test('stores extension-provided skills in the normal skill catalog', () => {

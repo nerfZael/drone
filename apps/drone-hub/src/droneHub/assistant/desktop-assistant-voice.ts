@@ -56,6 +56,10 @@ export type DesktopAssistantVoiceStatus = {
     message?: string;
     error?: string | null;
   };
+  realtime?: {
+    available: boolean;
+    enabled: boolean;
+  };
 };
 
 export function isDesktopAssistantVoiceActive(status: DesktopAssistantVoiceStatus): boolean {
@@ -96,8 +100,29 @@ let latestStatus: DesktopAssistantVoiceStatus | null = null;
 let lastCueKey = '';
 let lastCueAt = 0;
 let toggleInFlight = false;
+let realtimeToggleInFlight = false;
+let realtimeWebRtcStartInFlight = false;
+let realtimeWebRtcStartGeneration = 0;
+let realtimeWebRtcBrowserSessionId = '';
 let lastToggleAt = 0;
 let currentSpeechAudio: HTMLAudioElement | null = null;
+let currentRealtimeWebRtc: {
+  pc: RTCPeerConnection;
+  stream: MediaStream;
+  dataChannel: RTCDataChannel;
+  audio: HTMLAudioElement;
+} | null = null;
+
+function reportDesktopVoiceBrowserEvent(event: string, message?: string): void {
+  if (typeof window === 'undefined') return;
+  void fetch('/api/assistant/desktop-voice/client-event', {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ event, message }),
+  }).catch(() => {
+    // Best-effort diagnostics only.
+  });
+}
 
 function cueForTransition(previous: DesktopAssistantVoiceStatus | null, next: DesktopAssistantVoiceStatus): LocalVoiceCue | null {
   if (!previous) return null;
@@ -134,6 +159,171 @@ function stopDesktopVoiceSpeech(): void {
   }
   currentSpeechAudio = null;
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+}
+
+function stopDesktopVoiceWebRtc(): void {
+  realtimeWebRtcStartGeneration += 1;
+  realtimeWebRtcBrowserSessionId = '';
+  const session = currentRealtimeWebRtc;
+  currentRealtimeWebRtc = null;
+  realtimeWebRtcStartInFlight = false;
+  if (!session) return;
+  try {
+    session.dataChannel.close();
+  } catch {
+    // Ignore close failures.
+  }
+  for (const track of session.stream.getTracks()) {
+    try {
+      track.stop();
+    } catch {
+      // Ignore track stop failures.
+    }
+  }
+  try {
+    session.pc.close();
+  } catch {
+    // Ignore close failures.
+  }
+  try {
+    session.audio.pause();
+    session.audio.srcObject = null;
+    session.audio.remove();
+  } catch {
+    // Ignore audio cleanup failures.
+  }
+}
+
+function handleRealtimeDataChannelEvent(raw: string): void {
+  try {
+    JSON.parse(raw);
+  } catch {
+    // Ignore malformed realtime event payloads.
+  }
+}
+
+function sendRealtimeDataChannelEvent(payload: unknown): void {
+  const channel = currentRealtimeWebRtc?.dataChannel;
+  if (!channel || channel.readyState !== 'open') throw new Error('Realtime voice is not connected.');
+  channel.send(JSON.stringify(payload));
+}
+
+async function startDesktopVoiceWebRtc(sessionId: string): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (currentRealtimeWebRtc || realtimeWebRtcStartInFlight) return;
+  const trimmedSessionId = String(sessionId ?? '').trim();
+  if (!trimmedSessionId) {
+    reportDesktopVoiceBrowserEvent('webrtc-missing-session-id');
+    void requestDesktopVoiceCancelRecording('');
+    return;
+  }
+  if (typeof RTCPeerConnection === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+    reportDesktopVoiceBrowserEvent('webrtc-unavailable');
+    dispatchAssistantDesktopVoiceStatus({ mode: 'error', message: 'WebRTC microphone capture is unavailable in this browser.' });
+    void requestDesktopVoiceCancelRecording(trimmedSessionId);
+    return;
+  }
+  const startGeneration = realtimeWebRtcStartGeneration + 1;
+  realtimeWebRtcStartGeneration = startGeneration;
+  realtimeWebRtcBrowserSessionId = trimmedSessionId;
+  const assertWebRtcStartCurrent = () => {
+    if (startGeneration !== realtimeWebRtcStartGeneration) throw new Error('WebRTC realtime setup was cancelled.');
+  };
+  realtimeWebRtcStartInFlight = true;
+  let pc: RTCPeerConnection | null = null;
+  let stream: MediaStream | null = null;
+  let audio: HTMLAudioElement | null = null;
+  let dataChannel: RTCDataChannel | null = null;
+  try {
+    reportDesktopVoiceBrowserEvent('webrtc-start-received');
+    stopDesktopVoiceSpeech();
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+    reportDesktopVoiceBrowserEvent('webrtc-mic-ready');
+    assertWebRtcStartCurrent();
+    pc = new RTCPeerConnection();
+    audio = document.createElement('audio');
+    audio.autoplay = true;
+    (audio as any).playsInline = true;
+    pc.ontrack = (event) => {
+      if (!audio) return;
+      audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+      audio.play().catch(() => {});
+    };
+    for (const track of stream.getAudioTracks()) pc.addTrack(track, stream);
+    dataChannel = pc.createDataChannel('oai-events');
+    dataChannel.addEventListener('open', () => {
+      reportDesktopVoiceBrowserEvent('webrtc-datachannel-open');
+      if (latestStatus) dispatchAssistantDesktopVoiceStatus(latestStatus);
+    });
+    dataChannel.addEventListener('close', () => {
+      reportDesktopVoiceBrowserEvent('webrtc-datachannel-close');
+      if (latestStatus) dispatchAssistantDesktopVoiceStatus(latestStatus);
+    });
+    dataChannel.addEventListener('message', (event) => {
+      handleRealtimeDataChannelEvent(String(event.data ?? ''));
+    });
+    const offer = await pc.createOffer();
+    reportDesktopVoiceBrowserEvent('webrtc-offer-created');
+    assertWebRtcStartCurrent();
+    await pc.setLocalDescription(offer);
+    assertWebRtcStartCurrent();
+    const sdp = offer.sdp ?? pc.localDescription?.sdp ?? '';
+    if (!sdp.trim()) throw new Error('WebRTC SDP offer is empty.');
+    reportDesktopVoiceBrowserEvent('webrtc-offer-posting');
+    const response = await fetch('/api/assistant/desktop-voice/realtime/webrtc-session', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/sdp',
+        'x-drone-desktop-voice-webrtc-session-id': trimmedSessionId,
+      },
+      body: sdp,
+    });
+    assertWebRtcStartCurrent();
+    const payload = await response.json().catch(() => null);
+    if (!response.ok) throw new Error(String(payload?.error ?? `WebRTC realtime setup failed (${response.status})`));
+    const sdpAnswer = typeof payload?.sdpAnswer === 'string' ? payload.sdpAnswer : '';
+    if (!sdpAnswer.trim()) throw new Error('WebRTC realtime setup returned an empty SDP answer.');
+    await pc.setRemoteDescription({ type: 'answer', sdp: sdpAnswer });
+    assertWebRtcStartCurrent();
+    currentRealtimeWebRtc = { pc, stream, dataChannel, audio };
+    reportDesktopVoiceBrowserEvent('webrtc-connected');
+  } catch (error: any) {
+    reportDesktopVoiceBrowserEvent('webrtc-failed', error?.message ?? String(error));
+    if (dataChannel) {
+      try {
+        dataChannel.close();
+      } catch {
+        // Ignore close failures.
+      }
+    }
+    if (stream) {
+      for (const track of stream.getTracks()) track.stop();
+    }
+    if (pc) {
+      try {
+        pc.close();
+      } catch {
+        // Ignore close failures.
+      }
+    }
+    if (audio) {
+      audio.pause();
+      audio.srcObject = null;
+      audio.remove();
+    }
+    if (startGeneration === realtimeWebRtcStartGeneration) {
+      dispatchAssistantDesktopVoiceStatus({ mode: 'error', message: error?.message ?? String(error) });
+      void requestDesktopVoiceCancelRecording(trimmedSessionId);
+    }
+  } finally {
+    if (startGeneration === realtimeWebRtcStartGeneration) realtimeWebRtcStartInFlight = false;
+  }
 }
 
 function speakDesktopVoiceText(text: string): void {
@@ -215,10 +405,98 @@ async function requestDesktopVoiceStop(): Promise<void> {
   }
 }
 
+async function requestDesktopVoiceOff(): Promise<void> {
+  const now = Date.now();
+  if (toggleInFlight || now - lastToggleAt < 500) return;
+  toggleInFlight = true;
+  lastToggleAt = now;
+  try {
+    const response = await fetch('/api/assistant/desktop-voice/off', { method: 'POST' });
+    if (!response.ok) {
+      let message = `Desktop voice off failed (${response.status})`;
+      try {
+        const data = await response.json();
+        message = String(data?.error ?? message);
+      } catch {
+        // keep fallback
+      }
+      dispatchAssistantDesktopVoiceStatus({ mode: 'error', message });
+      return;
+    }
+    const status = (await response.json()) as DesktopAssistantVoiceStatus;
+    dispatchAssistantDesktopVoiceStatus(status);
+  } catch (error: any) {
+    dispatchAssistantDesktopVoiceStatus({ mode: 'error', message: error?.message ?? String(error) });
+  } finally {
+    toggleInFlight = false;
+  }
+}
+
+async function requestDesktopVoiceCancelRecording(sessionId = realtimeWebRtcBrowserSessionId): Promise<void> {
+  try {
+    const trimmedSessionId = String(sessionId ?? '').trim();
+    const response = await fetch('/api/assistant/desktop-voice/cancel-recording', {
+      method: 'POST',
+      headers: trimmedSessionId ? { 'x-drone-desktop-voice-webrtc-session-id': trimmedSessionId } : undefined,
+    });
+    if (!response.ok) {
+      let message = `Desktop voice cancel failed (${response.status})`;
+      try {
+        const data = await response.json();
+        message = String(data?.error ?? message);
+      } catch {
+        // keep fallback
+      }
+      dispatchAssistantDesktopVoiceStatus({ mode: 'error', message });
+      return;
+    }
+    const status = (await response.json()) as DesktopAssistantVoiceStatus;
+    dispatchAssistantDesktopVoiceStatus(status);
+  } catch (error: any) {
+    dispatchAssistantDesktopVoiceStatus({ mode: 'error', message: error?.message ?? String(error) });
+  }
+}
+
+async function requestDesktopVoiceRealtime(enabled: boolean): Promise<void> {
+  if (realtimeToggleInFlight) return;
+  realtimeToggleInFlight = true;
+  try {
+    const response = await fetch('/api/assistant/desktop-voice/realtime', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ enabled }),
+    });
+    if (!response.ok) {
+      let message = `Desktop voice realtime toggle failed (${response.status})`;
+      try {
+        const data = await response.json();
+        message = String(data?.error ?? message);
+      } catch {
+        // keep fallback
+      }
+      dispatchAssistantDesktopVoiceStatus({ mode: 'error', message });
+      return;
+    }
+    const status = (await response.json()) as DesktopAssistantVoiceStatus;
+    dispatchAssistantDesktopVoiceStatus(status);
+  } catch (error: any) {
+    dispatchAssistantDesktopVoiceStatus({ mode: 'error', message: error?.message ?? String(error) });
+  } finally {
+    realtimeToggleInFlight = false;
+  }
+}
+
 export function dispatchAssistantDesktopVoiceStop(): void {
   if (typeof window === 'undefined') return;
   stopDesktopVoiceSpeech();
   void requestDesktopVoiceStop();
+}
+
+export function dispatchAssistantDesktopVoiceOff(): void {
+  if (typeof window === 'undefined') return;
+  stopDesktopVoiceSpeech();
+  stopDesktopVoiceWebRtc();
+  void requestDesktopVoiceOff();
 }
 
 export function dispatchAssistantDesktopVoiceToggle(): void {
@@ -228,9 +506,38 @@ export function dispatchAssistantDesktopVoiceToggle(): void {
   void requestDesktopVoiceToggle();
 }
 
+export function dispatchAssistantDesktopVoiceRealtimeToggle(): void {
+  if (typeof window === 'undefined') return;
+  const nextEnabled = latestStatus?.realtime?.enabled !== true;
+  void requestDesktopVoiceRealtime(nextEnabled);
+}
+
+export function canSendAssistantDesktopVoiceRealtimeText(): boolean {
+  return currentRealtimeWebRtc?.dataChannel.readyState === 'open';
+}
+
+export function sendAssistantDesktopVoiceRealtimeText(textRaw: string): boolean {
+  const text = String(textRaw ?? '').trim();
+  if (!text || !canSendAssistantDesktopVoiceRealtimeText()) return false;
+  sendRealtimeDataChannelEvent({
+    type: 'conversation.item.create',
+    item: {
+      type: 'message',
+      role: 'user',
+      content: [{ type: 'input_text', text }],
+    },
+  });
+  sendRealtimeDataChannelEvent({
+    type: 'response.create',
+    response: { output_modalities: ['audio'] },
+  });
+  return true;
+}
+
 export function dispatchAssistantDesktopVoiceStatus(status: DesktopAssistantVoiceStatus): void {
   if (typeof window === 'undefined') return;
   if (status.mode === 'off' || status.mode === 'sleeping') stopDesktopVoiceSpeech();
+  if (status.mode !== 'recording') stopDesktopVoiceWebRtc();
   playCueForStatus(status);
   window.dispatchEvent(new CustomEvent<DesktopAssistantVoiceStatus>(ASSISTANT_DESKTOP_VOICE_STATUS_EVENT, { detail: status }));
 }
@@ -315,6 +622,20 @@ export function subscribeAssistantDesktopVoiceStatus(listener: (status: DesktopA
       } catch {
         // Ignore malformed event payloads.
       }
+    });
+    nextSource.addEventListener('desktop_voice_stop_audio', () => {
+      stopDesktopVoiceSpeech();
+    });
+    nextSource.addEventListener('desktop_voice_webrtc_start', (event) => {
+      try {
+        const data = JSON.parse((event as MessageEvent).data);
+        void startDesktopVoiceWebRtc(String(data?.sessionId ?? ''));
+      } catch {
+        void startDesktopVoiceWebRtc('');
+      }
+    });
+    nextSource.addEventListener('desktop_voice_webrtc_stop', () => {
+      stopDesktopVoiceWebRtc();
     });
     nextSource.onopen = () => {
       reconnectAttempt = 0;
