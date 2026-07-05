@@ -10,9 +10,10 @@ import {
 
 describe('right panel tab content', () => {
   test('lazy-loads every right panel pane', () => {
-    expect([...LAZY_RIGHT_PANEL_TABS].sort()).toEqual([...RIGHT_PANEL_TABS].sort());
+    expect([...LAZY_RIGHT_PANEL_TABS].sort()).toEqual(RIGHT_PANEL_TABS.filter((tab) => tab !== 'files').sort());
+    expect(isRightPanelTabLazyLoaded('files')).toBe(false);
     for (const tab of RIGHT_PANEL_TABS) {
-      expect(isRightPanelTabLazyLoaded(tab)).toBe(true);
+      if (tab !== 'files') expect(isRightPanelTabLazyLoaded(tab)).toBe(true);
     }
   });
 

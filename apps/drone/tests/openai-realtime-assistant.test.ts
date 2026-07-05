@@ -117,4 +117,66 @@ describe('openai realtime assistant', () => {
     expect(sent).toHaveLength(2);
     expect(responseRequests).toBe(1);
   });
+
+  test('can suppress a realtime tool follow-up response when another turn is active', async () => {
+    const sent: unknown[] = [];
+    let responseRequests = 0;
+    const handler = __openAiRealtimeAssistantTestInternals.createRealtimeFunctionCallHandler({
+      callbacks: {},
+      send: (payload: unknown) => sent.push(payload),
+      requestAudioResponse: () => {
+        responseRequests += 1;
+      },
+      executeTool: async () => JSON.stringify({ ok: true }),
+    });
+
+    await handler([
+      { id: 'item_1', callId: 'call_1', name: 'slow_tool', argumentsJson: '{}' },
+    ], {
+      shouldRequestAudioResponse: () => false,
+    });
+
+    expect(sent).toHaveLength(1);
+    expect(responseRequests).toBe(0);
+  });
+
+  test('checks realtime tool follow-up eligibility after the tool finishes', async () => {
+    const sent: unknown[] = [];
+    let responseRequests = 0;
+    let allowFollowUp = true;
+    let finishTool: (() => void) | null = null;
+    const handler = __openAiRealtimeAssistantTestInternals.createRealtimeFunctionCallHandler({
+      callbacks: {},
+      send: (payload: unknown) => sent.push(payload),
+      requestAudioResponse: () => {
+        responseRequests += 1;
+      },
+      executeTool: async () => {
+        await new Promise<void>((resolve) => {
+          finishTool = resolve;
+        });
+        return JSON.stringify({ ok: true });
+      },
+    });
+
+    const pending = handler([
+      { id: 'item_1', callId: 'call_1', name: 'slow_tool', argumentsJson: '{}' },
+    ], {
+      shouldRequestAudioResponse: () => allowFollowUp,
+    });
+
+    allowFollowUp = false;
+    finishTool?.();
+    await pending;
+
+    expect(sent).toHaveLength(1);
+    expect(responseRequests).toBe(0);
+  });
+
+  test('classifies duplicate active response errors as recoverable realtime protocol errors', () => {
+    expect(__openAiRealtimeAssistantTestInternals.isActiveResponseInProgressError(
+      'Conversation already has an active response in progress: resp_123. Wait until the response is finished before creating a new one.',
+    )).toBe(true);
+    expect(__openAiRealtimeAssistantTestInternals.isActiveResponseInProgressError('OpenAI Realtime connection closed.')).toBe(false);
+  });
 });

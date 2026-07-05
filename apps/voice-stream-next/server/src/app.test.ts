@@ -4,7 +4,7 @@ import path from 'node:path';
 
 import { binaryChunk, binarySize, buildApp, mergeTimestampedTranscriptText, mergeTranscriptText, openAiRealtimeAudioConfig, openAiSafetyIdentifier } from './app.js';
 import type { VoiceRecordingRecord } from './db.js';
-import { openAiRealtimeWebRtcSessionConfig, realtimeCallIdFromLocation } from './openai-realtime-webrtc.js';
+import { __openAiRealtimeWebRtcTestInternals, openAiRealtimeWebRtcSessionConfig, realtimeCallIdFromLocation } from './openai-realtime-webrtc.js';
 import { realtimeStopTranscript, realtimeStreamingTranscript } from './realtime-transcript.js';
 import { pcm16ToWav } from './wav.js';
 
@@ -179,6 +179,46 @@ describe('app configuration', () => {
     expect(realtimeCallIdFromLocation('/v1/realtime/calls/rtc_123456')).toBe('rtc_123456');
     expect(realtimeCallIdFromLocation('https://api.openai.com/v1/realtime/calls/rtc_abcdef?source=test')).toBe('rtc_abcdef');
     expect(realtimeCallIdFromLocation('')).toBe('');
+  });
+
+  test('suppresses OpenAI Realtime tool follow-up responses when a newer turn is active', async () => {
+    const sent: unknown[] = [];
+    let responseRequests = 0;
+    let allowFollowUp = true;
+    const finishTool: { resolve: (() => void) | null } = { resolve: null };
+    const handler = __openAiRealtimeWebRtcTestInternals.createRealtimeFunctionCallHandler({
+      callbacks: {},
+      send: (payload: unknown) => sent.push(payload),
+      requestAudioResponse: () => {
+        responseRequests += 1;
+      },
+      executeTool: async () => {
+        await new Promise<void>((resolve) => {
+          finishTool.resolve = resolve;
+        });
+        return JSON.stringify({ ok: true });
+      },
+    });
+
+    const pending = handler([
+      { id: 'item_1', callId: 'call_1', name: 'slow_tool', argumentsJson: '{}' },
+    ], {
+      shouldRequestAudioResponse: () => allowFollowUp,
+    });
+
+    allowFollowUp = false;
+    finishTool.resolve?.();
+    await pending;
+
+    expect(sent).toHaveLength(1);
+    expect(responseRequests).toBe(0);
+  });
+
+  test('classifies duplicate OpenAI Realtime active-response errors as recoverable', () => {
+    expect(__openAiRealtimeWebRtcTestInternals.isActiveResponseInProgressError(
+      'Conversation already has an active response in progress: resp_123. Wait until the response is finished before creating a new one.',
+    )).toBe(true);
+    expect(__openAiRealtimeWebRtcTestInternals.isActiveResponseInProgressError('OpenAI Realtime connection closed.')).toBe(false);
   });
 
   test('detects realtime stop transcript phrases without persisting the command', () => {

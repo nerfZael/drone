@@ -163,6 +163,10 @@ function realtimeFunctionOutput(value: unknown): string {
   }
 }
 
+function isActiveResponseInProgressError(messageRaw: unknown): boolean {
+  return /conversation already has an active response in progress/i.test(cleanText(messageRaw));
+}
+
 function realtimeMessageInputText(item: any): string {
   if (String(item?.type ?? '') !== 'message' || String(item?.role ?? '') !== 'user') return '';
   const content = Array.isArray(item?.content) ? item.content : [];
@@ -228,6 +232,46 @@ function emitWith<T>(callback: ((value: T) => void | Promise<void>) | undefined,
   void Promise.resolve(callback(value)).catch(() => {});
 }
 
+function createRealtimeFunctionCallHandler(opts: {
+  executeTool?: (call: OpenAiRealtimeToolCall) => Promise<string>;
+  callbacks: OpenAiRealtimeCallbacks;
+  send: (payload: unknown) => void;
+  requestAudioResponse: () => void;
+}): (calls: RealtimeFunctionCall[], options?: { shouldRequestAudioResponse?: () => boolean }) => Promise<void> {
+  const handledFunctionCalls = new Set<string>();
+  return async (calls: RealtimeFunctionCall[], options?: { shouldRequestAudioResponse?: () => boolean }): Promise<void> => {
+    if (!opts.executeTool) return;
+    let outputCreated = false;
+    for (const call of calls) {
+      const key = call.callId || call.id;
+      if (handledFunctionCalls.has(key)) continue;
+      handledFunctionCalls.add(key);
+      try {
+        emitWith(opts.callbacks.onStatus, `Realtime assistant is using ${call.name}.`);
+        const output = await opts.executeTool({
+          id: call.id,
+          callId: call.callId,
+          name: call.name,
+          arguments: parseRealtimeFunctionArguments(call.argumentsJson),
+        });
+        opts.send({
+          type: 'conversation.item.create',
+          item: { type: 'function_call_output', call_id: call.callId, output: realtimeFunctionOutput(output) },
+        });
+        outputCreated = true;
+      } catch (error: any) {
+        const message = cleanText(error?.message ?? error) || `${call.name} failed.`;
+        opts.send({
+          type: 'conversation.item.create',
+          item: { type: 'function_call_output', call_id: call.callId, output: realtimeFunctionOutput({ ok: false, error: message }) },
+        });
+        outputCreated = true;
+      }
+    }
+    if (outputCreated && (options?.shouldRequestAudioResponse?.() ?? true)) opts.requestAudioResponse();
+  };
+}
+
 async function createOpenAiRealtimeWebRtcCall(opts: OpenAiRealtimeWebRtcOptions, sessionConfig: Record<string, unknown>): Promise<{
   callId: string;
   sdpAnswer: string;
@@ -277,8 +321,14 @@ async function createOpenAiRealtimeSidebandSession(opts: OpenAiRealtimeWebRtcOpt
   let outputTranscript = '';
   let outputText = '';
   const handledUserMessageItemIds = new Set<string>();
-  const handledFunctionCalls = new Set<string>();
   const pendingFunctionCalls: RealtimeFunctionCall[] = [];
+  let userSpeechActive = false;
+  let userSpeechGeneration = 0;
+  let responseActive = false;
+  let activeResponseId = '';
+  let activeResponseSpeechGeneration = 0;
+  let currentResponseCancelled = false;
+  const cancelledResponseIds = new Set<string>();
 
   const send = (payload: unknown): void => {
     if (closed || upstream.readyState !== WebSocket.OPEN) return;
@@ -287,37 +337,17 @@ async function createOpenAiRealtimeSidebandSession(opts: OpenAiRealtimeWebRtcOpt
   const requestAudioResponse = (): void => {
     send({ type: 'response.create', response: { output_modalities: ['audio'] } });
   };
-  const handleRealtimeFunctionCalls = async (calls: RealtimeFunctionCall[]): Promise<void> => {
-    if (!opts.executeTool) return;
-    let outputCreated = false;
-    for (const call of calls) {
-      const key = call.callId || call.id;
-      if (handledFunctionCalls.has(key)) continue;
-      handledFunctionCalls.add(key);
-      try {
-        emitWith(callbacks.onStatus, `Realtime assistant is using ${call.name}.`);
-        const output = await opts.executeTool({
-          id: call.id,
-          callId: call.callId,
-          name: call.name,
-          arguments: parseRealtimeFunctionArguments(call.argumentsJson),
-        });
-        send({
-          type: 'conversation.item.create',
-          item: { type: 'function_call_output', call_id: call.callId, output: realtimeFunctionOutput(output) },
-        });
-        outputCreated = true;
-      } catch (error: any) {
-        const message = cleanText(error?.message ?? error) || `${call.name} failed.`;
-        send({
-          type: 'conversation.item.create',
-          item: { type: 'function_call_output', call_id: call.callId, output: realtimeFunctionOutput({ ok: false, error: message }) },
-        });
-        outputCreated = true;
-      }
-    }
-    if (outputCreated) requestAudioResponse();
+  const clearResponseOutput = (): void => {
+    outputTranscript = '';
+    outputText = '';
+    pendingFunctionCalls.length = 0;
   };
+  const handleRealtimeFunctionCalls = createRealtimeFunctionCallHandler({
+    executeTool: opts.executeTool,
+    callbacks,
+    send,
+    requestAudioResponse,
+  });
 
   return await new Promise<{ cancel: () => Promise<void> }>((resolve, reject) => {
     let settled = false;
@@ -356,6 +386,10 @@ async function createOpenAiRealtimeSidebandSession(opts: OpenAiRealtimeWebRtcOpt
       const type = String(event?.type ?? '');
       if (type === 'error' || type.endsWith('_error') || event?.error?.message) {
         const message = cleanText(event?.error?.message ?? event?.message) || 'OpenAI Realtime failed.';
+        if (isActiveResponseInProgressError(message)) {
+          emitWith(callbacks.onStatus, 'Realtime assistant is responding.');
+          return;
+        }
         emitWith(callbacks.onError, message);
         if (!closed) {
           closed = true;
@@ -381,6 +415,7 @@ async function createOpenAiRealtimeSidebandSession(opts: OpenAiRealtimeWebRtcOpt
         const transcript = cleanText(event.transcript ?? inputTranscript);
         inputTranscript = '';
         inputTranscriptItemId = '';
+        userSpeechActive = false;
         if (itemId) handledUserMessageItemIds.add(itemId);
         if (transcript) emitWith(callbacks.onUserTranscript, transcript);
         return;
@@ -391,16 +426,39 @@ async function createOpenAiRealtimeSidebandSession(opts: OpenAiRealtimeWebRtcOpt
         const text = realtimeMessageInputText(event?.item);
         if (text) {
           if (itemId) handledUserMessageItemIds.add(itemId);
+          userSpeechActive = false;
           emitWith(callbacks.onUserTranscript, text);
         }
         return;
       }
       if (type === 'input_audio_buffer.speech_started') {
+        userSpeechActive = true;
+        userSpeechGeneration += 1;
+        if (activeResponseId) cancelledResponseIds.add(activeResponseId);
+        if (responseActive || pendingFunctionCalls.length > 0 || outputTranscript || outputText) {
+          currentResponseCancelled = true;
+          clearResponseOutput();
+        }
         emit(callbacks.onUserSpeechStarted);
         emitWith(callbacks.onStatus, 'Realtime assistant is listening.');
         return;
       }
+      if (type === 'response.cancelled') {
+        const responseId = realtimeResponseId(event);
+        if (responseId) cancelledResponseIds.add(responseId);
+        if (!responseId || responseId === activeResponseId) {
+          responseActive = false;
+          activeResponseId = '';
+          activeResponseSpeechGeneration = 0;
+          currentResponseCancelled = true;
+          clearResponseOutput();
+        }
+        emitWith(callbacks.onStatus, 'Realtime assistant is listening.');
+        return;
+      }
       if (type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') {
+        const responseId = realtimeResponseId(event);
+        if ((responseId && cancelledResponseIds.has(responseId)) || currentResponseCancelled) return;
         outputTranscript += String(event.delta ?? '');
         const text = cleanText(outputTranscript);
         if (text) {
@@ -413,12 +471,16 @@ async function createOpenAiRealtimeSidebandSession(opts: OpenAiRealtimeWebRtcOpt
         return;
       }
       if (type === 'response.output_audio_transcript.done' || type === 'response.audio_transcript.done') {
+        const responseId = realtimeResponseId(event);
+        if (responseId && cancelledResponseIds.has(responseId)) return;
         const text = cleanText(event.transcript ?? outputTranscript);
         outputTranscript = '';
         if (text) emitWith(callbacks.onAssistantTranscript, text);
         return;
       }
       if (type === 'response.output_text.delta') {
+        const responseId = realtimeResponseId(event);
+        if ((responseId && cancelledResponseIds.has(responseId)) || currentResponseCancelled) return;
         outputText += String(event.delta ?? '');
         const text = cleanText(outputText);
         if (text) {
@@ -431,24 +493,53 @@ async function createOpenAiRealtimeSidebandSession(opts: OpenAiRealtimeWebRtcOpt
         return;
       }
       if (type === 'response.output_text.done') {
+        const responseId = realtimeResponseId(event);
+        if (responseId && cancelledResponseIds.has(responseId)) return;
         const text = cleanText(event.text ?? outputText);
         outputText = '';
         if (text) emitWith(callbacks.onAssistantTranscript, text);
         return;
       }
       if (type === 'response.created') {
-        outputText = '';
+        activeResponseId = realtimeResponseId(event);
+        activeResponseSpeechGeneration = userSpeechGeneration;
+        responseActive = true;
+        currentResponseCancelled = false;
+        clearResponseOutput();
         emitWith(callbacks.onStatus, 'Realtime assistant is responding.');
         return;
       }
       if (type === 'response.output_item.done') {
+        const responseId = realtimeResponseId(event);
+        if ((responseId && cancelledResponseIds.has(responseId)) || currentResponseCancelled) return;
         pendingFunctionCalls.push(...realtimeFunctionCalls(event));
         return;
       }
       if (type === 'response.done') {
+        const responseId = realtimeResponseId(event);
+        const status = cleanText(event?.response?.status);
+        if (status === 'cancelled' && responseId) cancelledResponseIds.add(responseId);
+        if (responseId && activeResponseId && responseId !== activeResponseId) return;
+        const responseSpeechGeneration = activeResponseSpeechGeneration;
+        responseActive = false;
+        activeResponseId = '';
+        activeResponseSpeechGeneration = 0;
+        if (status === 'cancelled' || currentResponseCancelled) {
+          currentResponseCancelled = true;
+          clearResponseOutput();
+          emitWith(callbacks.onStatus, 'Realtime assistant is listening.');
+          return;
+        }
+        currentResponseCancelled = false;
         const calls = uniqueRealtimeFunctionCalls([...pendingFunctionCalls.splice(0), ...realtimeFunctionCalls(event)]);
         if (calls.length > 0) {
-          void handleRealtimeFunctionCalls(calls);
+          const toolSpeechGeneration = responseSpeechGeneration;
+          void handleRealtimeFunctionCalls(calls, {
+            shouldRequestAudioResponse: () =>
+              !userSpeechActive &&
+              !responseActive &&
+              userSpeechGeneration === toolSpeechGeneration,
+          });
           return;
         }
         emitWith(callbacks.onStatus, 'Realtime assistant is listening.');
@@ -520,3 +611,8 @@ export async function createOpenAiRealtimeWebRtcSession(opts: OpenAiRealtimeWebR
 export function fallbackOpenAiSafetyIdentifier(seed: string): string {
   return `vsn_${crypto.createHash('sha256').update(seed).digest('hex').slice(0, 32)}`.slice(0, 64);
 }
+
+export const __openAiRealtimeWebRtcTestInternals = {
+  isActiveResponseInProgressError,
+  createRealtimeFunctionCallHandler,
+};

@@ -10,6 +10,7 @@ import type {
   PortReachabilityByHostPort,
 } from '../types';
 import type { DroneOpenedFileState, DroneOpenedFileTabState } from '../files/opened-file-types';
+import { DroneFilesDock } from '../files/DroneFilesDock';
 import { OpenedDroneFilePanel } from '../files/OpenedDroneFilePanel';
 import { QuickOpenModal } from '../files/QuickOpenModal';
 import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-state';
@@ -37,9 +38,6 @@ const LazyDroneEnvDock = React.lazy(async () => ({
 const LazyDroneFleetDock = React.lazy(async () => ({
   default: (await import('../fleet/DroneFleetDock')).DroneFleetDock,
 }));
-const LazyDroneFilesDock = React.lazy(async () => ({
-  default: (await import('../files/DroneFilesDock')).DroneFilesDock,
-}));
 const LazyDroneLinksDock = React.lazy(async () => ({
   default: (await import('../overview/DroneLinksDock')).DroneLinksDock,
 }));
@@ -50,7 +48,7 @@ const LazyDroneTerminalDock = React.lazy(async () => ({
   default: (await import('../terminal/DroneTerminalDock')).DroneTerminalDock,
 }));
 
-export const LAZY_RIGHT_PANEL_TABS: ReadonlySet<RightPanelTab> = new Set(RIGHT_PANEL_TABS);
+export const LAZY_RIGHT_PANEL_TABS: ReadonlySet<RightPanelTab> = new Set(RIGHT_PANEL_TABS.filter((tab) => tab !== 'files'));
 
 export function isRightPanelTabLazyLoaded(tab: RightPanelTab): boolean {
   return LAZY_RIGHT_PANEL_TABS.has(tab);
@@ -417,41 +415,39 @@ export function RightPanelTabContent({
 
     case 'files':
       return (
-        <LazyPane tab={tab}>
-          <LazyDroneFilesDock
-            key={`${paneKey}-files`}
-            droneId={drone.id}
-            droneName={drone.name}
-            droneLabel={uiDroneName(drone.name)}
-            path={currentFsPath}
-            homePath={defaultFsPathForCurrentDrone}
-            entries={fsEntries}
-            loading={fsLoading}
-            error={isCurrent ? fsErrorUi : fsError}
-            startup={
-              isCurrent
-                ? {
-                    waiting: filesPane.waiting,
-                    timedOut: filesPane.timedOut,
-                    hubPhase: drone.hubPhase,
-                    hubMessage: drone.hubMessage,
-                  }
-                : null
-            }
-            viewMode={fsExplorerView}
-            onSetViewMode={setFsExplorerView}
-            onOpenPath={setCurrentFsPath}
-            onRefresh={refreshFsList}
-            onRefreshOpenedFile={onRefreshOpenedEditorFile}
-            onOpenFile={onOpenFileInEditor}
-            onOpenFileInPanel={onOpenFileInPanel}
-            onCloseOpenedFile={onCloseOpenedEditorFile}
-            onConfirmCloseOpenedFilesForPaths={onConfirmCloseOpenedEditorFilesForPaths}
-            onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
-            onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
-            openedFile={openedFile}
-          />
-        </LazyPane>
+        <DroneFilesDock
+          key={`${paneKey}-files`}
+          droneId={drone.id}
+          droneName={drone.name}
+          droneLabel={uiDroneName(drone.name)}
+          path={currentFsPath}
+          homePath={defaultFsPathForCurrentDrone}
+          entries={fsEntries}
+          loading={fsLoading}
+          error={isCurrent ? fsErrorUi : fsError}
+          startup={
+            isCurrent
+              ? {
+                  waiting: filesPane.waiting,
+                  timedOut: filesPane.timedOut,
+                  hubPhase: drone.hubPhase,
+                  hubMessage: drone.hubMessage,
+                }
+              : null
+          }
+          viewMode={fsExplorerView}
+          onSetViewMode={setFsExplorerView}
+          onOpenPath={setCurrentFsPath}
+          onRefresh={refreshFsList}
+          onRefreshOpenedFile={onRefreshOpenedEditorFile}
+          onOpenFile={onOpenFileInEditor}
+          onOpenFileInPanel={onOpenFileInPanel}
+          onCloseOpenedFile={onCloseOpenedEditorFile}
+          onConfirmCloseOpenedFilesForPaths={onConfirmCloseOpenedEditorFilesForPaths}
+          onCloseOpenedFilesForPaths={onCloseOpenedEditorFilesForPaths}
+          onRemapOpenedFilesForPathChange={onRemapOpenedEditorFilesForPathChange}
+          openedFile={openedFile}
+        />
       );
 
     case 'editor':

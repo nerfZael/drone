@@ -844,6 +844,26 @@ function realtimeFunctionOutput(value: unknown): string {
   }
 }
 
+function realtimeResponseId(event: any): string {
+  return cleanText(event?.response?.id ?? event?.response_id ?? event?.responseId);
+}
+
+function isActiveResponseInProgressError(messageRaw: unknown): boolean {
+  return /conversation already has an active response in progress/i.test(cleanText(messageRaw));
+}
+
+function realtimeMessageInputText(item: any): string {
+  if (String(item?.type ?? '') !== 'message' || String(item?.role ?? '') !== 'user') return '';
+  const content = Array.isArray(item?.content) ? item.content : [];
+  return cleanText(content
+    .map((part: any) => {
+      const type = String(part?.type ?? '');
+      return type === 'input_text' || type === 'text' ? String(part?.text ?? '') : '';
+    })
+    .filter(Boolean)
+    .join('\n'));
+}
+
 function serverPublicUrl(req: FastifyRequest): string {
   const configured = process.env.VOICE_STREAM_NEXT_PUBLIC_URL?.trim();
   if (configured) return configured.replace(/\/+$/, '');
@@ -5280,12 +5300,20 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     const pendingAudio: Uint8Array[] = [];
     const responseAudio: Uint8Array[] = [];
     const pendingFunctionCalls: RealtimeFunctionCall[] = [];
+    const handledFunctionCalls = new Set<string>();
+    const cancelledResponseIds = new Set<string>();
     let upstreamReady = false;
     let clientClosed = false;
     let responseAudioBytes = 0;
     let receivedBytes = 0;
     let inputTranscript = '';
     let outputTranscript = '';
+    let responseActive = false;
+    let activeResponseId = '';
+    let userSpeechActive = false;
+    let userSpeechGeneration = 0;
+    let activeResponseSpeechGeneration = 0;
+    let currentResponseCancelled = false;
     let finalResponseRequested = false;
     let finalResponseSent = false;
     let activeAssistantThreadId = session.assistantThreadId;
@@ -5347,8 +5375,12 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       currentRealtimePrompt = '';
       currentRealtimeRunHasPendingApproval = false;
     };
-    const handleRealtimeFunctionCalls = async (calls: RealtimeFunctionCall[]): Promise<void> => {
+    const handleRealtimeFunctionCalls = async (calls: RealtimeFunctionCall[], options?: { shouldRequestAudioResponse?: () => boolean }): Promise<void> => {
+      let outputCreated = false;
       for (const call of calls) {
+        const key = call.callId || call.id;
+        if (handledFunctionCalls.has(key)) continue;
+        handledFunctionCalls.add(key);
         try {
           sendClient({ type: 'assistant_status', phase: 'tool_call', status: `Realtime is using ${call.name}.`, threadId: activeAssistantThreadId });
           const previousThreadId = activeAssistantThreadId;
@@ -5383,6 +5415,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               output: result.output,
             },
           });
+          outputCreated = true;
           if (result.toolsChanged) refreshRealtimeTools();
         } catch (error: any) {
           const message = error?.message ?? String(error);
@@ -5394,11 +5427,14 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               output: realtimeFunctionOutput({ ok: false, error: message }),
             },
           });
+          outputCreated = true;
           sendClient({ type: 'assistant_error', error: message });
           failRealtimeRun(message);
         }
       }
-      sendUpstream({ type: 'response.create' });
+      if (outputCreated && (options?.shouldRequestAudioResponse?.() ?? true)) {
+        sendUpstream({ type: 'response.create' });
+      }
     };
     const appendAudio = (pcm16khz: Uint8Array): void => {
       if (pcm16khz.byteLength === 0) return;
@@ -5422,6 +5458,12 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       responseAudioBytes = 0;
       const wav = pcm16ToWav(pcm, OPENAI_REALTIME_AUDIO_SAMPLE_RATE, 1);
       if ((socket as any).readyState === 1) socket.send(Buffer.from(wav));
+    };
+    const clearRealtimeResponseOutput = (): void => {
+      responseAudio.splice(0);
+      responseAudioBytes = 0;
+      outputTranscript = '';
+      pendingFunctionCalls.length = 0;
     };
     const closeUpstream = (reason: string): void => {
       if (upstream.readyState === WebSocket.OPEN || upstream.readyState === WebSocket.CONNECTING) {
@@ -5500,6 +5542,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       const type = String(event?.type ?? '');
       if (type === 'error' || type.endsWith('_error') || event?.error?.message) {
         const message = cleanText(event?.error?.message ?? event?.message, 'OpenAI Realtime failed');
+        if (isActiveResponseInProgressError(message)) {
+          sendClient({ type: 'assistant_status', phase: 'thinking', status: 'Realtime assistant is responding.', threadId: activeAssistantThreadId });
+          return;
+        }
         sendClient({ type: 'assistant_error', error: message });
         emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
         emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
@@ -5514,6 +5560,13 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         return;
       }
       if (type === 'input_audio_buffer.speech_started') {
+        userSpeechActive = true;
+        userSpeechGeneration += 1;
+        if (activeResponseId) cancelledResponseIds.add(activeResponseId);
+        if (responseActive || responseAudioBytes > 0 || pendingFunctionCalls.length > 0 || outputTranscript) {
+          currentResponseCancelled = true;
+          clearRealtimeResponseOutput();
+        }
         emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
         emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', '');
         return;
@@ -5532,6 +5585,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         const rawTranscript = cleanText(event.transcript ?? inputTranscript);
         const stopTranscript = realtimeStopTranscript(rawTranscript);
         const transcript = stopTranscript.stop ? stopTranscript.text : rawTranscript;
+        userSpeechActive = false;
         if (transcript || stopTranscript.stop) {
           inputTranscript = '';
           emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'user', '');
@@ -5562,7 +5616,27 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         }
         return;
       }
+      if (type === 'conversation.item.done' || type === 'conversation.item.added') {
+        const text = realtimeMessageInputText(event?.item);
+        if (text) userSpeechActive = false;
+        return;
+      }
+      if (type === 'response.cancelled') {
+        const responseId = realtimeResponseId(event);
+        if (responseId) cancelledResponseIds.add(responseId);
+        if (!responseId || responseId === activeResponseId) {
+          responseActive = false;
+          activeResponseId = '';
+          activeResponseSpeechGeneration = 0;
+          currentResponseCancelled = true;
+          clearRealtimeResponseOutput();
+        }
+        sendClient({ type: 'assistant_status', phase: 'listening', status: 'Realtime voice is listening.', threadId: activeAssistantThreadId });
+        return;
+      }
       if (type === 'response.output_audio.delta' || type === 'response.audio.delta') {
+        const responseId = realtimeResponseId(event);
+        if ((responseId && cancelledResponseIds.has(responseId)) || currentResponseCancelled) return;
         const delta = String(event.delta ?? '');
         if (delta) {
           const chunk = new Uint8Array(Buffer.from(delta, 'base64'));
@@ -5572,15 +5646,21 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         return;
       }
       if (type === 'response.output_audio.done' || type === 'response.audio.done') {
+        const responseId = realtimeResponseId(event);
+        if (responseId && cancelledResponseIds.has(responseId)) return;
         finishResponseAudio();
         return;
       }
       if (type === 'response.output_audio_transcript.delta' || type === 'response.audio_transcript.delta') {
+        const responseId = realtimeResponseId(event);
+        if ((responseId && cancelledResponseIds.has(responseId)) || currentResponseCancelled) return;
         outputTranscript += String(event.delta ?? '');
         emitAssistantRealtimeStreaming(device.userId, activeAssistantThreadId, 'assistant', cleanText(outputTranscript));
         return;
       }
       if (type === 'response.output_audio_transcript.done' || type === 'response.audio_transcript.done') {
+        const responseId = realtimeResponseId(event);
+        if (responseId && cancelledResponseIds.has(responseId)) return;
         const assistantText = cleanText(event.transcript ?? outputTranscript);
         outputTranscript = '';
         if (assistantText) {
@@ -5596,18 +5676,46 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         return;
       }
       if (type === 'response.created') {
+        activeResponseId = realtimeResponseId(event);
+        activeResponseSpeechGeneration = userSpeechGeneration;
+        responseActive = true;
+        currentResponseCancelled = false;
+        clearRealtimeResponseOutput();
         sendClient({ type: 'assistant_status', phase: 'thinking', status: 'Realtime assistant is responding.', threadId: activeAssistantThreadId });
         return;
       }
       if (type === 'response.output_item.done') {
+        const responseId = realtimeResponseId(event);
+        if ((responseId && cancelledResponseIds.has(responseId)) || currentResponseCancelled) return;
         pendingFunctionCalls.push(...realtimeFunctionCalls(event));
         return;
       }
       if (type === 'response.done') {
+        const responseId = realtimeResponseId(event);
+        const status = cleanText(event?.response?.status);
+        if (status === 'cancelled' && responseId) cancelledResponseIds.add(responseId);
+        if (responseId && activeResponseId && responseId !== activeResponseId) return;
+        const responseSpeechGeneration = activeResponseSpeechGeneration;
+        responseActive = false;
+        activeResponseId = '';
+        activeResponseSpeechGeneration = 0;
+        if (status === 'cancelled' || currentResponseCancelled) {
+          currentResponseCancelled = true;
+          clearRealtimeResponseOutput();
+          sendClient({ type: 'assistant_status', phase: 'listening', status: 'Realtime voice is listening.', threadId: activeAssistantThreadId });
+          return;
+        }
         finishResponseAudio();
+        currentResponseCancelled = false;
         const calls = uniqueRealtimeFunctionCalls([...pendingFunctionCalls.splice(0), ...realtimeFunctionCalls(event)]);
         if (calls.length > 0) {
-          void handleRealtimeFunctionCalls(calls);
+          const toolSpeechGeneration = responseSpeechGeneration;
+          void handleRealtimeFunctionCalls(calls, {
+            shouldRequestAudioResponse: () =>
+              !userSpeechActive &&
+              !responseActive &&
+              userSpeechGeneration === toolSpeechGeneration,
+          });
           return;
         }
         if (finalResponseRequested) {
