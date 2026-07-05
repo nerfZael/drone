@@ -565,6 +565,8 @@ export function CreateDronesModal({
                   title="Choose from models already seen in existing drones."
                   triggerLabel={spawnModelTriggerLabel}
                   triggerLabelClassName="font-mono"
+                  searchable
+                  searchPlaceholder="Search models"
                   chevron={(menuOpen) => <IconChevron down={!menuOpen} className="text-[var(--muted-dim)] opacity-70 flex-shrink-0" />}
                 />
                 <input

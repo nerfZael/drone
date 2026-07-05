@@ -126,6 +126,8 @@ export function SpawnContextToolbar({
                 title={modelTitle}
                 triggerLabel={spawnModelTriggerLabel}
                 triggerLabelClassName="font-mono"
+                searchable
+                searchPlaceholder="Search models"
                 chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
               />
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
@@ -241,6 +243,8 @@ export function SpawnContextToolbar({
             title={modelTitle}
             triggerLabel={spawnModelTriggerLabel}
             triggerLabelClassName="font-mono"
+            searchable
+            searchPlaceholder="Search models"
             chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
           />
           <input

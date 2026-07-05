@@ -1997,6 +1997,8 @@ export function DroneCanvasDock({
                   title="Choose from models already seen in existing drones."
                   triggerLabel={spawnModelTriggerLabel}
                   triggerLabelClassName="font-mono"
+                  searchable
+                  searchPlaceholder="Search models"
                 />
                 <input
                   value={normalizedSpawnModel}

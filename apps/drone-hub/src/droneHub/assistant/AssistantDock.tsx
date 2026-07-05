@@ -3978,6 +3978,8 @@ export function AssistantDock() {
             panelClassName="bottom-full mb-1.5 w-[190px]"
             menuClassName="max-h-56 overflow-y-auto"
             header="Model"
+            searchable
+            searchPlaceholder="Search models"
           />
           <div
             className="grid h-7 flex-shrink-0 grid-cols-2 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"

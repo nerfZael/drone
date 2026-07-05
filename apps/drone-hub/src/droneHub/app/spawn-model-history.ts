@@ -52,6 +52,7 @@ export function buildSpawnModelMenuEntries(
       value: id,
       label: id === activeModel && !seenModelIds.includes(id) ? `${id} (custom)` : id,
       title: id,
+      searchText: id,
       className: 'font-mono truncate',
     })),
   ];

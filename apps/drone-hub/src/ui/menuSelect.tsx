@@ -64,6 +64,63 @@ function isOptionEntry(entry: UiMenuSelectEntry): entry is UiMenuSelectOptionEnt
   return entry.kind !== 'separator';
 }
 
+function nodeSearchText(value: React.ReactNode): string {
+  if (typeof value === 'string' || typeof value === 'number') return String(value);
+  return '';
+}
+
+function fuzzyMatchScore(rawCandidate: string, rawQuery: string): number | null {
+  const candidate = rawCandidate.trim().toLowerCase().replace(/[\s._:/-]+/g, ' ');
+  const query = rawQuery.trim().toLowerCase().replace(/[\s._:/-]+/g, ' ');
+  if (!candidate || !query) return null;
+
+  const exactIndex = candidate.indexOf(query);
+  if (exactIndex >= 0) {
+    return 1000 - exactIndex * 4 - Math.max(0, candidate.length - query.length);
+  }
+
+  const compactCandidate = candidate.replace(/\s+/g, '');
+  const compactQuery = query.replace(/\s+/g, '');
+  const compactIndex = compactCandidate.indexOf(compactQuery);
+  if (compactIndex >= 0) {
+    return 900 - compactIndex * 4 - Math.max(0, compactCandidate.length - compactQuery.length);
+  }
+
+  let score = 0;
+  let queryIndex = 0;
+  let previousMatchIndex = -1;
+  for (let candidateIndex = 0; candidateIndex < candidate.length && queryIndex < query.length; candidateIndex += 1) {
+    if (candidate[candidateIndex] !== query[queryIndex]) continue;
+
+    const previousChar = candidateIndex > 0 ? candidate[candidateIndex - 1] : '';
+    const isBoundary = candidateIndex === 0 || /[\s._:/-]/.test(previousChar);
+    const isContiguous = previousMatchIndex >= 0 && candidateIndex === previousMatchIndex + 1;
+    score += 8;
+    if (isBoundary) score += 7;
+    if (isContiguous) score += 10;
+    if (previousMatchIndex >= 0 && !isContiguous) score -= Math.min(6, candidateIndex - previousMatchIndex - 1);
+
+    previousMatchIndex = candidateIndex;
+    queryIndex += 1;
+  }
+
+  if (queryIndex !== query.length) return null;
+  return score - Math.max(0, candidate.length - query.length) * 0.25;
+}
+
+function optionSearchScore(entry: UiMenuSelectOptionEntry, query: string): number | null {
+  const candidates = [entry.searchText, entry.title, entry.value, nodeSearchText(entry.label)]
+    .map((part) => String(part ?? '').trim())
+    .filter(Boolean);
+  let bestScore: number | null = null;
+  for (const candidate of candidates) {
+    const score = fuzzyMatchScore(candidate, query);
+    if (score === null) continue;
+    bestScore = bestScore === null ? score : Math.max(bestScore, score);
+  }
+  return bestScore;
+}
+
 function DefaultChevron({ open }: { open: boolean }) {
   return (
     <svg
@@ -133,15 +190,17 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
     [entries, value]
   );
   const filteredEntries = React.useMemo(() => {
-    const query = searchQuery.trim().toLowerCase();
+    const query = searchQuery.trim();
     if (!searchable || !query) return entries;
-    return entries.filter((entry) => {
-      if (!isOptionEntry(entry)) return true;
-      const haystack = [entry.searchText, entry.title, entry.value]
-        .map((part) => String(part ?? '').trim().toLowerCase())
-        .filter(Boolean);
-      return haystack.some((part) => part.includes(query));
-    });
+    return entries
+      .map((entry, index) => {
+        if (!isOptionEntry(entry)) return null;
+        const score = optionSearchScore(entry, query);
+        return score === null ? null : { entry, index, score };
+      })
+      .filter((item): item is { entry: UiMenuSelectOptionEntry; index: number; score: number } => Boolean(item))
+      .sort((a, b) => b.score - a.score || a.index - b.index)
+      .map((item) => item.entry);
   }, [entries, searchQuery, searchable]);
 
   const resolvedTriggerLabel = triggerLabel ?? selectedEntry?.label ?? '';
