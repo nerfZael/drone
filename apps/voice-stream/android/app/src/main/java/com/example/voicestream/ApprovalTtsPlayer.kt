@@ -1,5 +1,6 @@
 package com.example.voicestream
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -16,7 +17,8 @@ object ApprovalTtsPlayer {
         releaseActiveTrack()
     }
 
-    fun playWav(wav: ByteArray) {
+    fun playWav(context: Context, wav: ByteArray) {
+        val appContext = context.applicationContext
         val playbackGeneration = generation.incrementAndGet()
         releaseActiveTrack()
         Thread {
@@ -51,6 +53,7 @@ object ApprovalTtsPlayer {
                     .setBufferSizeInBytes(bufferSize)
                     .setTransferMode(AudioTrack.MODE_STREAM)
                     .build()
+                AudioDeviceRouter(appContext).routeForPlayback(track)
                 activeTrack = track
                 try {
                     if (playbackGeneration != generation.get()) return@runCatching

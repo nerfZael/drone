@@ -43,9 +43,9 @@ class VoiceSessionService : Service() {
     private val mainHandler = Handler(Looper.getMainLooper())
     private val preRollBuffer = PcmFrameBuffer(PRE_ROLL_FRAME_COUNT)
     private val pendingStreamBuffer = PcmFrameBuffer(MAX_PENDING_STREAM_FRAME_COUNT)
-    private val cuePlayer = LocalCuePlayer()
     private val approvalCodeRecognizer = ApprovalCodeRecognizer()
-    private lateinit var microphoneRouter: MicrophoneRouter
+    private lateinit var cuePlayer: LocalCuePlayer
+    private lateinit var audioDeviceRouter: AudioDeviceRouter
     private val approvalFinalizeRunnable = object : Runnable {
         override fun run() {
             handleApprovalUpdate(approvalCodeRecognizer.flush(SystemClock.elapsedRealtime()))
@@ -87,6 +87,7 @@ class VoiceSessionService : Service() {
     @Volatile private var lastStatus = "Off"
     @Volatile private var lastMode = Constants.MODE_OFF
     @Volatile private var currentMicrophone = "Mic: phone"
+    @Volatile private var currentOutput = "Out: auto"
     @Volatile private var lastApprovalStatus = ""
     @Volatile private var streamTarget = STREAM_TARGET_ASSISTANT
     @Volatile private var approvalSettings = ApprovalCodeSettings()
@@ -97,8 +98,10 @@ class VoiceSessionService : Service() {
         super.onCreate()
         DroneLog.install(applicationContext)
         DroneLog.i("Service", "VoiceSessionService created")
-        microphoneRouter = MicrophoneRouter(applicationContext)
-        currentMicrophone = microphoneRouter.describeBestAvailable()
+        cuePlayer = LocalCuePlayer(applicationContext)
+        audioDeviceRouter = AudioDeviceRouter(applicationContext)
+        currentMicrophone = audioDeviceRouter.describeSelectedInput()
+        currentOutput = audioDeviceRouter.describeSelectedOutput()
         createNotificationChannel()
     }
 
@@ -134,6 +137,13 @@ class VoiceSessionService : Service() {
 
             Constants.ACTION_QUERY_STATUS -> {
                 publishState(lastStatus, lastMode)
+                if (!serviceActive.get()) {
+                    stopSelf(startId)
+                }
+            }
+
+            Constants.ACTION_UPDATE_AUDIO_ROUTE -> {
+                applyAudioRoutePreference()
                 if (!serviceActive.get()) {
                     stopSelf(startId)
                 }
@@ -242,7 +252,8 @@ class VoiceSessionService : Service() {
         stopMicLoop()
         wakeDetector?.release()
         wakeDetector = null
-        currentMicrophone = microphoneRouter.describeBestAvailable()
+        currentMicrophone = audioDeviceRouter.describeSelectedInput()
+        currentOutput = audioDeviceRouter.describeSelectedOutput()
         wakeLock?.runCatching { if (isHeld) release() }
         wakeLock = null
         preRollBuffer.clear()
@@ -293,6 +304,7 @@ class VoiceSessionService : Service() {
             runCatching { localPlayer.release() }
         }
         player = null
+        currentOutput = audioDeviceRouter.describeSelectedOutput()
         playbackQueue.clear()
         wakeDetector?.reset()
 
@@ -351,9 +363,9 @@ class VoiceSessionService : Service() {
         }
 
         currentMicrophone = runCatching {
-            microphoneRouter.routeForRecording(localRecorder).label
+            audioDeviceRouter.routeForRecording(localRecorder).label
         }.onFailure { error ->
-            DroneLog.w("MicRoute", "Falling back after microphone routing failure", error)
+            DroneLog.w("AudioRoute", "Falling back after microphone routing failure", error)
         }.getOrElse { "Mic: phone" }
         publishState(lastStatus, lastMode)
 
@@ -411,9 +423,33 @@ class VoiceSessionService : Service() {
             runCatching { localRecorder.release() }
         }
         recorder = null
-        microphoneRouter.releaseRouting()
-        currentMicrophone = microphoneRouter.describeBestAvailable()
+        audioDeviceRouter.releaseRecordingRouting()
+        currentMicrophone = audioDeviceRouter.describeSelectedInput()
         DroneLog.i("MicLoop", "Stopped microphone loop")
+    }
+
+    private fun applyAudioRoutePreference() {
+        recorder?.let { localRecorder ->
+            currentMicrophone = runCatching {
+                audioDeviceRouter.routeForRecording(localRecorder).label
+            }.onFailure { error ->
+                DroneLog.w("AudioRoute", "Could not update input route", error)
+            }.getOrElse { audioDeviceRouter.describeSelectedInput() }
+        } ?: run {
+            currentMicrophone = audioDeviceRouter.describeSelectedInput()
+        }
+
+        player?.let { localPlayer ->
+            currentOutput = runCatching {
+                audioDeviceRouter.routeForPlayback(localPlayer).label
+            }.onFailure { error ->
+                DroneLog.w("AudioRoute", "Could not update output route", error)
+            }.getOrElse { audioDeviceRouter.describeSelectedOutput() }
+        } ?: run {
+            currentOutput = audioDeviceRouter.describeSelectedOutput()
+        }
+
+        publishState(lastStatus, lastMode)
     }
 
     private fun handleWakeDetected(phrase: WakePhrase) {
@@ -585,7 +621,7 @@ class VoiceSessionService : Service() {
                 if (!serviceActive.get()) return
                 val data = bytes.toByteArray()
                 if (isWavAudio(data)) {
-                    ApprovalTtsPlayer.playWav(data)
+                    ApprovalTtsPlayer.playWav(applicationContext, data)
                 }
             }
 
@@ -640,7 +676,7 @@ class VoiceSessionService : Service() {
                 if (!recording.get()) return
                 val data = bytes.toByteArray()
                 if (isWavAudio(data)) {
-                    ApprovalTtsPlayer.playWav(data)
+                    ApprovalTtsPlayer.playWav(applicationContext, data)
                 } else {
                     playbackQueue.offer(data)
                 }
@@ -822,6 +858,9 @@ class VoiceSessionService : Service() {
             .setBufferSizeInBytes(bufferSize)
             .setTransferMode(AudioTrack.MODE_STREAM)
             .build()
+        player?.let { localPlayer ->
+            currentOutput = audioDeviceRouter.routeForPlayback(localPlayer).label
+        }
 
         playbackThread = Thread {
             val localPlayer = player ?: return@Thread
@@ -926,6 +965,7 @@ class VoiceSessionService : Service() {
             putExtra(Constants.EXTRA_STATUS, lastStatus)
             putExtra(Constants.EXTRA_MODE, lastMode)
             putExtra(Constants.EXTRA_MICROPHONE, currentMicrophone)
+            putExtra(Constants.EXTRA_OUTPUT, currentOutput)
             putExtra(Constants.EXTRA_APPROVAL_STATUS, lastApprovalStatus)
         })
         sendControlStatus()
@@ -938,6 +978,7 @@ class VoiceSessionService : Service() {
             .put("status", lastStatus)
             .put("mode", lastMode)
             .put("microphone", currentMicrophone)
+            .put("output", currentOutput)
             .put("approvalStatus", lastApprovalStatus)
             .put("reportedAt", System.currentTimeMillis())
             .toString()
