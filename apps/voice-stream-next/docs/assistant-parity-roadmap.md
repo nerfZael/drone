@@ -157,7 +157,6 @@ Initial capabilities:
 
 - artifacts
 - speech
-- approvals
 - external provider calls
 - future integrations
 

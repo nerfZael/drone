@@ -2379,7 +2379,6 @@ function modelDrivenSpokenText(thread: AssistantThread, text: string): string | 
 
 async function approvalRequiredFor(db: VoiceStreamNextDb, userId: string, thread: AssistantThread, toolName: string, args: unknown): Promise<boolean> {
   if (thread.autoApprove) return false;
-  if (!thread.capabilities.approvals) return false;
   const approval = approvalPolicyForTool(db, userId, toolName);
   if (approval === 'always') return true;
   if (approval === 'normal_threads') return !thread.voiceEnabled;

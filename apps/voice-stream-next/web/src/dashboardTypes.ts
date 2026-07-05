@@ -174,7 +174,6 @@ export type AssistantThread = {
   capabilities?: {
     artifacts: boolean;
     speech: boolean;
-    approvals: boolean;
     externalCalls: boolean;
     futureIntegrations: boolean;
   };
