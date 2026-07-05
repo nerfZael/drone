@@ -29,7 +29,7 @@ export function makeId(): string {
 }
 
 export function isDroneStartingOrSeeding(hubPhase: string | null | undefined): boolean {
-  return hubPhase === 'creating' || hubPhase === 'starting' || hubPhase === 'seeding';
+  return hubPhase === 'draft' || hubPhase === 'creating' || hubPhase === 'starting' || hubPhase === 'seeding';
 }
 
 export function isHiddenDrone(drone: Pick<DroneSummary, 'visibility'> | null | undefined): boolean {

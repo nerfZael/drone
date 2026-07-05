@@ -629,7 +629,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         const id = normalizeDroneIdentity(idRaw);
         if (!id) continue;
         const phase = String(p?.phase ?? 'starting').trim();
-        if (phase === 'error') continue;
+        if (phase === 'error' || phase === 'draft') continue;
         enqueueProvisioning(id);
       }
     } catch {

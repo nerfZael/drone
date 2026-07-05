@@ -439,10 +439,31 @@ export function hubTransport(options: HubTransportOptions): DroneTransport {
         { method: 'GET' },
         requestOptions,
       );
+      const draftByChat: Record<string, boolean> =
+        response?.draftChats && typeof response.draftChats === 'object' && !Array.isArray(response.draftChats)
+          ? Object.fromEntries(
+              Object.entries(response.draftChats)
+                .map(([name, draft]) => [String(name).trim(), draft === true] as const)
+                .filter(([name, draft]) => Boolean(name) && draft),
+            )
+          : {};
+      for (const item of Array.isArray(response?.chatDetails) ? response.chatDetails : []) {
+        const name = String(item?.chat ?? item?.name ?? '').trim();
+        if (name && item?.draft === true) draftByChat[name] = true;
+      }
       return Array.isArray(response?.chats)
-        ? response.chats.map((name: any) => ({
-            name: String(name ?? ''),
-          }))
+        ? response.chats
+            .map((item: any) => {
+              const name = typeof item === 'string' ? item : String(item?.chat ?? item?.name ?? '');
+              const cleanName = String(name ?? '').trim();
+              if (!cleanName) return null;
+              const draft = (typeof item === 'object' && item?.draft === true) || draftByChat[cleanName] === true;
+              return {
+                name: cleanName,
+                ...(draft ? { draft: true } : {}),
+              };
+            })
+            .filter(Boolean) as ChatSummary[]
         : [];
     },
 

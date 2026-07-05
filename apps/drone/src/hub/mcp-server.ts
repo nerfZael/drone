@@ -979,6 +979,7 @@ function registerTools(server: McpServer) {
       remoteBranch: z.string().optional(),
       pullHostBranchBeforeCreate: z.boolean().optional(),
       initialMessage: z.string().optional(),
+      draft: z.boolean().optional(),
     },
   }, async (args) => {
     const resolvedRepo = await resolveRegisteredRepo(args);
@@ -994,6 +995,7 @@ function registerTools(server: McpServer) {
     const body = {
       name: cleanString(args.name),
       runtime: 'container',
+      ...(args.draft === true ? { draft: true } : {}),
       ...(cleanString(args.group) ? { group: cleanString(args.group) } : {}),
       ...(seedAgent ? { seedAgent } : {}),
       ...(seedModel ? { seedModel } : {}),
@@ -1034,18 +1036,41 @@ function registerTools(server: McpServer) {
     inputSchema: { drone: z.string() },
   }, async (args) => {
     const response = await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, { method: 'GET' });
-    return toolResult({ ok: true, drone: args.drone, chats: Array.isArray(response?.chats) ? response.chats.map((name: any) => ({ name: cleanString(name) })) : [] });
+    const draftByChat: Record<string, boolean> =
+      response?.draftChats && typeof response.draftChats === 'object' && !Array.isArray(response.draftChats)
+        ? Object.fromEntries(
+            Object.entries(response.draftChats)
+              .map(([name, draft]) => [cleanString(name), draft === true] as const)
+              .filter(([name, draft]) => Boolean(name) && draft),
+          )
+        : {};
+    for (const item of Array.isArray(response?.chatDetails) ? response.chatDetails : []) {
+      const name = cleanString(item?.chat ?? item?.name);
+      if (name && item?.draft === true) draftByChat[name] = true;
+    }
+    return toolResult({
+      ok: true,
+      drone: args.drone,
+      chats: Array.isArray(response?.chats)
+        ? response.chats
+            .map((item: any) => {
+              const name = typeof item === 'string' ? cleanString(item) : cleanString(item?.chat ?? item?.name);
+              return name ? { name, ...((typeof item === 'object' && item?.draft === true) || draftByChat[name] ? { draft: true } : {}) } : null;
+            })
+            .filter(Boolean)
+        : [],
+    });
   });
 
   server.registerTool('create_chat', {
     title: 'Create drone chat',
     description: 'Create a chat for a Drone Hub drone.',
-    inputSchema: { drone: z.string(), chat: z.string() },
+    inputSchema: { drone: z.string(), chat: z.string(), draft: z.boolean().optional() },
   }, async (args) => {
     let created = true;
     await requestJson(`/api/drones/${encodeURIComponent(args.drone)}/chats`, {
       method: 'POST',
-      body: JSON.stringify({ name: args.chat }),
+      body: JSON.stringify({ name: args.chat, ...(args.draft === true ? { draft: true } : {}) }),
     }).catch((error: any) => {
       if (error?.status !== 409) throw error;
       created = false;

@@ -31,6 +31,8 @@ type DraftChatWorkspaceProps = {
   draftChat: DraftChatState;
   createRuntime: CreateRuntime;
   onCreateRuntimeChange: (value: CreateRuntime) => void;
+  createAsDraft: boolean;
+  onCreateAsDraftChange: (value: boolean) => void;
   createPersistVolume: boolean;
   onCreatePersistVolumeChange: (value: boolean) => void;
   draftCreateMode: 'with-chat' | 'without-chat';
@@ -74,6 +76,8 @@ export function DraftChatWorkspace({
   draftChat,
   createRuntime,
   onCreateRuntimeChange,
+  createAsDraft,
+  onCreateAsDraftChange,
   createPersistVolume,
   onCreatePersistVolumeChange,
   draftCreateMode,
@@ -294,6 +298,40 @@ export function DraftChatWorkspace({
             </button>
           </div>
         ) : null}
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+            Draft
+          </span>
+          <button
+            type="button"
+            role="switch"
+            aria-checked={createAsDraft}
+            onClick={() => onCreateAsDraftChange(!createAsDraft)}
+            disabled={controlsLocked}
+            className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+              controlsLocked
+                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                : createAsDraft
+                  ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
+                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+            }`}
+            style={{ fontFamily: 'var(--display)' }}
+            title="Save this drone as a draft. Messages queue until you publish it."
+          >
+            <span
+              className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
+                createAsDraft ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
+              }`}
+            >
+              <span
+                className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
+                  createAsDraft ? 'translate-x-[11px]' : 'translate-x-[1px]'
+                }`}
+              />
+            </span>
+            {createAsDraft ? 'On' : 'Off'}
+          </button>
+        </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-2">
         <div className="flex items-center gap-1.5">

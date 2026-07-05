@@ -483,6 +483,13 @@ function parseCreateRuntime(raw: unknown): DroneRuntime {
   throw new Error('invalid runtime (expected container|host)');
 }
 
+function parseDraftFlag(raw: unknown): boolean {
+  if (typeof raw === 'boolean') return raw;
+  if (raw == null) return false;
+  const value = String(raw).trim().toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes' || value === 'on' || value === 'draft';
+}
+
 function parsePersistVolume(raw: unknown): boolean | undefined {
   if (raw == null) return undefined;
   if (typeof raw === 'boolean') return raw;
@@ -4784,6 +4791,14 @@ function summarizeDroneActivity(entry: any): {
   };
 }
 
+function isDraftDroneEntry(entry: any): boolean {
+  return entry?.draft === true || String(entry?.phase ?? '').trim().toLowerCase() === 'draft';
+}
+
+function isDraftChatEntry(entry: any): boolean {
+  return entry?.draft === true;
+}
+
 function summarizePlaybookRunEntry(args: {
   droneId: string;
   name: string;
@@ -8803,6 +8818,7 @@ async function pumpQueuedPendingPromptsForChat(opts: { droneId: string; chatName
   // Avoid unbounded loops if state keeps changing due to concurrent requests.
   for (let attempts = 0; attempts < 50; attempts++) {
     const { d, chat } = await getChatEntry({ droneId, chatName });
+    if (isDraftChatEntry(chat)) return;
     const agent = inferChatAgent(chat, d);
     if (!agent || agent.kind !== 'builtin') return;
 
@@ -13623,6 +13639,7 @@ export async function startDroneHubApiServer(opts: {
       for (const [droneName, d] of drones as any[]) {
         const chats = d?.chats && typeof d.chats === 'object' ? Object.entries(d.chats) : [];
         for (const [chatName, entry] of chats as any[]) {
+          if (isDraftChatEntry(entry)) continue;
           const pending = Array.isArray((entry as any)?.pendingPrompts) ? (entry as any).pendingPrompts : [];
           if (pending.some((p: any) => String(p?.state ?? '') === 'queued')) {
             enqueuePendingPromptPump(String(droneName), String(chatName));
@@ -14153,8 +14170,8 @@ export async function startDroneHubApiServer(opts: {
         request: submittedRequest,
       };
     },
-    createChat: async ({ droneId, chatName }): Promise<AssistantCreateChatResult> => {
-      const data = await callLocalHubApi(`/api/drones/${encodeURIComponent(droneId)}/chats`, { name: chatName });
+    createChat: async ({ droneId, chatName, draft }): Promise<AssistantCreateChatResult> => {
+      const data = await callLocalHubApi(`/api/drones/${encodeURIComponent(droneId)}/chats`, { name: chatName, ...(draft ? { draft: true } : {}) });
       return {
         droneId: String(data?.id ?? droneId).trim() || droneId,
         droneName: String(data?.name ?? droneId).trim() || droneId,
@@ -15240,15 +15257,20 @@ export async function startDroneHubApiServer(opts: {
         Boolean(String((seed as any)?.chatName ?? '').trim()) ||
         Boolean(String((seed as any)?.cwd ?? '').trim()));
     const message =
-      typeof p?.message === 'string' ? p.message : phase === 'error' ? 'Failed' : hasSeed ? 'Seeding…' : 'Starting…';
+      typeof p?.message === 'string' ? p.message : phase === 'draft' ? 'Draft' : phase === 'error' ? 'Failed' : hasSeed ? 'Seeding…' : 'Starting…';
     const err = typeof p?.error === 'string' ? p.error : null;
-    const hubPhase: any = phase === 'error' ? 'error' : phase === 'seeding' ? 'seeding' : 'starting';
+    const hubPhase: any = phase === 'draft' ? 'draft' : phase === 'error' ? 'error' : phase === 'seeding' ? 'seeding' : 'starting';
+    const startupChats = [
+      ...new Set(normalizePendingStartupPrompts((p as any)?.startupQueuedPrompts).map((item) => item.chatName)),
+    ].filter(Boolean);
+    const chats = startupChats.length > 0 ? startupChats : ['default'];
     return {
       id: normalizeDroneIdentity(p?.id) || null,
       name: String(p?.name ?? ''),
       group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
       kind: normalizeDroneEntryKind(p?.kind),
       visibility: normalizeDroneEntryVisibility(p?.visibility),
+      draft: isDraftDroneEntry(p),
       playbook: playbookMetaFromEntry(p?.playbook),
       createdAt: String(p?.createdAt ?? nowIso()),
       lastActivityAt: activity.lastActivityAt,
@@ -15268,7 +15290,7 @@ export async function startDroneHubApiServer(opts: {
       status: null,
       statusError: phase === 'error' ? (err ?? message ?? 'failed') : null,
       statusChecking: false,
-      chats: [],
+      chats,
       busyChats: [],
       hubPhase,
       hubMessage: phase === 'error' ? (err ?? message ?? null) : message,
@@ -15310,6 +15332,12 @@ export async function startDroneHubApiServer(opts: {
       Boolean(String(d?.repo?.seededAt ?? '').trim());
     const droneId = normalizeDroneIdentity(d?.id);
     const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
+    const chats = Object.keys(d.chats ?? {});
+    const draftChats = Object.fromEntries(
+      chats
+        .filter((chatName) => isDraftChatEntry((d.chats ?? {})[chatName]))
+        .map((chatName) => [chatName, true]),
+    );
     const { hostPort, statusOk, status, statusError, statusChecking } = cachedDroneStatusSummaryForEntry(d);
 
     return {
@@ -15337,7 +15365,8 @@ export async function startDroneHubApiServer(opts: {
       status,
       statusError,
       statusChecking: Boolean(statusChecking),
-      chats: Object.keys(d.chats ?? {}),
+      chats,
+      draftChats,
       busyChats,
       hubPhase,
       hubMessage,
@@ -19229,6 +19258,7 @@ export async function startDroneHubApiServer(opts: {
         }
 
         const nameRaw = body?.name;
+        const createAsDraft = parseDraftFlag(body?.draft ?? body?.isDraft);
 
         const groupRaw = typeof body?.group === 'string' ? body.group.trim() : '';
         const group = groupRaw ? groupRaw : null;
@@ -19265,7 +19295,7 @@ export async function startDroneHubApiServer(opts: {
         }
 
         const droneCli = resolveDroneCliPath();
-        if (!(await fileExists(droneCli))) {
+        if (!createAsDraft && !(await fileExists(droneCli))) {
           json(res, 500, { ok: false, error: `drone CLI not found at ${droneCli}` });
           return;
         }
@@ -19430,9 +19460,24 @@ export async function startDroneHubApiServer(opts: {
           regAny.pending = regAny.pending ?? {};
           const at = nowIso();
           ensureGroupRegistered(regAny, group ?? null, at);
+          const startupQueuedPrompts =
+            createAsDraft && seedPrompt
+              ? [
+                  {
+                    id: seedPromptId || crypto.randomBytes(9).toString('hex'),
+                    chatName: seedChatName,
+                    at: seedSubmittedAt,
+                    prompt: seedPrompt,
+                    ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
+                    state: 'queued' as const,
+                    updatedAt: seedSubmittedAt,
+                  },
+                ]
+              : [];
           regAny.pending[droneId] = {
             id: droneId,
             name,
+            ...(createAsDraft ? { draft: true } : {}),
             group: group ?? undefined,
             repoPath,
             runtime,
@@ -19440,9 +19485,10 @@ export async function startDroneHubApiServer(opts: {
             build,
             createdAt: at,
             updatedAt: at,
-            phase: 'starting',
-            message: 'Starting…',
+            phase: createAsDraft ? 'draft' : 'starting',
+            message: createAsDraft ? 'Draft' : 'Starting…',
             environment: createdEnvironment,
+            ...(startupQueuedPrompts.length > 0 ? { startupQueuedPrompts } : {}),
             ...(runtime === 'container' && typeof persistVolume === 'boolean' ? { persistVolume } : {}),
             ...(repoPath && !cloneFrom ? { repoSeedSource: repoBranchSource } : {}),
             ...(repoPath && repoBranchSource === 'remote' && remoteBranch && !cloneFrom ? { repoSeedRemoteBranch: remoteBranch } : {}),
@@ -19467,9 +19513,9 @@ export async function startDroneHubApiServer(opts: {
                     chatName: seedChatName,
                     ...(seedModel ? { model: seedModel } : {}),
                     ...(seedAgentPermissionMode === 'read-only' ? { agentPermissionMode: seedAgentPermissionMode } : {}),
-                    ...(seedPromptId ? { promptId: seedPromptId } : {}),
-                    ...(seedPrompt ? { prompt: seedPrompt } : {}),
-                    ...(seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
+                    ...(!createAsDraft && seedPromptId ? { promptId: seedPromptId } : {}),
+                    ...(!createAsDraft && seedPrompt ? { prompt: seedPrompt } : {}),
+                    ...(!createAsDraft && seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
                     ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
                     ...(seedAgent ? { agent: seedAgent } : {}),
                   },
@@ -19483,15 +19529,15 @@ export async function startDroneHubApiServer(opts: {
           return;
         }
 
-        // Queue provisioning (bounded concurrency).
-        enqueueProvisioning(droneId);
+        if (!createAsDraft) enqueueProvisioning(droneId);
 
-        json(res, 202, {
+        json(res, createAsDraft ? 201 : 202, {
           ok: true,
           id: droneId,
           name,
           runtime,
-          phase: 'starting',
+          phase: createAsDraft ? 'draft' : 'starting',
+          draft: createAsDraft,
           ...(seedPromptId
             ? {
                 initialMessage: {
@@ -19666,12 +19712,12 @@ export async function startDroneHubApiServer(opts: {
           }
         }
 
-        let accepted: Array<{ id: string; name: string; phase: 'starting' }> = [];
+        let accepted: Array<{ id: string; name: string; phase: 'draft' | 'starting'; draft?: boolean }> = [];
         let rejected: Array<{ name: string; error: string; status?: number }> = [];
         try {
           const result = await updateRegistry((regAny: any) => {
             regAny.pending = regAny.pending ?? {};
-            const accepted: Array<{ id: string; name: string; phase: 'starting' }> = [];
+            const accepted: Array<{ id: string; name: string; phase: 'draft' | 'starting'; draft?: boolean }> = [];
             const rejected: Array<{ name: string; error: string; status?: number }> = [];
             const seenInRequest = new Set<string>();
 
@@ -19723,6 +19769,7 @@ export async function startDroneHubApiServer(opts: {
                 continue;
               }
               const build = raw?.build === true;
+              const createAsDraft = parseDraftFlag(raw?.draft ?? raw?.isDraft);
               const createdEnvironment = deriveCreatedDroneEnvironmentConfig(regAny, { repoPath, runtime });
               let persistVolume: boolean | undefined;
               try {
@@ -19824,9 +19871,24 @@ export async function startDroneHubApiServer(opts: {
               const id = makeDroneIdentity();
               const at = nowIso();
               ensureGroupRegistered(regAny, group ?? null, at);
+              const startupQueuedPrompts =
+                createAsDraft && seedPrompt
+                  ? [
+                      {
+                        id: crypto.randomBytes(9).toString('hex'),
+                        chatName: seedChatName,
+                        at: seedSubmittedAt,
+                        prompt: seedPrompt,
+                        ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
+                        state: 'queued' as const,
+                        updatedAt: seedSubmittedAt,
+                      },
+                    ]
+                  : [];
               regAny.pending[id] = {
                 id,
                 name,
+                ...(createAsDraft ? { draft: true } : {}),
                 group: group ?? undefined,
                 repoPath,
                 runtime,
@@ -19834,9 +19896,10 @@ export async function startDroneHubApiServer(opts: {
                 build,
                 createdAt: at,
                 updatedAt: at,
-                phase: 'starting',
-                message: 'Starting…',
+                phase: createAsDraft ? 'draft' : 'starting',
+                message: createAsDraft ? 'Draft' : 'Starting…',
                 environment: createdEnvironment,
+                ...(startupQueuedPrompts.length > 0 ? { startupQueuedPrompts } : {}),
                 ...(runtime === 'container' && typeof persistVolume === 'boolean' ? { persistVolume } : {}),
                 ...(repoPath && !cloneFromId ? { repoSeedSource: repoBranchSource } : {}),
                 ...(repoPath && repoBranchSource === 'remote' && remoteBranch && !cloneFromId
@@ -19863,8 +19926,8 @@ export async function startDroneHubApiServer(opts: {
                         chatName: seedChatName,
                         ...(seedModel ? { model: seedModel } : {}),
                         ...(seedAgentPermissionMode === 'read-only' ? { agentPermissionMode: seedAgentPermissionMode } : {}),
-                        ...(seedPrompt ? { prompt: seedPrompt } : {}),
-                        ...(seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
+                        ...(!createAsDraft && seedPrompt ? { prompt: seedPrompt } : {}),
+                        ...(!createAsDraft && seedPrompt ? { submittedAt: seedSubmittedAt } : {}),
                         ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
                         ...(seedAgent ? { agent: seedAgent } : {}),
                       },
@@ -19872,7 +19935,7 @@ export async function startDroneHubApiServer(opts: {
                   : {}),
               };
 
-              accepted.push({ id, name, phase: 'starting' });
+              accepted.push({ id, name, phase: createAsDraft ? 'draft' : 'starting', ...(createAsDraft ? { draft: true } : {}) });
             }
 
             return { accepted, rejected };
@@ -19885,7 +19948,10 @@ export async function startDroneHubApiServer(opts: {
         }
 
         // Enqueue provisioning after pending is persisted.
-        for (const a of accepted) enqueueProvisioning(a.id);
+        for (const a of accepted) {
+          if ((a as any).draft === true || a.phase === 'draft') continue;
+          enqueueProvisioning(a.id);
+        }
 
         json(res, 202, { ok: true, accepted, rejected, total: list.length });
         return;
@@ -25006,6 +25072,51 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
+      // POST /api/drones/:id/publish
+      // Starts a draft drone and releases its queued startup prompts.
+      if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'publish') {
+        const droneRef = decodeURIComponent(parts[2]);
+        const regAnySnapshot: any = await loadRegistry();
+        const found = findDroneIdByRef(regAnySnapshot, droneRef);
+        if (!found) {
+          json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
+          return;
+        }
+        if (found.kind !== 'pending' || regAnySnapshot?.drones?.[found.id]) {
+          json(res, 409, { ok: false, error: `drone is already published: ${droneRef}` });
+          return;
+        }
+        const droneId = normalizeDroneIdentity(found.id) || found.id;
+        const pendingEntry = regAnySnapshot?.pending?.[droneId];
+        if (!isDraftDroneEntry(pendingEntry)) {
+          json(res, 409, { ok: false, error: `drone is not a draft: ${droneRef}` });
+          return;
+        }
+        const droneCli = resolveDroneCliPath();
+        if (!(await fileExists(droneCli))) {
+          json(res, 500, { ok: false, error: `drone CLI not found at ${droneCli}` });
+          return;
+        }
+        const published = await updateRegistry((regAny: any) => {
+          const draft = regAny?.pending?.[droneId];
+          if (!draft || regAny?.drones?.[droneId] || !isDraftDroneEntry(draft)) return null;
+          draft.draft = false;
+          draft.phase = 'starting';
+          draft.message = 'Starting…';
+          draft.updatedAt = nowIso();
+          regAny.pending = regAny.pending ?? {};
+          regAny.pending[droneId] = draft;
+          return { id: droneId, name: String(draft?.name ?? droneId).trim() || droneId, runtime: normalizeDroneRuntime(draft?.runtime) };
+        });
+        if (!published) {
+          json(res, 409, { ok: false, error: `drone is not a draft: ${droneRef}` });
+          return;
+        }
+        enqueueProvisioning(droneId);
+        json(res, 202, { ok: true, id: published.id, name: published.name, runtime: published.runtime, phase: 'starting', draft: false });
+        return;
+      }
+
       // POST /api/drones/:id/base-image
       // Sets the given drone's container as the DVM base image (same as: `dvm base set <container>`).
       if (method === 'POST' && parts.length === 4 && parts[0] === 'api' && parts[1] === 'drones' && parts[3] === 'base-image') {
@@ -26833,16 +26944,47 @@ export async function startDroneHubApiServer(opts: {
               }
             }
           } else {
-            r = await createOrEnqueuePromptUnified({
-              id: promptIdRaw || undefined,
-              droneId,
-              chatName: chat,
-              prompt,
-              attachments,
-              cwd: typeof body?.cwd === 'string' ? body.cwd : null,
-              submittedAt,
-              mark: (name) => timer.mark(name),
-            });
+            const liveChatEntry = (drone as any)?.chats?.[chat] ?? null;
+            if (isDraftChatEntry(liveChatEntry)) {
+              if (attachments.length > 0) {
+                r = {
+                  kind: 'error',
+                  status: 409,
+                  error: 'draft chats do not support attachments until they are published',
+                };
+              } else {
+                const draftPromptId = promptIdRaw || crypto.randomBytes(9).toString('hex');
+                await pushPendingPrompt({
+                  droneId,
+                  chatName: chat,
+                  pending: {
+                    id: draftPromptId,
+                    at: submittedAt,
+                    prompt,
+                    ...(typeof body?.cwd === 'string' ? { cwd: body.cwd } : {}),
+                    state: 'queued',
+                    updatedAt: submittedAt,
+                  },
+                });
+                r = {
+                  kind: 'enqueued',
+                  id: draftPromptId,
+                  pendingState: 'queued',
+                  blockedByAutomation: false,
+                };
+              }
+            } else {
+              r = await createOrEnqueuePromptUnified({
+                id: promptIdRaw || undefined,
+                droneId,
+                chatName: chat,
+                prompt,
+                attachments,
+                cwd: typeof body?.cwd === 'string' ? body.cwd : null,
+                submittedAt,
+                mark: (name) => timer.mark(name),
+              });
+            }
           }
           timer.mark('enqueue');
 
@@ -27495,6 +27637,7 @@ export async function startDroneHubApiServer(opts: {
             id: droneId,
             name: droneName,
             chat: chatName,
+            draft: isDraftChatEntry(chatEntry),
             agent,
             model: normalizeChatModel((chat as any)?.model),
             models: discovered.models,
@@ -27537,6 +27680,7 @@ export async function startDroneHubApiServer(opts: {
         }
         const copyFromRaw = String(body?.copyFrom ?? body?.copyFromChat ?? body?.fromChat ?? '').trim();
         const copyFrom = copyFromRaw ? normalizeChatName(copyFromRaw) : '';
+        const createAsDraft = parseDraftFlag(body?.draft ?? body?.isDraft);
         const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings()).enabledByDefault;
         const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings()).enabledByDefault;
 
@@ -27579,6 +27723,7 @@ export async function startDroneHubApiServer(opts: {
                 agentSuggestionEnabledByDefault,
               });
             }
+            if (createAsDraft) entry.draft = true;
             d.chats[chatName] = entry;
             regAny.drones = regAny.drones ?? {};
             regAny.drones[droneId] = d;
@@ -27590,6 +27735,7 @@ export async function startDroneHubApiServer(opts: {
             id: droneId,
             name: droneName,
             chat: chatName,
+            draft: createAsDraft,
             chats,
           });
           return;
@@ -27679,6 +27825,56 @@ export async function startDroneHubApiServer(opts: {
         }
       }
 
+      // POST /api/drones/:id/chats/:chat/publish
+      if (
+        method === 'POST' &&
+        parts.length === 6 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'publish'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
+
+        try {
+          const result = await updateRegistry((regAny: any) => {
+            const d = regAny?.drones?.[droneId];
+            if (!d) throw new Error(`unknown drone: ${droneId}`);
+            d.chats = d.chats ?? {};
+            const entry = d.chats?.[chatName];
+            if (!entry) throw new Error(`unknown chat: ${chatName}`);
+            if (!isDraftChatEntry(entry)) throw new Error(`chat is not a draft: ${chatName}`);
+            delete entry.draft;
+            entry.updatedAt = nowIso();
+            d.chats[chatName] = entry;
+            regAny.drones = regAny.drones ?? {};
+            regAny.drones[droneId] = d;
+            return { published: true, pendingCount: Array.isArray(entry.pendingPrompts) ? entry.pendingPrompts.length : 0 };
+          });
+          enqueuePendingPromptPump(droneId, chatName);
+          json(res, 202, {
+            ok: true,
+            id: droneId,
+            name: droneName,
+            chat: chatName,
+            draft: false,
+            published: result.published,
+            pendingCount: result.pendingCount,
+          });
+          return;
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          const code = /unknown drone|unknown chat/i.test(msg) ? 404 : /not a draft/i.test(msg) ? 409 : 500;
+          json(res, code, { ok: false, error: msg });
+          return;
+        }
+      }
+
       // POST /api/drones/:id/chats/:chat/archive
       if (
         method === 'POST' &&
@@ -27751,13 +27947,14 @@ export async function startDroneHubApiServer(opts: {
         try {
           const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings()).enabledByDefault;
           const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings()).enabledByDefault;
+          const chatWasDraft = isDraftChatEntry(resolved.drone?.chats?.[chatName]);
           await stopSingleDroneChatActivity({
             droneId,
             chatName,
             droneEntry: resolved.drone,
           });
 
-          if (deleteSettings.mode === 'archive') {
+          if (deleteSettings.mode === 'archive' && !chatWasDraft) {
             const result = await archiveChatById({
               droneId,
               chatName,
@@ -27850,10 +28047,16 @@ export async function startDroneHubApiServer(opts: {
           const storeChats = listChatsFromStore({ droneId });
           timer.mark('store');
           const chats = storeChats.available ? storeChats.chats : importedChats;
+          const registryChats = (resolved.drone as any)?.chats ?? {};
+          const chatDetails = chats.map((chatName) => ({
+            chat: chatName,
+            draft: isDraftChatEntry(registryChats?.[chatName]),
+          }));
+          const draftChats = Object.fromEntries(chatDetails.filter((item) => item.draft).map((item) => [item.chat, true]));
           timer.mark('format');
           timer.setHeader(res);
           logSlowHubRequest('chat list', timer, { droneId, chatCount: chats.length, storeAvailable: storeChats.available, status: 200 });
-          json(res, 200, { ok: true, id: droneId, name: droneName, chats });
+          json(res, 200, { ok: true, id: droneId, name: droneName, chats, chatDetails, draftChats });
           return;
         } catch (e: any) {
           timer.setHeader(res);

@@ -227,7 +227,7 @@ export type AssistantChangeEvent = {
 type AssistantToolCallbacks = {
   listDrones: () => Promise<AssistantDroneSummary[]>;
   createDrone: (opts: any) => Promise<AssistantCreateDroneResult>;
-  createChat: (opts: { droneId: string; chatName: string }) => Promise<AssistantCreateChatResult>;
+  createChat: (opts: { droneId: string; chatName: string; draft?: boolean }) => Promise<AssistantCreateChatResult>;
   createGroup?: (opts: { group: string }) => Promise<AssistantCreateGroupResult>;
   setDroneGroup: (opts: { droneIds: string[]; group: string | null }) => Promise<AssistantSetDroneGroupResult>;
   setDroneGroups?: (opts: { assignments: Array<{ droneIds: string[]; group: string | null }> }) => Promise<AssistantSetDroneGroupsResult>;
@@ -2911,9 +2911,11 @@ export class HubAssistantService {
     const repoBranchSource = normalizeAssistantRepoBranchSource(params?.repoBranchSource);
     const remoteBranch = cleanOptionalString(params?.remoteBranch);
     const initialMessage = cleanOptionalString(params?.initialMessage ?? params?.seedPrompt ?? params?.message);
+    const draft = params?.draft === true || params?.isDraft === true;
     const request = {
       name,
       runtime,
+      ...(draft ? { draft: true } : {}),
       ...(group ? { group } : {}),
       ...(repoPath ? { repoPath } : {}),
       ...(repoPath ? { repoBranchSource } : {}),
@@ -4774,12 +4776,24 @@ export class HubAssistantService {
           remoteBranch: Type.Optional(Type.String({ description: 'Remote branch name when repoBranchSource is remote.' })),
           pullHostBranchBeforeCreate: Type.Optional(Type.Boolean({ description: 'Whether to pull the host branch before creating from host branch. Defaults to hub behavior.' })),
           initialMessage: Type.Optional(Type.String({ description: 'Optional first user message to seed into the new drone default chat.' })),
+          draft: Type.Optional(Type.Boolean({ description: 'Create as a draft. Draft drones appear in the sidebar and queue messages, but do not start a container until published.' })),
         }),
         executionMode: 'sequential',
         execute: async (_toolCallId: string, params: any, signal?: AbortSignal) => {
           const request = await this.buildCreateDroneRequest(params ?? {}, threadId);
           const result = await this.tools.createDrone(request);
           this.addDroneToSelectedAccessScope(threadId, result.id);
+          if (request.draft === true) {
+            return {
+              content: [
+                {
+                  type: 'text',
+                  text: `Created draft drone ${result.name} (${result.id}).`,
+                },
+              ],
+              details: { ...result, phase: 'draft' },
+            };
+          }
           const ready = await waitForAssistantDroneReady({ droneId: result.id, signal });
           return {
             content: [
@@ -4829,6 +4843,7 @@ export class HubAssistantService {
         parameters: Type.Object({
           targetDroneId: Type.String({ description: 'Target drone id or visible name.' }),
           name: Type.String({ description: 'Name for the new chat.' }),
+          draft: Type.Optional(Type.Boolean({ description: 'Create as a draft chat. Messages queue until the chat is published.' })),
         }),
         executionMode: 'sequential',
         execute: async (_toolCallId: string, params: any) => {
@@ -4836,12 +4851,12 @@ export class HubAssistantService {
           const droneId = await this.requireDroneInScope(targetDroneRef, 'write', threadId);
           const chatName = cleanOptionalString(params?.name ?? params?.chatName);
           if (!chatName) throw new Error('missing chat name');
-          const result = await this.tools.createChat({ droneId, chatName });
+          const result = await this.tools.createChat({ droneId, chatName, draft: params?.draft === true });
           return {
             content: [
               {
                 type: 'text',
-                text: `Created chat ${result.chatName} in ${result.droneName} (${result.droneId}).`,
+                text: `Created ${params?.draft === true ? 'draft chat' : 'chat'} ${result.chatName} in ${result.droneName} (${result.droneId}).`,
               },
             ],
             details: result,

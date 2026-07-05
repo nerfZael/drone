@@ -105,6 +105,9 @@ export function RemoteDroneHubApp() {
   const sendPrompt = React.useCallback(async (payload: ChatSendPayload) => {
     return Boolean(await model.sendPrompt(payload));
   }, [model]);
+  const selectedChatIsDraft =
+    model.draftChats?.[model.selectedChat] === true || model.selectedDrone?.draftChats?.[model.selectedChat] === true;
+  const selectedIsDraft = model.selectedDrone?.draft === true || model.selectedDrone?.hubPhase === 'draft' || selectedChatIsDraft;
   const renderRemoteToolPane = React.useCallback(
     (tab: RightPanelTab) => {
       if (!model.selectedDrone || (tab !== 'files' && tab !== 'changes' && tab !== 'prs')) return null;
@@ -162,7 +165,12 @@ export function RemoteDroneHubApp() {
             <div className="flex min-w-0 items-center gap-2">
               <div className="min-w-0">
                 <div className="truncate text-[15px] font-semibold" style={{ fontFamily: 'var(--display)' }}>{model.selectedDrone?.name ?? 'No drone selected'}</div>
-                <div className="text-[11px] text-[var(--muted)]">Container-only remote surface</div>
+                <div className="flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
+                  <span>Container-only remote surface</span>
+                  {selectedChatIsDraft ? (
+                    <span className="rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[8px] uppercase tracking-wide text-[var(--accent)]">Draft</span>
+                  ) : null}
+                </div>
               </div>
             </div>
             <RemoteHeaderActions
@@ -234,12 +242,14 @@ export function RemoteDroneHubApp() {
             onDraftValueChange={model.setDraft}
             promptError={model.error}
             sending={model.sending}
+            publishing={model.publishing}
             waiting={model.pending.some((item) => item.state !== 'failed')}
             disabled={!model.selectedDrone || model.chatStateLoading}
             attachmentsEnabled={REMOTE_HUB_CAPABILITIES.attachments}
             automationActions={[]}
             focusTargetId="remote-primary-chat"
             onStop={model.selectedDrone ? () => model.stopChat() : undefined}
+            onPublish={selectedIsDraft ? () => model.publishDraft() : undefined}
             onSend={sendPrompt}
           />
         </div>

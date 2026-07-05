@@ -46,6 +46,7 @@ export type CreateDroneInput = {
   repoPath?: string;
   metadata?: Record<string, string>;
   idempotencyKey?: string;
+  draft?: boolean;
 };
 
 export type CreateDroneAgentInput =
@@ -115,6 +116,8 @@ export type DroneSummary = {
   runtime: DroneRuntime;
   persistVolume?: boolean;
   createdAt?: string;
+  draft?: boolean;
+  draftChats?: Record<string, boolean>;
 };
 
 export type DroneGroupSummary = {
@@ -124,6 +127,7 @@ export type DroneGroupSummary = {
 
 export type ChatSummary = {
   name: string;
+  draft?: boolean;
   messageCount?: number;
   lastMessageAt?: string;
 };

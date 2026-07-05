@@ -66,6 +66,7 @@ export function RemoteCreateDroneModal({
   const [group, setGroup] = React.useState('');
   const [repoPath, setRepoPath] = React.useState('');
   const [persistVolume, setPersistVolume] = React.useState(false);
+  const [createAsDraft, setCreateAsDraft] = React.useState(false);
   const [branchSource, setBranchSource] = React.useState<RepoBranchSourceMode>('host');
   const [remoteBranch, setRemoteBranch] = React.useState('');
   const [seedAgent, setSeedAgent] = React.useState<ChatAgentConfig>({ kind: 'builtin', id: 'cursor' });
@@ -92,6 +93,7 @@ export function RemoteCreateDroneModal({
     setGroup(String(selectedDrone?.group ?? '').trim());
     setRepoPath(selectedRepoPath);
     setPersistVolume(false);
+    setCreateAsDraft(false);
     setBranchSource(initialBranchSource(selectedDrone));
     setRemoteBranch(String(selectedDrone?.repoSeedRemoteBranch ?? '').trim());
     setSeedAgent({ kind: 'builtin', id: 'cursor' });
@@ -256,6 +258,7 @@ export function RemoteCreateDroneModal({
         body: JSON.stringify({
           name: String(name ?? '').trim(),
           runtime: 'container',
+          draft: createAsDraft,
           persistVolume,
           group: String(group ?? '').trim(),
           repoPath: normalizedRepoPath,
@@ -307,6 +310,7 @@ export function RemoteCreateDroneModal({
     }
   }, [
     branchSource,
+    createAsDraft,
     createSubmitting,
     creating,
     group,
@@ -464,6 +468,17 @@ export function RemoteCreateDroneModal({
                 className="h-3.5 w-3.5 accent-[var(--accent)]"
               />
               <span className="text-[11px] text-[var(--muted)]">Persist container volume</span>
+            </label>
+
+            <label className="flex items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-2">
+              <input
+                type="checkbox"
+                checked={createAsDraft}
+                onChange={(event) => setCreateAsDraft(event.target.checked)}
+                disabled={creating}
+                className="h-3.5 w-3.5 accent-[var(--accent)]"
+              />
+              <span className="text-[11px] text-[var(--muted)]">Create as draft</span>
             </label>
 
             <div className="grid gap-3 sm:grid-cols-2">

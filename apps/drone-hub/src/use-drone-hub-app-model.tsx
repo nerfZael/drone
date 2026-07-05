@@ -285,6 +285,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     creating,
     createMode,
     createRuntime,
+    createAsDraft,
     createPersistVolume,
     cloneSourceId,
     cloneIncludeChats,
@@ -308,6 +309,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setCreating,
     setCreateMode,
     setCreateRuntime,
+    setCreateAsDraft,
     setCreatePersistVolume,
     setCloneSourceId,
     setCloneIncludeChats,
@@ -1301,6 +1303,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       pullHostBranchBeforeCreate,
       createMode,
       createRuntime,
+      createAsDraft,
       createPersistVolume,
       cloneSourceId,
       cloneIncludeChats,
@@ -1332,6 +1335,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setCreateOpen,
       setCreateMode,
       setCreateRuntime,
+      setCreateAsDraft,
       setCreatePersistVolume,
       setCloneSourceId,
       setCreateGroup,
@@ -2576,6 +2580,33 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [drones, requestJson, uiDroneName],
   );
+  const [publishingDraft, setPublishingDraft] = React.useState(false);
+  const publishSelectedDraft = React.useCallback(async (): Promise<boolean> => {
+    if (!currentDrone || publishingDraft) return false;
+    const droneId = String(currentDrone.id ?? '').trim();
+    const chatName = String(selectedChat ?? '').trim() || 'default';
+    if (!droneId) return false;
+    setPublishingDraft(true);
+    try {
+      const isDraftDrone = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
+      await requestJson<{ ok: true }>(
+        isDraftDrone
+          ? `/api/drones/${encodeURIComponent(droneId)}/publish`
+          : `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/publish`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({}),
+        },
+      );
+      return true;
+    } catch (error: any) {
+      console.error('[DroneHub] publish draft failed', { droneId, chatName, error });
+      return false;
+    } finally {
+      setPublishingDraft(false);
+    }
+  }, [currentDrone, publishingDraft, requestJson, selectedChat]);
   const createCanvasDroneFromDraft = React.useCallback(
     async (payload: {
       draftNodeId: string;
@@ -2832,6 +2863,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     async (
       drone: DroneSummary,
       chatNameRaw: string,
+      opts?: { draft?: boolean },
     ): Promise<{ ok: boolean; chatName?: string; error?: string | null }> => {
       const droneId = String(drone?.id ?? '').trim();
       if (!droneId) return { ok: false, error: 'Missing drone id.' };
@@ -2848,7 +2880,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         await requestJson<{ ok: true }>(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ name: chatName, ...(availableChats.length > 0 ? { copyFromChat } : {}) }),
+          body: JSON.stringify({
+            name: chatName,
+            ...(availableChats.length > 0 ? { copyFromChat } : {}),
+            ...(opts?.draft === true ? { draft: true } : {}),
+          }),
         });
         setSelectedDrone(droneId);
         setSelectedChat(chatName);
@@ -3449,8 +3485,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     creating,
     createMode,
     createRuntime,
+    createAsDraft,
     createPersistVolume,
     setCreateRuntime,
+    setCreateAsDraft,
     setCreatePersistVolume,
     cloneSourceId,
     createNameEntries,
@@ -3637,6 +3675,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     groupBroadcastPromptError,
     groupBroadcastSending,
     sendGroupBroadcastPrompt,
+    publishSelectedDraft,
+    publishingDraft,
     uiDroneName,
     selectDroneCard,
     selectDroneChat,

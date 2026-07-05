@@ -33,12 +33,14 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const [selectedDroneId, setSelectedDroneId] = React.useState<string | null>(null);
   const [selectedChat, setSelectedChat] = React.useState('default');
   const [chats, setChats] = React.useState<string[]>([]);
+  const [draftChats, setDraftChats] = React.useState<Record<string, boolean>>({});
   const [transcripts, setTranscripts] = React.useState<TranscriptItem[]>([]);
   const [pending, setPending] = React.useState<PendingPrompt[]>([]);
   const [draft, setDraft] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [chatStateLoading, setChatStateLoading] = React.useState(false);
   const [sending, setSending] = React.useState(false);
+  const [publishing, setPublishing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [chatEventsConnected, setChatEventsConnected] = React.useState(false);
   const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
@@ -60,6 +62,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setDrones([]);
     setSelectedDroneId(null);
     setChats([]);
+    setDraftChats({});
     setTranscripts([]);
     setPending([]);
     setChatStateLoading(false);
@@ -103,10 +106,29 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
 
   const fetchChats = React.useCallback(async (droneId: string) => {
     const data = await remoteRequestJson<ChatListResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats`);
-    return (Array.isArray(data.chats) ? data.chats : [])
-      .map((item) => (typeof item === 'string' ? item : String(item.chat ?? item.name ?? '')))
+    const draftByChat: Record<string, boolean> =
+      data.draftChats && typeof data.draftChats === 'object' && !Array.isArray(data.draftChats)
+        ? Object.fromEntries(
+            Object.entries(data.draftChats)
+              .map(([chatName, draft]) => [String(chatName).trim(), draft === true] as const)
+              .filter(([chatName, draft]) => Boolean(chatName) && draft),
+          )
+        : {};
+    for (const item of Array.isArray(data.chatDetails) ? data.chatDetails : []) {
+      const chatName = String(item.chat ?? item.name ?? '').trim();
+      if (chatName && item.draft === true) draftByChat[chatName] = true;
+    }
+    const chatNames = (Array.isArray(data.chats) ? data.chats : [])
+      .map((item) => {
+        if (typeof item === 'string') return item;
+        const chatName = String(item.chat ?? item.name ?? '').trim();
+        if (chatName && item.draft === true) draftByChat[chatName] = true;
+        return chatName;
+      })
       .map((item) => String(item).trim())
       .filter(Boolean);
+    setDraftChats(draftByChat);
+    return chatNames;
   }, []);
 
   const fetchChatState = React.useCallback(async (droneId: string, chatName: string, signal?: AbortSignal): Promise<RemoteChatState> => {
@@ -302,6 +324,33 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     }
   }, [draft, effectiveDroneId, errorMessage, loadChatState, selectedChat]);
 
+  const publishDraft = React.useCallback(async () => {
+    if (!effectiveDroneId || !selectedChat || publishing) return false;
+    setPublishing(true);
+    try {
+      const isDraftDrone = selectedDrone?.draft === true || selectedDrone?.hubPhase === 'draft';
+      const url = isDraftDrone
+        ? `/api/drones/${encodeURIComponent(effectiveDroneId)}/publish`
+        : `/api/drones/${encodeURIComponent(effectiveDroneId)}/chats/${encodeURIComponent(selectedChat)}/publish`;
+      await remoteRequestJson(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      await reloadDrones(effectiveDroneId);
+      const nextChats = await fetchChats(effectiveDroneId).catch(() => null);
+      if (nextChats) setChats(nextChats.length > 0 ? nextChats : ['default']);
+      await loadChatState(effectiveDroneId, selectedChat).catch(() => {});
+      setError(null);
+      return true;
+    } catch (err: any) {
+      setError(errorMessage(err));
+      return false;
+    } finally {
+      setPublishing(false);
+    }
+  }, [effectiveDroneId, errorMessage, fetchChats, loadChatState, publishing, reloadDrones, selectedChat, selectedDrone]);
+
   const stopChat = React.useCallback(async () => {
     if (!effectiveDroneId || !selectedChat) return;
     try {
@@ -316,14 +365,14 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     }
   }, [effectiveDroneId, errorMessage, loadChatState, selectedChat]);
 
-  const createChat = React.useCallback(async (chatNameRaw: string) => {
+  const createChat = React.useCallback(async (chatNameRaw: string, opts?: { draft?: boolean }) => {
     const chatName = String(chatNameRaw ?? '').trim();
     if (!effectiveDroneId || !chatName) return false;
     try {
       await remoteRequestJson(`/api/drones/${encodeURIComponent(effectiveDroneId)}/chats`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ name: chatName }),
+        body: JSON.stringify({ name: chatName, ...(opts?.draft === true ? { draft: true } : {}) }),
       });
       const nextChats = await fetchChats(effectiveDroneId);
       setChats(nextChats.length > 0 ? nextChats : ['default']);
@@ -394,6 +443,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     selectedChat,
     setSelectedChat,
     chats,
+    draftChats,
     transcripts,
     pending,
     draft,
@@ -401,8 +451,10 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     loading,
     chatStateLoading,
     sending,
+    publishing,
     error,
     sendPrompt,
+    publishDraft,
     stopChat,
     createChat,
     renameDrone,

@@ -212,7 +212,7 @@ export function DronePullRequestsDock({
   repoPath: string;
   repoUnavailableReason?: string | null;
   disabled: boolean;
-  hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
+  hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
   onOpenPullRequest?: (pullRequest: RepoPullRequestSummary) => void;
   onRevealFileInFiles: (repoRelativePath: string) => void;

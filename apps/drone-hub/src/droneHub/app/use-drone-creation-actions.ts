@@ -25,7 +25,7 @@ type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
 type QueueDronesResponse = {
   ok: true;
-  accepted: Array<{ id: string; name: string; phase: 'starting' }>;
+  accepted: Array<{ id: string; name: string; phase: 'draft' | 'starting'; draft?: boolean }>;
   rejected: Array<{ id?: string; name: string; error: string; status?: number }>;
   total: number;
 };
@@ -60,6 +60,7 @@ type UseDroneCreationActionsArgs = {
   pullHostBranchBeforeCreate: boolean;
   createMode: 'create' | 'clone';
   createRuntime: 'container' | 'host';
+  createAsDraft: boolean;
   createPersistVolume: boolean;
   cloneSourceId: string | null;
   cloneIncludeChats: boolean;
@@ -108,6 +109,7 @@ type UseDroneCreationActionsArgs = {
   setCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setCreateMode: React.Dispatch<React.SetStateAction<'create' | 'clone'>>;
   setCreateRuntime: React.Dispatch<React.SetStateAction<'container' | 'host'>>;
+  setCreateAsDraft: React.Dispatch<React.SetStateAction<boolean>>;
   setCreatePersistVolume: React.Dispatch<React.SetStateAction<boolean>>;
   setCloneSourceId: React.Dispatch<React.SetStateAction<string | null>>;
   setCreateGroup: React.Dispatch<React.SetStateAction<string>>;
@@ -170,6 +172,7 @@ export function useDroneCreationActions({
   pullHostBranchBeforeCreate,
   createMode,
   createRuntime,
+  createAsDraft,
   createPersistVolume,
   cloneSourceId,
   cloneIncludeChats,
@@ -201,6 +204,7 @@ export function useDroneCreationActions({
   setCreateOpen,
   setCreateMode,
   setCreateRuntime,
+  setCreateAsDraft,
   setCreatePersistVolume,
   setCloneSourceId,
   setCreateGroup,
@@ -472,6 +476,7 @@ export function useDroneCreationActions({
           return {
             name,
             runtime,
+            ...(createAsDraft ? { draft: true } : {}),
             ...(group ? { group } : {}),
             ...(repoPath ? { repoPath } : {}),
             ...(typeof persistVolume === 'boolean' ? { persistVolume } : {}),
@@ -557,6 +562,7 @@ export function useDroneCreationActions({
       setCreateOpen(false);
       setCreateMode('create');
       setCreateRuntime('container');
+      setCreateAsDraft(false);
       setCreatePersistVolume(false);
       setCloneSourceId(null);
       setCreateName('');
@@ -578,6 +584,7 @@ export function useDroneCreationActions({
     createMessageSuffixRows,
     createMode,
     createRuntime,
+    createAsDraft,
     createPersistVolume,
     createNameRows,
     createRepoPath,
@@ -600,6 +607,7 @@ export function useDroneCreationActions({
     setCreateGroup,
     setCreateInitialMessage,
     setCreateMessageSuffixRows,
+    setCreateAsDraft,
     setCreateMode,
     setCreatePersistVolume,
     setCreateRuntime,
@@ -633,6 +641,10 @@ export function useDroneCreationActions({
       const prompt = String(opts?.prompt ?? pending?.prompt ?? '').trim();
       const draftAttachments = normalizeChatImageAttachmentPayloads(opts?.attachments ?? pending?.attachmentPayloads ?? []);
       const hasDraftAttachments = draftAttachments.length > 0;
+      const queuedPromptsToHandoff = Array.isArray(latestDraftChat?.queuedPrompts) ? latestDraftChat.queuedPrompts : [];
+      const hasQueuedDraftAttachments = queuedPromptsToHandoff.some(
+        (queuedPrompt) => normalizeChatImageAttachmentPayloads(queuedPrompt.attachmentPayloads).length > 0,
+      );
       const shouldSeedPromptViaCreate = !createWithoutChat && !hasDraftAttachments && prompt.length > 0;
       const automationStartRaw = opts?.automationStart ?? null;
       const automationId = String(automationStartRaw?.automationId ?? '').trim();
@@ -670,6 +682,14 @@ export function useDroneCreationActions({
       }
       if (!createWithoutChat && !prompt && automationPrompt && !automationId) {
         setDraftCreateError('Automation id is required.');
+        return false;
+      }
+      if (createAsDraft && (hasDraftAttachments || hasQueuedDraftAttachments)) {
+        setDraftCreateError('Draft drones cannot queue attachments until they are published.');
+        return false;
+      }
+      if (createAsDraft && automationPrompt) {
+        setDraftCreateError('Draft drones cannot start automations until they are published.');
         return false;
       }
       if (name && (name.length > 80 || /[\r\n]/.test(name))) {
@@ -741,6 +761,7 @@ export function useDroneCreationActions({
           seedAgentPermissionMode,
           prompt: shouldSeedPromptViaCreate ? prompt : '',
         });
+        if (createAsDraft) (body as any).draft = true;
         const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(
           `/api/drones`,
           {
@@ -839,7 +860,6 @@ export function useDroneCreationActions({
         if (hasDraftAttachments) {
           enqueueQueuedPrompt(droneId, 'default', prompt, draftAttachments);
         }
-        const queuedPromptsToHandoff = Array.isArray(draftChatRef.current?.queuedPrompts) ? draftChatRef.current.queuedPrompts : [];
         for (const queuedPrompt of queuedPromptsToHandoff) {
           enqueueQueuedPrompt(droneId, 'default', queuedPrompt.prompt, queuedPrompt.attachmentPayloads);
         }
@@ -865,6 +885,7 @@ export function useDroneCreationActions({
         setDraftCreateName('');
         setDraftCreateGroup('');
         setDraftCreateParentDroneId(null);
+        setCreateAsDraft(false);
         setDraftCreateError(postCreateError);
         setDraftNameSuggestionError(null);
         setDraftNameSuggesting(false);
@@ -902,6 +923,7 @@ export function useDroneCreationActions({
       draftCreateName,
       draftCreateParentDroneId,
       createRuntime,
+      createAsDraft,
       createPersistVolume,
       drones,
       addOptimisticStartupSeeds,
@@ -919,6 +941,7 @@ export function useDroneCreationActions({
       resolveAgentKeyToConfig,
       selectionAnchorRef,
       setDraftAutoRenaming,
+      setCreateAsDraft,
       setDraftChat,
       setDraftCreateError,
       setDraftCreateGroup,
