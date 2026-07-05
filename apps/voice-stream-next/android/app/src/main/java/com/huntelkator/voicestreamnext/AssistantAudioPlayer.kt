@@ -116,8 +116,8 @@ object AssistantAudioPlayer {
 
     private fun playPcmWav(next: PlaybackRequest, attributes: AudioAttributes, playbackGeneration: Int) {
         val parsedAudio = WavPcm.parse(next.wav)
-        val volumePercent = assistantSpeechPlaybackVolumePercent(next.context)
-        val gainResult = Pcm16Gain.applyGain(parsedAudio.pcm, volumePercent / 100.0)
+        val volumePercent = AssistantSpeechPlaybackVolume.percent(next.context)
+        val gainResult = Pcm16Gain.applyGain(parsedAudio.pcm, AssistantSpeechPlaybackVolume.gain(volumePercent))
         val audio = parsedAudio.copy(pcm = gainResult.pcm)
         val channelMask = if (audio.channels == 1) AudioFormat.CHANNEL_OUT_MONO else AudioFormat.CHANNEL_OUT_STEREO
         val minBuffer = AudioTrack.getMinBufferSize(audio.sampleRateHz, channelMask, AudioFormat.ENCODING_PCM_16BIT)
@@ -153,12 +153,6 @@ object AssistantAudioPlayer {
             runCatching { track.release() }
             abandonAudioFocus(next.context, focus)
         }
-    }
-
-    private fun assistantSpeechPlaybackVolumePercent(context: Context): Int {
-        return context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-            .getInt(Constants.PREF_ASSISTANT_SPEECH_PLAYBACK_VOLUME_PERCENT, Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_DEFAULT_PERCENT)
-            .coerceIn(Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MIN_PERCENT, Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MAX_PERCENT)
     }
 
     private fun playWithMediaPlayer(next: PlaybackRequest, attributes: AudioAttributes, playbackGeneration: Int) {
