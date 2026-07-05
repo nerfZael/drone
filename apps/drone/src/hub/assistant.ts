@@ -213,6 +213,8 @@ type AssistantPromptEvent =
 export type AssistantUiAction =
   | { type: 'open_drone_chat'; droneId: string; droneIds: string[]; chatName: string; at: string }
   | { type: 'highlight_drones'; droneIds: string[]; durationMs: number; at: string }
+  | { type: 'open_whiteboard'; whiteboardId: string; at: string }
+  | { type: 'close_whiteboard'; at: string }
   | { type: 'reload_ui_preferences'; at: string };
 
 export type AssistantChangeEvent = {
@@ -256,6 +258,10 @@ type AssistantToolCallbacks = {
   statDronePath?: (opts: { droneId: string; path: string }) => Promise<AssistantDronePathStatResult>;
   runDroneBash?: (opts: { droneId: string; command: string; cwd?: string; timeoutMs?: number }) => Promise<AssistantDroneBashResult>;
   listDroneChangedFiles?: (opts: { droneId: string }) => Promise<AssistantDroneChangedFilesResult>;
+  listWhiteboards?: (opts?: { scopeType?: string; scopeValue?: string }) => Promise<any>;
+  readWhiteboard?: (opts: { whiteboardId?: string }) => Promise<any>;
+  createWhiteboard?: (opts: { title?: string; scopeType?: string; scopeValue?: string }) => Promise<any>;
+  updateWhiteboard?: (opts: { whiteboardId?: string; operations?: unknown[]; shapes?: unknown[]; title?: string }) => Promise<any>;
 };
 
 type AssistantDroneFileEntry = {
@@ -668,7 +674,8 @@ const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Use bash only when a command is the right tool for inspection, tests, builds, or small scripted checks in an accessible container drone. Bash is approval-gated, non-interactive, and not for background processes.',
   'Use set_thinking_level when the user asks to change how much the assistant thinks. It changes this assistant thread to another supported thinking level for the same selected model and does not require approval.',
   'Use create_new_thread only when the user explicitly asks to start, open, create, clear, reset, or switch to a new assistant thread or session.',
-  'Use create_group for empty groups, set_drone_group for moving one batch to one group, set_drone_groups when different drones need different groups or no group, reorder_drones for sidebar order, open_drone_chat for UI navigation, and highlight_drones to visually point out drones for about 10 seconds.',
+  'Use create_group for empty groups, set_drone_group for moving one batch to one group, set_drone_groups when different drones need different groups or no group, reorder_drones for sidebar order, open_drone_chat for UI navigation, highlight_drones to visually point out drones for about 10 seconds, and open_whiteboard/close_whiteboard for whiteboard panel navigation.',
+  'Use whiteboard tools for simple diagrams, rectangles, arrows, and labels. Prefer structured shapes over raw scene JSON.',
   'File paths are interpreted by drone id plus path. Relative paths resolve inside the target drone workspace, usually the repo root for repo-backed drones.',
   'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
   ASSISTANT_CHAT_IDLE_PROMPT_LINE,
@@ -688,6 +695,12 @@ const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
   { name: 'web_search', label: 'Web search', category: 'context', description: 'Search the web for current information and source URLs.' },
   { name: 'fetch_content', label: 'Fetch content', category: 'context', description: 'Fetch readable page content from a URL.' },
   { name: 'assistant_files', label: 'Assistant files', category: 'files', description: 'Maintain private Markdown or text artifacts for this thread.' },
+  { name: 'list_whiteboards', label: 'List whiteboards', category: 'context', description: 'List backend-saved Drone Hub whiteboards.' },
+  { name: 'read_whiteboard', label: 'Read whiteboard', category: 'context', description: 'Read a whiteboard scene summary and elements.' },
+  { name: 'create_whiteboard', label: 'Create whiteboard', category: 'actions', description: 'Create a new backend-saved whiteboard.' },
+  { name: 'update_whiteboard', label: 'Update whiteboard', category: 'actions', description: 'Add, delete, or update simple whiteboard shapes.' },
+  { name: 'open_whiteboard', label: 'Open whiteboard', category: 'actions', description: 'Open the Whiteboard panel in Drone Hub.' },
+  { name: 'close_whiteboard', label: 'Close whiteboard', category: 'actions', description: 'Close the Whiteboard panel in Drone Hub.' },
   { name: 'get_system_prompt', label: 'Get system prompt', category: 'prompts', description: 'Read the global and current thread system prompts.' },
   { name: 'update_system_prompt', label: 'Update system prompt', category: 'prompts', description: 'Update only this thread system prompt.' },
   { name: 'set_thinking_level', label: 'Set thinking level', category: 'actions', description: 'Change this assistant thread to a supported thinking level for its current model.' },
@@ -730,6 +743,12 @@ const ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES = [
   'create_group',
   'set_drone_groups',
   'reorder_drones',
+  'list_whiteboards',
+  'read_whiteboard',
+  'create_whiteboard',
+  'update_whiteboard',
+  'open_whiteboard',
+  'close_whiteboard',
 ];
 const ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES.filter((name) => name !== 'create_chat');
 const ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES
@@ -4315,6 +4334,163 @@ export class HubAssistantService {
           return {
             content: [{ type: 'text', text: summary }],
             details: result,
+          };
+        },
+      },
+      {
+        name: 'list_whiteboards',
+        label: 'List whiteboards',
+        description: 'List backend-saved Drone Hub whiteboards with ids, titles, scopes, and versions.',
+        parameters: Type.Object({
+          scopeType: Type.Optional(Type.String({ description: 'Optional scope: global, repo, group, drone, or assistant-thread.' })),
+          scopeValue: Type.Optional(Type.String({ description: 'Optional scope value paired with scopeType.' })),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          if (!this.tools.listWhiteboards) throw new Error('whiteboard tools unavailable');
+          const result = await this.tools.listWhiteboards({
+            scopeType: cleanOptionalString(params?.scopeType),
+            scopeValue: cleanOptionalString(params?.scopeValue),
+          });
+          return {
+            content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+            details: result,
+          };
+        },
+      },
+      {
+        name: 'read_whiteboard',
+        label: 'Read whiteboard',
+        description: 'Read a backend-saved whiteboard scene. Omit whiteboardId for the main whiteboard.',
+        parameters: Type.Object({
+          whiteboardId: Type.Optional(Type.String({ description: 'Whiteboard id. Defaults to main.' })),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          if (!this.tools.readWhiteboard) throw new Error('whiteboard tools unavailable');
+          const result = await this.tools.readWhiteboard({ whiteboardId: cleanOptionalString(params?.whiteboardId) || 'main' });
+          const scene = result?.whiteboard?.scene ?? result?.scene ?? {};
+          const count = Number(result?.whiteboard?.visibleElementCount ?? (Array.isArray(scene?.elements) ? scene.elements.filter((element: any) => element?.isDeleted !== true).length : 0));
+          return {
+            content: [{ type: 'text', text: `Whiteboard ${result?.whiteboard?.title ?? result?.title ?? ''} has ${count} visible element${count === 1 ? '' : 's'}.` }],
+            details: result,
+          };
+        },
+      },
+      {
+        name: 'create_whiteboard',
+        label: 'Create whiteboard',
+        description: 'Create a backend-saved Drone Hub whiteboard.',
+        parameters: Type.Object({
+          title: Type.Optional(Type.String({ description: 'Whiteboard title.' })),
+          scopeType: Type.Optional(Type.String({ description: 'Optional scope: global, repo, group, drone, or assistant-thread.' })),
+          scopeValue: Type.Optional(Type.String({ description: 'Optional scope value paired with scopeType.' })),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          if (!this.tools.createWhiteboard) throw new Error('whiteboard tools unavailable');
+          const result = await this.tools.createWhiteboard({
+            title: cleanOptionalString(params?.title),
+            scopeType: cleanOptionalString(params?.scopeType),
+            scopeValue: cleanOptionalString(params?.scopeValue),
+          });
+          return {
+            content: [{ type: 'text', text: `Created whiteboard ${result?.whiteboard?.title ?? result?.title ?? ''} (${result?.whiteboard?.id ?? result?.id ?? ''}).` }],
+            details: result,
+          };
+        },
+      },
+      {
+        name: 'update_whiteboard',
+        label: 'Update whiteboard',
+        description:
+          'Add, delete, or update simple whiteboard shapes. For add_shape, pass shapes with type rectangle, text, or arrow plus x/y/width/height/text. Arrows may use fromId/toId or startX/startY/endX/endY.',
+        parameters: Type.Object({
+          whiteboardId: Type.Optional(Type.String({ description: 'Whiteboard id. Defaults to main.' })),
+          title: Type.Optional(Type.String({ description: 'Optional new whiteboard title.' })),
+          shapes: Type.Optional(Type.Array(Type.Object({
+            id: Type.Optional(Type.String()),
+            type: Type.Optional(Type.String({ description: 'rectangle, text, or arrow.' })),
+            text: Type.Optional(Type.String()),
+            label: Type.Optional(Type.String()),
+            x: Type.Optional(Type.Number()),
+            y: Type.Optional(Type.Number()),
+            width: Type.Optional(Type.Number()),
+            height: Type.Optional(Type.Number()),
+            fromId: Type.Optional(Type.String()),
+            toId: Type.Optional(Type.String()),
+            startX: Type.Optional(Type.Number()),
+            startY: Type.Optional(Type.Number()),
+            endX: Type.Optional(Type.Number()),
+            endY: Type.Optional(Type.Number()),
+            strokeColor: Type.Optional(Type.String()),
+            backgroundColor: Type.Optional(Type.String()),
+          }), { description: 'Shortcut for add_shape operations.' })),
+          operations: Type.Optional(Type.Array(Type.Object({
+            action: Type.String({ description: 'add_shape, delete_shape, or update_text.' }),
+            id: Type.Optional(Type.String()),
+            ids: Type.Optional(Type.Array(Type.String())),
+            text: Type.Optional(Type.String()),
+            shape: Type.Optional(Type.Object({
+              id: Type.Optional(Type.String()),
+              type: Type.Optional(Type.String()),
+              text: Type.Optional(Type.String()),
+              label: Type.Optional(Type.String()),
+              x: Type.Optional(Type.Number()),
+              y: Type.Optional(Type.Number()),
+              width: Type.Optional(Type.Number()),
+              height: Type.Optional(Type.Number()),
+              fromId: Type.Optional(Type.String()),
+              toId: Type.Optional(Type.String()),
+              startX: Type.Optional(Type.Number()),
+              startY: Type.Optional(Type.Number()),
+              endX: Type.Optional(Type.Number()),
+              endY: Type.Optional(Type.Number()),
+              strokeColor: Type.Optional(Type.String()),
+              backgroundColor: Type.Optional(Type.String()),
+            })),
+          }), { description: 'Operations: add_shape, delete_shape, update_text.' })),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          if (!this.tools.updateWhiteboard) throw new Error('whiteboard tools unavailable');
+          const result = await this.tools.updateWhiteboard({
+            whiteboardId: cleanOptionalString(params?.whiteboardId) || 'main',
+            title: cleanOptionalString(params?.title),
+            shapes: Array.isArray(params?.shapes) ? params.shapes : undefined,
+            operations: Array.isArray(params?.operations) ? params.operations : undefined,
+          });
+          const scene = result?.whiteboard?.scene ?? result?.scene ?? {};
+          const count = Number(result?.whiteboard?.visibleElementCount ?? (Array.isArray(scene?.elements) ? scene.elements.filter((element: any) => element?.isDeleted !== true).length : 0));
+          return {
+            content: [{ type: 'text', text: `Updated whiteboard ${result?.whiteboard?.title ?? result?.title ?? ''}. It now has ${count} visible element${count === 1 ? '' : 's'}.` }],
+            details: result,
+          };
+        },
+      },
+      {
+        name: 'open_whiteboard',
+        label: 'Open whiteboard',
+        description: 'Open the Whiteboard panel in Drone Hub. Omit whiteboardId for the main whiteboard.',
+        parameters: Type.Object({
+          whiteboardId: Type.Optional(Type.String({ description: 'Whiteboard id. Defaults to main.' })),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          const whiteboardId = cleanOptionalString(params?.whiteboardId) || 'main';
+          if (this.tools.readWhiteboard) await this.tools.readWhiteboard({ whiteboardId });
+          this.emitUiAction({ type: 'open_whiteboard', whiteboardId, at: nowIso() }, threadId);
+          return {
+            content: [{ type: 'text', text: `Opened whiteboard ${whiteboardId}.` }],
+            details: { ok: true, whiteboardId },
+          };
+        },
+      },
+      {
+        name: 'close_whiteboard',
+        label: 'Close whiteboard',
+        description: 'Close the Whiteboard panel in Drone Hub.',
+        parameters: Type.Object({}),
+        execute: async () => {
+          this.emitUiAction({ type: 'close_whiteboard', at: nowIso() }, threadId);
+          return {
+            content: [{ type: 'text', text: 'Closed the Whiteboard panel.' }],
+            details: { ok: true },
           };
         },
       },

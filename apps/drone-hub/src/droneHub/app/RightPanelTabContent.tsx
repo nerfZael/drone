@@ -47,6 +47,9 @@ const LazyDronePreviewDock = React.lazy(async () => ({
 const LazyDroneTerminalDock = React.lazy(async () => ({
   default: (await import('../terminal/DroneTerminalDock')).DroneTerminalDock,
 }));
+const LazyWhiteboardDock = React.lazy(async () => ({
+  default: (await import('../whiteboard/WhiteboardDock')).WhiteboardDock,
+}));
 
 export const LAZY_RIGHT_PANEL_TABS: ReadonlySet<RightPanelTab> = new Set(RIGHT_PANEL_TABS.filter((tab) => tab !== 'files'));
 
@@ -361,6 +364,13 @@ export function RightPanelTabContent({
             pullHostBranchBeforeCreate={canvasPullHostBranchBeforeCreate}
             onPullHostBranchBeforeCreateChange={onCanvasPullHostBranchBeforeCreateChange}
           />
+        </LazyPane>
+      );
+
+    case 'whiteboard':
+      return (
+        <LazyPane tab={tab}>
+          <LazyWhiteboardDock />
         </LazyPane>
       );
 

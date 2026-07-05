@@ -10,6 +10,7 @@ import { activeProfileStorageId, persistProfileStorageIdOverride } from './profi
 import { requestGuidedOnboardingReplay, resetGuidedOnboardingDismissals } from './onboarding/control';
 import { copyText } from './droneHub/app/clipboard';
 import { isCanvasDraftNodeId, useDroneCanvasStore } from './droneHub/canvas/use-drone-canvas-store';
+import { WHITEBOARD_ACTIVE_STORAGE_KEY, WHITEBOARD_OPEN_EVENT } from './droneHub/whiteboard/whiteboard-events';
 import {
   BUILTIN_AGENT_OPTIONS,
   HUB_LOGS_MAX_BYTES,
@@ -1448,6 +1449,24 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         void reloadUiPreferences();
         return;
       }
+      if (action.type === 'open_whiteboard') {
+        const whiteboardId = String(action.whiteboardId ?? '').trim() || 'main';
+        try {
+          window.localStorage.setItem(WHITEBOARD_ACTIVE_STORAGE_KEY, whiteboardId);
+        } catch {
+          // Ignore localStorage failures; the panel will fall back to main.
+        }
+        setRightPanelOpen(true);
+        requestRightPanelTab('whiteboard');
+        window.dispatchEvent(new CustomEvent(WHITEBOARD_OPEN_EVENT, { detail: { whiteboardId } }));
+        return;
+      }
+      if (action.type === 'close_whiteboard') {
+        if (rightPanelTab === 'whiteboard' || rightPanelBottomTab === 'whiteboard') {
+          setRightPanelOpen(false);
+        }
+        return;
+      }
       const droneIds: string[] = Array.from(
         new Set(
           (Array.isArray(action.droneIds) ? action.droneIds : [action.droneId])
@@ -1477,7 +1496,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       closed = true;
       source.close();
     };
-  }, [expandGroupsForDroneIds, reloadUiPreferences, selectDroneChat]);
+  }, [expandGroupsForDroneIds, reloadUiPreferences, requestRightPanelTab, rightPanelBottomTab, rightPanelTab, selectDroneChat, setRightPanelOpen]);
   React.useEffect(
     () => () => {
       if (typeof window === 'undefined') return;

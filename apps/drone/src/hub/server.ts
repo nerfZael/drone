@@ -101,6 +101,7 @@ import {
   transcriptTurnsSourceHash,
   upsertTranscriptTurnInStore,
 } from './transcript-store';
+import { requireWhiteboardStore, type WhiteboardDocument } from './whiteboard-store';
 import { extractAgentCopilotFromAgentMessage, type AgentCopilotRequest } from './agent-copilot-parser';
 import { cloneChatEntryForDroneClone, maybeBootstrapPromptFromTranscript } from './chat-clone';
 import {
@@ -14133,6 +14134,86 @@ export async function startDroneHubApiServer(opts: {
     };
   }
 
+  type WhiteboardChangeReason = 'created' | 'updated' | 'deleted';
+  type WhiteboardChangeEvent = {
+    type: 'whiteboard_changed';
+    sequence: number;
+    whiteboardId: string;
+    version: number | null;
+    reason: WhiteboardChangeReason;
+    source: string;
+    at: string;
+  };
+
+  const whiteboardChangeListeners = new Set<(event: WhiteboardChangeEvent) => void>();
+  let whiteboardChangeSequence = 0;
+
+  function emitWhiteboardChange(input: {
+    whiteboardId: string;
+    version?: number | null;
+    reason: WhiteboardChangeReason;
+    source?: unknown;
+  }): WhiteboardChangeEvent {
+    const event: WhiteboardChangeEvent = {
+      type: 'whiteboard_changed',
+      sequence: ++whiteboardChangeSequence,
+      whiteboardId: input.whiteboardId,
+      version: input.version ?? null,
+      reason: input.reason,
+      source: String(input.source ?? '').trim() || 'unknown',
+      at: nowIso(),
+    };
+    for (const listener of whiteboardChangeListeners) {
+      try {
+        listener(event);
+      } catch (error: any) {
+        hubLog('warn', 'whiteboard change listener failed', { error: String(error?.message ?? error ?? '') });
+      }
+    }
+    return event;
+  }
+
+  function subscribeWhiteboardChanges(listener: (event: WhiteboardChangeEvent) => void): () => void {
+    whiteboardChangeListeners.add(listener);
+    return () => {
+      whiteboardChangeListeners.delete(listener);
+    };
+  }
+
+  function compactWhiteboardForAssistant(whiteboard: WhiteboardDocument): Record<string, unknown> {
+    const elements = Array.isArray(whiteboard.scene?.elements) ? whiteboard.scene.elements : [];
+    const visible = elements.filter((element: any) => element?.isDeleted !== true);
+    const compactElements = visible.slice(0, 100).map((element: any) => {
+      const compact: Record<string, unknown> = {
+        id: String(element?.id ?? ''),
+        type: String(element?.type ?? ''),
+        x: Number(element?.x ?? 0),
+        y: Number(element?.y ?? 0),
+        width: Number(element?.width ?? 0),
+        height: Number(element?.height ?? 0),
+      };
+      if (typeof element?.text === 'string') {
+        compact.text = element.text.length > 500 ? `${element.text.slice(0, 500)}...` : element.text;
+      }
+      if (typeof element?.strokeColor === 'string') compact.strokeColor = element.strokeColor;
+      if (typeof element?.backgroundColor === 'string') compact.backgroundColor = element.backgroundColor;
+      if (Array.isArray(element?.points)) compact.points = element.points;
+      return compact;
+    });
+    return {
+      id: whiteboard.id,
+      title: whiteboard.title,
+      scopeType: whiteboard.scopeType,
+      scopeValue: whiteboard.scopeValue,
+      version: whiteboard.version,
+      updatedAt: whiteboard.updatedAt,
+      totalElementCount: elements.length,
+      visibleElementCount: visible.length,
+      truncatedElements: visible.length > compactElements.length,
+      elements: compactElements,
+    };
+  }
+
   const assistantService = new HubAssistantService({
     listDrones: async (): Promise<AssistantDroneSummary[]> => {
       const regAny: any = await loadRegistry();
@@ -14351,6 +14432,49 @@ export async function startDroneHubApiServer(opts: {
     statDronePath: async ({ droneId, path }) => await assistantStatDronePath({ droneId, path }),
     runDroneBash: async ({ droneId, command, cwd, timeoutMs }) => await assistantRunDroneBash({ droneId, command, cwd, timeoutMs }),
     listDroneChangedFiles: async ({ droneId }) => await assistantListDroneChangedFiles({ droneId }),
+    listWhiteboards: async ({ scopeType, scopeValue } = {}) => ({
+      ok: true,
+      whiteboards: requireWhiteboardStore().list({ scopeType, scopeValue }),
+    }),
+    readWhiteboard: async ({ whiteboardId }) => {
+      const store = requireWhiteboardStore();
+      const id = String(whiteboardId ?? '').trim() || 'main';
+      const whiteboard = id === 'main'
+        ? store.get(id) ?? store.ensureDefault()
+        : store.get(id);
+      if (!whiteboard) throw new Error(`unknown whiteboard: ${id}`);
+      return { ok: true, whiteboard: compactWhiteboardForAssistant(whiteboard) };
+    },
+    createWhiteboard: async ({ title, scopeType, scopeValue }) => {
+      const whiteboard = requireWhiteboardStore().create({ title, scopeType, scopeValue });
+      emitWhiteboardChange({ whiteboardId: whiteboard.id, version: whiteboard.version, reason: 'created', source: 'assistant' });
+      return { ok: true, whiteboard: compactWhiteboardForAssistant(whiteboard) };
+    },
+    updateWhiteboard: async ({ whiteboardId, operations, shapes, title }) => {
+      const store = requireWhiteboardStore();
+      const id = String(whiteboardId ?? '').trim() || 'main';
+      let whiteboard = id === 'main'
+        ? store.get(id) ?? store.ensureDefault()
+        : store.get(id);
+      if (!whiteboard) throw new Error(`unknown whiteboard: ${id}`);
+      let changed = false;
+      if (title) {
+        whiteboard = store.save(whiteboard.id, { baseVersion: whiteboard.version, title, actorId: 'assistant' });
+        changed = true;
+      }
+      const normalizedOperations =
+        Array.isArray(operations) && operations.length > 0
+          ? operations
+          : Array.isArray(shapes) && shapes.length > 0
+            ? [{ action: 'add_shape', shapes }]
+            : [];
+      if (normalizedOperations.length > 0) {
+        whiteboard = store.applyOperations(whiteboard.id, normalizedOperations, 'assistant');
+        changed = true;
+      }
+      if (changed) emitWhiteboardChange({ whiteboardId: whiteboard.id, version: whiteboard.version, reason: 'updated', source: 'assistant' });
+      return { ok: true, whiteboard: compactWhiteboardForAssistant(whiteboard) };
+    },
   });
   let desktopVoicePatchSessionId: string | null = null;
   let desktopRealtimeWebRtcSession: OpenAiRealtimeWebRtcAssistantSession | null = null;
@@ -16667,6 +16791,13 @@ export async function startDroneHubApiServer(opts: {
             const durationRaw = Number(rawAction?.durationMs);
             const durationMs = Number.isFinite(durationRaw) ? Math.max(1000, Math.min(60_000, Math.floor(durationRaw))) : 10_000;
             uiAction = { type: 'highlight_drones', droneIds, durationMs, at };
+          } else if (actionType === 'open_whiteboard') {
+            const whiteboardId = String(rawAction?.whiteboardId ?? rawAction?.id ?? '').trim() || 'main';
+            const whiteboard = requireWhiteboardStore().get(whiteboardId);
+            if (!whiteboard) throw new Error(`unknown whiteboard: ${whiteboardId}`);
+            uiAction = { type: 'open_whiteboard', whiteboardId: whiteboard.id, at };
+          } else if (actionType === 'close_whiteboard') {
+            uiAction = { type: 'close_whiteboard', at };
           } else {
             throw new Error(`unsupported ui action: ${actionType || 'missing type'}`);
           }
@@ -16676,6 +16807,120 @@ export async function startDroneHubApiServer(opts: {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
         }
         return;
+      }
+
+      {
+        const whiteboardParts = pathname.split('/').filter(Boolean);
+        if (whiteboardParts.length >= 2 && whiteboardParts[0] === 'api' && whiteboardParts[1] === 'whiteboards') {
+          if (whiteboardParts.length === 3 && whiteboardParts[2] === 'events' && method === 'GET') {
+            res.statusCode = 200;
+            res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+            res.setHeader('cache-control', 'no-cache, no-transform');
+            res.setHeader('connection', 'keep-alive');
+            req.socket.setTimeout(0);
+            (res as any).flushHeaders?.();
+            writeHubSseEvent(res, 'connected', { ok: true, at: nowIso() });
+            const unsubscribe = subscribeWhiteboardChanges((event) => {
+              writeHubSseEvent(res, 'whiteboard_change', event);
+            });
+            const keepAlive = setInterval(() => {
+              if (res.destroyed || res.writableEnded) return;
+              res.write(': keepalive\n\n');
+            }, 25_000);
+            (keepAlive as any).unref?.();
+            let cleanedUp = false;
+            const cleanup = () => {
+              if (cleanedUp) return;
+              cleanedUp = true;
+              clearInterval(keepAlive);
+              unsubscribe();
+            };
+            req.on('close', cleanup);
+            res.on('close', cleanup);
+            return;
+          }
+
+          const store = requireWhiteboardStore();
+
+          if (whiteboardParts.length === 2 && method === 'GET') {
+            json(res, 200, {
+              ok: true,
+              whiteboards: store.list({
+                scopeType: u.searchParams.get('scopeType') ?? undefined,
+                scopeValue: u.searchParams.get('scopeValue') ?? undefined,
+              }),
+            });
+            return;
+          }
+
+          if (whiteboardParts.length === 2 && method === 'POST') {
+            let body: any = null;
+            try {
+              body = await readJsonBody(req);
+            } catch (e: any) {
+              json(res, 400, { ok: false, error: e?.message ?? String(e) });
+              return;
+            }
+            try {
+              const whiteboard = store.create(body ?? {});
+              emitWhiteboardChange({ whiteboardId: whiteboard.id, version: whiteboard.version, reason: 'created', source: body?.actorId ?? 'ui' });
+              json(res, 201, { ok: true, whiteboard });
+            } catch (e: any) {
+              json(res, Number(e?.statusCode ?? 0) || 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
+          if (whiteboardParts.length === 3) {
+            const whiteboardId = decodeURIComponent(whiteboardParts[2] ?? '');
+
+            if (method === 'GET') {
+              const whiteboard = store.get(whiteboardId);
+              if (!whiteboard) {
+                json(res, 404, { ok: false, error: `whiteboard not found: ${whiteboardId}` });
+                return;
+              }
+              json(res, 200, { ok: true, whiteboard });
+              return;
+            }
+
+            if (method === 'PATCH') {
+              let body: any = null;
+              try {
+                body = await readJsonBody(req);
+              } catch (e: any) {
+                json(res, 400, { ok: false, error: e?.message ?? String(e) });
+                return;
+              }
+              try {
+                const whiteboard = Array.isArray(body?.operations) && body.operations.length > 0
+                  ? store.applyOperations(whiteboardId, body.operations, body?.actorId ?? 'ui')
+                  : store.save(whiteboardId, {
+                      baseVersion: body?.baseVersion,
+                      scene: body?.scene,
+                      title: body?.title,
+                      actorId: body?.actorId ?? 'ui',
+                    });
+                emitWhiteboardChange({ whiteboardId: whiteboard.id, version: whiteboard.version, reason: 'updated', source: body?.actorId ?? 'ui' });
+                json(res, 200, { ok: true, whiteboard });
+              } catch (e: any) {
+                json(res, Number(e?.statusCode ?? 0) || 400, { ok: false, error: e?.message ?? String(e) });
+              }
+              return;
+            }
+
+            if (method === 'DELETE') {
+              try {
+                const result = store.delete(whiteboardId);
+                if (result.deleted) emitWhiteboardChange({ whiteboardId: result.id, version: null, reason: 'deleted', source: 'ui' });
+                json(res, 200, { ok: true, ...result });
+              } catch (e: any) {
+                json(res, Number(e?.statusCode ?? 0) || 400, { ok: false, error: e?.message ?? String(e) });
+              }
+              return;
+            }
+          }
+        }
       }
 
       if (pathname === '/api/assistant/scope' && method === 'POST') {
