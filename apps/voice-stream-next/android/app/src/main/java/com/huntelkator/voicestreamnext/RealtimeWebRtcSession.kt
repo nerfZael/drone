@@ -1,7 +1,12 @@
 package com.huntelkator.voicestreamnext
 
 import android.content.Context
+import android.content.SharedPreferences
 import android.media.AudioAttributes
+import android.media.AudioDeviceInfo
+import android.media.AudioFocusRequest
+import android.media.AudioManager
+import android.os.Build
 import org.json.JSONObject
 import org.webrtc.AudioSource
 import org.webrtc.AudioTrack
@@ -17,6 +22,7 @@ import org.webrtc.SdpObserver
 import org.webrtc.SessionDescription
 import org.webrtc.audio.JavaAudioDeviceModule
 import java.nio.ByteBuffer
+import java.util.concurrent.CopyOnWriteArraySet
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
@@ -38,9 +44,21 @@ class RealtimeWebRtcSession(
     private var audioTrack: AudioTrack? = null
     private var peer: PeerConnection? = null
     private var dataChannel: DataChannel? = null
+    private val prefs = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
+    private val remoteAudioTracks = CopyOnWriteArraySet<AudioTrack>()
+    private var audioFocusRequest: AudioFocusRequest? = null
+    private var originalCommunicationDevice: AudioDeviceInfo? = null
+    private var originalSpeakerphoneOn: Boolean? = null
+    private var communicationDeviceSet = false
     private var inputTranscript = ""
+    private val volumePreferenceListener = SharedPreferences.OnSharedPreferenceChangeListener { _, key ->
+        if (key == Constants.PREF_ASSISTANT_SPEECH_PLAYBACK_VOLUME_PERCENT) applyRemoteAudioVolumeToAll()
+    }
 
     fun start(): RealtimeWebRtcStartResult {
+        prefs.registerOnSharedPreferenceChangeListener(volumePreferenceListener)
+        requestRealtimeAudioFocus()
+        routeRealtimeAudioToSpeakerWhenNeeded()
         PeerConnectionFactory.initialize(
             PeerConnectionFactory.InitializationOptions.builder(context)
                 .createInitializationOptions()
@@ -117,12 +135,16 @@ class RealtimeWebRtcSession(
         peer = null
         runCatching { audioTrack?.dispose() }
         audioTrack = null
+        remoteAudioTracks.clear()
         runCatching { audioSource?.dispose() }
         audioSource = null
         runCatching { factory?.dispose() }
         factory = null
         runCatching { eglBase?.release() }
         eglBase = null
+        restoreRealtimeAudioRouting()
+        abandonRealtimeAudioFocus()
+        runCatching { prefs.unregisterOnSharedPreferenceChangeListener(volumePreferenceListener) }
     }
 
     private fun createOffer(peer: PeerConnection): SessionDescription {
@@ -175,11 +197,101 @@ class RealtimeWebRtcSession(
     }
 
     private fun configureRemoteAudioTrack(track: AudioTrack) {
-        val volume = context.getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
-            .getInt(Constants.PREF_ASSISTANT_SPEECH_PLAYBACK_VOLUME_PERCENT, Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_DEFAULT_PERCENT)
-            .coerceIn(Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MIN_PERCENT, Constants.ASSISTANT_SPEECH_PLAYBACK_VOLUME_MAX_PERCENT)
-        runCatching { track.setVolume(volume / 100.0) }
-        ClientLog.i("RealtimeWebRtc", "Configured remote realtime audio volume=$volume% usage=media")
+        remoteAudioTracks.add(track)
+        applyRemoteAudioVolume(track)
+    }
+
+    private fun applyRemoteAudioVolumeToAll() {
+        remoteAudioTracks.forEach { applyRemoteAudioVolume(it) }
+    }
+
+    private fun applyRemoteAudioVolume(track: AudioTrack) {
+        val volume = AssistantSpeechPlaybackVolume.percent(context)
+        val gain = AssistantSpeechPlaybackVolume.gain(volume)
+        val applied = runCatching { track.setVolume(gain) }.isSuccess
+        ClientLog.i("RealtimeWebRtc", "Configured remote realtime audio volume=$volume% gain=$gain applied=$applied usage=media")
+    }
+
+    private fun requestRealtimeAudioFocus() {
+        val audioManager = context.getSystemService(AudioManager::class.java) ?: return
+        val attributes = AudioAttributes.Builder()
+            .setUsage(AudioAttributes.USAGE_MEDIA)
+            .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+            .build()
+        val request = AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN)
+            .setAudioAttributes(attributes)
+            .setAcceptsDelayedFocusGain(false)
+            .setOnAudioFocusChangeListener { }
+            .build()
+        val result = runCatching { audioManager.requestAudioFocus(request) }.getOrDefault(AudioManager.AUDIOFOCUS_REQUEST_FAILED)
+        if (result == AudioManager.AUDIOFOCUS_REQUEST_GRANTED) {
+            audioFocusRequest = request
+        } else {
+            ClientLog.w("RealtimeWebRtc", "Realtime audio focus not granted result=$result")
+        }
+    }
+
+    private fun abandonRealtimeAudioFocus() {
+        val request = audioFocusRequest ?: return
+        audioFocusRequest = null
+        val audioManager = context.getSystemService(AudioManager::class.java) ?: return
+        runCatching { audioManager.abandonAudioFocusRequest(request) }
+    }
+
+    private fun routeRealtimeAudioToSpeakerWhenNeeded() {
+        val audioManager = context.getSystemService(AudioManager::class.java) ?: return
+        if (hasExternalOutput(audioManager)) return
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            val speaker = runCatching {
+                audioManager.availableCommunicationDevices.firstOrNull { it.type == AudioDeviceInfo.TYPE_BUILTIN_SPEAKER }
+            }.getOrNull()
+            if (speaker != null) {
+                originalCommunicationDevice = runCatching { audioManager.communicationDevice }.getOrNull()
+                communicationDeviceSet = runCatching { audioManager.setCommunicationDevice(speaker) }.getOrDefault(false)
+                if (!communicationDeviceSet) originalCommunicationDevice = null
+            }
+        } else {
+            @Suppress("DEPRECATION")
+            originalSpeakerphoneOn = runCatching { audioManager.isSpeakerphoneOn }.getOrNull()
+            @Suppress("DEPRECATION")
+            runCatching { audioManager.isSpeakerphoneOn = true }
+        }
+    }
+
+    private fun restoreRealtimeAudioRouting() {
+        val audioManager = context.getSystemService(AudioManager::class.java) ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && communicationDeviceSet) {
+            val previous = originalCommunicationDevice
+            if (previous != null) {
+                runCatching { audioManager.setCommunicationDevice(previous) }
+            } else {
+                runCatching { audioManager.clearCommunicationDevice() }
+            }
+        }
+        communicationDeviceSet = false
+        originalCommunicationDevice = null
+        originalSpeakerphoneOn?.let { speakerphoneOn ->
+            @Suppress("DEPRECATION")
+            runCatching { audioManager.isSpeakerphoneOn = speakerphoneOn }
+        }
+        originalSpeakerphoneOn = null
+    }
+
+    private fun hasExternalOutput(audioManager: AudioManager): Boolean {
+        return runCatching {
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any { device ->
+                device.isSink && when (device.type) {
+                    AudioDeviceInfo.TYPE_BLUETOOTH_A2DP,
+                    AudioDeviceInfo.TYPE_BLUETOOTH_SCO,
+                    AudioDeviceInfo.TYPE_WIRED_HEADPHONES,
+                    AudioDeviceInfo.TYPE_WIRED_HEADSET,
+                    AudioDeviceInfo.TYPE_USB_DEVICE,
+                    AudioDeviceInfo.TYPE_USB_HEADSET -> true
+                    else -> Build.VERSION.SDK_INT >= Build.VERSION_CODES.S && device.type == AudioDeviceInfo.TYPE_BLE_HEADSET
+                }
+            }
+        }.getOrDefault(false)
     }
 
     private fun configureWebRtcOutputUsage(builder: JavaAudioDeviceModule.Builder) {

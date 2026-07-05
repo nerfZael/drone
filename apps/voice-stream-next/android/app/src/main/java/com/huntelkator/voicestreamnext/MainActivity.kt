@@ -1101,7 +1101,7 @@ class MainActivity : ComponentActivity() {
             setPadding(0, 6.dp(), 0, 8.dp())
             addView(header)
             addView(assistantSpeechPlaybackVolumeSeekBar, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT))
-            addView(label("Controls assistant playback only. 100% is unchanged.", 12f, COLOR_MUTED, false))
+            addView(label("Controls standard and realtime assistant playback. 100% is unchanged.", 12f, COLOR_MUTED, false))
         }
     }
 
