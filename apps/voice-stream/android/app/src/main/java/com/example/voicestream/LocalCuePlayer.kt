@@ -1,5 +1,6 @@
 package com.example.voicestream
 
+import android.content.Context
 import android.media.AudioAttributes
 import android.media.AudioFormat
 import android.media.AudioTrack
@@ -7,7 +8,9 @@ import android.os.SystemClock
 import kotlin.math.PI
 import kotlin.math.sin
 
-class LocalCuePlayer {
+class LocalCuePlayer(context: Context) {
+    private val appContext = context.applicationContext
+
     fun play(cue: LocalCue) {
         Thread {
             runCatching {
@@ -29,6 +32,7 @@ class LocalCuePlayer {
                     .setBufferSizeInBytes(cuePcm.pcm.size)
                     .setTransferMode(AudioTrack.MODE_STATIC)
                     .build()
+                AudioDeviceRouter(appContext).routeForPlayback(track)
                 try {
                     track.setVolume(1.0f)
                     track.write(cuePcm.pcm, 0, cuePcm.pcm.size)

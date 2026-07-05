@@ -38,13 +38,15 @@ class MainActivity : ComponentActivity() {
     private lateinit var statusText: TextView
     private lateinit var approvalText: TextView
     private lateinit var microphoneText: TextView
+    private lateinit var inputDeviceButton: Button
+    private lateinit var outputDeviceButton: Button
     private lateinit var awakeButton: Button
     private lateinit var offButton: Button
     private lateinit var root: LinearLayout
     private lateinit var settingsPanel: View
     private lateinit var settingsButton: Button
     private lateinit var qrButton: ImageButton
-    private val cuePlayer = LocalCuePlayer()
+    private lateinit var cuePlayer: LocalCuePlayer
     private var sessionMode = SessionMode.OFF
 
     private val cameraPermissionLauncher = registerForActivityResult(
@@ -71,11 +73,15 @@ class MainActivity : ComponentActivity() {
             val status = intent.getStringExtra(Constants.EXTRA_STATUS) ?: "Unknown"
             val mode = SessionMode.fromValue(intent.getStringExtra(Constants.EXTRA_MODE), status)
             val microphone = intent.getStringExtra(Constants.EXTRA_MICROPHONE)
+            val output = intent.getStringExtra(Constants.EXTRA_OUTPUT)
             val approvalStatus = intent.getStringExtra(Constants.EXTRA_APPROVAL_STATUS).orEmpty()
             updateSessionUi(mode, status)
             updateApprovalUi(mode, approvalStatus)
-            if (!microphone.isNullOrBlank()) {
-                updateMicrophoneUi(microphone)
+            if (!microphone.isNullOrBlank() || !output.isNullOrBlank()) {
+                updateAudioRouteUi(
+                    microphone ?: AudioDeviceRouter(this@MainActivity).describeSelectedInput(),
+                    output ?: AudioDeviceRouter(this@MainActivity).describeSelectedOutput()
+                )
             }
         }
     }
@@ -84,6 +90,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         DroneLog.install(applicationContext)
         DroneLog.i("Activity", "MainActivity created")
+        cuePlayer = LocalCuePlayer(applicationContext)
 
         val prefs = getSharedPreferences(Constants.PREFS_NAME, Context.MODE_PRIVATE)
         DroneLogUploader.upload(
@@ -247,6 +254,32 @@ class MainActivity : ComponentActivity() {
                     bottomMargin = 18.dp()
                 })
 
+                addView(fieldLabel("Microphone"))
+
+                inputDeviceButton = Button(this@MainActivity).apply {
+                    styleButton(primary = false)
+                    setOnClickListener { showInputDevicePicker() }
+                }
+                addView(inputDeviceButton, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    48.dp()
+                ))
+
+                addView(fieldLabel("Output").apply {
+                    setPadding(0, 14.dp(), 0, 8.dp())
+                })
+
+                outputDeviceButton = Button(this@MainActivity).apply {
+                    styleButton(primary = false)
+                    setOnClickListener { showOutputDevicePicker() }
+                }
+                addView(outputDeviceButton, LinearLayout.LayoutParams(
+                    ViewGroup.LayoutParams.MATCH_PARENT,
+                    48.dp()
+                ).apply {
+                    bottomMargin = 18.dp()
+                })
+
                 addView(fieldLabel("QR text or authenticated URL"))
 
                 pairingInput = EditText(this@MainActivity).apply {
@@ -311,8 +344,8 @@ class MainActivity : ComponentActivity() {
         })
 
         microphoneText = TextView(this).apply {
-            text = "Mic: phone"
-            textSize = 12f
+            text = "Mic: phone\nOut: auto"
+            textSize = 11f
             typeface = Typeface.DEFAULT_BOLD
             setTextColor(COLOR_MUTED)
             gravity = Gravity.CENTER
@@ -354,7 +387,10 @@ class MainActivity : ComponentActivity() {
         updatePairingText()
         updateSessionUi(SessionMode.OFF, "Off")
         updateApprovalUi(SessionMode.OFF, "")
-        updateMicrophoneUi("Mic: phone")
+        updateAudioRouteUi(
+            AudioDeviceRouter(this).describeSelectedInput(),
+            AudioDeviceRouter(this).describeSelectedOutput()
+        )
 
         setContentView(screen)
         requestNeededPermissions()
@@ -783,9 +819,66 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    private fun updateMicrophoneUi(label: String) {
+    private fun showInputDevicePicker() {
+        val router = AudioDeviceRouter(this)
+        showAudioDevicePicker(
+            title = "Microphone",
+            options = router.inputOptions(),
+            selectedValue = router.preferredInputValue()
+        ) { value ->
+            router.savePreferredInput(value)
+            updateAudioRouteUi(router.describeSelectedInput(), router.describeSelectedOutput())
+            notifyAudioRouteChanged()
+        }
+    }
+
+    private fun showOutputDevicePicker() {
+        val router = AudioDeviceRouter(this)
+        showAudioDevicePicker(
+            title = "Output",
+            options = router.outputOptions(),
+            selectedValue = router.preferredOutputValue()
+        ) { value ->
+            router.savePreferredOutput(value)
+            updateAudioRouteUi(router.describeSelectedInput(), router.describeSelectedOutput())
+            notifyAudioRouteChanged()
+        }
+    }
+
+    private fun showAudioDevicePicker(
+        title: String,
+        options: List<AudioRouteOption>,
+        selectedValue: String,
+        onSelected: (String) -> Unit
+    ) {
+        val labels = options.map { it.label }.toTypedArray()
+        val checkedIndex = options.indexOfFirst { it.value == selectedValue }.takeIf { it >= 0 } ?: 0
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setSingleChoiceItems(labels, checkedIndex) { dialog, which ->
+                onSelected(options[which].value)
+                dialog.dismiss()
+            }
+            .setNegativeButton("Cancel", null)
+            .show()
+    }
+
+    private fun notifyAudioRouteChanged() {
+        if (sessionMode == SessionMode.OFF || sessionMode == SessionMode.ERROR) return
+        startService(Intent(this, VoiceSessionService::class.java).apply {
+            action = Constants.ACTION_UPDATE_AUDIO_ROUTE
+        })
+    }
+
+    private fun updateAudioRouteUi(inputLabel: String, outputLabel: String) {
         if (::microphoneText.isInitialized) {
-            microphoneText.text = label
+            microphoneText.text = "$inputLabel\n$outputLabel"
+        }
+        if (::inputDeviceButton.isInitialized) {
+            inputDeviceButton.text = inputLabel
+        }
+        if (::outputDeviceButton.isInitialized) {
+            outputDeviceButton.text = outputLabel
         }
     }
 

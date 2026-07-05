@@ -46,7 +46,7 @@ object ApprovalCodeUploader {
                     val contentType = response.body?.contentType()?.toString().orEmpty()
                     val responseBytes = response.body?.bytes() ?: ByteArray(0)
                     if (responseBytes.isNotEmpty() && contentType.startsWith("audio/wav")) {
-                        ApprovalTtsPlayer.playWav(responseBytes)
+                        ApprovalTtsPlayer.playWav(appContext, responseBytes)
                     }
                 }
                 DroneLog.i("Approval", "Uploaded approval code length=${code.length}")
