@@ -2475,6 +2475,7 @@ async function loadDesktopExtensions(options = {}) {
         id: extensionConfig.id,
         name: extensionConfig.name,
         version: '0.0.0',
+        sourceKind: 'extension',
         tools: [],
         skills: [],
       };

@@ -33,6 +33,8 @@ export type AssistantDroneSummary = {
   repoPath: string;
   status: string;
   chats: string[];
+  busy?: boolean;
+  busyChats?: string[];
 };
 
 export type AssistantMessageDroneResult = {
@@ -2482,6 +2484,11 @@ export class HubAssistantService {
         // Ignore stale SSE clients.
       }
     }
+  }
+
+  emitExternalUiAction(uiAction: AssistantUiAction, threadId?: string): { ok: true; uiAction: AssistantUiAction } {
+    this.emitUiAction(uiAction, threadId);
+    return { ok: true, uiAction };
   }
 
   private activeChatIdleSubscriptions(threadId?: string): AssistantChatIdleSubscription[] {

@@ -2730,6 +2730,35 @@ async function createVoiceSession(target, assistantProfileId = null) {
   }
 }
 
+async function preferredAssistantVoiceTarget(assistantProfileId = null) {
+  const fallback = state.config?.heySebastianMode === 'realtime' ? 'realtime' : 'assistant';
+  if (!state.config?.deviceId || !state.config?.deviceToken) return fallback;
+  try {
+    const params = new URLSearchParams({
+      token: state.config.deviceToken,
+      installationId: state.config.installationId || '',
+      clientVersion: '1',
+      protocolVersion: '1',
+    });
+    if (assistantProfileId) params.set('assistantProfileId', assistantProfileId);
+    const data = await api(`/api/devices/${encodeURIComponent(state.config.deviceId)}/assistant/thread?${params.toString()}`, {
+      method: 'GET',
+      suppressAuthGuidance: true,
+      headers: {
+        'x-voice-device-token': state.config.deviceToken,
+        'x-voice-installation-id': state.config.installationId || '',
+        'x-voice-client-version': '1',
+      },
+    });
+    const mode = String(data?.thread?.voiceMode || '').toLowerCase();
+    if (mode === 'realtime') return 'realtime';
+    if (mode === 'standard') return 'assistant';
+  } catch {
+    // If the server cannot be reached, keep the user's local voice-mode preference.
+  }
+  return fallback;
+}
+
 async function startRealtimeWebRtcMic(options = {}, previousMode = state.mode) {
   resetVoiceStreamState();
   state.voiceStreamStarting = true;
@@ -4021,7 +4050,7 @@ async function startAssistantRecordingShortcut(payload = {}) {
     }
   }
 
-  await startMic('assistant', { cue: 'wake', assistantProfileId });
+  await startMic(await preferredAssistantVoiceTarget(assistantProfileId), { cue: 'wake', assistantProfileId });
 }
 
 async function toggleCallRecorder() {
@@ -4229,9 +4258,7 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
   if (state.mode === 'off') enterAwake();
   const target = match.command === 'patch' || match.command === 'clipboard'
     ? match.command
-    : state.config?.heySebastianMode === 'realtime'
-      ? 'realtime'
-      : 'assistant';
+    : await preferredAssistantVoiceTarget(match.assistantProfileId);
   await startMic(target, { cue: 'wake', assistantProfileId: match.assistantProfileId });
 }
 

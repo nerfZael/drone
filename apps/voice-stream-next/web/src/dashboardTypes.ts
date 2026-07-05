@@ -166,6 +166,7 @@ export type AssistantThread = {
   status?: 'idle' | 'running' | 'waiting_for_approval' | 'cancelled' | 'error';
   error?: string | null;
   voiceEnabled?: boolean;
+  voiceMode?: 'standard' | 'realtime' | null;
   autoApprove?: boolean;
   handsFreeMode?: boolean;
   systemPrompt?: string | null;
@@ -303,6 +304,9 @@ export type AssistantToolSummary = {
   category: string;
   description: string;
   approval: 'never' | 'normal_threads' | 'always' | 'dynamic';
+  sourceKind?: 'built_in' | 'extension' | 'mcp';
+  sourceId?: string;
+  sourceName?: string;
 };
 
 export type AssistantExtensionTargetKind = 'server' | 'device' | 'any_device';
@@ -322,6 +326,7 @@ export type AssistantExtensionManifest = {
   id: string;
   name: string;
   version: string;
+  sourceKind?: 'extension' | 'mcp';
   description?: string;
   tools: AssistantExtensionToolManifest[];
 };

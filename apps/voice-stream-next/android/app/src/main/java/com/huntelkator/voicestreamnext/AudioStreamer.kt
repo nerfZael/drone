@@ -258,7 +258,16 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
         thread(name = "VoiceStreamBeginRecording") {
             try {
                 val deviceId = api.pairedDeviceId()
+                val resolvedTarget = if (currentTarget == Constants.STREAM_TARGET_ASSISTANT) {
+                    api.assistantVoiceTarget(assistantProfileId)
+                } else {
+                    currentTarget
+                }
+                currentTarget = cleanTarget(resolvedTarget)
                 val sessionId = api.createVoiceSession(deviceId, currentTarget, assistantProfileId)
+                if (currentTarget == Constants.STREAM_TARGET_REALTIME) {
+                    pendingAssistantProfileId = assistantProfileId
+                }
                 beginRecordingWithSession(sessionId, currentTarget, onStatus, recordingAlreadyStarted = true)
             } catch (error: Exception) {
                 recording.set(false)
@@ -771,7 +780,7 @@ class AudioStreamer(private val context: Context, private val api: VoiceStreamAp
                 pendingAssistantProfileId = match.assistantProfileId
                 wakeDetector?.reset()
                 cuePlayer.play(LocalCue.WAKE)
-                beginRecording(if (api.heySebastianRealtimeEnabled()) Constants.STREAM_TARGET_REALTIME else Constants.STREAM_TARGET_ASSISTANT, onStatus)
+                beginRecording(Constants.STREAM_TARGET_ASSISTANT, onStatus)
             }
             match.hasPatch && !sleeping -> {
                 wakeDetector?.reset()
