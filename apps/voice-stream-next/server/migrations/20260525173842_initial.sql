@@ -74,7 +74,7 @@ CREATE TABLE IF NOT EXISTS assistant_threads (
   auto_approve INTEGER NOT NULL DEFAULT 0,
   system_prompt TEXT,
   enabled_tools_json TEXT NOT NULL DEFAULT '["assistant_artifacts","speak","get_system_prompt","update_system_prompt","set_thinking_level","web_search","fetch_content"]',
-  capabilities_json TEXT NOT NULL DEFAULT '{"artifacts":true,"speech":true,"approvals":true,"externalCalls":true,"futureIntegrations":false}',
+  capabilities_json TEXT NOT NULL DEFAULT '{"artifacts":true,"speech":true,"externalCalls":true,"futureIntegrations":false}',
   prompt_delivery_mode TEXT NOT NULL DEFAULT 'queue',
   created_at TEXT NOT NULL,
   updated_at TEXT NOT NULL

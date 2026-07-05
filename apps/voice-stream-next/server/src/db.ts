@@ -193,7 +193,6 @@ export type AssistantRunStatus = 'idle' | 'running' | 'waiting_for_approval' | '
 export type AssistantThreadCapabilities = {
   artifacts: boolean;
   speech: boolean;
-  approvals: boolean;
   externalCalls: boolean;
   futureIntegrations: boolean;
 };
@@ -698,7 +697,6 @@ const ASSISTANT_DEFAULT_ENABLED_TOOLS = [
 const ASSISTANT_DEFAULT_CAPABILITIES: AssistantThreadCapabilities = {
   artifacts: true,
   speech: true,
-  approvals: true,
   externalCalls: true,
   futureIntegrations: false,
 };
