@@ -1314,6 +1314,9 @@ export function SelectedDroneWorkspace({
                       triggerLabel={modelLabel}
                       chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
                       panelClassName="w-[260px]"
+                      menuClassName="max-h-[240px] overflow-y-auto"
+                      searchable
+                      searchPlaceholder="Search models"
                     />
                   ) : (
                     <>

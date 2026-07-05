@@ -73,6 +73,8 @@ export function useDroneHubToolbarMenuState({
       ...availableChatModels.map((m) => ({
         value: m.id,
         label: `${m.label}${m.isDefault ? ' (default)' : ''}${m.isCurrent ? ' (current)' : ''}`,
+        title: m.id,
+        searchText: `${m.label} ${m.id}`,
       })),
     ],
     [availableChatModels],
