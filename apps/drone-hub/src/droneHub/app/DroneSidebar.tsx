@@ -1386,6 +1386,7 @@ export type DroneSidebarProps = {
   onCreateDroneChat: (
     drone: DroneSummary,
     chatName: string,
+    opts?: { draft?: boolean },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
   onRenameDroneChat: (
     droneId: string,
@@ -1757,6 +1758,7 @@ export function DroneSidebar({
     submitChatEditor,
     submitFolderEditor,
     toggleDroneSection,
+    updateChatEditorCreateAsDraft,
     updateChatEditorValue,
     updateFolderEditorValue,
   } = useSidebarInteractions({
@@ -2767,6 +2769,7 @@ export function DroneSidebar({
                       onOpenCreateDroneChat={openDroneChatCreate}
                       onStartRenameDroneChat={startRenameDroneChat}
                       onChatEditorValueChange={updateChatEditorValue}
+                      onChatEditorCreateAsDraftChange={updateChatEditorCreateAsDraft}
                       onSubmitChatEditor={submitChatEditor}
                       onBlurChatEditor={blurChatEditor}
                       onCancelChatEditor={closeChatEditor}

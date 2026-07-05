@@ -20,6 +20,8 @@ type CreateDronesModalProps = {
   createMode: 'create' | 'clone';
   createRuntime: 'container' | 'host';
   onCreateRuntimeChange: (value: 'container' | 'host') => void;
+  createAsDraft: boolean;
+  onCreateAsDraftChange: (checked: boolean) => void;
   createPersistVolume: boolean;
   onCreatePersistVolumeChange: (checked: boolean) => void;
   cloneSourceId: string | null;
@@ -81,6 +83,8 @@ export function CreateDronesModal({
   createMode,
   createRuntime,
   onCreateRuntimeChange,
+  createAsDraft,
+  onCreateAsDraftChange,
   createPersistVolume,
   onCreatePersistVolumeChange,
   cloneSourceId,
@@ -341,6 +345,22 @@ export function CreateDronesModal({
                 </span>
               </div>
             )}
+
+            <div className="mb-4">
+              <label className="flex items-center gap-2 select-none">
+                <input
+                  type="checkbox"
+                  className="accent-[var(--accent)]"
+                  checked={createAsDraft}
+                  onChange={(e) => onCreateAsDraftChange(e.target.checked)}
+                  disabled={creating}
+                />
+                <span className="text-[11px] text-[var(--muted)]">Create as draft</span>
+              </label>
+              <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                Adds the drone to the sidebar and queues messages until you publish it.
+              </span>
+            </div>
 
             <div className="mb-4">
               <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>

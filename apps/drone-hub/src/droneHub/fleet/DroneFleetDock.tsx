@@ -159,7 +159,7 @@ export function DroneFleetDock({
   droneId: string;
   droneName: string;
   disabled: boolean;
-  hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
+  hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
 }) {
   const startup = usePaneReadiness({

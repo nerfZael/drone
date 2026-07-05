@@ -38,6 +38,7 @@ export type DroneSummary = {
   statusError: string | null;
   statusChecking?: boolean;
   chats: string[];
+  draftChats?: Record<string, boolean>;
   busyChats?: string[];
   dockerSize?: {
     totalBytes: number;
@@ -46,9 +47,10 @@ export type DroneSummary = {
     snapshotVirtualBytes?: number | null;
     snapshotCount: number;
   };
-  hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
+  hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
   busy?: boolean;
+  draft?: boolean;
 };
 
 export type RepoSummary = {

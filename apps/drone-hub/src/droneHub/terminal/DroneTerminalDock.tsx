@@ -113,7 +113,7 @@ export function DroneTerminalDock({
   ) => void;
   onCloseSession: (droneId: string, paneKey: 'single' | 'top' | 'bottom', sessionId: string) => void;
   disabled: boolean;
-  hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
+  hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
 }) {
   const normalizedCwd = React.useMemo(() => normalizeTerminalCwdInput(defaultCwd), [defaultCwd]);

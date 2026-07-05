@@ -1,4 +1,4 @@
-export type PendingPhase = 'starting' | 'creating' | 'seeding' | 'error';
+export type PendingPhase = 'draft' | 'starting' | 'creating' | 'seeding' | 'error';
 
 export type PendingPromptState = 'queued' | 'sending' | 'sent' | 'failed';
 

@@ -276,7 +276,7 @@ export function DroneChangesDock({
   initialDiffViewType?: DiffViewType | null;
   persistViewPreferences?: boolean;
   disabled: boolean;
-  hubPhase?: 'creating' | 'starting' | 'seeding' | 'error' | null;
+  hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
   onRevealFileInFiles: (repoRelativePath: string) => void;
   onOpenFileInEditor: (repoRelativePath: string) => void;

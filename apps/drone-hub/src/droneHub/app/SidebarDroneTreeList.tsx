@@ -64,6 +64,7 @@ export type SidebarDroneTreeListProps = {
   onCreateDroneChat: (
     drone: DroneSummary,
     chatName: string,
+    opts?: { draft?: boolean },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
   onRenameDroneChat: (
     droneId: string,
@@ -124,6 +125,7 @@ type SidebarChatRowProps = {
   drone: DroneSummary;
   sidebarDensityMode: SidebarDensityMode;
   chatName: string;
+  draft: boolean;
   selected: boolean;
   unread: boolean;
   busy: boolean;
@@ -410,6 +412,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
   drone,
   sidebarDensityMode,
   chatName,
+  draft,
   selected,
   unread,
   busy,
@@ -514,6 +517,11 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
         <span className="min-w-0 flex-1 truncate font-mono">
           {chatName}
         </span>
+        {draft ? (
+          <span className="flex-shrink-0 rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+            Draft
+          </span>
+        ) : null}
         {busy ? (
           <span className="inline-flex items-center flex-shrink-0" title="Agent responding">
             <TypingDots color="var(--yellow)" />
@@ -771,6 +779,22 @@ function SidebarDroneNode({
                 />
                 {chatEditor?.pending ? <IconSpinner className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-90" /> : null}
               </div>
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => updateChatEditorCreateAsDraft(chatEditor?.createAsDraft !== true)}
+                disabled={chatEditor?.pending}
+                className="flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)] disabled:opacity-50"
+              >
+                <span
+                  className={`h-3 w-3 rounded-sm border ${
+                    chatEditor?.createAsDraft === true
+                      ? 'border-[var(--accent)] bg-[var(--accent)]'
+                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)]'
+                  }`}
+                />
+                Draft
+              </button>
               {chatEditor?.error ? <div className="px-1 text-[10px] text-[var(--red)]">{chatEditor.error}</div> : null}
             </div>
           ) : null}
@@ -784,6 +808,7 @@ function SidebarDroneNode({
                 drone={drone}
                 sidebarDensityMode={sidebarDensityMode}
                 chatName={chatName}
+                draft={drone.draftChats?.[chatName] === true}
                 selected={selectedDrone === drone.id && activeChatName === chatName}
                 unread={unreadAgentMessageByChatNodeId[chatNodeId] === true}
                 busy={busyChatNodeIdSet.has(chatNodeId)}
@@ -954,6 +979,7 @@ export function SidebarDroneTreeList({
       droneId,
       targetChatName: null,
       value: `chat-${Math.max(1, chats.length + 1)}`,
+      createAsDraft: false,
       error: null,
       pending: false,
     });
@@ -977,6 +1003,10 @@ export function SidebarDroneTreeList({
     setChatEditor((prev) => (prev ? { ...prev, value: next, error: null } : prev));
   }, []);
 
+  const updateChatEditorCreateAsDraft = React.useCallback((next: boolean) => {
+    setChatEditor((prev) => (prev && prev.mode === 'create' ? { ...prev, createAsDraft: next, error: null } : prev));
+  }, []);
+
   const submitChatEditor = React.useCallback(async () => {
     const draft = chatEditor;
     if (!draft || draft.pending) return;
@@ -993,7 +1023,7 @@ export function SidebarDroneTreeList({
     setChatEditor((prev) => (prev ? { ...prev, pending: true, error: null } : prev));
     const result =
       draft.mode === 'create'
-        ? await onCreateDroneChat(drone, chatName)
+        ? await onCreateDroneChat(drone, chatName, { draft: draft.createAsDraft === true })
         : await onRenameDroneChat(draft.droneId, String(draft.targetChatName ?? '').trim(), chatName);
     if (!result.ok) {
       setChatEditor((prev) =>

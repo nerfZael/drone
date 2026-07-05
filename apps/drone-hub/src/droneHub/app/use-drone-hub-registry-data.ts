@@ -30,6 +30,18 @@ function sameOptionalText(left: unknown, right: unknown): boolean {
   return String(left ?? '') === String(right ?? '');
 }
 
+function sameBooleanMap(leftRaw: unknown, rightRaw: unknown): boolean {
+  const left = leftRaw && typeof leftRaw === 'object' && !Array.isArray(leftRaw) ? leftRaw as Record<string, unknown> : {};
+  const right = rightRaw && typeof rightRaw === 'object' && !Array.isArray(rightRaw) ? rightRaw as Record<string, unknown> : {};
+  const keys = Array.from(new Set([...Object.keys(left), ...Object.keys(right)]));
+  for (const key of keys) {
+    const leftValue = left[key] === true;
+    const rightValue = right[key] === true;
+    if (leftValue !== rightValue) return false;
+  }
+  return true;
+}
+
 function samePlaybook(left: DroneSummary['playbook'], right: DroneSummary['playbook']): boolean {
   if (!left && !right) return true;
   if (!left || !right) return false;
@@ -75,6 +87,7 @@ function sameDroneSummary(left: DroneSummary, right: DroneSummary): boolean {
     sameOptionalText(left.statusError, right.statusError) &&
     Boolean(left.statusChecking) === Boolean(right.statusChecking) &&
     sameStringArray(left.chats, right.chats) &&
+    sameBooleanMap(left.draftChats, right.draftChats) &&
     sameStringArray(left.busyChats, right.busyChats) &&
     sameOptionalText(left.hubPhase, right.hubPhase) &&
     sameOptionalText(left.hubMessage, right.hubMessage) &&

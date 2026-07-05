@@ -251,6 +251,8 @@ type SelectedDroneWorkspaceProps = {
   promptError: string | null;
   sendingPrompt: boolean;
   sendPromptText: (payload: ChatSendPayload) => Promise<boolean>;
+  publishSelectedDraft: () => Promise<boolean>;
+  publishingDraft: boolean;
   canStopResponse: boolean;
   requestStopResponse: () => Promise<void>;
   stoppingResponse: boolean;
@@ -377,6 +379,8 @@ export function SelectedDroneWorkspace({
   promptError,
   sendingPrompt,
   sendPromptText,
+  publishSelectedDraft,
+  publishingDraft,
   canStopResponse,
   requestStopResponse,
   stoppingResponse,
@@ -441,6 +445,7 @@ export function SelectedDroneWorkspace({
     () => explicitSelectedChat || resolveChatNameForDrone(currentDrone, selectedChat),
     [currentDrone, explicitSelectedChat, selectedChat],
   );
+  const selectedChatIsDraft = currentDrone.draftChats?.[activeChatName] === true;
   const [voicePatchStatus, setVoicePatchStatus] = React.useState<VoicePatchStatus>({
     active: false,
     sessionId: null,
@@ -1634,6 +1639,9 @@ export function SelectedDroneWorkspace({
               >
                 Chat
                 <span className="font-mono normal-case tracking-normal text-[11px] text-[var(--fg-secondary)]">{activeChatName}</span>
+                {selectedChatIsDraft ? (
+                  <span className="rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[8px] text-[var(--accent)]">Draft</span>
+                ) : null}
               </div>
               <div className="inline-flex items-center gap-1.5">
                 <div
@@ -2401,6 +2409,7 @@ export function SelectedDroneWorkspace({
             }}
             promptError={stopResponseError || voicePatchCancelError || promptError}
             sending={sendingPrompt}
+            publishing={publishingDraft}
             waiting={
               chatUiMode === 'transcript'
                 ? selectedChatDockerSnapshotBusy || visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')
@@ -2414,6 +2423,7 @@ export function SelectedDroneWorkspace({
             autoFocus={shouldAutoFocusInput}
             onStop={canStopResponse ? () => requestStopResponse() : undefined}
             stopping={stoppingResponse}
+            onPublish={currentDrone.draft === true || currentDrone.hubPhase === 'draft' || selectedChatIsDraft ? publishSelectedDraft : undefined}
             onSend={async (payload: ChatSendPayload) => await sendPromptText(payload)}
             onSendAutomation={
               chatUiMode === 'transcript'

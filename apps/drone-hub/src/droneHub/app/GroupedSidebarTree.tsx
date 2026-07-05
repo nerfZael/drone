@@ -59,6 +59,7 @@ type ChatEditorState = {
   droneId: string;
   targetChatName: string | null;
   value: string;
+  createAsDraft?: boolean;
   error: string | null;
   pending: boolean;
 };
@@ -130,6 +131,7 @@ type GroupedSidebarTreeProps = {
   onCreateDroneChat: (
     drone: DroneSummary,
     chatName: string,
+    opts?: { draft?: boolean },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
   onRenameDroneChat: (
     droneId: string,
@@ -141,6 +143,7 @@ type GroupedSidebarTreeProps = {
   onOpenCreateDroneChat: (drone: DroneSummary) => void;
   onStartRenameDroneChat: (droneId: string, chatName: string) => void;
   onChatEditorValueChange: (next: string) => void;
+  onChatEditorCreateAsDraftChange: (next: boolean) => void;
   onSubmitChatEditor: () => void;
   onBlurChatEditor: () => void;
   onCancelChatEditor: () => void;
@@ -463,6 +466,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
   });
   const active = selectedDrone === drone.id && activeChatName === chatName;
   const selected = selectedSidebarNodeId === sidebarChatId;
+  const draft = drone.draftChats?.[chatName] === true;
   const reorderPreviewClass =
     dragOverChat?.key === `${drone.id}:${chatName}`
       ? dragOverChat.placement === 'before'
@@ -539,6 +543,11 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
             <span className="h-1.5 w-1.5 flex-shrink-0" />
           )}
           <span className="min-w-0 flex-1 truncate font-mono">{chatName}</span>
+          {draft ? (
+            <span className="flex-shrink-0 rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+              Draft
+            </span>
+          ) : null}
           {busyChatNodeIdSet.has(chatNodeId) ? (
             <span className="inline-flex items-center flex-shrink-0" title="Agent responding">
               <TypingDots color="var(--yellow)" />
@@ -684,6 +693,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     onOpenCloneModal,
     onOpenCreateDroneChat,
     onChatEditorValueChange,
+    onChatEditorCreateAsDraftChange,
     onSubmitChatEditor,
     onBlurChatEditor,
     onCancelChatEditor,
@@ -887,6 +897,22 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                 />
                 {chatEditor?.pending ? <IconSpinner className="opacity-90 text-[var(--accent)]" /> : null}
               </div>
+              <button
+                type="button"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => onChatEditorCreateAsDraftChange(chatEditor?.createAsDraft !== true)}
+                disabled={chatEditor?.pending}
+                className="flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)] disabled:opacity-50"
+              >
+                <span
+                  className={`h-3 w-3 rounded-sm border ${
+                    chatEditor?.createAsDraft === true
+                      ? 'border-[var(--accent)] bg-[var(--accent)]'
+                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)]'
+                  }`}
+                />
+                Draft
+              </button>
               {chatEditor?.error ? <div className="px-1 text-[10px] text-[var(--red)]">{chatEditor.error}</div> : null}
             </div>
           ) : null}
@@ -2040,6 +2066,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.onBlurFolderEditor,
       props.onCancelChatEditor,
       props.onCancelFolderEditor,
+      props.onChatEditorCreateAsDraftChange,
       props.onChatEditorValueChange,
       props.onCreateDroneChat,
       props.onDeleteDrone,

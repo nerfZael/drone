@@ -23,6 +23,7 @@ export type ChatEditorState = {
   droneId: string;
   targetChatName: string | null;
   value: string;
+  createAsDraft?: boolean;
   error: string | null;
   pending: boolean;
 };
@@ -41,6 +42,7 @@ type UseSidebarInteractionsArgs = {
   onCreateDroneChat: (
     drone: DroneSummary,
     chatName: string,
+    opts?: { draft?: boolean },
   ) => Promise<{ ok: boolean; chatName?: string; error?: string | null }>;
   onRenameDroneChat: (
     droneId: string,
@@ -162,6 +164,12 @@ export function useSidebarInteractions({
     setChatEditor((prev: ChatEditorState | null) => (prev ? { ...prev, value: next, error: null } : prev));
   }, []);
 
+  const updateChatEditorCreateAsDraft = React.useCallback((next: boolean) => {
+    setChatEditor((prev: ChatEditorState | null) =>
+      prev && prev.mode === 'create' ? { ...prev, createAsDraft: next, error: null } : prev,
+    );
+  }, []);
+
   const openDroneChatCreate = React.useCallback((drone: DroneSummary) => {
     const droneId = String(drone?.id ?? '').trim();
     if (!droneId) return;
@@ -174,6 +182,7 @@ export function useSidebarInteractions({
       droneId,
       targetChatName: null,
       value: seedName,
+      createAsDraft: false,
       error: null,
       pending: false,
     });
@@ -355,7 +364,7 @@ export function useSidebarInteractions({
         setChatEditor((prev: ChatEditorState | null) => (prev ? { ...prev, pending: false, error: 'Drone is unavailable.' } : prev));
         return;
       }
-      const result = await onCreateDroneChat(drone, chatName);
+      const result = await onCreateDroneChat(drone, chatName, { draft: draft.createAsDraft === true });
       if (!result.ok) {
         setChatEditor((prev: ChatEditorState | null) => (prev ? { ...prev, pending: false, error: result.error || 'Create chat failed.' } : prev));
         return;
@@ -551,6 +560,7 @@ export function useSidebarInteractions({
     submitFolderEditor,
     toggleDroneSection,
     updateChatEditorValue,
+    updateChatEditorCreateAsDraft,
     updateFolderEditorValue,
   };
 }

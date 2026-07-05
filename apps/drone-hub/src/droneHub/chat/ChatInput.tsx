@@ -90,6 +90,8 @@ export function ChatInput({
   voicePatchCancelling = false,
   onCancelVoicePatch,
   onSend,
+  onPublish,
+  publishing = false,
   onSendAutomation,
   onStop,
   stopping = false,
@@ -113,6 +115,8 @@ export function ChatInput({
   voicePatchCancelling?: boolean;
   onCancelVoicePatch?: () => Promise<void> | void;
   onSend: (payload: ChatSendPayload) => Promise<boolean>;
+  onPublish?: () => Promise<boolean> | boolean;
+  publishing?: boolean;
   onSendAutomation?: (payload: ChatDraftAutomationPayload) => Promise<boolean>;
   onStop?: () => Promise<void> | void;
   stopping?: boolean;
@@ -946,6 +950,24 @@ export function ChatInput({
                 </button>
               </div>
             )}
+            {onPublish ? (
+              <button
+                type="button"
+                onClick={() => {
+                  void onPublish();
+                }}
+                disabled={Boolean(disabled) || publishing}
+                className={`inline-flex h-9 items-center justify-center rounded-md border px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                  Boolean(disabled) || publishing
+                    ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[var(--muted)] opacity-40'
+                    : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+                title="Publish this draft and send queued messages"
+              >
+                {publishing ? 'Publishing...' : 'Publish'}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => {
