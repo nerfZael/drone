@@ -22,6 +22,34 @@ const MAX_IDLE_EXPIRES_IN_MS = 24 * 60 * 60 * 1000;
 const MAX_IDLE_TARGETS = 20;
 const MAX_HIGHLIGHT_DURATION_MS = 60_000;
 
+const whiteboardShapeSchema = z.object({
+  id: z.string().optional(),
+  type: z.string().optional(),
+  text: z.string().optional(),
+  label: z.string().optional(),
+  x: z.number().optional(),
+  y: z.number().optional(),
+  width: z.number().optional(),
+  height: z.number().optional(),
+  fromId: z.string().optional(),
+  toId: z.string().optional(),
+  startX: z.number().optional(),
+  startY: z.number().optional(),
+  endX: z.number().optional(),
+  endY: z.number().optional(),
+  strokeColor: z.string().optional(),
+  backgroundColor: z.string().optional(),
+}).passthrough();
+
+const whiteboardOperationSchema = z.object({
+  action: z.string(),
+  id: z.string().optional(),
+  ids: z.array(z.string()).optional(),
+  text: z.string().optional(),
+  shape: whiteboardShapeSchema.optional(),
+  shapes: z.array(whiteboardShapeSchema).optional(),
+}).passthrough();
+
 type HubConnection = {
   baseUrl: string;
   token: string;
@@ -194,6 +222,82 @@ function toolResult(data: Record<string, unknown>): any {
     content: [{ type: 'text' as const, text: JSON.stringify(data, null, 2) }],
     structuredContent: data,
   };
+}
+
+function imageToolResult(args: { text: string; data: string; mimeType: string; metadata: Record<string, unknown> }): any {
+  return {
+    content: [
+      { type: 'text' as const, text: args.text },
+      {
+        type: 'image' as const,
+        data: args.data,
+        mimeType: args.mimeType,
+        _meta: args.metadata,
+      },
+    ],
+    structuredContent: args.metadata,
+  };
+}
+
+function compactWhiteboard(whiteboard: any): Record<string, unknown> {
+  const elements = Array.isArray(whiteboard?.scene?.elements) ? whiteboard.scene.elements : [];
+  const visible = elements.filter((element: any) => element?.isDeleted !== true);
+  const compactElements = visible.slice(0, 100).map((element: any) => {
+    const compact: Record<string, unknown> = {
+      id: cleanString(element?.id),
+      type: cleanString(element?.type),
+      x: Number(element?.x ?? 0),
+      y: Number(element?.y ?? 0),
+      width: Number(element?.width ?? 0),
+      height: Number(element?.height ?? 0),
+    };
+    if (typeof element?.text === 'string') {
+      compact.text = element.text.length > 500 ? `${element.text.slice(0, 500)}...` : element.text;
+    }
+    if (typeof element?.strokeColor === 'string') compact.strokeColor = element.strokeColor;
+    if (typeof element?.backgroundColor === 'string') compact.backgroundColor = element.backgroundColor;
+    if (Array.isArray(element?.points)) compact.points = element.points;
+    return compact;
+  });
+  return {
+    id: cleanString(whiteboard?.id),
+    title: cleanString(whiteboard?.title),
+    scopeType: cleanString(whiteboard?.scopeType),
+    scopeValue: cleanString(whiteboard?.scopeValue),
+    version: Number(whiteboard?.version ?? 0),
+    updatedAt: cleanString(whiteboard?.updatedAt),
+    totalElementCount: elements.length,
+    visibleElementCount: visible.length,
+    truncatedElements: visible.length > compactElements.length,
+    elements: compactElements,
+  };
+}
+
+async function ensureDefaultWhiteboardExists(): Promise<void> {
+  await requestJson('/api/whiteboards', { method: 'GET' });
+}
+
+async function requestWhiteboard(whiteboardIdRaw: unknown): Promise<any> {
+  const whiteboardId = cleanString(whiteboardIdRaw, 'main');
+  try {
+    return await requestJson(`/api/whiteboards/${encodeURIComponent(whiteboardId)}`, { method: 'GET' });
+  } catch (error: any) {
+    if (whiteboardId !== 'main' || error?.status !== 404) throw error;
+    await ensureDefaultWhiteboardExists();
+    return await requestJson('/api/whiteboards/main', { method: 'GET' });
+  }
+}
+
+function normalizeWhiteboardOperations(args: any): unknown[] {
+  const operations = Array.isArray(args?.operations) ? args.operations : [];
+  if (operations.length > 0) return operations;
+  const shapes = Array.isArray(args?.shapes) ? args.shapes : [];
+  return shapes.length > 0 ? [{ action: 'add_shape', shapes }] : [];
+}
+
+function appendOptionalSearchParam(params: URLSearchParams, key: string, value: unknown): void {
+  const text = cleanString(value);
+  if (text) params.set(key, text);
 }
 
 function normalizeAgent(value: unknown): { kind: 'builtin'; id: string } | null {
@@ -961,6 +1065,141 @@ function registerTools(server: McpServer) {
     const durationMs = normalizeHighlightDurationMs(args.durationMs);
     const response = await emitUiAction({ type: 'highlight_drones', droneIds, durationMs });
     return toolResult({ ok: true, droneIds, durationMs, uiAction: response?.uiAction ?? null });
+  });
+
+  server.registerTool('list_whiteboards', {
+    title: 'List whiteboards',
+    description: 'List backend-saved Drone Hub whiteboards with ids, titles, scopes, and versions.',
+    inputSchema: {
+      scopeType: z.string().optional(),
+      scopeValue: z.string().optional(),
+    },
+  }, async (args) => {
+    const params = new URLSearchParams();
+    const scopeType = cleanString(args.scopeType);
+    const scopeValue = cleanString(args.scopeValue);
+    if (scopeType) params.set('scopeType', scopeType);
+    if (scopeValue) params.set('scopeValue', scopeValue);
+    const pathname = `/api/whiteboards${params.size > 0 ? `?${params.toString()}` : ''}`;
+    return toolResult(await requestJson(pathname, { method: 'GET' }));
+  });
+
+  server.registerTool('read_whiteboard', {
+    title: 'Read whiteboard',
+    description: 'Read a backend-saved whiteboard scene summary and elements. Omit whiteboardId for the main whiteboard.',
+    inputSchema: {
+      whiteboardId: z.string().optional(),
+    },
+  }, async (args) => {
+    const response = await requestWhiteboard(args.whiteboardId);
+    const whiteboard = compactWhiteboard(response?.whiteboard);
+    return toolResult({ ok: true, whiteboard });
+  });
+
+  server.registerTool('create_whiteboard', {
+    title: 'Create whiteboard',
+    description: 'Create a backend-saved Drone Hub whiteboard.',
+    inputSchema: {
+      title: z.string().optional(),
+      scopeType: z.string().optional(),
+      scopeValue: z.string().optional(),
+    },
+  }, async (args) => {
+    const body = {
+      ...(cleanString(args.title) ? { title: cleanString(args.title) } : {}),
+      ...(cleanString(args.scopeType) ? { scopeType: cleanString(args.scopeType) } : {}),
+      ...(cleanString(args.scopeValue) ? { scopeValue: cleanString(args.scopeValue) } : {}),
+      actorId: 'mcp',
+    };
+    const response = await requestJson('/api/whiteboards', { method: 'POST', body: JSON.stringify(body) });
+    return toolResult({ ok: true, whiteboard: compactWhiteboard(response?.whiteboard) });
+  });
+
+  server.registerTool('update_whiteboard', {
+    title: 'Update whiteboard',
+    description:
+      'Add, delete, or update simple whiteboard shapes. For add_shape, pass shapes with type rectangle, text, or arrow plus x/y/width/height/text. Arrows may use fromId/toId or startX/startY/endX/endY.',
+    inputSchema: {
+      whiteboardId: z.string().optional(),
+      title: z.string().optional(),
+      shapes: z.array(whiteboardShapeSchema).optional(),
+      operations: z.array(whiteboardOperationSchema).optional(),
+    },
+  }, async (args) => {
+    const whiteboardId = cleanString(args.whiteboardId, 'main');
+    if (whiteboardId === 'main') await requestWhiteboard('main');
+    const operations = normalizeWhiteboardOperations(args);
+    const title = cleanString(args.title);
+    if (!title && operations.length === 0) throw new Error('title, shapes, or operations are required');
+    let response: any = null;
+    if (title) {
+      response = await requestJson(`/api/whiteboards/${encodeURIComponent(whiteboardId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ actorId: 'mcp', title }),
+      });
+    }
+    if (operations.length > 0) {
+      response = await requestJson(`/api/whiteboards/${encodeURIComponent(whiteboardId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ actorId: 'mcp', operations }),
+      });
+    }
+    return toolResult({ ok: true, whiteboard: compactWhiteboard(response?.whiteboard) });
+  });
+
+  server.registerTool('capture_whiteboard', {
+    title: 'Capture whiteboard',
+    description: 'Render the full visible whiteboard as a PNG image fitted to all visible shapes.',
+    inputSchema: {
+      whiteboardId: z.string().optional(),
+      padding: z.number().optional(),
+      maxWidth: z.number().optional(),
+      maxHeight: z.number().optional(),
+      backgroundColor: z.string().optional(),
+    },
+  }, async (args) => {
+    const whiteboardId = cleanString(args.whiteboardId, 'main');
+    const params = new URLSearchParams();
+    appendOptionalSearchParam(params, 'padding', args.padding);
+    appendOptionalSearchParam(params, 'maxWidth', args.maxWidth);
+    appendOptionalSearchParam(params, 'maxHeight', args.maxHeight);
+    appendOptionalSearchParam(params, 'backgroundColor', args.backgroundColor);
+    const response = await requestJson(
+      `/api/whiteboards/${encodeURIComponent(whiteboardId)}/image${params.size > 0 ? `?${params.toString()}` : ''}`,
+      { method: 'GET' },
+    );
+    const metadata = response?.metadata && typeof response.metadata === 'object' ? response.metadata : {};
+    const data = cleanString(response?.data);
+    const mimeType = cleanString((metadata as any).mimeType, 'image/png');
+    if (!data) throw new Error('whiteboard image response did not include image data');
+    return imageToolResult({
+      text: `Captured whiteboard ${cleanString((metadata as any).title, whiteboardId)} as a ${Number((metadata as any).width ?? 0) || '?'}x${Number((metadata as any).height ?? 0) || '?'} PNG.`,
+      data,
+      mimeType,
+      metadata,
+    });
+  });
+
+  server.registerTool('open_whiteboard', {
+    title: 'Open whiteboard',
+    description: 'Open the Whiteboard panel in Drone Hub. Omit whiteboardId for the main whiteboard.',
+    inputSchema: {
+      whiteboardId: z.string().optional(),
+    },
+  }, async (args) => {
+    const response = await requestWhiteboard(args.whiteboardId);
+    const whiteboardId = cleanString(response?.whiteboard?.id, cleanString(args.whiteboardId, 'main'));
+    const uiActionResponse = await emitUiAction({ type: 'open_whiteboard', whiteboardId });
+    return toolResult({ ok: true, whiteboardId, uiAction: uiActionResponse?.uiAction ?? null });
+  });
+
+  server.registerTool('close_whiteboard', {
+    title: 'Close whiteboard',
+    description: 'Close the Whiteboard panel in Drone Hub.',
+    inputSchema: {},
+  }, async () => {
+    const response = await emitUiAction({ type: 'close_whiteboard' });
+    return toolResult({ ok: true, uiAction: response?.uiAction ?? null });
   });
 
   server.registerTool('create_drone', {
