@@ -4,6 +4,7 @@ import { DroneHubDndProvider } from './droneHub/app/drone-hub-dnd';
 import { RemoteDroneHubApp } from './remote/RemoteDroneHubApp';
 import { installRemoteCsrfFetch } from './remote/remote-api';
 import { registerPwa } from './register-pwa';
+import '@excalidraw/excalidraw/index.css';
 import './styles.css';
 
 installRemoteCsrfFetch();

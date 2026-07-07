@@ -237,6 +237,14 @@ function repoReadRouteAllowed(parts: string[]): boolean {
   return false;
 }
 
+function whiteboardRouteAllowed(method: string, parts: string[]): boolean {
+  if (parts[0] !== 'api' || parts[1] !== 'whiteboards') return false;
+  if (method === 'GET' && parts.length === 3 && parts[2] === 'events') return true;
+  if ((method === 'GET' || method === 'POST') && parts.length === 2) return true;
+  if ((method === 'GET' || method === 'PATCH' || method === 'DELETE') && parts.length === 3) return true;
+  return false;
+}
+
 function contentTypeFor(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.html') return 'text/html; charset=utf-8';
@@ -305,6 +313,7 @@ export async function resolveContainerDroneForRemoteRequest(opts: { hubBaseUrl: 
 
 export function routeAllowed(method: string, pathname: string): boolean {
   const parts = splitPathname(pathname);
+  if (whiteboardRouteAllowed(method, parts)) return true;
   if (method === 'POST' && pathname === '/api/audio/transcriptions') return true;
   if (method === 'GET' && pathname === '/api/drones') return true;
   if (method === 'POST' && pathname === '/api/drones') return true;

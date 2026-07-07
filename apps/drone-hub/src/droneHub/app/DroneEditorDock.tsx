@@ -1,0 +1,84 @@
+import { OpenedDroneFilePanel } from '../files/OpenedDroneFilePanel';
+import { QuickOpenModal } from '../files/QuickOpenModal';
+import type { DroneOpenedFileState, DroneOpenedFileTabState } from '../files/opened-file-types';
+import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-state';
+
+type DroneEditorDockProps = {
+  droneId: string;
+  openedFile: DroneOpenedFileState;
+  quickOpen: {
+    open: boolean;
+    query: string;
+    files: QuickOpenFile[];
+    recentFiles: QuickOpenRecentFile[];
+    loading: boolean;
+    error: string | null;
+    canGoBack: boolean;
+    canGoForward: boolean;
+    onQueryChange: (value: string) => void;
+    onClose: () => void;
+    onOpenFile: (file: QuickOpenFile) => void;
+    onGoBack: () => void;
+    onGoForward: () => void;
+  };
+  openedFileTabs: DroneOpenedFileTabState[];
+  activeOpenedFileTabId: string | null;
+  onOpenedEditorFileContentChange: (nextContent: string) => void;
+  onSaveOpenedEditorFile: () => void;
+  onCloseOpenedEditorFile: (path?: string) => void;
+  onActivateOpenedEditorFileTab: (tabId: string) => void;
+  onReorderOpenedEditorFileTabs: (activeId: string, overId: string) => void;
+  onOpenFileTargetInEditor: (path: string, line?: number, column?: number) => void;
+};
+
+export function DroneEditorDock({
+  droneId,
+  openedFile,
+  quickOpen,
+  openedFileTabs,
+  activeOpenedFileTabId,
+  onOpenedEditorFileContentChange,
+  onSaveOpenedEditorFile,
+  onCloseOpenedEditorFile,
+  onActivateOpenedEditorFileTab,
+  onReorderOpenedEditorFileTabs,
+  onOpenFileTargetInEditor,
+}: DroneEditorDockProps) {
+  return (
+    <div className="h-full min-h-0 overflow-hidden bg-[var(--panel-alt)]">
+      <QuickOpenModal
+        open={quickOpen.open}
+        query={quickOpen.query}
+        files={quickOpen.files}
+        recentFiles={quickOpen.recentFiles}
+        loading={quickOpen.loading}
+        error={quickOpen.error}
+        onQueryChange={quickOpen.onQueryChange}
+        onClose={quickOpen.onClose}
+        onOpenFile={quickOpen.onOpenFile}
+      />
+      {openedFile.path ? (
+        <OpenedDroneFilePanel
+          droneId={droneId}
+          file={openedFile}
+          fileTabs={openedFileTabs}
+          activeTabId={activeOpenedFileTabId}
+          onFileContentChange={onOpenedEditorFileContentChange}
+          onSaveFile={onSaveOpenedEditorFile}
+          onCloseFile={onCloseOpenedEditorFile}
+          onActivateFileTab={onActivateOpenedEditorFileTab}
+          onReorderFileTabs={onReorderOpenedEditorFileTabs}
+          onOpenResolvedFile={onOpenFileTargetInEditor}
+          canGoBack={quickOpen.canGoBack}
+          canGoForward={quickOpen.canGoForward}
+          onGoBack={quickOpen.onGoBack}
+          onGoForward={quickOpen.onGoForward}
+        />
+      ) : (
+        <div className="h-full flex items-center justify-center px-4 text-center text-[12px] text-[var(--muted)]">
+          Open a file from Files, Changes, PRs, or a chat reference.
+        </div>
+      )}
+    </div>
+  );
+}

@@ -68,6 +68,15 @@ describe('remote Hub server', () => {
     expect(routeAllowed('GET', '/api/drones/drone-a/chats/default/state')).toBe(true);
   });
 
+  test('allows remote whiteboard routes', () => {
+    expect(routeAllowed('GET', '/api/whiteboards')).toBe(true);
+    expect(routeAllowed('POST', '/api/whiteboards')).toBe(true);
+    expect(routeAllowed('GET', '/api/whiteboards/main')).toBe(true);
+    expect(routeAllowed('PATCH', '/api/whiteboards/main')).toBe(true);
+    expect(routeAllowed('DELETE', '/api/whiteboards/diagram-a')).toBe(true);
+    expect(routeAllowed('GET', '/api/whiteboards/events')).toBe(true);
+  });
+
   test('validates remote per-drone access from the registry without requiring the full drone list', async () => {
     await withTempDroneDataDir('drone-remote-validation-test-', async () => {
       const now = new Date().toISOString();

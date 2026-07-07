@@ -23,8 +23,33 @@ function detectBuildId(): string {
 
 const buildId = detectBuildId();
 
+function unblockExcalidrawLanguageInit() {
+  return {
+    name: 'drone-hub-unblock-excalidraw-language-init',
+    transform(code: string, id: string) {
+      if (!id.includes('@excalidraw/excalidraw/dist/dev/index.js')) return null;
+      const target = `const updateLang = async () => {
+      await setLanguage(currentLang2);
+      setLoading(false);
+    };`;
+      const replacement = `const updateLang = () => {
+      setLoading(false);
+      void setLanguage(currentLang2).catch((error) => {
+        console.error('[DroneHub] Excalidraw language load failed', error);
+      });
+    };`;
+      if (!code.includes(target)) return null;
+      return {
+        code: code.replace(target, replacement),
+        map: null,
+      };
+    },
+  };
+}
+
 export default defineConfig({
   plugins: [
+    unblockExcalidrawLanguageInit(),
     react(),
     {
       name: 'drone-hub-version',
@@ -56,7 +81,20 @@ export default defineConfig({
     dedupe: ['react', 'react-dom'],
   },
   optimizeDeps: {
-    include: ['react', 'react-dom'],
+    include: [
+      'react',
+      'react-dom',
+      'es6-promise-pool',
+      'fuzzy',
+      'lodash.debounce',
+      'lodash.throttle',
+      'pako',
+      '@braintree/sanitize-url',
+      'png-chunk-text',
+      'png-chunks-encode',
+      'png-chunks-extract',
+    ],
+    exclude: ['@excalidraw/excalidraw'],
   },
   build: {
     outDir: 'dist',

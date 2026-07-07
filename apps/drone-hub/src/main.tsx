@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import DroneHubApp from './DroneHubApp';
 import { installDirectApiFetch } from './droneHub/app/direct-api-fetch';
 import { registerPwa } from './register-pwa';
+import '@excalidraw/excalidraw/index.css';
 import './styles.css';
 
 installDirectApiFetch();
