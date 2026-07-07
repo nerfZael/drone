@@ -10,6 +10,8 @@ import { URL } from 'node:url';
 
 import { RawData, WebSocket, WebSocketServer } from 'ws';
 import { BaseConfigManager } from 'dvm';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { ensureContainerDroneDaemonSession } from '../host/container-daemon';
 import { droneRootPath } from '../host/paths';
@@ -194,6 +196,7 @@ import {
 import { isHubApiAuthorized, isHubApiAuthorizedForWebSocket, rejectWebSocketUpgrade } from './hub-auth';
 import { bashQuote, encodeRemotePath, hexEncodeUtf8, normalizeContainerPath, parseBoolParam, shellQuoteIfNeeded } from './hub-format';
 import { readJsonBody, readRawBody, withCors } from './hub-http';
+import { createDroneHubMcpServer } from './mcp-server';
 import { normalizeRemotePublicUrl, pidIsRunning as remotePidIsRunning, readRemoteHubState } from './remote-state';
 import { createRemoteHubPairing, ensureDesiredRemoteHubDetached, getRemoteHubPairingStatus, redactRemoteHubState, startRemoteHubDetached, startRemoteNgrokTunnel, stopRemoteHubDetached } from './remote-control';
 import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from './groq-transcription';
@@ -321,6 +324,30 @@ import {
   type SkillProjectionTarget,
   updateSkillRecord,
 } from './skills';
+import {
+  createMcpServer,
+  deleteMcpServerRecord,
+  getMcpServerById,
+  listMcpServers,
+  type McpServerRecord,
+  syncMcpServersToContainerTargets,
+  syncMcpServersToHostTargets,
+  type McpProjectionTarget,
+  updateMcpServerRecord,
+} from './mcp-servers';
+import {
+  authenticateMcpBearerToken,
+  bearerTokenFromAuthorizationHeader,
+  createMcpAccessToken,
+  ensureDroneMcpAccessToken,
+  ensureHostMcpAccessToken,
+  getMcpAccessTokenById,
+  listMcpAccessTokens,
+  regenerateMcpAccessToken,
+  revokeMcpAccessToken,
+  revokeMcpAccessTokensForDrone,
+  type McpTokenIdentity,
+} from './mcp-tokens';
 import { importSkillFromSource, listSkillSourceCandidates, listSkillSources, previewSkillFromSource } from './skill-sources';
 import {
   decodeFleetCursor,
@@ -2274,6 +2301,76 @@ export function buildContainerSkillProjectionTargets(drone: any): SkillProjectio
   return targets;
 }
 
+export function buildHostMcpProjectionTargets(_drone: any): McpProjectionTarget[] {
+  const homeRoot = path.resolve(os.homedir());
+  return [
+    { agent: 'codex', configPath: path.join(homeRoot, '.codex', 'config.toml') },
+    { agent: 'cursor', configPath: path.join(homeRoot, '.cursor', 'mcp.json') },
+    { agent: 'claude', configPath: path.join(homeRoot, '.claude.json') },
+    { agent: 'opencode', configPath: path.join(homeRoot, '.config', 'opencode', 'opencode.json') },
+  ];
+}
+
+export function buildContainerMcpProjectionTargets(_drone: any): McpProjectionTarget[] {
+  const homeRoot = CONTAINER_MANAGED_HOME_DIR;
+  return [
+    { agent: 'codex', configPath: path.posix.join(homeRoot, '.codex', 'config.toml') },
+    { agent: 'cursor', configPath: path.posix.join(homeRoot, '.cursor', 'mcp.json') },
+    { agent: 'claude', configPath: path.posix.join(homeRoot, '.claude.json') },
+    { agent: 'opencode', configPath: path.posix.join(homeRoot, '.config', 'opencode', 'opencode.json') },
+  ];
+}
+
+type ActiveDroneHubMcpProjectionConfig = {
+  signingSecret: string;
+  hostUrl: string;
+  containerUrl: string;
+};
+
+let activeDroneHubMcpProjectionConfig: ActiveDroneHubMcpProjectionConfig | null = null;
+
+function setActiveDroneHubMcpProjectionConfig(config: ActiveDroneHubMcpProjectionConfig): void {
+  activeDroneHubMcpProjectionConfig = config;
+}
+
+function isDroneHubMcpServer(server: McpServerRecord): boolean {
+  return server.name === 'drone-hub' && server.transport === 'http';
+}
+
+async function mcpServersForProjection(opts: {
+  runtime: 'host' | 'container';
+  droneId?: string;
+  droneEntry?: any;
+}): Promise<McpServerRecord[]> {
+  const servers = await listMcpServers();
+  const config = activeDroneHubMcpProjectionConfig;
+  if (!config) return servers;
+  const out: McpServerRecord[] = [];
+  for (const server of servers) {
+    if (!isDroneHubMcpServer(server)) {
+      out.push(server);
+      continue;
+    }
+    const next: McpServerRecord = {
+      ...server,
+      url: opts.runtime === 'container' ? config.containerUrl : config.hostUrl,
+    };
+    if (opts.runtime === 'container' && server.enabled !== false) {
+      const token = await ensureDroneMcpAccessToken({
+        droneId: opts.droneId ?? '',
+        droneName: String(opts.droneEntry?.name ?? opts.droneId ?? '').trim() || opts.droneId,
+        signingSecret: config.signingSecret,
+      });
+      next.headers = {
+        ...(server.headers ?? {}),
+        Authorization: `Bearer ${token.tokenValue}`,
+      };
+    }
+    out.push(next);
+  }
+  return out;
+}
+
 async function syncSkillLibraryForDrone(opts: { droneId: string; droneEntry: any }): Promise<void> {
   const droneId = normalizeDroneIdentity(opts.droneId);
   const droneEntry = opts.droneEntry;
@@ -2288,6 +2385,28 @@ async function syncSkillLibraryForDrone(opts: { droneId: string; droneEntry: any
     await syncSkillLibraryToContainerTargets({
       containerName,
       targets: buildContainerSkillProjectionTargets(droneEntry),
+    });
+  });
+}
+
+async function syncMcpServersForDrone(opts: { droneId: string; droneEntry: any }): Promise<void> {
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const droneEntry = opts.droneEntry;
+  if (!droneId || !droneEntry) return;
+  const runtime = droneRuntime(droneEntry);
+  if (runtime === 'host') {
+    await syncMcpServersToHostTargets({
+      targets: buildHostMcpProjectionTargets(droneEntry),
+      servers: await mcpServersForProjection({ runtime: 'host', droneId, droneEntry }),
+    });
+    return;
+  }
+  const requestedDroneName = String((droneEntry as any)?.name ?? droneId).trim() || droneId;
+  await withLockedDroneContainer({ requestedDroneName, droneEntry }, async ({ containerName }) => {
+    await syncMcpServersToContainerTargets({
+      containerName,
+      targets: buildContainerMcpProjectionTargets(droneEntry),
+      servers: await mcpServersForProjection({ runtime: 'container', droneId, droneEntry }),
     });
   });
 }
@@ -5919,6 +6038,7 @@ async function sendPromptToChat(opts: {
   if (opts.skipManagedRepoSync !== true) {
     try {
       await syncSkillLibraryForDrone({ droneId, droneEntry: dSeed });
+      await syncMcpServersForDrone({ droneId, droneEntry: dSeed });
       await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: dSeed });
       opts.mark?.('skillSync');
     } catch (e: any) {
@@ -10161,6 +10281,7 @@ const { dequeueProvisioning, enqueueProvisioning, enqueueProvisioningForAllPendi
   runNodeCli,
   setChatAgentConfig,
   startupPromptToPendingPrompt,
+  syncMcpServersForDrone,
   syncRepoAgentsInstructionsForDrone,
   syncSkillLibraryForDrone,
   syncSharedPathsToDrone: (opts) => syncSetService.applyAllSyncSetsToDrone(opts),
@@ -11063,6 +11184,7 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
       return false;
     });
     if (removedRegistry) {
+      await revokeMcpAccessTokensForDrone(droneId);
       await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, reason: 'delete-drone' });
     }
   }
@@ -11720,6 +11842,7 @@ async function removeArchivedDroneById(opts: { id: string; keepVolume: boolean }
       return true;
     });
     if (removedArchive) {
+      await revokeMcpAccessTokensForDrone(droneId);
       await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, reason: 'delete-archived-drone' });
     }
   }
@@ -13526,6 +13649,7 @@ export async function startDroneHubApiServer(opts: {
   port: number;
   host?: string;
   apiToken: string;
+  mcpToken?: string;
   voiceStreamUrl?: string | null;
   allowedOrigins?: string[];
   onGroqApiKeySettingsChanged?: () => void | Promise<void>;
@@ -13548,6 +13672,7 @@ export async function startDroneHubApiServer(opts: {
   const host = opts.host ?? '127.0.0.1';
   const apiToken = String(opts.apiToken ?? '').trim();
   if (!apiToken) throw new Error('missing hub API token');
+  const mcpToken = String(opts.mcpToken ?? '').trim();
   const voiceStreamUrl = String(opts.voiceStreamUrl ?? '').trim().replace(/\/+$/, '');
 
   const notifyGroqApiKeySettingsChanged = () => {
@@ -15950,6 +16075,112 @@ export async function startDroneHubApiServer(opts: {
     schedulePromptAutomationEventRefresh(droneId, chatName);
   };
 
+  const mcpTransports = new Map<string, { transport: StreamableHTTPServerTransport; server: ReturnType<typeof createDroneHubMcpServer>; identity: McpTokenIdentity }>();
+  let actualPort = opts.port;
+
+  const closeMcpTransport = async (sessionId: string | undefined): Promise<void> => {
+    if (!sessionId) return;
+    const entry = mcpTransports.get(sessionId);
+    if (!entry) return;
+    mcpTransports.delete(sessionId);
+    await Promise.resolve(entry.server.close()).catch(() => {});
+  };
+
+  const handleDroneHubMcpRequest = async (req: http.IncomingMessage, res: http.ServerResponse, method: string): Promise<void> => {
+    if (!mcpToken) {
+      json(res, 404, { ok: false, error: 'MCP endpoint is not enabled' });
+      return;
+    }
+    const mcpIdentity = await authenticateMcpBearerToken(bearerTokenFromAuthorizationHeader(req.headers.authorization), mcpToken);
+    if (!mcpIdentity) {
+      hubLog('warn', 'unauthorized mcp request', {
+        method,
+        origin: typeof req.headers.origin === 'string' ? req.headers.origin : null,
+        userAgent: typeof req.headers['user-agent'] === 'string' ? req.headers['user-agent'] : null,
+      });
+      res.setHeader('www-authenticate', 'Bearer realm="drone-hub-mcp"');
+      json(res, 401, { ok: false, error: 'unauthorized' });
+      return;
+    }
+
+    const sessionIdHeader = req.headers['mcp-session-id'];
+    const sessionId = Array.isArray(sessionIdHeader) ? sessionIdHeader[0] : sessionIdHeader;
+
+    try {
+      if (method === 'POST') {
+        const existing = sessionId ? mcpTransports.get(sessionId) : null;
+        if (existing) {
+          await existing.transport.handleRequest(req, res);
+          return;
+        }
+        if (sessionId) {
+          json(res, 404, { ok: false, error: 'unknown MCP session' });
+          return;
+        }
+
+        const body = await readJsonBody(req);
+        if (!isInitializeRequest(body)) {
+          json(res, 400, { ok: false, error: 'MCP session must start with initialize' });
+          return;
+        }
+
+        let transport: StreamableHTTPServerTransport;
+        const mcpServer = createDroneHubMcpServer();
+        transport = new StreamableHTTPServerTransport({
+          sessionIdGenerator: () => crypto.randomUUID(),
+          onsessioninitialized: (nextSessionId) => {
+            mcpTransports.set(nextSessionId, { transport, server: mcpServer, identity: mcpIdentity });
+          },
+        });
+        transport.onclose = () => {
+          void closeMcpTransport(transport.sessionId);
+        };
+        await mcpServer.connect(transport);
+        await transport.handleRequest(req, res, body);
+        return;
+      }
+
+      if (method === 'GET' || method === 'DELETE') {
+        const existing = sessionId ? mcpTransports.get(sessionId) : null;
+        if (!existing) {
+          json(res, 400, { ok: false, error: 'invalid or missing MCP session' });
+          return;
+        }
+        await existing.transport.handleRequest(req, res);
+        return;
+      }
+
+      res.setHeader('allow', 'GET, POST, DELETE');
+      json(res, 405, { ok: false, error: 'method not allowed' });
+    } catch (error: any) {
+      hubLog('warn', 'mcp request failed', { method, error: String(error?.message ?? error ?? '') });
+      if (!res.headersSent && !res.writableEnded) {
+        json(res, 500, { ok: false, error: error?.message ?? String(error) });
+      }
+    }
+  };
+
+  const upsertDroneHubMcpServerPreset = async () => {
+    if (!mcpToken) throw new Error('MCP endpoint is not enabled');
+    const hostToken = await ensureHostMcpAccessToken({
+      name: 'Drone Hub host token',
+      signingSecret: mcpToken,
+    });
+    const payload = {
+      name: 'drone-hub',
+      description: 'Drone Hub MCP over HTTP for Hub agents.',
+      enabled: true,
+      transport: 'http',
+      url: `http://127.0.0.1:${actualPort}/mcp`,
+      headers: { Authorization: `Bearer ${hostToken.tokenValue}` },
+      agents: ['codex', 'cursor', 'claude', 'opencode'],
+    };
+    const existing = (await listMcpServers()).find((server) => server.name === payload.name);
+    return existing
+      ? await updateMcpServerRecord(existing.id, payload)
+      : await createMcpServer(payload);
+  };
+
   const server = http.createServer(async (req, res) => {
     try {
       const method = (req.method ?? 'GET').toUpperCase();
@@ -15966,6 +16197,11 @@ export async function startDroneHubApiServer(opts: {
 
       const u = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
       const pathname = u.pathname;
+      if (pathname === '/mcp') {
+        await handleDroneHubMcpRequest(req, res, method);
+        return;
+      }
+
       if (pathname.startsWith('/api/')) {
         if (!isHubApiAuthorized(req, apiToken)) {
           hubLog('warn', 'unauthorized api request', {
@@ -18110,6 +18346,72 @@ export async function startDroneHubApiServer(opts: {
         }
       }
 
+      if (pathname === '/api/mcp-servers') {
+        if (method === 'GET') {
+          json(res, 200, { ok: true, servers: await listMcpServers() });
+          return;
+        }
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          try {
+            json(res, 201, { ok: true, server: await createMcpServer(body) });
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const code = /already exists|duplicate/i.test(msg) ? 409 : /missing |invalid /i.test(msg) ? 400 : 500;
+            json(res, code, { ok: false, error: msg });
+          }
+          return;
+        }
+      }
+
+      if (pathname === '/api/mcp-servers/drone-hub-preset' && method === 'POST') {
+        try {
+          json(res, 200, { ok: true, server: await upsertDroneHubMcpServerPreset() });
+        } catch (e: any) {
+          const msg = e?.message ?? String(e);
+          json(res, /not enabled/i.test(msg) ? 503 : 500, { ok: false, error: msg });
+        }
+        return;
+      }
+
+      if (pathname === '/api/mcp-tokens') {
+        if (method === 'GET') {
+          json(res, 200, { ok: true, tokens: await listMcpAccessTokens() });
+          return;
+        }
+        if (method === 'POST') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          try {
+            if (body?.kind != null && body.kind !== 'host') {
+              json(res, 400, { ok: false, error: 'MCP token API only creates host tokens' });
+              return;
+            }
+            const created = await createMcpAccessToken({
+              name: String(body?.name ?? '').trim(),
+              kind: 'host',
+              signingSecret: mcpToken,
+            });
+            json(res, 201, { ok: true, token: created.token, tokenValue: created.tokenValue });
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            json(res, /missing |too long/i.test(msg) ? 400 : 500, { ok: false, error: msg });
+          }
+          return;
+        }
+      }
+
       if (pathname === '/api/skill-sources' && method === 'GET') {
         json(res, 200, { ok: true, sources: listSkillSources() });
         return;
@@ -18583,6 +18885,77 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
           json(res, 200, { ok: true, deleted: true, id: skillId });
+          return;
+        }
+      }
+
+      if (parts.length === 3 && parts[0] === 'api' && parts[1] === 'mcp-servers') {
+        const serverId = decodeURIComponent(parts[2]);
+        if (method === 'GET') {
+          const server = await getMcpServerById(serverId);
+          if (!server) {
+            json(res, 404, { ok: false, error: `unknown MCP server: ${serverId}` });
+            return;
+          }
+          json(res, 200, { ok: true, server });
+          return;
+        }
+        if (method === 'PUT') {
+          let body: any = null;
+          try {
+            body = await readJsonBody(req);
+          } catch (e: any) {
+            json(res, 400, { ok: false, error: e?.message ?? String(e) });
+            return;
+          }
+          try {
+            json(res, 200, { ok: true, server: await updateMcpServerRecord(serverId, body) });
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            const code = /unknown MCP server/i.test(msg) ? 404 : /already exists|duplicate/i.test(msg) ? 409 : /missing |invalid /i.test(msg) ? 400 : 500;
+            json(res, code, { ok: false, error: msg });
+          }
+          return;
+        }
+        if (method === 'DELETE') {
+          const deleted = await deleteMcpServerRecord(serverId);
+          if (!deleted) {
+            json(res, 404, { ok: false, error: `unknown MCP server: ${serverId}` });
+            return;
+          }
+          json(res, 200, { ok: true, deleted: true, id: serverId });
+          return;
+        }
+      }
+
+      if (parts.length >= 3 && parts[0] === 'api' && parts[1] === 'mcp-tokens') {
+        const tokenId = decodeURIComponent(parts[2]);
+        if (parts.length === 4 && parts[3] === 'regenerate' && method === 'POST') {
+          try {
+            const existing = await getMcpAccessTokenById(tokenId);
+            if (!existing) {
+              json(res, 404, { ok: false, error: `unknown MCP token: ${tokenId}` });
+              return;
+            }
+            if (existing.kind !== 'host') {
+              json(res, 400, { ok: false, error: 'Only host MCP tokens can be regenerated from settings' });
+              return;
+            }
+            const result = await regenerateMcpAccessToken(tokenId, mcpToken);
+            json(res, 200, { ok: true, token: result.token, tokenValue: result.tokenValue });
+          } catch (e: any) {
+            const msg = e?.message ?? String(e);
+            json(res, /unknown MCP token/i.test(msg) ? 404 : 500, { ok: false, error: msg });
+          }
+          return;
+        }
+        if (parts.length === 3 && method === 'DELETE') {
+          const token = await revokeMcpAccessToken(tokenId);
+          if (!token) {
+            json(res, 404, { ok: false, error: `unknown MCP token: ${tokenId}` });
+            return;
+          }
+          json(res, 200, { ok: true, token });
           return;
         }
       }
@@ -25610,6 +25983,7 @@ export async function startDroneHubApiServer(opts: {
           json(res, 404, { ok: false, error: `unknown drone: ${droneRef}` });
           return;
         }
+        await revokeMcpAccessTokensForDrone(droneId);
         json(res, 200, {
           ok: true,
           id: r.id,
@@ -26200,6 +26574,7 @@ export async function startDroneHubApiServer(opts: {
         try {
           if (shouldAwaitTerminalSkillSync(mode)) {
             await syncSkillLibraryForDrone({ droneId, droneEntry: d });
+            await syncMcpServersForDrone({ droneId, droneEntry: d });
           }
           if (mode === 'agent') {
             await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: d });
@@ -26571,6 +26946,7 @@ export async function startDroneHubApiServer(opts: {
           await ensureChatEntry({ droneId, chatName });
         }
         await syncSkillLibraryForDrone({ droneId, droneEntry: drone });
+        await syncMcpServersForDrone({ droneId, droneEntry: drone });
         await syncRepoAgentsInstructionsForDrone({ droneId, droneEntry: drone });
 
         // CLI-agnostic "continuation": keep one tmux session per chat.
@@ -27882,7 +28258,7 @@ export async function startDroneHubApiServer(opts: {
             id: droneId,
             name: droneName,
             chat: chatName,
-            draft: isDraftChatEntry(chatEntry),
+            draft: isDraftChatEntry(chat),
             agent,
             model: normalizeChatModel((chat as any)?.model),
             models: discovered.models,
@@ -28976,12 +29352,20 @@ export async function startDroneHubApiServer(opts: {
   startDroneStatusRefresher();
   scheduleDroneSummaryMaintenance('startup', 0);
   const address = server.address();
-  const actualPort = typeof address === 'object' && address ? address.port : opts.port;
+  actualPort = typeof address === 'object' && address ? address.port : opts.port;
+  setActiveDroneHubMcpProjectionConfig({
+    signingSecret: mcpToken,
+    hostUrl: `http://127.0.0.1:${actualPort}/mcp`,
+    containerUrl: `http://host.docker.internal:${actualPort}/mcp`,
+  });
 
   return {
     host,
     port: actualPort,
     close: async () => {
+      if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
+        activeDroneHubMcpProjectionConfig = null;
+      }
       const waitWithTimeout = async (p: Promise<void>, timeoutMs: number): Promise<void> => {
         await Promise.race([
           p,
@@ -29016,6 +29400,11 @@ export async function startDroneHubApiServer(opts: {
         }),
         1_000
       );
+      await Promise.all(
+        Array.from(mcpTransports.keys()).map(async (sessionId) => {
+          await closeMcpTransport(sessionId);
+        }),
+      ).catch(() => {});
       const serverClose = new Promise<void>((resolve) => server.close(() => resolve()));
       try {
         (server as any).closeIdleConnections?.();

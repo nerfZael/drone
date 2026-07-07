@@ -29,6 +29,7 @@ function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: bool
   const setChatAgentConfigCalls: any[] = [];
   const syncRepoAgentsCalls: any[] = [];
   const syncSkillLibraryCalls: any[] = [];
+  const syncMcpServersCalls: any[] = [];
   const syncSharedPathsCalls: any[] = [];
   const syncTaskStateCalls: any[] = [];
   const runNodeCliCalls: string[][] = [];
@@ -99,6 +100,10 @@ function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: bool
       syncSkillLibraryCalls.push(opts);
       events.push('sync:skills');
     },
+    syncMcpServersForDrone: async (opts) => {
+      syncMcpServersCalls.push(opts);
+      events.push('sync:mcp');
+    },
     syncSharedPathsToDrone: async (opts) => {
       syncSharedPathsCalls.push(opts);
       events.push('sync:shared-paths');
@@ -116,6 +121,7 @@ function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: bool
     setChatAgentConfigCalls,
     syncRepoAgentsCalls,
     syncSkillLibraryCalls,
+    syncMcpServersCalls,
     syncSharedPathsCalls,
     syncTaskStateCalls,
     runNodeCliCalls,
@@ -159,6 +165,7 @@ describe('drone provisioning controller', () => {
       });
       expect(harness.syncTaskStateCalls).toHaveLength(1);
       expect(harness.syncSkillLibraryCalls).toHaveLength(1);
+      expect(harness.syncMcpServersCalls).toHaveLength(1);
       expect(harness.syncSharedPathsCalls).toHaveLength(1);
       expect(harness.syncRepoAgentsCalls).toHaveLength(1);
       expect(harness.syncSharedPathsCalls).toHaveLength(1);

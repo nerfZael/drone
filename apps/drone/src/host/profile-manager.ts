@@ -57,6 +57,7 @@ export type HubState = {
 export type HubStateSync = {
   state: HubState;
   apiToken: string;
+  mcpToken?: string | null;
   previousRootDir?: string | null;
 };
 
@@ -118,6 +119,10 @@ function hubStatePath(rootDir?: string): string {
 
 function hubTokenPath(rootDir?: string): string {
   return path.join(droneDir(rootDir), 'hub.token');
+}
+
+function hubMcpTokenPath(rootDir?: string): string {
+  return path.join(droneDir(rootDir), 'hub.mcp.token');
 }
 
 async function ensureDroneDir(rootDir?: string): Promise<void> {
@@ -193,9 +198,24 @@ async function writeHubApiToken(token: string, rootDir?: string): Promise<void> 
   await setPrivateFileModeBestEffort(targetPath);
 }
 
+async function writeHubMcpToken(token: string, rootDir?: string): Promise<void> {
+  await ensureDroneDir(rootDir);
+  const targetPath = hubMcpTokenPath(rootDir);
+  await fs.writeFile(targetPath, `${String(token ?? '').trim()}\n`, 'utf8');
+  await setPrivateFileModeBestEffort(targetPath);
+}
+
 async function clearHubApiTokenBestEffort(rootDir?: string): Promise<void> {
   try {
     await fs.rm(hubTokenPath(rootDir), { force: true });
+  } catch {
+    // ignore
+  }
+}
+
+async function clearHubMcpTokenBestEffort(rootDir?: string): Promise<void> {
+  try {
+    await fs.rm(hubMcpTokenPath(rootDir), { force: true });
   } catch {
     // ignore
   }
@@ -327,11 +347,13 @@ async function stopHubAtRootIfRunning(rootDir: string): Promise<boolean> {
   if (!current || !pidIsRunning(current.pid)) {
     await removeHubStateBestEffort(rootDir);
     await clearHubApiTokenBestEffort(rootDir);
+    await clearHubMcpTokenBestEffort(rootDir);
     return false;
   }
   await stopHubProcess(current.pid);
   await removeHubStateBestEffort(rootDir);
   await clearHubApiTokenBestEffort(rootDir);
+  await clearHubMcpTokenBestEffort(rootDir);
   return true;
 }
 
@@ -408,9 +430,11 @@ async function syncRunningHubStateForProfile(profileName: string, sync: HubState
   const previousRootDir = sync.previousRootDir ? path.resolve(sync.previousRootDir) : null;
   await writeHubState(sync.state, nextRootDir);
   await writeHubApiToken(sync.apiToken, nextRootDir);
+  if (sync.mcpToken) await writeHubMcpToken(sync.mcpToken, nextRootDir);
   if (previousRootDir && previousRootDir !== nextRootDir) {
     await removeHubStateBestEffort(previousRootDir);
     await clearHubApiTokenBestEffort(previousRootDir);
+    await clearHubMcpTokenBestEffort(previousRootDir);
   }
 }
 
