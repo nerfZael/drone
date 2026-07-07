@@ -242,6 +242,7 @@ function whiteboardRouteAllowed(method: string, parts: string[]): boolean {
   if (method === 'GET' && parts.length === 3 && parts[2] === 'events') return true;
   if ((method === 'GET' || method === 'POST') && parts.length === 2) return true;
   if ((method === 'GET' || method === 'PATCH' || method === 'DELETE') && parts.length === 3) return true;
+  if (method === 'GET' && parts.length === 4 && parts[2] !== 'events' && parts[3] === 'image') return true;
   return false;
 }
 

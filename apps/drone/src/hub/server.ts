@@ -104,6 +104,7 @@ import {
   upsertTranscriptTurnInStore,
 } from './transcript-store';
 import { requireWhiteboardStore, type WhiteboardDocument } from './whiteboard-store';
+import { renderWhiteboardPng } from './whiteboard-export';
 import { extractAgentCopilotFromAgentMessage, type AgentCopilotRequest } from './agent-copilot-parser';
 import { cloneChatEntryForDroneClone, maybeBootstrapPromptFromTranscript } from './chat-clone';
 import {
@@ -14617,6 +14618,17 @@ export async function startDroneHubApiServer(opts: {
       if (changed) emitWhiteboardChange({ whiteboardId: whiteboard.id, version: whiteboard.version, reason: 'updated', source: 'assistant' });
       return { ok: true, whiteboard: compactWhiteboardForAssistant(whiteboard) };
     },
+    captureWhiteboard: async ({ whiteboardId, padding, maxWidth, maxHeight, backgroundColor }) => {
+      const store = requireWhiteboardStore();
+      const id = String(whiteboardId ?? '').trim() || 'main';
+      const whiteboard = id === 'main'
+        ? store.get(id) ?? store.ensureDefault()
+        : store.get(id);
+      if (!whiteboard) throw new Error(`unknown whiteboard: ${id}`);
+      const image = renderWhiteboardPng(whiteboard, { padding, maxWidth, maxHeight, backgroundColor });
+      const { data, ...metadata } = image;
+      return { ...image, metadata };
+    },
   });
   let desktopVoicePatchSessionId: string | null = null;
   let desktopRealtimeWebRtcSession: OpenAiRealtimeWebRtcAssistantSession | null = null;
@@ -17130,6 +17142,30 @@ export async function startDroneHubApiServer(opts: {
               const whiteboard = store.create(body ?? {});
               emitWhiteboardChange({ whiteboardId: whiteboard.id, version: whiteboard.version, reason: 'created', source: body?.actorId ?? 'ui' });
               json(res, 201, { ok: true, whiteboard });
+            } catch (e: any) {
+              json(res, Number(e?.statusCode ?? 0) || 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
+          if (whiteboardParts.length === 4 && whiteboardParts[3] === 'image' && method === 'GET') {
+            const whiteboardId = decodeURIComponent(whiteboardParts[2] ?? '');
+            const whiteboard = whiteboardId === 'main'
+              ? store.get(whiteboardId) ?? store.ensureDefault()
+              : store.get(whiteboardId);
+            if (!whiteboard) {
+              json(res, 404, { ok: false, error: `whiteboard not found: ${whiteboardId}` });
+              return;
+            }
+            try {
+              const image = renderWhiteboardPng(whiteboard, {
+                padding: u.searchParams.get('padding') ?? undefined,
+                maxWidth: u.searchParams.get('maxWidth') ?? undefined,
+                maxHeight: u.searchParams.get('maxHeight') ?? undefined,
+                backgroundColor: u.searchParams.get('backgroundColor') ?? undefined,
+              });
+              const { data, ...metadata } = image;
+              json(res, 200, { ok: true, data, metadata });
             } catch (e: any) {
               json(res, Number(e?.statusCode ?? 0) || 400, { ok: false, error: e?.message ?? String(e) });
             }
