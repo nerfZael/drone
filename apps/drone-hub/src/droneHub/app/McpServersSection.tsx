@@ -4,6 +4,8 @@ import { buttonClassName, inputClassName, textareaClassName } from './skill-libr
 import type { UseMcpServersResult } from './use-mcp-servers';
 
 export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
+  const [tokenPage, setTokenPage] = React.useState(0);
+  const [tokenPageSize, setTokenPageSize] = React.useState(10);
   const {
     mcpServers,
     mcpAccessTokens,
@@ -40,6 +42,16 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
 
   const busy = mcpServersSaving || mcpServersDeleting || mcpAccessTokensSaving;
   const activeTokens = mcpAccessTokens.filter((token) => !token.revokedAt);
+  const tokenPageCount = Math.max(1, Math.ceil(mcpAccessTokens.length / tokenPageSize));
+  const safeTokenPage = Math.min(tokenPage, tokenPageCount - 1);
+  const tokenPageStart = safeTokenPage * tokenPageSize;
+  const visibleTokens = mcpAccessTokens.slice(tokenPageStart, tokenPageStart + tokenPageSize);
+  const tokenRangeStart = mcpAccessTokens.length === 0 ? 0 : tokenPageStart + 1;
+  const tokenRangeEnd = Math.min(mcpAccessTokens.length, tokenPageStart + tokenPageSize);
+
+  React.useEffect(() => {
+    if (tokenPage > tokenPageCount - 1) setTokenPage(tokenPageCount - 1);
+  }, [tokenPage, tokenPageCount]);
 
   const handleSelect = React.useCallback(
     (serverId: string) => {
@@ -146,47 +158,88 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
           </div>
         )}
 
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-2">
+        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.10)] overflow-hidden">
           {mcpAccessTokens.length === 0 ? (
-            <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-4 text-[11px] text-[var(--muted-dim)]">
+            <div className="px-3 py-4 text-[11px] text-[var(--muted-dim)]">
               No MCP access tokens yet.
             </div>
           ) : (
-            mcpAccessTokens.map((token) => {
-              const revoked = Boolean(token.revokedAt);
-              return (
-                <div key={token.id} className={`rounded border px-3 py-3 flex flex-col gap-2 ${revoked ? 'border-[rgba(255,90,90,.2)] bg-[rgba(255,90,90,.04)]' : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.10)]'}`}>
-                  <div className="flex flex-wrap items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <div className="text-[12px] font-semibold text-[var(--fg-secondary)] truncate">{token.name}</div>
-                      <div className="text-[10px] text-[var(--muted-dim)] font-mono mt-1 truncate">{token.tokenPreview}</div>
-                    </div>
-                    <div className={`text-[9px] uppercase ${revoked ? 'text-[var(--red)]' : token.kind === 'drone' ? 'text-[var(--accent)]' : 'text-[#34d399]'}`}>
-                      {revoked ? 'Revoked' : token.kind}
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-1 text-[10px] text-[var(--muted-dim)]">
-                    <div>Created {formatTokenDate(token.createdAt)}</div>
-                    <div>Last used {formatTokenDate(token.lastUsedAt)}</div>
-                    {token.droneId && <div className="md:col-span-2 font-mono truncate">Drone {token.droneId}</div>}
-                  </div>
-                  <div className="flex flex-wrap items-center gap-2">
-                    {token.kind === 'host' && (
-                      <button type="button" onClick={() => handleRegenerateToken(token.id, token.name)} disabled={busy} className={buttonClassName('secondary', busy)} style={{ fontFamily: 'var(--display)' }}>
-                        Regenerate
-                      </button>
-                    )}
-                    <button type="button" onClick={() => handleRevokeToken(token.id, token.name)} disabled={busy || revoked} className={buttonClassName('danger', busy || revoked)} style={{ fontFamily: 'var(--display)' }}>
-                      Revoke
-                    </button>
-                  </div>
-                </div>
-              );
-            })
+            <div className="overflow-x-auto">
+              <table className="w-full min-w-[980px] border-collapse text-left">
+                <thead className="bg-[rgba(255,255,255,.03)] border-b border-[var(--border-subtle)]">
+                  <tr className="text-[9px] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                    <th className="px-3 py-2 font-semibold">Name</th>
+                    <th className="px-3 py-2 font-semibold">Kind</th>
+                    <th className="px-3 py-2 font-semibold">Token</th>
+                    <th className="px-3 py-2 font-semibold">Drone</th>
+                    <th className="px-3 py-2 font-semibold">Created</th>
+                    <th className="px-3 py-2 font-semibold">Last used</th>
+                    <th className="px-3 py-2 font-semibold">Status</th>
+                    <th className="px-3 py-2 font-semibold text-right">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleTokens.map((token) => {
+                    const revoked = Boolean(token.revokedAt);
+                    return (
+                      <tr key={token.id} className={`border-b border-[var(--border-subtle)] last:border-b-0 ${revoked ? 'bg-[rgba(255,90,90,.035)]' : 'hover:bg-[rgba(255,255,255,.025)]'}`}>
+                        <td className="px-3 py-2 text-[12px] text-[var(--fg-secondary)] font-semibold max-w-[220px] truncate">{token.name}</td>
+                        <td className="px-3 py-2">
+                          <span className={`text-[9px] uppercase ${token.kind === 'drone' ? 'text-[var(--accent)]' : 'text-[#34d399]'}`}>{token.kind}</span>
+                        </td>
+                        <td className="px-3 py-2 text-[10px] text-[var(--muted-dim)] font-mono max-w-[220px] truncate">{token.tokenPreview}</td>
+                        <td className="px-3 py-2 text-[10px] text-[var(--muted-dim)] font-mono max-w-[180px] truncate">{token.droneId || '-'}</td>
+                        <td className="px-3 py-2 text-[10px] text-[var(--muted-dim)] whitespace-nowrap">{formatTokenDate(token.createdAt)}</td>
+                        <td className="px-3 py-2 text-[10px] text-[var(--muted-dim)] whitespace-nowrap">{formatTokenDate(token.lastUsedAt)}</td>
+                        <td className={`px-3 py-2 text-[9px] uppercase ${revoked ? 'text-[var(--red)]' : 'text-[#34d399]'}`}>{revoked ? 'Revoked' : 'Active'}</td>
+                        <td className="px-3 py-2">
+                          <div className="flex items-center justify-end gap-2">
+                            {token.kind === 'host' && (
+                              <button type="button" onClick={() => handleRegenerateToken(token.id, token.name)} disabled={busy} className={buttonClassName('secondary', busy)} style={{ fontFamily: 'var(--display)' }}>
+                                Regenerate
+                              </button>
+                            )}
+                            <button type="button" onClick={() => handleRevokeToken(token.id, token.name)} disabled={busy || revoked} className={buttonClassName('danger', busy || revoked)} style={{ fontFamily: 'var(--display)' }}>
+                              Revoke
+                            </button>
+                          </div>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </div>
-        <div className="text-[10px] text-[var(--muted-dim)]">
-          Active identities: {activeTokens.length}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-[var(--muted-dim)]">
+          <div>
+            Active identities: {activeTokens.length} | Showing {tokenRangeStart}-{tokenRangeEnd} of {mcpAccessTokens.length}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <label className="flex items-center gap-2">
+              <span>Rows</span>
+              <select
+                value={tokenPageSize}
+                onChange={(e) => {
+                  setTokenPageSize(Number(e.target.value) || 10);
+                  setTokenPage(0);
+                }}
+                className={`${inputClassName()} h-7 py-0 text-[10px]`}
+              >
+                <option value={10}>10</option>
+                <option value={25}>25</option>
+                <option value={50}>50</option>
+              </select>
+            </label>
+            <button type="button" onClick={() => setTokenPage((page) => Math.max(0, page - 1))} disabled={safeTokenPage <= 0} className={buttonClassName('secondary', safeTokenPage <= 0)} style={{ fontFamily: 'var(--display)' }}>
+              Previous
+            </button>
+            <span>Page {safeTokenPage + 1} / {tokenPageCount}</span>
+            <button type="button" onClick={() => setTokenPage((page) => Math.min(tokenPageCount - 1, page + 1))} disabled={safeTokenPage >= tokenPageCount - 1} className={buttonClassName('secondary', safeTokenPage >= tokenPageCount - 1)} style={{ fontFamily: 'var(--display)' }}>
+              Next
+            </button>
+          </div>
         </div>
       </div>
 
