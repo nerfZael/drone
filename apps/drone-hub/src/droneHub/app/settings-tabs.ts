@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'remote' | 'voice' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'agents' | 'system';
+export type SettingsTabId = 'general' | 'remote' | 'voice' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'mcp' | 'agents' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -77,6 +77,12 @@ export const SETTINGS_TABS: Array<{
     label: 'Skills',
     title: 'Skill library',
     description: 'Create and manage portable skill packages for supported agent tools.',
+  },
+  {
+    id: 'mcp',
+    label: 'MCP',
+    title: 'Global MCP servers',
+    description: 'Manage global MCP servers projected into each drone agent config.',
   },
   {
     id: 'agents',

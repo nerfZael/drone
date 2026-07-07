@@ -11,6 +11,8 @@ import {
 
 const DRONE_STATE_ENTRY_NAMES = [
   'hub.json',
+  'hub.token',
+  'hub.mcp.token',
   'hub.log',
   'repo-exports',
   'worktrees',

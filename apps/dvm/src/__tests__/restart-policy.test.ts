@@ -27,6 +27,28 @@ describe('docker restart policy defaults', () => {
     );
   });
 
+  test('creates managed containers with host.docker.internal mapped to host gateway', async () => {
+    const client = new DockerClient();
+    const createContainer = jest.fn(async () => ({}) as any);
+    (client as any).docker = { createContainer };
+    jest.spyOn(client, 'ensureImage').mockResolvedValue();
+
+    await client.createContainer({
+      name: 'demo',
+      image: 'ubuntu:latest',
+      ports: [{ containerPort: 7777, hostPort: 31000 }],
+      persistence: { enabled: true, path: '/dvm-data' },
+    });
+
+    expect(createContainer).toHaveBeenCalledWith(
+      expect.objectContaining({
+        HostConfig: expect.objectContaining({
+          ExtraHosts: [DockerClient.HOST_GATEWAY_EXTRA_HOST],
+        }),
+      })
+    );
+  });
+
   test('updates existing containers to unless-stopped when started', async () => {
     const client = new DockerClient();
     const update = jest.fn(async () => ({}));
