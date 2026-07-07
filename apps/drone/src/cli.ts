@@ -407,6 +407,9 @@ async function isTcpPortAvailable(host: string, port: number): Promise<boolean> 
 
 const DEFAULT_HUB_API_PORT = 8787;
 const DEFAULT_VOICE_STREAM_PORT = 3199;
+const DEFAULT_HUB_API_HOST = '127.0.0.1';
+const DEFAULT_CONTAINER_MCP_HOST = process.platform === 'linux' ? '172.17.0.1' : '0.0.0.0';
+const DEFAULT_CONTAINER_MCP_PORT = 8788;
 
 function parsePortOption(raw: unknown, optionName: string): number {
   const value = Number(raw);
@@ -421,6 +424,46 @@ function shouldRunVoiceStream(options: any): boolean {
 function resolveVoiceStreamPort(options: any): number {
   const raw = options.voiceStreamPort ?? process.env.DRONE_VOICE_STREAM_PORT ?? DEFAULT_VOICE_STREAM_PORT;
   return parsePortOption(raw, '--voice-stream-port');
+}
+
+function resolveContainerMcpHost(options: any): string {
+  return String(
+    options.containerMcpHost ??
+      process.env.DRONE_HUB_CONTAINER_MCP_BIND_HOST ??
+      DEFAULT_CONTAINER_MCP_HOST
+  ).trim() || DEFAULT_CONTAINER_MCP_HOST;
+}
+
+function resolveContainerMcpPort(options: any): number {
+  const raw = options.containerMcpPort ?? process.env.DRONE_HUB_CONTAINER_MCP_PORT ?? DEFAULT_CONTAINER_MCP_PORT;
+  return parsePortOption(raw, '--container-mcp-port');
+}
+
+function resolveContainerMcpUrl(options: any): string {
+  const raw = String(options.containerMcpUrl ?? process.env.DRONE_HUB_CONTAINER_MCP_URL ?? '').trim();
+  if (!raw) return '';
+  const normalized = raw.replace(/\/+$/, '');
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error('invalid --container-mcp-url');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('--container-mcp-url must be an http(s) URL');
+  }
+  if (parsed.pathname !== '/mcp') {
+    throw new Error('--container-mcp-url must point to /mcp');
+  }
+  if (parsed.hash) {
+    throw new Error('--container-mcp-url must not include a URL fragment');
+  }
+  return parsed.toString().replace(/\/+$/, '');
+}
+
+function resolveContainerMcpProjectedUrl(port: number, explicitUrl: string): string {
+  const normalizedExplicitUrl = explicitUrl.trim().replace(/\/+$/, '');
+  return normalizedExplicitUrl || `http://host.docker.internal:${Math.floor(port)}/mcp`;
 }
 
 function resolveRepoRootFromDroneCliDir(): string {
@@ -500,6 +543,11 @@ type HubState = {
   apiHost: string;
   apiPort: number;
   uiPort: number;
+  containerMcp?: {
+    host: string;
+    port: number;
+    url: string;
+  } | null;
   voiceStream?: {
     port: number;
     url: string;
@@ -642,10 +690,21 @@ async function readHubState(rootDir?: string): Promise<HubState | null> {
     const logPath = typeof parsed.logPath === 'string' ? parsed.logPath : hubLogPath(rootDir);
     const launchEnv = parseHubLaunchEnvSnapshot(parsed.launchEnv);
     const voiceStream = parseHubVoiceStreamState(parsed.voiceStream);
-    return { version: 1, pid, apiHost, apiPort, uiPort, voiceStream, startedAt, logPath, launchEnv };
+    const containerMcp = parseHubContainerMcpState(parsed.containerMcp);
+    return { version: 1, pid, apiHost, apiPort, uiPort, containerMcp, voiceStream, startedAt, logPath, launchEnv };
   } catch {
     return null;
   }
+}
+
+function parseHubContainerMcpState(raw: unknown): HubState['containerMcp'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as any;
+  const host = typeof value.host === 'string' ? value.host.trim() : '';
+  const port = Number(value.port);
+  const url = typeof value.url === 'string' ? value.url.trim() : '';
+  if (!host || !Number.isFinite(port) || port <= 0 || !url) return null;
+  return { host, port: Math.floor(port), url };
 }
 
 function parseHubVoiceStreamState(raw: unknown): HubState['voiceStream'] {
@@ -1953,7 +2012,10 @@ async function hubRun(options: any) {
   const apiPort = apiPortRaw === 0 ? await getFreeTcpPort() : apiPortRaw;
   if (!Number.isFinite(apiPort) || apiPort <= 0) throw new Error('invalid --api-port');
 
-  const apiHost = String(options.host || '127.0.0.1');
+  const apiHost = String(options.host || DEFAULT_HUB_API_HOST);
+  const containerMcpHost = resolveContainerMcpHost(options);
+  const containerMcpPort = resolveContainerMcpPort(options);
+  const containerMcpUrl = resolveContainerMcpUrl(options);
   const voiceStreamEnabled = shouldRunVoiceStream(options);
   const voiceStreamPort = voiceStreamEnabled ? resolveVoiceStreamPort(options) : DEFAULT_VOICE_STREAM_PORT;
   await ensureDefaultProfileForFirstRun();
@@ -2039,6 +2101,9 @@ async function hubRun(options: any) {
   const api = await startDroneHubApiServer({
     port: apiPort,
     host: apiHost,
+    containerMcpHost,
+    containerMcpPort,
+    containerMcpUrl,
     apiToken,
     mcpToken,
     voiceStreamUrl: voiceStreamEnabled ? `http://127.0.0.1:${voiceStreamPort}` : null,
@@ -2062,6 +2127,7 @@ async function hubRun(options: any) {
     apiHost: api.host,
     apiPort: api.port,
     uiPort,
+    containerMcp: api.containerMcp,
     voiceStream,
     startedAt: new Date().toISOString(),
     logPath: hubLogPath(),
@@ -2155,6 +2221,10 @@ async function hubRun(options: any) {
 
   // eslint-disable-next-line no-console
   console.log(`Drone Hub API: http://${api.host}:${api.port}`);
+  if (api.containerMcp) {
+    // eslint-disable-next-line no-console
+    console.log(`Container MCP: ${api.containerMcp.url} (listening on ${api.containerMcp.host}:${api.containerMcp.port})`);
+  }
   // eslint-disable-next-line no-console
   console.log(`Drone Hub UI:  http://127.0.0.1:${uiPort}`);
   if (voiceStream) {
@@ -2175,7 +2245,11 @@ async function hubStart(options: any) {
   if (!Number.isFinite(uiPort) || uiPort <= 0) throw new Error('invalid --port');
   const apiPortRaw = Number(options.apiPort ?? 0);
   if (!Number.isFinite(apiPortRaw) || apiPortRaw < 0) throw new Error('invalid --api-port');
-  const apiHost = String(options.host || '127.0.0.1');
+  const apiHost = String(options.host || DEFAULT_HUB_API_HOST);
+  const containerMcpHost = resolveContainerMcpHost(options);
+  const containerMcpPort = resolveContainerMcpPort(options);
+  const containerMcpUrl = resolveContainerMcpUrl(options);
+  const containerMcpProjectedUrl = resolveContainerMcpProjectedUrl(containerMcpPort, containerMcpUrl);
   const voiceStreamEnabled = shouldRunVoiceStream(options);
   const voiceStreamPort = voiceStreamEnabled ? resolveVoiceStreamPort(options) : DEFAULT_VOICE_STREAM_PORT;
 
@@ -2183,6 +2257,35 @@ async function hubStart(options: any) {
   if (cur && pidIsRunning(cur.pid)) {
     const currentLaunchEnv = captureHubLaunchEnvSnapshot();
     const launchEnvChanged = hubLaunchEnvSnapshotsDiffer(cur.launchEnv, currentLaunchEnv);
+    const runningApiHost = String(cur.apiHost ?? '').trim();
+    const runningApiPort = Number(cur.apiPort);
+    const runningContainerMcpHost = String(cur.containerMcp?.host ?? '').trim();
+    const runningContainerMcpPort = Number(cur.containerMcp?.port);
+    const runningContainerMcpUrl = String(cur.containerMcp?.url ?? '').trim();
+    const restartReasons: string[] = [];
+    if (runningApiHost && runningApiHost !== apiHost) {
+      restartReasons.push(`Hub API is bound to ${runningApiHost}; requested ${apiHost}.`);
+    }
+    if (Number.isFinite(runningApiPort) && runningApiPort > 0 && apiPortRaw > 0 && runningApiPort !== apiPortRaw) {
+      restartReasons.push(`Hub API is listening on port ${runningApiPort}; requested ${apiPortRaw}.`);
+    }
+    if (!cur.containerMcp && containerMcpHost && containerMcpPort > 0) {
+      restartReasons.push('Container MCP listener is not running.');
+    }
+    if (runningContainerMcpHost && runningContainerMcpHost !== containerMcpHost) {
+      restartReasons.push(`Container MCP is bound to ${runningContainerMcpHost}; requested ${containerMcpHost}.`);
+    }
+    if (Number.isFinite(runningContainerMcpPort) && runningContainerMcpPort > 0 && runningContainerMcpPort !== containerMcpPort) {
+      restartReasons.push(`Container MCP is listening on port ${runningContainerMcpPort}; requested ${containerMcpPort}.`);
+    }
+    if (runningContainerMcpUrl && runningContainerMcpUrl !== containerMcpProjectedUrl) {
+      restartReasons.push(`Container MCP URL is ${runningContainerMcpUrl}; requested ${containerMcpProjectedUrl}.`);
+    }
+    if (launchEnvChanged) {
+      restartReasons.push(
+        'The hub is already running with a different LLM environment snapshot. Restart it to pick up the current OPENAI_API_KEY/GEMINI_API_KEY/DRONE_HUB_LLM_PROVIDER values.'
+      );
+    }
     // eslint-disable-next-line no-console
     console.log(
       JSON.stringify(
@@ -2190,13 +2293,11 @@ async function hubStart(options: any) {
           ok: true,
           alreadyRunning: true,
           state: cur,
-          ...(launchEnvChanged
+          ...(restartReasons.length > 0
             ? {
                 restartRecommended: true,
-                reason:
-                  'The hub is already running with a different LLM environment snapshot. Restart it to pick up the current OPENAI_API_KEY/GEMINI_API_KEY/DRONE_HUB_LLM_PROVIDER values.',
-                runningLaunchEnv: cur.launchEnv,
-                currentLaunchEnv,
+                reason: restartReasons.join(' '),
+                ...(launchEnvChanged ? { runningLaunchEnv: cur.launchEnv, currentLaunchEnv } : {}),
               }
             : {}),
         },
@@ -2232,6 +2333,11 @@ async function hubStart(options: any) {
         String(apiPortRaw),
         '--host',
         apiHost,
+        '--container-mcp-host',
+        containerMcpHost,
+        '--container-mcp-port',
+        String(containerMcpPort),
+        ...(containerMcpUrl ? ['--container-mcp-url', containerMcpUrl] : []),
         '--voice-stream-port',
         String(voiceStreamPort),
         ...(voiceStreamEnabled ? [] : ['--no-voice-stream']),
@@ -2262,6 +2368,7 @@ async function hubStart(options: any) {
             ? {
                 apiUrl: `http://${state.apiHost}:${state.apiPort}`,
                 uiUrl: `http://127.0.0.1:${state.uiPort}`,
+                ...(state.containerMcp ? { containerMcpUrl: state.containerMcp.url } : {}),
                 ...(state.voiceStream ? { voiceStreamUrl: state.voiceStream.url } : {}),
                 logPath: state.logPath,
               }
@@ -2506,7 +2613,10 @@ hub.command('start')
   .description('Start the hub in detached mode')
   .option('--port <port>', 'UI port (Vite dev server)', '5174')
   .option('--api-port <port>', `Hub API port (${DEFAULT_HUB_API_PORT} by default; pass 0 for auto)`, String(DEFAULT_HUB_API_PORT))
-  .option('--host <host>', 'Bind host for Hub API server', '127.0.0.1')
+  .option('--host <host>', 'Bind host for Hub API server', DEFAULT_HUB_API_HOST)
+  .option('--container-mcp-host <host>', 'Bind host for container-reachable MCP-only server', DEFAULT_CONTAINER_MCP_HOST)
+  .option('--container-mcp-port <port>', `Container MCP-only server port (${DEFAULT_CONTAINER_MCP_PORT} by default)`, String(DEFAULT_CONTAINER_MCP_PORT))
+  .option('--container-mcp-url <url>', 'MCP URL projected into container agent configs')
   .option('--voice-stream-port <port>', `Voice Stream server port (${DEFAULT_VOICE_STREAM_PORT} by default)`)
   .option('--no-voice-stream', 'Do not start the Voice Stream companion server')
   .action(async (options) => {
@@ -2521,7 +2631,10 @@ hub.command('restart')
   .description('Restart the detached hub')
   .option('--port <port>', 'UI port (Vite dev server)', '5174')
   .option('--api-port <port>', `Hub API port (${DEFAULT_HUB_API_PORT} by default; pass 0 for auto)`, String(DEFAULT_HUB_API_PORT))
-  .option('--host <host>', 'Bind host for Hub API server', '127.0.0.1')
+  .option('--host <host>', 'Bind host for Hub API server', DEFAULT_HUB_API_HOST)
+  .option('--container-mcp-host <host>', 'Bind host for container-reachable MCP-only server', DEFAULT_CONTAINER_MCP_HOST)
+  .option('--container-mcp-port <port>', `Container MCP-only server port (${DEFAULT_CONTAINER_MCP_PORT} by default)`, String(DEFAULT_CONTAINER_MCP_PORT))
+  .option('--container-mcp-url <url>', 'MCP URL projected into container agent configs')
   .option('--voice-stream-port <port>', `Voice Stream server port (${DEFAULT_VOICE_STREAM_PORT} by default)`)
   .option('--no-voice-stream', 'Do not start the Voice Stream companion server')
   .action(async (options) => {
@@ -2532,7 +2645,10 @@ hub.command('run')
   .description('Run the hub in the current process (internal)')
   .option('--port <port>', 'UI port (Vite dev server)', '5174')
   .option('--api-port <port>', `Hub API port (${DEFAULT_HUB_API_PORT} by default; pass 0 for auto)`, String(DEFAULT_HUB_API_PORT))
-  .option('--host <host>', 'Bind host for Hub API server', '127.0.0.1')
+  .option('--host <host>', 'Bind host for Hub API server', DEFAULT_HUB_API_HOST)
+  .option('--container-mcp-host <host>', 'Bind host for container-reachable MCP-only server', DEFAULT_CONTAINER_MCP_HOST)
+  .option('--container-mcp-port <port>', `Container MCP-only server port (${DEFAULT_CONTAINER_MCP_PORT} by default)`, String(DEFAULT_CONTAINER_MCP_PORT))
+  .option('--container-mcp-url <url>', 'MCP URL projected into container agent configs')
   .option('--voice-stream-port <port>', `Voice Stream server port (${DEFAULT_VOICE_STREAM_PORT} by default)`)
   .option('--no-voice-stream', 'Do not start the Voice Stream companion server')
   .action(async (options) => {
@@ -2582,7 +2698,7 @@ remoteHub.command('pair')
   });
 hub.action(async () => {
   // `drone hub` defaults to detached start.
-  await hubStart({ port: 5174, apiPort: DEFAULT_HUB_API_PORT, host: '127.0.0.1' });
+  await hubStart({ port: 5174, apiPort: DEFAULT_HUB_API_PORT, host: DEFAULT_HUB_API_HOST });
 });
 
 program

@@ -45,6 +45,11 @@ export type HubState = {
   apiHost: string;
   apiPort: number;
   uiPort: number;
+  containerMcp?: {
+    host: string;
+    port: number;
+    url: string;
+  } | null;
   voiceStream?: {
     port: number;
     url: string;
@@ -165,6 +170,7 @@ async function readHubState(rootDir?: string): Promise<HubState | null> {
       apiHost: typeof parsed.apiHost === 'string' ? parsed.apiHost : '127.0.0.1',
       apiPort,
       uiPort,
+      containerMcp: parseHubContainerMcpState(parsed.containerMcp),
       voiceStream: parseHubVoiceStreamState(parsed.voiceStream),
       startedAt: typeof parsed.startedAt === 'string' ? parsed.startedAt : new Date().toISOString(),
       logPath: typeof parsed.logPath === 'string' ? parsed.logPath : path.join(droneDir(rootDir), 'hub.log'),
@@ -173,6 +179,16 @@ async function readHubState(rootDir?: string): Promise<HubState | null> {
   } catch {
     return null;
   }
+}
+
+function parseHubContainerMcpState(raw: unknown): HubState['containerMcp'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as any;
+  const host = typeof value.host === 'string' ? value.host.trim() : '';
+  const port = Number(value.port);
+  const url = typeof value.url === 'string' ? value.url.trim() : '';
+  if (!host || !Number.isFinite(port) || port <= 0 || !url) return null;
+  return { host, port: Math.floor(port), url };
 }
 
 function parseHubVoiceStreamState(raw: unknown): HubState['voiceStream'] {

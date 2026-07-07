@@ -751,11 +751,22 @@ async function readManagedHubStateAtRoot(rootDir: string): Promise<ManagedHubSta
     apiHost: typeof parsed.apiHost === 'string' ? parsed.apiHost : '127.0.0.1',
     apiPort,
     uiPort,
+    containerMcp: parseManagedHubContainerMcpState(parsed.containerMcp),
     voiceStream: parseManagedHubVoiceStreamState(parsed.voiceStream),
     startedAt: typeof parsed.startedAt === 'string' ? parsed.startedAt : new Date().toISOString(),
     logPath: typeof parsed.logPath === 'string' ? parsed.logPath : path.join(rootDir, 'hub.log'),
     launchEnv: parsed.launchEnv ?? null,
   };
+}
+
+function parseManagedHubContainerMcpState(raw: unknown): ManagedHubState['containerMcp'] {
+  if (!raw || typeof raw !== 'object') return null;
+  const value = raw as any;
+  const host = typeof value.host === 'string' ? value.host.trim() : '';
+  const port = Number(value.port);
+  const url = typeof value.url === 'string' ? value.url.trim() : '';
+  if (!host || !Number.isFinite(port) || port <= 0 || !url) return null;
+  return { host, port: Math.floor(port), url };
 }
 
 function parseManagedHubVoiceStreamState(raw: unknown): ManagedHubState['voiceStream'] {
@@ -13645,9 +13656,34 @@ async function logHubLlmStartupSnapshot() {
   });
 }
 
+function normalizeContainerMcpUrl(raw: unknown): string {
+  const value = String(raw ?? '').trim();
+  if (!value) return '';
+  const normalized = value.replace(/\/+$/, '');
+  let parsed: URL;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error('invalid container MCP URL');
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error('container MCP URL must be an http(s) URL');
+  }
+  if (parsed.pathname !== '/mcp') {
+    throw new Error('container MCP URL must point to /mcp');
+  }
+  if (parsed.hash) {
+    throw new Error('container MCP URL must not include a URL fragment');
+  }
+  return parsed.toString().replace(/\/+$/, '');
+}
+
 export async function startDroneHubApiServer(opts: {
   port: number;
   host?: string;
+  containerMcpHost?: string;
+  containerMcpPort?: number;
+  containerMcpUrl?: string;
   apiToken: string;
   mcpToken?: string;
   voiceStreamUrl?: string | null;
@@ -13670,6 +13706,9 @@ export async function startDroneHubApiServer(opts: {
   loadHubEnv();
   await logHubLlmStartupSnapshot();
   const host = opts.host ?? '127.0.0.1';
+  const containerMcpHost = String(opts.containerMcpHost ?? '').trim();
+  const containerMcpPort = Number(opts.containerMcpPort ?? NaN);
+  const containerMcpRequestedUrl = normalizeContainerMcpUrl(opts.containerMcpUrl);
   const apiToken = String(opts.apiToken ?? '').trim();
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
@@ -13734,6 +13773,14 @@ export async function startDroneHubApiServer(opts: {
       apiHost: host,
       apiPort,
       uiPort,
+      containerMcp:
+        containerMcpHost && Number.isFinite(containerMcpPort) && containerMcpPort > 0
+          ? {
+              host: containerMcpHost,
+              port: Math.floor(containerMcpPort),
+              url: containerMcpRequestedUrl || `http://host.docker.internal:${Math.floor(containerMcpPort)}/mcp`,
+            }
+          : null,
       startedAt: new Date().toISOString(),
       logPath: path.join(rootDir, 'hub.log'),
       launchEnv: null,
@@ -16077,6 +16124,10 @@ export async function startDroneHubApiServer(opts: {
 
   const mcpTransports = new Map<string, { transport: StreamableHTTPServerTransport; server: ReturnType<typeof createDroneHubMcpServer>; identity: McpTokenIdentity }>();
   let actualPort = opts.port;
+  let containerMcpServer: http.Server | null = null;
+  let containerMcpActualPort = Number.isFinite(containerMcpPort) && containerMcpPort > 0 ? Math.floor(containerMcpPort) : 0;
+  let containerMcpActualUrl = '';
+  const containerMcpSockets = new Set<any>();
 
   const closeMcpTransport = async (sessionId: string | undefined): Promise<void> => {
     if (!sessionId) return;
@@ -29353,15 +29404,65 @@ export async function startDroneHubApiServer(opts: {
   scheduleDroneSummaryMaintenance('startup', 0);
   const address = server.address();
   actualPort = typeof address === 'object' && address ? address.port : opts.port;
+  if (mcpToken && containerMcpHost && containerMcpActualPort > 0) {
+    const mcpOnlyServer = http.createServer(async (req, res) => {
+      try {
+        const method = (req.method ?? 'GET').toUpperCase();
+        const u = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
+        if (u.pathname !== '/mcp') {
+          json(res, 404, { ok: false, error: 'not found' });
+          return;
+        }
+        await handleDroneHubMcpRequest(req, res, method);
+      } catch (error: any) {
+        hubLog('warn', 'container mcp request failed', { error: String(error?.message ?? error ?? '') });
+        if (!res.headersSent && !res.writableEnded) {
+          json(res, 500, { ok: false, error: error?.message ?? String(error) });
+        }
+      }
+    });
+    mcpOnlyServer.on('connection', (socket) => {
+      containerMcpSockets.add(socket);
+      socket.on('close', () => {
+        containerMcpSockets.delete(socket);
+      });
+    });
+    try {
+      await new Promise<void>((resolve, reject) => {
+        mcpOnlyServer.once('error', reject);
+        mcpOnlyServer.listen(containerMcpActualPort, containerMcpHost, () => resolve());
+      });
+    } catch (error) {
+      await new Promise<void>((resolve) => server.close(() => resolve())).catch(() => {});
+      throw error;
+    }
+    containerMcpServer = mcpOnlyServer;
+    const mcpAddress = mcpOnlyServer.address();
+    containerMcpActualPort = typeof mcpAddress === 'object' && mcpAddress ? mcpAddress.port : containerMcpActualPort;
+    containerMcpActualUrl = containerMcpRequestedUrl || `http://host.docker.internal:${containerMcpActualPort}/mcp`;
+    hubLog('info', 'container mcp listener started', {
+      host: containerMcpHost,
+      port: containerMcpActualPort,
+      url: containerMcpActualUrl,
+    });
+  }
   setActiveDroneHubMcpProjectionConfig({
     signingSecret: mcpToken,
     hostUrl: `http://127.0.0.1:${actualPort}/mcp`,
-    containerUrl: `http://host.docker.internal:${actualPort}/mcp`,
+    containerUrl: containerMcpActualUrl || `http://host.docker.internal:${actualPort}/mcp`,
   });
 
   return {
     host,
     port: actualPort,
+    containerMcp:
+      containerMcpServer && containerMcpActualUrl
+        ? {
+            host: containerMcpHost,
+            port: containerMcpActualPort,
+            url: containerMcpActualUrl,
+          }
+        : null,
     close: async () => {
       if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
         activeDroneHubMcpProjectionConfig = null;
@@ -29406,8 +29507,16 @@ export async function startDroneHubApiServer(opts: {
         }),
       ).catch(() => {});
       const serverClose = new Promise<void>((resolve) => server.close(() => resolve()));
+      const containerMcpServerClose = containerMcpServer
+        ? new Promise<void>((resolve) => containerMcpServer?.close(() => resolve()))
+        : Promise.resolve();
       try {
         (server as any).closeIdleConnections?.();
+      } catch {
+        // ignore
+      }
+      try {
+        (containerMcpServer as any)?.closeIdleConnections?.();
       } catch {
         // ignore
       }
@@ -29418,7 +29527,15 @@ export async function startDroneHubApiServer(opts: {
           // ignore
         }
       }
+      for (const socket of containerMcpSockets) {
+        try {
+          socket.destroy();
+        } catch {
+          // ignore
+        }
+      }
       await waitWithTimeout(serverClose, 3_000);
+      await waitWithTimeout(containerMcpServerClose, 3_000);
       if (ARCHIVE_CLEANUP_INTERVAL) {
         try {
           clearInterval(ARCHIVE_CLEANUP_INTERVAL);

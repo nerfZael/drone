@@ -189,11 +189,19 @@ fleet read --from reviewer-1 --chat default --limit 20
 
 # explicitly manage the detached Hub
 drone hub start --port 5174 --api-port 0 --host 127.0.0.1
+drone hub restart --container-mcp-host 172.17.0.1 --container-mcp-port 8788 --container-mcp-url http://host.docker.internal:8788/mcp
 drone hub start --voice-stream-port 3199
 drone hub start --no-voice-stream
 drone hub stop
 drone hub restart
 ```
+
+The full Hub API binds to `127.0.0.1` by default. Container drones get a separate authenticated
+MCP-only listener, projected as `http://host.docker.internal:8788/mcp` by default. On Linux Docker
+hosts, that MCP listener binds to the Docker bridge address `172.17.0.1` by default; use
+`--container-mcp-host` / `DRONE_HUB_CONTAINER_MCP_BIND_HOST` to override it for custom Docker,
+Podman, or Docker Desktop networking. Use `drone hub restart` when changing MCP bind/projection
+settings on an already-running Hub.
 
 When the Hub starts Voice Stream, it passes the GROQ API key saved in Drone Hub settings to the Voice Stream process. Saving or clearing the Hub GROQ key restarts the Voice Stream process so the key change takes effect. Standalone Voice Stream runs still read `GROQ_API_KEY` / `GROQ_TTS_API_KEY` from the environment.
 
