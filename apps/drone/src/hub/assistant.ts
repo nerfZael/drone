@@ -262,6 +262,7 @@ type AssistantToolCallbacks = {
   readWhiteboard?: (opts: { whiteboardId?: string }) => Promise<any>;
   createWhiteboard?: (opts: { title?: string; scopeType?: string; scopeValue?: string }) => Promise<any>;
   updateWhiteboard?: (opts: { whiteboardId?: string; operations?: unknown[]; shapes?: unknown[]; title?: string }) => Promise<any>;
+  captureWhiteboard?: (opts: { whiteboardId?: string; padding?: unknown; maxWidth?: unknown; maxHeight?: unknown; backgroundColor?: unknown }) => Promise<any>;
 };
 
 type AssistantDroneFileEntry = {
@@ -675,7 +676,7 @@ const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Use set_thinking_level when the user asks to change how much the assistant thinks. It changes this assistant thread to another supported thinking level for the same selected model and does not require approval.',
   'Use create_new_thread only when the user explicitly asks to start, open, create, clear, reset, or switch to a new assistant thread or session.',
   'Use create_group for empty groups, set_drone_group for moving one batch to one group, set_drone_groups when different drones need different groups or no group, reorder_drones for sidebar order, open_drone_chat for UI navigation, highlight_drones to visually point out drones for about 10 seconds, and open_whiteboard/close_whiteboard for whiteboard panel navigation.',
-  'Use whiteboard tools for simple diagrams, rectangles, arrows, and labels. Prefer structured shapes over raw scene JSON.',
+  'Use whiteboard tools for simple diagrams, rectangles, arrows, and labels. Prefer structured shapes over raw scene JSON. Use capture_whiteboard when you need to inspect or share the full visible board as an image.',
   'File paths are interpreted by drone id plus path. Relative paths resolve inside the target drone workspace, usually the repo root for repo-backed drones.',
   'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
   ASSISTANT_CHAT_IDLE_PROMPT_LINE,
@@ -699,6 +700,7 @@ const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
   { name: 'read_whiteboard', label: 'Read whiteboard', category: 'context', description: 'Read a whiteboard scene summary and elements.' },
   { name: 'create_whiteboard', label: 'Create whiteboard', category: 'actions', description: 'Create a new backend-saved whiteboard.' },
   { name: 'update_whiteboard', label: 'Update whiteboard', category: 'actions', description: 'Add, delete, or update simple whiteboard shapes.' },
+  { name: 'capture_whiteboard', label: 'Capture whiteboard', category: 'context', description: 'Render the full visible whiteboard as a PNG image.' },
   { name: 'open_whiteboard', label: 'Open whiteboard', category: 'actions', description: 'Open the Whiteboard panel in Drone Hub.' },
   { name: 'close_whiteboard', label: 'Close whiteboard', category: 'actions', description: 'Close the Whiteboard panel in Drone Hub.' },
   { name: 'get_system_prompt', label: 'Get system prompt', category: 'prompts', description: 'Read the global and current thread system prompts.' },
@@ -747,6 +749,7 @@ const ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES = [
   'read_whiteboard',
   'create_whiteboard',
   'update_whiteboard',
+  'capture_whiteboard',
   'open_whiteboard',
   'close_whiteboard',
 ];
@@ -911,11 +914,40 @@ function makeAssistantToolCallMessage(toolCallId: string, toolName: string, args
   };
 }
 
+function assistantToolResultContentBlocks(result: unknown, error?: unknown): any[] {
+  const errorText = cleanOptionalString(error);
+  if (errorText) return [{ type: 'text', text: errorText }];
+  const rawContent = result && typeof result === 'object' && Array.isArray((result as any).content)
+    ? (result as any).content
+    : [];
+  const content = rawContent.flatMap((part: any) => {
+    if (!part || typeof part !== 'object') return [];
+    if (part.type === 'text') {
+      const text = cleanOptionalString(part.text);
+      return text ? [{ type: 'text', text }] : [];
+    }
+    if (part.type === 'image') {
+      const data = cleanOptionalString(part.data);
+      const mimeType = cleanOptionalString(part.mimeType);
+      if (!data || !mimeType) return [];
+      return [{
+        type: 'image',
+        data,
+        mimeType,
+        ...(part.annotations && typeof part.annotations === 'object' ? { annotations: sanitizeMessage(part.annotations) } : {}),
+        ...(part._meta && typeof part._meta === 'object' ? { _meta: sanitizeMessage(part._meta) } : {}),
+      }];
+    }
+    return [];
+  });
+  return content.length > 0 ? content : [{ type: 'text', text: assistantRealtimeToolOutput(result) }];
+}
+
 function makeAssistantToolResultMessage(toolCallId: string, toolName: string, result: unknown, error?: unknown): any {
   const errorText = cleanOptionalString(error);
   return {
     role: 'toolResult',
-    content: [{ type: 'text', text: errorText || assistantRealtimeToolOutput(result) }],
+    content: assistantToolResultContentBlocks(result, errorText),
     toolName,
     toolCallId,
     ...(errorText ? { isError: true, errorMessage: errorText } : {}),
@@ -2123,8 +2155,18 @@ function assistantRealtimeToolOutput(value: unknown): string {
     .map((part: any) => (part?.type === 'text' ? String(part.text ?? '') : ''))
     .filter(Boolean)
     .join('\n\n');
+  const images = content
+    .filter((part: any) => part?.type === 'image' && part?.mimeType)
+    .map((part: any) => ({
+      type: 'image',
+      mimeType: String(part.mimeType),
+      byteLength: Number(part.byteLength ?? part._meta?.byteLength ?? 0) || undefined,
+      width: Number(part.width ?? part._meta?.width ?? 0) || undefined,
+      height: Number(part.height ?? part._meta?.height ?? 0) || undefined,
+    }));
   const payload = {
     ...(text ? { text } : {}),
+    ...(images.length > 0 ? { images } : {}),
     result: result.details ?? value,
   };
   try {
@@ -4463,6 +4505,53 @@ export class HubAssistantService {
           return {
             content: [{ type: 'text', text: `Updated whiteboard ${result?.whiteboard?.title ?? result?.title ?? ''}. It now has ${count} visible element${count === 1 ? '' : 's'}.` }],
             details: result,
+          };
+        },
+      },
+      {
+        name: 'capture_whiteboard',
+        label: 'Capture whiteboard',
+        description: 'Render the full visible whiteboard as a PNG image. The renderer fits all visible shapes into the image with padding.',
+        parameters: Type.Object({
+          whiteboardId: Type.Optional(Type.String({ description: 'Whiteboard id. Defaults to main.' })),
+          padding: Type.Optional(Type.Number({ description: 'World-space padding around all visible shapes. Defaults to 48.' })),
+          maxWidth: Type.Optional(Type.Number({ description: 'Maximum output width in pixels. Defaults to 1600.' })),
+          maxHeight: Type.Optional(Type.Number({ description: 'Maximum output height in pixels. Defaults to 1200.' })),
+          backgroundColor: Type.Optional(Type.String({ description: 'PNG background color. Defaults to white.' })),
+        }),
+        execute: async (_toolCallId: string, params: any) => {
+          if (!this.tools.captureWhiteboard) throw new Error('whiteboard capture unavailable');
+          const result = await this.tools.captureWhiteboard({
+            whiteboardId: cleanOptionalString(params?.whiteboardId) || 'main',
+            padding: params?.padding,
+            maxWidth: params?.maxWidth,
+            maxHeight: params?.maxHeight,
+            backgroundColor: cleanOptionalString(params?.backgroundColor),
+          });
+          const metadata = result?.metadata ?? result;
+          const data = cleanOptionalString(result?.data);
+          const mimeType = cleanOptionalString(result?.mimeType) || 'image/png';
+          if (!data) throw new Error('whiteboard capture did not return image data');
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Captured whiteboard ${metadata?.title ?? metadata?.whiteboardId ?? ''} as a ${metadata?.width ?? '?'}x${metadata?.height ?? '?'} PNG.`,
+              },
+              {
+                type: 'image',
+                data,
+                mimeType,
+                _meta: {
+                  width: metadata?.width,
+                  height: metadata?.height,
+                  byteLength: metadata?.byteLength,
+                  whiteboardId: metadata?.whiteboardId,
+                  version: metadata?.version,
+                },
+              },
+            ],
+            details: metadata,
           };
         },
       },

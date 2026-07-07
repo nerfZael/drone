@@ -72,9 +72,11 @@ describe('remote Hub server', () => {
     expect(routeAllowed('GET', '/api/whiteboards')).toBe(true);
     expect(routeAllowed('POST', '/api/whiteboards')).toBe(true);
     expect(routeAllowed('GET', '/api/whiteboards/main')).toBe(true);
+    expect(routeAllowed('GET', '/api/whiteboards/main/image')).toBe(true);
     expect(routeAllowed('PATCH', '/api/whiteboards/main')).toBe(true);
     expect(routeAllowed('DELETE', '/api/whiteboards/diagram-a')).toBe(true);
     expect(routeAllowed('GET', '/api/whiteboards/events')).toBe(true);
+    expect(routeAllowed('GET', '/api/whiteboards/events/image')).toBe(false);
   });
 
   test('validates remote per-drone access from the registry without requiring the full drone list', async () => {
