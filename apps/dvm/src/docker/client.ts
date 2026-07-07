@@ -60,6 +60,7 @@ function shellQuote(raw: string): string {
 export class DockerClient {
   private docker: Docker;
   static readonly DEFAULT_RESTART_POLICY_NAME = 'unless-stopped';
+  static readonly HOST_GATEWAY_EXTRA_HOST = 'host.docker.internal:host-gateway';
 
   constructor() {
     this.docker = new Docker();
@@ -222,6 +223,7 @@ export class DockerClient {
       HostConfig: {
         PortBindings: portBindings,
         NetworkMode: config.network,
+        ExtraHosts: [DockerClient.HOST_GATEWAY_EXTRA_HOST],
         Mounts: mounts.length > 0 ? (mounts as Docker.MountConfig) : undefined,
         RestartPolicy: {
           Name: DockerClient.DEFAULT_RESTART_POLICY_NAME,

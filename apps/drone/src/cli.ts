@@ -603,6 +603,10 @@ function hubTokenPath(rootDir?: string): string {
   return path.join(droneDir(rootDir), 'hub.token');
 }
 
+function hubMcpTokenPath(rootDir?: string): string {
+  return path.join(droneDir(rootDir), 'hub.mcp.token');
+}
+
 function hubLogPath(rootDir?: string): string {
   return path.join(droneDir(rootDir), 'hub.log');
 }
@@ -667,9 +671,16 @@ async function writeHubApiToken(token: string, rootDir?: string): Promise<void> 
   await setPrivateFileModeBestEffort(p);
 }
 
-async function readHubApiToken(rootDir?: string): Promise<string | null> {
+async function writeHubMcpToken(token: string, rootDir?: string): Promise<void> {
+  await ensureDroneDir(rootDir);
+  const p = hubMcpTokenPath(rootDir);
+  await fs.writeFile(p, `${String(token ?? '').trim()}\n`, 'utf8');
+  await setPrivateFileModeBestEffort(p);
+}
+
+async function readTrimmedSecretFile(filePath: string): Promise<string | null> {
   try {
-    const raw = await fs.readFile(hubTokenPath(rootDir), 'utf8');
+    const raw = await fs.readFile(filePath, 'utf8');
     const token = String(raw ?? '').trim();
     return token || null;
   } catch {
@@ -677,11 +688,27 @@ async function readHubApiToken(rootDir?: string): Promise<string | null> {
   }
 }
 
+async function readHubApiToken(rootDir?: string): Promise<string | null> {
+  return readTrimmedSecretFile(hubTokenPath(rootDir));
+}
+
+async function readHubMcpToken(rootDir?: string): Promise<string | null> {
+  return readTrimmedSecretFile(hubMcpTokenPath(rootDir));
+}
+
 async function ensureHubApiToken(rootDir?: string): Promise<string> {
   const existing = await readHubApiToken(rootDir);
   if (existing) return existing;
   const token = crypto.randomBytes(32).toString('base64url');
   await writeHubApiToken(token, rootDir);
+  return token;
+}
+
+async function ensureHubMcpToken(rootDir?: string): Promise<string> {
+  const existing = await readHubMcpToken(rootDir);
+  if (existing) return existing;
+  const token = crypto.randomBytes(32).toString('base64url');
+  await writeHubMcpToken(token, rootDir);
   return token;
 }
 
@@ -1933,6 +1960,7 @@ async function hubRun(options: any) {
   await ensureHubSetupState();
   const activeProfile = readActiveProfileNameSync();
   const apiToken = await ensureHubApiToken();
+  const mcpToken = await ensureHubMcpToken();
   const allowedOrigins = new Set<string>([`http://127.0.0.1:${uiPort}`, `http://localhost:${uiPort}`]);
   if (apiHost && apiHost !== '0.0.0.0' && apiHost !== '::') {
     allowedOrigins.add(`http://${apiHost}:${uiPort}`);
@@ -2012,6 +2040,7 @@ async function hubRun(options: any) {
     port: apiPort,
     host: apiHost,
     apiToken,
+    mcpToken,
     voiceStreamUrl: voiceStreamEnabled ? `http://127.0.0.1:${voiceStreamPort}` : null,
     allowedOrigins: Array.from(allowedOrigins),
     onGroqApiKeySettingsChanged: restartVoiceStreamForSettings,
@@ -2039,6 +2068,7 @@ async function hubRun(options: any) {
     launchEnv: captureHubLaunchEnvSnapshot(),
   });
   await writeHubApiToken(apiToken);
+  await writeHubMcpToken(mcpToken);
 
   void ensureDesiredRemoteHubDetached({ cliFilename: __filename, force: true }).then((result) => {
     if (result.error) {

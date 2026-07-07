@@ -4,6 +4,7 @@ import { AutomationSettingsSection } from './AutomationSettingsSection';
 import { ArchiveSettingsTab } from './ArchiveSettingsTab';
 import { BackupsSettingsTab } from './BackupsSettingsTab';
 import { GeneralSettingsTab } from './GeneralSettingsTab';
+import { McpServersSection } from './McpServersSection';
 import { PlaybookSettingsSection } from './PlaybookSettingsSection';
 import { ProfilesSettingsTab } from './ProfilesSettingsTab';
 import { RemoteAccessSettingsTab } from './RemoteAccessSettingsTab';
@@ -24,6 +25,7 @@ import { useFilesystemSettings } from './use-filesystem-settings';
 import { useGithubSettings } from './use-github-settings';
 import type { UseHubLogsResult } from './use-hub-logs';
 import type { UseLlmSettingsResult } from './use-llm-settings';
+import { useMcpServers } from './use-mcp-servers';
 import { useProfileSettings } from './use-profile-settings';
 import { useRegistryBackupSettings } from './use-registry-backup-settings';
 import { useSkillLibrary } from './use-skill-library';
@@ -79,6 +81,7 @@ export function SettingsView({
   const agentSuggestion = useAgentSuggestionSettings(requestJson);
   const agents = useAgentsSettings(requestJson);
   const skillLibrary = useSkillLibrary(requestJson);
+  const mcpServers = useMcpServers(requestJson);
   const filesystem = useFilesystemSettings(requestJson);
   const desktopVoiceModel = useDesktopVoiceModelSettings(requestJson);
   const voiceApproval = useVoiceApprovalSettings(requestJson);
@@ -121,6 +124,11 @@ export function SettingsView({
     skillLibrary.sourceSkillPreviewLoading ||
     skillLibrary.skillsSaving ||
     skillLibrary.skillsDeleting ||
+    mcpServers.mcpServersLoading ||
+    mcpServers.mcpServersSaving ||
+    mcpServers.mcpServersDeleting ||
+    mcpServers.mcpAccessTokensLoading ||
+    mcpServers.mcpAccessTokensSaving ||
     deleteAction.savingDeleteSettings ||
     filesystem.savingFilesystemSettings ||
     desktopVoiceModel.installingDesktopVoiceModel ||
@@ -158,6 +166,10 @@ export function SettingsView({
       const ok = window.confirm('Discard unsaved skill edits and refresh all settings?');
       if (!ok) return;
     }
+    if (mcpServers.mcpDraftDirty) {
+      const ok = window.confirm('Discard unsaved MCP server edits and refresh all settings?');
+      if (!ok) return;
+    }
     if (agentsDraftDirty) {
       const ok = window.confirm('Discard unsaved AGENTS.md edits and refresh all settings?');
       if (!ok) return;
@@ -180,7 +192,8 @@ export function SettingsView({
     void hubLogsState.loadAndroidLogs();
     void skillLibrary.loadSkills();
     void skillLibrary.loadSkillSources();
-  }, [agentMessageAutoContinue, agentSuggestion, agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, desktopVoiceModel, filesystem, github, hubLogsState, llm, profile, skillLibrary, syncSets, voiceApproval]);
+    void mcpServers.loadMcpServers();
+  }, [agentMessageAutoContinue, agentSuggestion, agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, desktopVoiceModel, filesystem, github, hubLogsState, llm, mcpServers, profile, skillLibrary, syncSets, voiceApproval]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
@@ -212,6 +225,7 @@ export function SettingsView({
       return <PlaybookSettingsSection focusedPlaybookId={focusedPlaybookId} onFocusedPlaybookHandled={onFocusedPlaybookHandled} />;
     }
     if (activeTab === 'skills') return <SkillLibrarySection skillLibrary={skillLibrary} />;
+    if (activeTab === 'mcp') return <McpServersSection mcp={mcpServers} />;
     if (activeTab === 'agents') return <AgentsSettingsSection agents={agents} />;
     return <SystemLogsSettingsTab hubLogsState={hubLogsState} hubLogsTailLines={hubLogsTailLines} hubLogsMaxBytes={hubLogsMaxBytes} />;
   };

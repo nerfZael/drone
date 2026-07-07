@@ -316,6 +316,14 @@ type DroneRegistryV1 = {
    * The Hub projects these skills into drone runtimes on demand.
    */
   skills?: Record<string, unknown>;
+  /**
+   * Hub-managed global MCP servers.
+   *
+   * This field is host-side and independent from any single repo. The Hub
+   * projects these servers into agent user config files inside drone runtimes.
+   */
+  mcpServers?: Record<string, unknown>;
+  mcpTokens?: Record<string, unknown>;
   playbooks?: Record<string, DroneRegistryPlaybookEntry>;
   /**
    * Host-side list of repositories the user has "registered" with `drone repo`.
@@ -494,6 +502,8 @@ export type DroneRegistry = {
    */
   settings?: DroneRegistryV1['settings'];
   skills?: Record<string, unknown>;
+  mcpServers?: Record<string, unknown>;
+  mcpTokens?: Record<string, unknown>;
   playbooks?: Record<string, DroneRegistryPlaybookEntry>;
   repos?: DroneRegistryV1['repos'];
   groups?: DroneRegistryV1['groups'];
@@ -732,6 +742,8 @@ function hasMeaningfulRegistryData(reg: DroneRegistry): boolean {
   if (countRecordEntries(reg.pending) > 0) return true;
   if (countRecordEntries(reg.archived) > 0) return true;
   if (countRecordEntries(reg.skills) > 0) return true;
+  if (countRecordEntries(reg.mcpServers) > 0) return true;
+  if (countRecordEntries(reg.mcpTokens) > 0) return true;
   if (countRecordEntries(reg.playbooks) > 0) return true;
   if (countRecordEntries(reg.repos) > 0) return true;
   if (countRecordEntries(reg.groups) > 0) return true;
@@ -965,6 +977,8 @@ function migrateV1ToV2(v1: DroneRegistryV1): DroneRegistry {
     version: 2,
     settings: v1.settings,
     skills: v1.skills,
+    mcpServers: (v1 as any).mcpServers,
+    mcpTokens: (v1 as any).mcpTokens,
     playbooks: {},
     repos: v1.repos,
     groups: v1.groups,

@@ -1164,12 +1164,17 @@ function registerTools(server: McpServer) {
   });
 }
 
-export async function startDroneHubMcpServer() {
+export function createDroneHubMcpServer() {
   const server = new McpServer(
     { name: 'Drone Hub MCP Server', version: '0.1.0' },
     { capabilities: { logging: {} } },
   );
   registerTools(server);
+  return server;
+}
+
+export async function startDroneHubMcpServer() {
+  const server = createDroneHubMcpServer();
   await server.connect(new StdioServerTransport());
   return server;
 }
