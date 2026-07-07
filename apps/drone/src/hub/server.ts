@@ -27882,7 +27882,7 @@ export async function startDroneHubApiServer(opts: {
             id: droneId,
             name: droneName,
             chat: chatName,
-            draft: isDraftChatEntry(chatEntry),
+            draft: isDraftChatEntry(chat),
             agent,
             model: normalizeChatModel((chat as any)?.model),
             models: discovered.models,
