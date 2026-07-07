@@ -8,7 +8,6 @@ import type {
   RepoPullRequestSummary,
   RepoPullRequestsPayload,
 } from '../types';
-import { DroneChangesDock } from '../changes';
 import {
   CHANGES_OPEN_PULL_REQUEST_EVENT,
   clearSelectedPullRequestForDrone,
@@ -21,6 +20,10 @@ import { profileStorageKey } from '../../profile-storage';
 const PR_MERGE_METHOD_STORAGE_KEY = profileStorageKey('droneHub.prMergeMethod');
 const PR_LIST_CACHE_TTL_MS = 12_000;
 const PR_LIST_POLL_INTERVAL_MS = 20_000;
+
+const LazyDroneChangesDock = React.lazy(async () => ({
+  default: (await import('../changes/DroneChangesDock')).DroneChangesDock,
+}));
 
 type PullRequestListDiagnostics = {
   repoRoot: string | null;
@@ -690,18 +693,26 @@ export function DronePullRequestsDock({
         )}
       </div>
       {activePullRequestNumber ? (
-        <DroneChangesDock
-          droneId={droneId}
-          repoAttached={repoAttached}
-          repoPath={repoPath}
-          repoUnavailableReason={repoUnavailableReason}
-          fixedContextMode="pull-request"
-          disabled={disabled}
-          hubPhase={hubPhase}
-          hubMessage={hubMessage}
-          onRevealFileInFiles={onRevealFileInFiles}
-          onOpenFileInEditor={onOpenFileInEditor}
-        />
+        <React.Suspense
+          fallback={
+            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+              Loading pull request changes...
+            </div>
+          }
+        >
+          <LazyDroneChangesDock
+            droneId={droneId}
+            repoAttached={repoAttached}
+            repoPath={repoPath}
+            repoUnavailableReason={repoUnavailableReason}
+            fixedContextMode="pull-request"
+            disabled={disabled}
+            hubPhase={hubPhase}
+            hubMessage={hubMessage}
+            onRevealFileInFiles={onRevealFileInFiles}
+            onOpenFileInEditor={onOpenFileInEditor}
+          />
+        </React.Suspense>
       ) : (
         <>
           <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] text-[10px] text-[var(--muted)] flex items-center gap-1.5 min-h-[30px] overflow-x-auto whitespace-nowrap">

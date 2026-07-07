@@ -18,11 +18,12 @@ const {
 
 describe('right panel tab content', () => {
   test('lazy-loads every right panel pane', () => {
-    expect([...LAZY_RIGHT_PANEL_TABS].sort()).toEqual(RIGHT_PANEL_TABS.filter((tab) => tab !== 'files' && tab !== 'whiteboard').sort());
+    expect([...LAZY_RIGHT_PANEL_TABS].sort()).toEqual(RIGHT_PANEL_TABS.filter((tab) => tab !== 'files' && tab !== 'whiteboard' && tab !== 'prs').sort());
     expect(isRightPanelTabLazyLoaded('files')).toBe(false);
     expect(isRightPanelTabLazyLoaded('whiteboard')).toBe(false);
+    expect(isRightPanelTabLazyLoaded('prs')).toBe(false);
     for (const tab of RIGHT_PANEL_TABS) {
-      if (tab !== 'files' && tab !== 'whiteboard') expect(isRightPanelTabLazyLoaded(tab)).toBe(true);
+      if (tab !== 'files' && tab !== 'whiteboard' && tab !== 'prs') expect(isRightPanelTabLazyLoaded(tab)).toBe(true);
     }
   });
 
@@ -43,19 +44,26 @@ describe('right panel tab content', () => {
     const sourcePath = path.join(import.meta.dir, '../src/droneHub/app/RightPanelTabContent.tsx');
     const source = fs.readFileSync(sourcePath, 'utf8');
     expect(source).not.toContain('React.lazy');
-    expect(source).not.toContain("from '../pullRequests/DronePullRequestsDock'");
+    expect(source).toContain("from '../pullRequests/DronePullRequestsDock'");
     expect(source).not.toContain("from '../files/OpenedDroneFilePanel'");
     expect(source).not.toContain("from '../files/QuickOpenModal'");
     expect(source).toContain("from '../whiteboard/WhiteboardDock'");
     expect(source).not.toContain('loadWhiteboardDock');
     for (const tab of RIGHT_PANEL_TABS) {
-      if (tab === 'files' || tab === 'whiteboard') continue;
+      if (tab === 'files' || tab === 'whiteboard' || tab === 'prs') continue;
       if (tab === 'assistant') {
         expect(source).toContain("if (tab === 'assistant')");
       } else {
         expect(source).toContain(`case '${tab}'`);
       }
     }
-    expect(source.match(/<PaneModule tab=\{tab\}/g)?.length).toBe(RIGHT_PANEL_TABS.length - 2);
+    expect(source.match(/<PaneModule tab=\{tab\}/g)?.length).toBe(RIGHT_PANEL_TABS.length - 3);
+  });
+
+  test('keeps pull request list independent from changes dock module load', () => {
+    const sourcePath = path.join(import.meta.dir, '../src/droneHub/pullRequests/DronePullRequestsDock.tsx');
+    const source = fs.readFileSync(sourcePath, 'utf8');
+    expect(source).not.toContain("from '../changes'");
+    expect(source).toContain("import('../changes/DroneChangesDock')");
   });
 });

@@ -11,6 +11,7 @@ import type {
 } from '../types';
 import type { DroneOpenedFileState, DroneOpenedFileTabState } from '../files/opened-file-types';
 import { DroneFilesDock } from '../files/DroneFilesDock';
+import { DronePullRequestsDock } from '../pullRequests/DronePullRequestsDock';
 import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-state';
 import { WhiteboardDock } from '../whiteboard/WhiteboardDock';
 import {
@@ -30,10 +31,9 @@ const loadDroneEnvDock = async () => (await import('../env/DroneEnvDock')).Drone
 const loadDroneFleetDock = async () => (await import('../fleet/DroneFleetDock')).DroneFleetDock;
 const loadDroneLinksDock = async () => (await import('../overview/DroneLinksDock')).DroneLinksDock;
 const loadDronePreviewDock = async () => (await import('../overview/DronePreviewDock')).DronePreviewDock;
-const loadDronePullRequestsDock = async () => (await import('../pullRequests/DronePullRequestsDock')).DronePullRequestsDock;
 const loadDroneTerminalDock = async () => (await import('../terminal/DroneTerminalDock')).DroneTerminalDock;
 export const LAZY_RIGHT_PANEL_TABS: ReadonlySet<RightPanelTab> = new Set(
-  RIGHT_PANEL_TABS.filter((tab) => tab !== 'files' && tab !== 'whiteboard'),
+  RIGHT_PANEL_TABS.filter((tab) => tab !== 'files' && tab !== 'whiteboard' && tab !== 'prs'),
 );
 
 export function isRightPanelTabLazyLoaded(tab: RightPanelTab): boolean {
@@ -589,24 +589,20 @@ export function RightPanelTabContent({
 
     case 'prs':
       return (
-        <PaneModule tab={tab} load={loadDronePullRequestsDock}>
-          {(DronePullRequestsDock) => (
-            <DronePullRequestsDock
-              key={`${paneKey}-${drone.id}-prs`}
-              droneId={drone.id}
-              droneName={drone.name}
-              repoAttached={repoFeaturesEnabled}
-              repoPath={drone.repoPath}
-              repoUnavailableReason={repoUnavailableReason}
-              disabled={disabled}
-              hubPhase={drone.hubPhase}
-              hubMessage={drone.hubMessage}
-              onOpenPullRequest={(pullRequest) => onOpenPullRequest(paneKey, pullRequest)}
-              onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
-              onOpenFileInEditor={onOpenChangesFileInEditor}
-            />
-          )}
-        </PaneModule>
+        <DronePullRequestsDock
+          key={`${paneKey}-${drone.id}-prs`}
+          droneId={drone.id}
+          droneName={drone.name}
+          repoAttached={repoFeaturesEnabled}
+          repoPath={drone.repoPath}
+          repoUnavailableReason={repoUnavailableReason}
+          disabled={disabled}
+          hubPhase={drone.hubPhase}
+          hubMessage={drone.hubMessage}
+          onOpenPullRequest={(pullRequest) => onOpenPullRequest(paneKey, pullRequest)}
+          onRevealFileInFiles={(repoRelativePath) => onRevealChangesFileInFiles(paneKey, repoRelativePath)}
+          onOpenFileInEditor={onOpenChangesFileInEditor}
+        />
       );
 
     default:
