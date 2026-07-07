@@ -3,7 +3,12 @@ import path from 'node:path';
 
 import { describe, expect, test } from 'bun:test';
 
-import { buildContainerSkillProjectionTargets, buildHostSkillProjectionTargets } from '../src/hub/server';
+import {
+  buildContainerMcpProjectionTargets,
+  buildContainerSkillProjectionTargets,
+  buildHostMcpProjectionTargets,
+  buildHostSkillProjectionTargets,
+} from '../src/hub/server';
 
 describe('skill projection targets', () => {
   test('uses home-level targets for repo-backed host drones and cleans up old repo-level projections', () => {
@@ -44,6 +49,26 @@ describe('skill projection targets', () => {
       { agent: 'claude', rootPath: '/work/repo/.claude/skills', cleanupOnly: true },
       { agent: 'cursor', rootPath: '/work/repo/.cursor/skills', cleanupOnly: true },
       { agent: 'opencode', rootPath: '/work/repo/.opencode/skills', cleanupOnly: true },
+    ]);
+  });
+});
+
+describe('MCP projection targets', () => {
+  test('uses only global host config paths', () => {
+    expect(buildHostMcpProjectionTargets({ repoAttached: true })).toEqual([
+      { agent: 'codex', configPath: path.join(os.homedir(), '.codex', 'config.toml') },
+      { agent: 'cursor', configPath: path.join(os.homedir(), '.cursor', 'mcp.json') },
+      { agent: 'claude', configPath: path.join(os.homedir(), '.claude.json') },
+      { agent: 'opencode', configPath: path.join(os.homedir(), '.config', 'opencode', 'opencode.json') },
+    ]);
+  });
+
+  test('uses only global container config paths', () => {
+    expect(buildContainerMcpProjectionTargets({ repoAttached: true, repo: { dest: '/work/repo' } })).toEqual([
+      { agent: 'codex', configPath: '/root/.codex/config.toml' },
+      { agent: 'cursor', configPath: '/root/.cursor/mcp.json' },
+      { agent: 'claude', configPath: '/root/.claude.json' },
+      { agent: 'opencode', configPath: '/root/.config/opencode/opencode.json' },
     ]);
   });
 });

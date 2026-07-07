@@ -63,6 +63,7 @@ type DroneProvisioningControllerDeps = {
     agentSuggestionEnabled?: boolean;
   }) => Promise<void>;
   startupPromptToPendingPrompt: (prompt: PendingStartupPrompt) => PendingPromptProjection;
+  syncMcpServersForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncRepoAgentsInstructionsForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncSkillLibraryForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncSharedPathsToDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
@@ -569,6 +570,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       if (createdDrone) {
         await deps.syncTaskStateSnapshotToDrone(pendingDroneId, createdDrone);
         await deps.syncSkillLibraryForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
+        await deps.syncMcpServersForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
         await deps.syncSharedPathsToDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
         await deps.syncRepoAgentsInstructionsForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
       }
