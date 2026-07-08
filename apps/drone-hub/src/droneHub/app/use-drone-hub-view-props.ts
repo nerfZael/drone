@@ -238,9 +238,15 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
     setActiveRepoPath,
     deleteRepo,
     githubUrlForRepo,
+    deleteMode,
     dirtyDroneApplyModal,
     closeDirtyDroneApplyModal,
     continueDirtyDroneApply,
+    droneDeleteConfirm,
+    droneDeleteConfirmBusy,
+    droneDeleteConfirmError,
+    closeDroneDeleteConfirm,
+    confirmDroneDelete,
     droneErrorModal,
     clearingDroneError,
     closeDroneErrorModal,
@@ -408,6 +414,19 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
           },
         }
       : null,
+    droneDeleteConfirmModalProps:
+      droneDeleteConfirm && Array.isArray(droneDeleteConfirm.drones) && droneDeleteConfirm.drones.length > 0
+        ? {
+            busy: droneDeleteConfirmBusy,
+            deleteMode,
+            drones: droneDeleteConfirm.drones,
+            error: droneDeleteConfirmError,
+            onCancel: closeDroneDeleteConfirm,
+            onConfirm: () => {
+              void confirmDroneDelete();
+            },
+          }
+        : null,
     droneErrorModalProps: droneErrorModal
       ? {
           droneErrorModal,
@@ -795,8 +814,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
             setSettingsPlaybookFocusId(playbookId);
             setAppView('settings');
           },
-          onDeleteRunDrone: async (droneId) => {
-            await deleteDrone(droneId);
+          onDeleteRunDrone: (droneId) => {
+            deleteDrone(droneId);
           },
           deletingDrones,
           optimisticallyDeletedDrones,

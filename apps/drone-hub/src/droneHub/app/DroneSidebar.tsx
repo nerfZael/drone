@@ -422,6 +422,28 @@ function flattenReadOnlyTreeDroneOrder(nodeTree: SidebarNodeTreeModel, collapsed
   return out;
 }
 
+function collectSidebarFolderDroneIds(nodeTree: SidebarNodeTreeModel, folderPathRaw: string): string[] {
+  const folderPath = String(folderPathRaw ?? '').trim();
+  if (!folderPath) return [];
+  const folderNode = Object.values(nodeTree.nodesById).find(
+    (node): node is SidebarTreeFolderNode => node.kind === 'folder' && node.path === folderPath,
+  );
+  if (!folderNode) return [];
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const visit = (nodeId: string) => {
+    const node = nodeTree.nodesById[nodeId];
+    if (!node) return;
+    if (node.kind === 'drone' && !seen.has(node.droneId)) {
+      seen.add(node.droneId);
+      out.push(node.droneId);
+    }
+    for (const childId of nodeTree.childIdsByParent[nodeId] ?? []) visit(childId);
+  };
+  visit(folderNode.id);
+  return out;
+}
+
 function StaticReadOnlySidebarTree({
   nodeTree,
   sidebarDensityMode,
@@ -1535,6 +1557,9 @@ export function DroneSidebar({
     setSidebarChatOrderByDrone,
     setHiddenSidebarGroups,
     setShowHiddenSidebarGroups,
+    setSelectedDrone,
+    setSelectedDroneIds,
+    setSelectedChat,
     setSidebarReposCollapsed,
     setSidebarAutoMinimize,
     setShowRecentDronesOnly,
@@ -1739,6 +1764,7 @@ export function DroneSidebar({
     creatingGroupMove,
     folderEditor,
     folderEditorInputRef,
+    clearGroupedFolderSelection,
     handleGroupedSelectDroneCard,
     handleGroupedSelectDroneChat,
     handleGroupedSelectFolder,
@@ -1781,6 +1807,46 @@ export function DroneSidebar({
     sidebarDroneById,
     visibleSidebarFolderPathSet,
   });
+  const handleGroupedSelectFolderWithDrones = React.useCallback(
+    (path: string, opts?: { toggle?: boolean }) => {
+      const folderDroneIds = collectSidebarFolderDroneIds(staticReadOnlyNodeTree, path);
+      if (folderDroneIds.length === 0) {
+        if (!opts?.toggle) {
+          handleGroupedSelectFolder(path);
+          setSelectedDrone(null);
+          setSelectedDroneIds([]);
+        }
+        return;
+      }
+      const next = (() => {
+        if (!opts?.toggle) return folderDroneIds;
+        const folderSet = new Set(folderDroneIds);
+        const allSelected = folderDroneIds.every((droneId) => selectedDroneIds.includes(droneId));
+        return allSelected
+          ? selectedDroneIds.filter((droneId) => !folderSet.has(droneId))
+          : [...selectedDroneIds, ...folderDroneIds.filter((droneId) => !selectedDroneIds.includes(droneId))];
+      })();
+      const toggledOff =
+        Boolean(opts?.toggle) && folderDroneIds.every((droneId) => selectedDroneIds.includes(droneId));
+      if (toggledOff) {
+        clearGroupedFolderSelection(path);
+      } else {
+        handleGroupedSelectFolder(path);
+      }
+      setSelectedDroneIds(next);
+      setSelectedDrone(next[0] ?? null);
+      if (next.length > 0) setSelectedChat('default');
+    },
+    [
+      clearGroupedFolderSelection,
+      handleGroupedSelectFolder,
+      selectedDroneIds,
+      setSelectedChat,
+      setSelectedDrone,
+      setSelectedDroneIds,
+      staticReadOnlyNodeTree,
+    ],
+  );
   const {
     activeDraggedDroneIds,
     dragOverCreateGroup,
@@ -2730,7 +2796,7 @@ export function DroneSidebar({
                       selectedSidebarNodeId={selectedSidebarNodeId}
                       selectedFolderPath={selectedFolderPath}
                       setSelectedSidebarNodeId={setSelectedSidebarNodeId}
-                      onSelectFolder={handleGroupedSelectFolder}
+                      onSelectFolder={handleGroupedSelectFolderWithDrones}
                       onSelectDroneCard={handleGroupedSelectDroneCard}
                       onSelectDroneChat={handleGroupedSelectDroneChat}
                       onMoveDronesToGroup={runOptimisticMoveDronesToGroup}

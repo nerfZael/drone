@@ -142,7 +142,7 @@ export function useDroneMutationActions({
   );
 
   const deleteDrone = React.useCallback(
-    async (droneIdRaw: string): Promise<boolean> => {
+    async (droneIdRaw: string, opts?: { confirmed?: boolean; showAlert?: boolean }): Promise<boolean> => {
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return false;
       const droneName = String(drones.find((d) => d.id === droneId)?.name ?? '').trim() || droneId;
@@ -154,7 +154,7 @@ export function useDroneMutationActions({
       ) {
         return false;
       }
-      if (shouldConfirmDelete()) {
+      if (shouldConfirmDelete() && opts?.confirmed !== true) {
         const ok = window.confirm(deleteMode === 'archive'
           ? `Archive drone "${droneName}"?\n\nThis removes it from the active list now. You can restore it from Settings > Archive before it auto-deletes.`
           : `Are you sure you want to delete drone "${droneName}"?\n\nThis will remove the container and remove it from your registry.`);
@@ -189,7 +189,9 @@ export function useDroneMutationActions({
           delete next[droneId];
           return next;
         });
-        window.alert(`${deleteMode === 'archive' ? 'Archive' : 'Delete'} failed: ${msg}`);
+        if (opts?.showAlert !== false) {
+          window.alert(`${deleteMode === 'archive' ? 'Archive' : 'Delete'} failed: ${msg}`);
+        }
         return false;
       } finally {
         setDeletingDrones((prev) => {

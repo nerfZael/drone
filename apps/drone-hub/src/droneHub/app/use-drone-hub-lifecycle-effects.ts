@@ -402,15 +402,15 @@ export function useDroneHubLifecycleEffects({
       if (e.defaultPrevented) return;
       const captureRoot =
         e.target instanceof HTMLElement ? e.target.closest<HTMLElement>('[data-shortcut-capture="true"]') : null;
-      const shiftDeleteOnly =
+      const deleteOnly =
         e.key === 'Delete' &&
-        e.shiftKey &&
+        !e.repeat &&
+        !e.shiftKey &&
         !e.ctrlKey &&
         !e.metaKey &&
         !e.altKey;
-      const allowShiftDeleteFromChatInput =
-        isPrimaryChatInputTarget(e.target) || isCanvasMessageInputTarget(e.target);
-      if (shiftDeleteOnly && !captureRoot && (!isEditableTarget(e.target) || allowShiftDeleteFromChatInput)) {
+      const modalOpen = Boolean(document.querySelector('[role="dialog"][aria-modal="true"]'));
+      if (deleteOnly && !modalOpen && !captureRoot && !isEditableTarget(e.target)) {
         const handled = onDeleteSelectedDroneFromInputShortcut();
         if (handled) {
           e.preventDefault();
