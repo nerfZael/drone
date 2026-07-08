@@ -32,6 +32,10 @@ export function isDroneStartingOrSeeding(hubPhase: string | null | undefined): b
   return hubPhase === 'draft' || hubPhase === 'creating' || hubPhase === 'starting' || hubPhase === 'seeding';
 }
 
+export function shouldReadChatRuntimeForHubPhase(hubPhase: string | null | undefined): boolean {
+  return hubPhase !== 'creating' && hubPhase !== 'starting' && hubPhase !== 'seeding';
+}
+
 export function isHiddenDrone(drone: Pick<DroneSummary, 'visibility'> | null | undefined): boolean {
   return String(drone?.visibility ?? '').trim().toLowerCase() === 'hidden';
 }
