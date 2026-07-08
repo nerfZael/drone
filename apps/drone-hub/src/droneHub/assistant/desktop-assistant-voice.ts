@@ -189,6 +189,11 @@ function playCueForStatus(status: DesktopAssistantVoiceStatus): void {
   playLocalVoiceCue(cue);
 }
 
+function shouldPlayServerDesktopVoiceAudio(): boolean {
+  const status = latestStatus;
+  return Boolean(status && status.mode !== 'off' && status.mode !== 'error');
+}
+
 function stopDesktopVoiceSpeech(): void {
   if (typeof window === 'undefined') return;
   currentSpeechAudio?.pause();
@@ -542,6 +547,7 @@ async function requestDesktopVoiceRealtime(enabled: boolean): Promise<void> {
   if (realtimeToggleInFlight) return;
   realtimeToggleInFlight = true;
   try {
+    if (!enabled) stopDesktopVoiceWebRtc();
     const response = await fetch('/api/assistant/desktop-voice/realtime', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -692,13 +698,14 @@ export function subscribeAssistantDesktopVoiceStatus(listener: (status: DesktopA
       try {
         const data = JSON.parse((event as MessageEvent).data);
         const cue = String(data?.cue ?? '').trim() as LocalVoiceCue;
-        if (SERVER_LOCAL_VOICE_CUES.has(cue)) playLocalVoiceCue(cue);
+        if (SERVER_LOCAL_VOICE_CUES.has(cue) && shouldPlayServerDesktopVoiceAudio()) playLocalVoiceCue(cue);
       } catch {
         // Ignore malformed event payloads.
       }
     });
     nextSource.addEventListener('desktop_voice_speak', (event) => {
       try {
+        if (!shouldPlayServerDesktopVoiceAudio()) return;
         const data = JSON.parse((event as MessageEvent).data);
         const text = String(data?.text ?? '').trim();
         if (text) speakDesktopVoiceText(text);
@@ -708,6 +715,7 @@ export function subscribeAssistantDesktopVoiceStatus(listener: (status: DesktopA
     });
     nextSource.addEventListener('desktop_voice_speak_audio', (event) => {
       try {
+        if (!shouldPlayServerDesktopVoiceAudio()) return;
         const data = JSON.parse((event as MessageEvent).data);
         const audioBase64 = String(data?.audioBase64 ?? '').trim();
         const contentType = String(data?.contentType ?? 'audio/wav').trim() || 'audio/wav';
