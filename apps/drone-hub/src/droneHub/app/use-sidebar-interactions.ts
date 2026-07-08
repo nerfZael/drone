@@ -426,6 +426,12 @@ export function useSidebarInteractions({
     setSelectedSidebarNodeId(sidebarFolderNodeId(path));
   }, []);
 
+  const clearGroupedFolderSelection = React.useCallback((pathRaw?: string) => {
+    const path = String(pathRaw ?? '').trim();
+    setSelectedFolderPath((prev) => (!path || prev === path ? null : prev));
+    setSelectedSidebarNodeId((prev) => (!path || prev === sidebarFolderNodeId(path) ? null : prev));
+  }, []);
+
   const handleGroupedSelectDroneCard = React.useCallback(
     (droneId: string, opts?: DroneSelectionClickOptions) => {
       setSelectedFolderPath(null);
@@ -540,6 +546,7 @@ export function useSidebarInteractions({
     creatingGroupMove,
     folderEditor,
     folderEditorInputRef,
+    clearGroupedFolderSelection,
     handleGroupedSelectDroneCard,
     handleGroupedSelectDroneChat,
     handleGroupedSelectFolder,

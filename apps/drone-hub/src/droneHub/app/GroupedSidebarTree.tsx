@@ -41,8 +41,6 @@ import type { MoveDronesToGroupResult } from './use-group-management';
 import type { SidebarGroup } from './use-sidebar-view-model';
 
 const GROUPED_FOLDER_SINGLE_CLICK_DELAY_MS = 180;
-const EMPTY_SELECTED_DRONE_IDS: string[] = [];
-const EMPTY_SELECTED_DRONE_SET = new Set<string>();
 
 type FolderEditorState = {
   mode: 'create' | 'rename';
@@ -86,7 +84,7 @@ type GroupedSidebarTreeProps = {
   selectedSidebarNodeId: string | null;
   selectedFolderPath: string | null;
   setSelectedSidebarNodeId: React.Dispatch<React.SetStateAction<string | null>>;
-  onSelectFolder: (path: string) => void;
+  onSelectFolder: (path: string, opts?: { toggle?: boolean }) => void;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onMoveDronesToGroup: (group: string, droneIds: string[]) => Promise<MoveDronesToGroupResult>;
@@ -286,6 +284,26 @@ function groupedFolderDragData(args: {
     groupKind,
     label: label || sidebarGroupBaseName(folderPath) || folderPath,
   };
+}
+
+function collectSidebarTreeDroneIds(nodeTree: SidebarNodeTreeModel, rootNodeId: string): string[] {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  const visit = (nodeId: string) => {
+    const node = nodeTree.nodesById[nodeId];
+    if (!node) return;
+    if (node.kind === 'drone') {
+      if (!seen.has(node.droneId)) {
+        seen.add(node.droneId);
+        out.push(node.droneId);
+      }
+    }
+    for (const childId of nodeTree.childIdsByParent[nodeId] ?? []) {
+      visit(childId);
+    }
+  };
+  visit(rootNodeId);
+  return out;
 }
 
 function groupedDroneDragData(args: {
@@ -712,19 +730,16 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   if (!drone) return null;
   const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
   const dragDisabled = !sidebarDndEnabled || movingDroneGroups || isOptimistic;
-  const droneSelectionActive = !selectedFolderPath;
-  const effectiveSelectedDroneSet = droneSelectionActive ? selectedDroneSet : EMPTY_SELECTED_DRONE_SET;
-  const effectiveSelectedDroneIds = droneSelectionActive ? selectedDroneIds : EMPTY_SELECTED_DRONE_IDS;
   const dragData = React.useMemo(
     () =>
       groupedDroneDragData({
         drone,
         uiDroneName,
-        selectedDroneIds: effectiveSelectedDroneIds,
-        selectedDroneSet: effectiveSelectedDroneSet,
+        selectedDroneIds,
+        selectedDroneSet,
         visibleDroneOrder,
       }),
-    [drone, effectiveSelectedDroneIds, effectiveSelectedDroneSet, uiDroneName, visibleDroneOrder],
+    [drone, selectedDroneIds, selectedDroneSet, uiDroneName, visibleDroneOrder],
   );
   const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
     id: `sidebar-grouped-drone:${drone.id}`,
@@ -766,7 +781,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const childDroneIds = (nodeTree.childIdsByParent[node.id] ?? [])
     .map((childNodeId) => nodeTree.nodesById[childNodeId])
     .filter((child): child is SidebarTreeDroneNode => Boolean(child && child.kind === 'drone'));
-  const selected = droneSelectionActive && (selectedDroneSet.has(drone.id) || selectedSidebarNodeId === node.id);
+  const selected = selectedDroneSet.has(drone.id) || selectedSidebarNodeId === node.id;
   const showOpenDefaultChatIndicator =
     hasOnlyDefaultChat && selectedDrone === drone.id && activeChatName === 'default';
   const reorderPreviewClass =
@@ -977,6 +992,8 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     hiddenSidebarGroupTokenSet,
     selectedSidebarNodeId,
     selectedFolderPath,
+    selectedDroneIds,
+    selectedDroneSet,
     setSelectedSidebarNodeId,
     onSelectFolder,
     onToggleGroupCollapsed,
@@ -1009,14 +1026,25 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
   );
   const groupToken = React.useMemo(() => sidebarGroupOrderToken(groupRef), [groupRef]);
   const collapsed = Boolean(collapsedGroups[folderPath]);
-  const isSelected = selectedSidebarNodeId === node.id || selectedFolderPath === folderPath;
+  const folderDroneIds = React.useMemo(() => collectSidebarTreeDroneIds(nodeTree, node.id), [node.id, nodeTree]);
+  const folderDroneSelected = folderDroneIds.length > 0 && folderDroneIds.every((droneId) => selectedDroneSet.has(droneId));
+  const isSelected = selectedSidebarNodeId === node.id || selectedFolderPath === folderPath || folderDroneSelected;
   const isHiddenGroup = hiddenSidebarGroupTokenSet.has(groupToken);
   const showEditorInline = folderEditor?.targetPath === folderPath && folderEditor.mode === 'rename';
   const showCreateInline = (folderEditor?.anchorPath ?? folderEditor?.parentPath) === folderPath && folderEditor?.mode === 'create';
   const childIds = nodeTree.childIdsByParent[node.id] ?? [];
   const { attributes, listeners, isDragging, setNodeRef: setDragNodeRef } = useDraggable({
     id: `sidebar-folder:${node.id}`,
-    data: groupedFolderDragData({ nodeId: node.id, folderPath, groupKind: node.groupKind, label: node.label }),
+    data:
+      folderDroneSelected && folderDroneIds.length > 0
+        ? {
+            type: 'sidebar-drone',
+            droneId: folderDroneIds[0],
+            droneIds: selectedDroneIds.length > 0 ? selectedDroneIds : folderDroneIds,
+            groupOrderKey: null,
+            label: node.label,
+          }
+        : groupedFolderDragData({ nodeId: node.id, folderPath, groupKind: node.groupKind, label: node.label }),
     disabled: !sidebarDndEnabled,
   });
   const folderDndDisabled = !sidebarDndEnabled;
@@ -1056,20 +1084,20 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     }
   }, []);
   React.useEffect(() => clearClickTimer, [clearClickTimer]);
-  const runFolderSingleClick = React.useCallback(() => {
+  const runFolderSingleClick = React.useCallback((opts?: { toggle?: boolean }) => {
     if (shouldSuppressClick()) return;
-    if (isSelected) {
+    if (isSelected && !opts?.toggle) {
       onToggleGroupCollapsed(folderPath);
       return;
     }
     setSelectedSidebarNodeId(node.id);
-    onSelectFolder(folderPath);
+    onSelectFolder(folderPath, opts);
   }, [folderPath, isSelected, node.id, onSelectFolder, onToggleGroupCollapsed, setSelectedSidebarNodeId, shouldSuppressClick]);
-  const scheduleFolderSingleClick = React.useCallback(() => {
+  const scheduleFolderSingleClick = React.useCallback((opts?: { toggle?: boolean }) => {
     clearClickTimer();
     clickTimerRef.current = setTimeout(() => {
       clickTimerRef.current = null;
-      runFolderSingleClick();
+      runFolderSingleClick(opts);
     }, GROUPED_FOLDER_SINGLE_CLICK_DELAY_MS);
   }, [clearClickTimer, runFolderSingleClick]);
   const handleFolderDoubleClick = React.useCallback(
@@ -1113,7 +1141,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
             className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX}`}
             onClick={(event) => {
               if (event.detail > 1) return;
-              scheduleFolderSingleClick();
+              scheduleFolderSingleClick({ toggle: event.metaKey || event.ctrlKey });
             }}
             {...(folderDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
             {...(folderDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}

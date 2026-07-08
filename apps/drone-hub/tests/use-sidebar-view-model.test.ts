@@ -68,6 +68,37 @@ describe('buildRepoSidebarGroups', () => {
       },
     ]);
   });
+
+  test('can hide empty registered repo groups after drones are filtered out', () => {
+    expect(
+      buildRepoSidebarGroups({
+        drones: [],
+        activeRepoPath: '',
+        registeredRepoPaths: ['/work/repo-a'],
+        sidebarDroneOrderByGroup: {},
+        sidebarGroupOrder: [],
+        includeEmptyRegisteredRepoGroups: false,
+      }),
+    ).toEqual([]);
+
+    expect(
+      buildRepoSidebarGroups({
+        drones: [drone({ id: 'drone-a', name: 'drone-a', repoPath: '/work/repo-a', repoAttached: true })],
+        activeRepoPath: '',
+        registeredRepoPaths: ['/work/repo-a', '/work/repo-b'],
+        sidebarDroneOrderByGroup: {},
+        sidebarGroupOrder: [],
+        includeEmptyRegisteredRepoGroups: false,
+      }),
+    ).toEqual([
+      {
+        group: 'repo:/work/repo-a',
+        label: 'repo-a',
+        kind: 'repo',
+        items: [drone({ id: 'drone-a', name: 'drone-a', repoPath: '/work/repo-a', repoAttached: true })],
+      },
+    ]);
+  });
 });
 
 describe('isSidebarGroupDeleting', () => {
