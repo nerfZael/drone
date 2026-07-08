@@ -100,7 +100,7 @@ export function useSidebarOptimisticGroups({
     async (groupRaw: string, opts?: { placement?: SidebarGroupCreatePlacement }) => {
       const group = String(groupRaw ?? '').trim();
       if (!group) return { ok: false, error: 'Group name is required.' };
-      const placement = opts?.placement ?? 'end';
+      const placement = opts?.placement ?? 'start';
       setSidebarGroupOrder((prev) =>
         insertSidebarGroupOrderToken(prev, sidebarGroups, { group, kind: 'group' }, placement),
       );
