@@ -12,7 +12,7 @@ import {
   type RepoBranchSelectionState,
   type RepoBranchSourceMode,
 } from './drone-create-runtime';
-import { makeId } from './helpers';
+import { makeId, newDraftChatFocusKey } from './helpers';
 import { allocateUntitledDisplayName } from './name-helpers';
 import {
   addOptimisticStartupSeeds,
@@ -45,6 +45,10 @@ export type DraftAutomationStartInput = {
   sleepBetweenRunsSeconds?: number;
   stopPhrase?: string;
   stopPhraseCaseSensitive?: boolean;
+};
+
+export type StartDraftPromptOptions = {
+  keepComposerOpen?: boolean;
 };
 
 type UseDroneCreationActionsArgs = {
@@ -234,6 +238,15 @@ export function useDroneCreationActions({
     draftChatRef.current = draftChat;
   }, [draftChat]);
   const cloneDronePendingRef = React.useRef(false);
+  const draftCreateInFlightCountRef = React.useRef(0);
+  const beginDraftCreate = React.useCallback(() => {
+    draftCreateInFlightCountRef.current += 1;
+    setDraftCreating(true);
+  }, [setDraftCreating]);
+  const endDraftCreate = React.useCallback(() => {
+    draftCreateInFlightCountRef.current = Math.max(0, draftCreateInFlightCountRef.current - 1);
+    setDraftCreating(draftCreateInFlightCountRef.current > 0);
+  }, [setDraftCreating]);
   const showTransientToast = React.useCallback(
     (message: string, title = 'Action failed') => {
       const text = String(message ?? '').trim();
@@ -633,6 +646,7 @@ export function useDroneCreationActions({
       autoRename?: boolean;
       autoRenamePrompt?: string;
       automationStart?: DraftAutomationStartInput;
+      keepDraftComposerOpen?: boolean;
     }): Promise<boolean> => {
       const latestDraftChat = draftChatRef.current;
       const pending = latestDraftChat?.prompt ?? null;
@@ -666,6 +680,7 @@ export function useDroneCreationActions({
       const group = String(opts?.group ?? draftCreateGroup ?? '').trim();
       const fleetParentId = String(draftCreateParentDroneId ?? '').trim();
       const runtime = createRuntime;
+      const keepDraftComposerOpen = Boolean(opts?.keepDraftComposerOpen);
       const persistVolume = runtime === 'container' ? createPersistVolume : undefined;
       const repoPath = String(draftCreateRepoPath ?? '').trim();
       const repoSeedFromDroneId = resolveRepoSeedFromParentDroneId({
@@ -722,7 +737,7 @@ export function useDroneCreationActions({
         setDraftCreateError('Automations require a builtin transcript agent.');
         return false;
       }
-      setDraftCreating(true);
+      beginDraftCreate();
       setDraftCreateError(null);
       const seedModel = createWithoutChat ? null : spawnModelForSeed;
       let createdDrone = false;
@@ -742,179 +757,196 @@ export function useDroneCreationActions({
             repoPath,
           })
         : [];
-      try {
-        const body = buildDraftDroneCreatePayload({
-          name,
-          group,
-          repoPath,
-          fleetParentId,
-          repoSeedFromDroneId,
-          runtime,
-          persistVolume,
-          repoBranchSelection: {
-            repoBranchSource: effectiveRepoBranchSource,
-            pullHostBranchBeforeCreate,
-            remoteBranch,
-          },
-          seedAgent,
-          seedModel,
-          seedAgentPermissionMode,
-          prompt: shouldSeedPromptViaCreate ? prompt : '',
-        });
-        if (createAsDraft) (body as any).draft = true;
-        const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(
-          `/api/drones`,
-          {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(body),
-          },
-        );
-        const droneId = String((data as any)?.id ?? '').trim();
-        const createdName = String((data as any)?.name ?? name ?? '').trim() || droneId;
-        if (!droneId) throw new Error('create drone did not return an id');
-        createdDrone = true;
 
-        if (optimisticSeeds.length > 0) {
-          replaceOptimisticStartupSeeds(setStartupSeedByDrone, optimisticSeeds, [{ id: droneId, name: createdName }], {
-            runtime,
-            agent: seedAgent,
-            model: seedModel,
-            agentPermissionMode: seedAgentPermissionMode,
-            prompt: shouldSeedPromptViaCreate ? prompt : '',
-            chatName: 'default',
+      const runCreate = async (): Promise<boolean> => {
+        try {
+          const body = buildDraftDroneCreatePayload({
+            name,
             group,
             repoPath,
-          });
-        } else if (shouldSeedPromptViaCreate) {
-          if (seedModel) rememberSeenModels([seedModel]);
-          rememberStartupSeed([{ id: droneId, name: createdName }], {
+            fleetParentId,
+            repoSeedFromDroneId,
             runtime,
-            agent: seedAgent,
-            model: seedModel,
-            agentPermissionMode: seedAgentPermissionMode,
-            prompt,
-            chatName: 'default',
-            group,
-            repoPath,
-          });
-        }
-        preferredSelectedDroneRef.current = droneId;
-        preferredSelectedDroneHoldUntilRef.current = Date.now() + startupSeedMissingGraceMs;
-        setSelectedDrone(droneId);
-        setSelectedDroneIds([droneId]);
-        selectionAnchorRef.current = droneId;
-        setSelectedChat('default');
-
-        setDraftChatState((prev) => {
-          if (!prev?.prompt) return prev;
-          return {
-            ...(prev ?? { focusKey: undefined }),
-            droneId,
-            droneName: createdName,
-            queuedPrompts: Array.isArray(prev.queuedPrompts) ? prev.queuedPrompts : [],
-            prompt: {
-              ...prev.prompt,
-              state: 'sent',
-              updatedAt: new Date().toISOString(),
+            persistVolume,
+            repoBranchSelection: {
+              repoBranchSource: effectiveRepoBranchSource,
+              pullHostBranchBeforeCreate,
+              remoteBranch,
             },
-          };
-        });
+            seedAgent,
+            seedModel,
+            seedAgentPermissionMode,
+            prompt: shouldSeedPromptViaCreate ? prompt : '',
+          });
+          if (createAsDraft) (body as any).draft = true;
+          const data = await requestJson<{ ok: true; id: string; name: string; phase: 'starting' }>(
+            `/api/drones`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(body),
+            },
+          );
+          const droneId = String((data as any)?.id ?? '').trim();
+          const createdName = String((data as any)?.name ?? name ?? '').trim() || droneId;
+          if (!droneId) throw new Error('create drone did not return an id');
+          createdDrone = true;
 
-        if (!createWithoutChat && automationPrompt && automationId) {
-          const startBody = {
-            automationId,
-            automationLabel,
-            prompt: automationPrompt,
-            onFailurePrompt: automationOnFailurePrompt,
-            runs: automationRuns,
-            sleepBetweenRunsSeconds: automationSleepBetweenRunsSeconds,
-            stopPhrase: automationStopPhrase,
-            stopPhraseCaseSensitive: automationStopPhraseCaseSensitive,
-          };
-          let lastError: unknown = null;
-          for (let attempt = 0; attempt < DRAFT_AUTOMATION_START_MAX_ATTEMPTS; attempt += 1) {
-            try {
-              await requestJson(
-                `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent('default')}/automations/start`,
-                {
-                  method: 'POST',
-                  headers: { 'content-type': 'application/json' },
-                  body: JSON.stringify(startBody),
-                },
-              );
-              lastError = null;
-              break;
-            } catch (e: any) {
-              lastError = e;
-              if (attempt >= DRAFT_AUTOMATION_START_MAX_ATTEMPTS - 1 || !shouldRetryDraftAutomationStart(e)) break;
-              await waitMs(draftAutomationStartRetryDelayMs(attempt));
-            }
+          if (optimisticSeeds.length > 0) {
+            replaceOptimisticStartupSeeds(setStartupSeedByDrone, optimisticSeeds, [{ id: droneId, name: createdName }], {
+              runtime,
+              agent: seedAgent,
+              model: seedModel,
+              agentPermissionMode: seedAgentPermissionMode,
+              prompt: shouldSeedPromptViaCreate ? prompt : '',
+              chatName: 'default',
+              group,
+              repoPath,
+            });
+          } else if (shouldSeedPromptViaCreate) {
+            if (seedModel) rememberSeenModels([seedModel]);
+            rememberStartupSeed([{ id: droneId, name: createdName }], {
+              runtime,
+              agent: seedAgent,
+              model: seedModel,
+              agentPermissionMode: seedAgentPermissionMode,
+              prompt,
+              chatName: 'default',
+              group,
+              repoPath,
+            });
           }
-          if (lastError) {
-            const automationErr = String((lastError as any)?.message ?? lastError ?? 'failed to start automation').trim();
-            postCreateError = `Drone created, but failed to start automation: ${automationErr}`;
+          if (!keepDraftComposerOpen) {
+            preferredSelectedDroneRef.current = droneId;
+            preferredSelectedDroneHoldUntilRef.current = Date.now() + startupSeedMissingGraceMs;
+            setSelectedDrone(droneId);
+            setSelectedDroneIds([droneId]);
+            selectionAnchorRef.current = droneId;
+            setSelectedChat('default');
           }
-        }
 
-        if (hasDraftAttachments) {
-          enqueueQueuedPrompt(droneId, 'default', prompt, draftAttachments);
-        }
-        for (const queuedPrompt of queuedPromptsToHandoff) {
-          enqueueQueuedPrompt(droneId, 'default', queuedPrompt.prompt, queuedPrompt.attachmentPayloads);
-        }
-        if (queuedPromptsToHandoff.length > 0) {
           setDraftChatState((prev) => {
             if (!prev?.prompt) return prev;
             return {
-              ...prev,
-              queuedPrompts: [],
+              ...(prev ?? { focusKey: undefined }),
+              droneId,
+              droneName: createdName,
+              queuedPrompts: Array.isArray(prev.queuedPrompts) ? prev.queuedPrompts : [],
+              prompt: {
+                ...prev.prompt,
+                state: 'sent',
+                updatedAt: new Date().toISOString(),
+              },
             };
           });
-        }
 
-        if (opts?.autoRename && !createWithoutChat) {
-          const renameSourcePrompt = String(opts.autoRenamePrompt ?? prompt ?? '').trim();
-          if (renameSourcePrompt) {
-            setDraftAutoRenaming(true);
-            void suggestAndRenameDraftDrone(droneId, renameSourcePrompt).finally(() => setDraftAutoRenaming(false));
+          if (!createWithoutChat && automationPrompt && automationId) {
+            const startBody = {
+              automationId,
+              automationLabel,
+              prompt: automationPrompt,
+              onFailurePrompt: automationOnFailurePrompt,
+              runs: automationRuns,
+              sleepBetweenRunsSeconds: automationSleepBetweenRunsSeconds,
+              stopPhrase: automationStopPhrase,
+              stopPhraseCaseSensitive: automationStopPhraseCaseSensitive,
+            };
+            let lastError: unknown = null;
+            for (let attempt = 0; attempt < DRAFT_AUTOMATION_START_MAX_ATTEMPTS; attempt += 1) {
+              try {
+                await requestJson(
+                  `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent('default')}/automations/start`,
+                  {
+                    method: 'POST',
+                    headers: { 'content-type': 'application/json' },
+                    body: JSON.stringify(startBody),
+                  },
+                );
+                lastError = null;
+                break;
+              } catch (e: any) {
+                lastError = e;
+                if (attempt >= DRAFT_AUTOMATION_START_MAX_ATTEMPTS - 1 || !shouldRetryDraftAutomationStart(e)) break;
+                await waitMs(draftAutomationStartRetryDelayMs(attempt));
+              }
+            }
+            if (lastError) {
+              const automationErr = String((lastError as any)?.message ?? lastError ?? 'failed to start automation').trim();
+              postCreateError = `Drone created, but failed to start automation: ${automationErr}`;
+            }
           }
-        }
 
-        setDraftCreateOpen(false);
-        setDraftCreateName('');
-        setDraftCreateGroup('');
-        setDraftCreateParentDroneId(null);
-        setCreateAsDraft(false);
-        setDraftCreateError(postCreateError);
-        setDraftNameSuggestionError(null);
-        setDraftNameSuggesting(false);
-        if (createWithoutChat) setDraftChatState(null);
-        return true;
-      } catch (e: any) {
-        const err = e?.message ?? String(e);
-        clearOptimisticStartupSeeds(setStartupSeedByDrone, optimisticSeeds);
-        if (createdDrone) {
-          setDraftCreateError(`Drone created, but setup was incomplete: ${err}`);
+          if (hasDraftAttachments) {
+            enqueueQueuedPrompt(droneId, 'default', prompt, draftAttachments);
+          }
+          for (const queuedPrompt of queuedPromptsToHandoff) {
+            enqueueQueuedPrompt(droneId, 'default', queuedPrompt.prompt, queuedPrompt.attachmentPayloads);
+          }
+          if (queuedPromptsToHandoff.length > 0) {
+            setDraftChatState((prev) => {
+              if (!prev?.prompt) return prev;
+              return {
+                ...prev,
+                queuedPrompts: [],
+              };
+            });
+          }
+
+          if (opts?.autoRename && !createWithoutChat) {
+            const renameSourcePrompt = String(opts.autoRenamePrompt ?? prompt ?? '').trim();
+            if (renameSourcePrompt) {
+              setDraftAutoRenaming(true);
+              void suggestAndRenameDraftDrone(droneId, renameSourcePrompt).finally(() => setDraftAutoRenaming(false));
+            }
+          }
+
+          setDraftCreateOpen(false);
+          if (!keepDraftComposerOpen) {
+            setDraftCreateName('');
+            setDraftCreateGroup('');
+            setDraftCreateParentDroneId(null);
+            setCreateAsDraft(false);
+            setDraftCreateError(postCreateError);
+            setDraftNameSuggestionError(null);
+            setDraftNameSuggesting(false);
+          } else if (postCreateError) {
+            setDraftCreateError(postCreateError);
+          }
+          if (createWithoutChat && !keepDraftComposerOpen) setDraftChatState(null);
           return true;
+        } catch (e: any) {
+          const err = e?.message ?? String(e);
+          clearOptimisticStartupSeeds(setStartupSeedByDrone, optimisticSeeds);
+          if (createdDrone) {
+            setDraftCreateError(`Drone created, but setup was incomplete: ${err}`);
+            return true;
+          }
+          setDraftChatState((prev) => {
+            if (!prev?.prompt) return prev;
+            return {
+              ...(prev ?? { droneId: '', droneName: '' }),
+              prompt: {
+                ...prev.prompt,
+                state: 'failed',
+                error: err,
+                updatedAt: new Date().toISOString(),
+              },
+            };
+          });
+          setDraftCreateError(err);
+          return false;
+        } finally {
+          endDraftCreate();
         }
-        setDraftChatState((prev) => {
-          if (!prev?.prompt) return prev;
-          return {
-            ...(prev ?? { droneId: '', droneName: '' }),
-            prompt: {
-              ...prev.prompt,
-              state: 'failed',
-              error: err,
-              updatedAt: new Date().toISOString(),
-            },
-          };
-        });
-        setDraftCreateError(err);
-        return false;
-      } finally {
-        setDraftCreating(false);
+      };
+
+      if (keepDraftComposerOpen) {
+        setDraftChatState({ droneId: '', droneName: '', prompt: null, queuedPrompts: [], focusKey: newDraftChatFocusKey() });
+        void runCreate();
+        return true;
       }
+
+      return await runCreate();
     },
     [
       draftCreateRepoPath,
@@ -940,6 +972,8 @@ export function useDroneCreationActions({
       requestJson,
       resolveAgentKeyToConfig,
       selectionAnchorRef,
+      beginDraftCreate,
+      endDraftCreate,
       setDraftAutoRenaming,
       setCreateAsDraft,
       setDraftChat,
@@ -981,10 +1015,24 @@ export function useDroneCreationActions({
   );
 
   const startDraftPrompt = React.useCallback(
-    async (payload: ChatSendPayload): Promise<boolean> => {
+    async (payload: ChatSendPayload, opts?: StartDraftPromptOptions): Promise<boolean> => {
       const attachments = normalizeChatImageAttachmentPayloads(payload?.attachments);
       const prompt = String(payload?.prompt ?? '').trim();
       if (!prompt && attachments.length === 0) return false;
+      if (opts?.keepComposerOpen) {
+        setDraftCreateError(null);
+        setDraftSuggestedName('');
+        setDraftNameSuggesting(false);
+        setDraftNameSuggestionError(null);
+        setDraftAutoRenaming(false);
+        setDraftCreateOpen(false);
+        return await createDroneFromDraft({
+          prompt,
+          attachments,
+          autoRename: !draftCreateName.trim(),
+          keepDraftComposerOpen: true,
+        });
+      }
       const nextDraftChat: DraftChatState = {
         droneId: '',
         droneName: '',
