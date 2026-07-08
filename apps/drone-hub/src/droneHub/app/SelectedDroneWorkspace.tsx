@@ -636,6 +636,14 @@ export function SelectedDroneWorkspace({
     fleetBadgeAssigning ||
     fleetBadgeDropActive ||
     (!currentDroneIsDraft && (Boolean(fleetBadgeError) || /\b[1-9]\d*\b/.test(fleetBadgeSummaryText)));
+  const selectedChatDockerSnapshotBusy = React.useMemo(
+    () =>
+      (transcripts ?? []).some((item) => {
+        const status = String(item?.dockerSnapshot?.status ?? '').trim();
+        return status === 'creating' || status === 'restoring';
+      }),
+    [transcripts],
+  );
   const chatInputWaiting = currentChatIsDraft
     ? false
     : chatUiMode === 'transcript'
@@ -694,14 +702,6 @@ export function SelectedDroneWorkspace({
   });
   const transcriptRenderBlocks = React.useMemo<TranscriptRenderBlock[]>(
     () => buildTranscriptRenderBlocks(transcripts ?? []),
-    [transcripts],
-  );
-  const selectedChatDockerSnapshotBusy = React.useMemo(
-    () =>
-      (transcripts ?? []).some((item) => {
-        const status = String(item?.dockerSnapshot?.status ?? '').trim();
-        return status === 'creating' || status === 'restoring';
-      }),
     [transcripts],
   );
   const latestAgentSuggestionMessageId = React.useMemo(
