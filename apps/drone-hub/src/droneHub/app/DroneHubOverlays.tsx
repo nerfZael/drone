@@ -3,6 +3,7 @@ import type { CreateDronesFromAgentMessageModal as CreateDronesFromAgentMessageM
 import type { CreateDronesModal as CreateDronesModalComponent } from './CreateDronesModal';
 import type { CustomAgentsModal as CustomAgentsModalComponent } from './CustomAgentsModal';
 import type { DirtyDroneApplyModal as DirtyDroneApplyModalComponent } from './DirtyDroneApplyModal';
+import type { DroneDeleteConfirmModal as DroneDeleteConfirmModalComponent } from './DroneDeleteConfirmModal';
 import type { DroneDropActionModal as DroneDropActionModalComponent } from './DroneDropActionModal';
 import type { DraftCreateDroneModal as DraftCreateDroneModalComponent } from './DraftCreateDroneModal';
 import type { DroneErrorModal as DroneErrorModalComponent } from './DroneErrorModal';
@@ -27,6 +28,11 @@ const CustomAgentsModal = React.lazy(async () => {
 const DirtyDroneApplyModal = React.lazy(async () => {
   const { DirtyDroneApplyModal } = await import('./DirtyDroneApplyModal');
   return { default: DirtyDroneApplyModal };
+});
+
+const DroneDeleteConfirmModal = React.lazy(async () => {
+  const { DroneDeleteConfirmModal } = await import('./DroneDeleteConfirmModal');
+  return { default: DroneDeleteConfirmModal };
 });
 
 const DroneDropActionModal = React.lazy(async () => {
@@ -57,6 +63,7 @@ export type DroneHubOverlaysProps = {
   createFromAgentMessageModalProps: React.ComponentProps<typeof CreateDronesFromAgentMessageModalComponent>;
   reposModalProps: React.ComponentProps<typeof ReposModalComponent> | null;
   dirtyDroneApplyModalProps: React.ComponentProps<typeof DirtyDroneApplyModalComponent> | null;
+  droneDeleteConfirmModalProps: React.ComponentProps<typeof DroneDeleteConfirmModalComponent> | null;
   droneErrorModalProps: React.ComponentProps<typeof DroneErrorModalComponent> | null;
   droneDropActionModalProps: React.ComponentProps<typeof DroneDropActionModalComponent> | null;
 };
@@ -69,6 +76,7 @@ export function DroneHubOverlays({
   createFromAgentMessageModalProps,
   reposModalProps,
   dirtyDroneApplyModalProps,
+  droneDeleteConfirmModalProps,
   droneErrorModalProps,
   droneDropActionModalProps,
 }: DroneHubOverlaysProps) {
@@ -92,6 +100,9 @@ export function DroneHubOverlays({
       <React.Suspense fallback={null}>{reposModalProps && <ReposModal {...reposModalProps} />}</React.Suspense>
       <React.Suspense fallback={null}>
         {dirtyDroneApplyModalProps && <DirtyDroneApplyModal {...dirtyDroneApplyModalProps} />}
+      </React.Suspense>
+      <React.Suspense fallback={null}>
+        {droneDeleteConfirmModalProps && <DroneDeleteConfirmModal {...droneDeleteConfirmModalProps} />}
       </React.Suspense>
       <React.Suspense fallback={null}>
         {droneErrorModalProps && <DroneErrorModal {...droneErrorModalProps} />}

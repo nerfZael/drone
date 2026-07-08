@@ -20,7 +20,7 @@ type PlaybookRunsWorkspaceProps = {
   pullHostBranchBeforeCreate: boolean;
   onClose: () => void;
   onOpenPlaybookSettings: (playbookId: string) => void;
-  onDeleteRunDrone: (droneId: string) => Promise<void>;
+  onDeleteRunDrone: (droneId: string) => void;
   deletingDrones: Record<string, boolean>;
   optimisticallyDeletedDrones: Record<string, boolean>;
   onOpenRun: (droneId: string, chatName: string) => void;
