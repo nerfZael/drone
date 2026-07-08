@@ -161,6 +161,7 @@ export function useSidebarViewModel({
         registeredRepoPaths,
         sidebarDroneOrderByGroup,
         sidebarGroupOrder,
+        includeEmptyRegisteredRepoGroups: !showRecentDronesOnly,
       }).filter((group) => !isSidebarGroupDeleting(group));
     }
 
@@ -207,6 +208,7 @@ export function useSidebarViewModel({
     sidebarDronesFilteredByRepoBase,
     sidebarGroupOrder,
     sidebarGroupingMode,
+    showRecentDronesOnly,
   ]);
 
   const sidebarHiddenGroupCount = React.useMemo(

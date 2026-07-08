@@ -17,18 +17,28 @@ export function buildRepoSidebarGroups(args: {
   registeredRepoPaths: string[];
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarGroupOrder: string[];
+  includeEmptyRegisteredRepoGroups?: boolean;
 }): SidebarGroup[] {
-  const { drones, activeRepoPath, registeredRepoPaths, sidebarDroneOrderByGroup, sidebarGroupOrder } = args;
+  const {
+    drones,
+    activeRepoPath,
+    registeredRepoPaths,
+    sidebarDroneOrderByGroup,
+    sidebarGroupOrder,
+    includeEmptyRegisteredRepoGroups = true,
+  } = args;
   const byRepo = new Map<string, SidebarGroup>();
   const targetRepo = String(activeRepoPath ?? '').trim();
   const visibleRepoPaths = targetRepo ? [targetRepo] : registeredRepoPaths;
 
-  for (const repoPathRaw of visibleRepoPaths) {
-    const repoPath = String(repoPathRaw ?? '').trim();
-    if (!repoPath) continue;
-    const key = `repo:${repoPath}`;
-    if (byRepo.has(key)) continue;
-    byRepo.set(key, { group: key, label: repoPathToLabel(repoPath), kind: 'repo', items: [] });
+  if (includeEmptyRegisteredRepoGroups) {
+    for (const repoPathRaw of visibleRepoPaths) {
+      const repoPath = String(repoPathRaw ?? '').trim();
+      if (!repoPath) continue;
+      const key = `repo:${repoPath}`;
+      if (byRepo.has(key)) continue;
+      byRepo.set(key, { group: key, label: repoPathToLabel(repoPath), kind: 'repo', items: [] });
+    }
   }
 
   for (const d of drones) {
