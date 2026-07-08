@@ -630,11 +630,11 @@ export function SelectedDroneWorkspace({
   });
   const compactRepoPath = String(currentDrone.repoPath ?? '').trim();
   const compactRepoLabel = compactRepoPath ? repoPathLabel(compactRepoPath) : '';
+  const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const showFleetBadge =
     fleetBadgeAssigning ||
     fleetBadgeDropActive ||
-    Boolean(fleetBadgeError) ||
-    /\b[1-9]\d*\b/.test(fleetBadgeSummaryText);
+    (!currentDroneIsDraft && (Boolean(fleetBadgeError) || /\b[1-9]\d*\b/.test(fleetBadgeSummaryText)));
   const openChatErrorDetails = React.useCallback(() => {
     const message = String(chatInfoError ?? '').trim();
     if (!message) return;
@@ -2423,7 +2423,7 @@ export function SelectedDroneWorkspace({
             autoFocus={shouldAutoFocusInput}
             onStop={canStopResponse ? () => requestStopResponse() : undefined}
             stopping={stoppingResponse}
-            onPublish={currentDrone.draft === true || currentDrone.hubPhase === 'draft' || selectedChatIsDraft ? publishSelectedDraft : undefined}
+            onPublish={currentDroneIsDraft || selectedChatIsDraft ? publishSelectedDraft : undefined}
             onSend={async (payload: ChatSendPayload) => await sendPromptText(payload)}
             onSendAutomation={
               chatUiMode === 'transcript'

@@ -13,7 +13,7 @@ import {
 } from './optimistic-pending-prompts';
 import { droneChatEventMatches, fetchDroneChatState, fetchDroneChatTranscriptCached, sameTranscriptItems, sendDroneChatPrompt } from './chat-api';
 import { subscribeDroneChatEvents } from './chat-events';
-import { droneChatQueueKey, isDroneStartingOrSeeding, parseDroneChatQueueKey } from './helpers';
+import { droneChatQueueKey, isDroneStartingOrSeeding, parseDroneChatQueueKey, shouldReadChatRuntimeForHubPhase } from './helpers';
 import { fetchJson, isNotFoundError, resolvePollIntervalMs, usePoll } from './hooks';
 import { beginRecordBusyKey, removeRecordKey } from './keyed-record-state';
 import type { QueuedPrompt } from './use-queued-prompts-state';
@@ -544,7 +544,7 @@ export function useChatRuntimeOrchestration({
       const key = selectedChatCacheKey;
       if (!selectedDrone || !selectedChat) return { key, pending: [] };
       if (!hasSelectedDroneSummary) return { key, pending: [] };
-      if (isDroneStartingOrSeeding(selectedDroneHubPhase)) return { key, pending: [] };
+      if (!shouldReadChatRuntimeForHubPhase(selectedDroneHubPhase)) return { key, pending: [] };
       const data = await fetchJson<{ ok: true; pending: PendingPrompt[] }>(
         `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/pending`,
       );
@@ -760,7 +760,7 @@ export function useChatRuntimeOrchestration({
         reloadAfterCurrentLoad = true;
         return;
       }
-      if (isDroneStartingOrSeeding(selectedDroneHubPhase)) return;
+      if (!shouldReadChatRuntimeForHubPhase(selectedDroneHubPhase)) return;
       busy = true;
       let keepLoading = false;
       const shouldLoadTailFirst = !loadedInitialTail && !fullTranscriptLoadedRef.current;
