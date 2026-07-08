@@ -313,10 +313,12 @@ type AssistantToolCall = { id: string; name: string; args: any };
 type AssistantDroneNameMap = Record<string, string>;
 type AssistantWaitTargetLabel = { key: string; droneLabel: string; chatName: string };
 type AssistantMessageDroneSummary = { droneLabel: string; chatName: string; message: string };
+type AssistantToolRenderItem = { type: 'tool'; key: string; call?: AssistantToolCall; result?: AssistantMessage };
 
 type AssistantRenderItem =
   | { type: 'message'; key: string; message: AssistantMessage; showToolCalls?: boolean; sourceMessageIndex: number }
-  | { type: 'tool'; key: string; call?: AssistantToolCall; result?: AssistantMessage }
+  | AssistantToolRenderItem
+  | { type: 'toolGroup'; key: string; items: AssistantToolRenderItem[] }
   | { type: 'queued'; key: string; prompt: AssistantQueuedPrompt };
 
 function messageText(message: AssistantMessage): string {
@@ -343,6 +345,17 @@ function lastAssistantContentBlock(message: AssistantMessage): { type: string } 
     if (t === 'text' || t === 'thinking' || t === 'toolCall') return { type: t };
   }
   return null;
+}
+
+function latestThinkingText(message: AssistantMessage): string {
+  if (lastAssistantContentBlock(message)?.type !== 'thinking') return '';
+  const content = message.content;
+  if (!Array.isArray(content)) return '';
+  for (let i = content.length - 1; i >= 0; i -= 1) {
+    const part = content[i];
+    if (part?.type === 'thinking') return String(part.thinking ?? '');
+  }
+  return '';
 }
 
 function toolCalls(message: AssistantMessage): AssistantToolCall[] {
@@ -459,6 +472,48 @@ function toolActivityTitle(call: AssistantToolCall | undefined, result: Assistan
   return baseTitle;
 }
 
+function toolItemName(item: AssistantToolRenderItem): string {
+  return String(item.call?.name || item.result?.toolName || '').trim();
+}
+
+function canGroupToolItem(item: AssistantToolRenderItem): boolean {
+  const name = toolItemName(item);
+  return Boolean(name) && name !== 'message_drone' && !isChatIdleToolName(name);
+}
+
+function compactRepeatedToolItems(items: AssistantRenderItem[]): AssistantRenderItem[] {
+  const compacted: AssistantRenderItem[] = [];
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    if (item.type !== 'tool' || !canGroupToolItem(item)) {
+      compacted.push(item);
+      continue;
+    }
+
+    const name = toolItemName(item);
+    const run: AssistantToolRenderItem[] = [item];
+    let nextIndex = index + 1;
+    while (nextIndex < items.length) {
+      const next = items[nextIndex];
+      if (next.type !== 'tool' || !canGroupToolItem(next) || toolItemName(next) !== name) break;
+      run.push(next);
+      nextIndex += 1;
+    }
+
+    if (run.length > 1) {
+      compacted.push({
+        type: 'toolGroup',
+        key: `tool-group:${name}:${run[0].key}:${run.length}`,
+        items: run,
+      });
+      index = nextIndex - 1;
+    } else {
+      compacted.push(item);
+    }
+  }
+  return compacted;
+}
+
 function toolDroneLookupKey(items: AssistantRenderItem[]): string {
   const keys: string[] = [];
   for (const item of items) {
@@ -524,7 +579,7 @@ function renderItemsFromMessages(messages: AssistantMessage[]): AssistantRenderI
       items.push({ type: 'tool', key: `tool-call:${call.id}`, call, result });
     }
   }
-  return items;
+  return compactRepeatedToolItems(items);
 }
 
 function formatUpdatedAt(raw: string): string {
@@ -864,6 +919,53 @@ function ToolPayloadDetails({ call, result }: { call?: AssistantToolCall; result
   );
 }
 
+function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderItem[] }) {
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const first = items[0];
+  const name = toolItemName(first);
+  const label = toolLabel(name);
+  const errorCount = items.filter((item) => item.result?.isError).length;
+  const pendingCount = items.filter((item) => !item.result).length;
+  const statusParts = [
+    pendingCount > 0 ? `${pendingCount} pending` : '',
+    errorCount > 0 ? `${errorCount} failed` : '',
+  ].filter(Boolean);
+  const statusText = statusParts.length > 0 ? statusParts.join(', ') : 'Complete';
+  const statusResult: AssistantMessage | undefined =
+    errorCount > 0 ? { role: 'toolResult', isError: true, content: '' } : pendingCount > 0 ? undefined : { role: 'toolResult', content: '' };
+
+  return (
+    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]">
+      <div className="flex min-w-0 items-center gap-2 px-2.5 py-2">
+        <ToolStatusIndicator result={statusResult} />
+        <div className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+          {label}
+        </div>
+        <span className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--fg-secondary)]">
+          x{items.length}
+        </span>
+        <span className="hidden flex-shrink-0 text-[10px] text-[var(--muted-dim)] sm:inline">{statusText}</span>
+        <ToolDetailsButton open={detailsOpen} onClick={() => setDetailsOpen((value) => !value)} />
+      </div>
+      {detailsOpen ? (
+        <div className="grid gap-2 border-t border-[var(--border-subtle)] p-2">
+          {items.map((item, index) => (
+            <div key={item.key} className="overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)]">
+              <div className="flex min-w-0 items-center gap-2 border-b border-[var(--border-subtle)] px-2.5 py-1.5">
+                <ToolStatusIndicator result={item.result} />
+                <div className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                  {label} #{index + 1}
+                </div>
+              </div>
+              <ToolPayloadDetails call={item.call} result={item.result} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function MessageDroneActivityRow({
   call,
   result,
@@ -1023,10 +1125,12 @@ function AssistantMessageRow({
   message,
   showToolCalls = true,
   isStreamingAssistant = false,
+  showReasoning = false,
 }: {
   message: AssistantMessage;
   showToolCalls?: boolean;
   isStreamingAssistant?: boolean;
+  showReasoning?: boolean;
 }) {
   const calls = showToolCalls ? toolCalls(message) : [];
   const content = message.content;
@@ -1052,8 +1156,9 @@ function AssistantMessageRow({
       if (!part || typeof part !== 'object') continue;
       if (part.type === 'thinking') {
         const thinkingText = String(part.thinking ?? '');
-        const headerPulse = Boolean(isStreamingAssistant && lastBlock?.type === 'thinking' && i === lastThinkingPartIndex);
-        if (thinkingText.trim() || headerPulse) {
+        const currentReasoning = Boolean(showReasoning && lastBlock?.type === 'thinking' && i === lastThinkingPartIndex);
+        const headerPulse = Boolean(isStreamingAssistant && currentReasoning);
+        if (currentReasoning) {
           blocks.push(<ReasoningBlock key={`th:${i}`} text={thinkingText} headerPulse={headerPulse} />);
         }
       } else if (part.type === 'text') {
@@ -1072,6 +1177,8 @@ function AssistantMessageRow({
       )
     ) : null;
   }
+
+  if (message.role === 'assistant' && !body && !message.errorMessage && calls.length === 0) return null;
 
   return (
     <div className={`px-3 py-2 ${message.role === 'user' ? 'bg-[rgba(255,255,255,.025)] border-y border-[var(--border-subtle)]' : ''}`}>
@@ -2562,6 +2669,13 @@ export function AssistantDock() {
     }
     return items;
   }, [activeThread?.queuedPrompts, visibleMessages]);
+  const latestActivityItemKey = React.useMemo(() => {
+    for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
+      const item = visibleItems[index];
+      if (item.type !== 'queued') return item.key;
+    }
+    return '';
+  }, [visibleItems]);
   const streamingAssistantSourceIndex = React.useMemo(() => {
     const streamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
       ? snapshot.streamingMessages
@@ -2580,7 +2694,18 @@ export function AssistantDock() {
         : [];
     return streamingMessages.find((streaming) => streaming.role === 'assistant') ?? null;
   }, [snapshot?.streamingMessage, snapshot?.streamingMessages]);
-  const showThinking = running && activePendingApprovals.length === 0 && !messageText(streamingAssistantMessage ?? { role: 'assistant' }).trim();
+  const latestActivityShowsReasoning = React.useMemo(() => {
+    if (!running || !latestActivityItemKey) return false;
+    const item = visibleItems.find((candidate) => candidate.key === latestActivityItemKey);
+    if (item?.type !== 'message' || item.message.role !== 'assistant') return false;
+    if (lastAssistantContentBlock(item.message)?.type !== 'thinking') return false;
+    return Boolean(latestThinkingText(item.message).trim() || item.sourceMessageIndex === streamingAssistantSourceIndex);
+  }, [latestActivityItemKey, running, streamingAssistantSourceIndex, visibleItems]);
+  const showThinking =
+    running &&
+    activePendingApprovals.length === 0 &&
+    !latestActivityShowsReasoning &&
+    !messageText(streamingAssistantMessage ?? { role: 'assistant' }).trim();
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
   const refresh = React.useCallback(async (options: { silent?: boolean } = {}) => {
@@ -3877,9 +4002,12 @@ export function AssistantDock() {
                         isStreamingAssistant={
                           item.message.role === 'assistant' && item.sourceMessageIndex === streamingAssistantSourceIndex
                         }
+                        showReasoning={running && item.key === latestActivityItemKey}
                       />
                     ) : item.type === 'tool' ? (
                       <ToolActivityRow key={item.key} call={item.call} result={item.result} droneNameById={droneNameById} />
+                    ) : item.type === 'toolGroup' ? (
+                      <RepeatedToolActivityRow key={item.key} items={item.items} />
                     ) : (
                       <QueuedPromptRow
                         key={item.key}
