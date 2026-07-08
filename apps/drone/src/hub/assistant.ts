@@ -5225,7 +5225,11 @@ export class HubAssistantService {
             content: [
               {
                 type: 'text',
-                text: `Approved and updated group for ${result.moved.length} drone${result.moved.length === 1 ? '' : 's'}.`,
+                text: result.moved.length > 0
+                  ? `Approved and updated group for ${result.moved.length} drone${result.moved.length === 1 ? '' : 's'}.`
+                  : result.rejected.length > 0
+                    ? `Approved, but no drone groups were updated; ${result.rejected.length} failed.`
+                    : 'Approved; no drone group changes were needed.',
               },
             ],
             details: result,
@@ -5281,7 +5285,11 @@ export class HubAssistantService {
             content: [
               {
                 type: 'text',
-                text: `Approved and updated groups for ${result.moved.length} drone${result.moved.length === 1 ? '' : 's'}${result.rejected.length > 0 ? `; ${result.rejected.length} failed` : ''}.`,
+                text: result.moved.length > 0
+                  ? `Approved and updated groups for ${result.moved.length} drone${result.moved.length === 1 ? '' : 's'}${result.rejected.length > 0 ? `; ${result.rejected.length} failed` : ''}.`
+                  : result.rejected.length > 0
+                    ? `Approved, but no drone groups were updated; ${result.rejected.length} failed.`
+                    : 'Approved; no drone group changes were needed.',
               },
             ],
             details: result,

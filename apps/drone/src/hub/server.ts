@@ -25670,26 +25670,36 @@ export async function startDroneHubApiServer(opts: {
             const prevRaw = String(source?.group ?? '').trim();
             const previousGroup = !prevRaw || isUngroupedGroupName(prevRaw) ? null : prevRaw;
 
+            const changed = previousGroup !== nextGroup;
+
             if (real) {
-              if (nextGroup == null) {
-                delete real.group;
-              } else {
-                real.group = nextGroup;
+              const realRaw = String(real?.group ?? '').trim();
+              const realGroup = !realRaw || isUngroupedGroupName(realRaw) ? null : realRaw;
+              if (realGroup !== nextGroup) {
+                if (nextGroup == null) {
+                  delete real.group;
+                } else {
+                  real.group = nextGroup;
+                }
+                regAny.drones = regAny.drones ?? {};
+                regAny.drones[id] = real;
               }
-              regAny.drones = regAny.drones ?? {};
-              regAny.drones[id] = real;
             }
             if (pending) {
-              if (nextGroup == null) {
-                delete pending.group;
-              } else {
-                pending.group = nextGroup;
+              const pendingRaw = String(pending?.group ?? '').trim();
+              const pendingGroup = !pendingRaw || isUngroupedGroupName(pendingRaw) ? null : pendingRaw;
+              if (pendingGroup !== nextGroup) {
+                if (nextGroup == null) {
+                  delete pending.group;
+                } else {
+                  pending.group = nextGroup;
+                }
+                regAny.pending = regAny.pending ?? {};
+                regAny.pending[id] = pending;
               }
-              regAny.pending = regAny.pending ?? {};
-              regAny.pending[id] = pending;
             }
 
-            moved.push({ id, name: String(source?.name ?? ''), previousGroup, group: nextGroup });
+            if (changed) moved.push({ id, name: String(source?.name ?? ''), previousGroup, group: nextGroup });
           }
 
           return { moved, rejected };

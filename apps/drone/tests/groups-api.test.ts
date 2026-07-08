@@ -202,6 +202,17 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     expect(moved.data?.group).toBe('assigned');
     expect(moved.data?.moved?.[0]?.id).toBe('group-move-drone');
 
+    const unchanged = await apiFetch('/api/drones/group-set', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ droneIds: ['group-move-drone'], group: 'assigned' }),
+    });
+    expect(unchanged.r.status).toBe(200);
+    expect(unchanged.data?.group).toBe('assigned');
+    expect(unchanged.data?.moved).toEqual([]);
+    expect(unchanged.data?.rejected).toEqual([]);
+    expect(unchanged.data?.total).toBe(1);
+
     const invalid = await apiFetch('/api/drones/group-set', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
