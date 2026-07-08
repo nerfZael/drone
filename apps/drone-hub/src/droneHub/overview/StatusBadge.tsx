@@ -15,6 +15,19 @@ export function StatusBadge({
   hubPhase?: DroneSummary['hubPhase'];
   hubMessage?: DroneSummary['hubMessage'];
 }) {
+  if (hubPhase === 'draft') {
+    return (
+      <span
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-[rgba(148,163,184,.10)] text-[var(--muted)] border border-[rgba(148,163,184,.18)]"
+        style={{ fontFamily: 'var(--display)' }}
+        title={String(hubMessage ?? 'Draft')}
+        aria-label="Draft"
+      >
+        <span className="w-1.5 h-1.5 rounded-full bg-[var(--muted)]" />
+        Draft
+      </span>
+    );
+  }
   if (hubPhase === 'creating' || hubPhase === 'starting' || hubPhase === 'seeding') {
     const label = hubPhase === 'seeding' ? 'Seeding' : 'Starting';
     const title = String(hubMessage ?? label);

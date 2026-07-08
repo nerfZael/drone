@@ -48,6 +48,11 @@ export type ChatSendPayload = {
   attachments: ChatAttachmentPayload[];
 };
 
+export type ChatSendContext = {
+  trigger: 'button' | 'keyboard';
+  modifierKey: boolean;
+};
+
 export type ChatDraftAutomationPayload = ChatSendPayload & {
   runs: number;
   sleepAmount: number;
@@ -114,7 +119,7 @@ export function ChatInput({
   voicePatchActive?: boolean;
   voicePatchCancelling?: boolean;
   onCancelVoicePatch?: () => Promise<void> | void;
-  onSend: (payload: ChatSendPayload) => Promise<boolean>;
+  onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onPublish?: () => Promise<boolean> | boolean;
   publishing?: boolean;
   onSendAutomation?: (payload: ChatDraftAutomationPayload) => Promise<boolean>;
@@ -417,7 +422,7 @@ export function ChatInput({
     });
   }
 
-  async function submitPromptSnapshot(prompt: string, snapshotAttachments: DraftChatAttachment[]) {
+  async function submitPromptSnapshot(prompt: string, snapshotAttachments: DraftChatAttachment[], context: ChatSendContext) {
     if (!prompt && snapshotAttachments.length === 0) return;
     if (draftAutomationActive && snapshotAttachments.length > 0) {
       setAttachmentError('Recurring chat automations do not support attachments yet.');
@@ -468,7 +473,7 @@ export function ChatInput({
       return;
     }
 
-    const ok = await onSend({ prompt, attachments: encoded });
+    const ok = await onSend({ prompt, attachments: encoded }, context);
     if (!ok) {
       // Don't clobber any new text the user started typing.
       setDraft((cur) => (cur.trim().length === 0 ? prompt : cur));
@@ -520,7 +525,7 @@ export function ChatInput({
     }
   }
 
-  const sendNow = () => {
+  const sendNow = (context: ChatSendContext) => {
     const actionToken = beginVoiceAction();
     if (actionToken == null) return;
     void (async () => {
@@ -533,7 +538,7 @@ export function ChatInput({
           setAttachmentError((current) => current || 'No speech detected.');
           return;
         }
-        await submitPromptSnapshot(prompt, snapshotAttachments);
+        await submitPromptSnapshot(prompt, snapshotAttachments, context);
       } finally {
         endVoiceAction(actionToken);
       }
@@ -883,9 +888,10 @@ export function ChatInput({
                   e.currentTarget.blur();
                   return;
                 }
+                const modifierKey = e.ctrlKey || e.metaKey;
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
-                  sendNow();
+                  sendNow({ trigger: 'keyboard', modifierKey });
                 }
               }}
               rows={1}
@@ -975,7 +981,7 @@ export function ChatInput({
                   void onStop?.();
                   return;
                 }
-                sendNow();
+                sendNow({ trigger: 'button', modifierKey: false });
               }}
               disabled={showStopAction ? stopping : sendDisabled}
               className={`inline-flex items-center justify-center h-9 min-w-[80px] px-4 rounded-md text-[11px] font-semibold tracking-wide uppercase border transition-all ${

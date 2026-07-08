@@ -817,6 +817,27 @@ describe('DesktopVoiceService', () => {
     expect(service.snapshot().realtime).toEqual({ available: true, enabled: false, webRtcSessionId: null });
   });
 
+  test('turning realtime assistant off cancels an active WebRTC session', async () => {
+    let webrtcCancels = 0;
+    const service = new DesktopVoiceService({
+      transcribeWav: async () => ({ text: '', model: 'test' }),
+      submitAssistantPrompt: async () => {},
+      realtimeAssistantEnabled: true,
+      realtimeWebRtcAvailable: true,
+      cancelRealtimeWebRtcAssistant: async () => {
+        webrtcCancels += 1;
+      },
+    });
+    (service as any).mode = 'awake';
+
+    await (service as any).startPromptRecording('assistant');
+    service.setRealtimeAssistantEnabled(false);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(webrtcCancels).toBe(1);
+    expect(service.snapshot().realtime).toEqual({ available: true, enabled: false, webRtcSessionId: null });
+  });
+
   test('can suppress normal assistant prompt submit for direct realtime tools', async () => {
     const submitted: string[] = [];
     let callbacks: any = null;
@@ -1110,7 +1131,7 @@ describe('DesktopVoiceService', () => {
     expect((service as any).promptPreRollBuffer.byteLength).toBe(0);
   });
 
-  test('replays recent desktop voice events to new subscribers', () => {
+  test('does not replay stale desktop voice audio cues to new subscribers', () => {
     const service = new DesktopVoiceService({
       transcribeWav: async () => ({ text: '', model: 'test' }),
       submitAssistantPrompt: async () => {},
@@ -1123,7 +1144,7 @@ describe('DesktopVoiceService', () => {
     const unsubscribe = service.subscribe((event) => events.push(event));
     unsubscribe();
 
-    expect(events.some((event) => event.type === 'desktop_voice_local_cue' && event.cue === 'status')).toBe(true);
+    expect(events.some((event) => event.type === 'desktop_voice_local_cue' && event.cue === 'status')).toBe(false);
     expect(events.some((event) => event.type === 'desktop_voice_transcript_segment' && event.text === 'hello')).toBe(true);
   });
 });
