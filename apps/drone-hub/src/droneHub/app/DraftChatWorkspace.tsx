@@ -1,6 +1,6 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ChatInput, type ChatImageAttachmentPayload, type ChatInputAutomationAction, type ChatSendPayload, EmptyState, PendingTranscriptTurn } from '../chat';
+import { ChatInput, type ChatImageAttachmentPayload, type ChatInputAutomationAction, type ChatSendContext, type ChatSendPayload, EmptyState, PendingTranscriptTurn } from '../chat';
 import { draftChatInputResetKey, droneChatQueueKey } from './helpers';
 import { IconChat } from './icons';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
@@ -57,7 +57,7 @@ type DraftChatWorkspaceProps = {
   draftCreateError: string | null;
   queuedPromptsByDroneChat: Record<string, QueuedPrompt[]>;
   onCancel: () => void;
-  onStartDraftPrompt: (payload: ChatSendPayload) => Promise<boolean>;
+  onStartDraftPrompt: (payload: ChatSendPayload, opts?: { keepComposerOpen?: boolean }) => Promise<boolean>;
   onStartDraftAutomation: (automation: DraftAutomationStartInput) => Promise<boolean>;
   onQueueDraftPromptDuringCreate: (payload: ChatSendPayload) => boolean;
   onCreateEmptyDrone: () => Promise<boolean>;
@@ -555,8 +555,12 @@ export function DraftChatWorkspace({
           autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt && visibleQueuedDraftPrompts.length === 0}
           attachmentsEnabled
           automationActions={draftAutomationActions}
-          onSend={async (payload: ChatSendPayload) => {
-            if (!draftChat.prompt) return await onStartDraftPrompt(payload);
+          onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
+            if (!draftChat.prompt) {
+              return await onStartDraftPrompt(payload, {
+                keepComposerOpen: context.trigger === 'keyboard' && context.modifierKey,
+              });
+            }
             const droneId = String(draftChat.droneId ?? '').trim();
             if (!droneId) {
               if (!draftCreating) {

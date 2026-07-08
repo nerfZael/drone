@@ -5,6 +5,7 @@ export type {
   ChatDraftAutomationPayload,
   ChatImageAttachmentPayload,
   ChatInputAutomationAction,
+  ChatSendContext,
   ChatSendPayload,
 } from './ChatInput';
 export { EmptyState } from './EmptyState';
