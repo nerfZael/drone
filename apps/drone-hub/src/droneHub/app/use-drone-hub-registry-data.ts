@@ -16,6 +16,40 @@ type UseDroneHubRegistryDataArgs = {
   setChatHeaderRepoPath: Setter<string>;
 };
 
+function droneHubBusyDebugEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem('droneHub.debugBusy') !== '0';
+  } catch {
+    return true;
+  }
+}
+
+const registryBusyDebugLastById = new Map<string, string>();
+
+function logRegistryBusyDebug(event: string, drones: DroneSummary[]): void {
+  if (!droneHubBusyDebugEnabled()) return;
+  const rows = [];
+  for (const drone of drones) {
+    const row = {
+      id: String(drone?.id ?? '').trim(),
+      name: String(drone?.name ?? '').trim(),
+      busy: Boolean(drone?.busy),
+      busyChats: Array.isArray(drone?.busyChats) ? drone.busyChats.map(String) : [],
+      hubPhase: drone?.hubPhase ?? null,
+      hubMessage: drone?.hubMessage ?? null,
+      statusOk: Boolean(drone?.statusOk),
+      statusError: drone?.statusError ?? null,
+    };
+    if (!row.id) continue;
+    const signature = JSON.stringify(row);
+    if (registryBusyDebugLastById.get(row.id) === signature) continue;
+    registryBusyDebugLastById.set(row.id, signature);
+    rows.push(row);
+  }
+  if (rows.length > 0) console.debug('[DroneHub][busy-debug] registry event', { event, drones: rows });
+}
+
 function sameStringArray(leftRaw: unknown, rightRaw: unknown): boolean {
   const left = Array.isArray(leftRaw) ? leftRaw : [];
   const right = Array.isArray(rightRaw) ? rightRaw : [];
@@ -215,6 +249,7 @@ function useDroneRegistryEvents(): {
       try {
         const data = JSON.parse((event as MessageEvent).data || '{}') as { ok?: boolean; drones?: DroneSummary[] };
         if (data?.ok !== true || !Array.isArray(data.drones)) throw new Error('Invalid drone registry snapshot.');
+        logRegistryBusyDebug('snapshot', data.drones ?? []);
         setValue((prev) => mergeDroneResponse(prev, { ok: true, drones: data.drones ?? [] }));
         setConnected(true);
         setError(null);
@@ -228,6 +263,7 @@ function useDroneRegistryEvents(): {
       if (closed) return;
       try {
         const data = JSON.parse((event as MessageEvent).data || '{}') as { upserts?: DroneSummary[]; removedIds?: string[]; order?: string[] };
+        logRegistryBusyDebug('delta', data.upserts ?? []);
         setValue((prev) => applyDroneDelta(prev, data));
         setConnected(true);
         setError(null);

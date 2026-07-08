@@ -136,6 +136,15 @@ export type DroneHubAppModel = {
   workspaceContentProps: DroneHubWorkspaceContentProps;
 };
 
+function droneHubBusyDebugEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem('droneHub.debugBusy') !== '0';
+  } catch {
+    return true;
+  }
+}
+
 export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     optimisticallyDeletedDrones,
@@ -2245,6 +2254,25 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (selectedNodeId && selectedIsResponding) out.add(selectedNodeId);
     return out;
   }, [drones, selectedChat, selectedDrone, selectedIsResponding]);
+  const busyDebugLastSidebarSignatureRef = React.useRef('');
+  React.useEffect(() => {
+    if (!droneHubBusyDebugEnabled()) return;
+    const busyChatNodeIds = Array.from(busyChatNodeIdSet).sort();
+    const signature = JSON.stringify({
+      busyChatNodeIds,
+      selectedDrone: String(selectedDrone ?? '').trim(),
+      selectedChat: String(selectedChat ?? '').trim() || 'default',
+      selectedIsResponding,
+    });
+    if (busyDebugLastSidebarSignatureRef.current === signature) return;
+    busyDebugLastSidebarSignatureRef.current = signature;
+    console.debug('[DroneHub][busy-debug] sidebar busy state', {
+      busyChatNodeIds,
+      selectedDrone,
+      selectedChat: String(selectedChat ?? '').trim() || 'default',
+      selectedIsResponding,
+    });
+  }, [busyChatNodeIdSet, selectedChat, selectedDrone, selectedIsResponding]);
   const chatNodeStateById = React.useMemo(() => {
     const out: Record<
       string,

@@ -9252,19 +9252,69 @@ function chatHasActivePendingPromptsForSummary(entry: any): boolean {
   return false;
 }
 
+type BusyChatDebugEntry = {
+  chatName: string;
+  reasons: string[];
+  pendingPrompts: Array<{ id: string; state: string; hasTurn: boolean }>;
+};
+
+const droneBusyDebugLastById = new Map<string, string>();
+
+function droneBusyDebugEnabled(): boolean {
+  return String(process.env.DRONE_HUB_BUSY_DEBUG ?? '').trim() !== '0';
+}
+
+function busyChatDebugForEntry(droneId: string, chatName: string, entry: any): BusyChatDebugEntry {
+  const reasons: string[] = [];
+  const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
+  const turns = Array.isArray(entry?.turns) ? entry.turns : [];
+  const doneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
+  const pendingPrompts = pending
+    .map((p: any) => {
+      const id = String(p?.id ?? '').trim();
+      return {
+        id,
+        state: String(p?.state ?? '').trim(),
+        hasTurn: Boolean(id && doneIds.has(id)),
+      };
+    })
+    .filter((p: { id: string }) => p.id);
+  if (chatHasActivePendingPromptsForSummary(entry)) reasons.push('active-pending-prompt');
+  if (promptAutomationLaneBusy(getPromptAutomationLane(droneId, chatName), { includeQueued: true })) {
+    reasons.push('prompt-automation');
+  }
+  if (chatHasActiveDockerSnapshot(entry)) reasons.push('docker-snapshot');
+  return { chatName, reasons, pendingPrompts };
+}
+
+function logDroneBusyDebugChange(d: any, droneId: string, diagnostics: BusyChatDebugEntry[]): void {
+  if (!droneBusyDebugEnabled()) return;
+  const busyChats = diagnostics.filter((item) => item.reasons.length > 0);
+  const signature = JSON.stringify(busyChats);
+  if (droneBusyDebugLastById.get(droneId) === signature) return;
+  droneBusyDebugLastById.set(droneId, signature);
+  console.log('[DroneHub][busy-debug] summary busy changed', {
+    droneId,
+    name: String(d?.name ?? droneId).trim() || droneId,
+    busy: busyChats.length > 0,
+    busyChats,
+  });
+}
+
 function busyChatNamesForDrone(d: any, droneIdRaw: string): string[] {
   const droneId = normalizeDroneIdentity(droneIdRaw);
   if (!droneId) return [];
   const chats = d?.chats && typeof d.chats === 'object' ? Object.entries(d.chats) : [];
   const out: string[] = [];
+  const diagnostics: BusyChatDebugEntry[] = [];
   for (const [chatNameRaw, entry] of chats as Array<[string, any]>) {
     const chatName = normalizeChatName(chatNameRaw);
     if (!chatName || out.includes(chatName)) continue;
-    const hasPending = chatHasActivePendingPromptsForSummary(entry);
-    const automationBusy = promptAutomationLaneBusy(getPromptAutomationLane(droneId, chatName), { includeQueued: true });
-    const snapshotBusy = chatHasActiveDockerSnapshot(entry);
-    if (hasPending || automationBusy || snapshotBusy) out.push(chatName);
+    const debug = busyChatDebugForEntry(droneId, chatName, entry);
+    diagnostics.push(debug);
+    if (debug.reasons.length > 0) out.push(chatName);
   }
+  logDroneBusyDebugChange(d, droneId, diagnostics);
   return out;
 }
 
