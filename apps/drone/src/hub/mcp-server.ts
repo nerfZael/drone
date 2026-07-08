@@ -224,18 +224,17 @@ function toolResult(data: Record<string, unknown>): any {
   };
 }
 
-function imageToolResult(args: { text: string; data: string; mimeType: string; metadata: Record<string, unknown> }): any {
+export function imageToolResult(args: { text: string; data: string; mimeType: string; metadata: Record<string, unknown> }): any {
   return {
     content: [
-      { type: 'text' as const, text: args.text },
       {
         type: 'image' as const,
         data: args.data,
         mimeType: args.mimeType,
         _meta: args.metadata,
       },
+      { type: 'text' as const, text: args.text },
     ],
-    structuredContent: args.metadata,
   };
 }
 
