@@ -385,10 +385,9 @@ export function DockableDroneWorkspace({
     suppressSaveRef.current = true;
     try {
       const stored = readStoredLayout(storageKey);
-      if (stored) {
+      if (stored && toolPaneOpen) {
         api.fromJSON(stored, { reuseExistingPanels: true });
         ensureChatPanel(api);
-        if (toolPaneOpen) ensurePanel(api, activeToolTab, 'single');
       } else {
         createDefaultLayout(api, activeToolTab, toolPaneOpen);
       }

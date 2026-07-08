@@ -1210,6 +1210,7 @@ export class DesktopVoiceService {
 
   setRealtimeAssistantEnabled(enabled: boolean): DesktopVoiceStatus {
     this.realtimeAssistantEnabled = enabled === true && Boolean(this.opts.startRealtimeAssistant || this.opts.realtimeWebRtcAvailable);
+    if (!this.realtimeAssistantEnabled) void this.cancelRealtimeSession();
     this.touch();
     this.emitChange();
     return this.snapshot();
@@ -2345,6 +2346,9 @@ export class DesktopVoiceService {
   private emitDesktopVoiceEvent(event: DesktopVoiceEvent): void {
     if (
       event.type !== 'desktop_voice_status' &&
+      event.type !== 'desktop_voice_local_cue' &&
+      event.type !== 'desktop_voice_speak' &&
+      event.type !== 'desktop_voice_speak_audio' &&
       event.type !== 'desktop_voice_stop_audio' &&
       event.type !== 'desktop_voice_webrtc_start' &&
       event.type !== 'desktop_voice_webrtc_stop'

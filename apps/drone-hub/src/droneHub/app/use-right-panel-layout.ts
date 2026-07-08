@@ -114,10 +114,7 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
         set((s) => {
           const rightPanelTab = parseRightPanelTab(resolveNext(s.rightPanelTab, next), s.rightPanelTab);
           if (s.rightPanelTab === rightPanelTab) return s;
-          return {
-            rightPanelTab,
-            rightPanelOpenRequestSeq: s.rightPanelOpenRequestSeq + 1,
-          };
+          return { rightPanelTab };
         }),
       setRightPanelSplitMode: (next) =>
         set((s) => {
@@ -127,17 +124,13 @@ const useRightPanelLayoutStore = create<RightPanelLayoutState>()(
             rightPanelBottomTab: next
               ? resolveDistinctBottomTab(s.rightPanelTab, s.rightPanelBottomTab)
               : s.rightPanelBottomTab,
-            rightPanelOpenRequestSeq: s.rightPanelOpenRequestSeq + 1,
           };
         }),
       setRightPanelBottomTab: (next) =>
         set((s) => {
           const rightPanelBottomTab = parseRightPanelTab(resolveNext(s.rightPanelBottomTab, next), s.rightPanelBottomTab);
           if (s.rightPanelBottomTab === rightPanelBottomTab) return s;
-          return {
-            rightPanelBottomTab,
-            rightPanelOpenRequestSeq: s.rightPanelOpenRequestSeq + 1,
-          };
+          return { rightPanelBottomTab };
         }),
       resetRightPanelWidth: () =>
         set({
