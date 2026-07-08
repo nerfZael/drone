@@ -160,7 +160,6 @@ export function useDroneMutationActions({
           : `Are you sure you want to delete drone "${droneName}"?\n\nThis will remove the container and remove it from your registry.`);
         if (!ok) return false;
       }
-      setOptimisticallyDeletedDrones((prev) => ({ ...prev, [droneId]: true }));
       setDeletingDrones((prev) => ({ ...prev, [droneId]: true }));
       try {
         if (deleteMode === 'archive') {
@@ -168,6 +167,7 @@ export function useDroneMutationActions({
         } else {
           await requestJson(`/api/drones/${encodeURIComponent(droneId)}`, { method: 'DELETE' });
         }
+        setOptimisticallyDeletedDrones((prev) => ({ ...prev, [droneId]: true }));
         // Keep canvas consistent with sidebar deletion/archive actions.
         const canvasState = useDroneCanvasStore.getState();
         const canvasNodeIds = Object.keys(canvasState.nodesByDroneId ?? {});

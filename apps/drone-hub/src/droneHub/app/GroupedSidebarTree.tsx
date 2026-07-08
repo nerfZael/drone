@@ -36,7 +36,7 @@ import {
   SidebarReorderDropIndicator,
 } from './sidebar-reorder-ui';
 import { isSameOrDescendantSidebarGroupPath, joinSidebarGroupPath, sidebarGroupBaseName } from './sidebar-group-paths';
-import type { SidebarDensityMode } from './settings-types';
+import type { DroneDeleteMode, SidebarDensityMode } from './settings-types';
 import type { MoveDronesToGroupResult } from './use-group-management';
 import type { SidebarGroup } from './use-sidebar-view-model';
 
@@ -116,6 +116,8 @@ type GroupedSidebarTreeProps = {
   busyChatNodeIdSet: Set<string>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
   deletingDrones: Record<string, boolean>;
+  deleteOperationModeById: Record<string, DroneDeleteMode>;
+  deleteMode: DroneDeleteMode;
   renamingDrones: Record<string, boolean>;
   settingBaseImages: Record<string, boolean>;
   movingDroneGroups: boolean;
@@ -699,6 +701,8 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
     busyChatNodeIdSet,
     unreadAgentMessageByChatNodeId,
     deletingDrones,
+    deleteOperationModeById,
+    deleteMode,
     renamingDrones,
     settingBaseImages,
     chatEditor,
@@ -827,6 +831,11 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             selectionTone="muted"
             showSelectionEdge={false}
             busy={showBusy}
+            operationLabel={
+              deletingDrones[drone.id]
+                ? ((deleteOperationModeById[drone.id] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
+                : undefined
+            }
             unreadAgentMessage={showUnread}
             onClick={(rowOpts) => {
               if (shouldSuppressClick()) return;
@@ -2112,6 +2121,8 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.chatEditorInputRef,
       props.collapsedGroups,
       props.deletingDrones,
+      props.deleteOperationModeById,
+      props.deleteMode,
       props.deletingGroups,
       props.droneById,
       props.folderEditor,

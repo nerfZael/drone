@@ -49,11 +49,14 @@ import { useUiPreferencesSettings } from './droneHub/app/use-ui-preferences-sett
 import { removeDroneIdsFromSidebarNodeOrderByParent } from './droneHub/app/sidebar-node-order';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
 import { useSetupStatus } from './droneHub/app/use-setup-status';
-import type { ProfileSettingsResponse } from './droneHub/app/settings-types';
+import type { DroneDeleteMode, ProfileSettingsResponse } from './droneHub/app/settings-types';
 import { shellTerminalPrewarmKey, shouldPrewarmShellTerminal } from './droneHub/app/terminal-prewarm';
 import { useQueuedPromptsState } from './droneHub/app/use-queued-prompts-state';
 import { useRightPanelLayout } from './droneHub/app/use-right-panel-layout';
-import { type DroneSelectionClickOptions } from './droneHub/app/drone-selection-helpers';
+import {
+  resolveDroneDeleteTargetIds,
+  type DroneSelectionClickOptions,
+} from './droneHub/app/drone-selection-helpers';
 import { useDroneSelectionState } from './droneHub/app/use-drone-selection-state';
 import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, useSidebarViewModel } from './droneHub/app/use-sidebar-view-model';
 import { useChatConfigState } from './droneHub/app/use-chat-config-state';
@@ -134,6 +137,8 @@ type DroneDropActionModalState = {
 type DroneDeleteConfirmState = {
   drones: DroneDeleteConfirmModalDrone[];
 };
+
+const DRONE_DELETE_CONCURRENCY = 4;
 
 export type DroneHubAppModel = {
   sidebarProps: DroneSidebarProps;
@@ -978,10 +983,48 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [deleteDroneBase, setSidebarChatOrderByDrone, setSidebarDroneOrderByGroup, setSidebarNodeOrderByParent],
   );
-  const [droneDeleteConfirm, setDroneDeleteConfirm] = React.useState<DroneDeleteConfirmState | null>(null);
-  const [droneDeleteConfirmBusy, setDroneDeleteConfirmBusy] = React.useState(false);
+  const [droneDeleteConfirm, setDroneDeleteConfirmState] = React.useState<DroneDeleteConfirmState | null>(null);
   const [droneDeleteConfirmError, setDroneDeleteConfirmError] = React.useState<string | null>(null);
-  const droneDeleteConfirmBusyRef = React.useRef(false);
+  const [droneDeleteOperationModeById, setDroneDeleteOperationModeById] = React.useState<Record<string, DroneDeleteMode>>({});
+  const droneDeleteOperationModeByIdRef = React.useRef<Record<string, DroneDeleteMode>>({});
+  const droneDeleteConfirmRef = React.useRef<DroneDeleteConfirmState | null>(null);
+  const droneDeleteConfirmLaunchRef = React.useRef(false);
+  const setDroneDeleteConfirm = React.useCallback((next: DroneDeleteConfirmState | null) => {
+    droneDeleteConfirmRef.current = next;
+    if (next) droneDeleteConfirmLaunchRef.current = false;
+    setDroneDeleteConfirmState(next);
+  }, []);
+  const markDroneDeleteOperations = React.useCallback((droneIds: string[], mode: DroneDeleteMode) => {
+    const next = { ...droneDeleteOperationModeByIdRef.current };
+    let changed = false;
+    for (const droneId of droneIds) {
+      if (!droneId || next[droneId] === mode) continue;
+      next[droneId] = mode;
+      changed = true;
+    }
+    if (!changed) return;
+    droneDeleteOperationModeByIdRef.current = next;
+    setDroneDeleteOperationModeById(next);
+  }, []);
+  const clearDroneDeleteOperations = React.useCallback((droneIds: string[]) => {
+    const next = { ...droneDeleteOperationModeByIdRef.current };
+    let changed = false;
+    for (const droneId of droneIds) {
+      if (!(droneId in next)) continue;
+      delete next[droneId];
+      changed = true;
+    }
+    if (!changed) return;
+    droneDeleteOperationModeByIdRef.current = next;
+    setDroneDeleteOperationModeById(next);
+  }, []);
+  React.useEffect(() => {
+    const ids = Object.keys(droneDeleteOperationModeById);
+    if (ids.length === 0) return;
+    if (ids.some((id) => deletingDrones[id])) return;
+    droneDeleteOperationModeByIdRef.current = {};
+    setDroneDeleteOperationModeById({});
+  }, [deletingDrones, droneDeleteOperationModeById]);
   const resolveDeleteDroneRows = React.useCallback(
     (droneIdsRaw: string[]): DroneDeleteConfirmModalDrone[] => {
       const seen = new Set<string>();
@@ -992,7 +1035,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         seen.add(id);
         const drone = droneById[id] ?? null;
         if (!drone) continue;
-        if (deletingDrones[id] || optimisticallyDeletedDrones[id]) continue;
+        if (
+          deletingDrones[id] ||
+          droneDeleteOperationModeById[id] ||
+          droneDeleteOperationModeByIdRef.current[id] ||
+          optimisticallyDeletedDrones[id]
+        ) {
+          continue;
+        }
         rows.push({
           id,
           label: uiDroneName(drone.name) || id,
@@ -1000,80 +1050,123 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       }
       return rows;
     },
-    [deletingDrones, droneById, optimisticallyDeletedDrones, uiDroneName],
+    [deletingDrones, droneById, droneDeleteOperationModeById, optimisticallyDeletedDrones, uiDroneName],
   );
   const runConfirmedDroneDelete = React.useCallback(
     async (rows: DroneDeleteConfirmModalDrone[]): Promise<boolean> => {
       const targets = rows.filter((row) => String(row.id ?? '').trim());
       if (targets.length === 0) return false;
-      let deletedAny = false;
-      const failedRows: DroneDeleteConfirmModalDrone[] = [];
-      for (const row of targets) {
-        const deleted = await deleteDrone(row.id, { confirmed: true, showAlert: false });
-        if (deleted) deletedAny = true;
-        else failedRows.push(row);
+      const targetIds = targets.map((row) => String(row.id ?? '').trim()).filter(Boolean);
+      const operationMode = deleteActionSettingsState.deleteSettings?.deleteAction.mode === 'archive' ? 'archive' : 'permanent';
+      markDroneDeleteOperations(targetIds, operationMode);
+      const results: Array<{ row: DroneDeleteConfirmModalDrone; deleted: boolean }> = new Array(targets.length);
+      let nextIndex = 0;
+      const workerCount = Math.min(DRONE_DELETE_CONCURRENCY, targets.length);
+      const runWorker = async (): Promise<void> => {
+        while (nextIndex < targets.length) {
+          const index = nextIndex;
+          nextIndex += 1;
+          const row = targets[index]!;
+          let deleted = false;
+          try {
+            deleted = await deleteDrone(row.id, { confirmed: true, showAlert: false });
+          } catch (error) {
+            console.error('[DroneHub] confirmed drone delete failed unexpectedly', { id: row.id, error });
+          }
+          results[index] = {
+            row,
+            deleted,
+          };
+        }
+      };
+      try {
+        await Promise.all(Array.from({ length: workerCount }, () => runWorker()));
+      } finally {
+        clearDroneDeleteOperations(targetIds);
       }
+      const completedResults = results.filter((result): result is { row: DroneDeleteConfirmModalDrone; deleted: boolean } => Boolean(result));
+      const deletedAny = completedResults.some((result) => result.deleted);
+      const failedRows = completedResults.filter((result) => !result.deleted).map((result) => result.row);
       if (failedRows.length > 0) {
         const failedLabels = failedRows.map((row) => row.label || row.id);
         const preview = failedLabels.slice(0, 4).join(', ');
         const suffix = failedLabels.length > 4 ? `, and ${failedLabels.length - 4} more` : '';
         const action = deleteActionSettingsState.deleteSettings?.deleteAction.mode === 'archive' ? 'archive' : 'delete';
-        setDroneDeleteConfirmError(`Could not ${action} ${preview}${suffix}.`);
-        setDroneDeleteConfirm({ drones: failedRows });
+        const message = `Could not ${action} ${preview}${suffix}.`;
+        if (droneDeleteConfirmRef.current && droneDeleteConfirmRef.current.drones.length > 0) {
+          showShortcutToast(message, action === 'archive' ? 'Archive failed' : 'Delete failed', 'error');
+        } else {
+          setDroneDeleteConfirmError(message);
+          setDroneDeleteConfirm({ drones: failedRows });
+        }
         return false;
       }
       return deletedAny;
     },
-    [deleteActionSettingsState.deleteSettings?.deleteAction.mode, deleteDrone],
+    [
+      clearDroneDeleteOperations,
+      deleteActionSettingsState.deleteSettings?.deleteAction.mode,
+      deleteDrone,
+      markDroneDeleteOperations,
+      setDroneDeleteConfirm,
+      showShortcutToast,
+    ],
   );
   const requestDeleteDrones = React.useCallback(
     (droneIdsRaw: string[]): boolean => {
+      const requestedIds = Array.from(
+        new Set(droneIdsRaw.map((id) => String(id ?? '').trim()).filter(Boolean)),
+      );
       const rows = resolveDeleteDroneRows(droneIdsRaw);
-      if (rows.length === 0 || droneDeleteConfirmBusyRef.current) return false;
+      if (rows.length === 0) {
+        if (requestedIds.length > 0) {
+          showShortcutToast(
+            requestedIds.length === 1
+              ? 'That drone is already being removed or is no longer available.'
+              : 'Those drones are already being removed or are no longer available.',
+            'Nothing to delete',
+            'error',
+          );
+        }
+        return false;
+      }
       setDroneDeleteConfirmError(null);
       if (autoDelete) {
-        droneDeleteConfirmBusyRef.current = true;
-        void runConfirmedDroneDelete(rows).finally(() => {
-          droneDeleteConfirmBusyRef.current = false;
-        });
+        void runConfirmedDroneDelete(rows);
         return true;
       }
       setDroneDeleteConfirm({ drones: rows });
       return true;
     },
-    [autoDelete, resolveDeleteDroneRows, runConfirmedDroneDelete],
+    [
+      autoDelete,
+      resolveDeleteDroneRows,
+      runConfirmedDroneDelete,
+      setDroneDeleteConfirm,
+      showShortcutToast,
+    ],
   );
   const requestDeleteDrone = React.useCallback(
     (droneId: string): void => {
-      requestDeleteDrones([droneId]);
+      requestDeleteDrones(resolveDroneDeleteTargetIds({ droneId, selectedDrone, selectedDroneIds }));
     },
-    [requestDeleteDrones],
+    [requestDeleteDrones, selectedDrone, selectedDroneIds],
   );
   const requestDeleteSelectedDrones = React.useCallback((): boolean => {
-    const selectedIds = selectedDroneIds.length > 0 ? selectedDroneIds : selectedDrone ? [selectedDrone] : [];
-    return requestDeleteDrones(selectedIds);
+    return requestDeleteDrones(resolveDroneDeleteTargetIds({ selectedDrone, selectedDroneIds }));
   }, [requestDeleteDrones, selectedDrone, selectedDroneIds]);
   const closeDroneDeleteConfirm = React.useCallback(() => {
-    if (droneDeleteConfirmBusyRef.current) return;
     setDroneDeleteConfirm(null);
     setDroneDeleteConfirmError(null);
-  }, []);
-  const confirmDroneDelete = React.useCallback(async () => {
-    if (!droneDeleteConfirm || droneDeleteConfirmBusyRef.current) return;
-    droneDeleteConfirmBusyRef.current = true;
-    setDroneDeleteConfirmBusy(true);
+  }, [setDroneDeleteConfirm]);
+  const confirmDroneDelete = React.useCallback(() => {
+    if (!droneDeleteConfirm || droneDeleteConfirmLaunchRef.current) return;
+    const rows = droneDeleteConfirm.drones;
+    droneDeleteConfirmLaunchRef.current = true;
     setDroneDeleteConfirmError(null);
-    try {
-      const deleted = await runConfirmedDroneDelete(droneDeleteConfirm.drones);
-      if (deleted) {
-        setDroneDeleteConfirm(null);
-        setDroneDeleteConfirmError(null);
-      }
-    } finally {
-      droneDeleteConfirmBusyRef.current = false;
-      setDroneDeleteConfirmBusy(false);
-    }
-  }, [droneDeleteConfirm, runConfirmedDroneDelete]);
+    setDroneDeleteConfirm(null);
+    void runConfirmedDroneDelete(rows);
+  }, [droneDeleteConfirm, runConfirmedDroneDelete, setDroneDeleteConfirm]);
 
   const normalizeCreateRepoPath = React.useCallback(
     (candidate: string): string => {
@@ -3575,6 +3668,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setCustomAgentModalOpen(false);
   }, [newCustomAgentCommand, newCustomAgentLabel]);
 
+  const sidebarDeletingDrones = React.useMemo(() => {
+    const operationIds = Object.keys(droneDeleteOperationModeById);
+    if (operationIds.length === 0) return deletingDrones;
+    const next = { ...deletingDrones };
+    for (const id of operationIds) next[id] = true;
+    return next;
+  }, [deletingDrones, droneDeleteOperationModeById]);
+
   const sidebarProps: DroneSidebarProps = useDroneHubSidebarProps({
     dronesError,
     groupMoveError,
@@ -3587,7 +3688,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     highlightedDroneIds,
     busyChatNodeIdSet,
     unreadAgentMessageByChatNodeId,
-    deletingDrones,
+    deletingDrones: sidebarDeletingDrones,
+    deleteOperationModeById: droneDeleteOperationModeById,
+    deleteMode: deleteActionSettingsState.deleteSettings?.deleteAction.mode ?? 'permanent',
     renamingDrones,
     settingBaseImages,
     movingDroneGroups,
@@ -3750,7 +3853,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     closeDroneErrorModal,
     clearDroneHubError,
     droneDeleteConfirm,
-    droneDeleteConfirmBusy,
     droneDeleteConfirmError,
     closeDroneDeleteConfirm,
     confirmDroneDelete,

@@ -237,6 +237,8 @@ function RemoteHubSidebarComponent({
       busyChatNodeIdSet={busyChatNodeIdSet}
       unreadAgentMessageByChatNodeId={EMPTY_RECORD}
       deletingDrones={EMPTY_RECORD}
+      deleteOperationModeById={EMPTY_RECORD}
+      deleteMode="permanent"
       renamingDrones={EMPTY_RECORD}
       settingBaseImages={EMPTY_RECORD}
       movingDroneGroups={false}

@@ -30,7 +30,7 @@ import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sideba
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import type { SidebarDroneTree } from './sidebar-drone-tree';
-import type { SidebarDensityMode } from './settings-types';
+import type { DroneDeleteMode, SidebarDensityMode } from './settings-types';
 import type { ChatEditorState } from './use-sidebar-interactions';
 
 export type SidebarDroneTreeListProps = {
@@ -46,6 +46,8 @@ export type SidebarDroneTreeListProps = {
   busyChatNodeIdSet: Set<string>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
   deletingDrones: Record<string, boolean>;
+  deleteOperationModeById: Record<string, DroneDeleteMode>;
+  deleteMode: DroneDeleteMode;
   renamingDrones: Record<string, boolean>;
   settingBaseImages: Record<string, boolean>;
   movingDroneGroups: boolean;
@@ -97,6 +99,8 @@ type SidebarDroneRowProps = {
   selectedDroneSet: Set<string>;
   highlightedDroneIds: Set<string>;
   deletingDrones: Record<string, boolean>;
+  deleteOperationModeById: Record<string, DroneDeleteMode>;
+  deleteMode: DroneDeleteMode;
   renamingDrones: Record<string, boolean>;
   settingBaseImages: Record<string, boolean>;
   movingDroneGroups: boolean;
@@ -269,6 +273,8 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
   selectedDroneSet,
   highlightedDroneIds,
   deletingDrones,
+  deleteOperationModeById,
+  deleteMode,
   renamingDrones,
   settingBaseImages,
   movingDroneGroups,
@@ -351,6 +357,11 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           selected={selectedDroneSet.has(drone.id)}
           highlighted={highlightedDroneIds.has(drone.id)}
           busy={busy}
+          operationLabel={
+            deletingDrones[drone.id]
+              ? ((deleteOperationModeById[drone.id] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
+              : undefined
+          }
           unreadAgentMessage={unread}
           showGroup={showGroup}
           leadingIcon={<IconDrone className={densityClasses.leadingIcon} />}
@@ -629,6 +640,8 @@ function SidebarDroneNode({
   busyChatNodeIdSet,
   unreadAgentMessageByChatNodeId,
   deletingDrones,
+  deleteOperationModeById,
+  deleteMode,
   renamingDrones,
   settingBaseImages,
   movingDroneGroups,
@@ -732,6 +745,8 @@ function SidebarDroneNode({
         selectedDroneSet={selectedDroneSet}
         highlightedDroneIds={highlightedDroneIds}
         deletingDrones={deletingDrones}
+        deleteOperationModeById={deleteOperationModeById}
+        deleteMode={deleteMode}
         renamingDrones={renamingDrones}
         settingBaseImages={settingBaseImages}
         movingDroneGroups={movingDroneGroups}
@@ -866,6 +881,8 @@ function SidebarDroneNode({
               busyChatNodeIdSet={busyChatNodeIdSet}
               unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
               deletingDrones={deletingDrones}
+              deleteOperationModeById={deleteOperationModeById}
+              deleteMode={deleteMode}
               renamingDrones={renamingDrones}
               settingBaseImages={settingBaseImages}
               movingDroneGroups={movingDroneGroups}
@@ -928,6 +945,8 @@ export function SidebarDroneTreeList({
   busyChatNodeIdSet,
   unreadAgentMessageByChatNodeId,
   deletingDrones,
+  deleteOperationModeById,
+  deleteMode,
   renamingDrones,
   settingBaseImages,
   movingDroneGroups,
@@ -1344,6 +1363,8 @@ export function SidebarDroneTreeList({
           busyChatNodeIdSet={busyChatNodeIdSet}
           unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
           deletingDrones={deletingDrones}
+          deleteOperationModeById={deleteOperationModeById}
+          deleteMode={deleteMode}
           renamingDrones={renamingDrones}
           settingBaseImages={settingBaseImages}
           movingDroneGroups={movingDroneGroups}

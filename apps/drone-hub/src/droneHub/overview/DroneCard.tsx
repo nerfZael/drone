@@ -30,6 +30,7 @@ type DroneCardProps = {
   setBaseImageBusy?: boolean;
   deleteDisabled?: boolean;
   deleteBusy?: boolean;
+  operationLabel?: string;
   statusHint?: string;
   unreadAgentMessage?: boolean;
   highlighted?: boolean;
@@ -74,6 +75,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.setBaseImageBusy) === Boolean(b.setBaseImageBusy) &&
     Boolean(a.deleteDisabled) === Boolean(b.deleteDisabled) &&
     Boolean(a.deleteBusy) === Boolean(b.deleteBusy) &&
+    (a.operationLabel ?? '') === (b.operationLabel ?? '') &&
     (a.statusHint ?? '') === (b.statusHint ?? '') &&
     Boolean(a.unreadAgentMessage) === Boolean(b.unreadAgentMessage) &&
     Boolean(a.highlighted) === Boolean(b.highlighted) &&
@@ -110,6 +112,7 @@ export const DroneCard = React.memo(function DroneCard({
   setBaseImageBusy,
   deleteDisabled,
   deleteBusy,
+  operationLabel,
   statusHint,
   unreadAgentMessage,
   highlighted,
@@ -128,7 +131,9 @@ export const DroneCard = React.memo(function DroneCard({
   const canDelete = typeof onDelete === 'function';
   const actionCount = Number(canClone) + Number(canCreateChat) + Number(canRename) + Number(canSetBaseImage) + Number(canDelete);
   const hasActions = canClone || canCreateChat || canRename || canSetBaseImage || canDelete;
-  const pinActionsVisible = Boolean(renameBusy) || Boolean(setBaseImageBusy) || Boolean(deleteBusy);
+  const activeOperationLabel = String(operationLabel ?? '').trim();
+  const showOperationStatus = Boolean(activeOperationLabel);
+  const pinActionsVisible = Boolean(renameBusy) || Boolean(setBaseImageBusy) || (Boolean(deleteBusy) && !showOperationStatus);
   const actionReserveWidthClass =
     actionCount >= 5
       ? 'min-w-[116px]'
@@ -145,6 +150,7 @@ export const DroneCard = React.memo(function DroneCard({
   const isStarting = drone.hubPhase === 'creating' || drone.hubPhase === 'starting' || drone.hubPhase === 'seeding';
   const showsTrailingStatus =
     showRespondingAsStatus ||
+    showOperationStatus ||
     isStarting ||
     drone.hubPhase === 'error' ||
     !drone.statusOk;
@@ -275,7 +281,17 @@ export const DroneCard = React.memo(function DroneCard({
                 : ''
             }
           >
-            {showInlineError ? null : showRespondingAsStatus ? (
+            {showInlineError ? null : showOperationStatus ? (
+              <span
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-[var(--yellow-subtle)] text-[var(--yellow)] border border-[rgba(255,178,36,.15)]"
+                style={{ fontFamily: 'var(--display)' }}
+                title={activeOperationLabel}
+                aria-label={activeOperationLabel}
+              >
+                <TypingDots color="var(--yellow)" />
+                {activeOperationLabel}
+              </span>
+            ) : showRespondingAsStatus ? (
               <span className="inline-flex items-center" title="Agent responding"><TypingDots color="var(--yellow)" /></span>
             ) : (
               <StatusBadge

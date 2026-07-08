@@ -105,3 +105,23 @@ export function resolveDroneCardSelection({
     selectionAnchor: id,
   };
 }
+
+export function resolveDroneDeleteTargetIds({
+  droneId,
+  selectedDrone,
+  selectedDroneIds,
+}: {
+  droneId?: string | null;
+  selectedDrone: string | null;
+  selectedDroneIds: string[];
+}): string[] {
+  const id = String(droneId ?? '').trim();
+  const selectedIds = uniqueOrderedDroneIds(selectedDroneIds);
+  if (id) {
+    if (selectedIds.length > 1 && selectedIds.includes(id)) return selectedIds;
+    return [id];
+  }
+  if (selectedIds.length > 0) return selectedIds;
+  const activeId = String(selectedDrone ?? '').trim();
+  return activeId ? [activeId] : [];
+}

@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  resolveDroneDeleteTargetIds,
   resolveDroneCardSelection,
   resolveSelectedChatForDrone,
   shouldKeepPendingSelectedChat,
@@ -204,5 +205,45 @@ describe('resolveDroneCardSelection', () => {
       activeDroneId: 'alpha',
       selectionAnchor: 'delta',
     });
+  });
+});
+
+describe('resolveDroneDeleteTargetIds', () => {
+  test('delete key targets all selected drones', () => {
+    expect(
+      resolveDroneDeleteTargetIds({
+        selectedDrone: 'alpha',
+        selectedDroneIds: ['alpha', 'bravo', 'charlie'],
+      }),
+    ).toEqual(['alpha', 'bravo', 'charlie']);
+  });
+
+  test('delete key falls back to the active drone when there is no multi-selection', () => {
+    expect(
+      resolveDroneDeleteTargetIds({
+        selectedDrone: 'alpha',
+        selectedDroneIds: [],
+      }),
+    ).toEqual(['alpha']);
+  });
+
+  test('trash on a selected drone targets the full multi-selection', () => {
+    expect(
+      resolveDroneDeleteTargetIds({
+        droneId: 'bravo',
+        selectedDrone: 'alpha',
+        selectedDroneIds: ['alpha', 'bravo', 'charlie'],
+      }),
+    ).toEqual(['alpha', 'bravo', 'charlie']);
+  });
+
+  test('trash on an unselected drone targets only that drone', () => {
+    expect(
+      resolveDroneDeleteTargetIds({
+        droneId: 'delta',
+        selectedDrone: 'alpha',
+        selectedDroneIds: ['alpha', 'bravo', 'charlie'],
+      }),
+    ).toEqual(['delta']);
   });
 });

@@ -79,7 +79,7 @@ import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, type SidebarGroup } from './use-sideb
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { useSidebarOptimisticGroups } from './use-sidebar-optimistic-groups';
 import type { MoveDronesToGroupResult } from './use-group-management';
-import type { SidebarDensityMode, SidebarGroupingMode } from './settings-types';
+import type { DroneDeleteMode, SidebarDensityMode, SidebarGroupingMode } from './settings-types';
 import { useSidebarReadModel } from './use-sidebar-read-model';
 import {
   useSidebarInteractions,
@@ -1378,6 +1378,8 @@ export type DroneSidebarProps = {
   busyChatNodeIdSet: Set<string>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
   deletingDrones: Record<string, boolean>;
+  deleteOperationModeById: Record<string, DroneDeleteMode>;
+  deleteMode: DroneDeleteMode;
   renamingDrones: Record<string, boolean>;
   settingBaseImages: Record<string, boolean>;
   movingDroneGroups: boolean;
@@ -1464,6 +1466,8 @@ export function DroneSidebar({
   busyChatNodeIdSet,
   unreadAgentMessageByChatNodeId,
   deletingDrones,
+  deleteOperationModeById,
+  deleteMode,
   renamingDrones,
   settingBaseImages,
   movingDroneGroups,
@@ -2045,6 +2049,8 @@ export function DroneSidebar({
       busyChatNodeIdSet,
       unreadAgentMessageByChatNodeId,
       deletingDrones,
+      deleteOperationModeById,
+      deleteMode,
       renamingDrones,
       settingBaseImages,
       movingDroneGroups,
@@ -2071,6 +2077,8 @@ export function DroneSidebar({
       activeChatName,
       busyChatNodeIdSet,
       collapsedDroneSections,
+      deleteOperationModeById,
+      deleteMode,
       deletingDrones,
       sidebarCapabilities.actions,
       movingDroneGroups,
@@ -2821,6 +2829,8 @@ export function DroneSidebar({
                       busyChatNodeIdSet={busyChatNodeIdSet}
                       unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
                       deletingDrones={deletingDrones}
+                      deleteOperationModeById={deleteOperationModeById}
+                      deleteMode={deleteMode}
                       renamingDrones={renamingDrones}
                       settingBaseImages={settingBaseImages}
                       movingDroneGroups={movingDroneGroups}

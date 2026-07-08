@@ -16,6 +16,8 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     busyChatNodeIdSet,
     unreadAgentMessageByChatNodeId,
     deletingDrones,
+    deleteOperationModeById,
+    deleteMode,
     renamingDrones,
     settingBaseImages,
     movingDroneGroups,
@@ -73,6 +75,8 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     busyChatNodeIdSet,
     unreadAgentMessageByChatNodeId,
     deletingDrones,
+    deleteOperationModeById,
+    deleteMode,
     renamingDrones,
     settingBaseImages,
     movingDroneGroups,
@@ -243,7 +247,6 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
     closeDirtyDroneApplyModal,
     continueDirtyDroneApply,
     droneDeleteConfirm,
-    droneDeleteConfirmBusy,
     droneDeleteConfirmError,
     closeDroneDeleteConfirm,
     confirmDroneDelete,
@@ -417,7 +420,7 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
     droneDeleteConfirmModalProps:
       droneDeleteConfirm && Array.isArray(droneDeleteConfirm.drones) && droneDeleteConfirm.drones.length > 0
         ? {
-            busy: droneDeleteConfirmBusy,
+            busy: false,
             deleteMode,
             drones: droneDeleteConfirm.drones,
             error: droneDeleteConfirmError,
