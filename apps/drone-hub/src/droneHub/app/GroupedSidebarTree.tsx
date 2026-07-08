@@ -1136,24 +1136,18 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
           style={{ paddingLeft: `${Math.max(0, node.depth) * densityClasses.folderDepthPaddingPx}px` }}
           onDoubleClick={handleFolderDoubleClick}
         >
-          <button
-            type="button"
-            className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX}`}
-            onClick={(event) => {
-              if (event.detail > 1) return;
-              scheduleFolderSingleClick({ toggle: event.metaKey || event.ctrlKey });
-            }}
-            {...(folderDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
-            {...(folderDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
-          >
-            <div className="flex min-w-0 items-center gap-1.5">
-              <IconFolder className={`flex-shrink-0 ${densityClasses.icon}`} />
-              {showEditorInline && folderEditor ? (
+          {showEditorInline && folderEditor ? (
+            <div className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX}`}>
+              <div className="flex min-w-0 items-center gap-1.5">
+                <IconFolder className={`flex-shrink-0 ${densityClasses.icon}`} />
                 <input
                   ref={folderEditorInputRef}
                   value={folderEditor.value}
                   onChange={(event) => onFolderEditorValueChange(event.target.value)}
                   onBlur={onBlurFolderEditor}
+                  onClick={(event) => event.stopPropagation()}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
                   onKeyDown={(event) => {
                     if (event.key === 'Enter') {
                       event.preventDefault();
@@ -1166,13 +1160,27 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                   maxLength={64}
                   className={`min-w-0 flex-1 rounded-md border border-[var(--accent-muted)] bg-[rgba(15,18,28,.88)] text-[var(--fg)] shadow-[0_0_0_1px_rgba(167,139,250,.16)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[rgba(167,139,250,.18)] ${densityClasses.folderInput}`}
                 />
-              ) : (
+              </div>
+            </div>
+          ) : (
+            <button
+              type="button"
+              className={`min-w-0 flex-1 rounded text-left ${densityClasses.folderPaddingX}`}
+              onClick={(event) => {
+                if (event.detail > 1) return;
+                scheduleFolderSingleClick({ toggle: event.metaKey || event.ctrlKey });
+              }}
+              {...(folderDndDisabled ? {} : attributes as unknown as Record<string, unknown>)}
+              {...(folderDndDisabled ? {} : listeners as unknown as Record<string, unknown>)}
+            >
+              <div className="flex min-w-0 items-center gap-1.5">
+                <IconFolder className={`flex-shrink-0 ${densityClasses.icon}`} />
                 <span className={`min-w-0 flex-1 truncate font-medium text-[var(--fg-secondary)] ${densityClasses.folderLabel}`} title={folderPath}>
                   {node.label}
                 </span>
-              )}
-            </div>
-          </button>
+              </div>
+            </button>
+          )}
           <div
             className={`relative ml-2 flex flex-shrink-0 items-center justify-end transition-[min-width] duration-150 ${
               actionsEnabled ? (isVirtualGroup ? 'group-hover/folder-row:min-w-[72px]' : 'group-hover/folder-row:min-w-[112px]') : ''
@@ -1184,7 +1192,8 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
             {actionsEnabled ? <div data-sidebar-folder-actions="true" className="absolute inset-y-0 right-0 flex items-center justify-end gap-1 opacity-0 transition-opacity group-hover/folder-row:opacity-100">
               <button
                 type="button"
-                onClick={() =>
+                onClick={(event) => {
+                  event.stopPropagation();
                   onOpenFolderCreate(
                     isVirtualGroup ? null : folderPath,
                     isVirtualGroup
@@ -1192,8 +1201,10 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                       : node.repoGroupPath
                         ? { repoGroupPath: node.repoGroupPath }
                         : undefined,
-                  )
-                }
+                  );
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
                 className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]`}
                 title={isVirtualGroup ? `New top-level folder from "${node.label}"` : `New subfolder in "${node.label}"`}
               >
@@ -1202,7 +1213,12 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               {!isVirtualGroup ? (
                 <button
                   type="button"
-                  onClick={() => onStartRenameFolder(folderPath)}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onStartRenameFolder(folderPath);
+                  }}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onMouseDown={(event) => event.stopPropagation()}
                   disabled={Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath])}
                   className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] transition-colors hover:bg-[rgba(167,139,250,.12)] disabled:opacity-50`}
                   title={`Rename folder "${node.label}"`}
@@ -1212,7 +1228,12 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               ) : null}
               <button
                 type="button"
-                onClick={() => toggleSidebarGroupHidden(groupRef)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  toggleSidebarGroupHidden(groupRef);
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
                 className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border transition-colors ${
                   isHiddenGroup
                     ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
@@ -1224,7 +1245,12 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               </button>
               <button
                 type="button"
-                onClick={() => onOpenGroupMultiChat(folderPath)}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onOpenGroupMultiChat(folderPath);
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
                 className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border transition-colors ${
                   selectedGroupMultiChat === folderPath
                     ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
@@ -1236,7 +1262,8 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
               </button>
               <button
                 type="button"
-                onClick={() =>
+                onClick={(event) => {
+                  event.stopPropagation();
                   onDeleteGroup(folderPath, node.totalDroneCount, {
                     kind: node.groupKind,
                     label: node.label,
@@ -1244,8 +1271,10 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                       isVirtualGroup && node.path.startsWith('repo:') && node.path !== 'repo:ungrouped'
                         ? node.path.slice('repo:'.length)
                         : null,
-                  })
-                }
+                  });
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                onMouseDown={(event) => event.stopPropagation()}
                 disabled={Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath])}
                 className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] text-[var(--red)] transition-colors hover:bg-[rgba(255,90,90,.15)] disabled:opacity-50`}
                 title={`Delete folder "${node.label}"`}
