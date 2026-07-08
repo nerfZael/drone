@@ -14,6 +14,16 @@ function pendingPrompt(id: string, at: string): PendingPrompt {
   };
 }
 
+function activePendingPrompt(id: string, at: string, updatedAt: string): PendingPrompt {
+  return {
+    id,
+    at,
+    updatedAt,
+    prompt: id,
+    state: 'sent',
+  };
+}
+
 describe('buildChatTimelineBlocks', () => {
   test('keeps a running automation card ahead of a later blocked manual message', () => {
     const transcriptTimelineBlocks: TranscriptTimelineBlock[] = [
@@ -82,5 +92,34 @@ describe('buildChatTimelineBlocks', () => {
       'transcript:prompt-loop-group',
       'pending:queued-automation',
     ]);
+  });
+
+  test('keeps active pending prompts ahead of queued follow-up prompts during the final timeline merge', () => {
+    const transcriptTimelineBlocks: TranscriptTimelineBlock[] = [
+      {
+        kind: 'pending-prompt',
+        key: 'pending:active',
+        item: activePendingPrompt(
+          'waiting-first',
+          '2026-03-29T10:00:00.000Z',
+          '2026-03-29T10:03:00.000Z',
+        ),
+      },
+      {
+        kind: 'pending-prompt',
+        key: 'pending:queued',
+        item: pendingPrompt('queued-follow-up', '2026-03-29T10:02:00.000Z'),
+      },
+    ];
+
+    const out = buildChatTimelineBlocks({
+      transcriptTimelineBlocks,
+      pendingTimelineBlocks: [],
+      runningAutomationIdentity: '',
+    });
+
+    expect(
+      out.map((item) => (item.block.kind === 'pending-prompt' ? item.block.item.id : item.block.kind)),
+    ).toEqual(['waiting-first', 'queued-follow-up']);
   });
 });

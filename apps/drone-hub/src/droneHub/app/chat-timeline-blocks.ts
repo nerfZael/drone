@@ -21,9 +21,21 @@ function chatTimelineRole(item: ChatTimelineBlock, runningAutomationIdentity: st
   return 'other';
 }
 
+function pendingPromptState(item: ChatTimelineItem): string {
+  return item.block.kind === 'pending-prompt' ? String(item.block.item?.state ?? '') : '';
+}
+
+function isActivePendingPromptState(state: string): boolean {
+  return state === 'sending' || state === 'sent';
+}
+
 function compareChatTimelineItems(a: ChatTimelineItem, b: ChatTimelineItem): number {
   if (a.timelineRole === 'running-automation' && b.timelineRole === 'queued-automation') return -1;
   if (a.timelineRole === 'queued-automation' && b.timelineRole === 'running-automation') return 1;
+  const aPendingState = pendingPromptState(a);
+  const bPendingState = pendingPromptState(b);
+  if (isActivePendingPromptState(aPendingState) && bPendingState === 'queued') return -1;
+  if (aPendingState === 'queued' && isActivePendingPromptState(bPendingState)) return 1;
   if (a.sortMs !== b.sortMs) return a.sortMs - b.sortMs;
   return a.order - b.order;
 }
