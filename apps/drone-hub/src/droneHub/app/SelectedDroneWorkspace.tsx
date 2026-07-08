@@ -631,10 +631,16 @@ export function SelectedDroneWorkspace({
   const compactRepoPath = String(currentDrone.repoPath ?? '').trim();
   const compactRepoLabel = compactRepoPath ? repoPathLabel(compactRepoPath) : '';
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
+  const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
   const showFleetBadge =
     fleetBadgeAssigning ||
     fleetBadgeDropActive ||
     (!currentDroneIsDraft && (Boolean(fleetBadgeError) || /\b[1-9]\d*\b/.test(fleetBadgeSummaryText)));
+  const chatInputWaiting = currentChatIsDraft
+    ? false
+    : chatUiMode === 'transcript'
+      ? selectedChatDockerSnapshotBusy || visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')
+      : (showRespondingAsStatusInHeader || canStopResponse);
   const openChatErrorDetails = React.useCallback(() => {
     const message = String(chatInfoError ?? '').trim();
     if (!message) return;
@@ -2410,20 +2416,16 @@ export function SelectedDroneWorkspace({
             promptError={stopResponseError || voicePatchCancelError || promptError}
             sending={sendingPrompt}
             publishing={publishingDraft}
-            waiting={
-              chatUiMode === 'transcript'
-                ? selectedChatDockerSnapshotBusy || visiblePendingPromptsWithStartup.some((p) => p.state !== 'failed')
-                : (showRespondingAsStatusInHeader || canStopResponse)
-            }
+            waiting={chatInputWaiting}
             automationActions={chatAutomationActions}
             lockComposerWhileAutomationActive={false}
             voicePatchActive={voicePatchActiveForCurrentChat}
             voicePatchCancelling={voicePatchCancelling}
             onCancelVoicePatch={voicePatchActiveForCurrentChat ? cancelVoicePatchForCurrentChat : undefined}
             autoFocus={shouldAutoFocusInput}
-            onStop={canStopResponse ? () => requestStopResponse() : undefined}
+            onStop={!currentChatIsDraft && canStopResponse ? () => requestStopResponse() : undefined}
             stopping={stoppingResponse}
-            onPublish={currentDroneIsDraft || selectedChatIsDraft ? publishSelectedDraft : undefined}
+            onPublish={currentChatIsDraft ? publishSelectedDraft : undefined}
             onSend={async (payload: ChatSendPayload) => await sendPromptText(payload)}
             onSendAutomation={
               chatUiMode === 'transcript'
