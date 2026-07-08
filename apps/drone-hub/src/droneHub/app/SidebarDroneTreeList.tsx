@@ -166,6 +166,7 @@ type SidebarDroneNodeProps = SidebarDroneTreeListProps & {
   onOpenCreateDroneChat: (drone: DroneSummary) => void;
   onStartRenameDroneChat: (droneId: string, chatName: string) => void;
   onChatEditorValueChange: (next: string) => void;
+  onChatEditorCreateAsDraftChange: (next: boolean) => void;
   onSubmitChatEditor: () => void;
   onBlurChatEditor: () => void;
   onCancelChatEditor: () => void;
@@ -666,6 +667,7 @@ function SidebarDroneNode({
   onOpenCreateDroneChat,
   onStartRenameDroneChat,
   onChatEditorValueChange,
+  onChatEditorCreateAsDraftChange,
   onSubmitChatEditor,
   onBlurChatEditor,
   onCancelChatEditor,
@@ -782,7 +784,7 @@ function SidebarDroneNode({
               <button
                 type="button"
                 onMouseDown={(event) => event.preventDefault()}
-                onClick={() => updateChatEditorCreateAsDraft(chatEditor?.createAsDraft !== true)}
+                onClick={() => onChatEditorCreateAsDraftChange(chatEditor?.createAsDraft !== true)}
                 disabled={chatEditor?.pending}
                 className="flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)] disabled:opacity-50"
               >
@@ -900,6 +902,7 @@ function SidebarDroneNode({
               onOpenCreateDroneChat={onOpenCreateDroneChat}
               onStartRenameDroneChat={onStartRenameDroneChat}
               onChatEditorValueChange={onChatEditorValueChange}
+              onChatEditorCreateAsDraftChange={onChatEditorCreateAsDraftChange}
               onSubmitChatEditor={onSubmitChatEditor}
               onBlurChatEditor={onBlurChatEditor}
               onCancelChatEditor={onCancelChatEditor}
@@ -1379,6 +1382,7 @@ export function SidebarDroneTreeList({
           onOpenCreateDroneChat={openCreateDroneChatEditor}
           onStartRenameDroneChat={startRenameDroneChatEditor}
           onChatEditorValueChange={updateChatEditorValue}
+          onChatEditorCreateAsDraftChange={updateChatEditorCreateAsDraft}
           onSubmitChatEditor={submitChatEditor}
           onBlurChatEditor={blurChatEditor}
           onCancelChatEditor={cancelChatEditor}

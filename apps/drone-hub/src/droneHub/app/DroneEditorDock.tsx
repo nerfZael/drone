@@ -3,6 +3,13 @@ import { QuickOpenModal } from '../files/QuickOpenModal';
 import type { DroneOpenedFileState, DroneOpenedFileTabState } from '../files/opened-file-types';
 import type { QuickOpenFile, QuickOpenRecentFile } from '../files/quick-open-state';
 
+type OpenFileTarget = {
+  path: string;
+  name: string;
+  line?: number | null;
+  column?: number | null;
+};
+
 type DroneEditorDockProps = {
   droneId: string;
   openedFile: DroneOpenedFileState;
@@ -17,18 +24,18 @@ type DroneEditorDockProps = {
     canGoForward: boolean;
     onQueryChange: (value: string) => void;
     onClose: () => void;
-    onOpenFile: (file: QuickOpenFile) => void;
+    onOpenFile: (file: { path: string; name: string }) => void;
     onGoBack: () => void;
     onGoForward: () => void;
   };
   openedFileTabs: DroneOpenedFileTabState[];
   activeOpenedFileTabId: string | null;
   onOpenedEditorFileContentChange: (nextContent: string) => void;
-  onSaveOpenedEditorFile: () => void;
-  onCloseOpenedEditorFile: (path?: string) => void;
+  onSaveOpenedEditorFile: (contentOverride?: string) => Promise<boolean>;
+  onCloseOpenedEditorFile: (tabId?: string | null) => void;
   onActivateOpenedEditorFileTab: (tabId: string) => void;
   onReorderOpenedEditorFileTabs: (activeId: string, overId: string) => void;
-  onOpenFileTargetInEditor: (path: string, line?: number, column?: number) => void;
+  onOpenFileTargetInEditor: (target: OpenFileTarget) => void;
 };
 
 export function DroneEditorDock({
