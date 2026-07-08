@@ -9,10 +9,13 @@ export type AssistantArtifactFileSummary = {
   size: number;
   updatedAt: string;
   revision: string;
+  mimeType?: string;
+  binary?: boolean;
 };
 
 export type AssistantArtifactFile = AssistantArtifactFileSummary & {
   content: string;
+  contentBase64?: string;
 };
 
 export type AssistantArtifactPatch = {
@@ -29,7 +32,23 @@ export type AssistantArtifactActionInput = {
 };
 
 const ARTIFACT_MAX_FILE_BYTES = 500_000;
+const ARTIFACT_MAX_UPLOAD_BYTES_EACH = 6 * 1024 * 1024;
+const ARTIFACT_MAX_UPLOAD_BYTES_TOTAL = 20 * 1024 * 1024;
+const ARTIFACT_MAX_UPLOAD_FILES = 8;
 const ARTIFACT_MAX_PATH_CHARS = 180;
+
+export type AssistantArtifactUploadInput = {
+  name?: unknown;
+  mime?: unknown;
+  size?: unknown;
+  dataBase64?: unknown;
+};
+
+export type AssistantArtifactUploadRef = AssistantArtifactFileSummary & {
+  name: string;
+  mime: string;
+  dataBase64?: string;
+};
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -86,18 +105,104 @@ function resolveArtifactPath(threadId: string, artifactPathRaw: unknown): { root
   return { root, artifactPath, filePath };
 }
 
-function revisionForContent(content: string): string {
+function revisionForContent(content: string | Buffer): string {
   return crypto.createHash('sha256').update(content).digest('hex').slice(0, 16);
+}
+
+function mimeTypeForPath(artifactPath: string): string {
+  const ext = path.extname(artifactPath).toLowerCase();
+  switch (ext) {
+    case '.png':
+      return 'image/png';
+    case '.jpg':
+    case '.jpeg':
+      return 'image/jpeg';
+    case '.gif':
+      return 'image/gif';
+    case '.webp':
+      return 'image/webp';
+    case '.bmp':
+      return 'image/bmp';
+    case '.svg':
+      return 'image/svg+xml';
+    case '.avif':
+      return 'image/avif';
+    case '.tif':
+    case '.tiff':
+      return 'image/tiff';
+    case '.md':
+      return 'text/markdown';
+    case '.txt':
+    case '.log':
+      return 'text/plain';
+    case '.json':
+      return 'application/json';
+    case '.csv':
+      return 'text/csv';
+    case '.html':
+    case '.htm':
+      return 'text/html';
+    case '.pdf':
+      return 'application/pdf';
+    case '.zip':
+      return 'application/zip';
+    case '.gz':
+      return 'application/gzip';
+    case '.wasm':
+      return 'application/wasm';
+    case '.css':
+      return 'text/css';
+    case '.js':
+    case '.mjs':
+    case '.cjs':
+      return 'text/javascript';
+    case '.ts':
+    case '.tsx':
+      return 'text/typescript';
+    default:
+      return 'application/octet-stream';
+  }
+}
+
+function isTextMimeType(mimeType: string): boolean {
+  const mime = String(mimeType ?? '').trim().toLowerCase();
+  return (
+    mime.startsWith('text/') ||
+    mime === 'application/json' ||
+    mime === 'application/xml' ||
+    mime === 'application/javascript' ||
+    mime === 'application/x-javascript'
+  );
+}
+
+function isImageMimeType(mimeType: string): boolean {
+  return String(mimeType ?? '').trim().toLowerCase().startsWith('image/');
+}
+
+function isUploadedArtifactPath(artifactPath: string): boolean {
+  return String(artifactPath ?? '').replace(/\\/g, '/').startsWith('uploads/');
+}
+
+function isLikelyTextBuffer(buffer: Buffer): boolean {
+  if (buffer.length === 0) return true;
+  const sample = buffer.subarray(0, Math.min(buffer.length, 4096));
+  return !sample.includes(0);
 }
 
 async function summaryForFile(root: string, artifactPath: string): Promise<AssistantArtifactFileSummary> {
   const filePath = path.resolve(root, artifactPath);
-  const [stat, content] = await Promise.all([fs.stat(filePath), fs.readFile(filePath, 'utf8')]);
+  const [stat, content] = await Promise.all([fs.stat(filePath), fs.readFile(filePath)]);
+  const mimeType = mimeTypeForPath(artifactPath);
+  const binary =
+    !isTextMimeType(mimeType) &&
+    (isImageMimeType(mimeType) || mimeType !== 'application/octet-stream' || !isLikelyTextBuffer(content));
   return {
     path: artifactPath,
-    size: Number.isFinite(stat.size) ? Math.max(0, Math.floor(stat.size)) : Buffer.byteLength(content, 'utf8'),
+    size: Number.isFinite(stat.size) ? Math.max(0, Math.floor(stat.size)) : content.length,
     updatedAt: Number.isFinite(stat.mtimeMs) ? new Date(stat.mtimeMs).toISOString() : nowIso(),
     revision: revisionForContent(content),
+    mimeType,
+    binary,
   };
 }
 
@@ -135,21 +240,42 @@ export async function deleteAssistantArtifactsForThread(threadId: string): Promi
 
 export async function readAssistantArtifactFile(threadId: string, artifactPathRaw: unknown): Promise<AssistantArtifactFile> {
   const { root, artifactPath, filePath } = resolveArtifactPath(threadId, artifactPathRaw);
-  let content: string;
+  let data: Buffer;
   try {
     const stat = await fs.stat(filePath);
     if (!stat.isFile()) throw errorWithStatus(`artifact is not a file: ${artifactPath}`, 404);
-    if (stat.size > ARTIFACT_MAX_FILE_BYTES) {
-      throw errorWithStatus(`artifact is too large (${stat.size} bytes, max ${ARTIFACT_MAX_FILE_BYTES})`, 413);
+    const mimeType = mimeTypeForPath(artifactPath);
+    const maxBytes = isTextMimeType(mimeType) && !isUploadedArtifactPath(artifactPath)
+      ? ARTIFACT_MAX_FILE_BYTES
+      : ARTIFACT_MAX_UPLOAD_BYTES_EACH;
+    if (stat.size > maxBytes) {
+      throw errorWithStatus(`artifact is too large (${stat.size} bytes, max ${maxBytes})`, 413);
     }
-    content = await fs.readFile(filePath, 'utf8');
+    data = await fs.readFile(filePath);
   } catch (e: any) {
     if (e?.statusCode) throw e;
     if (e?.code === 'ENOENT') throw errorWithStatus(`artifact not found: ${artifactPath}`, 404);
     throw e;
   }
   const summary = await summaryForFile(root, artifactPath);
-  return { ...summary, content };
+  if (summary.binary) return { ...summary, content: '', contentBase64: data.toString('base64') };
+  return { ...summary, content: data.toString('utf8') };
+}
+
+export async function readAssistantArtifactBytes(threadId: string, artifactPathRaw: unknown): Promise<{ path: string; mime: string; size: number; dataBase64: string }> {
+  const { artifactPath, filePath } = resolveArtifactPath(threadId, artifactPathRaw);
+  const stat = await fs.stat(filePath);
+  if (!stat.isFile()) throw errorWithStatus(`artifact is not a file: ${artifactPath}`, 404);
+  if (stat.size > ARTIFACT_MAX_UPLOAD_BYTES_EACH) {
+    throw errorWithStatus(`artifact is too large (${stat.size} bytes, max ${ARTIFACT_MAX_UPLOAD_BYTES_EACH})`, 413);
+  }
+  const data = await fs.readFile(filePath);
+  return {
+    path: artifactPath,
+    mime: mimeTypeForPath(artifactPath),
+    size: data.length,
+    dataBase64: data.toString('base64'),
+  };
 }
 
 async function writeAssistantArtifactFile(
@@ -236,6 +362,129 @@ async function deleteAssistantArtifactFile(threadId: string, artifactPathRaw: un
     if (e?.code === 'ENOENT') return { path: artifactPath, deleted: false };
     throw e;
   }
+}
+
+function base64DecodedByteLength(b64Raw: string): number {
+  const b64 = String(b64Raw ?? '').replace(/\s+/g, '');
+  if (!b64) return 0;
+  let padding = 0;
+  if (b64.endsWith('==')) padding = 2;
+  else if (b64.endsWith('=')) padding = 1;
+  const n = Math.floor((b64.length * 3) / 4) - padding;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function extForUploadMime(mimeRaw: string): string {
+  const mime = String(mimeRaw ?? '').trim().toLowerCase();
+  switch (mime) {
+    case 'image/png':
+      return 'png';
+    case 'image/jpg':
+    case 'image/jpeg':
+      return 'jpg';
+    case 'image/gif':
+      return 'gif';
+    case 'image/webp':
+      return 'webp';
+    case 'image/bmp':
+      return 'bmp';
+    case 'image/svg+xml':
+      return 'svg';
+    case 'image/avif':
+      return 'avif';
+    case 'image/tif':
+    case 'image/tiff':
+      return 'tiff';
+    case 'text/plain':
+      return 'txt';
+    default:
+      return 'bin';
+  }
+}
+
+function sanitizeUploadFileName(nameRaw: string, fallbackBase: string, ext: string): string {
+  const base = path.posix.basename(String(nameRaw ?? '').trim()).replace(/[\0\r\n\t]/g, '');
+  const safeBase = base
+    .replace(/[\/\\]+/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^[-.]+|[-.]+$/g, '')
+    .slice(0, 80);
+  const baseName = safeBase || fallbackBase;
+  const hasExt = /\.[a-z0-9]{1,8}$/i.test(baseName);
+  return (hasExt ? baseName : `${baseName}.${ext || 'bin'}`).replace(/^\.+/g, '').slice(0, 96) || `${fallbackBase}.${ext || 'bin'}`;
+}
+
+function uniqueUploadPath(fileNameRaw: string, usedPaths: Set<string>, index: number): string {
+  const prefix = new Date().toISOString().replace(/[:.]/g, '-');
+  const fileName = fileNameRaw || `attachment-${index + 1}.bin`;
+  let candidate = `uploads/${prefix}-${fileName}`;
+  let n = 2;
+  const keyFor = (value: string) => value.toLowerCase();
+  while (usedPaths.has(keyFor(candidate))) {
+    const parsed = path.posix.parse(fileName);
+    candidate = `uploads/${prefix}-${parsed.name || 'attachment'}-${n}${parsed.ext || ''}`;
+    n += 1;
+  }
+  usedPaths.add(keyFor(candidate));
+  return candidate;
+}
+
+export async function saveAssistantArtifactUploads(threadId: string, raw: unknown): Promise<AssistantArtifactUploadRef[]> {
+  const inputList = Array.isArray(raw) ? raw : [];
+  if (inputList.length > ARTIFACT_MAX_UPLOAD_FILES) {
+    throw errorWithStatus(`too many attachments (max ${ARTIFACT_MAX_UPLOAD_FILES})`, 413);
+  }
+  const list = inputList.slice(0, ARTIFACT_MAX_UPLOAD_FILES);
+  const out: AssistantArtifactUploadRef[] = [];
+  const usedPaths = new Set<string>();
+  const validated: Array<{ name: string; mime: string; dataBase64: string; bytes: Buffer; artifactPath: string }> = [];
+  let total = 0;
+  for (let i = 0; i < list.length; i += 1) {
+    const item = list[i] as AssistantArtifactUploadInput;
+    if (!item || typeof item !== 'object') continue;
+    const name = String(item.name ?? '').trim() || `attachment-${i + 1}`;
+    const mime = String(item.mime ?? '').trim().toLowerCase() || 'application/octet-stream';
+    const dataBase64 = String(item.dataBase64 ?? '').replace(/\s+/g, '');
+    if (!dataBase64) throw errorWithStatus('attachment is missing dataBase64', 400);
+    if (dataBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64)) {
+      throw errorWithStatus('attachment dataBase64 looks invalid', 400);
+    }
+    const declared = Number(item.size);
+    const decodedSize = base64DecodedByteLength(dataBase64);
+    const size = decodedSize || (Number.isFinite(declared) && declared > 0 ? Math.floor(declared) : 0);
+    if (!size) throw errorWithStatus('attachment size is invalid', 400);
+    if (size > ARTIFACT_MAX_UPLOAD_BYTES_EACH) {
+      throw errorWithStatus(`attachment too large (${size} bytes, max ${ARTIFACT_MAX_UPLOAD_BYTES_EACH})`, 413);
+    }
+    total += size;
+    if (total > ARTIFACT_MAX_UPLOAD_BYTES_TOTAL) {
+      throw errorWithStatus(`attachments too large in total (max ${ARTIFACT_MAX_UPLOAD_BYTES_TOTAL} bytes)`, 413);
+    }
+
+    let bytes: Buffer;
+    try {
+      bytes = Buffer.from(dataBase64, 'base64');
+    } catch {
+      throw errorWithStatus('invalid base64 payload', 400);
+    }
+    if (bytes.length !== size && decodedSize > 0) throw errorWithStatus('attachment size does not match payload', 400);
+
+    const ext = extForUploadMime(mime);
+    const fileName = sanitizeUploadFileName(name, isImageMimeType(mime) ? `image-${i + 1}` : `attachment-${i + 1}`, ext);
+    const artifactPath = uniqueUploadPath(fileName, usedPaths, i);
+    validated.push({ name, mime, dataBase64, bytes, artifactPath });
+  }
+
+  for (const upload of validated) {
+    const { root, filePath } = resolveArtifactPath(threadId, upload.artifactPath);
+    await fs.mkdir(path.dirname(filePath), { recursive: true });
+    await fs.writeFile(filePath, upload.bytes);
+    const summary = await summaryForFile(root, upload.artifactPath);
+    const effectiveMime = isImageMimeType(upload.mime) ? upload.mime : summary.mimeType || upload.mime;
+    out.push({ ...summary, name: upload.name, mime: effectiveMime, dataBase64: isImageMimeType(effectiveMime) ? upload.dataBase64 : undefined });
+  }
+  return out;
 }
 
 export async function runAssistantArtifactAction(threadId: string, input: AssistantArtifactActionInput): Promise<any> {

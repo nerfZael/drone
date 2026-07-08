@@ -2,6 +2,21 @@ import React from 'react';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import { requestJson } from '../http';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
+import {
+  CHAT_INPUT_MAX_BYTES_EACH,
+  CHAT_INPUT_MAX_BYTES_TOTAL,
+  CHAT_INPUT_MAX_IMAGES,
+  CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS,
+  blobToBase64,
+  fileToBase64,
+  filesFromClipboardData,
+  formatBytes,
+  isLikelyImageFile,
+  makeDraftImageAttachmentId,
+  revokeDraftImagePreviewUrls,
+  textByteLength,
+  type DraftChatAttachment,
+} from '../chat/chat-input-attachments';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-dnd';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import { IconChatThread, IconEye, IconList, IconPencil, IconPlus, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash } from '../app/icons';
@@ -229,11 +244,32 @@ type AssistantArtifactSummary = {
   size: number;
   updatedAt: string;
   revision: string;
+  mimeType?: string;
+  binary?: boolean;
 };
 
 type AssistantArtifactFile = AssistantArtifactSummary & {
   content: string;
+  contentBase64?: string;
 };
+
+type AssistantAttachmentPayload = {
+  name: string;
+  mime: string;
+  size: number;
+  dataBase64: string;
+};
+
+type AssistantDraftFileAttachment = {
+  kind: 'file';
+  id: string;
+  file: File;
+  name: string;
+  mime: string;
+  size: number;
+};
+
+type AssistantDraftAttachment = DraftChatAttachment | AssistantDraftFileAttachment;
 
 type AssistantScopeDrone = { id: string; name: string };
 type AssistantScopeMode = 'all' | 'selected';
@@ -554,6 +590,57 @@ function selectDefaultArtifactPath(files: AssistantArtifactSummary[]): string | 
   if (files.length === 0) return null;
   const preferred = files.find((file) => file.path === 'status.md') ?? files.find((file) => file.path.endsWith('/status.md'));
   return preferred?.path ?? files[0]?.path ?? null;
+}
+
+function isImageMimeType(mimeRaw: unknown): boolean {
+  return String(mimeRaw ?? '').trim().toLowerCase().startsWith('image/');
+}
+
+function attachmentMimeForFile(file: File): string {
+  const mime = String((file as any).type ?? '').trim().toLowerCase();
+  if (mime && (mime !== 'application/octet-stream' || !isLikelyImageFile(file))) return mime;
+  const name = String((file as any).name ?? '').trim().toLowerCase();
+  if (/\.(jpe?g)$/.test(name)) return 'image/jpeg';
+  if (/\.gif$/.test(name)) return 'image/gif';
+  if (/\.webp$/.test(name)) return 'image/webp';
+  if (/\.svg$/.test(name)) return 'image/svg+xml';
+  if (/\.avif$/.test(name)) return 'image/avif';
+  if (/\.bmp$/.test(name)) return 'image/bmp';
+  if (/\.tiff?$/.test(name)) return 'image/tiff';
+  return isLikelyImageFile(file) ? 'image/png' : mime || 'application/octet-stream';
+}
+
+function revokeAssistantAttachmentPreviewUrls(items: AssistantDraftAttachment[]): void {
+  revokeDraftImagePreviewUrls(items.filter((item): item is DraftChatAttachment => item.kind === 'image'));
+}
+
+function makeAssistantPastedTextAttachmentName(existingCount: number): string {
+  return existingCount <= 0 ? 'pasted-text.txt' : `pasted-text-${existingCount + 1}.txt`;
+}
+
+async function encodeAssistantAttachment(attachment: AssistantDraftAttachment): Promise<AssistantAttachmentPayload> {
+  if (attachment.kind === 'image') {
+    return {
+      name: attachment.name,
+      mime: attachment.mime,
+      size: attachment.size,
+      dataBase64: await fileToBase64(attachment.file),
+    };
+  }
+  if (attachment.kind === 'text') {
+    return {
+      name: attachment.name,
+      mime: attachment.mime,
+      size: attachment.size,
+      dataBase64: await blobToBase64(new Blob([attachment.text], { type: attachment.mime })),
+    };
+  }
+  return {
+    name: attachment.name,
+    mime: attachment.mime,
+    size: attachment.size,
+    dataBase64: await fileToBase64(attachment.file),
+  };
 }
 
 function modelSelectionKey(selection: Pick<AssistantRunModel, 'provider' | 'model' | 'thinkingLevel'>): string {
@@ -1403,10 +1490,18 @@ function AssistantThreadFilesView({
                 </div>
               </div>
               <div className="min-h-0 flex-1 overflow-auto px-5 py-4">
-                {selectedFile.content.trim() ? (
+                {selectedFile.contentBase64 && isImageMimeType(selectedFile.mimeType) ? (
+                  <img
+                    src={`data:${selectedFile.mimeType || 'image/png'};base64,${selectedFile.contentBase64}`}
+                    alt={selectedFile.path}
+                    className="max-h-full max-w-full rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] object-contain"
+                  />
+                ) : selectedFile.content.trim() ? (
                   <MarkdownMessage text={selectedFile.content} className="dh-markdown text-[13px]" />
                 ) : (
-                  <div className="text-[12px] text-[var(--muted-dim)]">Empty file</div>
+                  <div className="text-[12px] text-[var(--muted-dim)]">
+                    {selectedFile.binary ? 'Binary file preview is unavailable.' : 'Empty file'}
+                  </div>
                 )}
               </div>
             </div>
@@ -2388,6 +2483,9 @@ export function AssistantDock() {
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState('');
+  const [attachments, setAttachments] = React.useState<AssistantDraftAttachment[]>([]);
+  const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
+  const [attachmentDragActive, setAttachmentDragActive] = React.useState(false);
   const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(readInitialThreadSidebarOpen);
   const [assistantPanelMode, setAssistantPanelMode] = React.useState<AssistantPanelMode>(readInitialAssistantPanelMode);
   const [filesOpen, setFilesOpen] = React.useState(readInitialFilesOpen);
@@ -2458,6 +2556,8 @@ export function AssistantDock() {
   /** When false, new transcript content must not force scroll position (user scrolled up). */
   const assistantStickToBottomRef = React.useRef(true);
   const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
+  const attachmentInputRef = React.useRef<HTMLInputElement | null>(null);
+  const attachmentsRef = React.useRef<AssistantDraftAttachment[]>([]);
   const refocusInputWhenIdleRef = React.useRef(false);
   const activeThreadIdRef = React.useRef('');
   const currentScopeKeyRef = React.useRef('');
@@ -2611,6 +2711,25 @@ export function AssistantDock() {
   React.useEffect(() => {
     draftRef.current = draft;
   }, [draft]);
+
+  React.useEffect(() => {
+    attachmentsRef.current = attachments;
+  }, [attachments]);
+
+  React.useEffect(() => {
+    setAttachmentError(null);
+    setAttachmentDragActive(false);
+    setAttachments((prev) => {
+      revokeAssistantAttachmentPreviewUrls(prev);
+      return [];
+    });
+  }, [activeThreadId]);
+
+  React.useEffect(() => {
+    return () => {
+      revokeAssistantAttachmentPreviewUrls(attachmentsRef.current);
+    };
+  }, []);
 
   React.useEffect(() => {
     voiceDraftActiveRef.current = voiceDraftActive;
@@ -3303,12 +3422,138 @@ export function AssistantDock() {
     }
   }, [activeThread]);
 
+  const attachmentControlsLocked = !activeThread || voiceEnabled || assistantChatIdleHold;
+  const imageAttachmentCount = React.useMemo(
+    () => attachments.filter((attachment) => attachment.kind === 'image').length,
+    [attachments],
+  );
+
+  const openAttachmentPicker = React.useCallback(() => {
+    if (attachmentControlsLocked) return;
+    attachmentInputRef.current?.click();
+  }, [attachmentControlsLocked]);
+
+  const removeAttachment = React.useCallback((id: string) => {
+    setAttachmentError(null);
+    setAttachments((prev) => {
+      const idx = prev.findIndex((attachment) => attachment.id === id);
+      if (idx < 0) return prev;
+      const next = prev.slice();
+      const [removed] = next.splice(idx, 1);
+      if (removed) revokeAssistantAttachmentPreviewUrls([removed]);
+      return next;
+    });
+  }, []);
+
+  const addAttachmentFiles = React.useCallback((files: File[] | FileList | null | undefined) => {
+    if (attachmentControlsLocked) return;
+    if (!files) return;
+    const list = Array.isArray(files) ? files : Array.from(files);
+    if (list.length === 0) return;
+    setAttachmentError(null);
+    setAttachments((prev) => {
+      const next = prev.slice();
+      let total = next.reduce((sum, attachment) => sum + (Number(attachment.size) || 0), 0);
+      let images = next.filter((attachment) => attachment.kind === 'image').length;
+      for (const file of list) {
+        if (!file) continue;
+        const size = Number((file as any).size ?? 0);
+        if (!Number.isFinite(size) || size <= 0) {
+          setAttachmentError('One selected file is empty or unreadable.');
+          continue;
+        }
+        if (size > CHAT_INPUT_MAX_BYTES_EACH) {
+          setAttachmentError(`File too large (${formatBytes(size)}). Max per file is ${formatBytes(CHAT_INPUT_MAX_BYTES_EACH)}.`);
+          continue;
+        }
+        if (next.length >= CHAT_INPUT_MAX_IMAGES) {
+          setAttachmentError(`Too many files. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
+          break;
+        }
+        if (total + size > CHAT_INPUT_MAX_BYTES_TOTAL) {
+          setAttachmentError(`Attachments too large in total. Max total is ${formatBytes(CHAT_INPUT_MAX_BYTES_TOTAL)}.`);
+          break;
+        }
+        const name = String((file as any).name ?? '').trim() || `attachment-${next.length + 1}`;
+        const mime = attachmentMimeForFile(file);
+        if (isLikelyImageFile(file)) {
+          if (images >= CHAT_INPUT_MAX_IMAGES) {
+            setAttachmentError(`Too many images. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
+            break;
+          }
+          next.push({
+            kind: 'image',
+            id: makeDraftImageAttachmentId(),
+            file,
+            name,
+            mime,
+            size: Math.floor(size),
+            previewUrl: URL.createObjectURL(file),
+          });
+          images += 1;
+        } else {
+          next.push({
+            kind: 'file',
+            id: makeDraftImageAttachmentId(),
+            file,
+            name,
+            mime,
+            size: Math.floor(size),
+          });
+        }
+        total += size;
+      }
+      return next;
+    });
+  }, [attachmentControlsLocked]);
+
+  const addPastedTextAttachment = React.useCallback((textRaw: string) => {
+    if (attachmentControlsLocked) return;
+    const text = String(textRaw ?? '');
+    if (!text) return;
+    const size = textByteLength(text);
+    setAttachmentError(null);
+    setAttachments((prev) => {
+      const total = prev.reduce((sum, attachment) => sum + (Number(attachment.size) || 0), 0);
+      if (prev.length >= CHAT_INPUT_MAX_IMAGES) {
+        setAttachmentError(`Too many files. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
+        return prev;
+      }
+      if (size > CHAT_INPUT_MAX_BYTES_EACH) {
+        setAttachmentError(`Pasted text too large (${formatBytes(size)}). Max per file is ${formatBytes(CHAT_INPUT_MAX_BYTES_EACH)}.`);
+        return prev;
+      }
+      if (total + size > CHAT_INPUT_MAX_BYTES_TOTAL) {
+        setAttachmentError(`Attachments too large in total. Max total is ${formatBytes(CHAT_INPUT_MAX_BYTES_TOTAL)}.`);
+        return prev;
+      }
+      const textCount = prev.filter((attachment) => attachment.kind === 'text').length;
+      return [
+        ...prev,
+        {
+          kind: 'text',
+          id: makeDraftImageAttachmentId(),
+          text,
+          name: makeAssistantPastedTextAttachmentName(textCount),
+          mime: 'text/plain',
+          size,
+        },
+      ];
+    });
+  }, [attachmentControlsLocked]);
+
   const sendPrompt = React.useCallback(async () => {
     if (!activeThread) return;
     const prompt = draft.trim();
-    if (!prompt) return;
+    const attachmentSnapshot = attachmentsRef.current.slice();
+    if (!prompt && attachmentSnapshot.length === 0) return;
     setError(null);
+    setAttachmentError(null);
     if (activeThread.voiceEnabled) {
+      if (attachmentSnapshot.length > 0) {
+        setAttachmentError('Realtime voice threads do not support file attachments yet.');
+        return;
+      }
       try {
         if (!sendAssistantDesktopVoiceRealtimeText(prompt)) {
           setError('Realtime voice is not connected. Start realtime voice before sending text in this thread.');
@@ -3325,29 +3570,58 @@ export function AssistantDock() {
     }
     if (!(await waitForScopeSave())) return;
     setDraft('');
+    setAttachments([]);
     scrollAssistantToBottom({ force: true });
     refocusInputWhenIdleRef.current = true;
+    let encodedAttachments: AssistantAttachmentPayload[] = [];
+    try {
+      encodedAttachments = await Promise.all(attachmentSnapshot.map(encodeAssistantAttachment));
+    } catch (err: any) {
+      setAttachmentError(`Failed to read attachment: ${err?.message ?? String(err)}`);
+      setDraft((cur) => (cur.trim() ? cur : prompt));
+      setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
+      return;
+    }
     const response = await fetch(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/prompt`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
         prompt,
+        attachments: encodedAttachments,
         provider: activeThread.provider,
         model: activeThread.model,
         thinkingLevel: activeThread.thinkingLevel,
       }),
     });
+    let sentOk = true;
     try {
       await readNdjson(response, (event) => {
         if (event?.type === 'snapshot' && event.snapshot) setSnapshot(event.snapshot);
         if (event?.type === 'approval_pending' && event.snapshot) setSnapshot(event.snapshot);
-        if (event?.type === 'error') setError(String(event.error ?? 'Assistant failed.'));
+        if (event?.type === 'error') {
+          sentOk = false;
+          setError(String(event.error ?? 'Assistant failed.'));
+        }
       });
     } catch (err: any) {
+      sentOk = false;
       setError(err?.message ?? String(err));
       setDraft((cur) => (cur.trim() ? cur : prompt));
+      setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
     } finally {
+      if (sentOk && attachmentSnapshot.length > 0) {
+        revokeAssistantAttachmentPreviewUrls(attachmentSnapshot);
+      }
       void refresh();
+      if (sentOk && attachmentSnapshot.length > 0) {
+        requestJson<{ ok: true; threadId: string; files: AssistantArtifactSummary[] }>(
+          `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/artifacts`,
+        )
+          .then((data) => {
+            if (activeThreadIdRef.current === activeThread.id) setArtifactFiles(Array.isArray(data.files) ? data.files : []);
+          })
+          .catch(() => {});
+      }
     }
   }, [activeThread, draft, refresh, scrollAssistantToBottom, waitForScopeSave]);
 
@@ -4074,7 +4348,94 @@ export function AssistantDock() {
             </button>
           </div>
         </div>
-        <div className="relative rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] focus-within:border-[var(--accent-muted)]">
+        {attachmentError ? (
+          <div className="mb-2 rounded border border-[rgba(255,90,90,.28)] bg-[rgba(255,90,90,.07)] px-2.5 py-1.5 text-[11px] text-[var(--red)]">
+            {attachmentError}
+          </div>
+        ) : null}
+        <div
+          className={`relative rounded border bg-[rgba(255,255,255,.03)] focus-within:border-[var(--accent-muted)] ${
+            attachmentDragActive ? 'border-[var(--accent-muted)]' : 'border-[var(--border-subtle)]'
+          }`}
+          onDragEnter={(event) => {
+            if (attachmentControlsLocked) return;
+            if (event.dataTransfer?.types?.includes?.('Files')) setAttachmentDragActive(true);
+          }}
+          onDragOver={(event) => {
+            if (event.dataTransfer?.types?.includes?.('Files')) event.preventDefault();
+            if (attachmentControlsLocked) return;
+          }}
+          onDragLeave={() => setAttachmentDragActive(false)}
+          onDrop={(event) => {
+            event.preventDefault();
+            setAttachmentDragActive(false);
+            if (attachmentControlsLocked) return;
+            addAttachmentFiles(event.dataTransfer?.files ?? null);
+          }}
+        >
+          <input
+            ref={attachmentInputRef}
+            type="file"
+            multiple
+            className="hidden"
+            disabled={attachmentControlsLocked}
+            onChange={(event) => {
+              addAttachmentFiles(event.currentTarget.files);
+              event.currentTarget.value = '';
+            }}
+          />
+          {attachments.length > 0 ? (
+            <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <div className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                  {attachments.length} file{attachments.length === 1 ? '' : 's'} attached
+                  {imageAttachmentCount > 0 ? ` · ${imageAttachmentCount} image${imageAttachmentCount === 1 ? '' : 's'}` : ''}
+                </div>
+                <button
+                  type="button"
+                  onClick={openAttachmentPicker}
+                  disabled={attachmentControlsLocked}
+                  className="h-6 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-45"
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  Add
+                </button>
+              </div>
+              <div className="flex gap-2 overflow-x-auto pb-0.5 no-scrollbar">
+                {attachments.map((attachment) => (
+                  <div key={attachment.id} className="relative flex-shrink-0">
+                    {attachment.kind === 'image' ? (
+                      <img
+                        src={attachment.previewUrl}
+                        alt={attachment.name}
+                        className="h-14 w-14 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] object-cover"
+                      />
+                    ) : (
+                      <div className="w-[172px] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-2 py-1.5">
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <IconFile className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" />
+                          <span className="min-w-0 truncate text-[10px] font-medium text-[var(--fg-secondary)]">{attachment.name}</span>
+                        </div>
+                        <div className="mt-1 truncate text-[9px] text-[var(--muted-dim)]">
+                          {formatBytes(attachment.size)} · {attachment.mime || 'application/octet-stream'}
+                        </div>
+                      </div>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => removeAttachment(attachment.id)}
+                      disabled={attachmentControlsLocked}
+                      className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel-raised)] text-[10px] font-bold text-[var(--muted)] hover:border-[var(--red)] hover:text-[var(--red)] disabled:opacity-45"
+                      title={`Remove ${attachment.name}`}
+                      aria-label={`Remove ${attachment.name}`}
+                    >
+                      x
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
           <textarea
             ref={inputRef}
             data-chat-input-focus-id="assistant-chat"
@@ -4094,6 +4455,16 @@ export function AssistantDock() {
                 if (!assistantChatIdleHold) void sendPrompt();
               }
             }}
+            onPaste={(event) => {
+              if (attachmentControlsLocked) return;
+              const files = filesFromClipboardData(event.clipboardData);
+              if (files.length > 0) addAttachmentFiles(files);
+              const pastedText = String(event.clipboardData?.getData('text/plain') ?? '');
+              if (pastedText.length >= CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS) {
+                event.preventDefault();
+                addPastedTextAttachment(pastedText);
+              }
+            }}
             disabled={!activeThread || realtimeTextBlocked}
             placeholder={
               realtimeTextBlocked
@@ -4110,9 +4481,19 @@ export function AssistantDock() {
             }
             className="h-24 w-full resize-none border-0 bg-transparent px-3 pb-10 pt-2 text-[12px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none disabled:opacity-50"
           />
+          <button
+            type="button"
+            onClick={openAttachmentPicker}
+            disabled={attachmentControlsLocked}
+            className="absolute bottom-2 left-2 flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)] disabled:opacity-40"
+            title="Attach files, paste images, or drag and drop"
+            aria-label="Attach files"
+          >
+            <IconPlus className="h-3.5 w-3.5" />
+          </button>
           {activeRunningModel ? (
             <span
-              className="absolute bottom-2 left-2 max-w-[calc(100%-150px)] truncate rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]"
+              className="absolute bottom-2 left-10 max-w-[calc(100%-190px)] truncate rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]"
               title={`Running model: ${activeRunningModelLabel}`}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -4120,7 +4501,7 @@ export function AssistantDock() {
             </span>
           ) : voiceDraftActive ? (
             <span
-              className="absolute bottom-2 left-2 max-w-[calc(100%-150px)] truncate rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]"
+              className="absolute bottom-2 left-10 max-w-[calc(100%-190px)] truncate rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]"
               title="Voice transcript draft"
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -4145,7 +4526,7 @@ export function AssistantDock() {
               <button
                 type="button"
                 onClick={() => void sendPrompt()}
-                disabled={!draft.trim() || !activeThread || scopeSyncBusy || realtimeTextBlocked}
+                disabled={(!draft.trim() && attachments.length === 0) || !activeThread || scopeSyncBusy || realtimeTextBlocked}
                 className="h-7 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)] disabled:opacity-40"
                 style={{ fontFamily: 'var(--display)' }}
               >
