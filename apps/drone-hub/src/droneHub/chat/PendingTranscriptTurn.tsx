@@ -47,6 +47,14 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
   const isFailed = item.state === 'failed';
+  const observability =
+    item.observability?.state === 'status-unavailable'
+      ? {
+          message: String(item.observability.message ?? '').trim() || 'Prompt status is temporarily unavailable.',
+          lastCheckedAt: String(item.observability.lastCheckedAt ?? '').trim(),
+          lastError: String(item.observability.lastError ?? '').trim(),
+        }
+      : null;
   const isStopped =
     isFailed && /stopped by user|stopped before submission|stopped because the drone was archived|stopped because the drone was deleted/i.test(String(item.error ?? ''));
   const badgeLabel = isStopped ? 'Stopped' : isFailed ? 'Failed' : item.state === 'queued' ? 'Queued' : 'Pending';
@@ -272,6 +280,16 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                           ? 'Waiting…'
                           : 'Typing…'}
                   </div>
+                  {observability ? (
+                    <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-[10.5px] leading-[1.45] text-[var(--yellow)]">
+                      <div>{observability.message}</div>
+                      {observability.lastCheckedAt ? (
+                        <div className="mt-0.5 text-[9px] text-[var(--muted-dim)] font-mono">
+                          Last checked <RelativeTimeText at={observability.lastCheckedAt} />
+                        </div>
+                      ) : null}
+                    </div>
+                  ) : null}
                   {showBlipAgents ? (
                     <div className="mt-2 border-t border-[var(--border-subtle)] pt-2">
                       <ol className="space-y-1.5">

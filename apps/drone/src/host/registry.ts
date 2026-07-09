@@ -128,6 +128,12 @@ type DroneRegistryChatEntry = {
     state: 'queued' | 'sending' | 'sent' | 'failed';
     cwd?: string | null;
     error?: string;
+    observability?: {
+      state: 'status-unavailable';
+      message: string;
+      lastCheckedAt: string;
+      lastError?: string;
+    };
     updatedAt?: string;
   }>;
 };

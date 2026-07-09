@@ -82,6 +82,12 @@ export type StoredPendingPrompt = {
   blockedByAutomation?: boolean;
   state: string;
   error?: string;
+  observability?: {
+    state: 'status-unavailable';
+    message: string;
+    lastCheckedAt: string;
+    lastError?: string;
+  };
   blipClones?: {
     status: 'running';
     count: number;
@@ -257,6 +263,7 @@ function normalizePendingPrompt(raw: any): StoredPendingPrompt | null {
   const stateRaw = String(raw?.state ?? '').trim();
   const state = stateRaw === 'queued' || stateRaw === 'sending' || stateRaw === 'sent' || stateRaw === 'failed' ? stateRaw : 'sending';
   const blipClones = normalizeStoredBlipClones(raw?.blipClones);
+  const observability = normalizeStoredObservability(raw?.observability);
   return {
     id,
     at,
@@ -268,8 +275,22 @@ function normalizePendingPrompt(raw: any): StoredPendingPrompt | null {
     ...(raw?.blockedByAutomation === true ? { blockedByAutomation: true } : {}),
     state,
     ...(typeof raw?.error === 'string' ? { error: raw.error } : {}),
+    ...(observability ? { observability } : {}),
     ...(blipClones ? { blipClones } : {}),
     updatedAt,
+  };
+}
+
+function normalizeStoredObservability(raw: any): StoredPendingPrompt['observability'] | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  if (String(raw.state ?? '').trim() !== 'status-unavailable') return undefined;
+  const lastCheckedAt = String(raw.lastCheckedAt ?? '').trim();
+  const message = String(raw.message ?? '').trim() || 'Prompt status is temporarily unavailable.';
+  return {
+    state: 'status-unavailable',
+    message,
+    lastCheckedAt: lastCheckedAt || new Date().toISOString(),
+    ...(typeof raw.lastError === 'string' && String(raw.lastError).trim() ? { lastError: String(raw.lastError).trim() } : {}),
   };
 }
 
@@ -299,6 +320,7 @@ function promptFromRow(row: any): StoredPendingPrompt | null {
     blockedByAutomation: Number(row.blocked_by_automation ?? 0) === 1,
     state: row.state,
     error: row.error ?? base.error,
+    observability: base.observability,
     updatedAt: row.updated_at,
   });
 }
@@ -749,7 +771,7 @@ class TranscriptStore {
     droneId: string;
     chatName: string;
     id: string;
-    patch: Partial<Pick<StoredPendingPrompt, 'state' | 'error' | 'blipClones' | 'updatedAt'>>;
+    patch: Partial<Pick<StoredPendingPrompt, 'state' | 'error' | 'observability' | 'blipClones' | 'updatedAt'>>;
   }): { updated: boolean } {
     const current = this.readPendingPrompt(opts.droneId, opts.chatName, opts.id);
     if (!current) return { updated: false };
@@ -1192,7 +1214,7 @@ export function updatePendingPromptInStore(opts: {
   droneId: string;
   chatName: string;
   id: string;
-  patch: Partial<Pick<StoredPendingPrompt, 'state' | 'error' | 'blipClones' | 'updatedAt'>>;
+  patch: Partial<Pick<StoredPendingPrompt, 'state' | 'error' | 'observability' | 'blipClones' | 'updatedAt'>>;
 }): { available: boolean; updated: boolean } {
   const store = getTranscriptStore();
   if (!store) {

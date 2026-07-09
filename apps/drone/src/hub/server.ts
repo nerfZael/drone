@@ -9453,7 +9453,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     // If already in transcript, nothing to do.
     if (transcriptIds.has(id)) {
       if (state !== 'sent') {
-        pendingList[i] = { ...p, state: 'sent', updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', observability: undefined, updatedAt: nowIso() };
         changed = true;
       }
       continue;
@@ -9474,9 +9474,9 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     try {
       // eslint-disable-next-line no-await-in-loop
       jobResp = await dronePromptGet(client, id);
-    } catch {
-      // If daemon job lookups keep failing for too long, fail stale pending rows so
-      // they do not block queued follow-up prompts indefinitely.
+    } catch (error: any) {
+      // If daemon job lookups fail after acceptance, keep the prompt active and
+      // surface observability loss separately from agent failure.
       const staleState = stalePendingPromptState({
         state,
         updatedAt: typeof p?.updatedAt === 'string' ? p.updatedAt : null,
@@ -9500,16 +9500,25 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             ...p,
             state: 'queued',
             error: interruptedPromptDeliveryError('daemon status unavailable while prompt was being delivered'),
+            observability: undefined,
             updatedAt: nowIso(),
           };
           schedulePendingPromptPumpRetry(droneId, chatName);
         } else {
+          const checkedAt = nowIso();
+          const errorText = String(error?.message ?? error ?? '').trim();
           pendingList[i] = {
             ...p,
-            state: 'failed',
-            error: 'prompt status unavailable for too long (daemon unavailable or restarted)',
-            updatedAt: nowIso(),
+            state: 'sent',
+            observability: {
+              state: 'status-unavailable',
+              message: 'Prompt status is temporarily unavailable. The agent may still be running.',
+              lastCheckedAt: checkedAt,
+              ...(errorText ? { lastError: errorText.slice(0, 240) } : {}),
+            },
+            updatedAt: checkedAt,
           };
+          scheduleReconcileRetry(droneId, chatName, 10_000);
         }
         changed = true;
       }
@@ -9526,8 +9535,9 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       }
       const nextBlipClones = parsedBlip?.cloneActivity;
       const blipClonesChanged = jobKind === 'blip' && !samePendingBlipClones((p as any).blipClones, nextBlipClones);
-      if (state !== 'sent' || blipClonesChanged) {
-        pendingList[i] = { ...p, state: 'sent', blipClones: nextBlipClones, updatedAt: nowIso() };
+      const observabilityChanged = Boolean((p as any).observability);
+      if (state !== 'sent' || blipClonesChanged || observabilityChanged) {
+        pendingList[i] = { ...p, state: 'sent', observability: undefined, blipClones: nextBlipClones, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -9554,6 +9564,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           ...p,
           state: 'failed',
           error: `auto-finalized stale pending prompt; daemon job remained ${jobState || 'non-terminal'} until session recovery`,
+          observability: undefined,
           updatedAt: nowIso(),
         };
         changed = true;
@@ -9587,7 +9598,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             fallbackRaw: 'codex finished but no message was parsed',
             exitCode: 0,
           });
-          pendingList[i] = { ...p, state: 'failed', error, blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -9609,7 +9620,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         });
         transcriptIds.add(id);
         completedTurnIdsForSnapshot.push(id);
-        pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -9622,7 +9633,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         }
         const output = String(parsed.message ?? '').trimEnd();
         if (!output) {
-          pendingList[i] = { ...p, state: 'failed', error: 'pi finished but no assistant message was parsed', blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error: 'pi finished but no assistant message was parsed', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -9639,7 +9650,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         });
         transcriptIds.add(id);
         completedTurnIdsForSnapshot.push(id);
-        pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -9652,7 +9663,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         }
         const output = String(parsed.message ?? '').trimEnd();
         if (!output) {
-          pendingList[i] = { ...p, state: 'failed', error: 'blip finished but no assistant message was parsed', blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error: 'blip finished but no assistant message was parsed', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -9668,7 +9679,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           output,
         });
         transcriptIds.add(id);
-        pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -9707,7 +9718,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       });
       transcriptIds.add(id);
       completedTurnIdsForSnapshot.push(id);
-      pendingList[i] = { ...p, state: 'sent', blipClones: undefined, updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'sent', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }
@@ -9746,7 +9757,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           });
           transcriptIds.add(id);
           completedTurnIdsForSnapshot.push(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -9781,7 +9792,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           });
           transcriptIds.add(id);
           completedTurnIdsForSnapshot.push(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -9812,7 +9823,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             output,
           });
           transcriptIds.add(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -9832,13 +9843,13 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           '',
         exitCode,
       });
-      pendingList[i] = { ...p, state: 'failed', error: errText, blipClones: undefined, updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'failed', error: errText, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }
 
     if (jobState === 'canceled') {
-      pendingList[i] = { ...p, state: 'failed', error: STOPPED_BY_USER_ERROR, blipClones: undefined, updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'failed', error: STOPPED_BY_USER_ERROR, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }

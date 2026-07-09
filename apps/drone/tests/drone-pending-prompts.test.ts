@@ -106,6 +106,61 @@ describe('drone pending prompt store', () => {
     });
   });
 
+  test('preserves status-unavailable observability metadata separately from failure state', async () => {
+    await withTempDroneDataDir('drone-pending-prompts-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.drones = {
+          'drone-observed': {
+            id: 'drone-observed',
+            name: 'drone-observed',
+            chats: {
+              default: {
+                createdAt: '2026-03-26T09:00:00.000Z',
+                pendingPrompts: [
+                  {
+                    id: 'status-stale',
+                    at: '2026-03-26T09:01:00.000Z',
+                    prompt: 'long running',
+                    state: 'sent',
+                  },
+                ],
+              },
+            },
+          },
+        };
+      });
+
+      await pendingPromptStore.updatePendingPrompt({
+        droneId: 'drone-observed',
+        chatName: 'default',
+        id: 'status-stale',
+        patch: {
+          state: 'sent',
+          observability: {
+            state: 'status-unavailable',
+            message: 'Prompt status is temporarily unavailable. The agent may still be running.',
+            lastCheckedAt: '2026-03-26T09:12:00.000Z',
+            lastError: 'request timeout after 5000ms: GET /v1/prompts/status-stale',
+          },
+          updatedAt: '2026-03-26T09:12:00.000Z',
+        },
+      });
+
+      const pending = await pendingPromptStore.readPendingPrompts({ droneId: 'drone-observed', chatName: 'default' });
+      expect(pending).toHaveLength(1);
+      expect(pending[0]).toMatchObject({
+        id: 'status-stale',
+        state: 'sent',
+        observability: {
+          state: 'status-unavailable',
+          message: 'Prompt status is temporarily unavailable. The agent may still be running.',
+          lastCheckedAt: '2026-03-26T09:12:00.000Z',
+        },
+      });
+      expect(pending[0]?.state).not.toBe('failed');
+    });
+  });
+
   test('cancels queued prompts and falls back to transcript turns for already-submitted prompts', async () => {
     await withTempDroneDataDir('drone-pending-prompts-', async () => {
       await updateRegistry((reg: any) => {
