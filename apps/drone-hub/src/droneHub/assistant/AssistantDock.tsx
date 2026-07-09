@@ -2,12 +2,14 @@ import React from 'react';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import { requestJson } from '../http';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
+import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-dnd';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import { IconChatThread, IconEye, IconList, IconPencil, IconPlus, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash } from '../app/icons';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { IconFile, iconForFilePath } from '../icons';
+import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import {
   canSendAssistantDesktopVoiceRealtimeText,
   desktopAssistantVoiceControlLabel,
@@ -1021,10 +1023,14 @@ function ToolActivityRow({
 
 function AssistantMessageRow({
   message,
+  droneMentionLinks,
+  onOpenDroneMention,
   showToolCalls = true,
   isStreamingAssistant = false,
 }: {
   message: AssistantMessage;
+  droneMentionLinks?: MarkdownTextMentionLink[];
+  onOpenDroneMention?: (mention: MarkdownTextMentionLink) => void;
   showToolCalls?: boolean;
   isStreamingAssistant?: boolean;
 }) {
@@ -1058,7 +1064,17 @@ function AssistantMessageRow({
         }
       } else if (part.type === 'text') {
         const t = String(part.text ?? '').trim();
-        if (t) blocks.push(<MarkdownMessage key={`tx:${i}`} text={t} className="dh-markdown text-[12px]" />);
+        if (t) {
+          blocks.push(
+            <MarkdownMessage
+              key={`tx:${i}`}
+              text={t}
+              className="dh-markdown text-[12px]"
+              textMentionLinks={droneMentionLinks}
+              onOpenTextMention={onOpenDroneMention}
+            />,
+          );
+        }
       }
     }
     body = blocks.length > 0 ? <div className="space-y-1">{blocks}</div> : null;
@@ -1066,7 +1082,12 @@ function AssistantMessageRow({
     const text = messageText(message);
     body = text ? (
       message.role === 'assistant' ? (
-        <MarkdownMessage text={text} className="dh-markdown text-[12px]" />
+        <MarkdownMessage
+          text={text}
+          className="dh-markdown text-[12px]"
+          textMentionLinks={droneMentionLinks}
+          onOpenTextMention={onOpenDroneMention}
+        />
       ) : (
         <div className="whitespace-pre-wrap break-words text-[12px] text-[var(--fg-secondary)]">{text}</div>
       )
@@ -2541,6 +2562,31 @@ export function AssistantDock() {
       (snapshot?.chatIdleSubscriptions ?? []).filter((sub) => sub.threadId === activeThreadId && sub.status === 'active'),
     [snapshot?.chatIdleSubscriptions, activeThreadId],
   );
+  const droneMentionLinks = React.useMemo<MarkdownTextMentionLink[]>(() => {
+    const nameCounts = new Map<string, number>();
+    for (const name of Object.values(droneNameById)) {
+      const label = String(name ?? '').trim();
+      if (!label) continue;
+      const key = label.toLowerCase();
+      nameCounts.set(key, (nameCounts.get(key) ?? 0) + 1);
+    }
+    return Object.entries(droneNameById)
+      .map(([droneId, name]) => ({ droneId: String(droneId ?? '').trim(), name: String(name ?? '').trim() }))
+      .filter(({ droneId, name }) => Boolean(droneId && name && nameCounts.get(name.toLowerCase()) === 1))
+      .map(({ droneId, name }) => ({
+        key: droneId,
+        label: name,
+        title: `Ctrl-click to open ${name}`,
+      }));
+  }, [droneNameById]);
+  const openDroneMention = React.useCallback(
+    (mention: MarkdownTextMentionLink) => {
+      const droneId = String(mention.key ?? '').trim();
+      if (!droneId || !droneNameById[droneId]) return;
+      dispatchAssistantOpenDroneChat(droneId, 'default');
+    },
+    [droneNameById],
+  );
   const assistantChatIdleHold =
     Boolean(activeThread) &&
     (activeThread?.status === 'waiting_for_chats_idle' || activeChatIdleSubscriptionsForThread.length > 0);
@@ -2962,7 +3008,6 @@ export function AssistantDock() {
   }, [hasAssistantBackgroundActivity, refresh, shouldPollAssistantSnapshot]);
 
   React.useEffect(() => {
-    if (!toolDroneKey) return;
     let cancelled = false;
     void requestJson<{ ok: true; drones?: Array<{ id?: string; name?: string }> }>('/api/drones')
       .then((data) => {
@@ -3873,6 +3918,8 @@ export function AssistantDock() {
                       <AssistantMessageRow
                         key={item.key}
                         message={item.message}
+                        droneMentionLinks={droneMentionLinks}
+                        onOpenDroneMention={openDroneMention}
                         showToolCalls={item.showToolCalls}
                         isStreamingAssistant={
                           item.message.role === 'assistant' && item.sourceMessageIndex === streamingAssistantSourceIndex
