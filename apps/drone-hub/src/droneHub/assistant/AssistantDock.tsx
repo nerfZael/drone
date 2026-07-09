@@ -12,6 +12,7 @@ import {
   fileToBase64,
   filesFromClipboardData,
   formatBytes,
+  imageFilesFromClipboardData,
   isLikelyImageFile,
   makeDraftImageAttachmentId,
   revokeDraftImagePreviewUrls,
@@ -65,7 +66,7 @@ type AssistantThreadStatus = 'idle' | 'running' | 'waiting_for_approval' | 'wait
 
 type AssistantMessage = {
   role: 'user' | 'assistant' | 'toolResult';
-  content?: string | Array<{ type: string; text?: string; thinking?: string; name?: string; arguments?: any; id?: string }>;
+  content?: string | Array<{ type: string; text?: string; thinking?: string; name?: string; arguments?: any; id?: string; data?: string; mimeType?: string }>;
   toolName?: string;
   toolCallId?: string;
   isError?: boolean;
@@ -260,7 +261,12 @@ type AssistantAttachmentPayload = {
   mime: string;
   size: number;
   dataBase64: string;
+  disposition?: 'artifact' | 'prompt';
 };
+
+type AssistantAttachmentSource = 'file' | 'paste';
+type AssistantDraftImageAttachment = Extract<DraftChatAttachment, { kind: 'image' }> & { source: AssistantAttachmentSource };
+type AssistantDraftTextAttachment = Extract<DraftChatAttachment, { kind: 'text' }> & { source: AssistantAttachmentSource };
 
 type AssistantDraftFileAttachment = {
   kind: 'file';
@@ -269,9 +275,10 @@ type AssistantDraftFileAttachment = {
   name: string;
   mime: string;
   size: number;
+  source: 'file';
 };
 
-type AssistantDraftAttachment = DraftChatAttachment | AssistantDraftFileAttachment;
+type AssistantDraftAttachment = AssistantDraftImageAttachment | AssistantDraftTextAttachment | AssistantDraftFileAttachment;
 
 type AssistantScopeDrone = { id: string; name: string };
 type AssistantScopeMode = 'all' | 'selected';
@@ -371,6 +378,17 @@ function messageText(message: AssistantMessage): string {
     })
     .filter(Boolean)
     .join('\n');
+}
+
+function messageImageParts(message: AssistantMessage): Array<{ data: string; mimeType: string }> {
+  const content = message.content;
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter((part) => part?.type === 'image' && String(part.data ?? '').trim())
+    .map((part) => ({
+      data: String(part.data ?? '').trim(),
+      mimeType: String(part.mimeType ?? '').trim() || 'image/png',
+    }));
 }
 
 function lastAssistantContentBlock(message: AssistantMessage): { type: string } | null {
@@ -762,6 +780,7 @@ async function encodeAssistantAttachment(attachment: AssistantDraftAttachment): 
       mime: attachment.mime,
       size: attachment.size,
       dataBase64: await fileToBase64(attachment.file),
+      disposition: attachment.source === 'paste' ? 'prompt' : 'artifact',
     };
   }
   if (attachment.kind === 'text') {
@@ -770,6 +789,7 @@ async function encodeAssistantAttachment(attachment: AssistantDraftAttachment): 
       mime: attachment.mime,
       size: attachment.size,
       dataBase64: await blobToBase64(new Blob([attachment.text], { type: attachment.mime })),
+      disposition: 'artifact',
     };
   }
   return {
@@ -777,6 +797,7 @@ async function encodeAssistantAttachment(attachment: AssistantDraftAttachment): 
     mime: attachment.mime,
     size: attachment.size,
     dataBase64: await fileToBase64(attachment.file),
+    disposition: 'artifact',
   };
 }
 
@@ -1352,7 +1373,8 @@ function AssistantMessageRow({
     body = blocks.length > 0 ? <div className="space-y-1">{blocks}</div> : null;
   } else {
     const text = messageText(message);
-    body = text ? (
+    const images = messageImageParts(message);
+    const textBody = text ? (
       message.role === 'assistant' ? (
         <MarkdownMessage
           text={text}
@@ -1364,6 +1386,19 @@ function AssistantMessageRow({
         <div className="whitespace-pre-wrap break-words text-[12px] text-[var(--fg-secondary)]">{text}</div>
       )
     ) : null;
+    const imageBody = images.length > 0 ? (
+      <div className="flex flex-wrap gap-2">
+        {images.map((image, index) => (
+          <img
+            key={`${image.mimeType}:${index}`}
+            src={`data:${image.mimeType};base64,${image.data}`}
+            alt="Attached image"
+            className="max-h-44 max-w-[min(260px,100%)] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] object-contain"
+          />
+        ))}
+      </div>
+    ) : null;
+    body = textBody || imageBody ? <div className="space-y-2">{textBody}{imageBody}</div> : null;
   }
 
   if (message.role === 'assistant' && !body && !message.errorMessage && calls.length === 0) return null;
@@ -2812,6 +2847,7 @@ export function AssistantDock() {
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const scrollContentRef = React.useRef<HTMLDivElement | null>(null);
+  const assistantThreadRef = React.useRef<HTMLDivElement | null>(null);
   /** When false, new transcript content must not force scroll position (user scrolled up). */
   const assistantStickToBottomRef = React.useRef(true);
   const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
@@ -3728,6 +3764,10 @@ export function AssistantDock() {
     () => attachments.filter((attachment) => attachment.kind === 'image').length,
     [attachments],
   );
+  const promptImageAttachmentCount = React.useMemo(
+    () => attachments.filter((attachment) => attachment.kind === 'image' && attachment.source === 'paste').length,
+    [attachments],
+  );
 
   const openAttachmentPicker = React.useCallback(() => {
     if (attachmentControlsLocked) return;
@@ -3746,11 +3786,12 @@ export function AssistantDock() {
     });
   }, []);
 
-  const addAttachmentFiles = React.useCallback((files: File[] | FileList | null | undefined) => {
+  const addAttachmentFiles = React.useCallback((files: File[] | FileList | null | undefined, options?: { source?: AssistantAttachmentSource }) => {
     if (attachmentControlsLocked) return;
     if (!files) return;
     const list = Array.isArray(files) ? files : Array.from(files);
     if (list.length === 0) return;
+    const source = options?.source ?? 'file';
     setAttachmentError(null);
     setAttachments((prev) => {
       const next = prev.slice();
@@ -3790,6 +3831,7 @@ export function AssistantDock() {
             mime,
             size: Math.floor(size),
             previewUrl: URL.createObjectURL(file),
+            source,
           });
           images += 1;
         } else {
@@ -3800,6 +3842,7 @@ export function AssistantDock() {
             name,
             mime,
             size: Math.floor(size),
+            source: 'file',
           });
         }
         total += size;
@@ -3838,10 +3881,44 @@ export function AssistantDock() {
           name: makeAssistantPastedTextAttachmentName(textCount),
           mime: 'text/plain',
           size,
+          source: 'paste',
         },
       ];
     });
   }, [attachmentControlsLocked]);
+
+  const handleAssistantPaste = React.useCallback((event: React.ClipboardEvent): boolean => {
+    if (attachmentControlsLocked || filesOpen) return false;
+    const clipboardData = event.clipboardData;
+    const pastedImages = imageFilesFromClipboardData(clipboardData);
+    if (pastedImages.length > 0) {
+      event.preventDefault();
+      addAttachmentFiles(pastedImages, { source: 'paste' });
+      return true;
+    }
+
+    const files = filesFromClipboardData(clipboardData);
+    const nonImageFiles = files.filter((file) => !isLikelyImageFile(file));
+    if (nonImageFiles.length > 0) {
+      event.preventDefault();
+      addAttachmentFiles(nonImageFiles, { source: 'file' });
+      return true;
+    }
+
+    const pastedText = String(clipboardData?.getData('text/plain') ?? '');
+    if (pastedText.length >= CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS) {
+      event.preventDefault();
+      addPastedTextAttachment(pastedText);
+      return true;
+    }
+    return false;
+  }, [addAttachmentFiles, addPastedTextAttachment, attachmentControlsLocked, filesOpen]);
+
+  const focusAssistantThreadForPaste = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || target.closest('button,a,input,textarea,select,[role="button"],[role="menuitem"],[contenteditable="true"]')) return;
+    assistantThreadRef.current?.focus();
+  }, []);
 
   const sendPrompt = React.useCallback(async () => {
     if (!activeThread) return;
@@ -4170,7 +4247,32 @@ export function AssistantDock() {
           onCollapse={() => setThreadSidebarOpen(false)}
         />
       ) : null}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div
+        ref={assistantThreadRef}
+        tabIndex={-1}
+        className={`flex min-w-0 flex-1 flex-col outline-none ${attachmentDragActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
+        onMouseDown={focusAssistantThreadForPaste}
+        onPaste={(event) => {
+          handleAssistantPaste(event);
+        }}
+        onDragEnter={(event) => {
+          if (attachmentControlsLocked || filesOpen) return;
+          if (event.dataTransfer?.types?.includes?.('Files')) setAttachmentDragActive(true);
+        }}
+        onDragOver={(event) => {
+          if (event.dataTransfer?.types?.includes?.('Files')) event.preventDefault();
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setAttachmentDragActive(false);
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer?.types?.includes?.('Files')) return;
+          event.preventDefault();
+          setAttachmentDragActive(false);
+          if (attachmentControlsLocked || filesOpen) return;
+          addAttachmentFiles(event.dataTransfer?.files ?? null, { source: 'file' });
+        }}
+      >
         <div className="relative flex h-11 flex-shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[rgba(255,255,255,.025)] px-2">
           <button
             type="button"
@@ -4664,19 +4766,25 @@ export function AssistantDock() {
             attachmentDragActive ? 'border-[var(--accent-muted)]' : 'border-[var(--border-subtle)]'
           }`}
           onDragEnter={(event) => {
+            event.stopPropagation();
             if (attachmentControlsLocked) return;
             if (event.dataTransfer?.types?.includes?.('Files')) setAttachmentDragActive(true);
           }}
           onDragOver={(event) => {
+            event.stopPropagation();
             if (event.dataTransfer?.types?.includes?.('Files')) event.preventDefault();
             if (attachmentControlsLocked) return;
           }}
-          onDragLeave={() => setAttachmentDragActive(false)}
+          onDragLeave={(event) => {
+            event.stopPropagation();
+            setAttachmentDragActive(false);
+          }}
           onDrop={(event) => {
+            event.stopPropagation();
             event.preventDefault();
             setAttachmentDragActive(false);
             if (attachmentControlsLocked) return;
-            addAttachmentFiles(event.dataTransfer?.files ?? null);
+            addAttachmentFiles(event.dataTransfer?.files ?? null, { source: 'file' });
           }}
         >
           <input
@@ -4686,7 +4794,7 @@ export function AssistantDock() {
             className="hidden"
             disabled={attachmentControlsLocked}
             onChange={(event) => {
-              addAttachmentFiles(event.currentTarget.files);
+              addAttachmentFiles(event.currentTarget.files, { source: 'file' });
               event.currentTarget.value = '';
             }}
           />
@@ -4694,8 +4802,9 @@ export function AssistantDock() {
             <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <div className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                  {attachments.length} file{attachments.length === 1 ? '' : 's'} attached
+                  {attachments.length} item{attachments.length === 1 ? '' : 's'} attached
                   {imageAttachmentCount > 0 ? ` · ${imageAttachmentCount} image${imageAttachmentCount === 1 ? '' : 's'}` : ''}
+                  {promptImageAttachmentCount > 0 ? ` · ${promptImageAttachmentCount} chat-only` : ''}
                 </div>
                 <button
                   type="button"
@@ -4762,14 +4871,8 @@ export function AssistantDock() {
               }
             }}
             onPaste={(event) => {
-              if (attachmentControlsLocked) return;
-              const files = filesFromClipboardData(event.clipboardData);
-              if (files.length > 0) addAttachmentFiles(files);
-              const pastedText = String(event.clipboardData?.getData('text/plain') ?? '');
-              if (pastedText.length >= CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS) {
-                event.preventDefault();
-                addPastedTextAttachment(pastedText);
-              }
+              event.stopPropagation();
+              handleAssistantPaste(event);
             }}
             disabled={!activeThread || realtimeTextBlocked}
             placeholder={
