@@ -954,9 +954,42 @@ async function withDroneOpLock<T>(keyRaw: string, fn: () => Promise<T>): Promise
   }
 }
 
+type DroneContainerContext = {
+  registryDroneName: string;
+  containerName: string;
+  droneEntry: any;
+  droneId: string | null;
+};
+
+async function resolveDroneContainerContext(opts: {
+  requestedDroneName: string;
+  droneEntry: any;
+}): Promise<DroneContainerContext> {
+  const requestedDroneName = String(opts.requestedDroneName ?? '').trim();
+  const seedEntry = opts.droneEntry;
+  const seedId = normalizeDroneIdentity(seedEntry?.id) || null;
+
+  let registryDroneName = requestedDroneName;
+  let containerName = String(seedEntry?.containerName ?? seedEntry?.name ?? requestedDroneName).trim() || requestedDroneName;
+  let droneEntry = seedEntry;
+
+  if (seedId) {
+    const regLatest: any = await loadRegistry();
+    const found = findDroneEntryByIdentity(regLatest, seedId);
+    if (found) {
+      registryDroneName = String(found.key ?? requestedDroneName).trim() || requestedDroneName;
+      droneEntry = found.entry ?? droneEntry;
+      const resolvedContainerName = String((found.entry as any)?.containerName ?? (found.entry as any)?.name ?? found.key ?? '').trim();
+      if (resolvedContainerName) containerName = resolvedContainerName;
+    }
+  }
+
+  return { registryDroneName, containerName, droneEntry, droneId: seedId };
+}
+
 async function withLockedDroneContainer<T>(
   opts: { requestedDroneName: string; droneEntry: any },
-  fn: (ctx: { registryDroneName: string; containerName: string; droneEntry: any; droneId: string | null }) => Promise<T>,
+  fn: (ctx: DroneContainerContext) => Promise<T>,
 ): Promise<T> {
   const requestedDroneName = String(opts.requestedDroneName ?? '').trim();
   const seedEntry = opts.droneEntry;
@@ -964,23 +997,18 @@ async function withLockedDroneContainer<T>(
   const lockKey = seedId ? `drone:${seedId}` : `drone-name:${String(seedEntry?.containerName ?? seedEntry?.name ?? requestedDroneName)}`;
 
   return await withDroneOpLock(lockKey, async () => {
-    let registryDroneName = requestedDroneName;
-    let containerName = String(seedEntry?.containerName ?? seedEntry?.name ?? requestedDroneName).trim() || requestedDroneName;
-    let droneEntry = seedEntry;
-
-    if (seedId) {
-      const regLatest: any = await loadRegistry();
-      const found = findDroneEntryByIdentity(regLatest, seedId);
-      if (found) {
-        registryDroneName = String(found.key ?? requestedDroneName).trim() || requestedDroneName;
-        droneEntry = found.entry ?? droneEntry;
-        const resolvedContainerName = String((found.entry as any)?.containerName ?? (found.entry as any)?.name ?? found.key ?? '').trim();
-        if (resolvedContainerName) containerName = resolvedContainerName;
-      }
-    }
-
-    return await fn({ registryDroneName, containerName, droneEntry, droneId: seedId });
+    return await fn(await resolveDroneContainerContext(opts));
   });
+}
+
+async function withReadonlyDroneContainer<T>(
+  opts: { requestedDroneName: string; droneEntry: any },
+  fn: (ctx: DroneContainerContext) => Promise<T>,
+): Promise<T> {
+  // Read-only Docker exec/copy operations should not wait behind long chat,
+  // provisioning, or mutation work. A concurrent rename/delete will surface as
+  // a normal Docker missing-container error, which callers already handle.
+  return await fn(await resolveDroneContainerContext(opts));
 }
 
 function lockedDroneContainerSortKey(opts: { requestedDroneName: string; droneEntry: any }): string {
@@ -3374,7 +3402,7 @@ async function assistantStatDronePath(opts: { droneId: string; path: string }): 
     'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
     'printf "__META__\t%s\t%s\t%s\n" "$kind" "$size" "$mtime"',
   ].join('\n');
-  const r = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+  const r = await withReadonlyDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
     return await dvmExec(containerName, 'bash', ['-lc', script]);
   });
   if (r.code !== 0) throw new Error((r.stderr || r.stdout || 'failed reading path metadata').trim());
@@ -3425,7 +3453,7 @@ async function assistantListDroneFiles(opts: { droneId: string; path?: string })
     '  printf "%s\t%s\t%s\t%s\n" "$name" "$kind" "$size" "$mtime"',
     'done',
   ].join('\n');
-  const r = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+  const r = await withReadonlyDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
     return await dvmExec(containerName, 'bash', ['-lc', script], { timeoutMs: FS_LIST_TIMEOUT_MS });
   });
   if (r.code !== 0) {
@@ -3475,7 +3503,7 @@ async function assistantReadDroneFile(opts: { droneId: string; path: string; sta
     'printf "__META__\t%s\t%s\t%s\n" "$mime" "$size" "$mtime"',
     'base64 < "$target" | tr -d "\\n"',
   ].join('\n');
-  const r = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+  const r = await withReadonlyDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
     return await dvmExec(containerName, 'bash', ['-lc', script]);
   });
   const out = `${String(r.stdout ?? '')}\n${String(r.stderr ?? '')}`;
@@ -3773,7 +3801,7 @@ async function assistantSearchDroneFiles(opts: {
   const r =
     target.runtime === 'host'
       ? await runHostCommand('bash', ['-lc', script], { timeoutMs: 10_000 })
-      : await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+      : await withReadonlyDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
           return await dvmExec(containerName, 'bash', ['-lc', script]);
         });
   if (r.code !== 0) {
@@ -3835,7 +3863,7 @@ async function assistantFindDroneFiles(opts: { droneId: string; path?: string; p
   const r =
     target.runtime === 'host'
       ? await runHostCommand('bash', ['-lc', script], { timeoutMs: 10_000 })
-      : await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+      : await withReadonlyDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
           return await dvmExec(containerName, 'bash', ['-lc', script]);
         });
   if (r.code !== 0) {
@@ -3921,7 +3949,7 @@ async function assistantListDroneChangedFiles(opts: { droneId: string }): Promis
   }
 
   const repoPathInContainer = droneRepoPathInContainer(target.drone);
-  const result = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
+  const result = await withReadonlyDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) => {
     return await droneRepoChangesSummary({ container: containerName, repoPathInContainer });
   });
   return formatAssistantChangedFilesResult({ droneId: target.id, drone: target.drone, repoRoot: result.repoRoot, summary: result.summary });
@@ -20919,7 +20947,7 @@ export async function startDroneHubApiServer(opts: {
         ].join('\n');
 
         try {
-          const r = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+          const r = await withReadonlyDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
             return await dvmExec(containerName, 'bash', ['-lc', script], { timeoutMs: FS_LIST_TIMEOUT_MS });
           });
           if (r.code !== 0) {
@@ -21003,7 +21031,7 @@ export async function startDroneHubApiServer(opts: {
 
         const script = buildFsSearchScript({ root, query, limit, pathFlavor: 'posix' });
         try {
-          const r = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+          const r = await withReadonlyDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
             return await dvmExec(containerName, 'bash', ['-lc', script]);
           });
           const out = `${String(r.stdout ?? '')}\n${String(r.stderr ?? '')}`;
@@ -21117,7 +21145,7 @@ export async function startDroneHubApiServer(opts: {
           'if [ "$count" -gt 0 ]; then dd if="$target" bs=1 skip="$offset" count="$count" status=none | base64 | tr -d "\\n"; fi',
         ].join('\n');
         try {
-          const r = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+          const r = await withReadonlyDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
             return await dvmExec(containerName, 'bash', ['-lc', script]);
           });
           const out = `${String(r.stdout ?? '')}\n${String(r.stderr ?? '')}`;
@@ -21275,7 +21303,7 @@ export async function startDroneHubApiServer(opts: {
           ].join('\n');
 
         try {
-          const result = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+          const result = await withReadonlyDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
             const runRead = async (pathForRead: string) => {
               return await dvmExec(containerName, 'bash', ['-lc', buildReadScript(pathForRead)]);
             };
@@ -21632,7 +21660,7 @@ export async function startDroneHubApiServer(opts: {
             const destinationPath = path.join(hostExtractDir, safeBaseName);
             await fs.cp(resolvedTargetPath, destinationPath, { recursive: true });
           } else {
-            await withLockedDroneContainer(
+            await withReadonlyDroneContainer(
               { requestedDroneName: droneName, droneEntry: resolved.drone },
               async ({ containerName }) => {
                 await dvmCopyFromContainer(containerName, targetPath, hostExtractDir);
@@ -21849,7 +21877,7 @@ export async function startDroneHubApiServer(opts: {
         ].join('\n');
 
         try {
-          const r = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+          const r = await withReadonlyDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
             return await dvmExec(containerName, 'bash', ['-lc', script]);
           });
           const stdout = String(r.stdout ?? '');
@@ -22059,7 +22087,7 @@ export async function startDroneHubApiServer(opts: {
         ].join('\n');
 
         try {
-          const r = await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
+          const r = await withReadonlyDroneContainer({ requestedDroneName: droneName, droneEntry: resolved.drone }, async ({ containerName }) => {
             return await dvmExec(containerName, 'bash', ['-lc', script]);
           });
           const stdout = String(r.stdout ?? '');
@@ -22150,10 +22178,10 @@ export async function startDroneHubApiServer(opts: {
           if (runtime === 'host') {
             mappedHostPort = containerPort;
           } else {
-            const ports = await withLockedDroneContainer(
+            const ports = await withReadonlyDroneContainer(
               { requestedDroneName: droneName, droneEntry: drone },
               async ({ containerName }) => {
-              return await dvmPorts(containerName);
+                return await dvmPorts(containerName);
               },
             );
             const mapped = ports.find(
@@ -22218,7 +22246,7 @@ export async function startDroneHubApiServer(opts: {
                   if (!Number.isFinite(hostPort) || hostPort <= 0 || !Number.isFinite(containerPort) || containerPort <= 0) return [];
                   return [{ hostPort: Math.floor(hostPort), containerPort: Math.floor(containerPort) }];
                 })()
-              : await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: drone }, async ({ containerName }) => {
+              : await withReadonlyDroneContainer({ requestedDroneName: droneName, droneEntry: drone }, async ({ containerName }) => {
                   return await dvmPorts(containerName);
                 });
           json(res, 200, { ok: true, id: droneId, name: droneName, ports });
