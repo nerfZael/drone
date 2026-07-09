@@ -2219,6 +2219,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           createdAt: startupSeedForCurrentDrone.at || new Date().toISOString(),
         }
       : null;
+  const chatRuntimeMetadataAvailable = Boolean(
+    effectiveChatInfo &&
+      currentDrone &&
+      effectiveChatInfo.name === currentDrone.name &&
+      effectiveChatInfo.chat === (selectedChat || 'default'),
+  );
   const builtinAgentOptions: Array<{ key: string; label: string; agent: ChatAgentConfig }> = BUILTIN_AGENT_OPTIONS;
   const currentAgent = effectiveChatInfo?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig);
   const currentModel = String(chatInfo?.model ?? effectiveChatInfo?.model ?? '').trim() || null;
@@ -4025,6 +4031,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     toolbarAgentMenuEntries,
     agentDisabled,
     agentLabel,
+    chatRuntimeMetadataAvailable,
     modelControlEnabled,
     availableChatModels,
     currentModel,

@@ -37,7 +37,7 @@ import {
 } from './DockableDroneWorkspace';
 import { DroneWorkspaceHeaderFrame } from './DroneWorkspaceHeaderFrame';
 import { type RightPanelTab } from './app-config';
-import type { AgentSuggestionState, StartupSeedState, TldrState } from './app-types';
+import type { AgentSuggestionState, ChatModelOption, StartupSeedState, TldrState } from './app-types';
 import type { RepoOpErrorMeta } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
 import { requestChangesPullRequest } from '../changes/navigation';
@@ -67,6 +67,7 @@ import type { RepoTransferActionResult, RepoTransferPeer } from './use-workspace
 import {
   formatBytes,
   parseGithubPullRequestHref,
+  resolveDisplayedChatModel,
 } from './selected-drone-workspace-utils';
 import { useHeaderRepoPullRequestSummary } from './HeaderPullRequestShortcuts';
 import { useFleetAssignmentDropState } from './use-fleet-assignment-drop-state';
@@ -170,8 +171,9 @@ type SelectedDroneWorkspaceProps = {
   toolbarAgentMenuEntries: UiMenuSelectEntry[];
   agentDisabled: boolean;
   agentLabel: string;
+  chatRuntimeMetadataAvailable: boolean;
   modelControlEnabled: boolean;
-  availableChatModels: unknown[];
+  availableChatModels: ChatModelOption[];
   currentModel: string | null;
   setChatModel: (model: string | null) => Promise<void>;
   agentPermissionMode: AgentPermissionMode;
@@ -304,6 +306,7 @@ export function SelectedDroneWorkspace({
   toolbarAgentMenuEntries,
   agentDisabled,
   agentLabel,
+  chatRuntimeMetadataAvailable,
   modelControlEnabled,
   availableChatModels,
   currentModel,
@@ -630,6 +633,25 @@ export function SelectedDroneWorkspace({
   });
   const compactRepoPath = String(currentDrone.repoPath ?? '').trim();
   const compactRepoLabel = compactRepoPath ? repoPathLabel(compactRepoPath) : '';
+  const compactModel = resolveDisplayedChatModel(
+    currentModel,
+    availableChatModels,
+    loadingChatModels,
+    modelControlEnabled,
+  );
+  const compactModelTitle =
+    compactModel.source === 'configured'
+      ? `Model: ${compactModel.label} (configured for this chat)`
+      : compactModel.source === 'current'
+        ? `Model: ${compactModel.label} (reported as current by the agent CLI)`
+        : compactModel.source === 'default'
+          ? `Model: ${compactModel.label} (reported as default by the agent CLI)`
+          : compactModel.source === 'loading'
+            ? 'Detecting the default model from the agent CLI'
+            : compactModel.source === 'unsupported'
+              ? 'Model is not reported by this custom agent command'
+              : 'Model: agent CLI default (the CLI did not report a specific model)';
+  const showCompactRuntimeMetadata = hasChats && chatRuntimeMetadataAvailable;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
   const showFleetBadge =
@@ -1184,11 +1206,34 @@ export function SelectedDroneWorkspace({
                     </button>
                   ) : null}
                 </div>
-                {compactRepoPath ? (
-                  <span className="hidden min-w-0 max-w-[min(34vw,420px)] items-center gap-1.5 truncate text-[10px] text-[var(--muted)] lg:inline-flex" title={compactRepoPath}>
-                    <IconFolder className="flex-shrink-0 opacity-35 w-3 h-3" />
-                    <span className="min-w-0 truncate font-mono text-[var(--muted)]">{compactRepoLabel}</span>
-                  </span>
+                {compactRepoPath || showCompactRuntimeMetadata ? (
+                  <div className="hidden min-w-0 max-w-[min(34vw,420px)] items-center gap-1.5 overflow-hidden text-[10px] text-[var(--muted)] lg:flex">
+                    {compactRepoPath ? (
+                      <span className="inline-flex min-w-0 items-center gap-1.5" title={compactRepoPath}>
+                        <IconFolder className="h-3 w-3 flex-shrink-0 opacity-35" />
+                        <span className="min-w-0 max-w-[140px] truncate font-mono">{compactRepoLabel}</span>
+                      </span>
+                    ) : null}
+                    {compactRepoPath && showCompactRuntimeMetadata ? (
+                      <span className="flex-shrink-0 text-[var(--muted-dim)] opacity-45" aria-hidden="true">·</span>
+                    ) : null}
+                    {showCompactRuntimeMetadata ? (
+                      <>
+                        <span className="inline-flex min-w-0 items-center gap-1" title={`Agent CLI: ${agentLabel}`}>
+                          <span className="flex-shrink-0 uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>CLI</span>
+                          <span className="min-w-0 max-w-[90px] truncate font-mono">{agentLabel}</span>
+                        </span>
+                        <span className="flex-shrink-0 text-[var(--muted-dim)] opacity-45" aria-hidden="true">·</span>
+                        <span
+                          className="inline-flex min-w-0 items-center gap-1"
+                          title={compactModelTitle}
+                        >
+                          <span className="flex-shrink-0 uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Model</span>
+                          <span className="min-w-0 max-w-[140px] truncate font-mono">{compactModel.label}</span>
+                        </span>
+                      </>
+                    ) : null}
+                  </div>
                 ) : null}
               </div>
             </div>
