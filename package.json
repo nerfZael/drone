@@ -23,6 +23,7 @@
     "drone": "bun run --filter drone dev --",
     "blip": "bun run --filter @blip/tools build && bun run --filter @blip/core build && bun run --filter @blip/cli dev -- --workspace \"$PWD\"",
     "drone-hub": "bun run --filter drone-hub dev",
+    "drone-hub:app": "bun run --filter drone-hub build && bun run --filter drone build && node apps/drone/dist/cli.js hub app --static-ui-dir apps/drone-hub/dist",
     "voice-stream": "bun run --filter voice-stream dev",
     "vsn": "bun run --filter voice-stream-next dev",
     "vsn:apk": "bun run --filter voice-stream-next apk",
