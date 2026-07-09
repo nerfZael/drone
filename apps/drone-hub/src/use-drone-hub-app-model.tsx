@@ -87,6 +87,7 @@ import {
   useDroneHubWorkspaceContentProps,
 } from './droneHub/app/use-drone-hub-view-props';
 import type { MarkdownFileReference } from './droneHub/chat/MarkdownMessage';
+import { ASSISTANT_OPEN_DRONE_CHAT_EVENT, type AssistantOpenDroneChatEventDetail } from './droneHub/assistant/open-drone-chat-event';
 import { buildDroneHubTaskQueueSpec, type DroneHubTaskSpawnMode } from './droneHub/chat/drone-hub-task-spawn';
 import {
   buildSuggestedChatNameCandidate,
@@ -1536,6 +1537,19 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [setCollapsedGroups],
   );
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handleAssistantOpenDroneChat = (event: Event) => {
+      const detail = (event as CustomEvent<AssistantOpenDroneChatEventDetail>).detail;
+      const droneId = String(detail?.droneId ?? '').trim();
+      if (!droneId || !droneByIdRef.current[droneId]) return;
+      const chatName = String(detail?.chatName ?? '').trim() || 'default';
+      expandGroupsForDroneIds([droneId]);
+      selectDroneChat(droneId, chatName);
+    };
+    window.addEventListener(ASSISTANT_OPEN_DRONE_CHAT_EVENT, handleAssistantOpenDroneChat);
+    return () => window.removeEventListener(ASSISTANT_OPEN_DRONE_CHAT_EVENT, handleAssistantOpenDroneChat);
+  }, [expandGroupsForDroneIds, selectDroneChat]);
   React.useEffect(() => {
     if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
     let closed = false;

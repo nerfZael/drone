@@ -678,6 +678,34 @@ code, pre {
   color: #d7cbfb;
   text-decoration-color: rgba(215, 203, 251, .9);
 }
+.dh-markdown button.dh-markdown-text-mention {
+  display: inline;
+  appearance: none;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: transparent;
+  color: #b9a7f6;
+  font: inherit;
+  line-height: inherit;
+  text-align: left;
+  text-decoration: underline;
+  text-decoration-thickness: 1.5px;
+  text-underline-offset: 2px;
+  text-decoration-color: rgba(185, 167, 246, .35);
+  cursor: pointer;
+}
+.dh-markdown button.dh-markdown-text-mention:hover {
+  color: #cbbdf9;
+  text-decoration-color: rgba(203, 189, 249, .62);
+}
+.dh-markdown button.dh-markdown-text-mention:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+  color: #d7cbfb;
+  text-decoration-color: rgba(215, 203, 251, .9);
+}
 .dh-markdown a.dh-inline-code-link {
   text-decoration: none;
 }
