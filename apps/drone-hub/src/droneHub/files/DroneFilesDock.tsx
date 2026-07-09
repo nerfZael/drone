@@ -1,9 +1,8 @@
 import React from 'react';
 import { IconPencil, IconTrash } from '../app/icons';
 import { invalidateFsListCachesForDrone } from '../app/use-files-and-ports-pane-state';
-import { formatBytes } from '../app/selected-drone-workspace-utils';
 import { requestJson, requestJsonWithTimeout } from '../http';
-import { IconChevron, iconForFilePath } from '../icons';
+import { IconChevron, IconFolder, iconForFilePath } from '../icons';
 import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../types';
 import { runDroneFsAction } from './file-actions-api';
 import type { DroneOpenedFileState } from './opened-file-types';
@@ -114,6 +113,21 @@ function IconDownload({ className }: { className?: string }) {
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
       <path d="M8.75 1.5a.75.75 0 00-1.5 0v6.19L5.53 5.97a.75.75 0 10-1.06 1.06l3 3a.75.75 0 001.06 0l3-3a.75.75 0 00-1.06-1.06L8.75 7.69V1.5zM2 10.75A1.75 1.75 0 013.75 9h8.5A1.75 1.75 0 0114 10.75v1.5A1.75 1.75 0 0112.25 14h-8.5A1.75 1.75 0 012 12.25v-1.5zm1.75-.25a.25.25 0 00-.25.25v1.5c0 .138.112.25.25.25h8.5a.25.25 0 00.25-.25v-1.5a.25.25 0 00-.25-.25h-8.5z" />
     </svg>
+  );
+}
+
+function TreeIndentGuides({ depth }: { depth: number }) {
+  if (depth <= 0) return null;
+  return (
+    <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0">
+      {Array.from({ length: depth }).map((_, index) => (
+        <span
+          key={index}
+          className="absolute inset-y-0 w-px bg-[rgba(136,145,168,.18)]"
+          style={{ left: `${9 + index * 14}px` }}
+        />
+      ))}
+    </span>
   );
 }
 
@@ -704,55 +718,48 @@ export function DroneFilesDock({
   );
 
   const actionButtonClassName =
-    'w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] flex items-center justify-center';
+    'w-5 h-5 rounded-sm text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.07)] flex items-center justify-center';
 
   function renderExplorer(nodes: FileExplorerNode[], depth: number): React.ReactNode {
     return nodes.map((node) => {
-      const indentPx = 8 + depth * 12;
+      const indentPx = 4 + depth * 14;
       if (node.kind === 'directory') {
         const open = expandedDirs[node.path] === true;
         const childLoading = childLoadingByPath[node.path] === true;
         const childError = childErrorByPath[node.path];
         const childLoaded = Object.prototype.hasOwnProperty.call(childEntriesByPath, node.path);
         const title = `${node.path}${childLoaded && node.count != null ? ` • ${node.count} item${node.count === 1 ? '' : 's'}` : ''}`;
+        const selected = selectedPaths.has(node.path);
 
         return (
           <React.Fragment key={`dir:${node.path}`}>
-            <div className="w-full group/dir" style={{ paddingLeft: `${indentPx}px` }}>
-              <div className="flex items-center gap-1">
-                <input
-                  type="checkbox"
-                  checked={selectedPaths.has(node.path)}
-                  disabled={busy}
-                  onChange={(event) => {
-                    const checked = event.currentTarget.checked;
-                    setSelectedPaths((prev) => toggleSelectedPath(prev, node.path, checked));
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                  className="h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]"
-                  title={`Select ${node.path}`}
-                />
+            <div className="relative w-full group/dir">
+              <TreeIndentGuides depth={depth} />
+              <div
+                className={`flex h-[22px] items-center gap-0.5 pr-1 text-[13px] transition-colors ${
+                  selected
+                    ? 'bg-[rgba(55,118,171,.20)] text-[var(--fg)] shadow-[inset_0_0_0_1px_rgba(64,156,255,.55)]'
+                    : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)]'
+                }`}
+                style={{ paddingLeft: `${indentPx}px` }}
+              >
                 <button
                   type="button"
                   disabled={busy}
                   onClick={() => toggleDirectory(node.path)}
-                  className={`flex-1 min-w-0 text-left px-1 rounded border transition-all flex items-center gap-0.5 disabled:opacity-60 ${
-                    open
-                      ? 'border-transparent bg-[rgba(255,255,255,.04)]'
-                      : 'border-transparent hover:bg-[var(--hover)]'
-                  }`}
-                  style={{
-                    minHeight: '28px',
-                  }}
+                  className="flex h-full min-w-0 flex-1 items-center gap-1 rounded-none border-0 px-0 text-left disabled:opacity-60"
                   title={`${title} • Click to ${open ? 'collapse' : 'expand'}`}
                 >
-                  <span className="inline-flex items-center justify-center w-4 h-4 flex-shrink-0 text-[var(--muted-dim)]">
+                  <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
                     <IconChevron down={open} size={12} />
                   </span>
-                  <span className="truncate flex-1 text-[var(--fg-secondary)] text-[11px]">{node.name}</span>
+                  <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[#d7b85a]">
+                    <IconFolder size={13} />
+                  </span>
+                  <span className="min-w-0 flex-1 truncate text-[13px] leading-none">{node.name}</span>
                   {childError ? (
                     <span
-                      className="inline-flex items-center justify-center rounded border px-1 text-[8px] uppercase tracking-wide text-[var(--red)] border-[rgba(248,81,73,.22)] bg-[var(--red-subtle)]"
+                      className="inline-flex items-center justify-center rounded-sm px-1 text-[9px] uppercase text-[var(--red)]"
                       title={childError}
                     >
                       Error
@@ -760,15 +767,28 @@ export function DroneFilesDock({
                   ) : null}
                   {childLoading ? (
                     <span
-                      className="inline-flex items-center gap-1 rounded border px-1 text-[8px] uppercase tracking-wide text-[var(--accent)] border-[var(--accent-muted)] bg-[var(--accent-subtle)]"
+                      className="inline-flex items-center gap-1 rounded-sm px-1 text-[9px] uppercase text-[var(--accent)]"
                       title={`Loading ${node.path}`}
                     >
                       <InlineSpinner />
                       Loading
                     </span>
                   ) : null}
-                  {node.count != null ? <span className="text-[10px] text-[var(--muted-dim)] tabular-nums">{node.count}</span> : null}
                 </button>
+                <input
+                  type="checkbox"
+                  checked={selected}
+                  disabled={busy}
+                  onChange={(event) => {
+                    const checked = event.currentTarget.checked;
+                    setSelectedPaths((prev) => toggleSelectedPath(prev, node.path, checked));
+                  }}
+                  onClick={(event) => event.stopPropagation()}
+                  className={`h-3 w-3 flex-shrink-0 accent-[var(--accent)] transition-opacity ${
+                    selected ? 'opacity-100' : 'opacity-0 group-hover/dir:opacity-100 focus:opacity-100'
+                  }`}
+                  title={`Select ${node.path}`}
+                />
                 <button
                   type="button"
                   disabled={busy}
@@ -777,7 +797,7 @@ export function DroneFilesDock({
                     event.stopPropagation();
                     beginRename(node.entry);
                   }}
-                  className={`${actionButtonClassName} opacity-0 group-hover/dir:opacity-100 focus:opacity-100 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed`}
+                  className={`${actionButtonClassName} opacity-0 transition-opacity group-hover/dir:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-40`}
                   title={`Rename ${node.path}`}
                 >
                   <IconPencil className="w-3 h-3" />
@@ -790,32 +810,32 @@ export function DroneFilesDock({
                     event.stopPropagation();
                     deleteEntries([node.entry]);
                   }}
-                  className={`${actionButtonClassName} opacity-0 group-hover/dir:opacity-100 focus:opacity-100 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed`}
+                  className={`${actionButtonClassName} opacity-0 transition-opacity group-hover/dir:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-40`}
                   title={`Delete ${node.path}`}
                 >
                   <IconTrash className="w-3 h-3" />
                 </button>
                 {renderDownloadButton(
                   node.entry,
-                  `${actionButtonClassName} opacity-0 group-hover/dir:opacity-100 focus:opacity-100 transition-opacity`,
+                  `${actionButtonClassName} opacity-0 transition-opacity group-hover/dir:opacity-100 focus:opacity-100`,
                 )}
               </div>
             </div>
             {open ? (
               <>
                 {childError ? (
-                  <div className="ml-7 mt-1 mb-1 rounded border border-[rgba(248,81,73,.18)] bg-[var(--red-subtle)] px-2 py-1 text-[10px] text-[var(--red)]">
+                  <div className="ml-7 my-0.5 px-2 py-1 text-[10px] text-[var(--red)]">
                     {childError}
                   </div>
                 ) : null}
                 {childLoading && !childLoaded ? (
-                  <div className="ml-7 mt-1 mb-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 py-1 text-[10px] text-[var(--muted)]">
+                  <div className="ml-7 my-0.5 px-2 py-1 text-[10px] text-[var(--muted)]">
                     Loading directory...
                   </div>
                 ) : null}
                 {childLoaded && node.children && node.children.length > 0 ? renderExplorer(node.children, depth + 1) : null}
                 {childLoaded && (!node.children || node.children.length === 0) ? (
-                  <div className="ml-7 mt-1 mb-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 py-1 text-[10px] text-[var(--muted)]">
+                  <div className="ml-7 my-0.5 px-2 py-1 text-[10px] text-[var(--muted)]">
                     Directory is empty.
                   </div>
                 ) : null}
@@ -827,62 +847,61 @@ export function DroneFilesDock({
 
       const entry = node.entry;
       const active = activeOpenedFilePath === entry.path;
+      const selected = selectedPaths.has(entry.path);
       const FileIcon = iconForFilePath(entry.path);
       const modified = formatLocalDateTime(entry.mtimeMs);
       const openable = entry.kind === 'file';
       return (
-        <div key={`file:${entry.path}`} className="w-full group/file" style={{ paddingLeft: `${indentPx}px` }}>
-          <div className="flex items-center gap-1">
+        <div key={`file:${entry.path}`} className="relative w-full group/file">
+          <TreeIndentGuides depth={depth} />
+          <div
+            className={`flex h-[22px] items-center gap-0.5 pr-1 text-[13px] transition-colors ${
+              selected || active
+                ? 'bg-[rgba(55,118,171,.20)] text-[var(--fg)] shadow-[inset_0_0_0_1px_rgba(64,156,255,.55)]'
+                : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)]'
+            }`}
+            style={{ paddingLeft: `${indentPx}px` }}
+          >
+            {openable ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => openFileEntry(entry)}
+                className="flex h-full min-w-0 flex-1 items-center gap-1 rounded-none border-0 px-0 text-left disabled:opacity-60"
+                title={`${entry.path} • ${modified}`}
+              >
+                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]" aria-hidden="true" />
+                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
+                  <FileIcon size={13} />
+                </span>
+                <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
+              </button>
+            ) : (
+              <div
+                className="flex h-full min-w-0 flex-1 items-center gap-1 text-left opacity-70"
+                title={`${entry.path} • ${modified}`}
+              >
+                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]" aria-hidden="true" />
+                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
+                  <FileIcon size={13} />
+                </span>
+                <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
+              </div>
+            )}
             <input
               type="checkbox"
-              checked={selectedPaths.has(entry.path)}
+              checked={selected}
               disabled={busy}
               onChange={(event) => {
                 const checked = event.currentTarget.checked;
                 setSelectedPaths((prev) => toggleSelectedPath(prev, entry.path, checked));
               }}
               onClick={(event) => event.stopPropagation()}
-              className="h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]"
+              className={`h-3 w-3 flex-shrink-0 accent-[var(--accent)] transition-opacity ${
+                selected ? 'opacity-100' : 'opacity-0 group-hover/file:opacity-100 focus:opacity-100'
+              }`}
               title={`Select ${entry.path}`}
             />
-            {openable ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => openFileEntry(entry)}
-                className={`flex-1 min-w-0 text-left px-1 rounded border transition-all flex items-center gap-0.5 disabled:opacity-60 ${
-                  active
-                    ? 'border-transparent bg-[rgba(255,255,255,.04)]'
-                    : 'border-transparent hover:bg-[var(--hover)]'
-                }`}
-                style={{
-                  minHeight: '28px',
-                }}
-                title={`${entry.path} • ${modified}`}
-              >
-                <span className="inline-flex items-center justify-center w-4 h-4 flex-shrink-0 text-[var(--muted-dim)]">
-                  <FileIcon size={12} />
-                </span>
-                <span className="truncate flex-1 text-[var(--fg-secondary)] text-[11px]">{node.name}</span>
-                <span className="text-[10px] text-[var(--muted-dim)] tabular-nums">
-                  {entry.kind === 'file' ? formatBytes(entry.size) : '-'}
-                </span>
-              </button>
-            ) : (
-              <div
-                className="flex-1 min-w-0 text-left px-1 rounded border border-transparent flex items-center gap-0.5 opacity-70"
-                style={{
-                  minHeight: '28px',
-                }}
-                title={`${entry.path} • ${modified}`}
-              >
-                <span className="inline-flex items-center justify-center w-4 h-4 flex-shrink-0 text-[var(--muted-dim)]">
-                  <FileIcon size={12} />
-                </span>
-                <span className="truncate flex-1 text-[var(--fg-secondary)] text-[11px]">{node.name}</span>
-                <span className="text-[10px] text-[var(--muted-dim)] tabular-nums">-</span>
-              </div>
-            )}
             <button
               type="button"
               disabled={busy}
@@ -891,7 +910,7 @@ export function DroneFilesDock({
                 event.stopPropagation();
                 beginRename(entry);
               }}
-              className={`${actionButtonClassName} opacity-0 group-hover/file:opacity-100 focus:opacity-100 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed`}
+              className={`${actionButtonClassName} opacity-0 transition-opacity group-hover/file:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-40`}
               title={`Rename ${entry.path}`}
             >
               <IconPencil className="w-3 h-3" />
@@ -904,14 +923,14 @@ export function DroneFilesDock({
                 event.stopPropagation();
                 deleteEntries([entry]);
               }}
-              className={`${actionButtonClassName} opacity-0 group-hover/file:opacity-100 focus:opacity-100 transition-opacity disabled:opacity-40 disabled:cursor-not-allowed`}
+              className={`${actionButtonClassName} opacity-0 transition-opacity group-hover/file:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-40`}
               title={`Delete ${entry.path}`}
             >
               <IconTrash className="w-3 h-3" />
             </button>
             {renderDownloadButton(
               entry,
-              `${actionButtonClassName} opacity-0 group-hover/file:opacity-100 focus:opacity-100 transition-opacity`,
+              `${actionButtonClassName} opacity-0 transition-opacity group-hover/file:opacity-100 focus:opacity-100`,
             )}
           </div>
         </div>
@@ -1068,7 +1087,7 @@ export function DroneFilesDock({
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
         <div className="w-full bg-[var(--panel)] flex flex-col">
-          <div className="flex-1 min-h-0 overflow-auto px-1.5 py-1">
+          <div className="flex-1 min-h-0 overflow-auto py-1">
             {showStartupPlaceholder ? (
               <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[12px] text-[var(--muted)]">
                 <div className="text-[11px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>

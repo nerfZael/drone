@@ -23,7 +23,7 @@ import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import { IconChatThread, IconEye, IconList, IconPencil, IconPlus, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash } from '../app/icons';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
-import { IconFile, iconForFilePath } from '../icons';
+import { IconChevron, IconFile, IconFolder, iconForFilePath } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import {
   canSendAssistantDesktopVoiceRealtimeText,
@@ -638,9 +638,89 @@ function formatArtifactSize(bytesRaw: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
-function fileNameFromPath(pathRaw: string): string {
-  const path = String(pathRaw ?? '').trim();
-  return path.split('/').filter(Boolean).pop() || path || 'file';
+type AssistantArtifactTreeNode =
+  | {
+      kind: 'directory';
+      name: string;
+      path: string;
+      children: AssistantArtifactTreeNode[];
+    }
+  | {
+      kind: 'file';
+      name: string;
+      path: string;
+      file: AssistantArtifactSummary;
+    };
+
+function sortAssistantArtifactTree(nodes: AssistantArtifactTreeNode[]): AssistantArtifactTreeNode[] {
+  return nodes.sort((left, right) => {
+    if (left.kind !== right.kind) return left.kind === 'directory' ? -1 : 1;
+    return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
+  });
+}
+
+function buildAssistantArtifactTree(files: AssistantArtifactSummary[]): AssistantArtifactTreeNode[] {
+  const root: AssistantArtifactTreeNode[] = [];
+  const directoriesByPath = new Map<string, Extract<AssistantArtifactTreeNode, { kind: 'directory' }>>();
+
+  for (const file of files) {
+    const path = String(file.path ?? '').trim();
+    if (!path) continue;
+    const parts = path.split('/').filter(Boolean);
+    const fileName = parts.pop() ?? path;
+    let parent = root;
+    let currentPath = '';
+
+    for (const part of parts) {
+      currentPath = currentPath ? `${currentPath}/${part}` : part;
+      let directory = directoriesByPath.get(currentPath);
+      if (!directory) {
+        directory = { kind: 'directory', name: part, path: currentPath, children: [] };
+        directoriesByPath.set(currentPath, directory);
+        parent.push(directory);
+      }
+      parent = directory.children;
+    }
+
+    parent.push({ kind: 'file', name: fileName, path, file });
+  }
+
+  const sortDeep = (nodes: AssistantArtifactTreeNode[]) => {
+    sortAssistantArtifactTree(nodes);
+    for (const node of nodes) {
+      if (node.kind === 'directory') sortDeep(node.children);
+    }
+  };
+  sortDeep(root);
+  return root;
+}
+
+function collectAssistantArtifactDirectoryPaths(nodes: AssistantArtifactTreeNode[]): string[] {
+  const out: string[] = [];
+  const visit = (items: AssistantArtifactTreeNode[]) => {
+    for (const node of items) {
+      if (node.kind !== 'directory') continue;
+      out.push(node.path);
+      visit(node.children);
+    }
+  };
+  visit(nodes);
+  return out;
+}
+
+function AssistantTreeIndentGuides({ depth }: { depth: number }) {
+  if (depth <= 0) return null;
+  return (
+    <span aria-hidden="true" className="pointer-events-none absolute inset-y-0 left-0">
+      {Array.from({ length: depth }).map((_, index) => (
+        <span
+          key={index}
+          className="absolute inset-y-0 w-px bg-[rgba(136,145,168,.18)]"
+          style={{ left: `${9 + index * 14}px` }}
+        />
+      ))}
+    </span>
+  );
 }
 
 function selectDefaultArtifactPath(files: AssistantArtifactSummary[]): string | null {
@@ -1530,6 +1610,83 @@ function AssistantThreadFilesView({
   onRefresh: () => void;
   onClose: () => void;
 }) {
+  const artifactTree = React.useMemo(() => buildAssistantArtifactTree(files), [files]);
+  const [expandedDirs, setExpandedDirs] = React.useState<Record<string, boolean>>({});
+
+  React.useEffect(() => {
+    const availableDirs = new Set(collectAssistantArtifactDirectoryPaths(artifactTree));
+    setExpandedDirs((prev) => {
+      const next: Record<string, boolean> = {};
+      let changed = false;
+      for (const dirPath of availableDirs) {
+        next[dirPath] = prev[dirPath] ?? true;
+        if (!(dirPath in prev)) changed = true;
+      }
+      if (Object.keys(prev).some((dirPath) => !availableDirs.has(dirPath))) changed = true;
+      return changed ? next : prev;
+    });
+  }, [artifactTree]);
+
+  const toggleDirectory = React.useCallback((path: string) => {
+    setExpandedDirs((prev) => ({ ...prev, [path]: prev[path] !== true }));
+  }, []);
+
+  function renderArtifactTree(nodes: AssistantArtifactTreeNode[], depth: number): React.ReactNode {
+    return nodes.map((node) => {
+      const indentPx = 4 + depth * 14;
+      if (node.kind === 'directory') {
+        const open = expandedDirs[node.path] === true;
+        return (
+          <React.Fragment key={`dir:${node.path}`}>
+            <div className="relative w-full group/artifact-dir">
+              <AssistantTreeIndentGuides depth={depth} />
+              <button
+                type="button"
+                onClick={() => toggleDirectory(node.path)}
+                title={node.path}
+                className="flex h-[22px] w-full min-w-0 items-center gap-1 pr-2 text-left text-[13px] text-[var(--fg-secondary)] transition-colors hover:bg-[rgba(255,255,255,.055)]"
+                style={{ paddingLeft: `${indentPx}px` }}
+              >
+                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
+                  <IconChevron down={open} size={12} />
+                </span>
+                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[#d7b85a]">
+                  <IconFolder size={13} />
+                </span>
+                <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
+              </button>
+            </div>
+            {open ? renderArtifactTree(node.children, depth + 1) : null}
+          </React.Fragment>
+        );
+      }
+
+      const Icon = iconForFilePath(node.path) ?? IconFile;
+      const selected = node.path === selectedPath;
+      return (
+        <button
+          key={`file:${node.path}`}
+          type="button"
+          onClick={() => onSelectPath(node.path)}
+          title={`${node.path} • ${formatUpdatedAt(node.file.updatedAt)} • ${formatArtifactSize(node.file.size)}`}
+          className={`relative flex h-[22px] w-full min-w-0 items-center gap-1 pr-2 text-left text-[13px] transition-colors ${
+            selected
+              ? 'bg-[rgba(55,118,171,.20)] text-[var(--fg)] shadow-[inset_0_0_0_1px_rgba(64,156,255,.55)]'
+              : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)]'
+          }`}
+          style={{ paddingLeft: `${indentPx}px` }}
+        >
+          <AssistantTreeIndentGuides depth={depth} />
+          <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]" aria-hidden="true" />
+          <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
+            <Icon size={13} />
+          </span>
+          <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
+        </button>
+      );
+    });
+  }
+
   return (
     <div className="flex min-h-0 flex-1 flex-col bg-[rgba(0,0,0,.08)]">
       <div className="flex h-10 flex-shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-3">
@@ -1573,39 +1730,13 @@ function AssistantThreadFilesView({
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1">
-        <aside className="w-[190px] flex-shrink-0 overflow-y-auto border-r border-[var(--border-subtle)] p-2">
+        <aside className="w-[210px] flex-shrink-0 overflow-y-auto border-r border-[var(--border-subtle)] py-1">
           {files.length === 0 ? (
             <div className="px-2 py-3 text-[11px] text-[var(--muted-dim)]">
               {loading ? 'Loading files...' : 'No thread files.'}
             </div>
           ) : (
-            <div className="space-y-1">
-              {files.map((file) => {
-                const Icon = iconForFilePath(file.path) ?? IconFile;
-                const selected = file.path === selectedPath;
-                return (
-                  <button
-                    key={file.path}
-                    type="button"
-                    onClick={() => onSelectPath(file.path)}
-                    title={file.path}
-                    className={`w-full min-w-0 rounded border px-2 py-1.5 text-left transition-colors ${
-                      selected
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--fg)]'
-                        : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                  >
-                    <div className="flex min-w-0 items-center gap-1.5">
-                      <Icon className="h-3.5 w-3.5 flex-shrink-0" />
-                      <span className="min-w-0 truncate text-[12px] font-medium">{fileNameFromPath(file.path)}</span>
-                    </div>
-                    <div className="mt-1 truncate text-[10px] text-[var(--muted-dim)]">
-                      {formatUpdatedAt(file.updatedAt)} · {formatArtifactSize(file.size)}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+            <div>{renderArtifactTree(artifactTree, 0)}</div>
           )}
         </aside>
         <main className="min-w-0 flex-1 overflow-hidden">
