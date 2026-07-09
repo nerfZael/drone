@@ -80,6 +80,34 @@ export function imageFilesFromClipboardData(data: Pick<DataTransfer, 'files' | '
   return out;
 }
 
+export function filesFromClipboardData(data: Pick<DataTransfer, 'files' | 'items'> | null | undefined): File[] {
+  const fileList = Array.from(data?.files ?? []);
+  if (fileList.length > 0) {
+    const out: File[] = [];
+    const seen = new Set<string>();
+    for (const file of fileList) {
+      const key = fileIdentity(file);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(file);
+    }
+    return out;
+  }
+
+  const out: File[] = [];
+  const seen = new Set<string>();
+  for (const item of Array.from(data?.items ?? [])) {
+    if (!item || item.kind !== 'file') continue;
+    const file = item.getAsFile();
+    if (!file) continue;
+    const key = fileIdentity(file);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(file);
+  }
+  return out;
+}
+
 export function formatBytes(n: number): string {
   const num = Number(n);
   if (!Number.isFinite(num) || num <= 0) return '0 B';

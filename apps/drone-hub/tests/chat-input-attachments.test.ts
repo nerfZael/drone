@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { imageFilesFromClipboardData } from '../src/droneHub/chat/chat-input-attachments';
+import { filesFromClipboardData, imageFilesFromClipboardData } from '../src/droneHub/chat/chat-input-attachments';
 
 describe('chat input attachment helpers', () => {
   test('collects all image files exposed through clipboard files', () => {
@@ -55,5 +55,17 @@ describe('chat input attachment helpers', () => {
     });
 
     expect(files).toEqual([one]);
+  });
+
+  test('collects non-image files from clipboard data', () => {
+    const image = new File(['one'], 'one.png', { type: 'image/png', lastModified: 1 });
+    const text = new File(['text'], 'notes.txt', { type: 'text/plain', lastModified: 2 });
+
+    const files = filesFromClipboardData({
+      files: [image, text, text] as any,
+      items: [] as any,
+    });
+
+    expect(files).toEqual([image, text]);
   });
 });
