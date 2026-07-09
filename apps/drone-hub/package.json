@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "desktop": "bun run build && bun run --filter drone build && node ../drone/dist/cli.js hub app --static-ui-dir dist",
     "build:size": "node scripts/build-size.cjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "bun test tests",
