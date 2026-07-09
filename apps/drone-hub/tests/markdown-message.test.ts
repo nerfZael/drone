@@ -78,6 +78,18 @@ describe('MarkdownMessage', () => {
     expect(html).toContain('rel="noreferrer"');
   });
 
+  test('renders configured plain-text mentions without changing links or code', () => {
+    const html = renderMarkdown('Ask Alpha Agent, not `Alpha Agent` or [Alpha Agent](https://example.com).', {
+      textMentionLinks: [{ key: 'drone-1', label: 'Alpha Agent', title: 'Ctrl-click to open Alpha Agent' }],
+      onOpenTextMention: () => {},
+    });
+    expect(html).toContain('class="dh-markdown-text-mention"');
+    expect(html).toContain('title="Ctrl-click to open Alpha Agent"');
+    expect(html).toContain('aria-label="Ctrl-click to open Alpha Agent"');
+    expect(html).toContain('<code>Alpha Agent</code>');
+    expect(html).toContain('<a href="https://example.com"');
+  });
+
   test('nests loose bullet lines directly under numbered items', () => {
     const html = renderMarkdown(
       [

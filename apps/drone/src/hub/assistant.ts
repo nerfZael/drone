@@ -15,8 +15,10 @@ import { defaultHubLlmModelId, resolveHubLlmRuntime } from './llm-runtime';
 import {
   deleteAssistantArtifactsForThread,
   listAssistantArtifactFiles,
+  readAssistantArtifactBytes,
   readAssistantArtifactFile,
   runAssistantArtifactAction,
+  saveAssistantArtifactUploads,
   type AssistantArtifactActionInput,
 } from './assistant-artifacts';
 import { fetchContent, searchWeb } from './web-search';
@@ -120,12 +122,20 @@ type AssistantThread = {
 type AssistantQueuedPrompt = {
   id: string;
   prompt: string;
+  attachments?: AssistantPromptAttachment[];
   createdAt: string;
   provider: LlmProviderId;
   model: string;
   thinkingLevel: AssistantThinkingLevel;
   deliveryMode: AssistantPromptDeliveryMode;
   voiceSource?: AssistantVoiceSource | null;
+};
+
+type AssistantPromptAttachment = {
+  path: string;
+  name: string;
+  mime: string;
+  size: number;
 };
 
 type AssistantPromptDeliveryMode = 'queue' | 'asap';
@@ -890,10 +900,35 @@ function normalizeAssistantAutoApprove(raw: unknown): boolean {
   return raw === true || raw === 1 || String(raw ?? '').trim().toLowerCase() === 'true' || String(raw ?? '').trim() === '1';
 }
 
-function makeAssistantUserMessage(prompt: string): any {
+function isAssistantImageMime(mimeRaw: unknown): boolean {
+  return String(mimeRaw ?? '').trim().toLowerCase().startsWith('image/');
+}
+
+function isAssistantImagePath(pathRaw: unknown): boolean {
+  return /\.(png|jpe?g|gif|webp|bmp|svg|avif|tiff?)$/i.test(String(pathRaw ?? '').trim());
+}
+
+function promptWithAssistantAttachments(promptRaw: string, attachments: AssistantPromptAttachment[]): string {
+  const prompt = String(promptRaw ?? '').trim();
+  const list = Array.isArray(attachments) ? attachments : [];
+  if (list.length === 0) return prompt;
+  const lines = list.map((attachment, index) => (
+    `${index + 1}. ${attachment.name} (${attachment.mime || 'application/octet-stream'}, ${attachment.size} bytes): ${attachment.path}`
+  ));
+  const label = list.length === 1 ? 'Thread file attached to this message:' : 'Thread files attached to this message:';
+  const note = `${label}\n${lines.join('\n')}`;
+  return prompt ? `${prompt}\n\n${note}` : note;
+}
+
+function makeAssistantUserMessage(prompt: string, images: Array<{ data: string; mimeType: string }> = []): any {
+  const content: any[] = [{ type: 'text', text: prompt }];
+  for (const image of images) {
+    if (!image.data || !image.mimeType) continue;
+    content.push({ type: 'image', data: image.data, mimeType: image.mimeType });
+  }
   return {
     role: 'user',
-    content: [{ type: 'text', text: prompt }],
+    content,
     timestamp: Date.now(),
   };
 }
@@ -2199,12 +2234,14 @@ function normalizeQueuedPrompt(raw: any, fallback: { provider: LlmProviderId; mo
   if (!raw || typeof raw !== 'object') return null;
   const id = cleanOptionalString(raw.id);
   const prompt = cleanOptionalString(raw.prompt);
-  if (!id || !prompt) return null;
+  const attachments = normalizeAssistantPromptAttachments(raw.attachments);
+  if (!id || (!prompt && attachments.length === 0)) return null;
   const provider = normalizeProvider(raw.provider ?? fallback.provider);
   const model = allowedModelForProvider(provider, raw.model ?? fallback.model);
   return {
     id,
     prompt,
+    ...(attachments.length > 0 ? { attachments } : {}),
     createdAt: cleanOptionalString(raw.createdAt) || nowIso(),
     provider,
     model,
@@ -2212,6 +2249,28 @@ function normalizeQueuedPrompt(raw: any, fallback: { provider: LlmProviderId; mo
     deliveryMode: normalizeAssistantPromptDeliveryMode(raw.deliveryMode),
     voiceSource: normalizeAssistantVoiceSource(raw.voiceSource),
   };
+}
+
+function normalizeAssistantPromptAttachments(raw: unknown): AssistantPromptAttachment[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: AssistantPromptAttachment[] = [];
+  const seen = new Set<string>();
+  for (const item of list) {
+    if (!item || typeof item !== 'object') continue;
+    const pathValue = cleanOptionalString((item as any).path);
+    if (!pathValue || seen.has(pathValue)) continue;
+    const name = cleanOptionalString((item as any).name) || path.posix.basename(pathValue) || 'attachment';
+    const mime = cleanOptionalString((item as any).mime) || 'application/octet-stream';
+    const sizeNum = Number((item as any).size ?? 0);
+    seen.add(pathValue);
+    out.push({
+      path: pathValue,
+      name,
+      mime,
+      size: Number.isFinite(sizeNum) && sizeNum > 0 ? Math.floor(sizeNum) : 0,
+    });
+  }
+  return out.slice(0, 8);
 }
 
 function normalizeChatIdleSubscriptionStatus(raw: unknown): AssistantChatIdleSubscriptionStatus {
@@ -3578,7 +3637,7 @@ export class HubAssistantService {
     if (next.length === thread.queuedPrompts.length) throw new Error(`unknown queued assistant message: ${queuedPromptId}`);
     thread.queuedPrompts = next;
     thread.updatedAt = nowIso();
-    this.syncActiveSteeringQueue(thread);
+    await this.syncActiveSteeringQueue(thread);
     await this.persist();
     return await this.threadSnapshot(thread.id);
   }
@@ -3604,13 +3663,18 @@ export class HubAssistantService {
 
   async promptThread(
     threadId: string,
-    input: { prompt?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown; deliveryMode?: unknown; voiceSource?: unknown },
+    input: { prompt?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown; deliveryMode?: unknown; voiceSource?: unknown; attachments?: unknown },
     onEvent?: (event: AssistantPromptEvent) => void | Promise<void>,
   ): Promise<void> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
     this.activeThreadId = thread.id;
-    const queuedPrompt = this.makeQueuedPrompt(thread, { ...input, deliveryMode: input.deliveryMode ?? thread.promptDeliveryMode });
+    const uploadedAttachments = await saveAssistantArtifactUploads(thread.id, input.attachments);
+    const queuedPrompt = this.makeQueuedPrompt(thread, {
+      ...input,
+      attachments: uploadedAttachments,
+      deliveryMode: input.deliveryMode ?? thread.promptDeliveryMode,
+    });
     const activeAgent = this.activeAgents.get(thread.id);
     const runningModel = this.runningModels.get(thread.id);
     const canSteerActiveThread = Boolean(activeAgent);
@@ -3621,7 +3685,7 @@ export class HubAssistantService {
         queuedPrompt.thinkingLevel = runningModel.thinkingLevel;
       }
       thread.queuedPrompts.push(queuedPrompt);
-      activeAgent?.steer?.(makeAssistantUserMessage(queuedPrompt.prompt));
+      activeAgent?.steer?.(await this.makeQueuedPromptUserMessage(thread.id, queuedPrompt));
       thread.updatedAt = nowIso();
       await this.persist();
       await onEvent?.({ type: 'snapshot', snapshot: await this.threadSnapshot(thread.id) });
@@ -3660,15 +3724,17 @@ export class HubAssistantService {
 
   private makeQueuedPrompt(
     thread: AssistantThread,
-    input: { prompt?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown; deliveryMode?: unknown; voiceSource?: unknown },
+    input: { prompt?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown; deliveryMode?: unknown; voiceSource?: unknown; attachments?: unknown },
   ): AssistantQueuedPrompt {
     const prompt = String(input.prompt ?? '').trim();
-    if (!prompt) throw new Error('missing prompt');
+    const attachments = normalizeAssistantPromptAttachments(input.attachments);
+    if (!prompt && attachments.length === 0) throw new Error('missing prompt');
     const provider = normalizeProvider(input.provider ?? thread.provider);
     const model = allowedModelForProvider(provider, input.model ?? thread.model);
     return {
       id: makeAssistantId('queued'),
       prompt,
+      ...(attachments.length > 0 ? { attachments } : {}),
       createdAt: nowIso(),
       provider,
       model,
@@ -3678,13 +3744,30 @@ export class HubAssistantService {
     };
   }
 
-  private syncActiveSteeringQueue(thread: AssistantThread): void {
+  private async makeQueuedPromptUserMessage(threadId: string, queuedPrompt: AssistantQueuedPrompt): Promise<any> {
+    const attachments = normalizeAssistantPromptAttachments(queuedPrompt.attachments);
+    const prompt = promptWithAssistantAttachments(queuedPrompt.prompt, attachments);
+    const images: Array<{ data: string; mimeType: string }> = [];
+    for (const attachment of attachments) {
+      if (!isAssistantImageMime(attachment.mime) && !isAssistantImagePath(attachment.path)) continue;
+      try {
+        const file = await readAssistantArtifactBytes(threadId, attachment.path);
+        const mimeType = isAssistantImageMime(attachment.mime) ? attachment.mime : file.mime || 'image/png';
+        images.push({ data: file.dataBase64, mimeType });
+      } catch {
+        // The prompt still lists the thread file path if a file was removed before delivery.
+      }
+    }
+    return makeAssistantUserMessage(prompt, images);
+  }
+
+  private async syncActiveSteeringQueue(thread: AssistantThread): Promise<void> {
     const activeAgent = this.activeAgents.get(thread.id);
     if (!activeAgent) return;
     activeAgent.clearSteeringQueue?.();
     for (const queuedPrompt of thread.queuedPrompts) {
       if (queuedPrompt.deliveryMode !== 'asap') continue;
-      activeAgent.steer?.(makeAssistantUserMessage(queuedPrompt.prompt));
+      activeAgent.steer?.(await this.makeQueuedPromptUserMessage(thread.id, queuedPrompt));
     }
   }
 
@@ -3693,7 +3776,9 @@ export class HubAssistantService {
     const prompt = textFromMessage(message).trim();
     if (!prompt) return false;
     const index = thread.queuedPrompts.findIndex(
-      (queuedPrompt) => queuedPrompt.deliveryMode === 'asap' && queuedPrompt.prompt.trim() === prompt,
+      (queuedPrompt) =>
+        queuedPrompt.deliveryMode === 'asap' &&
+        promptWithAssistantAttachments(queuedPrompt.prompt, normalizeAssistantPromptAttachments(queuedPrompt.attachments)).trim() === prompt,
     );
     if (index < 0) return false;
     thread.queuedPrompts.splice(index, 1);
@@ -3819,7 +3904,7 @@ export class HubAssistantService {
         await onEvent?.({ type: 'snapshot', snapshot: await this.threadSnapshot(thread.id) });
       });
 
-      await agent.prompt(queuedPrompt.prompt);
+      await agent.prompt(await this.makeQueuedPromptUserMessage(thread.id, queuedPrompt));
       thread.messages = agent.state.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
       await this.maybeSpeakVoicePromptResult(thread, queuedPrompt, previousMessageKeys, previousSpeakToolUseCount);
       if ((thread.status as AssistantThreadStatus) !== 'error') {

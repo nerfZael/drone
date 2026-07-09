@@ -231,6 +231,113 @@ export type MarkdownFileReference = {
   column: number | null;
 };
 
+export type MarkdownTextMentionLink = {
+  key: string;
+  label: string;
+  title?: string;
+};
+
+type PreparedTextMentionLink = MarkdownTextMentionLink & {
+  lowerLabel: string;
+};
+
+function prepareTextMentionLinks(links: MarkdownTextMentionLink[] | undefined): PreparedTextMentionLink[] {
+  const seen = new Set<string>();
+  return (Array.isArray(links) ? links : [])
+    .map((link) => ({
+      ...link,
+      key: String(link.key ?? '').trim(),
+      label: String(link.label ?? '').trim(),
+      lowerLabel: String(link.label ?? '').trim().toLowerCase(),
+    }))
+    .filter((link) => {
+      if (!link.key || !link.label || seen.has(link.lowerLabel)) return false;
+      seen.add(link.lowerLabel);
+      return true;
+    })
+    .sort((a, b) => b.label.length - a.label.length || a.label.localeCompare(b.label));
+}
+
+function isMentionBoundaryChar(value: string): boolean {
+  return !/[A-Za-z0-9_-]/.test(value);
+}
+
+function hasMentionBoundary(text: string, index: number, label: string): boolean {
+  const before = index > 0 ? text[index - 1] ?? '' : '';
+  const afterIndex = index + label.length;
+  const after = afterIndex < text.length ? text[afterIndex] ?? '' : '';
+  return (!before || isMentionBoundaryChar(before)) && (!after || isMentionBoundaryChar(after));
+}
+
+function splitTextMentionLinks(
+  text: string,
+  mentions: PreparedTextMentionLink[],
+  onOpenTextMention: ((mention: MarkdownTextMentionLink) => void) | undefined,
+): React.ReactNode {
+  if (!text || mentions.length === 0 || !onOpenTextMention) return text;
+  const lowerText = text.toLowerCase();
+  const parts: React.ReactNode[] = [];
+  let cursor = 0;
+  let partIndex = 0;
+
+  while (cursor < text.length) {
+    let match: PreparedTextMentionLink | null = null;
+    for (const mention of mentions) {
+      if (!lowerText.startsWith(mention.lowerLabel, cursor)) continue;
+      if (!hasMentionBoundary(text, cursor, mention.label)) continue;
+      match = mention;
+      break;
+    }
+
+    if (!match) {
+      cursor += 1;
+      continue;
+    }
+
+    if (cursor > partIndex) parts.push(text.slice(partIndex, cursor));
+    const label = text.slice(cursor, cursor + match.label.length);
+    parts.push(
+      <button
+        key={`${match.key}:${cursor}`}
+        type="button"
+        className="dh-markdown-text-mention"
+        title={match.title ?? `Ctrl-click ${match.label}`}
+        aria-label={match.title ?? `Ctrl-click ${match.label}`}
+        onClick={(event) => {
+          if (!event.ctrlKey && !event.metaKey) return;
+          event.preventDefault();
+          event.stopPropagation();
+          onOpenTextMention(match);
+        }}
+      >
+        {label}
+      </button>,
+    );
+    cursor += match.label.length;
+    partIndex = cursor;
+  }
+
+  if (parts.length === 0) return text;
+  if (partIndex < text.length) parts.push(text.slice(partIndex));
+  return parts;
+}
+
+function renderTextMentionChildren(
+  children: React.ReactNode,
+  mentions: PreparedTextMentionLink[],
+  onOpenTextMention: ((mention: MarkdownTextMentionLink) => void) | undefined,
+): React.ReactNode {
+  if (mentions.length === 0 || !onOpenTextMention) return children;
+  if (typeof children === 'string') return splitTextMentionLinks(children, mentions, onOpenTextMention);
+  if (typeof children === 'number') return splitTextMentionLinks(String(children), mentions, onOpenTextMention);
+  if (!Array.isArray(children)) return children;
+  return children.map((child, index) => (
+    <React.Fragment key={React.isValidElement(child) && child.key != null ? child.key : index}>
+      {renderTextMentionChildren(child, mentions, onOpenTextMention)}
+    </React.Fragment>
+  ));
+}
+
 function isLikelyFilePath(raw: string): boolean {
   const candidate = String(raw ?? '').trim();
   if (!candidate || /\s/.test(candidate) || candidate.includes('\0')) return false;
@@ -336,12 +443,16 @@ export function MarkdownMessage({
   className,
   onOpenFileReference,
   onOpenLink,
+  textMentionLinks,
+  onOpenTextMention,
   preferOpenLinkBeforeModifiedClick = false,
 }: {
   text: string;
   className?: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
+  textMentionLinks?: MarkdownTextMentionLink[];
+  onOpenTextMention?: (mention: MarkdownTextMentionLink) => void;
   preferOpenLinkBeforeModifiedClick?: boolean;
 }) {
   const handleAnchorClick = React.useCallback(
@@ -370,6 +481,11 @@ export function MarkdownMessage({
     [onOpenLink, preferOpenLinkBeforeModifiedClick],
   );
   const normalizedText = React.useMemo(() => normalizeLooseNestedBullets(text), [text]);
+  const preparedTextMentionLinks = React.useMemo(() => prepareTextMentionLinks(textMentionLinks), [textMentionLinks]);
+  const renderMentionChildren = React.useCallback(
+    (children: React.ReactNode) => renderTextMentionChildren(children, preparedTextMentionLinks, onOpenTextMention),
+    [onOpenTextMention, preparedTextMentionLinks],
+  );
   const [tableModes, setTableModes] = React.useState<Record<string, TableMode>>({});
   const [expandedTable, setExpandedTable] = React.useState<ExpandedTableState | null>(null);
   const [expandedTableMode, setExpandedTableMode] = React.useState<TableMode>('fit');
@@ -386,130 +502,140 @@ export function MarkdownMessage({
         <ReactMarkdown
           remarkPlugins={[remarkGfm, remarkBreaks]}
           components={{
-          a: ({ href, children, ...props }) => {
-            const hrefText = typeof href === 'string' ? href : '';
-            const hrefFileRef = onOpenFileReference ? parseInlineCodeFileReference(hrefText) : null;
-            if (hrefFileRef && onOpenFileReference) {
-              const targetDescription =
-                hrefFileRef.line == null
-                  ? hrefFileRef.path
-                  : `${hrefFileRef.path}:${hrefFileRef.line}${hrefFileRef.column == null ? '' : `:${hrefFileRef.column}`}`;
+            p: ({ children, node: _node, ...props }) => <p {...props}>{renderMentionChildren(children)}</p>,
+            li: ({ children, node: _node, ...props }) => <li {...props}>{renderMentionChildren(children)}</li>,
+            td: ({ children, node: _node, ...props }) => <td {...props}>{renderMentionChildren(children)}</td>,
+            th: ({ children, node: _node, ...props }) => <th {...props}>{renderMentionChildren(children)}</th>,
+            h1: ({ children, node: _node, ...props }) => <h1 {...props}>{renderMentionChildren(children)}</h1>,
+            h2: ({ children, node: _node, ...props }) => <h2 {...props}>{renderMentionChildren(children)}</h2>,
+            h3: ({ children, node: _node, ...props }) => <h3 {...props}>{renderMentionChildren(children)}</h3>,
+            h4: ({ children, node: _node, ...props }) => <h4 {...props}>{renderMentionChildren(children)}</h4>,
+            h5: ({ children, node: _node, ...props }) => <h5 {...props}>{renderMentionChildren(children)}</h5>,
+            h6: ({ children, node: _node, ...props }) => <h6 {...props}>{renderMentionChildren(children)}</h6>,
+            a: ({ href, children, node: _node, ...props }) => {
+              const hrefText = typeof href === 'string' ? href : '';
+              const hrefFileRef = onOpenFileReference ? parseInlineCodeFileReference(hrefText) : null;
+              if (hrefFileRef && onOpenFileReference) {
+                const targetDescription =
+                  hrefFileRef.line == null
+                    ? hrefFileRef.path
+                    : `${hrefFileRef.path}:${hrefFileRef.line}${hrefFileRef.column == null ? '' : `:${hrefFileRef.column}`}`;
+                return (
+                  <a
+                    href={hrefText}
+                    title={`Open ${targetDescription}`}
+                    aria-label={`Open file ${targetDescription}`}
+                    onClick={(event) => {
+                      event.preventDefault();
+                      onOpenFileReference(hrefFileRef);
+                    }}
+                    {...props}
+                  >
+                    {children}
+                  </a>
+                );
+              }
               return (
                 <a
                   href={hrefText}
-                  title={`Open ${targetDescription}`}
-                  aria-label={`Open file ${targetDescription}`}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    onOpenFileReference(hrefFileRef);
-                  }}
+                  target="_blank"
+                  rel="noreferrer"
+                  onClick={(event) => handleAnchorClick(event, hrefText)}
                   {...props}
                 >
                   {children}
                 </a>
               );
-            }
-            return (
-              <a
-                href={hrefText}
-                target="_blank"
-                rel="noreferrer"
-                onClick={(event) => handleAnchorClick(event, hrefText)}
-                {...props}
-              >
-                {children}
-              </a>
-            );
-          },
-          code: ({ children, className: codeClassName, ...props }) => {
-            const raw = flattenText(children);
-            const hasLanguageClass = typeof codeClassName === 'string' && codeClassName.includes('language-');
-            const isInline = !hasLanguageClass && !raw.includes('\n');
-            const href = isInline ? parseInlineCodeLinkHref(raw) : null;
-            if (href) {
+            },
+            code: ({ children, className: codeClassName, node: _node, ...props }) => {
+              const raw = flattenText(children);
+              const hasLanguageClass = typeof codeClassName === 'string' && codeClassName.includes('language-');
+              const isInline = !hasLanguageClass && !raw.includes('\n');
+              const href = isInline ? parseInlineCodeLinkHref(raw) : null;
+              if (href) {
+                return (
+                  <a
+                    className="dh-inline-code-link"
+                    href={href}
+                    target="_blank"
+                    rel="noreferrer"
+                    aria-label={`Open link ${href}`}
+                    onClick={(event) => handleAnchorClick(event, href)}
+                  >
+                    <code className={codeClassName} {...props}>
+                      {raw}
+                    </code>
+                  </a>
+                );
+              }
+              const fileRef = isInline ? parseInlineCodeFileReference(raw) : null;
+              if (fileRef && onOpenFileReference) {
+                const targetDescription =
+                  fileRef.line == null
+                    ? fileRef.path
+                    : `${fileRef.path}:${fileRef.line}${fileRef.column == null ? '' : `:${fileRef.column}`}`;
+                return (
+                  <button
+                    type="button"
+                    className="dh-inline-code-file-link"
+                    onClick={() => onOpenFileReference(fileRef)}
+                    title={`Open ${targetDescription}`}
+                    aria-label={`Open file ${targetDescription}`}
+                  >
+                    <code className={codeClassName} {...props}>
+                      {raw}
+                    </code>
+                  </button>
+                );
+              }
               return (
-                <a
-                  className="dh-inline-code-link"
-                  href={href}
-                  target="_blank"
-                  rel="noreferrer"
-                  aria-label={`Open link ${href}`}
-                  onClick={(event) => handleAnchorClick(event, href)}
-                >
-                  <code className={codeClassName} {...props}>
-                    {raw}
-                  </code>
-                </a>
+                <code className={codeClassName} {...props}>
+                  {children}
+                </code>
               );
-            }
-            const fileRef = isInline ? parseInlineCodeFileReference(raw) : null;
-            if (fileRef && onOpenFileReference) {
-              const targetDescription =
-                fileRef.line == null
-                  ? fileRef.path
-                  : `${fileRef.path}:${fileRef.line}${fileRef.column == null ? '' : `:${fileRef.column}`}`;
+            },
+            blockquote: ({ children, ...props }) => {
+              const kind = detectCalloutKind(children);
+              const cleanedChildren = kind ? stripLeadingCalloutMarker(children) : children;
               return (
-                <button
-                  type="button"
-                  className="dh-inline-code-file-link"
-                  onClick={() => onOpenFileReference(fileRef)}
-                  title={`Open ${targetDescription}`}
-                  aria-label={`Open file ${targetDescription}`}
-                >
-                  <code className={codeClassName} {...props}>
-                    {raw}
-                  </code>
-                </button>
+                <blockquote data-callout={kind ?? undefined} {...props}>
+                  {kind ? (
+                    <span className="dh-markdown-callout-label" aria-label={`${CALLOUT_LABEL[kind]} callout`}>
+                      {CALLOUT_LABEL[kind]}
+                    </span>
+                  ) : null}
+                  {cleanedChildren}
+                </blockquote>
               );
-            }
-            return (
-              <code className={codeClassName} {...props}>
-                {children}
-              </code>
-            );
-          },
-          blockquote: ({ children, ...props }) => {
-            const kind = detectCalloutKind(children);
-            const cleanedChildren = kind ? stripLeadingCalloutMarker(children) : children;
-            return (
-              <blockquote data-callout={kind ?? undefined} {...props}>
-                {kind ? (
-                  <span className="dh-markdown-callout-label" aria-label={`${CALLOUT_LABEL[kind]} callout`}>
-                    {CALLOUT_LABEL[kind]}
-                  </span>
-                ) : null}
-                {cleanedChildren}
-              </blockquote>
-            );
-          },
-          pre: ({ children, node: _node, ...props }) => (
-            <div className="dh-markdown-block dh-markdown-block--wide">
-              <pre {...props}>{children}</pre>
-            </div>
-          ),
-          table: ({ children, node, ...props }) => {
-            const tableId = tableIdFromNode(node, children);
-            const mode = tableModes[tableId] ?? 'fit';
-            return (
-              <MarkdownTable
-                {...props}
-                mode={mode}
-                onModeChange={(nextMode) =>
-                  setTableModes((prev) => (prev[tableId] === nextMode ? prev : { ...prev, [tableId]: nextMode }))
-                }
-                onOpenExpanded={() => {
-                  setExpandedTable({
-                    id: tableId,
-                    children,
-                    props,
-                  });
-                  setExpandedTableMode('fit');
-                }}
-              >
-                {children}
-              </MarkdownTable>
-            );
-          },
+            },
+            pre: ({ children, node: _node, ...props }) => (
+              <div className="dh-markdown-block dh-markdown-block--wide">
+                <pre {...props}>{children}</pre>
+              </div>
+            ),
+            table: ({ children, node, ...props }) => {
+              const tableId = tableIdFromNode(node, children);
+              const mode = tableModes[tableId] ?? 'fit';
+              return (
+                <MarkdownTable
+                  {...props}
+                  mode={mode}
+                  onModeChange={(nextMode) =>
+                    setTableModes((prev) => (prev[tableId] === nextMode ? prev : { ...prev, [tableId]: nextMode }))
+                  }
+                  onOpenExpanded={() => {
+                    setExpandedTable({
+                      id: tableId,
+                      children,
+                      props,
+                    });
+                    setExpandedTableMode('fit');
+                  }}
+                >
+                  {children}
+                </MarkdownTable>
+              );
+            },
           }}
         >
           {normalizedText}
