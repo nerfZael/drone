@@ -250,7 +250,23 @@ function ToolPanel({ api, params }: IDockviewPanelProps<{ tab?: RightPanelTab; p
 }
 
 function WorkspaceTab(props: IDockviewPanelHeaderProps) {
-  return <DockviewDefaultTab {...props} hideClose={props.api.id === CHAT_PANEL_ID} />;
+  const closeable = props.api.id !== CHAT_PANEL_ID;
+  const closePanel = React.useCallback(() => {
+    props.api.close();
+  }, [props.api]);
+  const handlePointerDown = React.useCallback((event: React.PointerEvent<HTMLDivElement>) => {
+    if (!closeable || event.button !== 1) return;
+    event.preventDefault();
+  }, [closeable]);
+
+  return (
+    <DockviewDefaultTab
+      {...props}
+      hideClose={!closeable}
+      closeActionOverride={closeable ? closePanel : undefined}
+      onPointerDown={handlePointerDown}
+    />
+  );
 }
 
 function WorkspaceWatermark() {
