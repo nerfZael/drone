@@ -15,7 +15,6 @@ import {
   imageFilesFromClipboardData,
   isLikelyImageFile,
   makeDraftImageAttachmentId,
-  revokeDraftImagePreviewUrls,
   textByteLength,
   type DraftChatAttachment,
 } from '../chat/chat-input-attachments';
@@ -179,6 +178,13 @@ type AssistantSnapshot = {
   streamingMessage?: AssistantMessage;
   streamingMessages?: AssistantMessage[];
 };
+
+function snapshotWithPreferredActiveThread(snapshot: AssistantSnapshot, preferredThreadId: string | null | undefined): AssistantSnapshot {
+  const threadId = String(preferredThreadId ?? '').trim();
+  if (!threadId || snapshot.activeThreadId === threadId) return snapshot;
+  if (!snapshot.threads.some((thread) => thread.id === threadId)) return snapshot;
+  return { ...snapshot, activeThreadId: threadId };
+}
 
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
 const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
@@ -766,7 +772,9 @@ function attachmentMimeForFile(file: File): string {
 }
 
 function revokeAssistantAttachmentPreviewUrls(items: AssistantDraftAttachment[]): void {
-  revokeDraftImagePreviewUrls(items.filter((item): item is DraftChatAttachment => item.kind === 'image'));
+  for (const item of items) {
+    if (item.kind === 'image' && item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+  }
 }
 
 function makeAssistantPastedTextAttachmentName(existingCount: number): string {
@@ -2861,6 +2869,7 @@ export function AssistantDock() {
   const scopeSaveRequestIdRef = React.useRef(0);
   const scopeSyncPromiseRef = React.useRef<PendingAssistantScopeSave | null>(null);
   const updateThreadRequestRef = React.useRef(0);
+  const snapshotRequestSeqRef = React.useRef(0);
   const enabledToolDraftNamesRef = React.useRef<string[]>([]);
   const assistantEventRefreshTimerRef = React.useRef<number | null>(null);
   const draftRef = React.useRef('');
@@ -2930,7 +2939,8 @@ export function AssistantDock() {
     () => (snapshot?.pendingApprovals ?? []).filter((approval) => approval.threadId === activeThread?.id && approval.status === 'pending'),
     [activeThread?.id, snapshot?.pendingApprovals],
   );
-  const running = activeThread?.status === 'running' || activeThread?.status === 'waiting_for_approval';
+  const activeRunningModel = activeThread ? snapshot?.runningModels?.[activeThread.id] ?? null : null;
+  const running = activeThread?.status === 'running' || activeThread?.status === 'waiting_for_approval' || Boolean(activeRunningModel);
   const activeChatIdleSubscriptionsForThread = React.useMemo(
     () =>
       (snapshot?.chatIdleSubscriptions ?? []).filter((sub) => sub.threadId === activeThreadId && sub.status === 'active'),
@@ -3021,30 +3031,45 @@ export function AssistantDock() {
     !messageText(streamingAssistantMessage ?? { role: 'assistant' }).trim();
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
+  const applySnapshot = React.useCallback((next: AssistantSnapshot, preferredThreadId?: string | null) => {
+    setSnapshot(snapshotWithPreferredActiveThread(next, preferredThreadId ?? activeThreadIdRef.current));
+  }, []);
+
+  const beginSnapshotMutation = React.useCallback(() => {
+    snapshotRequestSeqRef.current += 1;
+    return snapshotRequestSeqRef.current;
+  }, []);
+
+  const snapshotMutationCurrent = React.useCallback((requestSeq: number) => snapshotRequestSeqRef.current === requestSeq, []);
+
   const refresh = React.useCallback(async (options: { silent?: boolean } = {}) => {
     if (!options.silent) {
       setLoading(true);
       setError(null);
     }
+    const requestSeq = snapshotRequestSeqRef.current;
     try {
       const threadId = activeThreadIdRef.current;
+      let next: AssistantSnapshot;
       if (threadId) {
-        setSnapshot(await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(threadId)}`));
+        next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(threadId)}`);
+        if (snapshotRequestSeqRef.current !== requestSeq) return;
+        applySnapshot(next, threadId);
       } else {
         const listed = await requestJson<AssistantSnapshot>('/api/assistant/threads');
         const listedThreadId = String(listed.activeThreadId ?? '').trim();
-        setSnapshot(
-          listedThreadId
-            ? await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(listedThreadId)}`)
-            : listed,
-        );
+        next = listedThreadId
+          ? await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(listedThreadId)}`)
+          : listed;
+        if (snapshotRequestSeqRef.current !== requestSeq) return;
+        applySnapshot(next, listedThreadId);
       }
     } catch (err: any) {
       if (!options.silent) setError(err?.message ?? String(err));
     } finally {
       if (!options.silent) setLoading(false);
     }
-  }, []);
+  }, [applySnapshot]);
 
   React.useEffect(() => {
     draftRef.current = draft;
@@ -3684,6 +3709,7 @@ export function AssistantDock() {
 
   const createThread = React.useCallback(async () => {
     updateThreadRequestRef.current += 1;
+    const requestSeq = beginSnapshotMutation();
     try {
       const activeDroneId = selectedDroneChatOpen ? String(selectedDrone ?? '').trim() : '';
       const next = await requestJson<AssistantSnapshot>('/api/assistant/threads', {
@@ -3696,12 +3722,14 @@ export function AssistantDock() {
           title: assistantPanelMode === 'voice' ? 'Realtime thread' : undefined,
         }),
       });
-      setSnapshot(next);
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      activeThreadIdRef.current = String(next.activeThreadId ?? '').trim();
+      applySnapshot(next, activeThreadIdRef.current);
       setDraft('');
     } catch (err: any) {
-      setError(err?.message ?? String(err));
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     }
-  }, [assistantPanelMode, selectedChat, selectedDrone, selectedDroneChatOpen]);
+  }, [applySnapshot, assistantPanelMode, beginSnapshotMutation, selectedChat, selectedDrone, selectedDroneChatOpen, snapshotMutationCurrent]);
 
   const openVoicePairing = React.useCallback(async () => {
     const popup = typeof window === 'undefined' ? null : window.open('about:blank', '_blank');
@@ -3725,39 +3753,50 @@ export function AssistantDock() {
 
   const selectThread = React.useCallback(async (thread: AssistantThread) => {
     updateThreadRequestRef.current += 1;
+    const requestSeq = beginSnapshotMutation();
+    const previousThreadId = activeThreadIdRef.current;
+    activeThreadIdRef.current = thread.id;
     try {
       const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}/activate`, { method: 'POST' });
-      setSnapshot(next);
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      applySnapshot(next, thread.id);
       setDraft('');
     } catch (err: any) {
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      activeThreadIdRef.current = previousThreadId;
       setError(err?.message ?? String(err));
     }
-  }, []);
+  }, [applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const deleteThread = React.useCallback(async (thread: AssistantThread) => {
     updateThreadRequestRef.current += 1;
+    const requestSeq = beginSnapshotMutation();
     try {
-      setSnapshot(await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}`, { method: 'DELETE' }));
+      const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}`, { method: 'DELETE' });
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      activeThreadIdRef.current = String(next.activeThreadId ?? '').trim();
+      applySnapshot(next, activeThreadIdRef.current);
     } catch (err: any) {
-      setError(err?.message ?? String(err));
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     }
-  }, []);
+  }, [applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const updateThread = React.useCallback(async (patch: Partial<Pick<AssistantThread, 'model' | 'provider' | 'thinkingLevel' | 'autoApprove' | 'promptDeliveryMode' | 'enabledTools' | 'voiceEnabled'>>) => {
     if (!activeThread) return;
     const requestId = updateThreadRequestRef.current + 1;
     updateThreadRequestRef.current = requestId;
+    const requestSeq = beginSnapshotMutation();
     try {
       const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(patch),
       });
-      if (updateThreadRequestRef.current === requestId) setSnapshot(next);
+      if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq)) applySnapshot(next, activeThread.id);
     } catch (err: any) {
-      if (updateThreadRequestRef.current === requestId) setError(err?.message ?? String(err));
+      if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     }
-  }, [activeThread]);
+  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const attachmentControlsLocked = !activeThread || voiceEnabled || assistantChatIdleHold;
   const imageAttachmentCount = React.useMemo(
@@ -3925,28 +3964,31 @@ export function AssistantDock() {
     const prompt = draft.trim();
     const attachmentSnapshot = attachmentsRef.current.slice();
     if (!prompt && attachmentSnapshot.length === 0) return;
+    const requestSeq = beginSnapshotMutation();
     setError(null);
     setAttachmentError(null);
     if (activeThread.voiceEnabled) {
       if (attachmentSnapshot.length > 0) {
-        setAttachmentError('Realtime voice threads do not support file attachments yet.');
+        if (snapshotMutationCurrent(requestSeq)) setAttachmentError('Realtime voice threads do not support file attachments yet.');
         return;
       }
       try {
         if (!sendAssistantDesktopVoiceRealtimeText(prompt)) {
-          setError('Realtime voice is not connected. Start realtime voice before sending text in this thread.');
+          if (snapshotMutationCurrent(requestSeq)) setError('Realtime voice is not connected. Start realtime voice before sending text in this thread.');
           return;
         }
+        if (!snapshotMutationCurrent(requestSeq)) return;
         setDraft('');
         scrollAssistantToBottom({ force: true });
         refocusInputWhenIdleRef.current = true;
         void refresh({ silent: true });
       } catch (err: any) {
-        setError(err?.message ?? String(err));
+        if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
       }
       return;
     }
     if (!(await waitForScopeSave())) return;
+    if (!snapshotMutationCurrent(requestSeq)) return;
     setDraft('');
     setAttachments([]);
     scrollAssistantToBottom({ force: true });
@@ -3955,11 +3997,14 @@ export function AssistantDock() {
     try {
       encodedAttachments = await Promise.all(attachmentSnapshot.map(encodeAssistantAttachment));
     } catch (err: any) {
-      setAttachmentError(`Failed to read attachment: ${err?.message ?? String(err)}`);
-      setDraft((cur) => (cur.trim() ? cur : prompt));
-      setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
+      if (snapshotMutationCurrent(requestSeq)) {
+        setAttachmentError(`Failed to read attachment: ${err?.message ?? String(err)}`);
+        setDraft((cur) => (cur.trim() ? cur : prompt));
+        setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
+      }
       return;
     }
+    if (!snapshotMutationCurrent(requestSeq)) return;
     const response = await fetch(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/prompt`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -3974,8 +4019,9 @@ export function AssistantDock() {
     let sentOk = true;
     try {
       await readNdjson(response, (event) => {
-        if (event?.type === 'snapshot' && event.snapshot) setSnapshot(event.snapshot);
-        if (event?.type === 'approval_pending' && event.snapshot) setSnapshot(event.snapshot);
+        if (!snapshotMutationCurrent(requestSeq)) return;
+        if (event?.type === 'snapshot' && event.snapshot) applySnapshot(event.snapshot, activeThread.id);
+        if (event?.type === 'approval_pending' && event.snapshot) applySnapshot(event.snapshot, activeThread.id);
         if (event?.type === 'error') {
           sentOk = false;
           setError(String(event.error ?? 'Assistant failed.'));
@@ -3983,15 +4029,17 @@ export function AssistantDock() {
       });
     } catch (err: any) {
       sentOk = false;
-      setError(err?.message ?? String(err));
-      setDraft((cur) => (cur.trim() ? cur : prompt));
-      setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
+      if (snapshotMutationCurrent(requestSeq)) {
+        setError(err?.message ?? String(err));
+        setDraft((cur) => (cur.trim() ? cur : prompt));
+        setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
+      }
     } finally {
       if (sentOk && attachmentSnapshot.length > 0) {
         revokeAssistantAttachmentPreviewUrls(attachmentSnapshot);
       }
-      void refresh();
-      if (sentOk && attachmentSnapshot.length > 0) {
+      if (snapshotMutationCurrent(requestSeq)) void refresh();
+      if (snapshotMutationCurrent(requestSeq) && sentOk && attachmentSnapshot.length > 0) {
         requestJson<{ ok: true; threadId: string; files: AssistantArtifactSummary[] }>(
           `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/artifacts`,
         )
@@ -4001,56 +4049,69 @@ export function AssistantDock() {
           .catch(() => {});
       }
     }
-  }, [activeThread, draft, refresh, scrollAssistantToBottom, waitForScopeSave]);
+  }, [activeThread, applySnapshot, beginSnapshotMutation, draft, refresh, scrollAssistantToBottom, snapshotMutationCurrent, waitForScopeSave]);
 
   const stop = React.useCallback(async () => {
     if (!activeThread) return;
+    const requestSeq = beginSnapshotMutation();
     setAssistantStopBusy(true);
     try {
-      setSnapshot(await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/stop`, { method: 'POST' }));
+      const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/stop`, { method: 'POST' });
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      applySnapshot(
+        next,
+        activeThread.id,
+      );
     } catch (err: any) {
-      setError(err?.message ?? String(err));
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     } finally {
       setAssistantStopBusy(false);
     }
-  }, [activeThread]);
+  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const cancelQueuedPrompt = React.useCallback(async (prompt: AssistantQueuedPrompt) => {
     if (!activeThread) return;
+    const requestSeq = beginSnapshotMutation();
     setQueuedCancelBusyId(prompt.id);
     try {
-      setSnapshot(
-        await requestJson<AssistantSnapshot>(
-          `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/queued/${encodeURIComponent(prompt.id)}`,
-          { method: 'DELETE' },
-        ),
+      const next = await requestJson<AssistantSnapshot>(
+        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/queued/${encodeURIComponent(prompt.id)}`,
+        { method: 'DELETE' },
+      );
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      applySnapshot(
+        next,
+        activeThread.id,
       );
     } catch (err: any) {
-      setError(err?.message ?? String(err));
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     } finally {
       setQueuedCancelBusyId(null);
     }
-  }, [activeThread]);
+  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const resolveApproval = React.useCallback(async (approval: AssistantApproval, approved: boolean) => {
     if (!activeThread) return;
+    const requestSeq = beginSnapshotMutation();
     setApprovalBusyId(approval.id);
     try {
-      setSnapshot(
-        await requestJson<AssistantSnapshot>(
-          `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/approvals/${encodeURIComponent(approval.id)}/${approved ? 'approve' : 'deny'}`,
-          { method: 'POST' },
-        ),
+      const next = await requestJson<AssistantSnapshot>(
+        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/approvals/${encodeURIComponent(approval.id)}/${approved ? 'approve' : 'deny'}`,
+        { method: 'POST' },
+      );
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      applySnapshot(
+        next,
+        activeThread.id,
       );
     } catch (err: any) {
-      setError(err?.message ?? String(err));
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     } finally {
       setApprovalBusyId(null);
     }
-  }, [activeThread]);
+  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const modelOptions = snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS;
-  const activeRunningModel = activeThread ? snapshot?.runningModels?.[activeThread.id] ?? null : null;
   const activeProvider = activeThread?.provider ?? modelOptions[0]?.provider ?? 'openai';
   const providerOptions = React.useMemo(
     () => ASSISTANT_PROVIDERS.map((provider) => ({
