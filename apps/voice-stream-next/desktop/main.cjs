@@ -1576,13 +1576,9 @@ function triggerRendererShortcut(channel) {
 
 function triggerTranscriptionShortcut() {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ compactShowInactive: true });
-  const restoreWindowMode = win.isVisible() && !win.isMinimized()
-    ? (compactMode ? 'compact' : 'expanded')
-    : 'hidden';
-  const temporaryOverlay = restoreWindowMode !== 'compact';
-  applyCompactMode(win, { inactive: true });
+  const overlayRestore = prepareTemporaryOverlay(win, { inactive: true });
   const send = () => {
-    if (!win.isDestroyed()) win.webContents.send('shortcut:transcription', { temporaryOverlay, restoreWindowMode });
+    if (!win.isDestroyed()) win.webContents.send('shortcut:transcription', overlayRestore);
   };
   if (win.webContents.isLoading()) {
     win.webContents.once('did-finish-load', send);
@@ -1629,9 +1625,14 @@ function triggerPauseResumeShortcut() {
 
 function triggerAssistantRecordingShortcut(assistantProfileId = null) {
   const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : createWindow({ compactShowInactive: true });
-  if (!win.isVisible() || win.isMinimized()) applyCompactMode(win, { inactive: true });
+  const overlayRestore = prepareTemporaryOverlay(win, { inactive: true });
   const send = () => {
-    if (!win.isDestroyed()) win.webContents.send('shortcut:assistantRecording', { assistantProfileId: assistantProfileId || null });
+    if (!win.isDestroyed()) {
+      win.webContents.send('shortcut:assistantRecording', {
+        assistantProfileId: assistantProfileId || null,
+        ...overlayRestore,
+      });
+    }
   };
   if (win.webContents.isLoading()) {
     win.webContents.once('did-finish-load', send);
@@ -1681,6 +1682,32 @@ function restoreTemporaryOverlay(win, restoreWindowMode) {
     return windowStatePayload();
   }
   return windowStatePayload();
+}
+
+function temporaryOverlayRestoreForWindow(win) {
+  const restoreWindowMode = win.isVisible() && !win.isMinimized()
+    ? (compactMode ? 'compact' : 'expanded')
+    : 'hidden';
+  return {
+    temporaryOverlay: restoreWindowMode !== 'compact',
+    restoreWindowMode,
+  };
+}
+
+function prepareTemporaryOverlay(win, options = {}) {
+  if (!win || win.isDestroyed()) {
+    return {
+      ...windowStatePayload(),
+      temporaryOverlay: false,
+      restoreWindowMode: compactMode ? 'compact' : 'expanded',
+    };
+  }
+  const overlayRestore = temporaryOverlayRestoreForWindow(win);
+  if (overlayRestore.temporaryOverlay) applyCompactMode(win, options);
+  return {
+    ...windowStatePayload(),
+    ...overlayRestore,
+  };
 }
 
 function showWindow(win, options = {}) {
@@ -3049,6 +3076,7 @@ if (!gotSingleInstanceLock) {
     const win = windowFromEvent(event);
     hideToTray(win);
   });
+  ipcMain.handle('window:prepareTemporaryOverlay', (event) => prepareTemporaryOverlay(windowFromEvent(event), { inactive: true }));
   ipcMain.handle('window:restoreTemporaryOverlay', (event, payload) => restoreTemporaryOverlay(windowFromEvent(event), payload?.restoreWindowMode));
   ipcMain.handle('tray:status', (_event, payload) => updateTrayStatus(payload?.mode, payload?.status));
   ipcMain.handle('shortcut:status', () => allShortcutStatuses());

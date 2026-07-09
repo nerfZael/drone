@@ -4671,7 +4671,12 @@ export function AssistantDock() {
           onClose={() => setFilesOpen(false)}
         />
       ) : (
-        <>
+        <div
+          ref={setDroneReferenceDropNodeRef}
+          className={`flex min-h-0 flex-1 flex-col ${
+            droneReferenceDropActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''
+          }`}
+        >
           <div className="relative min-h-0 flex-1">
             <div ref={scrollRef} className="h-full overflow-y-auto">
               <div ref={scrollContentRef} className="space-y-2 py-3">
@@ -4900,7 +4905,6 @@ export function AssistantDock() {
           </div>
         ) : null}
         <div
-          ref={setDroneReferenceDropNodeRef}
           className={`relative rounded border bg-[rgba(255,255,255,.03)] focus-within:border-[var(--accent-muted)] ${
             attachmentDragActive || droneReferenceDropActive ? 'border-[var(--accent-muted)]' : 'border-[var(--border-subtle)]'
           }`}
@@ -5132,7 +5136,7 @@ export function AssistantDock() {
           </div>
         </div>
       </div>
-        </>
+        </div>
       )}
       </div>
       {systemPromptOpen ? (
