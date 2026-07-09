@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { resolveDisplayedChatModel } from '../src/droneHub/app/selected-drone-workspace-utils';
+import {
+  displayedChatModelTitle,
+  resolveDisplayedChatModel,
+} from '../src/droneHub/app/selected-drone-workspace-utils';
 
 describe('selected drone workspace model display', () => {
   test('prefers an explicitly configured chat model', () => {
@@ -52,5 +55,11 @@ describe('selected drone workspace model display', () => {
       label: 'Not reported',
       source: 'unsupported',
     });
+  });
+
+  test('explains whether a displayed model was configured or detected', () => {
+    expect(displayedChatModelTitle({ label: 'gpt-test', source: 'configured' })).toContain('configured');
+    expect(displayedChatModelTitle({ label: 'gpt-test', source: 'default' })).toContain('reported as default');
+    expect(displayedChatModelTitle({ label: 'Not reported', source: 'unsupported' })).toContain('not reported');
   });
 });

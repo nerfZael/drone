@@ -109,6 +109,7 @@ function remoteRouteLabel(method: string, pathname: string): { label: string; ch
   if (parts.length < 4 || parts[0] !== 'api' || parts[1] !== 'drones') return null;
   if (method === 'GET' && parts.length === 4 && parts[3] === 'chats') return { label: 'chat list', chatLoad: true };
   if (method === 'GET' && parts.length === 5 && parts[3] === 'chats') return { label: 'chat metadata', chatLoad: true };
+  if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'models') return { label: 'chat models', chatLoad: true };
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'state') return { label: 'chat state', chatLoad: true };
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'pending') return { label: 'chat pending', chatLoad: true };
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'transcript') return { label: 'chat transcript', chatLoad: true };
@@ -327,6 +328,7 @@ export function routeAllowed(method: string, pathname: string): boolean {
   if (method === 'POST' && parts.length === 4 && parts[3] === 'chats') return true;
   if (method === 'POST' && parts.length === 4 && parts[3] === 'rename') return true;
   if (method === 'GET' && parts.length === 5 && parts[3] === 'chats') return true;
+  if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'models') return true;
   if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'prompt') return true;
   if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'stop') return true;
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'state') return true;

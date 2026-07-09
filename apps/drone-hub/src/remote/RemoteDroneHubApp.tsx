@@ -1,6 +1,6 @@
 import React from 'react';
 import { FrontendUpdatePrompt } from '../FrontendUpdatePrompt';
-import type { RightPanelTab } from '../droneHub/app/app-config';
+import { type RightPanelTab } from '../droneHub/app/app-config';
 import { DockableDroneWorkspace } from '../droneHub/app/DockableDroneWorkspace';
 import { DroneWorkspaceHeaderFrame } from '../droneHub/app/DroneWorkspaceHeaderFrame';
 import { droneHomePath } from '../droneHub/app/helpers';
@@ -14,6 +14,7 @@ import { RemoteCreateDroneModal } from './RemoteCreateDroneModal';
 import { RemoteHeaderActions } from './RemoteHeaderActions';
 import { RemoteHubSidebar } from './RemoteHubSidebar';
 import { RemoteRepoPanels } from './RemoteRepoPanels';
+import { RemoteRuntimeMetadata } from './RemoteRuntimeMetadata';
 import { REMOTE_HUB_CAPABILITIES } from './remote-capabilities';
 import { useRemoteHubModel } from './useRemoteHubModel';
 
@@ -165,12 +166,16 @@ export function RemoteDroneHubApp() {
             <div className="flex min-w-0 items-center gap-2">
               <div className="min-w-0">
                 <div className="truncate text-[15px] font-semibold" style={{ fontFamily: 'var(--display)' }}>{model.selectedDrone?.name ?? 'No drone selected'}</div>
-                <div className="flex items-center gap-1.5 text-[11px] text-[var(--muted)]">
-                  <span>Container-only remote surface</span>
-                  {selectedChatIsDraft ? (
-                    <span className="rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[8px] uppercase tracking-wide text-[var(--accent)]">Draft</span>
-                  ) : null}
-                </div>
+                <RemoteRuntimeMetadata
+                  hasDrone={Boolean(model.selectedDrone)}
+                  repoPath={model.selectedDrone?.repoPath ?? ''}
+                  agent={model.chatRuntime.info?.agent ?? null}
+                  configuredModel={model.chatRuntime.info?.model ?? null}
+                  models={model.chatRuntime.models}
+                  loading={model.chatRuntime.loading}
+                  error={model.chatRuntime.error}
+                  draft={selectedChatIsDraft}
+                />
               </div>
             </div>
             <RemoteHeaderActions

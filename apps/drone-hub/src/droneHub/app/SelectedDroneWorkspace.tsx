@@ -65,6 +65,7 @@ import {
 import { resolveRunningPromptLoopIdentity } from './prompt-loop-running-identity';
 import type { RepoTransferActionResult, RepoTransferPeer } from './use-workspace-actions';
 import {
+  displayedChatModelTitle,
   formatBytes,
   parseGithubPullRequestHref,
   resolveDisplayedChatModel,
@@ -639,18 +640,7 @@ export function SelectedDroneWorkspace({
     loadingChatModels,
     modelControlEnabled,
   );
-  const compactModelTitle =
-    compactModel.source === 'configured'
-      ? `Model: ${compactModel.label} (configured for this chat)`
-      : compactModel.source === 'current'
-        ? `Model: ${compactModel.label} (reported as current by the agent CLI)`
-        : compactModel.source === 'default'
-          ? `Model: ${compactModel.label} (reported as default by the agent CLI)`
-          : compactModel.source === 'loading'
-            ? 'Detecting the default model from the agent CLI'
-            : compactModel.source === 'unsupported'
-              ? 'Model is not reported by this custom agent command'
-              : 'Model: agent CLI default (the CLI did not report a specific model)';
+  const compactModelTitle = displayedChatModelTitle(compactModel);
   const showCompactRuntimeMetadata = hasChats && chatRuntimeMetadataAvailable;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
