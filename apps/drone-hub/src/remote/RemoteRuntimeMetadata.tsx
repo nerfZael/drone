@@ -5,6 +5,7 @@ import type { ChatModelOption } from '../droneHub/app/app-types';
 import { repoPathLabel } from '../droneHub/app/repo-path-label';
 import {
   displayedChatModelTitle,
+  formatAgentModelMetadata,
   resolveDisplayedChatModel,
 } from '../droneHub/app/selected-drone-workspace-utils';
 
@@ -44,6 +45,7 @@ export function RemoteRuntimeMetadata({
     loading,
     agent?.kind === 'builtin',
   );
+  const agentModelLabel = formatAgentModelMetadata(agentLabel, displayedModel);
 
   return (
     <div
@@ -62,13 +64,12 @@ export function RemoteRuntimeMetadata({
         ) : runtimeUnavailable ? (
           <span className="truncate font-mono">Runtime not reported</span>
         ) : (
-          <>
-            <span className="flex-shrink-0 uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>CLI</span>
-            <span className="min-w-0 max-w-[100px] truncate font-mono" title={`Agent CLI: ${agentLabel}`}>{agentLabel}</span>
-            <span className="opacity-45" aria-hidden="true">·</span>
-            <span className="flex-shrink-0 uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Model</span>
-            <span className="min-w-0 max-w-[140px] truncate font-mono" title={displayedChatModelTitle(displayedModel)}>{displayedModel.label}</span>
-          </>
+          <span
+            className="min-w-0 max-w-[240px] truncate font-mono"
+            title={`${agentLabel} · ${displayedChatModelTitle(displayedModel)}`}
+          >
+            {agentModelLabel}
+          </span>
         )
       ) : (
         <span>Remote Drone Hub</span>

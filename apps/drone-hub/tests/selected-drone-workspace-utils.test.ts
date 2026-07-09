@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   displayedChatModelTitle,
+  formatAgentModelMetadata,
   resolveDisplayedChatModel,
 } from '../src/droneHub/app/selected-drone-workspace-utils';
 
@@ -61,5 +62,10 @@ describe('selected drone workspace model display', () => {
     expect(displayedChatModelTitle({ label: 'gpt-test', source: 'configured' })).toContain('configured');
     expect(displayedChatModelTitle({ label: 'gpt-test', source: 'default' })).toContain('reported as default');
     expect(displayedChatModelTitle({ label: 'Not reported', source: 'unsupported' })).toContain('not reported');
+  });
+
+  test('formats agent and model metadata without field labels', () => {
+    expect(formatAgentModelMetadata('Codex', { label: 'gpt-test', source: 'default' })).toBe('Codex (gpt-test)');
+    expect(formatAgentModelMetadata('', { label: 'Default model', source: 'unknown' })).toBe('Not reported (Default model)');
   });
 });

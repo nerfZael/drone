@@ -23,8 +23,9 @@ describe('RemoteRuntimeMetadata', () => {
   test('shows repo, agent CLI, and detected model without the old container-only subtitle', () => {
     const html = renderMetadata();
     expect(html).toContain('repo');
-    expect(html).toContain('Codex');
-    expect(html).toContain('gpt-test');
+    expect(html).toContain('Codex (gpt-test)');
+    expect(html).not.toContain('>CLI<');
+    expect(html).not.toContain('>Model<');
     expect(html).not.toContain('Container-only remote surface');
   });
 
@@ -38,7 +39,6 @@ describe('RemoteRuntimeMetadata', () => {
       agent: { kind: 'custom', id: 'custom-agent', label: 'My Agent', command: 'my-agent' },
       models: [],
     });
-    expect(html).toContain('Custom: My Agent');
-    expect(html).toContain('Not reported');
+    expect(html).toContain('Custom: My Agent (Not reported)');
   });
 });

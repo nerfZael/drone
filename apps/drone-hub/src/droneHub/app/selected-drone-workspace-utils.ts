@@ -36,6 +36,11 @@ export function displayedChatModelTitle(model: DisplayedChatModel): string {
   return 'Model: agent CLI default (the CLI did not report a specific model)';
 }
 
+export function formatAgentModelMetadata(agentLabelRaw: string, model: DisplayedChatModel): string {
+  const agentLabel = String(agentLabelRaw ?? '').trim() || 'Not reported';
+  return `${agentLabel} (${model.label})`;
+}
+
 export function formatEditorMtime(mtimeMs: number | null): string {
   if (typeof mtimeMs !== 'number' || !Number.isFinite(mtimeMs) || mtimeMs <= 0) return 'Unknown';
   try {
