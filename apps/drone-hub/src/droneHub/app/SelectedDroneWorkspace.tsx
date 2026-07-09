@@ -633,7 +633,12 @@ export function SelectedDroneWorkspace({
   });
   const compactRepoPath = String(currentDrone.repoPath ?? '').trim();
   const compactRepoLabel = compactRepoPath ? repoPathLabel(compactRepoPath) : '';
-  const compactModel = resolveDisplayedChatModel(currentModel, availableChatModels, loadingChatModels);
+  const compactModel = resolveDisplayedChatModel(
+    currentModel,
+    availableChatModels,
+    loadingChatModels,
+    modelControlEnabled,
+  );
   const compactModelTitle =
     compactModel.source === 'configured'
       ? `Model: ${compactModel.label} (configured for this chat)`
@@ -643,7 +648,9 @@ export function SelectedDroneWorkspace({
           ? `Model: ${compactModel.label} (reported as default by the agent CLI)`
           : compactModel.source === 'loading'
             ? 'Detecting the default model from the agent CLI'
-            : 'Model: agent CLI default (the CLI did not report a specific model)';
+            : compactModel.source === 'unsupported'
+              ? 'Model is not reported by this custom agent command'
+              : 'Model: agent CLI default (the CLI did not report a specific model)';
   const showCompactRuntimeMetadata = hasChats && chatRuntimeMetadataAvailable;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
@@ -1200,11 +1207,11 @@ export function SelectedDroneWorkspace({
                   ) : null}
                 </div>
                 {compactRepoPath || showCompactRuntimeMetadata ? (
-                  <div className="hidden min-w-0 max-w-[min(48vw,620px)] items-center gap-1.5 overflow-hidden text-[10px] text-[var(--muted)] lg:flex">
+                  <div className="hidden min-w-0 max-w-[min(34vw,420px)] items-center gap-1.5 overflow-hidden text-[10px] text-[var(--muted)] lg:flex">
                     {compactRepoPath ? (
                       <span className="inline-flex min-w-0 items-center gap-1.5" title={compactRepoPath}>
                         <IconFolder className="h-3 w-3 flex-shrink-0 opacity-35" />
-                        <span className="min-w-0 max-w-[180px] truncate font-mono">{compactRepoLabel}</span>
+                        <span className="min-w-0 max-w-[140px] truncate font-mono">{compactRepoLabel}</span>
                       </span>
                     ) : null}
                     {compactRepoPath && showCompactRuntimeMetadata ? (
@@ -1214,7 +1221,7 @@ export function SelectedDroneWorkspace({
                       <>
                         <span className="inline-flex min-w-0 items-center gap-1" title={`Agent CLI: ${agentLabel}`}>
                           <span className="flex-shrink-0 uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>CLI</span>
-                          <span className="min-w-0 max-w-[130px] truncate font-mono">{agentLabel}</span>
+                          <span className="min-w-0 max-w-[90px] truncate font-mono">{agentLabel}</span>
                         </span>
                         <span className="flex-shrink-0 text-[var(--muted-dim)] opacity-45" aria-hidden="true">·</span>
                         <span
@@ -1222,7 +1229,7 @@ export function SelectedDroneWorkspace({
                           title={compactModelTitle}
                         >
                           <span className="flex-shrink-0 uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Model</span>
-                          <span className="min-w-0 max-w-[190px] truncate font-mono">{compactModel.label}</span>
+                          <span className="min-w-0 max-w-[140px] truncate font-mono">{compactModel.label}</span>
                         </span>
                       </>
                     ) : null}

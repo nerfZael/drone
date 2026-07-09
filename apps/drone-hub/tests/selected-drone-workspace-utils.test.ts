@@ -46,4 +46,11 @@ describe('selected drone workspace model display', () => {
     ).toEqual({ label: 'Detecting…', source: 'loading' });
     expect(resolveDisplayedChatModel(null, [], false)).toEqual({ label: 'Default model', source: 'unknown' });
   });
+
+  test('does not claim a default model for custom agent commands', () => {
+    expect(resolveDisplayedChatModel(null, [], false, false)).toEqual({
+      label: 'Not reported',
+      source: 'unsupported',
+    });
+  });
 });

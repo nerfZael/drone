@@ -4,16 +4,18 @@ export { editorLanguageForPath } from '../code-languages';
 
 export type DisplayedChatModel = {
   label: string;
-  source: 'configured' | 'current' | 'default' | 'loading' | 'unknown';
+  source: 'configured' | 'current' | 'default' | 'loading' | 'unknown' | 'unsupported';
 };
 
 export function resolveDisplayedChatModel(
   configuredModelRaw: string | null | undefined,
   discoveredModels: ChatModelOption[],
   discoveryLoading: boolean,
+  discoverySupported = true,
 ): DisplayedChatModel {
   const configuredModel = String(configuredModelRaw ?? '').trim();
   if (configuredModel) return { label: configuredModel, source: 'configured' };
+  if (!discoverySupported) return { label: 'Not reported', source: 'unsupported' };
   if (discoveryLoading) return { label: 'Detecting…', source: 'loading' };
 
   const currentModel = discoveredModels.find((model) => model.isCurrent && String(model.id ?? '').trim());
