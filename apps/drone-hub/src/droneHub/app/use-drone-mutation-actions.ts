@@ -146,12 +146,23 @@ export function useDroneMutationActions({
       const droneId = String(droneIdRaw ?? '').trim();
       if (!droneId) return false;
       const droneName = String(drones.find((d) => d.id === droneId)?.name ?? '').trim() || droneId;
+      const guardState = {
+        deleting: Boolean(deletingDrones[droneId]),
+        renaming: Boolean(renamingDrones[droneId]),
+        settingBaseImage: Boolean(settingBaseImages[droneId]),
+        optimisticallyDeleted: Boolean(optimisticallyDeletedDrones[droneId]),
+      };
       if (
-        deletingDrones[droneId] ||
-        renamingDrones[droneId] ||
-        settingBaseImages[droneId] ||
-        optimisticallyDeletedDrones[droneId]
+        guardState.deleting ||
+        guardState.renaming ||
+        guardState.settingBaseImage ||
+        guardState.optimisticallyDeleted
       ) {
+        console.warn('[DroneHub] delete drone request ignored because the drone is busy', {
+          id: droneId,
+          name: droneName,
+          ...guardState,
+        });
         return false;
       }
       if (shouldConfirmDelete() && opts?.confirmed !== true) {

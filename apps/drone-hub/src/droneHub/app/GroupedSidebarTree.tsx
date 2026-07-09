@@ -788,6 +788,11 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
   const selected = selectedDroneSet.has(drone.id) || selectedSidebarNodeId === node.id;
   const showOpenDefaultChatIndicator =
     hasOnlyDefaultChat && selectedDrone === drone.id && activeChatName === 'default';
+  const onDeleteDroneRef = React.useRef(onDeleteDrone);
+  onDeleteDroneRef.current = onDeleteDrone;
+  const handleDeleteDrone = React.useCallback(() => {
+    onDeleteDroneRef.current(drone.id);
+  }, [drone.id]);
   const reorderPreviewClass =
     dragOverTreeTarget?.nodeId === node.id
       ? dragOverTreeTarget.placement === 'before'
@@ -851,7 +856,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
             onClone={actionsEnabled ? () => onOpenCloneModal(drone) : undefined}
             onRename={actionsEnabled ? () => onRenameDrone(drone.id) : undefined}
             onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
-            onDelete={actionsEnabled ? () => onDeleteDrone(drone.id) : undefined}
+            onDelete={actionsEnabled ? handleDeleteDrone : undefined}
             onErrorClick={onOpenDroneErrorModal}
             cloneDisabled={
               isOptimistic ||

@@ -1121,6 +1121,25 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const rows = resolveDeleteDroneRows(droneIdsRaw);
       if (rows.length === 0) {
         if (requestedIds.length > 0) {
+          console.warn('[DroneHub] sidebar drone delete request ignored', {
+            requestedIds,
+            selectedDrone,
+            selectedDroneIds,
+            reasonsByDroneId: Object.fromEntries(
+              requestedIds.map((id) => [
+                id,
+                {
+                  exists: Boolean(droneById[id]),
+                  deleting: Boolean(deletingDrones[id]),
+                  deleteOperationMode:
+                    droneDeleteOperationModeById[id] ??
+                    droneDeleteOperationModeByIdRef.current[id] ??
+                    null,
+                  optimisticallyDeleted: Boolean(optimisticallyDeletedDrones[id]),
+                },
+              ]),
+            ),
+          });
           showShortcutToast(
             requestedIds.length === 1
               ? 'That drone is already being removed or is no longer available.'
@@ -1141,10 +1160,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [
       autoDelete,
+      deletingDrones,
+      droneById,
+      droneDeleteOperationModeById,
       resolveDeleteDroneRows,
       runConfirmedDroneDelete,
       setDroneDeleteConfirm,
       showShortcutToast,
+      selectedDrone,
+      selectedDroneIds,
+      optimisticallyDeletedDrones,
     ],
   );
   const requestDeleteDrone = React.useCallback(

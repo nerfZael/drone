@@ -67,6 +67,12 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     a.dragListeners === b.dragListeners &&
     Boolean(a.draggable) === Boolean(b.draggable) &&
     Boolean(a.dragging) === Boolean(b.dragging) &&
+    Boolean(a.onClone) === Boolean(b.onClone) &&
+    Boolean(a.onCreateChat) === Boolean(b.onCreateChat) &&
+    Boolean(a.onRename) === Boolean(b.onRename) &&
+    Boolean(a.onSetBaseImage) === Boolean(b.onSetBaseImage) &&
+    Boolean(a.onDelete) === Boolean(b.onDelete) &&
+    Boolean(a.onErrorClick) === Boolean(b.onErrorClick) &&
     Boolean(a.cloneDisabled) === Boolean(b.cloneDisabled) &&
     Boolean(a.createChatDisabled) === Boolean(b.createChatDisabled) &&
     Boolean(a.renameDisabled) === Boolean(b.renameDisabled) &&
@@ -179,6 +185,9 @@ export const DroneCard = React.memo(function DroneCard({
     e.preventDefault();
     e.stopPropagation();
   };
+  const stopActionPressPropagation = (e: React.SyntheticEvent) => {
+    e.stopPropagation();
+  };
   return (
     <div
       ref={dragNodeRef}
@@ -255,8 +264,8 @@ export const DroneCard = React.memo(function DroneCard({
                 stopCardSelection(e);
                 onErrorClick?.(drone, errText);
               }}
-              onMouseDown={stopCardSelection}
-              onPointerDown={stopCardSelection}
+              onMouseDown={stopActionPressPropagation}
+              onPointerDown={stopActionPressPropagation}
               className="text-[10px] text-[var(--red)] truncate max-w-[72px] hover:underline focus:outline-none"
               title="View full error details"
               aria-label={`View error details for ${shownName}`}
@@ -320,8 +329,8 @@ export const DroneCard = React.memo(function DroneCard({
                 <button
                   type="button"
                   onClick={(e) => { stopCardSelection(e); onCreateChat?.(); }}
-                  onMouseDown={stopCardSelection}
-                  onPointerDown={stopCardSelection}
+                  onMouseDown={stopActionPressPropagation}
+                  onPointerDown={stopActionPressPropagation}
                   disabled={Boolean(createChatDisabled)}
                   className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-colors ${
                     createChatDisabled
@@ -338,8 +347,8 @@ export const DroneCard = React.memo(function DroneCard({
                 <button
                   type="button"
                   onClick={(e) => { stopCardSelection(e); onClone(); }}
-                  onMouseDown={stopCardSelection}
-                  onPointerDown={stopCardSelection}
+                  onMouseDown={stopActionPressPropagation}
+                  onPointerDown={stopActionPressPropagation}
                   disabled={Boolean(cloneDisabled)}
                   className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-colors ${
                     cloneDisabled
@@ -356,8 +365,8 @@ export const DroneCard = React.memo(function DroneCard({
                 <button
                   type="button"
                   onClick={(e) => { stopCardSelection(e); onRename?.(); }}
-                  onMouseDown={stopCardSelection}
-                  onPointerDown={stopCardSelection}
+                  onMouseDown={stopActionPressPropagation}
+                  onPointerDown={stopActionPressPropagation}
                   disabled={Boolean(renameDisabled)}
                   aria-busy={Boolean(renameDisabled)}
                   className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-colors ${
@@ -375,8 +384,8 @@ export const DroneCard = React.memo(function DroneCard({
                 <button
                   type="button"
                   onClick={(e) => { stopCardSelection(e); onSetBaseImage?.(); }}
-                  onMouseDown={stopCardSelection}
-                  onPointerDown={stopCardSelection}
+                  onMouseDown={stopActionPressPropagation}
+                  onPointerDown={stopActionPressPropagation}
                   disabled={Boolean(setBaseImageDisabled)}
                   aria-busy={Boolean(setBaseImageBusy)}
                   className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-colors ${
@@ -394,8 +403,8 @@ export const DroneCard = React.memo(function DroneCard({
                 <button
                   type="button"
                   onClick={(e) => { stopCardSelection(e); onDelete(); }}
-                  onMouseDown={stopCardSelection}
-                  onPointerDown={stopCardSelection}
+                  onMouseDown={stopActionPressPropagation}
+                  onPointerDown={stopActionPressPropagation}
                   disabled={Boolean(deleteDisabled)}
                   aria-busy={Boolean(deleteDisabled)}
                   className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-colors ${

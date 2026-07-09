@@ -339,6 +339,11 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
       : undefined,
     disabled: reorderDropDisabled,
   });
+  const onDeleteDroneRef = React.useRef(onDeleteDrone);
+  onDeleteDroneRef.current = onDeleteDrone;
+  const handleDeleteDrone = React.useCallback(() => {
+    onDeleteDroneRef.current(drone.id);
+  }, [drone.id]);
 
   return (
     <div
@@ -375,7 +380,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           onCreateChat={actionsEnabled ? () => onOpenCreateDroneChat(drone) : undefined}
           onRename={actionsEnabled ? () => onRenameDrone(drone.id) : undefined}
           onSetBaseImage={actionsEnabled ? () => onSetDroneBaseImage(drone.id) : undefined}
-          onDelete={actionsEnabled ? () => onDeleteDrone(drone.id) : undefined}
+          onDelete={actionsEnabled ? handleDeleteDrone : undefined}
           onErrorClick={onOpenDroneErrorModal}
           cloneDisabled={
             isOptimistic ||
