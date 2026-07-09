@@ -12,9 +12,9 @@ import {
   fileToBase64,
   filesFromClipboardData,
   formatBytes,
+  imageFilesFromClipboardData,
   isLikelyImageFile,
   makeDraftImageAttachmentId,
-  revokeDraftImagePreviewUrls,
   textByteLength,
   type DraftChatAttachment,
 } from '../chat/chat-input-attachments';
@@ -23,7 +23,7 @@ import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import { IconChatThread, IconEye, IconList, IconPencil, IconPlus, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash } from '../app/icons';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
-import { IconChevron, IconFile, IconFolder, iconForFilePath } from '../icons';
+import { IconChevron, IconDrone, IconFile, IconFolder, iconForFilePath } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import {
   canSendAssistantDesktopVoiceRealtimeText,
@@ -65,7 +65,7 @@ type AssistantThreadStatus = 'idle' | 'running' | 'waiting_for_approval' | 'wait
 
 type AssistantMessage = {
   role: 'user' | 'assistant' | 'toolResult';
-  content?: string | Array<{ type: string; text?: string; thinking?: string; name?: string; arguments?: any; id?: string }>;
+  content?: string | Array<{ type: string; text?: string; thinking?: string; name?: string; arguments?: any; id?: string; data?: string; mimeType?: string }>;
   toolName?: string;
   toolCallId?: string;
   isError?: boolean;
@@ -179,6 +179,13 @@ type AssistantSnapshot = {
   streamingMessages?: AssistantMessage[];
 };
 
+function snapshotWithPreferredActiveThread(snapshot: AssistantSnapshot, preferredThreadId: string | null | undefined): AssistantSnapshot {
+  const threadId = String(preferredThreadId ?? '').trim();
+  if (!threadId || snapshot.activeThreadId === threadId) return snapshot;
+  if (!snapshot.threads.some((thread) => thread.id === threadId)) return snapshot;
+  return { ...snapshot, activeThreadId: threadId };
+}
+
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
 const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
 
@@ -260,7 +267,12 @@ type AssistantAttachmentPayload = {
   mime: string;
   size: number;
   dataBase64: string;
+  disposition?: 'artifact' | 'prompt';
 };
+
+type AssistantAttachmentSource = 'file' | 'paste';
+type AssistantDraftImageAttachment = Extract<DraftChatAttachment, { kind: 'image' }> & { source: AssistantAttachmentSource };
+type AssistantDraftTextAttachment = Extract<DraftChatAttachment, { kind: 'text' }> & { source: AssistantAttachmentSource };
 
 type AssistantDraftFileAttachment = {
   kind: 'file';
@@ -269,9 +281,11 @@ type AssistantDraftFileAttachment = {
   name: string;
   mime: string;
   size: number;
+  source: 'file';
 };
 
-type AssistantDraftAttachment = DraftChatAttachment | AssistantDraftFileAttachment;
+type AssistantDraftAttachment = AssistantDraftImageAttachment | AssistantDraftTextAttachment | AssistantDraftFileAttachment;
+type AssistantDroneReference = { id: string; name: string };
 
 type AssistantScopeDrone = { id: string; name: string };
 type AssistantScopeMode = 'all' | 'selected';
@@ -330,9 +344,49 @@ function cleanAssistantScopeDrones(drones: AssistantScopeDrone[]): AssistantScop
   return Array.from(byId.values());
 }
 
+function cleanAssistantDroneReferences(drones: AssistantDroneReference[]): AssistantDroneReference[] {
+  return cleanAssistantScopeDrones(drones).map((drone) => ({ id: drone.id, name: drone.name }));
+}
+
+function assistantDroneReferenceBlock(drones: AssistantDroneReference[]): string {
+  const clean = cleanAssistantDroneReferences(drones);
+  if (clean.length === 0) return '';
+  return [
+    'Referenced drones:',
+    ...clean.map((drone) => `- ${drone.name || drone.id} (id: ${drone.id})`),
+  ].join('\n');
+}
+
+function appendAssistantDroneReferences(promptRaw: string, drones: AssistantDroneReference[]): string {
+  const prompt = String(promptRaw ?? '').trim();
+  const referenceBlock = assistantDroneReferenceBlock(drones);
+  if (!referenceBlock) return prompt;
+  return prompt ? `${prompt}\n\n${referenceBlock}` : referenceBlock;
+}
+
 function assistantScopeDroneIds(readMode: AssistantScopeMode, writeMode: AssistantScopeMode, drones: AssistantScopeDrone[]): string[] {
   if (readMode !== 'selected' && writeMode !== 'selected') return [];
   return cleanAssistantScopeDrones(drones).map((drone) => drone.id);
+}
+
+function assistantDroneDropTargetFromDragData(data: ReturnType<typeof parseDroneHubDragData>): { ids: string[]; fallbackLabel: string } | null {
+  if (!data) return null;
+  if (data.type === 'sidebar-drone') {
+    return {
+      ids: data.droneIds,
+      fallbackLabel: data.droneIds.length === 1 ? data.label : '',
+    };
+  }
+  if (data.type === 'sidebar-group') {
+    return { ids: data.droneIds, fallbackLabel: '' };
+  }
+  if (data.type === 'sidebar-chat') {
+    return {
+      ids: [data.droneId],
+      fallbackLabel: data.label.split('/')[0]?.trim() || '',
+    };
+  }
+  return null;
 }
 
 function assistantScopeKeyFromScope(scope: AssistantAccessScope): string {
@@ -371,6 +425,17 @@ function messageText(message: AssistantMessage): string {
     })
     .filter(Boolean)
     .join('\n');
+}
+
+function messageImageParts(message: AssistantMessage): Array<{ data: string; mimeType: string }> {
+  const content = message.content;
+  if (!Array.isArray(content)) return [];
+  return content
+    .filter((part) => part?.type === 'image' && String(part.data ?? '').trim())
+    .map((part) => ({
+      data: String(part.data ?? '').trim(),
+      mimeType: String(part.mimeType ?? '').trim() || 'image/png',
+    }));
 }
 
 function lastAssistantContentBlock(message: AssistantMessage): { type: string } | null {
@@ -748,7 +813,9 @@ function attachmentMimeForFile(file: File): string {
 }
 
 function revokeAssistantAttachmentPreviewUrls(items: AssistantDraftAttachment[]): void {
-  revokeDraftImagePreviewUrls(items.filter((item): item is DraftChatAttachment => item.kind === 'image'));
+  for (const item of items) {
+    if (item.kind === 'image' && item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+  }
 }
 
 function makeAssistantPastedTextAttachmentName(existingCount: number): string {
@@ -762,6 +829,7 @@ async function encodeAssistantAttachment(attachment: AssistantDraftAttachment): 
       mime: attachment.mime,
       size: attachment.size,
       dataBase64: await fileToBase64(attachment.file),
+      disposition: attachment.source === 'paste' ? 'prompt' : 'artifact',
     };
   }
   if (attachment.kind === 'text') {
@@ -770,6 +838,7 @@ async function encodeAssistantAttachment(attachment: AssistantDraftAttachment): 
       mime: attachment.mime,
       size: attachment.size,
       dataBase64: await blobToBase64(new Blob([attachment.text], { type: attachment.mime })),
+      disposition: 'artifact',
     };
   }
   return {
@@ -777,6 +846,7 @@ async function encodeAssistantAttachment(attachment: AssistantDraftAttachment): 
     mime: attachment.mime,
     size: attachment.size,
     dataBase64: await fileToBase64(attachment.file),
+    disposition: 'artifact',
   };
 }
 
@@ -1352,7 +1422,8 @@ function AssistantMessageRow({
     body = blocks.length > 0 ? <div className="space-y-1">{blocks}</div> : null;
   } else {
     const text = messageText(message);
-    body = text ? (
+    const images = messageImageParts(message);
+    const textBody = text ? (
       message.role === 'assistant' ? (
         <MarkdownMessage
           text={text}
@@ -1364,6 +1435,19 @@ function AssistantMessageRow({
         <div className="whitespace-pre-wrap break-words text-[12px] text-[var(--fg-secondary)]">{text}</div>
       )
     ) : null;
+    const imageBody = images.length > 0 ? (
+      <div className="flex flex-wrap gap-2">
+        {images.map((image, index) => (
+          <img
+            key={`${image.mimeType}:${index}`}
+            src={`data:${image.mimeType};base64,${image.data}`}
+            alt="Attached image"
+            className="max-h-44 max-w-[min(260px,100%)] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] object-contain"
+          />
+        ))}
+      </div>
+    ) : null;
+    body = textBody || imageBody ? <div className="space-y-2">{textBody}{imageBody}</div> : null;
   }
 
   if (message.role === 'assistant' && !body && !message.errorMessage && calls.length === 0) return null;
@@ -2743,6 +2827,7 @@ export function AssistantDock() {
   const [error, setError] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState('');
   const [attachments, setAttachments] = React.useState<AssistantDraftAttachment[]>([]);
+  const [referencedDrones, setReferencedDrones] = React.useState<AssistantDroneReference[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
   const [attachmentDragActive, setAttachmentDragActive] = React.useState(false);
   const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(readInitialThreadSidebarOpen);
@@ -2812,11 +2897,13 @@ export function AssistantDock() {
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const scrollContentRef = React.useRef<HTMLDivElement | null>(null);
+  const assistantThreadRef = React.useRef<HTMLDivElement | null>(null);
   /** When false, new transcript content must not force scroll position (user scrolled up). */
   const assistantStickToBottomRef = React.useRef(true);
   const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
   const attachmentInputRef = React.useRef<HTMLInputElement | null>(null);
   const attachmentsRef = React.useRef<AssistantDraftAttachment[]>([]);
+  const referencedDronesRef = React.useRef<AssistantDroneReference[]>([]);
   const refocusInputWhenIdleRef = React.useRef(false);
   const activeThreadIdRef = React.useRef('');
   const currentScopeKeyRef = React.useRef('');
@@ -2825,6 +2912,7 @@ export function AssistantDock() {
   const scopeSaveRequestIdRef = React.useRef(0);
   const scopeSyncPromiseRef = React.useRef<PendingAssistantScopeSave | null>(null);
   const updateThreadRequestRef = React.useRef(0);
+  const snapshotRequestSeqRef = React.useRef(0);
   const enabledToolDraftNamesRef = React.useRef<string[]>([]);
   const assistantEventRefreshTimerRef = React.useRef<number | null>(null);
   const draftRef = React.useRef('');
@@ -2894,7 +2982,8 @@ export function AssistantDock() {
     () => (snapshot?.pendingApprovals ?? []).filter((approval) => approval.threadId === activeThread?.id && approval.status === 'pending'),
     [activeThread?.id, snapshot?.pendingApprovals],
   );
-  const running = activeThread?.status === 'running' || activeThread?.status === 'waiting_for_approval';
+  const activeRunningModel = activeThread ? snapshot?.runningModels?.[activeThread.id] ?? null : null;
+  const running = activeThread?.status === 'running' || activeThread?.status === 'waiting_for_approval' || Boolean(activeRunningModel);
   const activeChatIdleSubscriptionsForThread = React.useMemo(
     () =>
       (snapshot?.chatIdleSubscriptions ?? []).filter((sub) => sub.threadId === activeThreadId && sub.status === 'active'),
@@ -2928,6 +3017,13 @@ export function AssistantDock() {
   const assistantChatIdleHold =
     Boolean(activeThread) &&
     (activeThread?.status === 'waiting_for_chats_idle' || activeChatIdleSubscriptionsForThread.length > 0);
+  const droneReferenceControlsLocked = !activeThread || assistantChatIdleHold;
+  const { isOver: droneReferenceDropIsOver, setNodeRef: setDroneReferenceDropNodeRef } = useDroppable({
+    id: 'assistant-message-drone-reference-drop',
+    data: { type: 'assistant-message-drone-reference-drop' },
+    disabled: droneReferenceControlsLocked,
+  });
+  const droneReferenceDropActive = droneReferenceDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
   const visibleMessages = React.useMemo(() => {
     const messages = activeThread?.messages ?? [];
     const streamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
@@ -2985,30 +3081,45 @@ export function AssistantDock() {
     !messageText(streamingAssistantMessage ?? { role: 'assistant' }).trim();
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
+  const applySnapshot = React.useCallback((next: AssistantSnapshot, preferredThreadId?: string | null) => {
+    setSnapshot(snapshotWithPreferredActiveThread(next, preferredThreadId ?? activeThreadIdRef.current));
+  }, []);
+
+  const beginSnapshotMutation = React.useCallback(() => {
+    snapshotRequestSeqRef.current += 1;
+    return snapshotRequestSeqRef.current;
+  }, []);
+
+  const snapshotMutationCurrent = React.useCallback((requestSeq: number) => snapshotRequestSeqRef.current === requestSeq, []);
+
   const refresh = React.useCallback(async (options: { silent?: boolean } = {}) => {
     if (!options.silent) {
       setLoading(true);
       setError(null);
     }
+    const requestSeq = snapshotRequestSeqRef.current;
     try {
       const threadId = activeThreadIdRef.current;
+      let next: AssistantSnapshot;
       if (threadId) {
-        setSnapshot(await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(threadId)}`));
+        next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(threadId)}`);
+        if (snapshotRequestSeqRef.current !== requestSeq) return;
+        applySnapshot(next, threadId);
       } else {
         const listed = await requestJson<AssistantSnapshot>('/api/assistant/threads');
         const listedThreadId = String(listed.activeThreadId ?? '').trim();
-        setSnapshot(
-          listedThreadId
-            ? await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(listedThreadId)}`)
-            : listed,
-        );
+        next = listedThreadId
+          ? await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(listedThreadId)}`)
+          : listed;
+        if (snapshotRequestSeqRef.current !== requestSeq) return;
+        applySnapshot(next, listedThreadId);
       }
     } catch (err: any) {
       if (!options.silent) setError(err?.message ?? String(err));
     } finally {
       if (!options.silent) setLoading(false);
     }
-  }, []);
+  }, [applySnapshot]);
 
   React.useEffect(() => {
     draftRef.current = draft;
@@ -3019,8 +3130,13 @@ export function AssistantDock() {
   }, [attachments]);
 
   React.useEffect(() => {
+    referencedDronesRef.current = referencedDrones;
+  }, [referencedDrones]);
+
+  React.useEffect(() => {
     setAttachmentError(null);
     setAttachmentDragActive(false);
+    setReferencedDrones([]);
     setAttachments((prev) => {
       revokeAssistantAttachmentPreviewUrls(prev);
       return [];
@@ -3565,6 +3681,24 @@ export function AssistantDock() {
     void saveScopeDraft({ readMode: 'selected', writeMode: 'selected', drones: Array.from(byId.values()) });
   }, [saveScopeDraft, scopeDrones]);
 
+  const addReferencedDrones = React.useCallback((drones: AssistantDroneReference[]) => {
+    const clean = cleanAssistantDroneReferences(drones);
+    if (clean.length === 0) return;
+    setAttachmentError(null);
+    setReferencedDrones((prev) => {
+      const byId = new Map(prev.map((drone) => [drone.id, drone]));
+      for (const drone of clean) byId.set(drone.id, drone);
+      return Array.from(byId.values());
+    });
+    window.requestAnimationFrame(() => inputRef.current?.focus());
+  }, []);
+
+  const removeReferencedDrone = React.useCallback((droneIdRaw: string) => {
+    const droneId = String(droneIdRaw ?? '').trim();
+    if (!droneId) return;
+    setReferencedDrones((prev) => prev.filter((drone) => drone.id !== droneId));
+  }, []);
+
   const removeScopeDrone = React.useCallback((droneId: string) => {
     void saveScopeDraft({
       readMode: scopeReadMode,
@@ -3583,22 +3717,20 @@ export function AssistantDock() {
 
   useDndMonitor({
     onDragEnd: (event) => {
-      if (String(event.over?.id ?? '') !== 'assistant-drone-scope-drop') return;
+      const overId = String(event.over?.id ?? '');
+      if (overId !== 'assistant-drone-scope-drop' && overId !== 'assistant-message-drone-reference-drop') return;
       const data = parseDroneHubDragData(event.active.data.current);
-      if (!data) return;
-      let ids: string[] = [];
-      let fallbackLabel = '';
-      if (data.type === 'sidebar-drone') {
-        ids = data.droneIds;
-        fallbackLabel = data.droneIds.length === 1 ? data.label : '';
-      } else if (data.type === 'sidebar-group') {
-        ids = data.droneIds;
-      } else if (data.type === 'sidebar-chat') {
-        ids = [data.droneId];
-        fallbackLabel = data.label.split('/')[0]?.trim() || '';
-      }
-      if (ids.length === 0) return;
-      void resolveScopeDroneNames(ids, fallbackLabel).then(addScopeDrones);
+      const target = assistantDroneDropTargetFromDragData(data);
+      if (!target || target.ids.length === 0) return;
+      const droppedOnThreadId = activeThreadIdRef.current;
+      void resolveScopeDroneNames(target.ids, target.fallbackLabel).then((drones) => {
+        if (overId === 'assistant-drone-scope-drop') {
+          addScopeDrones(drones);
+          return;
+        }
+        if (activeThreadIdRef.current !== droppedOnThreadId) return;
+        addReferencedDrones(drones);
+      });
     },
   });
 
@@ -3648,6 +3780,7 @@ export function AssistantDock() {
 
   const createThread = React.useCallback(async () => {
     updateThreadRequestRef.current += 1;
+    const requestSeq = beginSnapshotMutation();
     try {
       const activeDroneId = selectedDroneChatOpen ? String(selectedDrone ?? '').trim() : '';
       const next = await requestJson<AssistantSnapshot>('/api/assistant/threads', {
@@ -3660,12 +3793,14 @@ export function AssistantDock() {
           title: assistantPanelMode === 'voice' ? 'Realtime thread' : undefined,
         }),
       });
-      setSnapshot(next);
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      activeThreadIdRef.current = String(next.activeThreadId ?? '').trim();
+      applySnapshot(next, activeThreadIdRef.current);
       setDraft('');
     } catch (err: any) {
-      setError(err?.message ?? String(err));
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     }
-  }, [assistantPanelMode, selectedChat, selectedDrone, selectedDroneChatOpen]);
+  }, [applySnapshot, assistantPanelMode, beginSnapshotMutation, selectedChat, selectedDrone, selectedDroneChatOpen, snapshotMutationCurrent]);
 
   const openVoicePairing = React.useCallback(async () => {
     const popup = typeof window === 'undefined' ? null : window.open('about:blank', '_blank');
@@ -3689,43 +3824,58 @@ export function AssistantDock() {
 
   const selectThread = React.useCallback(async (thread: AssistantThread) => {
     updateThreadRequestRef.current += 1;
+    const requestSeq = beginSnapshotMutation();
+    const previousThreadId = activeThreadIdRef.current;
+    activeThreadIdRef.current = thread.id;
     try {
       const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}/activate`, { method: 'POST' });
-      setSnapshot(next);
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      applySnapshot(next, thread.id);
       setDraft('');
     } catch (err: any) {
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      activeThreadIdRef.current = previousThreadId;
       setError(err?.message ?? String(err));
     }
-  }, []);
+  }, [applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const deleteThread = React.useCallback(async (thread: AssistantThread) => {
     updateThreadRequestRef.current += 1;
+    const requestSeq = beginSnapshotMutation();
     try {
-      setSnapshot(await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}`, { method: 'DELETE' }));
+      const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}`, { method: 'DELETE' });
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      activeThreadIdRef.current = String(next.activeThreadId ?? '').trim();
+      applySnapshot(next, activeThreadIdRef.current);
     } catch (err: any) {
-      setError(err?.message ?? String(err));
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     }
-  }, []);
+  }, [applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const updateThread = React.useCallback(async (patch: Partial<Pick<AssistantThread, 'model' | 'provider' | 'thinkingLevel' | 'autoApprove' | 'promptDeliveryMode' | 'enabledTools' | 'voiceEnabled'>>) => {
     if (!activeThread) return;
     const requestId = updateThreadRequestRef.current + 1;
     updateThreadRequestRef.current = requestId;
+    const requestSeq = beginSnapshotMutation();
     try {
       const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}`, {
         method: 'PATCH',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(patch),
       });
-      if (updateThreadRequestRef.current === requestId) setSnapshot(next);
+      if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq)) applySnapshot(next, activeThread.id);
     } catch (err: any) {
-      if (updateThreadRequestRef.current === requestId) setError(err?.message ?? String(err));
+      if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     }
-  }, [activeThread]);
+  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const attachmentControlsLocked = !activeThread || voiceEnabled || assistantChatIdleHold;
   const imageAttachmentCount = React.useMemo(
     () => attachments.filter((attachment) => attachment.kind === 'image').length,
+    [attachments],
+  );
+  const promptImageAttachmentCount = React.useMemo(
+    () => attachments.filter((attachment) => attachment.kind === 'image' && attachment.source === 'paste').length,
     [attachments],
   );
 
@@ -3746,11 +3896,12 @@ export function AssistantDock() {
     });
   }, []);
 
-  const addAttachmentFiles = React.useCallback((files: File[] | FileList | null | undefined) => {
+  const addAttachmentFiles = React.useCallback((files: File[] | FileList | null | undefined, options?: { source?: AssistantAttachmentSource }) => {
     if (attachmentControlsLocked) return;
     if (!files) return;
     const list = Array.isArray(files) ? files : Array.from(files);
     if (list.length === 0) return;
+    const source = options?.source ?? 'file';
     setAttachmentError(null);
     setAttachments((prev) => {
       const next = prev.slice();
@@ -3790,6 +3941,7 @@ export function AssistantDock() {
             mime,
             size: Math.floor(size),
             previewUrl: URL.createObjectURL(file),
+            source,
           });
           images += 1;
         } else {
@@ -3800,6 +3952,7 @@ export function AssistantDock() {
             name,
             mime,
             size: Math.floor(size),
+            source: 'file',
           });
         }
         total += size;
@@ -3838,51 +3991,96 @@ export function AssistantDock() {
           name: makeAssistantPastedTextAttachmentName(textCount),
           mime: 'text/plain',
           size,
+          source: 'paste',
         },
       ];
     });
   }, [attachmentControlsLocked]);
 
+  const handleAssistantPaste = React.useCallback((event: React.ClipboardEvent): boolean => {
+    if (attachmentControlsLocked || filesOpen) return false;
+    const clipboardData = event.clipboardData;
+    const pastedImages = imageFilesFromClipboardData(clipboardData);
+    if (pastedImages.length > 0) {
+      event.preventDefault();
+      addAttachmentFiles(pastedImages, { source: 'paste' });
+      return true;
+    }
+
+    const files = filesFromClipboardData(clipboardData);
+    const nonImageFiles = files.filter((file) => !isLikelyImageFile(file));
+    if (nonImageFiles.length > 0) {
+      event.preventDefault();
+      addAttachmentFiles(nonImageFiles, { source: 'file' });
+      return true;
+    }
+
+    const pastedText = String(clipboardData?.getData('text/plain') ?? '');
+    if (pastedText.length >= CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS) {
+      event.preventDefault();
+      addPastedTextAttachment(pastedText);
+      return true;
+    }
+    return false;
+  }, [addAttachmentFiles, addPastedTextAttachment, attachmentControlsLocked, filesOpen]);
+
+  const focusAssistantThreadForPaste = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (!target || target.closest('button,a,input,textarea,select,[role="button"],[role="menuitem"],[contenteditable="true"]')) return;
+    assistantThreadRef.current?.focus();
+  }, []);
+
   const sendPrompt = React.useCallback(async () => {
     if (!activeThread) return;
-    const prompt = draft.trim();
+    const draftPrompt = draft.trim();
     const attachmentSnapshot = attachmentsRef.current.slice();
+    const referencedDroneSnapshot = referencedDronesRef.current.slice();
+    const prompt = appendAssistantDroneReferences(draftPrompt, referencedDroneSnapshot);
     if (!prompt && attachmentSnapshot.length === 0) return;
+    const requestSeq = beginSnapshotMutation();
     setError(null);
     setAttachmentError(null);
     if (activeThread.voiceEnabled) {
       if (attachmentSnapshot.length > 0) {
-        setAttachmentError('Realtime voice threads do not support file attachments yet.');
+        if (snapshotMutationCurrent(requestSeq)) setAttachmentError('Realtime voice threads do not support file attachments yet.');
         return;
       }
       try {
         if (!sendAssistantDesktopVoiceRealtimeText(prompt)) {
-          setError('Realtime voice is not connected. Start realtime voice before sending text in this thread.');
+          if (snapshotMutationCurrent(requestSeq)) setError('Realtime voice is not connected. Start realtime voice before sending text in this thread.');
           return;
         }
+        if (!snapshotMutationCurrent(requestSeq)) return;
         setDraft('');
+        setReferencedDrones([]);
         scrollAssistantToBottom({ force: true });
         refocusInputWhenIdleRef.current = true;
         void refresh({ silent: true });
       } catch (err: any) {
-        setError(err?.message ?? String(err));
+        if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
       }
       return;
     }
     if (!(await waitForScopeSave())) return;
+    if (!snapshotMutationCurrent(requestSeq)) return;
     setDraft('');
     setAttachments([]);
+    setReferencedDrones([]);
     scrollAssistantToBottom({ force: true });
     refocusInputWhenIdleRef.current = true;
     let encodedAttachments: AssistantAttachmentPayload[] = [];
     try {
       encodedAttachments = await Promise.all(attachmentSnapshot.map(encodeAssistantAttachment));
     } catch (err: any) {
-      setAttachmentError(`Failed to read attachment: ${err?.message ?? String(err)}`);
-      setDraft((cur) => (cur.trim() ? cur : prompt));
-      setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
+      if (snapshotMutationCurrent(requestSeq)) {
+        setAttachmentError(`Failed to read attachment: ${err?.message ?? String(err)}`);
+        setDraft((cur) => (cur.trim() ? cur : draftPrompt));
+        setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
+        setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
+      }
       return;
     }
+    if (!snapshotMutationCurrent(requestSeq)) return;
     const response = await fetch(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/prompt`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -3897,8 +4095,9 @@ export function AssistantDock() {
     let sentOk = true;
     try {
       await readNdjson(response, (event) => {
-        if (event?.type === 'snapshot' && event.snapshot) setSnapshot(event.snapshot);
-        if (event?.type === 'approval_pending' && event.snapshot) setSnapshot(event.snapshot);
+        if (!snapshotMutationCurrent(requestSeq)) return;
+        if (event?.type === 'snapshot' && event.snapshot) applySnapshot(event.snapshot, activeThread.id);
+        if (event?.type === 'approval_pending' && event.snapshot) applySnapshot(event.snapshot, activeThread.id);
         if (event?.type === 'error') {
           sentOk = false;
           setError(String(event.error ?? 'Assistant failed.'));
@@ -3906,15 +4105,18 @@ export function AssistantDock() {
       });
     } catch (err: any) {
       sentOk = false;
-      setError(err?.message ?? String(err));
-      setDraft((cur) => (cur.trim() ? cur : prompt));
-      setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
+      if (snapshotMutationCurrent(requestSeq)) {
+        setError(err?.message ?? String(err));
+        setDraft((cur) => (cur.trim() ? cur : draftPrompt));
+        setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
+        setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
+      }
     } finally {
       if (sentOk && attachmentSnapshot.length > 0) {
         revokeAssistantAttachmentPreviewUrls(attachmentSnapshot);
       }
-      void refresh();
-      if (sentOk && attachmentSnapshot.length > 0) {
+      if (snapshotMutationCurrent(requestSeq)) void refresh();
+      if (snapshotMutationCurrent(requestSeq) && sentOk && attachmentSnapshot.length > 0) {
         requestJson<{ ok: true; threadId: string; files: AssistantArtifactSummary[] }>(
           `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/artifacts`,
         )
@@ -3924,56 +4126,69 @@ export function AssistantDock() {
           .catch(() => {});
       }
     }
-  }, [activeThread, draft, refresh, scrollAssistantToBottom, waitForScopeSave]);
+  }, [activeThread, applySnapshot, beginSnapshotMutation, draft, refresh, scrollAssistantToBottom, snapshotMutationCurrent, waitForScopeSave]);
 
   const stop = React.useCallback(async () => {
     if (!activeThread) return;
+    const requestSeq = beginSnapshotMutation();
     setAssistantStopBusy(true);
     try {
-      setSnapshot(await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/stop`, { method: 'POST' }));
+      const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/stop`, { method: 'POST' });
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      applySnapshot(
+        next,
+        activeThread.id,
+      );
     } catch (err: any) {
-      setError(err?.message ?? String(err));
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     } finally {
       setAssistantStopBusy(false);
     }
-  }, [activeThread]);
+  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const cancelQueuedPrompt = React.useCallback(async (prompt: AssistantQueuedPrompt) => {
     if (!activeThread) return;
+    const requestSeq = beginSnapshotMutation();
     setQueuedCancelBusyId(prompt.id);
     try {
-      setSnapshot(
-        await requestJson<AssistantSnapshot>(
-          `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/queued/${encodeURIComponent(prompt.id)}`,
-          { method: 'DELETE' },
-        ),
+      const next = await requestJson<AssistantSnapshot>(
+        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/queued/${encodeURIComponent(prompt.id)}`,
+        { method: 'DELETE' },
+      );
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      applySnapshot(
+        next,
+        activeThread.id,
       );
     } catch (err: any) {
-      setError(err?.message ?? String(err));
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     } finally {
       setQueuedCancelBusyId(null);
     }
-  }, [activeThread]);
+  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const resolveApproval = React.useCallback(async (approval: AssistantApproval, approved: boolean) => {
     if (!activeThread) return;
+    const requestSeq = beginSnapshotMutation();
     setApprovalBusyId(approval.id);
     try {
-      setSnapshot(
-        await requestJson<AssistantSnapshot>(
-          `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/approvals/${encodeURIComponent(approval.id)}/${approved ? 'approve' : 'deny'}`,
-          { method: 'POST' },
-        ),
+      const next = await requestJson<AssistantSnapshot>(
+        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/approvals/${encodeURIComponent(approval.id)}/${approved ? 'approve' : 'deny'}`,
+        { method: 'POST' },
+      );
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      applySnapshot(
+        next,
+        activeThread.id,
       );
     } catch (err: any) {
-      setError(err?.message ?? String(err));
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     } finally {
       setApprovalBusyId(null);
     }
-  }, [activeThread]);
+  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const modelOptions = snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS;
-  const activeRunningModel = activeThread ? snapshot?.runningModels?.[activeThread.id] ?? null : null;
   const activeProvider = activeThread?.provider ?? modelOptions[0]?.provider ?? 'openai';
   const providerOptions = React.useMemo(
     () => ASSISTANT_PROVIDERS.map((provider) => ({
@@ -4170,7 +4385,32 @@ export function AssistantDock() {
           onCollapse={() => setThreadSidebarOpen(false)}
         />
       ) : null}
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div
+        ref={assistantThreadRef}
+        tabIndex={-1}
+        className={`flex min-w-0 flex-1 flex-col outline-none ${attachmentDragActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
+        onMouseDown={focusAssistantThreadForPaste}
+        onPaste={(event) => {
+          handleAssistantPaste(event);
+        }}
+        onDragEnter={(event) => {
+          if (attachmentControlsLocked || filesOpen) return;
+          if (event.dataTransfer?.types?.includes?.('Files')) setAttachmentDragActive(true);
+        }}
+        onDragOver={(event) => {
+          if (event.dataTransfer?.types?.includes?.('Files')) event.preventDefault();
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setAttachmentDragActive(false);
+        }}
+        onDrop={(event) => {
+          if (!event.dataTransfer?.types?.includes?.('Files')) return;
+          event.preventDefault();
+          setAttachmentDragActive(false);
+          if (attachmentControlsLocked || filesOpen) return;
+          addAttachmentFiles(event.dataTransfer?.files ?? null, { source: 'file' });
+        }}
+      >
         <div className="relative flex h-11 flex-shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[rgba(255,255,255,.025)] px-2">
           <button
             type="button"
@@ -4660,23 +4900,30 @@ export function AssistantDock() {
           </div>
         ) : null}
         <div
+          ref={setDroneReferenceDropNodeRef}
           className={`relative rounded border bg-[rgba(255,255,255,.03)] focus-within:border-[var(--accent-muted)] ${
-            attachmentDragActive ? 'border-[var(--accent-muted)]' : 'border-[var(--border-subtle)]'
+            attachmentDragActive || droneReferenceDropActive ? 'border-[var(--accent-muted)]' : 'border-[var(--border-subtle)]'
           }`}
           onDragEnter={(event) => {
+            event.stopPropagation();
             if (attachmentControlsLocked) return;
             if (event.dataTransfer?.types?.includes?.('Files')) setAttachmentDragActive(true);
           }}
           onDragOver={(event) => {
+            event.stopPropagation();
             if (event.dataTransfer?.types?.includes?.('Files')) event.preventDefault();
             if (attachmentControlsLocked) return;
           }}
-          onDragLeave={() => setAttachmentDragActive(false)}
+          onDragLeave={(event) => {
+            event.stopPropagation();
+            setAttachmentDragActive(false);
+          }}
           onDrop={(event) => {
+            event.stopPropagation();
             event.preventDefault();
             setAttachmentDragActive(false);
             if (attachmentControlsLocked) return;
-            addAttachmentFiles(event.dataTransfer?.files ?? null);
+            addAttachmentFiles(event.dataTransfer?.files ?? null, { source: 'file' });
           }}
         >
           <input
@@ -4686,16 +4933,65 @@ export function AssistantDock() {
             className="hidden"
             disabled={attachmentControlsLocked}
             onChange={(event) => {
-              addAttachmentFiles(event.currentTarget.files);
+              addAttachmentFiles(event.currentTarget.files, { source: 'file' });
               event.currentTarget.value = '';
             }}
           />
+          {referencedDrones.length > 0 || droneReferenceDropActive ? (
+            <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
+              <div className="mb-1.5 flex items-center justify-between gap-2">
+                <div className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                  {referencedDrones.length > 0
+                    ? `${referencedDrones.length} drone${referencedDrones.length === 1 ? '' : 's'} referenced`
+                    : 'Drop drones to reference them'}
+                </div>
+              </div>
+              {referencedDrones.length > 0 ? (
+                <div className="flex gap-2 overflow-x-auto pb-0.5 no-scrollbar">
+                  {referencedDrones.map((drone) => {
+                    const label = drone.name || drone.id;
+                    return (
+                      <div
+                        key={drone.id}
+                        className="relative w-[190px] flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-2 py-1.5"
+                      >
+                        <div className="flex min-w-0 items-center gap-1.5">
+                          <IconDrone className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" />
+                          <span className="min-w-0 truncate text-[10px] font-medium text-[var(--fg-secondary)]" title={label}>
+                            {label}
+                          </span>
+                        </div>
+                        <div className="mt-1 truncate font-mono text-[9px] text-[var(--muted-dim)]" title={drone.id}>
+                          {drone.id}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeReferencedDrone(drone.id)}
+                          disabled={droneReferenceControlsLocked}
+                          className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel-raised)] text-[10px] font-bold text-[var(--muted)] hover:border-[var(--red)] hover:text-[var(--red)] disabled:opacity-45"
+                          title={`Remove ${label}`}
+                          aria-label={`Remove ${label}`}
+                        >
+                          x
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <div className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5 text-[10px] text-[var(--accent)]">
+                  Release to add drone names and IDs to this message.
+                </div>
+              )}
+            </div>
+          ) : null}
           {attachments.length > 0 ? (
             <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <div className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                  {attachments.length} file{attachments.length === 1 ? '' : 's'} attached
+                  {attachments.length} item{attachments.length === 1 ? '' : 's'} attached
                   {imageAttachmentCount > 0 ? ` · ${imageAttachmentCount} image${imageAttachmentCount === 1 ? '' : 's'}` : ''}
+                  {promptImageAttachmentCount > 0 ? ` · ${promptImageAttachmentCount} chat-only` : ''}
                 </div>
                 <button
                   type="button"
@@ -4762,14 +5058,8 @@ export function AssistantDock() {
               }
             }}
             onPaste={(event) => {
-              if (attachmentControlsLocked) return;
-              const files = filesFromClipboardData(event.clipboardData);
-              if (files.length > 0) addAttachmentFiles(files);
-              const pastedText = String(event.clipboardData?.getData('text/plain') ?? '');
-              if (pastedText.length >= CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS) {
-                event.preventDefault();
-                addPastedTextAttachment(pastedText);
-              }
+              event.stopPropagation();
+              handleAssistantPaste(event);
             }}
             disabled={!activeThread || realtimeTextBlocked}
             placeholder={
@@ -4832,7 +5122,7 @@ export function AssistantDock() {
               <button
                 type="button"
                 onClick={() => void sendPrompt()}
-                disabled={(!draft.trim() && attachments.length === 0) || !activeThread || scopeSyncBusy || realtimeTextBlocked}
+                disabled={(!draft.trim() && attachments.length === 0 && referencedDrones.length === 0) || !activeThread || scopeSyncBusy || realtimeTextBlocked}
                 className="h-7 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)] disabled:opacity-40"
                 style={{ fontFamily: 'var(--display)' }}
               >

@@ -91,7 +91,13 @@ export function DroneHubWorkspaceContent({
     if (selectedDroneWorkspaceProps?.rightPanelOpen) return;
     setEmbeddedAssistantPanelVisible(false);
   }, [selectedDroneWorkspaceProps?.rightPanelOpen]);
-  const assistantEmbeddedVisible = Boolean(selectedDroneWorkspaceProps?.rightPanelOpen && embeddedAssistantPanelVisible);
+  const assistantTabSelected = Boolean(
+    selectedDroneWorkspaceProps?.rightPanelTab === 'assistant' ||
+      (selectedDroneWorkspaceProps?.rightPanelSplit && selectedDroneWorkspaceProps?.rightPanelBottomTab === 'assistant'),
+  );
+  const assistantEmbeddedVisible = Boolean(
+    selectedDroneWorkspaceProps?.rightPanelOpen && (embeddedAssistantPanelVisible || assistantTabSelected),
+  );
 
   const workspaceContent =
     setupWelcomeProps && appView !== 'settings' ? (

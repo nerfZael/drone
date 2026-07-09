@@ -123,6 +123,7 @@ type AssistantQueuedPrompt = {
   id: string;
   prompt: string;
   attachments?: AssistantPromptAttachment[];
+  promptImages?: AssistantPromptImage[];
   createdAt: string;
   provider: LlmProviderId;
   model: string;
@@ -136,6 +137,13 @@ type AssistantPromptAttachment = {
   name: string;
   mime: string;
   size: number;
+};
+
+type AssistantPromptImage = {
+  name: string;
+  mime: string;
+  size: number;
+  dataBase64: string;
 };
 
 type AssistantPromptDeliveryMode = 'queue' | 'asap';
@@ -643,6 +651,9 @@ const ASSISTANT_STATE_FILE_NAME = 'assistant.json';
 const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
 const ASSISTANT_OVERVIEW_PROMPT_MAX_CHARS = 20_000;
 const ASSISTANT_OVERVIEW_INPUT_MAX_CHARS = 48_000;
+const ASSISTANT_PROMPT_MAX_ATTACHMENTS = 8;
+const ASSISTANT_PROMPT_MAX_ATTACHMENT_BYTES_EACH = 6 * 1024 * 1024;
+const ASSISTANT_PROMPT_MAX_ATTACHMENT_BYTES_TOTAL = 20 * 1024 * 1024;
 const CHAT_MESSAGE_DEFAULT_LIMIT = 10;
 const CHAT_MESSAGE_MAX_LIMIT = 50;
 const CHAT_MESSAGE_RESPONSE_MAX_BYTES = 500_000;
@@ -1006,6 +1017,12 @@ function textFromMessage(message: any): string {
     .map((part) => (part?.type === 'text' ? String(part.text ?? '') : ''))
     .filter(Boolean)
     .join('\n');
+}
+
+function imageCountFromMessage(message: any): number {
+  const content = message?.content;
+  if (!Array.isArray(content)) return 0;
+  return content.filter((part) => part?.type === 'image').length;
 }
 
 function messageHasToolCall(message: any, toolName: string): boolean {
@@ -2235,13 +2252,15 @@ function normalizeQueuedPrompt(raw: any, fallback: { provider: LlmProviderId; mo
   const id = cleanOptionalString(raw.id);
   const prompt = cleanOptionalString(raw.prompt);
   const attachments = normalizeAssistantPromptAttachments(raw.attachments);
-  if (!id || (!prompt && attachments.length === 0)) return null;
+  const promptImages = normalizeAssistantPromptImages(raw.promptImages);
+  if (!id || (!prompt && attachments.length === 0 && promptImages.length === 0)) return null;
   const provider = normalizeProvider(raw.provider ?? fallback.provider);
   const model = allowedModelForProvider(provider, raw.model ?? fallback.model);
   return {
     id,
     prompt,
     ...(attachments.length > 0 ? { attachments } : {}),
+    ...(promptImages.length > 0 ? { promptImages } : {}),
     createdAt: cleanOptionalString(raw.createdAt) || nowIso(),
     provider,
     model,
@@ -2271,6 +2290,61 @@ function normalizeAssistantPromptAttachments(raw: unknown): AssistantPromptAttac
     });
   }
   return out.slice(0, 8);
+}
+
+function base64DecodedByteLengthForAssistantImage(b64Raw: string): number {
+  const b64 = String(b64Raw ?? '').replace(/\s+/g, '');
+  if (!b64) return 0;
+  let padding = 0;
+  if (b64.endsWith('==')) padding = 2;
+  else if (b64.endsWith('=')) padding = 1;
+  const n = Math.floor((b64.length * 3) / 4) - padding;
+  return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+function normalizeAssistantPromptImages(raw: unknown): AssistantPromptImage[] {
+  const list = Array.isArray(raw) ? raw : [];
+  const out: AssistantPromptImage[] = [];
+  let total = 0;
+  for (const item of list.slice(0, ASSISTANT_PROMPT_MAX_ATTACHMENTS)) {
+    if (!item || typeof item !== 'object') continue;
+    const mime = cleanOptionalString((item as any).mime).toLowerCase();
+    if (!isAssistantImageMime(mime)) continue;
+    const dataBase64 = String((item as any).dataBase64 ?? '').replace(/\s+/g, '');
+    if (!dataBase64 || dataBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64)) continue;
+    const declared = Number((item as any).size);
+    const decodedSize = base64DecodedByteLengthForAssistantImage(dataBase64);
+    const size = decodedSize || (Number.isFinite(declared) && declared > 0 ? Math.floor(declared) : 0);
+    if (!size || size > ASSISTANT_PROMPT_MAX_ATTACHMENT_BYTES_EACH) continue;
+    total += size;
+    if (total > ASSISTANT_PROMPT_MAX_ATTACHMENT_BYTES_TOTAL) break;
+    out.push({
+      name: cleanOptionalString((item as any).name) || `pasted-image-${out.length + 1}`,
+      mime,
+      size,
+      dataBase64,
+    });
+  }
+  return out;
+}
+
+function assistantPromptAttachmentDisposition(raw: unknown): 'artifact' | 'prompt' {
+  const value = cleanOptionalString((raw as any)?.disposition ?? (raw as any)?.source).toLowerCase();
+  return value === 'prompt' || value === 'chat' || value === 'inline' ? 'prompt' : 'artifact';
+}
+
+function splitAssistantPromptAttachmentInput(raw: unknown): { artifactUploads: unknown[]; promptImages: AssistantPromptImage[] } {
+  const list = Array.isArray(raw) ? raw : [];
+  if (list.length > ASSISTANT_PROMPT_MAX_ATTACHMENTS) {
+    throw new Error(`too many attachments (max ${ASSISTANT_PROMPT_MAX_ATTACHMENTS})`);
+  }
+  const artifactUploads: unknown[] = [];
+  const promptImageInputs: unknown[] = [];
+  for (const item of list) {
+    if (assistantPromptAttachmentDisposition(item) === 'prompt') promptImageInputs.push(item);
+    else artifactUploads.push(item);
+  }
+  return { artifactUploads, promptImages: normalizeAssistantPromptImages(promptImageInputs) };
 }
 
 function normalizeChatIdleSubscriptionStatus(raw: unknown): AssistantChatIdleSubscriptionStatus {
@@ -3669,10 +3743,12 @@ export class HubAssistantService {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
     this.activeThreadId = thread.id;
-    const uploadedAttachments = await saveAssistantArtifactUploads(thread.id, input.attachments);
+    const { artifactUploads, promptImages } = splitAssistantPromptAttachmentInput(input.attachments);
+    const uploadedAttachments = await saveAssistantArtifactUploads(thread.id, artifactUploads);
     const queuedPrompt = this.makeQueuedPrompt(thread, {
       ...input,
       attachments: uploadedAttachments,
+      promptImages,
       deliveryMode: input.deliveryMode ?? thread.promptDeliveryMode,
     });
     const activeAgent = this.activeAgents.get(thread.id);
@@ -3724,17 +3800,19 @@ export class HubAssistantService {
 
   private makeQueuedPrompt(
     thread: AssistantThread,
-    input: { prompt?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown; deliveryMode?: unknown; voiceSource?: unknown; attachments?: unknown },
+    input: { prompt?: unknown; model?: unknown; provider?: unknown; thinkingLevel?: unknown; deliveryMode?: unknown; voiceSource?: unknown; attachments?: unknown; promptImages?: unknown },
   ): AssistantQueuedPrompt {
     const prompt = String(input.prompt ?? '').trim();
     const attachments = normalizeAssistantPromptAttachments(input.attachments);
-    if (!prompt && attachments.length === 0) throw new Error('missing prompt');
+    const promptImages = normalizeAssistantPromptImages(input.promptImages);
+    if (!prompt && attachments.length === 0 && promptImages.length === 0) throw new Error('missing prompt');
     const provider = normalizeProvider(input.provider ?? thread.provider);
     const model = allowedModelForProvider(provider, input.model ?? thread.model);
     return {
       id: makeAssistantId('queued'),
       prompt,
       ...(attachments.length > 0 ? { attachments } : {}),
+      ...(promptImages.length > 0 ? { promptImages } : {}),
       createdAt: nowIso(),
       provider,
       model,
@@ -3747,7 +3825,8 @@ export class HubAssistantService {
   private async makeQueuedPromptUserMessage(threadId: string, queuedPrompt: AssistantQueuedPrompt): Promise<any> {
     const attachments = normalizeAssistantPromptAttachments(queuedPrompt.attachments);
     const prompt = promptWithAssistantAttachments(queuedPrompt.prompt, attachments);
-    const images: Array<{ data: string; mimeType: string }> = [];
+    const images: Array<{ data: string; mimeType: string }> = normalizeAssistantPromptImages(queuedPrompt.promptImages)
+      .map((image) => ({ data: image.dataBase64, mimeType: image.mime }));
     for (const attachment of attachments) {
       if (!isAssistantImageMime(attachment.mime) && !isAssistantImagePath(attachment.path)) continue;
       try {
@@ -3774,11 +3853,15 @@ export class HubAssistantService {
   private removeDeliveredSteeringPrompt(thread: AssistantThread, message: any): boolean {
     if (message?.role !== 'user') return false;
     const prompt = textFromMessage(message).trim();
-    if (!prompt) return false;
+    const imageCount = imageCountFromMessage(message);
+    if (!prompt && imageCount === 0) return false;
     const index = thread.queuedPrompts.findIndex(
-      (queuedPrompt) =>
-        queuedPrompt.deliveryMode === 'asap' &&
-        promptWithAssistantAttachments(queuedPrompt.prompt, normalizeAssistantPromptAttachments(queuedPrompt.attachments)).trim() === prompt,
+      (queuedPrompt) => {
+        if (queuedPrompt.deliveryMode !== 'asap') return false;
+        const queuedImageCount = normalizeAssistantPromptImages(queuedPrompt.promptImages).length;
+        return promptWithAssistantAttachments(queuedPrompt.prompt, normalizeAssistantPromptAttachments(queuedPrompt.attachments)).trim() === prompt &&
+          imageCount >= queuedImageCount;
+      },
     );
     if (index < 0) return false;
     thread.queuedPrompts.splice(index, 1);
