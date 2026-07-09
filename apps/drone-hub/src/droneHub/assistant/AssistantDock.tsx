@@ -332,7 +332,7 @@ function cleanAssistantScopeDrones(drones: AssistantScopeDrone[]): AssistantScop
 }
 
 function cleanAssistantDroneReferences(drones: AssistantDroneReference[]): AssistantDroneReference[] {
-  return cleanAssistantScopeDrones(drones);
+  return cleanAssistantScopeDrones(drones).map((drone) => ({ id: drone.id, name: drone.name }));
 }
 
 function assistantDroneReferenceBlock(drones: AssistantDroneReference[]): string {
@@ -3661,9 +3661,15 @@ export function AssistantDock() {
       const data = parseDroneHubDragData(event.active.data.current);
       const target = assistantDroneDropTargetFromDragData(data);
       if (!target || target.ids.length === 0) return;
-      void resolveScopeDroneNames(target.ids, target.fallbackLabel).then(
-        overId === 'assistant-drone-scope-drop' ? addScopeDrones : addReferencedDrones,
-      );
+      const droppedOnThreadId = activeThreadIdRef.current;
+      void resolveScopeDroneNames(target.ids, target.fallbackLabel).then((drones) => {
+        if (overId === 'assistant-drone-scope-drop') {
+          addScopeDrones(drones);
+          return;
+        }
+        if (activeThreadIdRef.current !== droppedOnThreadId) return;
+        addReferencedDrones(drones);
+      });
     },
   });
 
