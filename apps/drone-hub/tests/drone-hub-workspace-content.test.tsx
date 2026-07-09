@@ -22,6 +22,11 @@ mock.module('../src/droneHub/assistant', () => ({
     React.createElement('div', { 'data-assistant-embedded': String(embeddedVisible) }, 'assistant'),
 }));
 
+mock.module('../src/droneHub/assistant/FloatingAssistantDock', () => ({
+  FloatingAssistantDock: ({ embeddedVisible }: { embeddedVisible: boolean }) =>
+    React.createElement('div', { 'data-assistant-embedded': String(embeddedVisible) }, 'assistant'),
+}));
+
 mock.module('../src/droneHub/app/NoDroneSelectedState', () => ({
   NoDroneSelectedState: () => React.createElement('div', { 'data-view': 'no-drone' }, 'No drone selected'),
 }));
@@ -87,7 +92,7 @@ async function renderSettled(props: DroneHubWorkspaceContentProps): Promise<stri
 
 describe('DroneHubWorkspaceContent lazy workspace views', () => {
   test('shows the workspace fallback while a lazy branch is loading', () => {
-    const html = renderWorkspace(baseProps({ appView: 'settings' }));
+    const html = renderWorkspace(baseProps({ kanbanBoardWorkspaceProps: {} as DroneHubWorkspaceContentProps['kanbanBoardWorkspaceProps'] }));
     expect(html).toContain('Loading workspace...');
   });
 
@@ -149,5 +154,35 @@ describe('DroneHubWorkspaceContent lazy workspace views', () => {
     );
     expect(html).toContain('data-view="selected"');
     expect(html).toContain('data-has-preview-host="true"');
+  });
+
+  test('hides the floating assistant immediately when the assistant pane is active', async () => {
+    const html = await renderSettled(
+      baseProps({
+        selectedDroneWorkspaceProps: {
+          currentDrone: { id: 'drone-1' },
+          rightPanelOpen: true,
+          rightPanelTab: 'assistant',
+          rightPanelSplit: false,
+          rightPanelBottomTab: 'terminal',
+        } as DroneHubWorkspaceContentProps['selectedDroneWorkspaceProps'],
+      }),
+    );
+    expect(html).toContain('data-assistant-embedded="true"');
+  });
+
+  test('hides the floating assistant when the assistant pane is active in split mode', async () => {
+    const html = await renderSettled(
+      baseProps({
+        selectedDroneWorkspaceProps: {
+          currentDrone: { id: 'drone-1' },
+          rightPanelOpen: true,
+          rightPanelTab: 'files',
+          rightPanelSplit: true,
+          rightPanelBottomTab: 'assistant',
+        } as DroneHubWorkspaceContentProps['selectedDroneWorkspaceProps'],
+      }),
+    );
+    expect(html).toContain('data-assistant-embedded="true"');
   });
 });
