@@ -1989,6 +1989,16 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
     }
   }, [client, setNotice]);
 
+  const copyVoiceRecordingTranscript = React.useCallback(async (recording: VoiceRecordingRecord) => {
+    const transcriptText = recording.transcriptText ?? '';
+    const copied = await copyText(transcriptText);
+    if (copied) {
+      setNotice('Copied transcript to clipboard.');
+      return;
+    }
+    setError(transcriptText.trim() ? 'Could not copy transcript to clipboard.' : 'No transcript text to copy.');
+  }, [setError, setNotice]);
+
   React.useEffect(() => {
     voiceRecordingsQueryRef.current = { mode: voiceRecordingsMode, offset: voiceRecordingsOffset };
   }, [voiceRecordingsMode, voiceRecordingsOffset]);
@@ -5825,6 +5835,20 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                             <a className={assistantActionButtonClass} href={recordingTranscriptUrl(recording.id, true)} download>
                               Download transcript
                             </a>
+                          ) : null}
+                          {recording.transcriptText?.trim() ? (
+                            <button
+                              type="button"
+                              className={assistantIconButtonClass}
+                              onClick={() => void copyVoiceRecordingTranscript(recording)}
+                              title="Copy transcript to clipboard"
+                              aria-label="Copy transcript to clipboard"
+                            >
+                              <svg viewBox="0 0 24 24" aria-hidden="true" className={assistantIconSvgClass}>
+                                <path d="M8 7a2 2 0 0 1 2-2h8a2 2 0 0 1 2 2v10a2 2 0 0 1-2 2h-8a2 2 0 0 1-2-2Z" />
+                                <path d="M16 5V4a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h2" />
+                              </svg>
+                            </button>
                           ) : null}
                           {canRetranscribe ? (
                             <button

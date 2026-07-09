@@ -5,8 +5,12 @@ import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import * as fsSync from 'node:fs';
 import fs from 'node:fs/promises';
+import http from 'node:http';
+import { createRequire } from 'node:module';
 import net from 'node:net';
 import path from 'node:path';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 
 import { health, procStart, procStop, readOutput, sendInput, sendKeys, status } from './host/api';
 import { ensureContainerDroneDaemonSession } from './host/container-daemon';
@@ -52,6 +56,7 @@ import {
 } from './host/runtime';
 import { ensureHubSetupState } from './host/setup-state';
 import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
+import { readRawBody } from './hub/hub-http';
 import { parseHubRunnerProcessesFromPsOutput, parseHubUiServerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import {
   normalizeRemotePublicUrl,
@@ -71,6 +76,8 @@ import {
   resolveVoiceStreamPairingPasswordSettings,
 } from './hub/hub-settings';
 import { buildVoiceStreamProcessEnv } from './hub/voice-stream-launch';
+
+const requireFromCli = createRequire(__filename);
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -471,6 +478,272 @@ function resolveRepoRootFromDroneCliDir(): string {
   // - src -> drone -> apps -> <repoRoot>
   // - dist -> drone -> apps -> <repoRoot>
   return path.resolve(__dirname, '..', '..', '..');
+}
+
+type DroneHubUiMode = 'dev' | 'static';
+
+type StaticDroneHubUiServer = {
+  host: string;
+  port: number;
+  url: string;
+  close: () => Promise<void>;
+};
+
+const HOP_BY_HOP_HEADERS = new Set([
+  'connection',
+  'keep-alive',
+  'proxy-authenticate',
+  'proxy-authorization',
+  'te',
+  'trailer',
+  'transfer-encoding',
+  'upgrade',
+]);
+
+function normalizeDroneHubUiMode(raw: unknown): DroneHubUiMode {
+  const value = String(raw ?? '').trim().toLowerCase();
+  if (!value || value === 'dev') return 'dev';
+  if (value === 'static' || value === 'desktop' || value === 'electron') return 'static';
+  throw new Error('invalid --ui-mode (expected dev|static)');
+}
+
+function resolveDroneHubStaticUiDir(repoRoot: string, raw: unknown): string {
+  const explicit = String(raw ?? process.env.DRONE_HUB_STATIC_UI_DIR ?? '').trim();
+  if (explicit) return path.resolve(explicit);
+  const candidates = [
+    path.join(repoRoot, 'apps', 'drone-hub', 'dist'),
+    path.join(__dirname, 'hub-ui'),
+    path.join(__dirname, '..', 'hub-ui'),
+  ];
+  return candidates.find((candidate) => fsSync.existsSync(path.join(candidate, 'index.html'))) ?? candidates[0];
+}
+
+function contentTypeForStaticFile(filePath: string): string {
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.html') return 'text/html; charset=utf-8';
+  if (ext === '.js' || ext === '.mjs') return 'text/javascript; charset=utf-8';
+  if (ext === '.css') return 'text/css; charset=utf-8';
+  if (ext === '.svg') return 'image/svg+xml';
+  if (ext === '.png') return 'image/png';
+  if (ext === '.ico') return 'image/x-icon';
+  if (ext === '.webmanifest') return 'application/manifest+json; charset=utf-8';
+  if (ext === '.json') return 'application/json; charset=utf-8';
+  if (ext === '.woff2') return 'font/woff2';
+  return 'application/octet-stream';
+}
+
+function safeDroneHubStaticPath(staticDir: string, pathname: string): string | null {
+  let decoded = '/';
+  try {
+    decoded = decodeURIComponent(pathname.split('?')[0] ?? '/');
+  } catch {
+    return null;
+  }
+  const rel = decoded === '/' ? 'index.html' : decoded.replace(/^\/+/, '');
+  const resolved = path.resolve(staticDir, rel);
+  const root = path.resolve(staticDir);
+  if (resolved !== root && !resolved.startsWith(`${root}${path.sep}`)) return null;
+  return resolved;
+}
+
+function shouldServeDroneHubIndexFallback(pathname: string): boolean {
+  let decoded = '/';
+  try {
+    decoded = decodeURIComponent(pathname.split('?')[0] ?? '/');
+  } catch {
+    return false;
+  }
+  return decoded === '/' || decoded === '/index.html' || !path.posix.extname(decoded);
+}
+
+async function serveDroneHubStaticAsset(staticDir: string, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const url = new URL(req.url ?? '/', `http://${req.headers.host ?? '127.0.0.1'}`);
+  const resolved = safeDroneHubStaticPath(staticDir, url.pathname);
+  const fallback = path.join(staticDir, 'index.html');
+  const filePath = resolved && fsSync.existsSync(resolved) ? resolved : shouldServeDroneHubIndexFallback(url.pathname) ? fallback : null;
+  if (!filePath || !fsSync.existsSync(filePath)) {
+    res.statusCode = fsSync.existsSync(path.join(staticDir, 'index.html')) ? 404 : 503;
+    res.setHeader('content-type', 'application/json; charset=utf-8');
+    res.end(
+      JSON.stringify({
+        ok: false,
+        error: fsSync.existsSync(path.join(staticDir, 'index.html'))
+          ? 'static asset not found'
+          : `Drone Hub UI is not built at ${staticDir}; run \`bun run --filter drone-hub build\`.`,
+      }),
+    );
+    return;
+  }
+  res.statusCode = 200;
+  res.setHeader('content-type', contentTypeForStaticFile(filePath));
+  const base = path.basename(filePath);
+  if (path.extname(filePath).toLowerCase() === '.html' || base === 'pwa-sw.js' || base === 'version.json') {
+    res.setHeader('cache-control', 'no-store');
+  } else if (url.pathname.startsWith('/assets/')) {
+    res.setHeader('cache-control', 'public, max-age=31536000, immutable');
+  }
+  fsSync.createReadStream(filePath).pipe(res);
+}
+
+function copyProxyResponseHeaders(response: Response, res: http.ServerResponse): void {
+  response.headers.forEach((value, key) => {
+    if (!HOP_BY_HOP_HEADERS.has(key.toLowerCase())) res.setHeader(key, value);
+  });
+}
+
+async function proxyDroneHubApiRequest(opts: {
+  req: http.IncomingMessage;
+  res: http.ServerResponse;
+  apiHost: string;
+  apiPort: number;
+  apiToken: string;
+}): Promise<void> {
+  const method = String(opts.req.method ?? 'GET').toUpperCase();
+  const url = new URL(opts.req.url ?? '/', `http://${opts.req.headers.host ?? '127.0.0.1'}`);
+  const target = `http://${opts.apiHost}:${opts.apiPort}${url.pathname}${url.search}`;
+  const body = method === 'GET' || method === 'HEAD' ? undefined : await readRawBody(opts.req);
+  const response = await fetch(target, {
+    method,
+    headers: {
+      authorization: `Bearer ${opts.apiToken}`,
+      ...(opts.req.headers['content-type'] ? { 'content-type': String(opts.req.headers['content-type']) } : {}),
+      ...(opts.req.headers['if-none-match'] ? { 'if-none-match': String(opts.req.headers['if-none-match']) } : {}),
+      ...(opts.req.headers['mcp-session-id'] ? { 'mcp-session-id': String(opts.req.headers['mcp-session-id']) } : {}),
+      ...(opts.req.headers['x-drone-desktop-voice-webrtc-session-id']
+        ? { 'x-drone-desktop-voice-webrtc-session-id': String(opts.req.headers['x-drone-desktop-voice-webrtc-session-id']) }
+        : {}),
+    },
+    body: body as any,
+  });
+
+  opts.res.statusCode = response.status;
+  copyProxyResponseHeaders(response, opts.res);
+  if (!response.body) {
+    opts.res.end();
+    return;
+  }
+  await pipeline(Readable.fromWeb(response.body as any), opts.res);
+}
+
+function proxyDroneHubApiUpgrade(opts: {
+  req: http.IncomingMessage;
+  socket: net.Socket;
+  head: Buffer;
+  apiHost: string;
+  apiPort: number;
+  apiToken: string;
+}): void {
+  const url = new URL(opts.req.url ?? '/', `http://${opts.req.headers.host ?? '127.0.0.1'}`);
+  if (!url.pathname.startsWith('/api/')) {
+    opts.socket.write('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+    opts.socket.destroy();
+    return;
+  }
+
+  const upstream = net.connect(opts.apiPort, opts.apiHost);
+  upstream.once('connect', () => {
+    const headers = new Map<string, string>();
+    for (const [key, value] of Object.entries(opts.req.headers)) {
+      if (value == null) continue;
+      const lower = key.toLowerCase();
+      if (lower === 'host' || lower === 'authorization') continue;
+      headers.set(key, Array.isArray(value) ? value.join(', ') : String(value));
+    }
+    headers.set('Host', `${opts.apiHost}:${opts.apiPort}`);
+    headers.set('Authorization', `Bearer ${opts.apiToken}`);
+    headers.set('Connection', 'Upgrade');
+    headers.set('Upgrade', 'websocket');
+
+    const lines = [`${opts.req.method ?? 'GET'} ${url.pathname}${url.search} HTTP/${opts.req.httpVersion}`];
+    for (const [key, value] of headers) lines.push(`${key}: ${value}`);
+    upstream.write(`${lines.join('\r\n')}\r\n\r\n`);
+    if (opts.head.length > 0) upstream.write(opts.head);
+    opts.socket.pipe(upstream).pipe(opts.socket);
+  });
+  upstream.once('error', () => {
+    try {
+      opts.socket.write('HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\n\r\n');
+    } catch {
+      // ignore
+    }
+    opts.socket.destroy();
+  });
+}
+
+async function startStaticDroneHubUiServer(opts: {
+  port: number;
+  host?: string;
+  staticDir: string;
+  apiHost: string;
+  apiPort: number;
+  apiToken: string;
+}): Promise<StaticDroneHubUiServer> {
+  const host = String(opts.host ?? '127.0.0.1').trim() || '127.0.0.1';
+  const sockets = new Set<net.Socket>();
+  const server = http.createServer(async (req, res) => {
+    try {
+      const url = new URL(req.url ?? '/', `http://${req.headers.host ?? host}`);
+      if (url.pathname.startsWith('/api/')) {
+        await proxyDroneHubApiRequest({
+          req,
+          res,
+          apiHost: opts.apiHost,
+          apiPort: opts.apiPort,
+          apiToken: opts.apiToken,
+        });
+        return;
+      }
+      await serveDroneHubStaticAsset(opts.staticDir, req, res);
+    } catch (error: any) {
+      if (res.headersSent) {
+        if (!res.destroyed) res.destroy(error);
+        return;
+      }
+      res.statusCode = 500;
+      res.setHeader('content-type', 'application/json; charset=utf-8');
+      res.end(JSON.stringify({ ok: false, error: error?.message ?? String(error) }));
+    }
+  });
+
+  server.on('connection', (socket) => {
+    sockets.add(socket);
+    socket.on('close', () => {
+      sockets.delete(socket);
+    });
+  });
+
+  server.on('upgrade', (req, socket, head) => {
+    proxyDroneHubApiUpgrade({
+      req,
+      socket: socket as net.Socket,
+      head,
+      apiHost: opts.apiHost,
+      apiPort: opts.apiPort,
+      apiToken: opts.apiToken,
+    });
+  });
+
+  await new Promise<void>((resolve, reject) => {
+    server.once('error', reject);
+    server.listen(opts.port, host, () => resolve());
+  });
+  const address = server.address();
+  const port = typeof address === 'object' && address ? address.port : opts.port;
+  return {
+    host,
+    port,
+    url: `http://${host}:${port}`,
+    close: async () => {
+      for (const socket of sockets) {
+        try {
+          socket.destroy();
+        } catch {
+          // ignore
+        }
+      }
+      await new Promise<void>((resolve) => server.close(() => resolve()));
+    },
+  };
 }
 
 async function startVoiceStreamServer(
@@ -2005,8 +2278,10 @@ program
   });
 
 async function hubRun(options: any) {
-  const uiPort = Number(options.port);
+  const uiPortRaw = Number(options.port);
+  const uiPort = uiPortRaw === 0 ? await getFreeTcpPort() : uiPortRaw;
   if (!Number.isFinite(uiPort) || uiPort <= 0) throw new Error('invalid --port');
+  const uiMode = normalizeDroneHubUiMode(options.uiMode);
 
   const apiPortRaw = Number(options.apiPort);
   const apiPort = apiPortRaw === 0 ? await getFreeTcpPort() : apiPortRaw;
@@ -2033,6 +2308,7 @@ async function hubRun(options: any) {
   let shutdownStarted = false;
   let voiceStreamRestart: Promise<void> | null = null;
   let voiceStreamChild: ChildProcess | null = null;
+  let staticUiServer: StaticDroneHubUiServer | null = null;
   const intentionalVoiceStreamStops = new WeakSet<ChildProcess>();
 
   const trackVoiceStreamChild = (child: ChildProcess | null) => {
@@ -2146,8 +2422,8 @@ async function hubRun(options: any) {
     console.warn(`Remote Hub auto-start failed: ${error?.message ?? String(error)}`);
   });
 
-  // Start the drone-hub Vite dev server and proxy /api → Hub API server.
   const hubDir = path.join(repoRoot, 'apps', 'drone-hub');
+  const staticUiDir = resolveDroneHubStaticUiDir(repoRoot, options.staticUiDir);
   if (voiceStreamEnabled && (await isTcpPortAvailable('0.0.0.0', voiceStreamPort))) {
     trackVoiceStreamChild(await startVoiceStreamServer(repoRoot, voiceStreamPort, {
       url: `http://127.0.0.1:${api.port}`,
@@ -2167,7 +2443,7 @@ async function hubRun(options: any) {
       uiPortAvailable = await isTcpPortAvailable('127.0.0.1', uiPort);
     }
   }
-  const child = uiPortAvailable
+  const child = uiMode === 'dev' && uiPortAvailable
     ? spawn('bun', ['run', 'dev', '--', '--port', String(uiPort), '--strictPort'], {
         cwd: hubDir,
         stdio: 'inherit',
@@ -2181,7 +2457,18 @@ async function hubRun(options: any) {
         },
       })
     : null;
-  if (!uiPortAvailable) {
+  if (uiMode === 'static') {
+    if (!uiPortAvailable) {
+      throw new Error(`Drone Hub UI port ${uiPort} is already in use`);
+    }
+    staticUiServer = await startStaticDroneHubUiServer({
+      port: uiPort,
+      staticDir: staticUiDir,
+      apiHost: api.host,
+      apiPort: api.port,
+      apiToken,
+    });
+  } else if (!uiPortAvailable) {
     // eslint-disable-next-line no-console
     console.warn(`Drone Hub UI port ${uiPort} is already in use; leaving the existing UI server running.`);
   }
@@ -2200,6 +2487,11 @@ async function hubRun(options: any) {
     }
     try {
       child?.kill('SIGINT');
+    } catch {
+      // ignore
+    }
+    try {
+      await staticUiServer?.close();
     } catch {
       // ignore
     }
@@ -2231,6 +2523,20 @@ async function hubRun(options: any) {
     // eslint-disable-next-line no-console
     console.log(`Voice Stream:  ${voiceStream.url}`);
   }
+  if (options.readyJson) {
+    // eslint-disable-next-line no-console
+    console.log(
+      `DRONE_HUB_READY ${JSON.stringify({
+        ok: true,
+        apiUrl: `http://${api.host}:${api.port}`,
+        uiUrl: `http://127.0.0.1:${uiPort}`,
+        uiMode,
+        staticUiDir: uiMode === 'static' ? staticUiDir : null,
+        ...(api.containerMcp ? { containerMcpUrl: api.containerMcp.url } : {}),
+        ...(voiceStream ? { voiceStreamUrl: voiceStream.url } : {}),
+      })}`,
+    );
+  }
 
   await new Promise<void>((resolve, reject) => {
     waitForStopResolve = resolve;
@@ -2242,7 +2548,9 @@ async function hubRun(options: any) {
 
 async function hubStart(options: any) {
   const uiPort = Number(options.port ?? 5174);
-  if (!Number.isFinite(uiPort) || uiPort <= 0) throw new Error('invalid --port');
+  if (!Number.isFinite(uiPort) || uiPort < 0) throw new Error('invalid --port');
+  const uiMode = normalizeDroneHubUiMode(options.uiMode);
+  const staticUiDir = String(options.staticUiDir ?? '').trim();
   const apiPortRaw = Number(options.apiPort ?? 0);
   if (!Number.isFinite(apiPortRaw) || apiPortRaw < 0) throw new Error('invalid --api-port');
   const apiHost = String(options.host || DEFAULT_HUB_API_HOST);
@@ -2268,6 +2576,9 @@ async function hubStart(options: any) {
     }
     if (Number.isFinite(runningApiPort) && runningApiPort > 0 && apiPortRaw > 0 && runningApiPort !== apiPortRaw) {
       restartReasons.push(`Hub API is listening on port ${runningApiPort}; requested ${apiPortRaw}.`);
+    }
+    if (Number.isFinite(Number(cur.uiPort)) && Number(cur.uiPort) > 0 && uiPort > 0 && Number(cur.uiPort) !== uiPort) {
+      restartReasons.push(`Hub UI is listening on port ${cur.uiPort}; requested ${uiPort}.`);
     }
     if (!cur.containerMcp && containerMcpHost && containerMcpPort > 0) {
       restartReasons.push('Container MCP listener is not running.');
@@ -2333,6 +2644,9 @@ async function hubStart(options: any) {
         String(apiPortRaw),
         '--host',
         apiHost,
+        '--ui-mode',
+        uiMode,
+        ...(staticUiDir ? ['--static-ui-dir', staticUiDir] : []),
         '--container-mcp-host',
         containerMcpHost,
         '--container-mcp-port',
@@ -2543,6 +2857,66 @@ async function remoteHubPair() {
   console.log(JSON.stringify({ ok: true, ...pairing }, null, 2));
 }
 
+function resolveElectronCliPath(): string {
+  try {
+    return requireFromCli.resolve('electron/cli.js');
+  } catch {
+    throw new Error(
+      'Electron is not installed. Install optional dependencies for the drone package, or run this from the repo after `bun install`.',
+    );
+  }
+}
+
+function resolveDroneHubElectronMainPath(): string {
+  const repoRoot = resolveRepoRootFromDroneCliDir();
+  const candidates = [
+    path.join(__dirname, 'hub-electron-main.cjs'),
+    path.join(repoRoot, 'apps', 'drone', 'desktop', 'hub-electron-main.cjs'),
+  ];
+  const found = candidates.find((candidate) => fsSync.existsSync(candidate));
+  if (found) return found;
+  throw new Error(`Drone Hub Electron main file was not found. Looked in: ${candidates.join(', ')}`);
+}
+
+async function hubApp(options: any) {
+  const electronCli = resolveElectronCliPath();
+  const electronMain = resolveDroneHubElectronMainPath();
+  const uiPort = Number(options.port ?? 0);
+  if (!Number.isFinite(uiPort) || uiPort < 0) throw new Error('invalid --port');
+  const apiPort = Number(options.apiPort ?? 0);
+  if (!Number.isFinite(apiPort) || apiPort < 0) throw new Error('invalid --api-port');
+  const voiceStreamEnabled = shouldRunVoiceStream(options);
+  const voiceStreamPort = voiceStreamEnabled ? resolveVoiceStreamPort(options) : DEFAULT_VOICE_STREAM_PORT;
+  const containerMcpUrl = resolveContainerMcpUrl(options);
+
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(process.execPath, [electronCli, electronMain], {
+      stdio: 'inherit',
+      env: {
+        ...process.env,
+        DRONE_HUB_CLI_PATH: __filename,
+        DRONE_HUB_APP_PORT: String(uiPort),
+        DRONE_HUB_APP_API_PORT: String(apiPort),
+        DRONE_HUB_APP_HOST: String(options.host || DEFAULT_HUB_API_HOST),
+        DRONE_HUB_APP_CONTAINER_MCP_HOST: resolveContainerMcpHost(options),
+        DRONE_HUB_APP_CONTAINER_MCP_PORT: String(resolveContainerMcpPort(options)),
+        ...(containerMcpUrl ? { DRONE_HUB_APP_CONTAINER_MCP_URL: containerMcpUrl } : {}),
+        DRONE_HUB_APP_VOICE_STREAM_PORT: String(voiceStreamPort),
+        ...(voiceStreamEnabled ? {} : { DRONE_HUB_APP_NO_VOICE_STREAM: '1' }),
+        ...(options.staticUiDir ? { DRONE_HUB_STATIC_UI_DIR: path.resolve(String(options.staticUiDir)) } : {}),
+      },
+    });
+    child.once('error', reject);
+    child.once('exit', (code, signal) => {
+      if (code === 0 || signal === 'SIGTERM' || signal === 'SIGINT') {
+        resolve();
+        return;
+      }
+      reject(new Error(`Electron exited with code ${code ?? 'null'} signal ${signal ?? 'null'}`));
+    });
+  });
+}
+
 async function profileListCommand() {
   // eslint-disable-next-line no-console
   console.log(JSON.stringify({ ok: true, ...(await listProfilesState()) }, null, 2));
@@ -2611,7 +2985,9 @@ profile.command('delete <name>')
 const hub = program.command('hub').description('Manage the local Drone Hub (detached dev server)');
 hub.command('start')
   .description('Start the hub in detached mode')
-  .option('--port <port>', 'UI port (Vite dev server)', '5174')
+  .option('--port <port>', 'UI port (Vite dev server or static UI server; pass 0 for auto in static mode)', '5174')
+  .option('--ui-mode <mode>', 'UI mode: dev|static', 'dev')
+  .option('--static-ui-dir <path>', 'Built drone-hub dist directory for --ui-mode static')
   .option('--api-port <port>', `Hub API port (${DEFAULT_HUB_API_PORT} by default; pass 0 for auto)`, String(DEFAULT_HUB_API_PORT))
   .option('--host <host>', 'Bind host for Hub API server', DEFAULT_HUB_API_HOST)
   .option('--container-mcp-host <host>', 'Bind host for container-reachable MCP-only server', DEFAULT_CONTAINER_MCP_HOST)
@@ -2629,7 +3005,9 @@ hub.command('stop')
   });
 hub.command('restart')
   .description('Restart the detached hub')
-  .option('--port <port>', 'UI port (Vite dev server)', '5174')
+  .option('--port <port>', 'UI port (Vite dev server or static UI server; pass 0 for auto in static mode)', '5174')
+  .option('--ui-mode <mode>', 'UI mode: dev|static', 'dev')
+  .option('--static-ui-dir <path>', 'Built drone-hub dist directory for --ui-mode static')
   .option('--api-port <port>', `Hub API port (${DEFAULT_HUB_API_PORT} by default; pass 0 for auto)`, String(DEFAULT_HUB_API_PORT))
   .option('--host <host>', 'Bind host for Hub API server', DEFAULT_HUB_API_HOST)
   .option('--container-mcp-host <host>', 'Bind host for container-reachable MCP-only server', DEFAULT_CONTAINER_MCP_HOST)
@@ -2643,7 +3021,9 @@ hub.command('restart')
   });
 hub.command('run')
   .description('Run the hub in the current process (internal)')
-  .option('--port <port>', 'UI port (Vite dev server)', '5174')
+  .option('--port <port>', 'UI port (Vite dev server or static UI server; pass 0 for auto in static mode)', '5174')
+  .option('--ui-mode <mode>', 'UI mode: dev|static', 'dev')
+  .option('--static-ui-dir <path>', 'Built drone-hub dist directory for --ui-mode static')
   .option('--api-port <port>', `Hub API port (${DEFAULT_HUB_API_PORT} by default; pass 0 for auto)`, String(DEFAULT_HUB_API_PORT))
   .option('--host <host>', 'Bind host for Hub API server', DEFAULT_HUB_API_HOST)
   .option('--container-mcp-host <host>', 'Bind host for container-reachable MCP-only server', DEFAULT_CONTAINER_MCP_HOST)
@@ -2651,8 +3031,24 @@ hub.command('run')
   .option('--container-mcp-url <url>', 'MCP URL projected into container agent configs')
   .option('--voice-stream-port <port>', `Voice Stream server port (${DEFAULT_VOICE_STREAM_PORT} by default)`)
   .option('--no-voice-stream', 'Do not start the Voice Stream companion server')
+  .option('--ready-json', 'Print a DRONE_HUB_READY JSON line after startup')
   .action(async (options) => {
     await hubRun(options);
+  });
+hub.command('app')
+  .alias('electron')
+  .description('Start Drone Hub as an Electron desktop app')
+  .option('--port <port>', 'Local desktop UI port; pass 0 for auto', '0')
+  .option('--static-ui-dir <path>', 'Built drone-hub dist directory')
+  .option('--api-port <port>', `Hub API port (${DEFAULT_HUB_API_PORT} by default; pass 0 for auto)`, '0')
+  .option('--host <host>', 'Bind host for Hub API server', DEFAULT_HUB_API_HOST)
+  .option('--container-mcp-host <host>', 'Bind host for container-reachable MCP-only server', DEFAULT_CONTAINER_MCP_HOST)
+  .option('--container-mcp-port <port>', `Container MCP-only server port (${DEFAULT_CONTAINER_MCP_PORT} by default)`, String(DEFAULT_CONTAINER_MCP_PORT))
+  .option('--container-mcp-url <url>', 'MCP URL projected into container agent configs')
+  .option('--voice-stream-port <port>', `Voice Stream server port (${DEFAULT_VOICE_STREAM_PORT} by default)`)
+  .option('--no-voice-stream', 'Do not start the Voice Stream companion server')
+  .action(async (options) => {
+    await hubApp(options);
   });
 hub.command('remote-run')
   .description('Run the remote Hub in the current process (internal)')

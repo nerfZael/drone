@@ -4,21 +4,6 @@ type FloatingAssistantActivityHelpers = typeof import('../src/droneHub/assistant
 
 let helpers: FloatingAssistantActivityHelpers;
 
-mock.module('react', () => {
-  const React = {
-    useCallback: (fn: unknown) => fn,
-    useEffect: () => undefined,
-    useRef: (current: unknown) => ({ current }),
-    useState: (initial: unknown) => [typeof initial === 'function' ? initial() : initial, () => undefined],
-  };
-  return { default: React, ...React };
-});
-
-mock.module('react/jsx-dev-runtime', () => ({
-  Fragment: 'Fragment',
-  jsxDEV: () => null,
-}));
-
 mock.module(new URL('../src/droneHub/assistant/AssistantDock.tsx', import.meta.url).pathname, () => ({
   AssistantDock: () => null,
 }));

@@ -33,6 +33,10 @@ function blipBundleArgs(root) {
   ];
 }
 
+function workspaceBuildArgs(packageName) {
+  return ['run', '--filter', packageName, 'build'];
+}
+
 function runOrThrow(cmd, args, opts = {}) {
   const result = spawnSync(cmd, args, {
     cwd: opts.cwd,
@@ -86,6 +90,33 @@ async function copyDesktopVoiceVoskModel(root) {
   await fs.cp(source, target, { recursive: true });
 }
 
+async function ensureBlipBundleDependenciesBuilt(root) {
+  const repoRoot = path.resolve(root, '../..');
+  runOrThrow('bun', workspaceBuildArgs('@mariozechner/pi-ai'), { cwd: repoRoot });
+  runOrThrow('bun', workspaceBuildArgs('@blip/tools'), { cwd: repoRoot });
+  runOrThrow('bun', workspaceBuildArgs('@blip/core'), { cwd: repoRoot });
+}
+
+async function copyDroneHubElectronMain(root) {
+  const source = path.join(root, 'desktop', 'hub-electron-main.cjs');
+  const target = path.join(root, 'dist', 'hub-electron-main.cjs');
+  await fs.copyFile(source, target);
+  await chmodExecutableBestEffort(target);
+}
+
+async function copyBuiltDroneHubUi(root) {
+  const source = path.resolve(root, '..', 'drone-hub', 'dist');
+  const target = path.join(root, 'dist', 'hub-ui');
+  try {
+    await fs.access(path.join(source, 'index.html'));
+  } catch {
+    console.warn(`Drone Hub UI bundle not found at ${source}; run \`bun run --filter drone-hub build\` before publishing the drone package.`);
+    return;
+  }
+  await fs.rm(target, { recursive: true, force: true });
+  await fs.cp(source, target, { recursive: true });
+}
+
 async function main() {
   const root = path.resolve(__dirname, '..');
   await removeFileBestEffort(path.join(root, 'dist', 'fleet.js'));
@@ -93,9 +124,12 @@ async function main() {
   await removeFileBestEffort(path.join(root, 'dist', 'tasks.js'));
   runOrThrow('bun', tasksBundleArgs(root), { cwd: root });
   await removeFileBestEffort(path.join(root, 'dist', 'blip.js'));
+  await ensureBlipBundleDependenciesBuilt(root);
   runOrThrow('bun', blipBundleArgs(root), { cwd: root });
   await assertBlipBundleHasErrorDetails(root);
   await copyDesktopVoiceVoskModel(root);
+  await copyDroneHubElectronMain(root);
+  await copyBuiltDroneHubUi(root);
   await chmodExecutableBestEffort(path.join(root, 'dist', 'blip.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'cli.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'daemon.js'));

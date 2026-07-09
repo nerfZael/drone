@@ -23,6 +23,7 @@
     "postbuild": "node scripts/postbuild.cjs",
     "clean": "rimraf dist",
     "dev": "ts-node src/cli.ts",
+    "app": "node dist/cli.js hub app",
     "test": "bun test --timeout 20000 --max-concurrency 1 tests",
     "test:node": "bun run build && node --test tests/node/*.test.cjs",
     "test:coverage": "bun test --timeout 20000 --max-concurrency 1 --coverage tests",
@@ -49,6 +50,7 @@
     "zod": "^4.3.6"
   },
   "optionalDependencies": {
+    "electron": "31.7.7",
     "vosk": "^0.3.39"
   },
   "devDependencies": {
