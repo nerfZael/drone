@@ -1,0 +1,49 @@
+import { describe, expect, test } from 'bun:test';
+import { resolveDisplayedChatModel } from '../src/droneHub/app/selected-drone-workspace-utils';
+
+describe('selected drone workspace model display', () => {
+  test('prefers an explicitly configured chat model', () => {
+    expect(
+      resolveDisplayedChatModel(
+        'configured-model',
+        [{ id: 'discovered-model', label: 'Discovered', isCurrent: true }],
+        false,
+      ),
+    ).toEqual({ label: 'configured-model', source: 'configured' });
+  });
+
+  test('uses the CLI current model before its default model', () => {
+    expect(
+      resolveDisplayedChatModel(
+        null,
+        [
+          { id: 'default-model', label: 'Default', isDefault: true },
+          { id: 'current-model', label: 'Current', isCurrent: true },
+        ],
+        false,
+      ),
+    ).toEqual({ label: 'current-model', source: 'current' });
+  });
+
+  test('uses the CLI default model when no current model is reported', () => {
+    expect(
+      resolveDisplayedChatModel(
+        null,
+        [{ id: 'default-model', label: 'Default', isDefault: true }],
+        false,
+      ),
+    ).toEqual({ label: 'default-model', source: 'default' });
+  });
+
+  test('shows detection and unknown fallback states', () => {
+    expect(resolveDisplayedChatModel(null, [], true)).toEqual({ label: 'Detecting…', source: 'loading' });
+    expect(
+      resolveDisplayedChatModel(
+        null,
+        [{ id: 'stale-model', label: 'Stale', isCurrent: true }],
+        true,
+      ),
+    ).toEqual({ label: 'Detecting…', source: 'loading' });
+    expect(resolveDisplayedChatModel(null, [], false)).toEqual({ label: 'Default model', source: 'unknown' });
+  });
+});

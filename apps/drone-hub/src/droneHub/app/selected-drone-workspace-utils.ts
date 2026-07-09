@@ -1,4 +1,29 @@
+import type { ChatModelOption } from './app-types';
+
 export { editorLanguageForPath } from '../code-languages';
+
+export type DisplayedChatModel = {
+  label: string;
+  source: 'configured' | 'current' | 'default' | 'loading' | 'unknown';
+};
+
+export function resolveDisplayedChatModel(
+  configuredModelRaw: string | null | undefined,
+  discoveredModels: ChatModelOption[],
+  discoveryLoading: boolean,
+): DisplayedChatModel {
+  const configuredModel = String(configuredModelRaw ?? '').trim();
+  if (configuredModel) return { label: configuredModel, source: 'configured' };
+  if (discoveryLoading) return { label: 'Detecting…', source: 'loading' };
+
+  const currentModel = discoveredModels.find((model) => model.isCurrent && String(model.id ?? '').trim());
+  if (currentModel) return { label: String(currentModel.id).trim(), source: 'current' };
+
+  const defaultModel = discoveredModels.find((model) => model.isDefault && String(model.id ?? '').trim());
+  if (defaultModel) return { label: String(defaultModel.id).trim(), source: 'default' };
+
+  return { label: 'Default model', source: 'unknown' };
+}
 
 export function formatEditorMtime(mtimeMs: number | null): string {
   if (typeof mtimeMs !== 'number' || !Number.isFinite(mtimeMs) || mtimeMs <= 0) return 'Unknown';
