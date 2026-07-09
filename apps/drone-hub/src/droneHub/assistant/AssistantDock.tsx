@@ -3079,6 +3079,7 @@ export function AssistantDock() {
     activePendingApprovals.length === 0 &&
     !latestActivityShowsReasoning &&
     !messageText(streamingAssistantMessage ?? { role: 'assistant' }).trim();
+  const showEmptyAssistantThread = !(loading && !snapshot) && visibleItems.length === 0 && !showThinking;
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
   const applySnapshot = React.useCallback((next: AssistantSnapshot, preferredThreadId?: string | null) => {
@@ -4679,11 +4680,14 @@ export function AssistantDock() {
         >
           <div className="relative min-h-0 flex-1">
             <div ref={scrollRef} className="h-full overflow-y-auto">
-              <div ref={scrollContentRef} className="space-y-2 py-3">
+              <div
+                ref={scrollContentRef}
+                className={showEmptyAssistantThread ? 'flex min-h-full items-center justify-center px-3 py-3' : 'space-y-2 py-3'}
+              >
                 {loading && !snapshot ? (
                   <div className="px-3 text-[12px] text-[var(--muted)]">Loading assistant...</div>
-                ) : visibleItems.length === 0 && !showThinking ? (
-                  <div className="mx-3 rounded border border-dashed border-[var(--border)] px-3 py-5 text-center">
+                ) : showEmptyAssistantThread ? (
+                  <div className="w-full rounded border border-dashed border-[var(--border)] px-3 py-5 text-center">
                     <div className="text-[12px] text-[var(--fg-secondary)]">Start a thread to inspect drones or coordinate work.</div>
                     <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Drone messaging will ask for approval first.</div>
                   </div>
