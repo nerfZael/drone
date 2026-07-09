@@ -915,7 +915,7 @@ function promptWithAssistantAttachments(promptRaw: string, attachments: Assistan
   const lines = list.map((attachment, index) => (
     `${index + 1}. ${attachment.name} (${attachment.mime || 'application/octet-stream'}, ${attachment.size} bytes): ${attachment.path}`
   ));
-  const label = list.length === 1 ? 'Thread file attached to this message:' : 'Thread files attached to this message:';
+  const label = list.length === 1 ? 'Assistant file attached to this message:' : 'Assistant files attached to this message:';
   const note = `${label}\n${lines.join('\n')}`;
   return prompt ? `${prompt}\n\n${note}` : note;
 }

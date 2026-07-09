@@ -11,7 +11,7 @@ function buildUnexpectedHtmlError(url: string): string {
 export function usePoll<T>(
   fn: () => Promise<T>,
   intervalMs: number,
-  deps: any[] = [],
+  deps: React.DependencyList = [],
   opts?: { enabled?: boolean; isEqual?: (prev: T, next: T) => boolean },
 ) {
   const [value, setValue] = React.useState<T | null>(null);
@@ -83,6 +83,62 @@ export function usePoll<T>(
   }, [enabled, ...deps]);
 
   return { value, error, loading };
+}
+
+export type TimedRequestState<T> = {
+  data: T | null;
+  error: unknown;
+  loading: boolean;
+};
+
+export function useTimedRequest<T>(
+  load: (signal: AbortSignal) => Promise<T>,
+  deps: React.DependencyList = [],
+  opts?: { enabled?: boolean; keepPreviousData?: boolean },
+): TimedRequestState<T> {
+  const [data, setData] = React.useState<T | null>(null);
+  const [error, setError] = React.useState<unknown>(null);
+  const [loading, setLoading] = React.useState(false);
+  const enabled = opts?.enabled ?? true;
+  const keepPreviousData = opts?.keepPreviousData ?? false;
+
+  React.useEffect(() => {
+    if (!enabled) {
+      setLoading(false);
+      setError(null);
+      if (!keepPreviousData) setData(null);
+      return;
+    }
+
+    let mounted = true;
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+    if (!keepPreviousData) setData(null);
+
+    void load(controller.signal)
+      .then((next) => {
+        if (!mounted) return;
+        setData(next);
+        setError(null);
+      })
+      .catch((e: any) => {
+        if (!mounted || e?.name === 'AbortError') return;
+        setError(e);
+        if (!keepPreviousData) setData(null);
+      })
+      .finally(() => {
+        if (mounted) setLoading(false);
+      });
+
+    return () => {
+      mounted = false;
+      controller.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [enabled, keepPreviousData, ...deps]);
+
+  return { data, error, loading };
 }
 
 export function useNowMs(intervalMs: number, enabled: boolean): number {
