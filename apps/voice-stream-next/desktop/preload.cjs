@@ -31,6 +31,7 @@ contextBridge.exposeInMainWorld('voiceStreamDesktop', {
   expandWindow: () => ipcRenderer.invoke('window:expand'),
   signedOutWindow: () => ipcRenderer.invoke('window:signedOut'),
   closeWindow: () => ipcRenderer.invoke('window:close'),
+  prepareTemporaryOverlay: () => ipcRenderer.invoke('window:prepareTemporaryOverlay'),
   restoreTemporaryOverlay: (payload) => ipcRenderer.invoke('window:restoreTemporaryOverlay', payload),
   setTrayStatus: (status) => ipcRenderer.invoke('tray:status', status),
   shortcutStatus: () => ipcRenderer.invoke('shortcut:status'),

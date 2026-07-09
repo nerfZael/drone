@@ -107,6 +107,7 @@ const state = {
   transcriptionReturnMode: null,
   transcriptionReturnStatus: '',
   transcriptionOverlayRestore: null,
+  assistantRecordingOverlayRestore: null,
   smartTranscriptText: '',
   smartRestarting: false,
   mode: 'off',
@@ -3369,17 +3370,17 @@ function completeStoppedVoice(nextMode = 'awake', status = '') {
     resetApprovalCollection();
     preRollBuffer.clear();
     setMode('off', 'Off.');
-    finishTranscriptionShortcutOverlay();
+    finishTemporaryRecordingOverlays();
     return;
   }
   if (nextMode === 'sleeping') {
     void enterStoppedSleep(status || 'Sleeping.');
-    finishTranscriptionShortcutOverlay();
+    finishTemporaryRecordingOverlays();
     return;
   }
   setMode('awake', status || 'Awake. Waiting for voice command.');
   startWakeListener();
-  finishTranscriptionShortcutOverlay();
+  finishTemporaryRecordingOverlays();
 }
 
 async function enterStoppedSleep(status = 'Sleeping.') {
@@ -3404,9 +3405,7 @@ function beginTranscriptionShortcutSession(overlayRestore) {
   state.transcriptionShortcutActive = true;
   state.transcriptionReturnMode = ['off', 'awake', 'sleeping'].includes(state.mode) ? state.mode : 'awake';
   state.transcriptionReturnStatus = els.micStatus.textContent || '';
-  state.transcriptionOverlayRestore = overlayRestore?.temporaryOverlay
-    ? { restoreWindowMode: overlayRestore.restoreWindowMode || 'hidden' }
-    : null;
+  state.transcriptionOverlayRestore = normalizeTemporaryOverlayRestore(overlayRestore);
 }
 
 function transcriptionReturnMode() {
@@ -3433,6 +3432,29 @@ function finishTranscriptionShortcutOverlay() {
   restoreTemporaryTranscriptionOverlay(overlayRestore, 650);
 }
 
+function beginAssistantRecordingOverlay(overlayRestore) {
+  state.assistantRecordingOverlayRestore = normalizeTemporaryOverlayRestore(overlayRestore);
+}
+
+function finishAssistantRecordingOverlay(delayMs = 650) {
+  const overlayRestore = state.assistantRecordingOverlayRestore;
+  state.assistantRecordingOverlayRestore = null;
+  restoreTemporaryTranscriptionOverlay(overlayRestore, delayMs);
+}
+
+function finishTemporaryRecordingOverlays() {
+  finishTranscriptionShortcutOverlay();
+  finishAssistantRecordingOverlay();
+}
+
+function normalizeTemporaryOverlayRestore(overlayRestore) {
+  if (!overlayRestore?.temporaryOverlay) return null;
+  const restoreWindowMode = ['compact', 'expanded', 'hidden'].includes(overlayRestore.restoreWindowMode)
+    ? overlayRestore.restoreWindowMode
+    : 'hidden';
+  return { temporaryOverlay: true, restoreWindowMode };
+}
+
 function restoreTemporaryTranscriptionOverlay(overlayRestore, delayMs = 0) {
   if (!overlayRestore?.temporaryOverlay || !desktop.restoreTemporaryOverlay) return;
   const restorePayload = { restoreWindowMode: overlayRestore.restoreWindowMode || 'hidden' };
@@ -3450,6 +3472,16 @@ async function prepareFocusedWindowTranscriptionOverlay() {
   if (state.compact || !desktop.compactWindow) return null;
   await desktop.compactWindow().then(applyWindowState).catch(() => undefined);
   return { temporaryOverlay: true, restoreWindowMode: 'expanded' };
+}
+
+async function prepareTemporaryRecordingOverlay() {
+  if (desktop.prepareTemporaryOverlay) {
+    return await desktop.prepareTemporaryOverlay().then((overlayRestore) => {
+      applyWindowState(overlayRestore);
+      return overlayRestore;
+    }).catch(() => null);
+  }
+  return prepareFocusedWindowTranscriptionOverlay();
 }
 
 function floatToPcm16(input, sourceSampleRate = VOICE_PCM_SAMPLE_RATE_HZ) {
@@ -4019,38 +4051,55 @@ function assistantRecordingShortcutFromEvent(event) {
 }
 
 async function startAssistantRecordingShortcut(payload = {}) {
+  const pendingOverlayRestore = normalizeTemporaryOverlayRestore(payload);
+  const restorePendingOverlay = () => restoreTemporaryTranscriptionOverlay(pendingOverlayRestore, 650);
   if (!state.config?.deviceId || !state.config?.deviceToken) {
     showStatus('Connect this desktop before recording with an assistant shortcut.');
+    restorePendingOverlay();
     return;
   }
   if (state.voiceStreamStarting) {
     showStatus('Assistant voice recording is already starting.');
+    restorePendingOverlay();
     return;
   }
   if (state.mode === 'transcribing') {
     showStatus('Voice transcription is already running.');
+    restorePendingOverlay();
     return;
   }
   if (state.mode === 'recording' || state.mode === 'paused') {
     showStatus('Stop the current recording before starting another assistant recording.');
+    restorePendingOverlay();
     return;
   }
 
+  beginAssistantRecordingOverlay(payload);
+  const restoreAssistantOverlay = () => finishAssistantRecordingOverlay(650);
   const assistantProfileId = String(payload?.assistantProfileId || '').trim() || null;
   const settings = await loadVoiceSettings().catch((err) => {
     showStatus(err?.message || 'Could not load assistant profiles.');
     return null;
   });
-  if (!settings) return;
+  if (!settings) {
+    restoreAssistantOverlay();
+    return;
+  }
   if (assistantProfileId) {
     const profile = enabledAssistantProfiles().find((entry) => String(entry?.id || '') === assistantProfileId);
     if (!profile) {
       showStatus('That assistant profile is unavailable or disabled.');
+      restoreAssistantOverlay();
       return;
     }
   }
 
-  await startMic(await preferredAssistantVoiceTarget(assistantProfileId), { cue: 'wake', assistantProfileId });
+  try {
+    await startMic(await preferredAssistantVoiceTarget(assistantProfileId), { cue: 'wake', assistantProfileId });
+  } catch (error) {
+    restoreAssistantOverlay();
+    throw error;
+  }
 }
 
 async function toggleCallRecorder() {
@@ -4140,6 +4189,12 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
     showStatus(pausedStatus(state.voiceTarget));
     void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'ignored', reason: 'recording paused' });
     void logDesktopEvent('info', 'Wake phrase ignored while recording is paused', { text });
+    return;
+  }
+  if (state.voiceStreamStarting || state.mode === 'transcribing') {
+    showStatus(state.mode === 'transcribing' ? 'Finishing voice transcription.' : 'Voice recording is already starting.');
+    void recordCommandRecognitionLog({ text, final: finalResult, outcome: 'ignored', reason: 'voice busy' });
+    void logDesktopEvent('info', 'Wake phrase ignored while voice is busy', { text, mode: state.mode, starting: state.voiceStreamStarting });
     return;
   }
   if (state.mode !== 'sleeping' && acceptApprovalText(text, finalizeNow)) return;
@@ -4259,7 +4314,14 @@ async function processPhraseText(text, finalizeNow = false, finalResult = false)
   const target = match.command === 'patch' || match.command === 'clipboard'
     ? match.command
     : await preferredAssistantVoiceTarget(match.assistantProfileId);
-  await startMic(target, { cue: 'wake', assistantProfileId: match.assistantProfileId });
+  const overlayRestore = await prepareTemporaryRecordingOverlay();
+  beginAssistantRecordingOverlay(overlayRestore);
+  try {
+    await startMic(target, { cue: 'wake', assistantProfileId: match.assistantProfileId });
+  } catch (error) {
+    finishAssistantRecordingOverlay();
+    throw error;
+  }
 }
 
 async function startWakeAudioCapture() {
