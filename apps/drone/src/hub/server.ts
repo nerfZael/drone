@@ -6728,6 +6728,7 @@ const {
   pruneCompletedPendingPrompts,
   readPendingPrompts,
   readPendingStartupPrompts,
+  retryPendingPrompt,
   transcriptTurnIdsFromEntry,
   pushPendingPrompt,
   pushPendingStartupPrompt,
@@ -9012,7 +9013,9 @@ async function pumpQueuedPendingPromptsForChat(opts: { droneId: string; chatName
     if (!agent || agent.kind !== 'builtin') return;
 
     const entry: any = chat;
-    const pendingList: any[] = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
+    // Prompt rows are canonical in SQLite; the registry-backed chat projection
+    // is compatibility metadata and can lag queue transitions.
+    const pendingList: any[] = await readPendingPrompts({ droneId, chatName });
     if (pendingList.length === 0) return;
 
     const turns: any[] = Array.isArray(entry?.turns) ? entry.turns : [];
@@ -9102,13 +9105,20 @@ async function pumpQueuedPendingPromptsForChat(opts: { droneId: string; chatName
         ...(diagnostics ? { diagnostics } : {}),
       });
       if (looksLikeTransientPromptEnqueueError(errorText)) {
-        await updatePendingPrompt({
+        const retry = await retryPendingPrompt({
           droneId,
           chatName,
           id,
-          patch: { state: 'queued', error: interruptedPromptDeliveryError(errorText) },
+          error: interruptedPromptDeliveryError(errorText),
         });
-        schedulePendingPromptPumpRetry(droneId, chatName);
+        if (retry.disposition === 'retry') {
+          const nextMs = retry.nextAttemptAt ? Date.parse(retry.nextAttemptAt) : NaN;
+          schedulePendingPromptPumpRetry(
+            droneId,
+            chatName,
+            Number.isFinite(nextMs) ? Math.max(1_000, nextMs - Date.now()) : undefined,
+          );
+        }
         return;
       }
       await updatePendingPrompt({
@@ -10036,13 +10046,14 @@ async function enqueuePrompt(opts: {
   await ensureChatEntry({ droneId, chatName });
   opts.mark?.('ensureChat');
   const { d, chat } = await getChatEntry({ droneId, chatName });
+  const canonicalPendingPrompts = await readPendingPrompts({ droneId, chatName });
   const runtime = droneRuntime(d);
   const configuredModel = normalizeChatModel((chat as any)?.model);
   const disposition = getPromptEnqueueDisposition({
     droneId,
     chatName,
     droneEntry: d,
-    chatEntry: chat,
+    chatEntry: { ...chat, pendingPrompts: canonicalPendingPrompts },
     automation: opts.automation,
   });
   const { defer, blockedByAutomation } = disposition;
@@ -10168,13 +10179,20 @@ async function enqueuePrompt(opts: {
       ...(diagnostics ? { diagnostics } : {}),
     });
     if (looksLikeTransientPromptEnqueueError(errorText)) {
-      await updatePendingPrompt({
+      const retry = await retryPendingPrompt({
         droneId,
         chatName,
         id,
-        patch: { state: 'queued', error: interruptedPromptDeliveryError(errorText) },
+        error: interruptedPromptDeliveryError(errorText),
       });
-      schedulePendingPromptPumpRetry(droneId, chatName);
+      if (retry.disposition === 'retry') {
+        const nextMs = retry.nextAttemptAt ? Date.parse(retry.nextAttemptAt) : NaN;
+        schedulePendingPromptPumpRetry(
+          droneId,
+          chatName,
+          Number.isFinite(nextMs) ? Math.max(1_000, nextMs - Date.now()) : undefined,
+        );
+      }
     } else {
       await updatePendingPrompt({
         droneId,

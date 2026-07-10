@@ -37,6 +37,7 @@ export function looksLikeTransientPromptEnqueueError(raw: unknown): boolean {
     msg.includes('queued prompt enqueue failed') ||
     msg.includes('timed out after') ||
     msg.includes('request timeout after') ||
+    msg.includes('timed out acquiring registry lock') ||
     msg.includes('drone daemon not ready') ||
     msg.includes('drone daemon not reachable') ||
     msg.includes('daemon unavailable') ||
