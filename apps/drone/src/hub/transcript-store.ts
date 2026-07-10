@@ -57,6 +57,27 @@ export type TranscriptStoreReadResult = {
 export type ChatStoreImportResult = { available: boolean; sourceHash: string };
 export type ChatStoreReadResult = { available: boolean; chat: any | null; sourceHash: string };
 export type ChatStoreListResult = { available: boolean; chats: string[] };
+export type ChatMetadataPatch = {
+  set?: Record<string, unknown>;
+  setIfMissing?: Record<string, unknown>;
+  unset?: string[];
+};
+export type ChatMetadataPatchResult = {
+  available: boolean;
+  changed: boolean;
+  metadata: Record<string, unknown> | null;
+};
+export type TranscriptTurnUpdateResult = {
+  available: boolean;
+  changed: boolean;
+  turn: StoredTranscriptTurn | null;
+};
+export type TranscriptRollbackResult = {
+  available: boolean;
+  changed: boolean;
+  removedTurns: StoredTranscriptTurn[];
+  turn: StoredTranscriptTurn | null;
+};
 
 export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
   {
@@ -248,6 +269,40 @@ function metadata(chatEntry: any): any {
   return value;
 }
 
+function safeMetadataField(raw: unknown): string | null {
+  const field = String(raw ?? '').trim();
+  if (!field || field === 'turns' || field === 'pendingPrompts' || field === '__proto__' || field === 'constructor' || field === 'prototype') {
+    return null;
+  }
+  return field;
+}
+
+function applyMetadataPatch(currentRaw: unknown, patch?: ChatMetadataPatch): { metadata: Record<string, unknown>; changed: boolean; fields: string[] } {
+  const current = currentRaw && typeof currentRaw === 'object' && !Array.isArray(currentRaw)
+    ? { ...(currentRaw as Record<string, unknown>) }
+    : {};
+  const fields = new Set<string>();
+  for (const [rawField, value] of Object.entries(patch?.setIfMissing ?? {})) {
+    const field = safeMetadataField(rawField);
+    if (!field || (typeof current[field] === 'string' ? String(current[field]).trim() : current[field] != null)) continue;
+    current[field] = value;
+    fields.add(field);
+  }
+  for (const [rawField, value] of Object.entries(patch?.set ?? {})) {
+    const field = safeMetadataField(rawField);
+    if (!field || stableJson(current[field]) === stableJson(value)) continue;
+    current[field] = value;
+    fields.add(field);
+  }
+  for (const rawField of patch?.unset ?? []) {
+    const field = safeMetadataField(rawField);
+    if (!field || !Object.prototype.hasOwnProperty.call(current, field)) continue;
+    delete current[field];
+    fields.add(field);
+  }
+  return { metadata: current, changed: fields.size > 0, fields: [...fields].sort() };
+}
+
 function turnsWithLegacySubmissionTimes(chatEntry: any): StoredTranscriptTurn[] {
   const submittedAtById = new Map<string, string>();
   for (const prompt of Array.isArray(chatEntry?.pendingPrompts) ? chatEntry.pendingPrompts : []) {
@@ -366,6 +421,46 @@ export class ChatTranscriptRepository {
     });
   }
 
+  async patchMetadata(opts: { droneId: string; chatName: string; patch: ChatMetadataPatch }): Promise<ChatMetadataPatchResult> {
+    return await this.database.writeTransaction('patch canonical chat metadata', (connection) => {
+      const row = this.chatRow(connection, opts.droneId, opts.chatName);
+      if (!row) throw new Error(`unknown chat: ${opts.chatName}`);
+      const result = this.patchMetadataWithConnection(connection, opts.droneId, opts.chatName, opts.patch);
+      if (result.changed) {
+        appendChatEvent(connection, 'chat.metadata.changed', opts.droneId, opts.chatName, { fields: result.fields });
+      }
+      return { available: true, changed: result.changed, metadata: result.metadata };
+    });
+  }
+
+  async applyReconciliation(opts: {
+    droneId: string;
+    chatName: string;
+    metadataPatch?: ChatMetadataPatch;
+    turns?: StoredTranscriptTurn[];
+  }): Promise<ChatStoreImportResult> {
+    return await this.database.writeTransaction('apply canonical chat reconciliation', (connection) => {
+      if (!this.chatRow(connection, opts.droneId, opts.chatName)) throw new Error(`unknown chat: ${opts.chatName}`);
+      const metadataResult = this.patchMetadataWithConnection(connection, opts.droneId, opts.chatName, opts.metadataPatch ?? {});
+      const changedTurnIds: string[] = [];
+      for (const raw of opts.turns ?? []) {
+        const turn = normalizeTurn(raw);
+        const id = turnId(turn);
+        if (this.upsertTurnWithConnection(connection, opts.droneId, opts.chatName, id, turn)) changedTurnIds.push(id);
+      }
+      const refreshed = changedTurnIds.length > 0
+        ? refreshTranscriptMetadata(connection, opts.droneId, opts.chatName)
+        : this.transcriptMetadata(connection, opts.droneId, opts.chatName);
+      if (metadataResult.changed || changedTurnIds.length > 0) {
+        appendChatEvent(connection, 'chat.reconciled', opts.droneId, opts.chatName, {
+          metadataFields: metadataResult.fields,
+          turnIds: changedTurnIds,
+        });
+      }
+      return { available: true, sourceHash: refreshed.sourceHash };
+    });
+  }
+
   async renameChat(opts: { droneId: string; chatName: string; newChatName: string }): Promise<boolean> {
     return await this.database.writeTransaction('rename canonical chat', (connection) => {
       if (this.chatRow(connection, opts.droneId, opts.newChatName)) throw new Error(`chat already exists: ${opts.newChatName}`);
@@ -429,18 +524,69 @@ export class ChatTranscriptRepository {
       }
       const turn = normalizeTurn(opts.turn);
       const id = turnId(turn);
-      const ordinal = this.nextOrdinal(connection, opts.droneId, opts.chatName);
-      connection.prepare(`
-        INSERT INTO canonical_chat_turns (
-          drone_id, chat_name, turn_id, ordinal, at, prompt_at, completed_at, turn_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(drone_id, chat_name, turn_id) DO UPDATE SET
-          at = excluded.at, prompt_at = excluded.prompt_at,
-          completed_at = excluded.completed_at, turn_json = excluded.turn_json
-      `).run(opts.droneId, opts.chatName, id, ordinal, turn.at, turn.promptAt ?? null, turn.completedAt ?? null, stableJson(turn));
+      const changed = this.upsertTurnWithConnection(connection, opts.droneId, opts.chatName, id, turn);
       const refreshed = refreshTranscriptMetadata(connection, opts.droneId, opts.chatName);
-      appendChatEvent(connection, 'chat.turn.changed', opts.droneId, opts.chatName, { turnId: id });
+      if (changed) appendChatEvent(connection, 'chat.turn.changed', opts.droneId, opts.chatName, { turnId: id });
       return { available: true, sourceHash: refreshed.sourceHash };
+    });
+  }
+
+  async updateTurn(opts: {
+    droneId: string;
+    chatName: string;
+    turnId: string;
+    update: (turn: StoredTranscriptTurn) => StoredTranscriptTurn;
+  }): Promise<TranscriptTurnUpdateResult> {
+    return await this.database.writeTransaction('update canonical transcript turn', (connection) => {
+      const row = connection.prepare(`SELECT turn_json FROM canonical_chat_turns
+        WHERE drone_id = ? AND chat_name = ? AND turn_id = ?`).get(opts.droneId, opts.chatName, opts.turnId) as TurnRow | undefined;
+      if (!row) return { available: true, changed: false, turn: null };
+      const current = normalizeTurn(parseJson(row.turn_json));
+      const next = normalizeTurn(opts.update(current));
+      if (turnId(next) !== opts.turnId) throw new Error('targeted transcript update cannot change turn id');
+      if (stableJson(current) === stableJson(next)) return { available: true, changed: false, turn: current };
+      this.upsertTurnWithConnection(connection, opts.droneId, opts.chatName, opts.turnId, next);
+      refreshTranscriptMetadata(connection, opts.droneId, opts.chatName);
+      appendChatEvent(connection, 'chat.turn.changed', opts.droneId, opts.chatName, { turnId: opts.turnId, source: 'targeted-update' });
+      return { available: true, changed: true, turn: next };
+    });
+  }
+
+  async rollbackToTurn(opts: {
+    droneId: string;
+    chatName: string;
+    turnId: string;
+    update: (turn: StoredTranscriptTurn) => StoredTranscriptTurn;
+  }): Promise<TranscriptRollbackResult> {
+    return await this.database.writeTransaction('rollback canonical transcript turns', (connection) => {
+      const rows = connection.prepare(`SELECT turn_id, turn_json FROM canonical_chat_turns
+        WHERE drone_id = ? AND chat_name = ?
+        ORDER BY COALESCE(prompt_at, at), completed_at, ordinal, turn_id`).all(opts.droneId, opts.chatName) as Array<TurnRow & { turn_id: string }>;
+      const index = rows.findIndex((row) => row.turn_id === opts.turnId);
+      if (index < 0) return { available: true, changed: false, removedTurns: [], turn: null };
+      const current = normalizeTurn(parseJson(rows[index].turn_json));
+      const next = normalizeTurn(opts.update(current));
+      if (turnId(next) !== opts.turnId) throw new Error('transcript rollback cannot change turn id');
+      const removedRows = rows.slice(index + 1);
+      const remove = connection.prepare(`DELETE FROM canonical_chat_turns
+        WHERE drone_id = ? AND chat_name = ? AND turn_id = ?`);
+      for (const row of removedRows) remove.run(opts.droneId, opts.chatName, row.turn_id);
+      const targetChanged = stableJson(current) !== stableJson(next);
+      if (targetChanged) this.upsertTurnWithConnection(connection, opts.droneId, opts.chatName, opts.turnId, next);
+      const changed = targetChanged || removedRows.length > 0;
+      if (changed) {
+        refreshTranscriptMetadata(connection, opts.droneId, opts.chatName);
+        appendChatEvent(connection, 'chat.turns.rolled-back', opts.droneId, opts.chatName, {
+          turnId: opts.turnId,
+          removedTurnIds: removedRows.map((row) => row.turn_id),
+        });
+      }
+      return {
+        available: true,
+        changed,
+        removedTurns: removedRows.map((row) => normalizeTurn(parseJson(row.turn_json))),
+        turn: next,
+      };
     });
   }
 
@@ -580,6 +726,60 @@ export class ChatTranscriptRepository {
     return true;
   }
 
+  private patchMetadataWithConnection(
+    connection: HubDatabaseConnection,
+    droneId: string,
+    chatName: string,
+    patch: ChatMetadataPatch,
+  ): { metadata: Record<string, unknown>; changed: boolean; fields: string[] } {
+    const row = this.chatRow(connection, droneId, chatName);
+    if (!row) throw new Error(`unknown chat: ${chatName}`);
+    const result = applyMetadataPatch(parseJson(row.metadata_json), patch);
+    if (result.changed) {
+      connection.prepare(`UPDATE canonical_chats
+        SET metadata_json = ?, source_hash = ?, updated_at = ?
+        WHERE drone_id = ? AND chat_name = ?`).run(
+        stableJson(result.metadata),
+        chatEntrySourceHash(result.metadata),
+        new Date().toISOString(),
+        droneId,
+        chatName,
+      );
+    }
+    return result;
+  }
+
+  private upsertTurnWithConnection(
+    connection: HubDatabaseConnection,
+    droneId: string,
+    chatName: string,
+    id: string,
+    turn: StoredTranscriptTurn,
+  ): boolean {
+    const current = connection.prepare(`SELECT turn_json FROM canonical_chat_turns
+      WHERE drone_id = ? AND chat_name = ? AND turn_id = ?`).get(droneId, chatName, id) as TurnRow | undefined;
+    if (current && stableJson(normalizeTurn(parseJson(current.turn_json))) === stableJson(turn)) return false;
+    const ordinal = this.nextOrdinal(connection, droneId, chatName);
+    connection.prepare(`
+      INSERT INTO canonical_chat_turns (
+        drone_id, chat_name, turn_id, ordinal, at, prompt_at, completed_at, turn_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(drone_id, chat_name, turn_id) DO UPDATE SET
+        at = excluded.at, prompt_at = excluded.prompt_at,
+        completed_at = excluded.completed_at, turn_json = excluded.turn_json
+    `).run(droneId, chatName, id, ordinal, turn.at, turn.promptAt ?? null, turn.completedAt ?? null, stableJson(turn));
+    return true;
+  }
+
+  private transcriptMetadata(connection: HubDatabaseConnection, droneId: string, chatName: string): TranscriptImportResult {
+    const row = this.chatRow(connection, droneId, chatName);
+    return {
+      available: true,
+      transcriptVersion: Number(row?.transcript_version ?? 0),
+      sourceHash: row?.turns_source_hash || transcriptTurnsSourceHash([]),
+    };
+  }
+
   private nextOrdinal(connection: HubDatabaseConnection, droneId: string, chatName: string): number {
     const row = connection.prepare(`SELECT COALESCE(MAX(ordinal), -1) + 1 AS ordinal
       FROM canonical_chat_turns WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName) as { ordinal: number };
@@ -682,6 +882,46 @@ export async function upsertChatInStore(opts: { droneId: string; chatName: strin
   return { available: true, sourceHash: chatEntrySourceHash(value) };
 }
 
+export async function patchChatMetadataInStore(opts: {
+  droneId: string;
+  chatName: string;
+  patch: ChatMetadataPatch;
+}): Promise<ChatMetadataPatchResult> {
+  const store = repository();
+  if (store) return await store.patchMetadata(opts);
+  const row = memoryChats.get(key(opts.droneId, opts.chatName));
+  if (!row) throw new Error(`unknown chat: ${opts.chatName}`);
+  const result = applyMetadataPatch(row.metadata, opts.patch);
+  if (result.changed) {
+    row.metadata = result.metadata;
+    row.sourceHash = chatEntrySourceHash(result.metadata);
+  }
+  return { available: true, changed: result.changed, metadata: result.metadata };
+}
+
+export async function applyChatReconciliationInStore(opts: {
+  droneId: string;
+  chatName: string;
+  metadataPatch?: ChatMetadataPatch;
+  turns?: StoredTranscriptTurn[];
+}): Promise<ChatStoreImportResult> {
+  const store = repository();
+  if (store) return await store.applyReconciliation(opts);
+  const row = memoryChats.get(key(opts.droneId, opts.chatName));
+  if (!row) throw new Error(`unknown chat: ${opts.chatName}`);
+  const metadataResult = applyMetadataPatch(row.metadata, opts.metadataPatch);
+  if (metadataResult.changed) {
+    row.metadata = metadataResult.metadata;
+    row.sourceHash = chatEntrySourceHash(metadataResult.metadata);
+  }
+  const turns = memoryTurnMap(opts.droneId, opts.chatName);
+  for (const raw of opts.turns ?? []) {
+    const turn = normalizeTurn(raw);
+    turns.set(turnId(turn), turn);
+  }
+  return { available: true, sourceHash: transcriptTurnsSourceHash(sortedTurns(turns.values())) };
+}
+
 export async function renameChatInStore(opts: { droneId: string; chatName: string; newChatName: string }): Promise<boolean> {
   const store = repository();
   if (store) return await store.renameChat(opts);
@@ -741,6 +981,46 @@ export async function upsertTranscriptTurnInStore(opts: { droneId: string; chatN
   await memoryBackfillChat(opts.droneId, opts.chatName, {});
   const turn = normalizeTurn(opts.turn); memoryTurnMap(opts.droneId, opts.chatName).set(turnId(turn), turn);
   return { available: true, sourceHash: transcriptTurnsSourceHash(sortedTurns(memoryTurnMap(opts.droneId, opts.chatName).values())) };
+}
+
+export async function updateTranscriptTurnInStore(opts: {
+  droneId: string;
+  chatName: string;
+  turnId: string;
+  update: (turn: StoredTranscriptTurn) => StoredTranscriptTurn;
+}): Promise<TranscriptTurnUpdateResult> {
+  const store = repository();
+  if (store) return await store.updateTurn(opts);
+  const turns = memoryTurnMap(opts.droneId, opts.chatName);
+  const current = turns.get(opts.turnId);
+  if (!current) return { available: true, changed: false, turn: null };
+  const next = normalizeTurn(opts.update(current));
+  if (turnId(next) !== opts.turnId) throw new Error('targeted transcript update cannot change turn id');
+  const changed = stableJson(current) !== stableJson(next);
+  if (changed) turns.set(opts.turnId, next);
+  return { available: true, changed, turn: next };
+}
+
+export async function rollbackTranscriptToTurnInStore(opts: {
+  droneId: string;
+  chatName: string;
+  turnId: string;
+  update: (turn: StoredTranscriptTurn) => StoredTranscriptTurn;
+}): Promise<TranscriptRollbackResult> {
+  const store = repository();
+  if (store) return await store.rollbackToTurn(opts);
+  const turns = memoryTurnMap(opts.droneId, opts.chatName);
+  const ordered = sortedTurns(turns.values());
+  const index = ordered.findIndex((turn) => turnId(turn) === opts.turnId);
+  if (index < 0) return { available: true, changed: false, removedTurns: [], turn: null };
+  const current = ordered[index];
+  const next = normalizeTurn(opts.update(current));
+  if (turnId(next) !== opts.turnId) throw new Error('transcript rollback cannot change turn id');
+  const removedTurns = ordered.slice(index + 1);
+  for (const removed of removedTurns) turns.delete(turnId(removed));
+  const targetChanged = stableJson(current) !== stableJson(next);
+  if (targetChanged) turns.set(opts.turnId, next);
+  return { available: true, changed: targetChanged || removedTurns.length > 0, removedTurns, turn: next };
 }
 
 // Prompt compatibility exists only for Bun tests. Production callers use PromptQueueRepository.
