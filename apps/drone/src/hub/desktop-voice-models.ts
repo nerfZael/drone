@@ -3,8 +3,11 @@ import fs from 'node:fs/promises';
 import fsSync from 'node:fs';
 import path from 'node:path';
 
+import {
+  getHubSettingRecordSync,
+  getHubSettingsRepository,
+} from '../host/hub-settings-repository';
 import { droneRootPath } from '../host/paths';
-import { updateRegistry } from '../host/registry';
 import { readRegistryJsonFromSqlite } from '../host/sqlite-registry-store';
 
 export type DesktopVoiceModelInstallState = 'missing' | 'installed' | 'installing' | 'error';
@@ -63,6 +66,7 @@ const DESKTOP_VOICE_MODEL_CATALOG: DesktopVoiceModelCatalogEntry[] = [
 ];
 
 const DEFAULT_MODEL_ID = DESKTOP_VOICE_MODEL_CATALOG[0].id;
+const DESKTOP_VOICE_MODEL_SETTING_KEY = 'desktop-voice.model';
 
 let installJob: {
   modelId: string;
@@ -115,27 +119,46 @@ function modelDirForEntry(entry: DesktopVoiceModelCatalogEntry): string | null {
   return hasRequiredVoskModelFiles(modelDir) ? modelDir : null;
 }
 
-function readSelectedModelIdSync(): string {
+function readLegacySelectedModelIdSync(): { modelId: string; updatedAt: string | null } | null {
   try {
     const raw = readRegistryJsonFromSqlite() ?? fsSync.readFileSync(droneRootPath('registry.json'), 'utf8');
     const parsed = JSON.parse(raw);
     const modelId = String(parsed?.settings?.desktopVoice?.modelId ?? '').trim();
-    return catalogEntry(modelId) ? modelId : DEFAULT_MODEL_ID;
+    const updatedAtRaw = parsed?.settings?.desktopVoice?.updatedAt;
+    return catalogEntry(modelId)
+      ? {
+          modelId,
+          updatedAt:
+            typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+        }
+      : null;
   } catch {
-    return DEFAULT_MODEL_ID;
+    return null;
   }
+}
+
+function readSelectedModelIdSync(): string {
+  const canonical = getHubSettingRecordSync<{ modelId?: unknown }>(DESKTOP_VOICE_MODEL_SETTING_KEY);
+  const modelId = String(canonical?.value?.modelId ?? '').trim();
+  if (catalogEntry(modelId)) return modelId;
+  return readLegacySelectedModelIdSync()?.modelId ?? DEFAULT_MODEL_ID;
+}
+
+async function ensureSelectedModelSetting(): Promise<void> {
+  const repository = await getHubSettingsRepository();
+  if (repository.get(DESKTOP_VOICE_MODEL_SETTING_KEY)) return;
+  const legacy = readLegacySelectedModelIdSync();
+  if (!legacy) return;
+  await repository.backfillIfAbsent(
+    DESKTOP_VOICE_MODEL_SETTING_KEY,
+    { modelId: legacy.modelId },
+    legacy.updatedAt,
+  );
 }
 
 async function persistSelectedModelId(modelId: string): Promise<void> {
   if (!catalogEntry(modelId)) throw new Error(`Unknown desktop voice model: ${modelId}`);
-  await updateRegistry((reg: any) => {
-    reg.settings ??= {};
-    reg.settings.desktopVoice = {
-      ...(reg.settings.desktopVoice ?? {}),
-      modelId,
-      updatedAt: new Date().toISOString(),
-    };
-  });
+  await (await getHubSettingsRepository()).put(DESKTOP_VOICE_MODEL_SETTING_KEY, { modelId });
 }
 
 export function managedDesktopVoiceModelDirSync(): string | null {
@@ -241,6 +264,7 @@ async function installDownloadedModel(entry: DesktopVoiceModelCatalogEntry): Pro
 }
 
 export async function startDesktopVoiceModelInstall(modelId = DEFAULT_MODEL_ID): Promise<DesktopVoiceModelStatus> {
+  await ensureSelectedModelSetting();
   const entry = catalogEntry(modelId);
   if (!entry) throw new Error(`Unknown desktop voice model: ${modelId}`);
   if (installJob) return desktopVoiceModelStatus();
@@ -273,6 +297,7 @@ export async function startDesktopVoiceModelInstall(modelId = DEFAULT_MODEL_ID):
 }
 
 export async function removeDesktopVoiceModel(modelId?: string): Promise<DesktopVoiceModelStatus> {
+  await ensureSelectedModelSetting();
   if (installJob) throw new Error('Desktop voice model install is still running.');
   const entry = catalogEntry(String(modelId ?? '').trim()) ?? DESKTOP_VOICE_MODEL_CATALOG[1];
   if (!entry.bundled) await fs.rm(installedModelDir(entry), { recursive: true, force: true });

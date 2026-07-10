@@ -8,18 +8,27 @@ const { resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const {
   getHubSettingsRepository,
   HubSettingVersionConflictError,
+  resetHubSettingsRepositoryForTests,
 } = require('../../dist/host/hub-settings-repository.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const { readRegistryJsonFromSqlite } = require('../../dist/host/sqlite-registry-store.js');
 const { updateRegistry } = require('../../dist/host/registry.js');
 const {
   resolveUiPreferencesSettingsResponse,
+  clearStoredProviderApiKey,
+  resolveAgentSuggestionSettingsResponse,
+  resolveDeleteActionSettingsResponse,
+  resolveEffectiveProviderApiKeySettings,
+  upsertStoredAgentSuggestionSettings,
+  upsertStoredDeleteActionSettings,
+  upsertStoredProviderApiKey,
   UiPreferencesSettingsConflictError,
   UiPreferencesSettingsValidationError,
   upsertStoredUiPreferencesSettings,
 } = require('../../dist/hub/hub-settings.js');
 
 const originalDroneDataDir = process.env.DRONE_DATA_DIR;
+const originalOpenAiApiKey = process.env.OPENAI_API_KEY;
 const tempRoots = [];
 
 function useTempDroneDataDir(label) {
@@ -32,11 +41,19 @@ function useTempDroneDataDir(label) {
   return dataDir;
 }
 
+function useDroneDataDir(dataDir) {
+  process.env.DRONE_DATA_DIR = dataDir;
+  resetDroneRootDirForTests();
+}
+
 afterEach(async () => {
   await resetHubDatabaseForTests();
+  resetHubSettingsRepositoryForTests();
   if (originalDroneDataDir == null) delete process.env.DRONE_DATA_DIR;
   else process.env.DRONE_DATA_DIR = originalDroneDataDir;
   resetDroneRootDirForTests();
+  if (originalOpenAiApiKey == null) delete process.env.OPENAI_API_KEY;
+  else process.env.OPENAI_API_KEY = originalOpenAiApiKey;
   for (const root of tempRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
@@ -80,6 +97,7 @@ describe('HubSettingsRepository', () => {
     );
 
     assert.equal(updated.version, 2);
+    assert.notEqual(updated.updatedAt, created.updatedAt);
     await assert.rejects(
       repository.put('cas-probe', { value: 'stale' }, { expectedVersion: created.version }),
       (error) => {
@@ -90,6 +108,121 @@ describe('HubSettingsRepository', () => {
         return true;
       },
     );
+  });
+
+  test('rolls back a failed atomic setting transform', async () => {
+    useTempDroneDataDir('rollback');
+    const repository = await getHubSettingsRepository();
+    await repository.put('rollback-probe', { value: 'before' });
+
+    await assert.rejects(
+      repository.update('rollback-probe', () => {
+        throw new Error('intentional settings failure');
+      }),
+      /intentional settings failure/,
+    );
+    assert.deepEqual(repository.get('rollback-probe').value, { value: 'before' });
+    assert.equal(repository.get('rollback-probe').version, 1);
+  });
+});
+
+describe('remaining canonical Hub settings', () => {
+  test('imports a legacy secret once, gives canonical state precedence, and tombstones clears', async () => {
+    useTempDroneDataDir('secret-migration');
+    delete process.env.OPENAI_API_KEY;
+    await updateRegistry((registry) => {
+      registry.settings ??= {};
+      registry.settings.openai = {
+        apiKey: 'legacy-openai-key',
+        updatedAt: '2026-01-02T03:04:05.000Z',
+      };
+    });
+
+    const migrated = await resolveEffectiveProviderApiKeySettings('openai');
+    assert.equal(migrated.apiKey, 'legacy-openai-key');
+    assert.equal(migrated.updatedAt, '2026-01-02T03:04:05.000Z');
+    const repository = await getHubSettingsRepository();
+    assert.equal(repository.get('api-key.openai').version, 1);
+
+    await updateRegistry((registry) => {
+      registry.settings.openai = {
+        apiKey: 'newer-legacy-value-must-not-win',
+        updatedAt: '2027-01-02T03:04:05.000Z',
+      };
+    });
+    assert.equal((await resolveEffectiveProviderApiKeySettings('openai')).apiKey, 'legacy-openai-key');
+    assert.equal(repository.get('api-key.openai').version, 1);
+
+    await clearStoredProviderApiKey('openai');
+    assert.equal((await resolveEffectiveProviderApiKeySettings('openai')).apiKey, null);
+    assert.equal(repository.get('api-key.openai').value, null);
+    assert.equal(repository.get('api-key.openai').version, 2);
+
+    await resetHubDatabaseForTests();
+    resetHubSettingsRepositoryForTests();
+    assert.equal((await resolveEffectiveProviderApiKeySettings('openai')).apiKey, null);
+    assert.equal((await getHubSettingsRepository()).get('api-key.openai').version, 2);
+  });
+
+  test('merges concurrent partial updates to a composite setting without losing either field', async () => {
+    useTempDroneDataDir('composite-concurrency');
+    await upsertStoredAgentSuggestionSettings({
+      policyMarkdown: '# Initial policy',
+      enabledByDefault: false,
+    });
+
+    await Promise.all([
+      upsertStoredAgentSuggestionSettings({ enabledByDefault: true }),
+      upsertStoredAgentSuggestionSettings({ policyMarkdown: '# Concurrent policy' }),
+    ]);
+
+    const resolved = await resolveAgentSuggestionSettingsResponse();
+    assert.equal(resolved.agentSuggestion.policyMarkdown, '# Concurrent policy');
+    assert.equal(resolved.agentSuggestion.enabledByDefault, true);
+    assert.equal((await getHubSettingsRepository()).get('agent-suggestion').version, 3);
+  });
+
+  test('preserves partial-update API behavior while importing legacy composite values', async () => {
+    useTempDroneDataDir('delete-action-api');
+    await updateRegistry((registry) => {
+      registry.settings ??= {};
+      registry.settings.deleteAction = {
+        mode: 'archive',
+        archiveRetention: '1w',
+        archiveRuntimePolicy: 'keep-running',
+        updatedAt: '2026-02-03T04:05:06.000Z',
+      };
+    });
+
+    await upsertStoredDeleteActionSettings({ archiveRuntimePolicy: 'stop' });
+    const response = await resolveDeleteActionSettingsResponse();
+    assert.deepEqual(
+      {
+        mode: response.deleteAction.mode,
+        archiveRetention: response.deleteAction.archiveRetention,
+        archiveRuntimePolicy: response.deleteAction.archiveRuntimePolicy,
+      },
+      { mode: 'archive', archiveRetention: '1w', archiveRuntimePolicy: 'stop' },
+    );
+    assert.equal((await getHubSettingsRepository()).get('delete-action').version, 2);
+  });
+
+  test('switches repository state with DRONE_DATA_DIR', async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-hub-settings-switch-'));
+    tempRoots.push(root);
+    const firstDir = path.join(root, 'first');
+    const secondDir = path.join(root, 'second');
+    fs.mkdirSync(firstDir, { recursive: true });
+    fs.mkdirSync(secondDir, { recursive: true });
+    delete process.env.OPENAI_API_KEY;
+
+    useDroneDataDir(firstDir);
+    await upsertStoredProviderApiKey('openai', 'first-key');
+    useDroneDataDir(secondDir);
+    await upsertStoredProviderApiKey('openai', 'second-key');
+    assert.equal((await resolveEffectiveProviderApiKeySettings('openai')).apiKey, 'second-key');
+    useDroneDataDir(firstDir);
+    assert.equal((await resolveEffectiveProviderApiKeySettings('openai')).apiKey, 'first-key');
   });
 });
 
