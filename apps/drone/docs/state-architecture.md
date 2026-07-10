@@ -2,77 +2,105 @@
 
 ## Decision
 
-`hub.sqlite` is the canonical persistence boundary for newly migrated Hub domains. The Hub remains a modular monolith: API handlers and background workers call explicit repositories, and repositories perform short transactions through the shared Hub database coordinator.
+The Hub is a modular monolith with one canonical persistence boundary: `hub.sqlite`.
+HTTP handlers, CLI commands, and background workers call domain application commands or
+repositories; those components perform short transactions through the shared database
+coordinator. JSON is a migration, backup, and export format, not a live database.
 
-The registry snapshot remains a compatibility source for domains that have not yet migrated. It must not be extended with new high-frequency state.
+This replaces the former architecture in which unrelated features acquired one global
+registry lock and rewrote a multi-megabyte JSON aggregate. That lock coupled file views,
+prompt delivery, lifecycle changes, settings, and catalog edits, so an unrelated writer
+could make any of them fail after the ten-second lock deadline.
 
 ## Database boundary
 
-`host/hub-database.ts` owns the shared Node `better-sqlite3` connection and configures:
+`host/hub-database.ts` owns the production Node `better-sqlite3` connection and configures:
 
-- WAL journaling
-- normal synchronous durability
-- foreign-key enforcement
-- a bounded SQLite busy timeout
+- WAL journaling and normal synchronous durability
+- foreign-key enforcement and a bounded SQLite busy timeout
 - a fair in-process FIFO for write transactions
 - independently versioned migration scopes
+- connection replacement when the configured data directory changes
 
-Transaction callbacks are synchronous by design. Network, Docker, filesystem, and daemon work must happen before or after a database transaction, never inside it.
+Transaction callbacks are synchronous by design. Network, Docker, filesystem, and daemon
+work happen before or after a database transaction, never inside it.
 
-## Canonical domains
+## Domain ownership
 
-### Prompt queue
+Each aggregate has one canonical owner:
 
-`host/prompt-queue-repository.ts` owns prompt delivery state. Enqueue, claim, retry, cancellation, and lease recovery are database transitions. Claims are conditional and FIFO within a chat; unrelated chats may progress independently.
+- `host/drone-lifecycle-repository.ts`: real, pending, and archived drone identity and lifecycle
+- `host/transcript-store.ts`: chat metadata and ordered transcript turns
+- `host/prompt-queue-repository.ts`: prompt enqueue, claim, retry, cancellation, and lease recovery
+- `host/assistant-store.ts`: assistant preferences, threads, messages, prompts, and subscriptions
+- `host/hub-settings-repository.ts`: provider secrets and all Hub/UI/voice/agent/backup settings, one row per key
+- `host/catalog-store.ts`: groups, repositories, skills, MCP servers and tokens, and playbooks
+- `host/fleet-workflow-store.ts`: sync sets, durable playbook work, and append-only workflow audit
+- `host/hub-outbox.ts`: post-commit notifications and background effects
 
-The registry and legacy transcript prompt rows are import-only compatibility sources. They may seed a missing prompt but cannot overwrite a canonical row. Cancellation is a durable terminal tombstone so a stale snapshot cannot resurrect work.
+Application commands compose repository changes with an outbox append in the same SQLite
+transaction. External effects are dispatched after commit using FIFO claims, leases,
+bounded retries, and dead-lettering. A process restart can reclaim an expired lease without
+replaying an acknowledged event.
 
-Daemon delivery occurs outside the transaction. A lease makes an interrupted `sending` prompt recoverable after Hub restart. Retry state includes an attempt count and bounded backoff.
+Canonical prompt delivery is intentionally separate from transcript storage. A prompt can
+be leased, retried, cancelled, or tombstoned without rewriting chat history, while transcript
+turns remain ordered and independently mutable.
 
-### Assistant
+## Compatibility and migration
 
-`host/assistant-store.ts` owns assistant preferences, threads, messages, queued prompts, and chat-idle subscriptions. State is stored in normalized rows and saved with conditional upserts, so unchanged message history is not rewritten.
+`loadRegistry()` is now a compatibility read projection assembled from canonical domain
+rows. Existing API code may consume the registry-shaped result during migration, but it is
+not reading a canonical registry aggregate.
 
-An existing `assistant.json` is imported once. Its fingerprint is recorded in the same canonical transaction, then the file is renamed as a recovery backup. Once canonical state exists, a reappearing file is archived but never re-imported.
+The old `registry_json` value is retained only as an insert-only migration seed and recovery
+artifact. A small `legacy_residual_state` row preserves fields that do not yet have a typed
+owner; canonical namespaces and chats are stripped before it is stored. Manual and scheduled
+backups export a fresh registry-shaped projection from canonical state.
 
-The file backend selected when SQLite is unavailable under Bun exists only for the Bun test runtime. Production Node fails loudly when the canonical database is unavailable.
+Compatibility follows these rules:
 
-### UI preferences
+1. Canonical rows always win over legacy snapshots.
+2. Imports insert missing identities only; tombstones prevent resurrection.
+3. Production Node fails loudly if the canonical database cannot be opened.
+4. The old file-lock implementation is available only when the native SQLite binding is
+   unavailable, principally for the existing Bun test/fallback path.
+5. No new domain or high-frequency state may be added to the residual JSON shape.
 
-`host/hub-settings-repository.ts` stores one canonical row per migrated setting key. UI preferences are the first migrated key. Writes are versioned and support compare-and-swap conflicts while preserving unconditional writes for older clients.
+During the last call-site migration, `updateRegistry()` translates legacy lifecycle and chat
+mutations into their canonical owners. This bridge is deliberately temporary: its residual
+write and canonical command are separate transactions, so a process crash between them is
+not atomic. Production callers should use domain commands directly; once they all do, remove
+the translator and retain only projection/export support.
 
-Legacy registry UI preferences are backfilled only when the canonical row is absent. Other settings remain registry-backed until migrated as separate vertical slices.
+## Command and concurrency rules
 
-## Compatibility rules
-
-1. Canonical rows always win over registry snapshots.
-2. Compatibility imports insert missing rows only.
-3. A failed canonical database open is an error in production; it must not silently create a second source of truth.
-4. Failed first-open probes must not leave an empty `hub.sqlite`, because legacy paths use file existence to detect canonical ownership.
-5. JSON snapshots are for migration, backup, and export—not live read/modify/write operations.
-
-## Next migration slices
-
-Migrate remaining domains independently rather than recreating a global registry repository:
-
-1. Drone lifecycle and archived drones
-2. Chat metadata and transcript reconciliation
-3. Groups, repositories, playbooks, skills, and MCP configuration
-4. Remaining settings keys
-5. CLI writes through Hub application commands
-6. Transactional outbox for post-commit SSE and background work
-
-After all writers use explicit repositories, generate registry-shaped JSON only as an export/backup projection and remove the global registry lock.
+- Use stable IDs as identity; display names are mutable attributes.
+- Enforce invariants such as active display-name uniqueness inside the canonical transaction.
+- Use targeted updates or domain transforms instead of read/modify/write of a global object.
+- Keep compatibility backfills idempotent and non-destructive.
+- Represent deletion with a durable row or tombstone when stale imports could otherwise
+  resurrect data.
+- Publish work through the transactional outbox rather than performing effects before commit.
+- Make queue claims conditional and leased; do not hold a database transaction while work runs.
 
 ## Verification expectations
 
-Each migrated domain must cover:
+Every canonical domain covers the relevant subset of:
 
-- migration idempotency
-- canonical precedence over legacy state
-- rollback behavior
-- concurrent writers or claims
-- restart/crash recovery
+- migration idempotency and canonical precedence
+- transaction rollback and concurrent writers/claimants
+- restart, lease, retry, and tombstone recovery
+- cross-process contention for shared invariants
 - data-directory switching in tests
-- Node production-binding behavior
-- Bun compatibility behavior where the existing test harness requires it
+- production Node binding behavior
+- explicit Bun fallback behavior where the existing harness requires it
+- canonical JSON backup/export without a live registry rewrite
+
+## Retirement gate
+
+The compatibility bridge can be removed when searches find no production Node mutation that
+enters through `updateRegistry()` for lifecycle, chats, prompts, catalog data, settings, or
+workflows. At that point `registry_json`, residual mutation support, and the Bun file-lock
+fallback can be deprecated independently; read projection and JSON export may remain for API
+and backup compatibility.
