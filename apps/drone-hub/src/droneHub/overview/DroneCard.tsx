@@ -10,6 +10,8 @@ type DroneCardProps = {
   displayName?: string;
   selected: boolean;
   busy?: boolean;
+  disabled?: boolean;
+  disabledReason?: string;
   onClick: (opts?: { toggle?: boolean; range?: boolean }) => void;
   dragNodeRef?: React.Ref<HTMLDivElement>;
   dragAttributes?: Record<string, any>;
@@ -62,6 +64,8 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     (a.displayName ?? '') === (b.displayName ?? '') &&
     a.selected === b.selected &&
     Boolean(a.busy) === Boolean(b.busy) &&
+    Boolean(a.disabled) === Boolean(b.disabled) &&
+    (a.disabledReason ?? '') === (b.disabledReason ?? '') &&
     a.dragNodeRef === b.dragNodeRef &&
     a.dragAttributes === b.dragAttributes &&
     a.dragListeners === b.dragListeners &&
@@ -98,6 +102,8 @@ export const DroneCard = React.memo(function DroneCard({
   displayName,
   selected,
   busy,
+  disabled,
+  disabledReason,
   onClick,
   dragNodeRef,
   dragAttributes,
@@ -193,11 +199,17 @@ export const DroneCard = React.memo(function DroneCard({
       ref={dragNodeRef}
       data-onboarding-id="sidebar.droneCard"
       role="button"
-      tabIndex={0}
+      tabIndex={disabled ? -1 : 0}
+      aria-disabled={disabled || undefined}
+      title={disabled ? disabledReason : undefined}
       {...dragAttributes}
       {...dragListeners}
-      onClick={(e) => onClick({ toggle: e.metaKey || e.ctrlKey, range: e.shiftKey })}
+      onClick={(e) => {
+        if (disabled) return;
+        onClick({ toggle: e.metaKey || e.ctrlKey, range: e.shiftKey });
+      }}
       onKeyDown={(e) => {
+        if (disabled) return;
         if (e.key === ' ') {
           e.preventDefault();
           onClick();
@@ -213,7 +225,7 @@ export const DroneCard = React.memo(function DroneCard({
             : 'border-transparent hover:bg-[rgba(255,255,255,.03)] hover:border-[rgba(255,255,255,.06)]'
       } ${draggable ? 'cursor-grab touch-none active:cursor-grabbing' : ''} ${
         dragging ? 'opacity-35' : ''
-      } ${
+      } ${disabled ? 'cursor-not-allowed opacity-60' : ''} ${
         highlighted ? 'shadow-[0_0_0_1px_rgba(255,214,102,.28),0_0_18px_rgba(255,214,102,.14)]' : ''
       } focus:outline-none focus-visible:outline-none`}
     >

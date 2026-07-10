@@ -217,7 +217,7 @@ function applyDroneDelta(
   return { ok: true, drones: next };
 }
 
-function useDroneRegistryEvents(): {
+export function useDroneRegistryEvents(enabled = true): {
   value: { ok: true; drones: DroneSummary[] } | null;
   error: string | null;
   loading: boolean;
@@ -229,6 +229,13 @@ function useDroneRegistryEvents(): {
   const [connected, setConnected] = React.useState(false);
 
   React.useEffect(() => {
+    if (!enabled) {
+      setValue(null);
+      setError(null);
+      setLoading(false);
+      setConnected(false);
+      return;
+    }
     if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
       setLoading(false);
       setConnected(false);
@@ -296,7 +303,7 @@ function useDroneRegistryEvents(): {
       closed = true;
       source.close();
     };
-  }, []);
+  }, [enabled]);
 
   return { value, error, loading, connected: connected && Boolean(value) };
 }

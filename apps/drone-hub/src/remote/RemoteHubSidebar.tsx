@@ -56,6 +56,8 @@ function remoteRegistryGroupNames(drones: DroneSummary[]): string[] {
 }
 
 const REMOTE_SIDEBAR_MODE: DroneSidebarReadOnlyMode = 'static-tree';
+const REMOTE_HOST_DRONE_DISABLED_REASON =
+  'Host runtime drones are visible here but can only be opened from the local Drone Hub.';
 
 function RemoteHubSidebarComponent({
   drones,
@@ -119,6 +121,16 @@ function RemoteHubSidebarComponent({
       }
     }
     return next;
+  }, [drones]);
+  const hostDroneDisplayState = React.useMemo(() => {
+    const disabledReasonById: Record<string, string> = {};
+    const statusHintById: Record<string, string> = {};
+    for (const drone of drones) {
+      if (drone.runtime !== 'host') continue;
+      disabledReasonById[drone.id] = REMOTE_HOST_DRONE_DISABLED_REASON;
+      statusHintById[drone.id] = 'Host · local';
+    }
+    return { disabledReasonById, statusHintById };
   }, [drones]);
 
   const viewModel = useSidebarViewModel({
@@ -287,6 +299,8 @@ function RemoteHubSidebarComponent({
       fillContainer={fillContainer}
       readOnlyMode={REMOTE_SIDEBAR_MODE}
       headerAccessory={headerAccessory}
+      readOnlyDisabledDroneReasonById={hostDroneDisplayState.disabledReasonById}
+      readOnlyDroneStatusHintById={hostDroneDisplayState.statusHintById}
     />
   );
 }
