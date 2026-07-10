@@ -4,8 +4,9 @@ import fsp from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 
+import { getHubSettingsRepository } from './hub-settings-repository';
 import { droneRootPath } from './paths';
-import { loadRegistry, updateRegistry, type DroneRegistry } from './registry';
+import { loadRegistry, type DroneRegistry } from './registry';
 import { hubSqlitePath, readRegistryJsonFromSqlitePath } from './sqlite-registry-store';
 
 type DatabaseConstructor = typeof import('better-sqlite3');
@@ -85,6 +86,7 @@ const MIN_DAILY_RETENTION_DAYS = 1;
 const MAX_DAILY_RETENTION_DAYS = 365;
 const SUSPICIOUS_EMPTY_MIN_PREVIOUS = 10;
 const BACKUP_SCHEDULER_CHECK_MS = 5 * 60 * 1000;
+const REGISTRY_BACKUP_SETTING_KEY = 'registry-backups';
 
 let backupSchedulerTimer: ReturnType<typeof setInterval> | null = null;
 let backupSchedulerNextCheckAt: string | null = null;
@@ -173,8 +175,33 @@ function normalizeBackupSettings(raw: unknown): EffectiveRegistryBackupSettings 
 }
 
 export async function resolveRegistryBackupSettings(): Promise<EffectiveRegistryBackupSettings> {
-  const reg = await loadRegistry();
-  return normalizeBackupSettings((reg.settings as any)?.backups);
+  const repository = await getHubSettingsRepository();
+  let canonical = repository.get<RegistryBackupSettings | null>(REGISTRY_BACKUP_SETTING_KEY);
+  if (!canonical) {
+    const reg = await loadRegistry();
+    const legacyRaw = (reg.settings as any)?.backups;
+    if (legacyRaw !== undefined) {
+      const legacy = normalizeBackupSettings(legacyRaw);
+      canonical = await repository.backfillIfAbsent(
+        REGISTRY_BACKUP_SETTING_KEY,
+        {
+          enabled: legacy.enabled,
+          hourlyEnabled: legacy.hourlyEnabled,
+          dailyEnabled: legacy.dailyEnabled,
+          hourlyRetentionHours: legacy.hourlyRetentionHours,
+          dailyRetentionDays: legacy.dailyRetentionDays,
+        },
+        legacy.updatedAt,
+      );
+    } else {
+      canonical = repository.get<RegistryBackupSettings | null>(REGISTRY_BACKUP_SETTING_KEY);
+    }
+  }
+  return normalizeBackupSettings(
+    canonical?.value == null
+      ? undefined
+      : { ...canonical.value, updatedAt: canonical.updatedAt },
+  );
 }
 
 export async function upsertStoredRegistryBackupSettings(opts: Partial<RegistryBackupSettings>): Promise<void> {
@@ -197,18 +224,20 @@ export async function upsertStoredRegistryBackupSettings(opts: Partial<RegistryB
     throw new Error(`dailyRetentionDays must be between ${MIN_DAILY_RETENTION_DAYS} and ${MAX_DAILY_RETENTION_DAYS}`);
   }
 
-  await updateRegistry((reg: any) => {
-    reg.settings ??= {};
-    const prev = normalizeBackupSettings(reg.settings.backups);
-    reg.settings.backups = {
-      enabled: enabled ?? prev.enabled,
-      hourlyEnabled: hourlyEnabled ?? prev.hourlyEnabled,
-      dailyEnabled: dailyEnabled ?? prev.dailyEnabled,
-      hourlyRetentionHours: hourlyRetentionHours ?? prev.hourlyRetentionHours,
-      dailyRetentionDays: dailyRetentionDays ?? prev.dailyRetentionDays,
-      updatedAt: new Date().toISOString(),
-    };
-  });
+  await resolveRegistryBackupSettings();
+  await (await getHubSettingsRepository()).update<RegistryBackupSettings>(
+    REGISTRY_BACKUP_SETTING_KEY,
+    (current) => {
+      const prev = normalizeBackupSettings(current?.value);
+      return {
+        enabled: enabled ?? prev.enabled,
+        hourlyEnabled: hourlyEnabled ?? prev.hourlyEnabled,
+        dailyEnabled: dailyEnabled ?? prev.dailyEnabled,
+        hourlyRetentionHours: hourlyRetentionHours ?? prev.hourlyRetentionHours,
+        dailyRetentionDays: dailyRetentionDays ?? prev.dailyRetentionDays,
+      };
+    },
+  );
 }
 
 function hourlyBucket(at = new Date()): string {

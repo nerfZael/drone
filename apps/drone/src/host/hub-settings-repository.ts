@@ -1,10 +1,16 @@
+import fs from 'node:fs';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+
 import {
   applyHubDatabaseMigrations,
+  getHubDatabase,
   requireHubDatabase,
   type HubDatabase,
   type HubDatabaseConnection,
   type HubDatabaseMigration,
 } from './hub-database';
+import { droneRootPath } from './paths';
 
 const SETTINGS_MIGRATIONS: readonly HubDatabaseMigration[] = [
   {
@@ -24,12 +30,32 @@ const SETTINGS_MIGRATIONS: readonly HubDatabaseMigration[] = [
     },
   },
 ];
+const migratedDatabases = new WeakSet<HubDatabase>();
+
+function ensureSettingsMigrations(database: HubDatabase): void {
+  if (migratedDatabases.has(database)) return;
+  database.read((connection) => {
+    applyHubDatabaseMigrations(connection, SETTINGS_MIGRATIONS, 'settings');
+  });
+  migratedDatabases.add(database);
+}
 
 type SettingRow = {
   setting_key: string;
   value_json: string;
   updated_at: string | null;
   version: number;
+};
+
+type CompatibilitySettingsFile = {
+  version: 1;
+  settings: Record<string, SettingRow>;
+};
+
+type CompatibilityBackend = {
+  path: string;
+  rows: Map<string, SettingRow>;
+  queue: Promise<void>;
 };
 
 export type HubSettingRecord<T> = {
@@ -98,6 +124,17 @@ function recordFromRow<T>(row: SettingRow | undefined): HubSettingRecord<T> | nu
   };
 }
 
+function monotonicUpdatedAt(
+  updatedAt: string | null,
+  current: HubSettingRecord<unknown> | null,
+): string | null {
+  if (!updatedAt || !current?.updatedAt) return updatedAt;
+  const nextMs = Date.parse(updatedAt);
+  const currentMs = Date.parse(current.updatedAt);
+  if (!Number.isFinite(nextMs) || !Number.isFinite(currentMs) || nextMs > currentMs) return updatedAt;
+  return new Date(currentMs + 1).toISOString();
+}
+
 function selectSetting<T>(
   connection: HubDatabaseConnection,
   key: string,
@@ -119,35 +156,130 @@ function writeSetting<T>(
 ): HubSettingRecord<T> {
   const valueJson = serializeValue(value);
   const version = (current?.version ?? 0) + 1;
+  const effectiveUpdatedAt = monotonicUpdatedAt(updatedAt, current);
   if (current) {
     connection
       .prepare(
         'UPDATE hub_canonical_settings SET value_json = ?, updated_at = ?, version = ? WHERE setting_key = ?',
       )
-      .run(valueJson, updatedAt, version, key);
+      .run(valueJson, effectiveUpdatedAt, version, key);
   } else {
     connection
       .prepare(
         'INSERT INTO hub_canonical_settings (setting_key, value_json, updated_at, version) VALUES (?, ?, ?, ?)',
       )
-      .run(key, valueJson, updatedAt, version);
+      .run(key, valueJson, effectiveUpdatedAt, version);
   }
-  return { key, value, updatedAt, version };
+  return { key, value, updatedAt: effectiveUpdatedAt, version };
+}
+
+function compatibilityFilePath(): string {
+  return droneRootPath('hub-settings.bun.json');
+}
+
+function bunCompatibilityAvailable(): boolean {
+  return typeof (globalThis as any).Bun !== 'undefined';
+}
+
+function readCompatibilityRows(filePath: string): Map<string, SettingRow> {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as CompatibilitySettingsFile;
+    const settings = parsed?.version === 1 && parsed.settings && typeof parsed.settings === 'object'
+      ? parsed.settings
+      : {};
+    return new Map(
+      Object.entries(settings).filter((entry): entry is [string, SettingRow] => {
+        const row = entry[1];
+        return Boolean(
+          row &&
+            typeof row === 'object' &&
+            typeof row.setting_key === 'string' &&
+            typeof row.value_json === 'string' &&
+            Number.isSafeInteger(row.version) &&
+            row.version > 0,
+        );
+      }),
+    );
+  } catch (error: any) {
+    if (String(error?.code ?? '') === 'ENOENT') return new Map();
+    throw error;
+  }
+}
+
+async function persistCompatibilityRows(backend: CompatibilityBackend): Promise<void> {
+  const directory = path.dirname(backend.path);
+  await fsp.mkdir(directory, { recursive: true });
+  const temporaryPath = path.join(
+    directory,
+    `.hub-settings.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`,
+  );
+  const settings = Object.fromEntries(backend.rows);
+  try {
+    await fsp.writeFile(
+      temporaryPath,
+      `${JSON.stringify({ version: 1, settings }, null, 2)}\n`,
+      'utf8',
+    );
+    await fsp.chmod(temporaryPath, 0o600).catch(() => {});
+    await fsp.rename(temporaryPath, backend.path);
+    await fsp.chmod(backend.path, 0o600).catch(() => {});
+  } catch (error) {
+    await fsp.rm(temporaryPath, { force: true }).catch(() => {});
+    throw error;
+  }
 }
 
 export class HubSettingsRepository {
-  private constructor(private readonly database: HubDatabase) {}
+  private constructor(
+    private readonly database: HubDatabase | null,
+    private readonly compatibility: CompatibilityBackend | null,
+  ) {}
 
-  static async open(database: HubDatabase = requireHubDatabase()): Promise<HubSettingsRepository> {
-    await database.writeTransaction('migrate canonical hub settings', (connection) => {
-      applyHubDatabaseMigrations(connection, SETTINGS_MIGRATIONS, 'settings');
-    });
-    return new HubSettingsRepository(database);
+  static async open(database: HubDatabase | null = getHubDatabase()): Promise<HubSettingsRepository> {
+    if (!database) {
+      if (!bunCompatibilityAvailable()) database = requireHubDatabase();
+      else {
+        const filePath = compatibilityFilePath();
+        return new HubSettingsRepository(null, {
+          path: filePath,
+          rows: readCompatibilityRows(filePath),
+          queue: Promise.resolve(),
+        });
+      }
+    }
+    ensureSettingsMigrations(database);
+    return new HubSettingsRepository(database, null);
   }
 
   get<T>(keyRaw: string): HubSettingRecord<T> | null {
     const key = normalizeKey(keyRaw);
-    return this.database.read((connection) => selectSetting<T>(connection, key));
+    if (this.database) return this.database.read((connection) => selectSetting<T>(connection, key));
+    return recordFromRow<T>(this.compatibility?.rows.get(key));
+  }
+
+  private compatibilityWrite<T>(
+    operation: (rows: Map<string, SettingRow>) => T,
+  ): Promise<T> {
+    const backend = this.compatibility;
+    if (!backend) throw new Error('Hub settings compatibility backend is unavailable');
+    const previous = backend.queue;
+    const write = previous.catch(() => {}).then(async () => {
+      const previousRows = new Map(backend.rows);
+      try {
+        const result = operation(backend.rows);
+        await persistCompatibilityRows(backend);
+        return result;
+      } catch (error) {
+        backend.rows.clear();
+        for (const [key, row] of previousRows) backend.rows.set(key, row);
+        throw error;
+      }
+    });
+    backend.queue = write.then(
+      () => undefined,
+      () => undefined,
+    );
+    return write;
   }
 
   put<T>(
@@ -159,6 +291,27 @@ export class HubSettingsRepository {
     const expectedVersion = normalizeExpectedVersion(options.expectedVersion);
     const updatedAt =
       options.updatedAt === undefined ? new Date().toISOString() : options.updatedAt;
+    if (!this.database) {
+      return this.compatibilityWrite((rows) => {
+        const current = recordFromRow<T>(rows.get(key));
+        if (expectedVersion !== undefined && expectedVersion !== (current?.version ?? null)) {
+          throw new HubSettingVersionConflictError(key, expectedVersion, current);
+        }
+        const next = {
+          key,
+          value,
+          updatedAt: monotonicUpdatedAt(updatedAt, current),
+          version: (current?.version ?? 0) + 1,
+        };
+        rows.set(key, {
+          setting_key: key,
+          value_json: serializeValue(value),
+          updated_at: next.updatedAt,
+          version: next.version,
+        });
+        return next;
+      });
+    }
     return this.database.writeTransaction(`write hub setting ${key}`, (connection) => {
       const current = selectSetting<T>(connection, key);
       if (expectedVersion !== undefined && expectedVersion !== (current?.version ?? null)) {
@@ -177,6 +330,25 @@ export class HubSettingsRepository {
     const key = normalizeKey(keyRaw);
     const updatedAt =
       options.updatedAt === undefined ? new Date().toISOString() : options.updatedAt;
+    if (!this.database) {
+      return this.compatibilityWrite((rows) => {
+        const current = recordFromRow<T>(rows.get(key));
+        const value = transform(current);
+        const next = {
+          key,
+          value,
+          updatedAt: monotonicUpdatedAt(updatedAt, current),
+          version: (current?.version ?? 0) + 1,
+        };
+        rows.set(key, {
+          setting_key: key,
+          value_json: serializeValue(value),
+          updated_at: next.updatedAt,
+          version: next.version,
+        });
+        return next;
+      });
+    }
     return this.database.writeTransaction(`update hub setting ${key}`, (connection) => {
       const current = selectSetting<T>(connection, key);
       return writeSetting(connection, key, transform(current), updatedAt, current);
@@ -190,6 +362,20 @@ export class HubSettingsRepository {
     updatedAt: string | null,
   ): Promise<HubSettingRecord<T>> {
     const key = normalizeKey(keyRaw);
+    if (!this.database) {
+      return this.compatibilityWrite((rows) => {
+        const current = recordFromRow<T>(rows.get(key));
+        if (current) return current;
+        const next = { key, value, updatedAt, version: 1 };
+        rows.set(key, {
+          setting_key: key,
+          value_json: serializeValue(value),
+          updated_at: updatedAt,
+          version: 1,
+        });
+        return next;
+      });
+    }
     return this.database.writeTransaction(`backfill hub setting ${key}`, (connection) => {
       const current = selectSetting<T>(connection, key);
       if (current) return current;
@@ -198,16 +384,31 @@ export class HubSettingsRepository {
   }
 }
 
-let cachedRepository: { database: HubDatabase; repository: Promise<HubSettingsRepository> } | null =
-  null;
+let cachedRepository: { key: HubDatabase | string; repository: Promise<HubSettingsRepository> } | null = null;
 
 export function getHubSettingsRepository(): Promise<HubSettingsRepository> {
-  const database = requireHubDatabase();
-  if (cachedRepository?.database === database) return cachedRepository.repository;
+  const database = getHubDatabase();
+  const key: HubDatabase | string = database ?? compatibilityFilePath();
+  if (cachedRepository?.key === key) return cachedRepository.repository;
   const repository = HubSettingsRepository.open(database).catch((error) => {
-    if (cachedRepository?.database === database) cachedRepository = null;
+    if (cachedRepository?.key === key) cachedRepository = null;
     throw error;
   });
-  cachedRepository = { database, repository };
+  cachedRepository = { key, repository };
   return repository;
+}
+
+export function getHubSettingRecordSync<T>(keyRaw: string): HubSettingRecord<T> | null {
+  const key = normalizeKey(keyRaw);
+  const database = getHubDatabase();
+  if (database) {
+    ensureSettingsMigrations(database);
+    return database.read((connection) => selectSetting<T>(connection, key));
+  }
+  if (!bunCompatibilityAvailable()) requireHubDatabase();
+  return recordFromRow<T>(readCompatibilityRows(compatibilityFilePath()).get(key));
+}
+
+export function resetHubSettingsRepositoryForTests(): void {
+  cachedRepository = null;
 }

@@ -1,6 +1,5 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
+import { loadRegistry } from '../src/host/registry';
 import {
   KanbanBoardSettingsConflictError,
   resolveKanbanBoardSettingsResponse,
@@ -19,8 +18,8 @@ describe('kanban board settings persistence', () => {
     });
   });
 
-  test('round-trips board state through registry storage', async () => {
-    await withTempDroneDataDir('drone-kanban-settings-', async (droneDataDir) => {
+  test('round-trips board state through canonical settings storage', async () => {
+    await withTempDroneDataDir('drone-kanban-settings-', async () => {
       await upsertStoredKanbanBoardSettings({
         taskTypes: [
           { id: 'bug', label: 'Bug', active: true },
@@ -60,9 +59,7 @@ describe('kanban board settings persistence', () => {
         playbookId: 'playbook-1',
       });
 
-      const registryPath = path.join(droneDataDir, 'registry.json');
-      const registry = JSON.parse(fs.readFileSync(registryPath, 'utf8'));
-      expect(registry?.settings?.kanbanBoard?.lanes?.[0]?.cards?.[0]?.id).toBe('task-1');
+      expect((await loadRegistry()).settings?.kanbanBoard).toBeUndefined();
     });
   });
 
