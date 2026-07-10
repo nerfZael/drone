@@ -4,7 +4,8 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { DroneRegistry } from '../host/registry';
-import { loadRegistry, updateRegistry } from '../host/registry';
+import { loadRegistry, loadRegistryRawSnapshot, updateRegistry } from '../host/registry';
+import { getHubDatabase } from '../host/hub-database';
 import { getCatalogStore, type CatalogStore } from '../host/catalog-store';
 import { bashQuote } from './hub-format';
 
@@ -240,14 +241,14 @@ async function canonicalMcpServerStore(): Promise<CatalogStore | null> {
   try {
     return await getCatalogStore();
   } catch (error) {
-    if ((globalThis as any).Bun) return null;
+    if ((globalThis as any).Bun && getHubDatabase() === null) return null;
     throw error;
   }
 }
 
 async function backfillLegacyMcpServers(store: CatalogStore): Promise<void> {
   if (store.isBackfillComplete('mcp-servers')) return;
-  await store.backfillMcpServers(listMcpServersFromRegistry(await loadRegistry()));
+  await store.backfillMcpServers(listMcpServersFromRegistry(await loadRegistryRawSnapshot()));
 }
 
 export async function listMcpServers(): Promise<McpServerRecord[]> {

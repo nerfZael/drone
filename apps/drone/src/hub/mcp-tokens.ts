@@ -1,7 +1,8 @@
 import crypto from 'node:crypto';
 
-import { loadRegistry, updateRegistry } from '../host/registry';
+import { loadRegistry, loadRegistryRawSnapshot, updateRegistry } from '../host/registry';
 import { getCatalogStore, type CatalogStore } from '../host/catalog-store';
+import { getHubDatabase } from '../host/hub-database';
 
 export type McpAccessTokenKind = 'host' | 'drone';
 
@@ -120,14 +121,14 @@ async function canonicalMcpTokenStore(): Promise<CatalogStore | null> {
   try {
     return await getCatalogStore();
   } catch (error) {
-    if ((globalThis as any).Bun) return null;
+    if ((globalThis as any).Bun && getHubDatabase() === null) return null;
     throw error;
   }
 }
 
 async function backfillLegacyMcpTokens(store: CatalogStore): Promise<void> {
   if (store.isBackfillComplete('mcp-tokens')) return;
-  await store.backfillMcpTokens(listStoredTokensFromRegistry(await loadRegistry()));
+  await store.backfillMcpTokens(listStoredTokensFromRegistry(await loadRegistryRawSnapshot()));
 }
 
 async function listStoredTokens(): Promise<McpAccessTokenRecord[]> {

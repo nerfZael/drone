@@ -14,6 +14,10 @@ import {
   type SyncSetSourceSnapshot,
 } from './sync-sets';
 import { getFleetWorkflowStore, type FleetWorkflowStore } from '../host/fleet-workflow-store';
+import { getHubDatabase } from '../host/hub-database';
+import { loadRegistryRawSnapshot } from '../host/registry';
+
+const workflowBackfilled = new WeakSet<FleetWorkflowStore>();
 
 type SyncSetTargetOutcome = {
   syncSetId: string;
@@ -57,15 +61,19 @@ function buildSyncSetDroneNameMap(regAny: any, normalizeDroneIdentity: CreateSyn
 
 export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
   async function workflowStore(): Promise<FleetWorkflowStore | null> {
-    try { return await getFleetWorkflowStore(); } catch (error) { if ((globalThis as any).Bun) return null; throw error; }
+    try { return await getFleetWorkflowStore(); } catch (error) { if ((globalThis as any).Bun && getHubDatabase() === null) return null; throw error; }
+  }
+
+  async function ensureWorkflowBackfill(store: FleetWorkflowStore): Promise<void> {
+    if (workflowBackfilled.has(store)) return;
+    await store.backfillSyncSets(readStoredSyncSets(await loadRegistryRawSnapshot()));
+    workflowBackfilled.add(store);
   }
 
   async function storedSyncSets(regAny?: any): Promise<StoredSyncSet[]> {
-    const registry = regAny ?? (await deps.loadRegistry());
-    const legacy = readStoredSyncSets(registry);
     const store = await workflowStore();
-    if (!store) return legacy;
-    await store.backfillSyncSets(legacy);
+    if (!store) return readStoredSyncSets(regAny ?? (await deps.loadRegistry()));
+    await ensureWorkflowBackfill(store);
     return store.listSyncSets<StoredSyncSet>();
   }
 
@@ -217,17 +225,17 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
     storedSyncSets,
     async createSyncSet(syncSet: StoredSyncSet) {
       const store = await workflowStore();
-      if (store) { await store.backfillSyncSets(readStoredSyncSets(await deps.loadRegistry())); return await store.putSyncSet(syncSet); }
+      if (store) { await ensureWorkflowBackfill(store); return await store.putSyncSet(syncSet); }
       await deps.updateRegistry((regAny:any)=>{const rows=readStoredSyncSets(regAny);rows.push(syncSet);writeStoredSyncSets(regAny,rows,syncSet.updatedAt);});
       return syncSet;
     },
     async updateSyncSet(syncSet: StoredSyncSet) {
       const store = await workflowStore();
-      if (store) { await store.backfillSyncSets(readStoredSyncSets(await deps.loadRegistry())); return await store.putSyncSet(syncSet); }
+      if (store) { await ensureWorkflowBackfill(store); return await store.putSyncSet(syncSet); }
       await deps.updateRegistry((regAny:any)=>{const rows=readStoredSyncSets(regAny);const i=findStoredSyncSetIndex(rows,syncSet.id);if(i<0)throw new Error(`unknown sync set: ${syncSet.id}`);rows[i]=syncSet;writeStoredSyncSets(regAny,rows,syncSet.updatedAt);}); return syncSet;
     },
     async deleteSyncSet(id:string) {
-      const store=await workflowStore();if(store){await store.backfillSyncSets(readStoredSyncSets(await deps.loadRegistry()));return await store.deleteSyncSet(id);}
+      const store=await workflowStore();if(store){await ensureWorkflowBackfill(store);return await store.deleteSyncSet(id);}
       let removed=false;await deps.updateRegistry((regAny:any)=>{const rows=readStoredSyncSets(regAny);const i=findStoredSyncSetIndex(rows,id);if(i>=0){rows.splice(i,1);removed=true;writeStoredSyncSets(regAny,rows,deps.nowIso());}});return removed;
     },
 
