@@ -13,9 +13,11 @@ const { buildHubStateProjection } = require('../../dist/host/hub-state-projectio
 const { getHubSettingsRepository } = require('../../dist/host/hub-settings-repository.js');
 const { getCatalogStore } = require('../../dist/host/catalog-store.js');
 const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle-repository.js');
+const { getPromptQueueRepository } = require('../../dist/host/prompt-queue-repository.js');
 const { CanonicalRegistryMutationError } = require('../../dist/host/legacy-residual-state.js');
 const { loadRegistry, saveRegistry, updateRegistry } = require('../../dist/host/registry.js');
 const { readRegistryJsonFromSqlite } = require('../../dist/host/sqlite-registry-store.js');
+const { deleteActiveChatFromStore } = require('../../dist/hub/transcript-store.js');
 
 const originalDroneDataDir = process.env.DRONE_DATA_DIR;
 const roots = [];
@@ -51,7 +53,14 @@ function seedRegistry() {
       alpha: {
         id: 'alpha', name: 'Legacy Alpha', containerName: 'legacy-alpha', runtime: 'container',
         token: 'token', containerPort: 7777, createdAt: '2026-01-01T00:00:00.000Z',
-        chats: { default: { createdAt: '2026-01-01T00:00:00.000Z', turns: [] } },
+        chats: {
+          default: { createdAt: '2026-01-01T00:00:00.000Z', turns: [] },
+          review: {
+            createdAt: '2026-01-01T00:00:00.000Z',
+            turns: [],
+            pendingPrompts: [{ id: 'review-prompt', at: '2026-01-01T00:01:00.000Z', prompt: 'review this', state: 'queued' }],
+          },
+        },
         archivedChats: {
           review: {
             createdAt: '2026-01-01T00:00:00.000Z',
@@ -82,6 +91,7 @@ test('projection backfills once, then canonical columns and tombstones win', asy
   assert.equal(first.skills.skill.description, 'legacy skill');
   assert.equal(first.groups.stale.name, 'stale');
   assert.ok(first.drones.alpha.chats.default);
+  assert.equal(first.drones.alpha.chats.review.pendingPrompts[0].id, 'review-prompt');
   assert.equal(first.drones.alpha.archivedChats.review.turns[0].id, 'archived-turn');
 
   const lifecycle = await getDroneLifecycleRepository();
@@ -107,6 +117,11 @@ test('projection backfills once, then canonical columns and tombstones win', asy
   assert.equal(projected.settings.filesystem, undefined);
   assert.equal(projected.settings.openai, undefined);
   assert.equal(projected.settings.canonical, undefined);
+
+  await deleteActiveChatFromStore({ droneId: 'alpha', chatName: 'review' });
+  const afterChatDelete = await buildHubStateProjection();
+  assert.equal(afterChatDelete.drones.alpha.chats.review, undefined);
+  assert.equal(getPromptQueueRepository().get({ droneId: 'alpha', chatName: 'review', promptId: 'review-prompt' }), null);
 });
 
 test('canonical writes and residual concurrency do not rewrite registry_json', async () => {

@@ -5,6 +5,7 @@ import {
 } from './drone-lifecycle-repository';
 import { getFleetWorkflowStore, type FleetAuditRecord, type WorkflowQueueItem } from './fleet-workflow-store';
 import { getHubDatabase } from './hub-database';
+import { getPromptQueueRepository, type PromptQueueItem } from './prompt-queue-repository';
 import { loadRegistryCompatibilityBase, type DroneRegistry } from './registry';
 import { fleetAuditList } from '../hub/fleet-helpers';
 import { listStoredTokensFromRegistry } from '../hub/mcp-tokens';
@@ -151,6 +152,32 @@ function archivedChatsForDrone(droneId: string): Record<string, any> {
   }]));
 }
 
+async function backfillLegacyChatState(registry: any): Promise<void> {
+  const promptQueue = getPromptQueueRepository();
+  for (const bucket of [registry?.drones, registry?.pending, registry?.archived]) {
+    for (const [droneId, entry] of Object.entries(bucket ?? {}) as Array<[string, any]>) {
+      const chats = entry?.chats && typeof entry.chats === 'object' && !Array.isArray(entry.chats)
+        ? entry.chats as Record<string, any>
+        : {};
+      await importDroneChatsFromRegistry({ droneId, chats });
+      await importArchivedChatsFromRegistry({ droneId, archivedChats: entry?.archivedChats });
+      if (!promptQueue) continue;
+      for (const [chatName, chat] of Object.entries(chats)) {
+        const canonicalChat = readChatFromStore({ droneId, chatName });
+        if (!canonicalChat.available || !canonicalChat.chat) continue;
+        const completedIds = new Set(
+          (Array.isArray(chat?.turns) ? chat.turns : [])
+            .map((turn: any) => String(turn?.id ?? '').trim())
+            .filter(Boolean),
+        );
+        const prompts = (Array.isArray(chat?.pendingPrompts) ? chat.pendingPrompts : [])
+          .filter((prompt: any) => !completedIds.has(String(prompt?.id ?? '').trim())) as PromptQueueItem[];
+        await promptQueue.backfillLegacy({ droneId, chatName, prompts });
+      }
+    }
+  }
+}
+
 function legacyPlaybooks(registry: any): CatalogPlaybookRecord[] {
   return recordValues(registry?.playbooks).flatMap((raw: any) => {
     const id = String(raw?.id ?? '').trim();
@@ -183,18 +210,31 @@ export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Pro
   // Insert-only migration must happen before canonical collections replace the seed.
   const lifecycle = await getDroneLifecycleRepository();
   if (lifecycle) {
-    for (const [droneId, entry] of Object.entries(base.drones ?? {}) as Array<[string, any]>) {
-      await importDroneChatsFromRegistry({ droneId, chats: entry?.chats });
-      await importArchivedChatsFromRegistry({ droneId, archivedChats: entry?.archivedChats });
-    }
+    await backfillLegacyChatState(base);
     await lifecycle.backfillLegacyInsertOnly(base);
     base.drones = mapBy(lifecycle.list('real').map((record) => ({
       ...lifecycleProjection(record),
       chats: chatsForDrone(record.id),
       archivedChats: archivedChatsForDrone(record.id),
     })), (record: any) => record.id);
-    base.pending = mapBy(lifecycle.list('pending').map(lifecycleProjection), (record: any) => record.id);
-    base.archived = mapBy(lifecycle.list('archived').map(lifecycleProjection), (record: any) => record.id);
+    base.pending = mapBy(lifecycle.list('pending').map((record) => {
+      const chats = chatsForDrone(record.id);
+      const archivedChats = archivedChatsForDrone(record.id);
+      return {
+        ...lifecycleProjection(record),
+        ...(Object.keys(chats).length > 0 ? { chats } : {}),
+        ...(Object.keys(archivedChats).length > 0 ? { archivedChats } : {}),
+      };
+    }), (record: any) => record.id);
+    base.archived = mapBy(lifecycle.list('archived').map((record) => {
+      const chats = chatsForDrone(record.id);
+      const archivedChats = archivedChatsForDrone(record.id);
+      return {
+        ...lifecycleProjection(record),
+        ...(Object.keys(chats).length > 0 ? { chats } : {}),
+        ...(Object.keys(archivedChats).length > 0 ? { archivedChats } : {}),
+      };
+    }), (record: any) => record.id);
   }
 
   const catalog = await getCatalogStore();

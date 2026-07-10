@@ -26,7 +26,9 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
     version: 2,
     settings: {
       openai: { apiKey: 'old-key', updatedAt: '2026-06-07T00:00:00.000Z' },
+      experimentalUserState: { enabled: true, note: 'preserve me' },
     },
+    customUserState: { layout: ['one', 'two'], note: 'preserve me too' },
     skills: {
       skillA: { label: 'Skill A' },
     },
@@ -72,6 +74,13 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
         build: false,
         createdAt: '2026-06-07T00:00:00.000Z',
         phase: 'starting',
+        chats: {
+          draft: {
+            createdAt: '2026-06-07T00:00:00.000Z',
+            turns: [{ id: 'pending-turn', at: '2026-06-07T00:01:00.000Z', prompt: 'pending history', ok: true, output: 'kept' }],
+            pendingPrompts: [{ id: 'pending-prompt', at: '2026-06-07T00:02:00.000Z', prompt: 'pending queued', state: 'queued' }],
+          },
+        },
       },
     },
     archived: {
@@ -86,6 +95,13 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
         archivedAt: '2026-06-07T01:00:00.000Z',
         deleteAt: '2026-06-08T01:00:00.000Z',
         archiveRetention: '1d',
+        chats: {
+          default: {
+            createdAt: '2026-06-07T00:00:00.000Z',
+            turns: [{ id: 'archived-turn', at: '2026-06-07T00:01:00.000Z', prompt: 'archived history', ok: true, output: 'kept' }],
+            pendingPrompts: [{ id: 'archived-prompt', at: '2026-06-07T00:02:00.000Z', prompt: 'archived queued', state: 'sent' }],
+          },
+        },
       },
     },
     drones: {
@@ -120,6 +136,10 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
                 output: 'one',
               },
             ],
+            pendingPrompts: [
+              { id: 'active-prompt', at: '2026-06-07T00:03:00.000Z', prompt: 'still queued', state: 'queued' },
+              { id: 'turn-2', at: '2026-06-07T00:02:00.000Z', prompt: 'already completed', state: 'sent' },
+            ],
           },
         },
       },
@@ -130,6 +150,13 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
   const { loadRegistry, updateRegistry } = require('../../dist/host/registry');
   const loaded = await loadRegistry();
   assert.equal(loaded.drones.drone1.name, 'drone one');
+  assert.equal(loaded.drones.drone1.chats.default.pendingPrompts[0].id, 'active-prompt');
+  assert.equal(loaded.pending.pending1.chats.draft.turns[0].id, 'pending-turn');
+  assert.equal(loaded.pending.pending1.chats.draft.pendingPrompts[0].id, 'pending-prompt');
+  assert.equal(loaded.archived.archived1.chats.default.turns[0].id, 'archived-turn');
+  assert.equal(loaded.archived.archived1.chats.default.pendingPrompts[0].id, 'archived-prompt');
+  assert.deepEqual(loaded.settings.experimentalUserState, originalRegistry.settings.experimentalUserState);
+  assert.deepEqual(loaded.customUserState, originalRegistry.customUserState);
 
   const sqlitePath = path.join(droneDataDir, 'hub.sqlite');
   assert.equal(fs.existsSync(sqlitePath), true);
@@ -137,7 +164,7 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
   const backups = fs.readdirSync(droneDataDir).filter((name) => /^registry\.backup-before-sqlite-.*\.json$/.test(name));
   assert.equal(backups.length, 1);
   const backup = JSON.parse(fs.readFileSync(path.join(droneDataDir, backups[0]), 'utf8'));
-  assert.equal(backup.drones.drone1.name, 'drone one');
+  assert.deepEqual(backup, originalRegistry);
   assert.equal(fs.existsSync(registryPath), false);
 
   const Database = require('better-sqlite3');
@@ -147,7 +174,7 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_drones').get().count, 1);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_pending_drones').get().count, 1);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_archived_drones').get().count, 1);
-    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_settings').get().count, 1);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_settings').get().count, 2);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_repos').get().count, 1);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_groups').get().count, 1);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_playbooks').get().count, 1);
@@ -155,6 +182,9 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_playbook_run_queue_items').get().count, 1);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_chats').get().count, 1);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM transcript_turns').get().count, 2);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM canonical_chats').get().count, 3);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM canonical_chat_turns').get().count, 4);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM prompts').get().count, 3);
     const prompts = db
       .prepare('SELECT prompt FROM transcript_turns WHERE drone_id = ? AND chat_name = ? ORDER BY ordinal ASC')
       .all('drone1', 'default')
@@ -163,6 +193,15 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
   } finally {
     db.close();
   }
+
+  const { resetHubDatabaseForTests } = require('../../dist/host/hub-database');
+  await resetHubDatabaseForTests();
+  const afterRestart = await loadRegistry();
+  assert.equal(afterRestart.drones.drone1.chats.default.pendingPrompts[0].id, 'active-prompt');
+  assert.equal(afterRestart.pending.pending1.chats.draft.turns[0].id, 'pending-turn');
+  assert.equal(afterRestart.archived.archived1.chats.default.turns[0].id, 'archived-turn');
+  assert.deepEqual(afterRestart.settings.experimentalUserState, originalRegistry.settings.experimentalUserState);
+  assert.deepEqual(afterRestart.customUserState, originalRegistry.customUserState);
 
   fs.writeFileSync(
     registryPath,
