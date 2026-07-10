@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { sameTranscriptItem } from '../src/droneHub/app/chat-api';
+import { fetchDroneChatState, fetchDroneChatTranscript, sameTranscriptItem } from '../src/droneHub/app/chat-api';
 import type { TranscriptItem } from '../src/droneHub/types';
 
 function transcriptItem(overrides: Partial<TranscriptItem> = {}): TranscriptItem {
@@ -36,5 +36,39 @@ describe('chat api transcript equality', () => {
     });
 
     expect(sameTranscriptItem(creating, ready)).toBe(false);
+  });
+});
+
+describe('chat api request scopes', () => {
+  test('loads the initial transcript tail and pending prompts in one request', async () => {
+    const urls: string[] = [];
+    const result = await fetchDroneChatState(
+      async <T>(url: string): Promise<T> => {
+        urls.push(url);
+        return { ok: true, transcripts: [transcriptItem()], pending: [{ id: 'pending-1' }] } as T;
+      },
+      { droneId: 'drone one', chatName: 'default', turn: 'all', tail: 50 },
+    );
+
+    expect(urls).toEqual([
+      '/api/drones/drone%20one/chats/default/state?turn=all&tail=50&transcript=tail',
+    ]);
+    expect(result.transcripts).toHaveLength(1);
+    expect(result.pending).toHaveLength(1);
+  });
+
+  test('requests full transcript without pending prompts for explicit export', async () => {
+    const urls: string[] = [];
+    await fetchDroneChatTranscript(
+      async <T>(url: string): Promise<T> => {
+        urls.push(url);
+        return { ok: true, transcripts: [] } as T;
+      },
+      { droneId: 'drone-1', chatName: 'chat one', turn: 'all' },
+    );
+
+    expect(urls).toEqual([
+      '/api/drones/drone-1/chats/chat%20one/state?turn=all&transcript=selected&pending=none',
+    ]);
   });
 });
