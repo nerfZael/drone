@@ -61,6 +61,36 @@ Canonical prompt delivery is intentionally separate from transcript storage. A p
 be leased, retried, cancelled, or tombstoned without rewriting chat history, while transcript
 turns remain ordered and independently mutable.
 
+## Read models and hot paths
+
+The Hub uses purpose-built read models for interactive traffic. `loadRegistry()` is an
+export/compatibility boundary, not a general-purpose query API: assembling it requires
+joining every canonical domain into the legacy aggregate shape, so request handlers and
+recurring workers must not use it for bounded reads.
+
+- `hub/canonical-drone-read-model.ts` builds the active/pending Drone Hub summary with a
+  fixed set of targeted SQL queries. It reads only active lifecycle rows, chat metadata,
+  turn summaries, and the bounded prompt data required by the UI. The model is read-only
+  and may be shared briefly across simultaneous summary, status, SSE, and assistant-idle
+  consumers.
+- Chat state reads resolve lifecycle identity directly, read the transcript version first,
+  and honor `If-None-Match` before loading transcript rows. A normal chat load requests one
+  bounded transcript tail together with pending prompts; complete history is fetched only
+  for an explicit copy or download action.
+- Prompt-queue reads and background reconciliation use their canonical repositories and
+  already-resolved lifecycle rows. Reads do not import legacy chat state or perform a
+  compatibility backfill.
+- Repository change scans are single-flight per repository, use a short-lived result cache,
+  batch changed-file hashing into one Git invocation, and are invalidated by repository
+  mutation commands. The browser schedules the next poll only after the current request
+  completes and only while the relevant view is visible.
+- Local development uses the Vite same-origin proxy unless a direct API origin is explicitly
+  configured, avoiding unnecessary CORS preflight requests.
+
+Read-path tests should assert both the returned projection and that SQLite `total_changes`
+does not increase. Performance-sensitive handlers expose phase-level `Server-Timing` values
+so storage work can be distinguished from network scheduling or external Docker/Git work.
+
 ## Compatibility and migration
 
 `loadRegistry()` is now a compatibility read projection assembled from canonical domain
