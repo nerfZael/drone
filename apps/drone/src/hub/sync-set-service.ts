@@ -13,6 +13,7 @@ import {
   type StoredSyncSet,
   type SyncSetSourceSnapshot,
 } from './sync-sets';
+import { getFleetWorkflowStore, type FleetWorkflowStore } from '../host/fleet-workflow-store';
 
 type SyncSetTargetOutcome = {
   syncSetId: string;
@@ -55,8 +56,21 @@ function buildSyncSetDroneNameMap(regAny: any, normalizeDroneIdentity: CreateSyn
 }
 
 export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
+  async function workflowStore(): Promise<FleetWorkflowStore | null> {
+    try { return await getFleetWorkflowStore(); } catch (error) { if ((globalThis as any).Bun) return null; throw error; }
+  }
+
+  async function storedSyncSets(regAny?: any): Promise<StoredSyncSet[]> {
+    const registry = regAny ?? (await deps.loadRegistry());
+    const legacy = readStoredSyncSets(registry);
+    const store = await workflowStore();
+    if (!store) return legacy;
+    await store.backfillSyncSets(legacy);
+    return store.listSyncSets<StoredSyncSet>();
+  }
+
   async function buildViewsFromRegistry(regAny: any) {
-    const syncSets = readStoredSyncSets(regAny);
+    const syncSets = await storedSyncSets(regAny);
     const droneNameById = buildSyncSetDroneNameMap(regAny, deps.normalizeDroneIdentity);
     return await Promise.all(
       syncSets.map(async (syncSet) =>
@@ -70,6 +84,21 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
   }
 
   async function recordTargetOutcome(opts: SyncSetTargetOutcome) {
+    const store = await workflowStore();
+    if (store) {
+      await store.updateSyncSet<StoredSyncSet>(opts.syncSetId, (existing) => {
+        const previousTarget = existing.targetStatus[String(opts.targetId ?? '').trim()] ?? null;
+        let next = setStoredSyncSetTargetStatus(existing, opts.targetId, {
+          targetKind: opts.targetKind, state: opts.state,
+          appliedVersionId: opts.state === 'synced' ? opts.appliedVersionId ?? null : previousTarget?.appliedVersionId ?? null,
+          appliedAt: opts.state === 'synced' ? opts.appliedAt ?? null : previousTarget?.appliedAt ?? null,
+          error: opts.state === 'error' ? String(opts.error ?? '').trim() || 'sync failed' : null,
+        });
+        if (opts.state === 'synced') next = { ...next, lastAppliedVersionId: opts.appliedVersionId ?? null, lastAppliedAt: opts.appliedAt ?? null };
+        return { ...next, updatedAt: deps.nowIso() };
+      });
+      return;
+    }
     await deps.updateRegistry((regAny: any) => {
       const syncSets = readStoredSyncSets(regAny);
       const index = findStoredSyncSetIndex(syncSets, opts.syncSetId);
@@ -185,12 +214,28 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
 
   return {
     buildViewsFromRegistry,
+    storedSyncSets,
+    async createSyncSet(syncSet: StoredSyncSet) {
+      const store = await workflowStore();
+      if (store) { await store.backfillSyncSets(readStoredSyncSets(await deps.loadRegistry())); return await store.putSyncSet(syncSet); }
+      await deps.updateRegistry((regAny:any)=>{const rows=readStoredSyncSets(regAny);rows.push(syncSet);writeStoredSyncSets(regAny,rows,syncSet.updatedAt);});
+      return syncSet;
+    },
+    async updateSyncSet(syncSet: StoredSyncSet) {
+      const store = await workflowStore();
+      if (store) { await store.backfillSyncSets(readStoredSyncSets(await deps.loadRegistry())); return await store.putSyncSet(syncSet); }
+      await deps.updateRegistry((regAny:any)=>{const rows=readStoredSyncSets(regAny);const i=findStoredSyncSetIndex(rows,syncSet.id);if(i<0)throw new Error(`unknown sync set: ${syncSet.id}`);rows[i]=syncSet;writeStoredSyncSets(regAny,rows,syncSet.updatedAt);}); return syncSet;
+    },
+    async deleteSyncSet(id:string) {
+      const store=await workflowStore();if(store){await store.backfillSyncSets(readStoredSyncSets(await deps.loadRegistry()));return await store.deleteSyncSet(id);}
+      let removed=false;await deps.updateRegistry((regAny:any)=>{const rows=readStoredSyncSets(regAny);const i=findStoredSyncSetIndex(rows,id);if(i>=0){rows.splice(i,1);removed=true;writeStoredSyncSets(regAny,rows,deps.nowIso());}});return removed;
+    },
 
     async applySyncSetToAllExistingTargets(syncSetIdRaw: unknown) {
       const syncSetId = String(syncSetIdRaw ?? '').trim();
       if (!syncSetId) throw new Error('missing sync set id');
       const regAny: any = await deps.loadRegistry();
-      const syncSets = readStoredSyncSets(regAny);
+      const syncSets = await storedSyncSets(regAny);
       const syncSet = syncSets.find((entry) => entry.id === syncSetId) ?? null;
       if (!syncSet) throw new Error(`unknown sync set: ${syncSetId}`);
       const snapshot = await computeSyncSetSourceSnapshot(syncSet);
@@ -253,7 +298,7 @@ export function createSyncSetService(deps: CreateSyncSetServiceDeps) {
       const droneId = deps.normalizeDroneIdentity(opts.droneId);
       if (!droneId || !opts.droneEntry) return;
       const regAny: any = await deps.loadRegistry();
-      const syncSets = readStoredSyncSets(regAny);
+      const syncSets = await storedSyncSets(regAny);
       for (const syncSet of syncSets) {
         try {
           const snapshot = await computeSyncSetSourceSnapshot(syncSet);

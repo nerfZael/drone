@@ -14,6 +14,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { ensureContainerDroneDaemonSession } from '../host/container-daemon';
+import { getFleetWorkflowStore, type FleetWorkflowStore } from '../host/fleet-workflow-store';
 import { droneRootPath } from '../host/paths';
 import { readActiveProfileName } from '../host/profiles';
 import {
@@ -170,9 +171,7 @@ import {
   ensureHubManagedSyncSetSourceDir,
   findStoredSyncSetIndex,
   parseSyncSetMutationInput,
-  readStoredSyncSets,
   removeHubManagedSyncSetSourceDir,
-  writeStoredSyncSets,
   type ParsedSyncSetMutationInput,
 } from './sync-sets';
 import { createSyncSetService } from './sync-set-service';
@@ -380,7 +379,6 @@ import {
   fleetActorConfig,
   fleetActorPayload,
   fleetAuditList,
-  fleetAuditUsageCount,
   fleetChildrenForActor,
   fleetDescendantIdsForActor,
   fleetTargetAllowedForRead,
@@ -1215,6 +1213,10 @@ let FLEET_RECONCILE_INTERVAL: ReturnType<typeof setInterval> | null = null;
 let FLEET_RECONCILE_BUSY = false;
 const PROMPT_SKILL_SYNC_WARNINGS = new Set<string>();
 
+async function fleetWorkflowStoreOrCompatibility(): Promise<FleetWorkflowStore | null> {
+  try { return await getFleetWorkflowStore(); } catch (error) { if ((globalThis as any).Bun) return null; throw error; }
+}
+
 async function appendFleetAuditEvent(event: {
   actor: string;
   actorName: string;
@@ -1225,6 +1227,18 @@ async function appendFleetAuditEvent(event: {
   reason?: string | null;
   meta?: Record<string, unknown>;
 }): Promise<void> {
+  const regAny = await loadRegistry();
+  const store = await fleetWorkflowStoreOrCompatibility();
+  const record = {
+    id: `fleet-audit-${crypto.randomBytes(8).toString('hex')}`, at: nowIso(), actor: event.actor,
+    actorName: event.actorName, action: event.action, target: event.target ?? null,
+    targetName: event.targetName ?? null, status: event.status, reason: event.reason ?? null, meta: event.meta ?? {},
+  };
+  if (store) {
+    await store.backfillAudit(fleetAuditList(regAny));
+    await store.appendAudit(record);
+    return;
+  }
   await updateRegistry((regAny: any) => {
     const audit = fleetAuditList(regAny);
     audit.unshift({
@@ -1241,6 +1255,14 @@ async function appendFleetAuditEvent(event: {
     });
     regAny.fleet.audit = audit.slice(0, FLEET_AUDIT_MAX_EVENTS);
   });
+}
+
+async function canonicalFleetAudit(opts: { actor?: string; target?: string; action?: string; status?: string; limit?: number; since?: string } = {}) {
+  const regAny = await loadRegistry();
+  const store = await fleetWorkflowStoreOrCompatibility();
+  if (!store) return fleetAuditList(regAny);
+  await store.backfillAudit(fleetAuditList(regAny));
+  return store.listAudit(opts);
 }
 
 
@@ -1509,7 +1531,7 @@ async function processFleetRequest(actorId: string, actorEntry: any, request: an
     if (findDroneIdByRef(regAny, name)) await reject(`drone already exists: ${name}`, 409);
     const children = fleetChildrenForActor(regAny, actorId);
     if (children.length >= limits.maxChildren) await reject(`child limit reached (${limits.maxChildren})`, 429);
-    const creationsLastHour = fleetAuditUsageCount(regAny, { actorId, action: 'create_child', status: 'accepted', sinceMs: 60 * 60 * 1000 });
+    const creationsLastHour = (await canonicalFleetAudit({ actor: actorId, action: 'create_child', status: 'accepted', since: new Date(Date.now() - 60 * 60 * 1000).toISOString(), limit: 1000 })).length;
     if (creationsLastHour >= limits.maxCreationsPerHour) await reject(`creation rate limit reached (${limits.maxCreationsPerHour}/hour)`, 429);
     const pendingGlobal = Object.keys(regAny?.pending ?? {}).length;
     if (pendingGlobal >= limits.maxPendingCreationsGlobal) await reject(`global pending creation limit reached (${limits.maxPendingCreationsGlobal})`, 429);
@@ -1587,7 +1609,7 @@ async function processFleetRequest(actorId: string, actorEntry: any, request: an
     if (Buffer.byteLength(message, 'utf8') > limits.maxMessageSizeBytes) {
       await reject(`message too large (max ${limits.maxMessageSizeBytes} bytes)`, 413, target);
     }
-    const messagesLastMinute = fleetAuditUsageCount(regAny, { actorId, action: 'send_message', status: 'accepted', sinceMs: 60 * 1000 });
+    const messagesLastMinute = (await canonicalFleetAudit({ actor: actorId, action: 'send_message', status: 'accepted', since: new Date(Date.now() - 60 * 1000).toISOString(), limit: 1000 })).length;
     if (messagesLastMinute >= limits.maxMessagesPerMinute) {
       await reject(`message rate limit reached (${limits.maxMessagesPerMinute}/minute)`, 429, target);
     }
@@ -5176,6 +5198,21 @@ function writePlaybookRunQueueItems(regAny: any, itemsRaw: PlaybookRunQueueItem[
   regAny.playbookRunQueue = { items };
 }
 
+async function canonicalPlaybookQueueItems(registry?: any): Promise<PlaybookRunQueueItem[]> {
+  const regAny = registry ?? (await loadRegistry());
+  const legacy = readPlaybookRunQueueItems(regAny);
+  const store = await fleetWorkflowStoreOrCompatibility();
+  if (!store) return legacy;
+  await store.backfillQueue(legacy);
+  return store.listQueue<PlaybookRunQueueItem>(true).filter((item) => (item as any).state !== 'cancelled' && (item as any).state !== 'completed');
+}
+
+async function enqueueCanonicalPlaybookQueueItem(item: PlaybookRunQueueItem): Promise<void> {
+  const store = await fleetWorkflowStoreOrCompatibility();
+  if (store) { await store.backfillQueue(readPlaybookRunQueueItems(await loadRegistry())); await store.enqueue(item); return; }
+  await updateRegistry((regAny:any)=>{const items=readPlaybookRunQueueItems(regAny);items.push(item);writePlaybookRunQueueItems(regAny,items);});
+}
+
 function normalizePlaybookRunQueueGate(raw: unknown): PlaybookRunQueueGate | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const gate = raw as Record<string, unknown>;
@@ -5251,13 +5288,13 @@ function hasActivePlaybookRunQueueGate(regAny: any, playbookIdRaw: unknown): boo
   return false;
 }
 
-function summarizePlaybookRunQueueItems(regAny: any): Array<
+async function summarizePlaybookRunQueueItems(regAny: any): Promise<Array<
   PlaybookRunQueueItem & {
     remainingCount: number;
     state: PlaybookRunQueueState;
   }
-> {
-  return readPlaybookRunQueueItems(regAny)
+>> {
+  return (await canonicalPlaybookQueueItems(regAny))
     .map((item) => {
       const remainingCount = Math.max(0, item.requestedCount - item.launchedCount - item.inFlightCount);
       const state: PlaybookRunQueueState = item.error
@@ -5385,11 +5422,12 @@ async function startPlaybookRunLaunch(opts: {
 }
 
 async function drainPlaybookRunLaunchQueue(): Promise<void> {
-  const plans = await updateRegistry((regLatest: any) => {
-    reconcilePlaybookRunQueueGates(regLatest);
-    const items = readPlaybookRunQueueItems(regLatest);
+  await updateRegistry((regLatest:any)=>{reconcilePlaybookRunQueueGates(regLatest);});
+  const regLatest = await loadRegistry();
+  const items = await canonicalPlaybookQueueItems(regLatest);
+  const store = await fleetWorkflowStoreOrCompatibility();
     const claimedSerialPlaybookIds = new Set<string>();
-    const plansLocal: Array<{
+    const plans: Array<{
       queueItemId: string;
       playbookId: string;
       repoPath: string;
@@ -5406,9 +5444,10 @@ async function drainPlaybookRunLaunchQueue(): Promise<void> {
       const claimCount = item.serializeFirstMessageGroup ? 1 : remainingCount;
       item.inFlightCount += claimCount;
       item.updatedAt = nowIso();
+      if (store) await store.updateQueue<PlaybookRunQueueItem>(item.id, () => ({ ...item }));
       if (item.serializeFirstMessageGroup) claimedSerialPlaybookIds.add(item.playbookId);
       for (let index = 0; index < claimCount; index += 1) {
-        plansLocal.push({
+        plans.push({
           queueItemId: item.id,
           playbookId: item.playbookId,
           repoPath: item.repoPath,
@@ -5417,9 +5456,7 @@ async function drainPlaybookRunLaunchQueue(): Promise<void> {
         });
       }
     }
-    writePlaybookRunQueueItems(regLatest, items);
-    return plansLocal;
-  });
+    if (!store) await updateRegistry((registry:any)=>writePlaybookRunQueueItems(registry,items));
   for (const plan of plans) {
     try {
       await startPlaybookRunLaunch({
@@ -5429,11 +5466,8 @@ async function drainPlaybookRunLaunchQueue(): Promise<void> {
         queueItemId: plan.queueItemId,
         serializeFirstMessageGroup: plan.serializeFirstMessageGroup,
       });
-      await updateRegistry((regLatest: any) => {
-        const items = readPlaybookRunQueueItems(regLatest);
-        const nextItems = items
-          .map((item) => {
-            if (item.id !== plan.queueItemId) return item;
+      if (store) {
+        await store.updateQueue<PlaybookRunQueueItem>(plan.queueItemId, (item) => {
             const nextInflight = Math.max(0, item.inFlightCount - 1);
             const nextLaunched = Math.min(item.requestedCount, item.launchedCount + 1);
             return {
@@ -5443,26 +5477,18 @@ async function drainPlaybookRunLaunchQueue(): Promise<void> {
               updatedAt: nowIso(),
               error: undefined,
             };
-          })
-          .filter((item) => item.requestedCount - item.launchedCount > 0 || item.inFlightCount > 0);
-        writePlaybookRunQueueItems(regLatest, nextItems);
-      });
+        });
+      } else await updateRegistry((registry:any)=>{const rows=readPlaybookRunQueueItems(registry).map((item)=>item.id===plan.queueItemId?{...item,inFlightCount:Math.max(0,item.inFlightCount-1),launchedCount:Math.min(item.requestedCount,item.launchedCount+1),updatedAt:nowIso(),error:undefined}:item);writePlaybookRunQueueItems(registry,rows);});
     } catch (error: any) {
       const message = error?.message ?? String(error);
-      await updateRegistry((regLatest: any) => {
-        const items = readPlaybookRunQueueItems(regLatest);
-        const nextItems = items.map((item) =>
-          item.id === plan.queueItemId
-            ? {
+      if (store) {
+        await store.updateQueue<PlaybookRunQueueItem>(plan.queueItemId, (item) => ({
                 ...item,
                 inFlightCount: Math.max(0, item.inFlightCount - 1),
                 updatedAt: nowIso(),
                 error: message,
-              }
-            : item,
-        );
-        writePlaybookRunQueueItems(regLatest, nextItems);
-      });
+              }));
+      } else await updateRegistry((registry:any)=>{const rows=readPlaybookRunQueueItems(registry).map((item)=>item.id===plan.queueItemId?{...item,inFlightCount:Math.max(0,item.inFlightCount-1),updatedAt:nowIso(),error:message}:item);writePlaybookRunQueueItems(registry,rows);});
       hubLog('warn', 'playbook run queue launch failed', {
         queueItemId: plan.queueItemId,
         playbookId: plan.playbookId,
@@ -18237,10 +18263,11 @@ export async function startDroneHubApiServer(opts: {
       if (pathname === '/api/settings/sync-sets') {
         if (method === 'GET') {
           const regAny: any = await loadRegistry();
+          const storedSyncSets = await syncSetService.storedSyncSets(regAny);
           json(res, 200, {
             ok: true,
             syncSets: await syncSetService.buildViewsFromRegistry(regAny),
-            updatedAt: regAny?.settings?.syncSets?.updatedAt ?? null,
+            updatedAt: storedSyncSets.reduce((latest, item) => !latest || item.updatedAt > latest ? item.updatedAt : latest, null as string | null),
           });
           return;
         }
@@ -18268,10 +18295,8 @@ export async function startDroneHubApiServer(opts: {
             await ensureHubManagedSyncSetSourceDir(syncSetId);
           }
           try {
-            await updateRegistry((regAny: any) => {
-              const syncSets = readStoredSyncSets(regAny);
-              syncSets.push(
-                buildStoredSyncSet({
+            await syncSetService.createSyncSet(
+              buildStoredSyncSet({
                   id: syncSetId,
                   label: input.label,
                   sourceType: input.sourceType,
@@ -18281,9 +18306,7 @@ export async function startDroneHubApiServer(opts: {
                   createdAt,
                   updatedAt: createdAt,
                 }),
-              );
-              writeStoredSyncSets(regAny, syncSets, createdAt);
-            });
+            );
           } catch (e) {
             if (createdManagedSourceDir) {
               await removeHubManagedSyncSetSourceDir(syncSetId);
@@ -18291,10 +18314,11 @@ export async function startDroneHubApiServer(opts: {
             throw e;
           }
           const regAny: any = await loadRegistry();
+          const storedSyncSets = await syncSetService.storedSyncSets(regAny);
           json(res, 201, {
             ok: true,
             syncSets: await syncSetService.buildViewsFromRegistry(regAny),
-            updatedAt: regAny?.settings?.syncSets?.updatedAt ?? null,
+            updatedAt: storedSyncSets.reduce((latest, item) => !latest || item.updatedAt > latest ? item.updatedAt : latest, null as string | null),
           });
           return;
         }
@@ -18348,7 +18372,7 @@ export async function startDroneHubApiServer(opts: {
           let notFound = false;
           const updatedAt = nowIso();
           const existingRegAny: any = await loadRegistry();
-          const existingSyncSets = readStoredSyncSets(existingRegAny);
+          const existingSyncSets = await syncSetService.storedSyncSets(existingRegAny);
           if (findStoredSyncSetIndex(existingSyncSets, syncSetId) < 0) {
             json(res, 404, { ok: false, error: `unknown sync set: ${syncSetId}` });
             return;
@@ -18356,14 +18380,8 @@ export async function startDroneHubApiServer(opts: {
           if (input.sourceType === 'hub-managed') {
             await ensureHubManagedSyncSetSourceDir(syncSetId);
           }
-          await updateRegistry((regAny: any) => {
-            const syncSets = readStoredSyncSets(regAny);
-            const index = findStoredSyncSetIndex(syncSets, syncSetId);
-            if (index < 0) {
-              notFound = true;
-              return;
-            }
-            const existing = syncSets[index]!;
+          {
+            const existing = existingSyncSets.find((item) => item.id === syncSetId)!;
             const materialChanged =
               existing.sourceType !== input.sourceType ||
               (existing.sourcePath ?? null) !== (input.sourcePath ?? null) ||
@@ -18377,7 +18395,7 @@ export async function startDroneHubApiServer(opts: {
                   targetStatus: {},
                 }
               : existing;
-            syncSets[index] = buildStoredSyncSet({
+            await syncSetService.updateSyncSet(buildStoredSyncSet({
               id: existing.id,
               label: input.label,
               sourceType: input.sourceType,
@@ -18387,42 +18405,35 @@ export async function startDroneHubApiServer(opts: {
               createdAt: existing.createdAt,
               updatedAt,
               existing: nextExisting,
-            });
-            writeStoredSyncSets(regAny, syncSets, updatedAt);
-          });
+            }));
+          }
           if (notFound) {
             json(res, 404, { ok: false, error: `unknown sync set: ${syncSetId}` });
             return;
           }
           const regAny: any = await loadRegistry();
+          const storedSyncSets = await syncSetService.storedSyncSets(regAny);
           json(res, 200, {
             ok: true,
             syncSets: await syncSetService.buildViewsFromRegistry(regAny),
-            updatedAt: regAny?.settings?.syncSets?.updatedAt ?? null,
+            updatedAt: storedSyncSets.reduce((latest, item) => !latest || item.updatedAt > latest ? item.updatedAt : latest, null as string | null),
           });
           return;
         }
 
         if (method === 'DELETE') {
-          let removed = false;
-          await updateRegistry((regAny: any) => {
-            const syncSets = readStoredSyncSets(regAny);
-            const index = findStoredSyncSetIndex(syncSets, syncSetId);
-            if (index < 0) return;
-            syncSets.splice(index, 1);
-            removed = true;
-            writeStoredSyncSets(regAny, syncSets, nowIso());
-          });
+          const removed = await syncSetService.deleteSyncSet(syncSetId);
           if (!removed) {
             json(res, 404, { ok: false, error: `unknown sync set: ${syncSetId}` });
             return;
           }
           await removeHubManagedSyncSetSourceDir(syncSetId);
           const regAny: any = await loadRegistry();
+          const storedSyncSets = await syncSetService.storedSyncSets(regAny);
           json(res, 200, {
             ok: true,
             syncSets: await syncSetService.buildViewsFromRegistry(regAny),
-            updatedAt: regAny?.settings?.syncSets?.updatedAt ?? null,
+            updatedAt: storedSyncSets.reduce((latest, item) => !latest || item.updatedAt > latest ? item.updatedAt : latest, null as string | null),
           });
           return;
         }
@@ -19803,16 +19814,7 @@ export async function startDroneHubApiServer(opts: {
         const actionFilter = String(u.searchParams.get('action') ?? '').trim();
         const statusFilter = String(u.searchParams.get('status') ?? '').trim();
         const limit = clampInt(Number(u.searchParams.get('limit') ?? 100), 1, 200);
-        const regAny: any = await loadRegistry();
-        const items = fleetAuditList(regAny)
-          .filter((item: any) => {
-            if (actorFilter && String(item?.actor ?? '') !== actorFilter && String(item?.actorName ?? '') !== actorFilter) return false;
-            if (targetFilter && String(item?.target ?? '') !== targetFilter && String(item?.targetName ?? '') !== targetFilter) return false;
-            if (actionFilter && String(item?.action ?? '') !== actionFilter) return false;
-            if (statusFilter && String(item?.status ?? '') !== statusFilter) return false;
-            return true;
-          })
-          .slice(0, limit);
+        const items = await canonicalFleetAudit({ actor: actorFilter, target: targetFilter, action: actionFilter, status: statusFilter, limit });
         json(res, 200, { ok: true, items });
         return;
       }
@@ -20071,11 +20073,7 @@ export async function startDroneHubApiServer(opts: {
           createdAt: nowIso(),
           updatedAt: nowIso(),
         } satisfies PlaybookRunQueueItem;
-        await updateRegistry((regLatest: any) => {
-          const items = readPlaybookRunQueueItems(regLatest);
-          items.push(queueItem);
-          writePlaybookRunQueueItems(regLatest, items);
-        });
+        await enqueueCanonicalPlaybookQueueItem(queueItem);
         void runFleetReconcilerCycle();
         json(res, 202, {
           ok: true,
@@ -20140,7 +20138,7 @@ export async function startDroneHubApiServer(opts: {
         const runs = Array.from(byId.values()).sort(
           (a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt) || Date.parse(b.createdAt) - Date.parse(a.createdAt),
         );
-        const queue = summarizePlaybookRunQueueItems(regAny).filter((item) => !repoPath || item.repoPath === repoPath);
+        const queue = (await summarizePlaybookRunQueueItems(regAny)).filter((item) => !repoPath || item.repoPath === repoPath);
         json(res, 200, { ok: true, runs, queue });
         return;
       }
@@ -20152,19 +20150,10 @@ export async function startDroneHubApiServer(opts: {
           json(res, 400, { ok: false, error: 'missing queue item id' });
           return;
         }
-        const removed = await updateRegistry((regLatest: any) => {
-          const items = readPlaybookRunQueueItems(regLatest);
-          const nextItems = items.map((item) => {
-            if (item.id !== queueItemId) return item;
-            return {
-              ...item,
-              requestedCount: Math.min(item.requestedCount, item.launchedCount + item.inFlightCount),
-              updatedAt: nowIso(),
-            };
-          });
-          writePlaybookRunQueueItems(regLatest, nextItems);
-          return items.some((item) => item.id === queueItemId);
-        });
+        const store = await fleetWorkflowStoreOrCompatibility();
+        const removed = store
+          ? await store.cancelQueue(queueItemId)
+          : await updateRegistry((regLatest:any)=>{const items=readPlaybookRunQueueItems(regLatest);const found=items.some((item)=>item.id===queueItemId);writePlaybookRunQueueItems(regLatest,items.filter((item)=>item.id!==queueItemId));return found;});
         if (removed) void runFleetReconcilerCycle();
         json(res, removed ? 200 : 404, removed ? { ok: true, removed: true, id: queueItemId } : { ok: false, error: `unknown queue item: ${queueItemId}` });
         return;
@@ -20181,22 +20170,10 @@ export async function startDroneHubApiServer(opts: {
         }
         const playbookId = typeof body?.playbookId === 'string' ? body.playbookId.trim() : '';
         const repoPath = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
-        const removed = await updateRegistry((regLatest: any) => {
-          const items = readPlaybookRunQueueItems(regLatest);
-          let removedCount = 0;
-          const nextItems = items.map((item) => {
-            if (playbookId && item.playbookId !== playbookId) return item;
-            if (repoPath && item.repoPath !== repoPath) return item;
-            removedCount += 1;
-            return {
-              ...item,
-              requestedCount: Math.min(item.requestedCount, item.launchedCount + item.inFlightCount),
-              updatedAt: nowIso(),
-            };
-          });
-          writePlaybookRunQueueItems(regLatest, nextItems);
-          return removedCount;
-        });
+        const store = await fleetWorkflowStoreOrCompatibility();
+        const removed = store
+          ? await store.clearQueue({ playbookId, repoPath })
+          : await updateRegistry((regLatest:any)=>{const items=readPlaybookRunQueueItems(regLatest);const matching=items.filter((item)=>(!playbookId||item.playbookId===playbookId)&&(!repoPath||item.repoPath===repoPath));writePlaybookRunQueueItems(regLatest,items.filter((item)=>!matching.includes(item)));return matching.length;});
         if (removed > 0) void runFleetReconcilerCycle();
         json(res, 200, { ok: true, removed, ...(playbookId ? { playbookId } : {}), ...(repoPath ? { repoPath } : {}) });
         return;
