@@ -68,6 +68,10 @@ describe('remote Hub server', () => {
     expect(routeAllowed('GET', '/api/drones/drone-a/chats/default/state')).toBe(true);
   });
 
+  test('allows selected-chat model discovery', () => {
+    expect(routeAllowed('GET', '/api/drones/drone-a/chats/default/models')).toBe(true);
+  });
+
   test('allows remote whiteboard routes', () => {
     expect(routeAllowed('GET', '/api/whiteboards')).toBe(true);
     expect(routeAllowed('POST', '/api/whiteboards')).toBe(true);

@@ -65,6 +65,8 @@ import {
 import { resolveRunningPromptLoopIdentity } from './prompt-loop-running-identity';
 import type { RepoTransferActionResult, RepoTransferPeer } from './use-workspace-actions';
 import {
+  displayedChatModelTitle,
+  formatAgentModelMetadata,
   formatBytes,
   parseGithubPullRequestHref,
   resolveDisplayedChatModel,
@@ -639,18 +641,8 @@ export function SelectedDroneWorkspace({
     loadingChatModels,
     modelControlEnabled,
   );
-  const compactModelTitle =
-    compactModel.source === 'configured'
-      ? `Model: ${compactModel.label} (configured for this chat)`
-      : compactModel.source === 'current'
-        ? `Model: ${compactModel.label} (reported as current by the agent CLI)`
-        : compactModel.source === 'default'
-          ? `Model: ${compactModel.label} (reported as default by the agent CLI)`
-          : compactModel.source === 'loading'
-            ? 'Detecting the default model from the agent CLI'
-            : compactModel.source === 'unsupported'
-              ? 'Model is not reported by this custom agent command'
-              : 'Model: agent CLI default (the CLI did not report a specific model)';
+  const compactModelTitle = displayedChatModelTitle(compactModel);
+  const compactAgentModelLabel = formatAgentModelMetadata(agentLabel, compactModel);
   const showCompactRuntimeMetadata = hasChats && chatRuntimeMetadataAvailable;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
@@ -1218,20 +1210,12 @@ export function SelectedDroneWorkspace({
                       <span className="flex-shrink-0 text-[var(--muted-dim)] opacity-45" aria-hidden="true">·</span>
                     ) : null}
                     {showCompactRuntimeMetadata ? (
-                      <>
-                        <span className="inline-flex min-w-0 items-center gap-1" title={`Agent CLI: ${agentLabel}`}>
-                          <span className="flex-shrink-0 uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>CLI</span>
-                          <span className="min-w-0 max-w-[90px] truncate font-mono">{agentLabel}</span>
-                        </span>
-                        <span className="flex-shrink-0 text-[var(--muted-dim)] opacity-45" aria-hidden="true">·</span>
-                        <span
-                          className="inline-flex min-w-0 items-center gap-1"
-                          title={compactModelTitle}
-                        >
-                          <span className="flex-shrink-0 uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>Model</span>
-                          <span className="min-w-0 max-w-[140px] truncate font-mono">{compactModel.label}</span>
-                        </span>
-                      </>
+                      <span
+                        className="min-w-0 max-w-[240px] truncate font-mono"
+                        title={`${agentLabel} · ${compactModelTitle}`}
+                      >
+                        {compactAgentModelLabel}
+                      </span>
                     ) : null}
                   </div>
                 ) : null}

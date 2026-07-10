@@ -27,6 +27,20 @@ export function resolveDisplayedChatModel(
   return { label: 'Default model', source: 'unknown' };
 }
 
+export function displayedChatModelTitle(model: DisplayedChatModel): string {
+  if (model.source === 'configured') return `Model: ${model.label} (configured for this chat)`;
+  if (model.source === 'current') return `Model: ${model.label} (reported as current by the agent CLI)`;
+  if (model.source === 'default') return `Model: ${model.label} (reported as default by the agent CLI)`;
+  if (model.source === 'loading') return 'Detecting the default model from the agent CLI';
+  if (model.source === 'unsupported') return 'Model is not reported by this custom agent command';
+  return 'Model: agent CLI default (the CLI did not report a specific model)';
+}
+
+export function formatAgentModelMetadata(agentLabelRaw: string, model: DisplayedChatModel): string {
+  const agentLabel = String(agentLabelRaw ?? '').trim() || 'Not reported';
+  return `${agentLabel} (${model.label})`;
+}
+
 export function formatEditorMtime(mtimeMs: number | null): string {
   if (typeof mtimeMs !== 'number' || !Number.isFinite(mtimeMs) || mtimeMs <= 0) return 'Unknown';
   try {

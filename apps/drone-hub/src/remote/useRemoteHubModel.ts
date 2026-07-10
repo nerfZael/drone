@@ -1,12 +1,15 @@
 import React from 'react';
+import { normalizeChatInfoPayload, type ChatInfo } from '../domain';
 import { droneChatEventMatches } from '../droneHub/app/chat-api';
 import { subscribeDroneChatEvents } from '../droneHub/app/chat-events';
+import type { ChatModelOption } from '../droneHub/app/app-types';
 import type { ChatSendPayload } from '../droneHub/chat';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../droneHub/types';
 import {
   remoteRequestJson,
   setRemoteCsrf,
   type ChatListResponse,
+  type ChatRuntimeResponse,
   type ChatStateResponse,
   type DroneListResponse,
   type RemoteSession,
@@ -16,6 +19,14 @@ import {
 type RemoteChatState = {
   transcripts: TranscriptItem[];
   pending: PendingPrompt[];
+};
+
+type RemoteChatRuntimeState = {
+  key: string | null;
+  info: ChatInfo | null;
+  models: ChatModelOption[];
+  loading: boolean;
+  error: string | null;
 };
 
 type UseRemoteHubModelOptions = {
@@ -39,6 +50,13 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const [draft, setDraft] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [chatStateLoading, setChatStateLoading] = React.useState(false);
+  const [chatRuntime, setChatRuntime] = React.useState<RemoteChatRuntimeState>({
+    key: null,
+    info: null,
+    models: [],
+    loading: false,
+    error: null,
+  });
   const [sending, setSending] = React.useState(false);
   const [publishing, setPublishing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -66,6 +84,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setTranscripts([]);
     setPending([]);
     setChatStateLoading(false);
+    setChatRuntime({ key: null, info: null, models: [], loading: false, error: null });
     setChatEventsConnected(false);
     activeChatStateKeyRef.current = null;
     loadedChatStateKeyRef.current = null;
@@ -231,6 +250,51 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     loadedChatStateKeyRef.current = null;
     loadedFullTranscriptKeyRef.current = null;
   }, [authenticated, effectiveDroneId]);
+
+  React.useEffect(() => {
+    const key = effectiveDroneId && selectedChat ? remoteChatStateKey(effectiveDroneId, selectedChat) : null;
+    if (!authenticated || !effectiveDroneId || !selectedChat || !key) {
+      setChatRuntime({ key: null, info: null, models: [], loading: false, error: null });
+      return;
+    }
+
+    let cancelled = false;
+    setChatRuntime({ key, info: null, models: [], loading: true, error: null });
+    void remoteRequestJson<ChatRuntimeResponse>(
+      `/api/drones/${encodeURIComponent(effectiveDroneId)}/chats/${encodeURIComponent(selectedChat)}/models`,
+    )
+      .then((data) => {
+        if (cancelled) return;
+        const models = (Array.isArray(data.models) ? data.models : [])
+          .map((model) => ({
+            id: String(model?.id ?? '').trim(),
+            label: String(model?.label ?? model?.id ?? '').trim(),
+            ...(model?.isCurrent ? { isCurrent: true } : {}),
+            ...(model?.isDefault ? { isDefault: true } : {}),
+          }))
+          .filter((model) => model.id);
+        setChatRuntime({
+          key,
+          info: normalizeChatInfoPayload(data),
+          models,
+          loading: false,
+          error: null,
+        });
+      })
+      .catch((err: any) => {
+        if (cancelled) return;
+        setChatRuntime({
+          key,
+          info: null,
+          models: [],
+          loading: false,
+          error: err?.message ?? String(err),
+        });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [authenticated, effectiveDroneId, selectedChat]);
 
   React.useEffect(() => {
     if (!authenticated || !effectiveDroneId || !selectedChat) return;
@@ -433,6 +497,19 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     markUnauthenticated();
   }, [markUnauthenticated]);
 
+  const selectedChatRuntimeKey = effectiveDroneId && selectedChat
+    ? remoteChatStateKey(effectiveDroneId, selectedChat)
+    : null;
+  const selectedChatRuntime: RemoteChatRuntimeState = chatRuntime.key === selectedChatRuntimeKey
+    ? chatRuntime
+    : {
+        key: selectedChatRuntimeKey,
+        info: null,
+        models: [],
+        loading: Boolean(selectedChatRuntimeKey),
+        error: null,
+      };
+
   return {
     authenticated,
     session,
@@ -450,6 +527,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setDraft,
     loading,
     chatStateLoading,
+    chatRuntime: selectedChatRuntime,
     sending,
     publishing,
     error,
