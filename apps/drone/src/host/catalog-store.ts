@@ -5,6 +5,7 @@ import {
   type HubDatabaseConnection,
   type HubDatabaseMigration,
 } from './hub-database';
+import { appendHubOutboxEvent, initializeHubOutbox } from './hub-outbox';
 
 const CATALOG_MIGRATIONS: readonly HubDatabaseMigration[] = [
   {
@@ -86,6 +87,21 @@ const CATALOG_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: 'versioned group and repository commands',
+    migrate(connection) {
+      connection.exec(`
+        ALTER TABLE catalog_groups ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0);
+        ALTER TABLE catalog_groups ADD COLUMN deleted_at TEXT;
+        ALTER TABLE catalog_repositories ADD COLUMN version INTEGER NOT NULL DEFAULT 1 CHECK (version > 0);
+        ALTER TABLE catalog_repositories ADD COLUMN environment_version INTEGER NOT NULL DEFAULT 1 CHECK (environment_version > 0);
+        ALTER TABLE catalog_repositories ADD COLUMN agents_version INTEGER NOT NULL DEFAULT 1 CHECK (agents_version > 0);
+        ALTER TABLE catalog_repositories ADD COLUMN updated_at TEXT;
+        ALTER TABLE catalog_repositories ADD COLUMN deleted_at TEXT;
+      `);
+    },
+  },
 ];
 
 export type CatalogSkillRecord = {
@@ -121,7 +137,7 @@ export type CatalogMcpTokenRecord = {
   revokedAt?: string;
 };
 
-export type CatalogGroupRecord = { name: string; createdAt: string; updatedAt: string };
+export type CatalogGroupRecord = { name: string; createdAt: string; updatedAt: string; version?: number };
 
 export type CatalogRepositoryRecord = {
   path: string;
@@ -130,6 +146,10 @@ export type CatalogRepositoryRecord = {
   github?: { owner: string; repo: string };
   environment?: unknown;
   agents?: unknown;
+  updatedAt?: string;
+  version?: number;
+  environmentVersion?: number;
+  agentsVersion?: number;
 };
 
 export type CatalogPlaybookRecord = {
@@ -162,6 +182,7 @@ export class CatalogStore {
   private constructor(private readonly database: HubDatabase) {}
 
   static async open(database: HubDatabase = requireHubDatabase()): Promise<CatalogStore> {
+    initializeHubOutbox(database);
     database.read((connection) => {
       applyHubDatabaseMigrations(connection, CATALOG_MIGRATIONS, 'catalog');
     });
@@ -352,9 +373,7 @@ export class CatalogStore {
 
   listGroups(): CatalogGroupRecord[] {
     return this.database.read((connection) => (connection.prepare(
-      'SELECT name, created_at, updated_at FROM catalog_groups ORDER BY name').all() as any[]).map((row) => ({
-        name: row.name, createdAt: row.created_at, updatedAt: row.updated_at,
-      })));
+      'SELECT * FROM catalog_groups WHERE deleted_at IS NULL ORDER BY name').all() as any[]).map(this.groupFromRow));
   }
 
   backfillGroups(records: CatalogGroupRecord[]): Promise<boolean> {
@@ -368,26 +387,75 @@ export class CatalogStore {
 
   putGroup(record: CatalogGroupRecord, insertOnly = false): Promise<CatalogGroupRecord> {
     return this.database.writeTransaction('write group catalog', (connection) => {
-      const sql = insertOnly
-        ? 'INSERT OR IGNORE INTO catalog_groups (name,created_at,updated_at) VALUES (?,?,?)'
-        : `INSERT INTO catalog_groups (name,created_at,updated_at) VALUES (?,?,?)
-           ON CONFLICT(name) DO UPDATE SET updated_at=excluded.updated_at`;
-      connection.prepare(sql).run(record.name, record.createdAt, record.updatedAt);
+      if (insertOnly) {
+        connection.prepare('INSERT OR IGNORE INTO catalog_groups (name,created_at,updated_at) VALUES (?,?,?)')
+          .run(record.name, record.createdAt, record.updatedAt);
+      } else {
+        const current = connection.prepare('SELECT * FROM catalog_groups WHERE name=?').get(record.name) as any;
+        connection.prepare(`INSERT INTO catalog_groups (name,created_at,updated_at,version,deleted_at) VALUES (?,?,?,1,NULL)
+          ON CONFLICT(name) DO UPDATE SET updated_at=excluded.updated_at, version=catalog_groups.version+1, deleted_at=NULL`)
+          .run(record.name, record.createdAt, record.updatedAt);
+        appendHubOutboxEvent(connection, {
+          topic: 'catalog.groups', eventType: current?.deleted_at == null && current ? 'group.updated' : 'group.created',
+          aggregateType: 'group', aggregateId: record.name,
+          payload: { name: record.name, updatedAt: record.updatedAt },
+        });
+      }
       const row = connection.prepare('SELECT * FROM catalog_groups WHERE name=?').get(record.name) as any;
-      return { name: row.name, createdAt: row.created_at, updatedAt: row.updated_at };
+      return this.groupFromRow(row);
     });
   }
 
-  deleteGroup(name: string): Promise<boolean> { return this.deleteById('catalog_groups', name, 'delete group', 'name'); }
+  deleteGroup(name: string, at = new Date().toISOString()): Promise<boolean> {
+    return this.database.writeTransaction('delete group', (connection) => {
+      const info = connection.prepare(`UPDATE catalog_groups SET deleted_at=?,updated_at=?,version=version+1
+        WHERE name=? AND deleted_at IS NULL`).run(at, at, name);
+      if (Number(info.changes ?? 0) !== 1) return false;
+      appendHubOutboxEvent(connection, { topic: 'catalog.groups', eventType: 'group.deleted',
+        aggregateType: 'group', aggregateId: name, payload: { name, deletedAt: at } });
+      return true;
+    });
+  }
+
+  renameGroups(rewrites: Array<{ from: string; to: string }>, at = new Date().toISOString()): Promise<number> {
+    return this.database.writeTransaction('rename group hierarchy', (connection) => {
+      const sources = new Set(rewrites.map((item) => item.from));
+      const sourceRows = new Map<string, any>();
+      for (const item of rewrites) {
+        const row = connection.prepare('SELECT * FROM catalog_groups WHERE name=? AND deleted_at IS NULL').get(item.from) as any;
+        if (row) sourceRows.set(item.from, row);
+      }
+      for (const item of rewrites) {
+        const collision = connection.prepare('SELECT 1 FROM catalog_groups WHERE name=? AND deleted_at IS NULL').get(item.to);
+        if (collision && !sources.has(item.to)) throw new Error(`group already exists: ${item.to}`);
+      }
+      let renamed = 0;
+      for (const item of rewrites) {
+        const source = sourceRows.get(item.from);
+        if (!source) continue;
+        connection.prepare(`INSERT INTO catalog_groups (name,created_at,updated_at,version,deleted_at) VALUES (?,?,?,?,NULL)
+          ON CONFLICT(name) DO UPDATE SET updated_at=excluded.updated_at,version=catalog_groups.version+1,deleted_at=NULL`)
+          .run(item.to, source.created_at, at, Number(source.version ?? 1) + 1);
+        connection.prepare('UPDATE catalog_groups SET deleted_at=?,updated_at=?,version=version+1 WHERE name=?')
+          .run(at, at, item.from);
+        appendHubOutboxEvent(connection, { topic: 'catalog.groups', eventType: 'group.renamed', aggregateType: 'group',
+          aggregateId: item.to, payload: { oldName: item.from, newName: item.to, updatedAt: at } });
+        renamed += 1;
+      }
+      return renamed;
+    });
+  }
 
   listRepositories(): CatalogRepositoryRecord[] {
-    return this.database.read((connection) => (connection.prepare('SELECT * FROM catalog_repositories ORDER BY path').all() as any[])
-      .map((row) => ({ path: row.path, addedAt: row.added_at,
-        ...(row.remote_url ? { remoteUrl: row.remote_url } : {}),
-        ...(row.github_owner && row.github_repo ? { github: { owner: row.github_owner, repo: row.github_repo } } : {}),
-        ...(row.environment_json ? { environment: optionalJson(row.environment_json) } : {}),
-        ...(row.agents_json ? { agents: optionalJson(row.agents_json) } : {}),
-      })));
+    return this.database.read((connection) => (connection.prepare(
+      'SELECT * FROM catalog_repositories WHERE deleted_at IS NULL ORDER BY path').all() as any[]).map(this.repositoryFromRow));
+  }
+
+  getRepository(path: string): CatalogRepositoryRecord | null {
+    return this.database.read((connection) => {
+      const row = connection.prepare('SELECT * FROM catalog_repositories WHERE path=? AND deleted_at IS NULL').get(path) as any;
+      return row ? this.repositoryFromRow(row) : null;
+    });
   }
 
   backfillRepositories(records: CatalogRepositoryRecord[]): Promise<boolean> {
@@ -404,16 +472,51 @@ export class CatalogStore {
 
   putRepository(record: CatalogRepositoryRecord, insertOnly = false): Promise<void> {
     return this.database.writeTransaction('write repository catalog', (connection) => {
-      const values = [record.path, record.addedAt, record.remoteUrl ?? null, record.github?.owner ?? null,
-        record.github?.repo ?? null, record.environment === undefined ? null : json(record.environment),
-        record.agents === undefined ? null : json(record.agents)];
-      const sql = insertOnly ? `INSERT OR IGNORE INTO catalog_repositories
-        (path,added_at,remote_url,github_owner,github_repo,environment_json,agents_json) VALUES (?,?,?,?,?,?,?)`
-        : `INSERT INTO catalog_repositories
-        (path,added_at,remote_url,github_owner,github_repo,environment_json,agents_json) VALUES (?,?,?,?,?,?,?)
-        ON CONFLICT(path) DO UPDATE SET remote_url=excluded.remote_url, github_owner=excluded.github_owner,
-          github_repo=excluded.github_repo, environment_json=excluded.environment_json, agents_json=excluded.agents_json`;
-      connection.prepare(sql).run(...values);
+      if (insertOnly) {
+        connection.prepare(`INSERT OR IGNORE INTO catalog_repositories
+          (path,added_at,remote_url,github_owner,github_repo,environment_json,agents_json,updated_at)
+          VALUES (?,?,?,?,?,?,?,?)`).run(record.path, record.addedAt, record.remoteUrl ?? null,
+          record.github?.owner ?? null, record.github?.repo ?? null,
+          record.environment === undefined ? null : json(record.environment),
+          record.agents === undefined ? null : json(record.agents), record.updatedAt ?? record.addedAt);
+        return;
+      }
+      const current = connection.prepare('SELECT * FROM catalog_repositories WHERE path=?').get(record.path) as any;
+      const environmentJson = record.environment === undefined ? current?.environment_json ?? null : json(record.environment);
+      const agentsJson = record.agents === undefined ? current?.agents_json ?? null : json(record.agents);
+      const updatedAt = record.updatedAt ?? new Date().toISOString();
+      connection.prepare(`INSERT INTO catalog_repositories
+        (path,added_at,remote_url,github_owner,github_repo,environment_json,agents_json,updated_at,version,deleted_at)
+        VALUES (?,?,?,?,?,?,?,?,1,NULL)
+        ON CONFLICT(path) DO UPDATE SET remote_url=excluded.remote_url,github_owner=excluded.github_owner,
+          github_repo=excluded.github_repo,environment_json=excluded.environment_json,agents_json=excluded.agents_json,
+          updated_at=excluded.updated_at,version=catalog_repositories.version+1,deleted_at=NULL`)
+        .run(record.path, current?.added_at ?? record.addedAt, record.remoteUrl ?? current?.remote_url ?? null,
+          record.github?.owner ?? current?.github_owner ?? null, record.github?.repo ?? current?.github_repo ?? null,
+          environmentJson, agentsJson, updatedAt);
+      appendHubOutboxEvent(connection, { topic: 'catalog.repositories',
+        eventType: current?.deleted_at == null && current ? 'repository.updated' : 'repository.registered',
+        aggregateType: 'repository', aggregateId: record.path,
+        payload: { path: record.path, updatedAt } });
+    });
+  }
+
+  updateRepositoryEnvironment(path: string, environment: unknown, at = new Date().toISOString()): Promise<CatalogRepositoryRecord> {
+    return this.updateRepositoryPart(path, 'environment', environment, at);
+  }
+
+  updateRepositoryAgents(path: string, agents: unknown, at = new Date().toISOString()): Promise<CatalogRepositoryRecord> {
+    return this.updateRepositoryPart(path, 'agents', agents, at);
+  }
+
+  deleteRepository(path: string, at = new Date().toISOString()): Promise<boolean> {
+    return this.database.writeTransaction('delete repository catalog', (connection) => {
+      const info = connection.prepare(`UPDATE catalog_repositories SET deleted_at=?,updated_at=?,version=version+1
+        WHERE path=? AND deleted_at IS NULL`).run(at, at, path);
+      if (Number(info.changes ?? 0) !== 1) return false;
+      appendHubOutboxEvent(connection, { topic: 'catalog.repositories', eventType: 'repository.removed',
+        aggregateType: 'repository', aggregateId: path, payload: { path, deletedAt: at } });
+      return true;
     });
   }
 
@@ -486,6 +589,48 @@ export class CatalogStore {
     ...(row.last_used_at ? { lastUsedAt: row.last_used_at } : {}),
     ...(row.revoked_at ? { revokedAt: row.revoked_at } : {}),
   });
+
+  private groupFromRow = (row: any): CatalogGroupRecord => ({
+    name: row.name,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
+    version: Number(row.version ?? 1),
+  });
+
+  private repositoryFromRow = (row: any): CatalogRepositoryRecord => ({
+    path: row.path,
+    addedAt: row.added_at,
+    ...(row.remote_url ? { remoteUrl: row.remote_url } : {}),
+    ...(row.github_owner && row.github_repo ? { github: { owner: row.github_owner, repo: row.github_repo } } : {}),
+    ...(row.environment_json ? { environment: optionalJson(row.environment_json) } : {}),
+    ...(row.agents_json ? { agents: optionalJson(row.agents_json) } : {}),
+    ...(row.updated_at ? { updatedAt: row.updated_at } : {}),
+    version: Number(row.version ?? 1),
+    environmentVersion: Number(row.environment_version ?? 1),
+    agentsVersion: Number(row.agents_version ?? 1),
+  });
+
+  private updateRepositoryPart(path: string, part: 'environment' | 'agents', value: unknown, at: string): Promise<CatalogRepositoryRecord> {
+    return this.database.writeTransaction(`update repository ${part}`, (connection) => {
+      const current = connection.prepare('SELECT * FROM catalog_repositories WHERE path=? AND deleted_at IS NULL').get(path) as any;
+      if (!current) {
+        connection.prepare(`INSERT INTO catalog_repositories
+          (path,added_at,environment_json,agents_json,updated_at,version,environment_version,agents_version,deleted_at)
+          VALUES (?,?,?,?,?,1,1,1,NULL)`).run(path, at, part === 'environment' ? json(value) : null,
+          part === 'agents' ? json(value) : null, at);
+      } else if (part === 'environment') {
+        connection.prepare(`UPDATE catalog_repositories SET environment_json=?,environment_version=environment_version+1,
+          version=version+1,updated_at=? WHERE path=? AND deleted_at IS NULL`).run(json(value), at, path);
+      } else {
+        connection.prepare(`UPDATE catalog_repositories SET agents_json=?,agents_version=agents_version+1,
+          version=version+1,updated_at=? WHERE path=? AND deleted_at IS NULL`).run(json(value), at, path);
+      }
+      appendHubOutboxEvent(connection, { topic: 'catalog.repositories', eventType: `repository.${part}.updated`,
+        aggregateType: 'repository', aggregateId: path, payload: { path, updatedAt: at } });
+      const row = connection.prepare('SELECT * FROM catalog_repositories WHERE path=?').get(path) as any;
+      return this.repositoryFromRow(row);
+    });
+  }
 
   private deleteById(table: string, value: string, label: string, column = 'id'): Promise<boolean> {
     const allowed = new Set(['catalog_skills', 'catalog_mcp_servers', 'catalog_groups', 'catalog_playbooks']);

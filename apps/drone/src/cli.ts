@@ -80,6 +80,7 @@ import {
   resolveVoiceStreamPairingPasswordSettings,
 } from './hub/hub-settings';
 import { buildVoiceStreamProcessEnv } from './hub/voice-stream-launch';
+import { ensureCanonicalGroup, listCanonicalGroups, listCanonicalRepositories, registerCanonicalRepository } from './hub/groups-repositories';
 
 const requireFromCli = createRequire(__filename);
 
@@ -1615,13 +1616,10 @@ createCommand
       }
 
       try {
+        if (group) await ensureCanonicalGroup(group);
         await updateRegistry((reg) => {
           const at = new Date().toISOString();
           if (registryHasDisplayName(reg, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
-          if (group) {
-            (reg as any).groups = (reg as any).groups ?? {};
-            if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
-          }
           reg.drones[stableId] = {
             id: stableId,
             runtime: 'host',
@@ -1782,13 +1780,10 @@ createCommand
 
     await waitForHealth(hostPort, token);
 
+    if (group) await ensureCanonicalGroup(group);
     await updateRegistry((reg) => {
       const at = new Date().toISOString();
       if (registryHasDisplayName(reg, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
-      if (group) {
-        (reg as any).groups = (reg as any).groups ?? {};
-        if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
-      }
       reg.drones[stableId] = {
         id: stableId,
         runtime: 'container',
@@ -1859,6 +1854,7 @@ importCommand
       }
     }
 
+    if (group) await ensureCanonicalGroup(group);
     await updateRegistry((reg) => {
       const at = new Date().toISOString();
       // Enforce unique display names (unless this is updating the same id).
@@ -1866,10 +1862,6 @@ importCommand
         if (String((v as any)?.name ?? '').trim() === displayName && String(k) !== String(stableId)) {
           throw new Error(`drone already exists: ${displayName}`);
         }
-      }
-      if (group) {
-        (reg as any).groups = (reg as any).groups ?? {};
-        if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
       }
       reg.drones[stableId] = {
         id: stableId,
@@ -2168,8 +2160,8 @@ program
   .action(async () => {
     const reg = await loadRegistry();
     const byGroup = new Map<string, string[]>();
-    for (const g of Object.keys((reg as any).groups ?? {})) {
-      const name = String(g ?? '').trim();
+    for (const entry of await listCanonicalGroups()) {
+      const name = String(entry.name ?? '').trim();
       if (!name) continue;
       if (!byGroup.has(name)) byGroup.set(name, []);
     }
@@ -2216,10 +2208,8 @@ program
     const group = String(groupRaw ?? '').trim();
     if (!group) throw new Error('invalid group (must be non-empty)');
 
+    await ensureCanonicalGroup(group);
     const prev = await updateRegistry((reg) => {
-      const at = new Date().toISOString();
-      (reg as any).groups = (reg as any).groups ?? {};
-      if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
       const { key, drone: d } = resolveDroneFromRegistry(reg as any, String(name));
       const prev = String(d.group ?? '').trim() || null;
       d.group = group;
@@ -2260,24 +2250,14 @@ program
     const github = parseGithubSlug(remoteUrl);
     const addedAt = new Date().toISOString();
 
-    await updateRegistry((reg: any) => {
-      const cur = reg?.repos;
-      const next: Record<string, any> =
-        cur && typeof cur === 'object' && !Array.isArray(cur)
-          ? (cur as any)
-          : {};
-      next[repoRoot] = {
+    await registerCanonicalRepository({
         path: repoRoot,
         addedAt,
         ...(remoteUrl ? { remoteUrl } : {}),
         ...(github ? { github } : {}),
-      };
-      reg.repos = next;
     });
 
-    const regAny: any = await loadRegistry();
-    const reposObj = regAny?.repos && typeof regAny.repos === 'object' && !Array.isArray(regAny.repos) ? regAny.repos : {};
-    const repos = Object.values(reposObj)
+    const repos = (await listCanonicalRepositories())
       .map((r: any) => ({
         path: typeof r?.path === 'string' ? String(r.path) : '',
         addedAt: typeof r?.addedAt === 'string' ? String(r.addedAt) : null,

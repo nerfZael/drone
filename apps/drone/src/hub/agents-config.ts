@@ -1,3 +1,5 @@
+import { canonicalRepositoriesMap } from './groups-repositories';
+
 export type RepoAgentsMode = 'inherit' | 'override' | 'disabled';
 
 export type ResolvedDefaultAgentsConfig = {
@@ -90,4 +92,8 @@ export function resolveRepoAgentsConfig(regAny: any, repoPathRaw: unknown): Reso
     effectiveContent,
     effectiveSource,
   };
+}
+
+export async function resolveCanonicalRepoAgentsConfig(regAny: any, repoPathRaw: unknown): Promise<ResolvedRepoAgentsConfig> {
+  return resolveRepoAgentsConfig({ ...regAny, repos: await canonicalRepositoriesMap() }, repoPathRaw);
 }
