@@ -230,6 +230,7 @@ import {
   quarantineWorktreePath,
   updateHostRef,
 } from './repoOps';
+import { ShortLivedSingleFlightCache } from './repo-changes-scan-cache';
 import { isHubApiAuthorized, isHubApiAuthorizedForWebSocket, rejectWebSocketUpgrade } from './hub-auth';
 import { bashQuote, encodeRemotePath, hexEncodeUtf8, normalizeContainerPath, parseBoolParam, shellQuoteIfNeeded } from './hub-format';
 import { readJsonBody, readRawBody, withCors } from './hub-http';
@@ -5664,6 +5665,7 @@ const cliModelFlagSupportCache = new Map<string, { atMs: number; supported: bool
 const PULL_PREVIEW_HOST_MERGE_CACHE_TTL_MS = 25_000;
 const pullPreviewHostMergeCache = new Map<string, { atMs: number; entries: RepoPullChangeEntry[] }>();
 const GITHUB_PULL_REQUEST_LIST_CACHE_TTL_MS = 12_000;
+const repoChangesScanCache = new ShortLivedSingleFlightCache<any>(2_000);
 const githubPullRequestListCache = new Map<
   string,
   {
@@ -22434,6 +22436,17 @@ export async function startDroneHubApiServer(opts: {
       // GET /api/drones/:name/repo/changes
       // Returns repo status in a machine-friendly shape for source-control style UIs.
       if (
+        method !== 'GET' &&
+        parts.length >= 4 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'repo'
+      ) {
+        // Repo mutations are comparatively rare. Clearing the tiny scan cache
+        // here keeps every mutation route coherent, including future routes.
+        repoChangesScanCache.invalidate();
+      }
+      if (
         method === 'GET' &&
         parts.length === 5 &&
         parts[0] === 'api' &&
@@ -22461,7 +22474,10 @@ export async function startDroneHubApiServer(opts: {
               return;
             }
             const repoRoot = await gitTopLevel(repoPathRaw);
-            const summary = await gitRepoChangesSummary(repoRoot);
+            const summary = await repoChangesScanCache.getOrLoad(
+              `host\0${repoRoot}`,
+              () => gitRepoChangesSummary(repoRoot),
+            );
             json(res, 200, {
               ok: true,
               id: droneId,
@@ -22475,13 +22491,16 @@ export async function startDroneHubApiServer(opts: {
             return;
           } else {
             const repoPathInContainer = droneRepoPathInContainer(d);
-            const { repoRoot, summary } = await withLockedDroneContainer(
+            const { repoRoot, summary } = await withReadonlyDroneContainer(
               { requestedDroneName: droneName, droneEntry: d },
               async ({ containerName }) => {
-                return await droneRepoChangesSummary({
-                  container: containerName,
-                  repoPathInContainer,
-                });
+                return await repoChangesScanCache.getOrLoad(
+                  `container\0${containerName}\0${repoPathInContainer}`,
+                  () => droneRepoChangesSummary({
+                    container: containerName,
+                    repoPathInContainer,
+                  }),
+                );
               },
             );
             json(res, 200, {

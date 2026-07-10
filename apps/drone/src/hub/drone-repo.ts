@@ -51,23 +51,22 @@ export async function droneRepoChangesSummary(opts: {
     args: ['status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'],
   });
   const parsed = parseGitStatusPorcelainV2Z(statusRaw.stdout);
-  const entries = await Promise.all(
-    parsed.entries.map(async (entry) => {
-      const needsWorktreeHash = entry.isUntracked || (entry.unstagedType !== null && entry.unstagedType !== 'deleted');
-      const worktreeContentHash = needsWorktreeHash
-        ? await hashDroneFileContents({
-            container: opts.container,
-            repoPathInContainer,
-            repoRelativePath: entry.path,
-          })
-        : null;
-      return {
-        ...entry,
-        reviewKey: repoChangeReviewKey(entry.path, entry.originalPath),
-        reviewToken: buildWorkingTreeRepoChangeReviewToken(entry, worktreeContentHash),
-      };
-    }),
-  );
+  const pathsToHash = parsed.entries
+    .filter((entry) => entry.isUntracked || (entry.unstagedType !== null && entry.unstagedType !== 'deleted'))
+    .map((entry) => entry.path);
+  const worktreeHashes = await hashDroneFileContentsBatch({
+    container: opts.container,
+    repoPathInContainer,
+    repoRelativePaths: pathsToHash,
+  });
+  const entries = parsed.entries.map((entry) => {
+    const worktreeContentHash = worktreeHashes.get(entry.path) ?? null;
+    return {
+      ...entry,
+      reviewKey: repoChangeReviewKey(entry.path, entry.originalPath),
+      reviewToken: buildWorkingTreeRepoChangeReviewToken(entry, worktreeContentHash),
+    };
+  });
   return {
     repoRoot,
     summary: {
@@ -77,21 +76,29 @@ export async function droneRepoChangesSummary(opts: {
   };
 }
 
-async function hashDroneFileContents(opts: {
+export async function hashDroneFileContentsBatch(opts: {
   container: string;
   repoPathInContainer: string;
-  repoRelativePath: string;
-}): Promise<string | null> {
-  const requestedPath = String(opts.repoRelativePath ?? '').trim();
-  if (!requestedPath || requestedPath.includes('\0')) return null;
-  const result = await runGitInDrone({
+  repoRelativePaths: string[];
+  runGit?: typeof runGitInDrone;
+}): Promise<Map<string, string>> {
+  const requestedPaths = opts.repoRelativePaths
+    .map((value) => String(value ?? '').trim())
+    .filter((value) => value && !value.includes('\0'));
+  if (requestedPaths.length === 0) return new Map();
+  const result = await (opts.runGit ?? runGitInDrone)({
     container: opts.container,
     repoPathInContainer: opts.repoPathInContainer,
-    args: ['hash-object', '--no-filters', '--', requestedPath],
+    args: ['hash-object', '--no-filters', '--', ...requestedPaths],
   });
-  if (result.code !== 0) return null;
-  const hash = String(result.stdout ?? '').trim().toLowerCase();
-  return /^[0-9a-f]{40}$/.test(hash) ? hash : null;
+  if (result.code !== 0) return new Map();
+  const hashes = String(result.stdout ?? '').trim().split(/\r?\n/);
+  const mapped = new Map<string, string>();
+  requestedPaths.forEach((requestedPath, index) => {
+    const hash = String(hashes[index] ?? '').trim().toLowerCase();
+    if (/^[0-9a-f]{40}$/.test(hash)) mapped.set(requestedPath, hash);
+  });
+  return mapped;
 }
 
 export async function droneRepoDiffForPath(opts: {
