@@ -7,14 +7,18 @@ const { afterEach, describe, test } = require('node:test');
 const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const {
+  applyChatReconciliationInStore,
   deleteChatFromStore,
   importDroneChatsFromRegistry,
   listChatsFromStore,
+  patchChatMetadataInStore,
   readChatFromStore,
   readTranscriptTurnsFromStore,
   renameChatInStore,
+  rollbackTranscriptToTurnInStore,
   upsertChatInStore,
   upsertTranscriptTurnInStore,
+  updateTranscriptTurnInStore,
 } = require('../../dist/hub/transcript-store.js');
 
 const originalDataDir = process.env.DRONE_DATA_DIR;
@@ -146,6 +150,103 @@ describe('canonical chat and transcript repository', () => {
       /circular/i,
     );
     assert.equal(readChatFromStore({ droneId: 'drone-1', chatName: 'broken' }).chat, null);
+  });
+
+  test('serializes metadata commands and commits reconciliation with one transactional outbox event', async () => {
+    tempDataDir('metadata-commands');
+    await upsertChatInStore({ droneId: 'drone-1', chatName: 'default', chatEntry: legacyChat('base') });
+    requireHubDatabase().read((connection) => connection.exec('DELETE FROM hub_outbox'));
+
+    await Promise.all([
+      patchChatMetadataInStore({
+        droneId: 'drone-1', chatName: 'default', patch: { setIfMissing: { claudeSessionId: 'session-a' } },
+      }),
+      patchChatMetadataInStore({
+        droneId: 'drone-1', chatName: 'default', patch: { setIfMissing: { claudeSessionId: 'session-b' } },
+      }),
+    ]);
+    const selectedSession = readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat.claudeSessionId;
+    assert.ok(selectedSession === 'session-a' || selectedSession === 'session-b');
+
+    await applyChatReconciliationInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      metadataPatch: { set: { codexThreadId: 'thread-1', piSessionId: 'pi-1' } },
+      turns: [{ id: 'reconciled', at: '2026-01-01T00:01:00.000Z', prompt: 'work', ok: true, output: 'done' }],
+    });
+    const chat = readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat;
+    assert.equal(chat.codexThreadId, 'thread-1');
+    assert.equal(chat.piSessionId, 'pi-1');
+    assert.deepEqual(chat.turns.map((turn) => turn.id), ['reconciled']);
+
+    const circular = {}; circular.self = circular;
+    await assert.rejects(
+      applyChatReconciliationInStore({
+        droneId: 'drone-1',
+        chatName: 'default',
+        metadataPatch: { set: { broken: circular } },
+        turns: [{ id: 'must-rollback', at: '2026-01-01T00:02:00.000Z', prompt: 'bad', ok: true, output: 'bad' }],
+      }),
+      /circular/i,
+    );
+    assert.equal(readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat.turns.length, 1);
+
+    const events = requireHubDatabase().read((connection) =>
+      connection.prepare("SELECT event_type FROM hub_outbox WHERE topic = 'chat.changes' ORDER BY id").all(),
+    );
+    assert.deepEqual(events, [
+      { event_type: 'chat.metadata.changed' },
+      { event_type: 'chat.reconciled' },
+    ]);
+  });
+
+  test('updates individual turns and rolls back later turns without rewriting the transcript', async () => {
+    tempDataDir('targeted-turns');
+    await upsertChatInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      chatEntry: legacyChat('base', [
+        { id: 'one', at: '2026-01-01T00:01:00.000Z', prompt: 'one', ok: true, output: '1' },
+        { id: 'two', at: '2026-01-01T00:02:00.000Z', prompt: 'two', ok: true, output: '2' },
+        { id: 'three', at: '2026-01-01T00:03:00.000Z', prompt: 'three', ok: true, output: '3', dockerSnapshot: { id: 'later', status: 'ready', createdAt: '2026-01-01T00:03:01.000Z', imageRef: 'later-image' } },
+      ]),
+    });
+    const beforeOne = requireHubDatabase().read((connection) => connection.prepare(
+      "SELECT turn_json FROM canonical_chat_turns WHERE drone_id = 'drone-1' AND chat_name = 'default' AND turn_id = 'one'",
+    ).get().turn_json);
+    requireHubDatabase().read((connection) => connection.exec('DELETE FROM hub_outbox'));
+
+    await Promise.all([
+      updateTranscriptTurnInStore({
+        droneId: 'drone-1', chatName: 'default', turnId: 'two',
+        update: (turn) => ({ ...turn, agentSuggestion: { usedDirectAt: '2026-01-01T00:04:00.000Z' } }),
+      }),
+      updateTranscriptTurnInStore({
+        droneId: 'drone-1', chatName: 'default', turnId: 'one',
+        update: (turn) => ({ ...turn, agentMessageAutoContinue: { status: 'classified', updatedAt: '2026-01-01T00:04:00.000Z' } }),
+      }),
+    ]);
+    const afterOne = requireHubDatabase().read((connection) => connection.prepare(
+      "SELECT turn_json FROM canonical_chat_turns WHERE drone_id = 'drone-1' AND chat_name = 'default' AND turn_id = 'one'",
+    ).get().turn_json);
+    assert.notEqual(afterOne, beforeOne);
+
+    const rollback = await rollbackTranscriptToTurnInStore({
+      droneId: 'drone-1', chatName: 'default', turnId: 'two',
+      update: (turn) => ({
+        ...turn,
+        dockerSnapshot: { id: 'checkpoint', status: 'ready', createdAt: '2026-01-01T00:02:01.000Z', restoredAt: '2026-01-01T00:05:00.000Z' },
+      }),
+    });
+    assert.deepEqual(rollback.removedTurns.map((turn) => turn.id), ['three']);
+    const final = readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat.turns;
+    assert.deepEqual(final.map((turn) => turn.id), ['one', 'two']);
+    assert.equal(final[1].dockerSnapshot.restoredAt, '2026-01-01T00:05:00.000Z');
+
+    const eventTypes = requireHubDatabase().read((connection) => connection.prepare(
+      "SELECT event_type FROM hub_outbox WHERE topic = 'chat.changes' ORDER BY id",
+    ).all().map((row) => row.event_type));
+    assert.deepEqual(eventTypes, ['chat.turn.changed', 'chat.turn.changed', 'chat.turns.rolled-back']);
   });
 
   test('switches data directories and preserves transcript ordering across restart', async () => {
