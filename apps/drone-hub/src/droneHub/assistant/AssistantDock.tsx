@@ -20,7 +20,7 @@ import {
 } from '../chat/chat-input-attachments';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-dnd';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
-import { IconChatThread, IconEye, IconList, IconPencil, IconPlus, IconSettings, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash } from '../app/icons';
+import { IconChatThread, IconEye, IconList, IconPencil, IconPlus, IconSettings, IconShieldCheck, IconSidebarCollapse, IconSidebarExpand, IconSpinner, IconTrash } from '../app/icons';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { IconChevron, IconDrone, IconFile, IconFolder, iconForFilePath } from '../icons';
@@ -44,8 +44,6 @@ import {
 const ASSISTANT_THREAD_SIDEBAR_OPEN_STORAGE_KEY = 'droneHub.assistant.threadSidebarOpen';
 const ASSISTANT_THREAD_MODE_STORAGE_KEY = 'droneHub.assistant.threadMode';
 const ASSISTANT_FILES_OPEN_STORAGE_KEY = 'droneHub.assistant.filesOpen';
-const ASSISTANT_OVERVIEW_AUTO_STORAGE_KEY = 'droneHub.assistant.overviewAuto';
-const ASSISTANT_OVERVIEW_INTERVAL_STORAGE_KEY = 'droneHub.assistant.overviewIntervalMs';
 const TOOL_ROW_MESSAGE_PREVIEW_MAX = 72;
 const TOOL_ROW_TARGET_PREVIEW_MAX = 3;
 /** Distance from bottom (px) below which we treat the assistant transcript as "pinned" for auto-scroll. */
@@ -53,14 +51,6 @@ const ASSISTANT_SCROLL_BOTTOM_THRESHOLD_PX = 48;
 const ASSISTANT_IDLE_REFRESH_INTERVAL_MS = 2_500;
 const ASSISTANT_ACTIVE_REFRESH_INTERVAL_MS = 1_000;
 const ASSISTANT_EVENT_REFRESH_DEBOUNCE_MS = 150;
-const ASSISTANT_OVERVIEW_INTERVAL_OPTIONS = [
-  { value: '10000', label: '10s' },
-  { value: '30000', label: '30s' },
-  { value: '60000', label: '1m' },
-  { value: '120000', label: '2m' },
-  { value: '300000', label: '5m' },
-];
-
 type AssistantThreadStatus = 'idle' | 'running' | 'waiting_for_approval' | 'waiting_for_chats_idle' | 'error';
 
 type AssistantMessage = {
@@ -309,21 +299,6 @@ function readInitialAssistantPanelMode(): AssistantPanelMode {
 function readInitialFilesOpen(): boolean {
   if (typeof window === 'undefined') return false;
   return window.localStorage.getItem(ASSISTANT_FILES_OPEN_STORAGE_KEY) === '1';
-}
-
-function readInitialOverviewAutoEnabled(): boolean {
-  if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(ASSISTANT_OVERVIEW_AUTO_STORAGE_KEY) === '1';
-}
-
-function normalizeOverviewIntervalMs(raw: unknown): number {
-  const value = String(raw ?? '').trim();
-  return ASSISTANT_OVERVIEW_INTERVAL_OPTIONS.some((option) => option.value === value) ? Number(value) : 30_000;
-}
-
-function readInitialOverviewIntervalMs(): number {
-  if (typeof window === 'undefined') return 30_000;
-  return normalizeOverviewIntervalMs(window.localStorage.getItem(ASSISTANT_OVERVIEW_INTERVAL_STORAGE_KEY));
 }
 
 function assistantScopeSyncKey(readMode: AssistantScopeMode, writeMode: AssistantScopeMode, droneIds: string[]): string {
@@ -2741,7 +2716,6 @@ function AssistantOverviewOverlay({
   overview,
   loading,
   error,
-  autoEnabled,
   canRerun,
   onClose,
   onRerun,
@@ -2750,7 +2724,6 @@ function AssistantOverviewOverlay({
   overview: AssistantThreadOverviewResult | null;
   loading: boolean;
   error: string | null;
-  autoEnabled: boolean;
   canRerun: boolean;
   onClose: () => void;
   onRerun: () => void;
@@ -2770,7 +2743,7 @@ function AssistantOverviewOverlay({
               {loading ? <IconSpinner className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" /> : null}
             </div>
             <div className="mt-0.5 truncate text-[10px] text-[var(--muted-dim)]">
-              {generatedAt ? `${overview?.cached ? 'Cached' : overview?.inputReused ? 'Rerun' : 'Generated'} ${generatedAt}` : autoEnabled ? 'Auto overview is on' : 'No overview generated yet'}
+              {generatedAt ? `${overview?.cached ? 'Cached' : overview?.inputReused ? 'Rerun' : 'Generated'} ${generatedAt}` : 'No overview generated yet'}
             </div>
           </div>
           <div className="flex flex-shrink-0 items-center gap-1.5">
@@ -2863,8 +2836,6 @@ export function AssistantDock() {
   const [systemPromptError, setSystemPromptError] = React.useState<string | null>(null);
   const [systemPromptNotice, setSystemPromptNotice] = React.useState<string | null>(null);
   const [overviewOpen, setOverviewOpen] = React.useState(false);
-  const [overviewAutoEnabled, setOverviewAutoEnabled] = React.useState(readInitialOverviewAutoEnabled);
-  const [overviewIntervalMs, setOverviewIntervalMs] = React.useState(readInitialOverviewIntervalMs);
   const [overview, setOverview] = React.useState<AssistantThreadOverviewResult | null>(null);
   const [overviewLoading, setOverviewLoading] = React.useState(false);
   const [overviewError, setOverviewError] = React.useState<string | null>(null);
@@ -3531,16 +3502,6 @@ export function AssistantDock() {
   }, [assistantPanelMode]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(ASSISTANT_OVERVIEW_AUTO_STORAGE_KEY, overviewAutoEnabled ? '1' : '0');
-  }, [overviewAutoEnabled]);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(ASSISTANT_OVERVIEW_INTERVAL_STORAGE_KEY, String(overviewIntervalMs));
-  }, [overviewIntervalMs]);
-
-  React.useEffect(() => {
     setOverview(null);
     setOverviewError(null);
     setOverviewLoading(false);
@@ -3550,15 +3511,6 @@ export function AssistantDock() {
     if (!systemPromptOpen) return;
     void loadSystemPromptSettings();
   }, [activeThreadId, loadSystemPromptSettings, systemPromptOpen]);
-
-  React.useEffect(() => {
-    if (!overviewAutoEnabled || !activeThreadId) return;
-    void requestOverview();
-    const timer = window.setInterval(() => {
-      void requestOverview({ silent: true });
-    }, overviewIntervalMs);
-    return () => window.clearInterval(timer);
-  }, [activeThreadId, overviewAutoEnabled, overviewIntervalMs, requestOverview]);
 
   const resolveScopeDroneNames = React.useCallback(async (ids: string[], fallbackLabel?: string): Promise<AssistantScopeDrone[]> => {
     const cleanIds = Array.from(new Set(ids.map((id) => String(id ?? '').trim()).filter(Boolean)));
@@ -4585,17 +4537,7 @@ export function AssistantDock() {
                 : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
             }`}
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true" className="mx-auto h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 3v4" />
-              <path d="M12 17v4" />
-              <path d="M5.64 5.64l2.83 2.83" />
-              <path d="M15.53 15.53l2.83 2.83" />
-              <path d="M3 12h4" />
-              <path d="M17 12h4" />
-              <path d="M5.64 18.36l2.83-2.83" />
-              <path d="M15.53 8.47l2.83-2.83" />
-              <path d="M10 12.4l1.4 1.4 3-3.6" />
-            </svg>
+            <IconShieldCheck className="mx-auto h-4 w-4" />
           </button>
           {toolsPanelOpen ? (
             <AssistantToolsPanel
@@ -4738,7 +4680,6 @@ export function AssistantDock() {
                 overview={overview}
                 loading={overviewLoading}
                 error={overviewError}
-                autoEnabled={overviewAutoEnabled}
                 canRerun={Boolean(overview)}
                 onClose={() => setOverviewOpen(false)}
                 onRerun={() => void requestOverview({ force: true, reuseLastInput: true })}
@@ -4753,42 +4694,35 @@ export function AssistantDock() {
 
       <div className="flex-shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)] p-2">
         <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
-          <div
-            className="mr-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            Provider
-          </div>
-          <div className="flex min-w-0 items-center gap-1 overflow-x-auto no-scrollbar">
-            {providerOptions.map((provider) => {
-              const selected = provider.id === activeProvider;
-              const disabled = !activeThread || provider.models.length === 0;
-              return (
-                <button
-                  key={provider.id}
-                  type="button"
-                  disabled={disabled}
-                  aria-pressed={selected}
-                  title={provider.title}
-                  onClick={() => {
-                    const nextModel = provider.models[0];
-                    void updateThread({
-                      provider: provider.id,
-                      ...(nextModel ? { model: nextModel.id, thinkingLevel: nextModel.thinkingLevel } : {}),
-                    });
-                  }}
-                  className={`inline-flex h-7 min-w-[72px] flex-shrink-0 items-center justify-center rounded border px-2 text-[10px] font-semibold uppercase tracking-wide disabled:cursor-not-allowed disabled:opacity-45 ${
-                    selected
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  {provider.label}
-                </button>
-              );
-            })}
-          </div>
+          <UiMenuSelect
+            value={activeProvider}
+            disabled={!activeThread}
+            onValueChange={(value) => {
+              const provider = providerOptions.find((option) => option.id === value);
+              if (!provider) return;
+              const nextModel = provider.models[0];
+              void updateThread({
+                provider: provider.id,
+                ...(nextModel ? { model: nextModel.id, thinkingLevel: nextModel.thinkingLevel } : {}),
+              });
+            }}
+            entries={providerOptions.map((provider) => ({
+              value: provider.id,
+              label: provider.label,
+              title: provider.title,
+              searchText: `${provider.label} ${provider.authLabel}`,
+              disabled: provider.models.length === 0,
+            }))}
+            variant="toolbar"
+            role="listbox"
+            itemRole="option"
+            title="Assistant provider"
+            triggerLabel={activeProviderMeta.label}
+            triggerClassName="h-7 w-[88px] justify-between border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+            triggerLabelClassName="font-semibold"
+            panelClassName="bottom-full mb-1.5 w-[140px]"
+            header="Provider"
+          />
           <UiMenuSelect
             value={selectedModelKey}
             disabled={!activeThread}
@@ -4842,27 +4776,6 @@ export function AssistantDock() {
             <span className="truncate">{activeProviderMeta.authLabel}</span>
           </div>
           <div className="ml-auto flex flex-shrink-0 items-center gap-1.5">
-            <UiMenuSelect
-              value={String(overviewIntervalMs)}
-              disabled={!activeThread}
-              onValueChange={(value) => setOverviewIntervalMs(normalizeOverviewIntervalMs(value))}
-              entries={ASSISTANT_OVERVIEW_INTERVAL_OPTIONS.map((option) => ({
-                value: option.value,
-                label: option.label,
-                title: `Refresh overview every ${option.label}`,
-                searchText: option.label,
-              }))}
-              variant="toolbar"
-              role="listbox"
-              itemRole="option"
-              title="Overview refresh interval"
-              triggerLabel={ASSISTANT_OVERVIEW_INTERVAL_OPTIONS.find((option) => option.value === String(overviewIntervalMs))?.label ?? '30s'}
-              triggerClassName="h-7 w-[56px] justify-between border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
-              triggerLabelClassName="font-semibold"
-              panelClassName="bottom-full right-0 mb-1.5 w-[120px]"
-              menuClassName="max-h-48 overflow-y-auto"
-              header="Overview"
-            />
             <button
               type="button"
               onClick={() => {
@@ -4881,25 +4794,6 @@ export function AssistantDock() {
               aria-label={overviewOpen ? 'Hide thread overview' : 'Show thread overview'}
             >
               {overviewLoading ? <IconSpinner className="h-3.5 w-3.5" /> : <IconEye className="h-3.5 w-3.5" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const next = !overviewAutoEnabled;
-                setOverviewAutoEnabled(next);
-                if (next) setOverviewOpen(true);
-              }}
-              disabled={!activeThread}
-              aria-pressed={overviewAutoEnabled}
-              aria-label="Toggle automatic thread overview"
-              title={overviewAutoEnabled ? 'Automatic overview is on' : 'Automatic overview is off'}
-              className={`flex h-7 w-7 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
-                overviewAutoEnabled
-                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
-              }`}
-            >
-              <IconList className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>
