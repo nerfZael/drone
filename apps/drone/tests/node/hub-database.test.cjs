@@ -46,9 +46,11 @@ describe('hub database foundation', () => {
     database.read((connection) => applyHubDatabaseMigrations(connection));
 
     const migrations = database.read((connection) =>
-      connection.prepare('SELECT version, name FROM hub_schema_migrations ORDER BY version').all(),
+      connection
+        .prepare('SELECT scope, version, name FROM hub_schema_migrations ORDER BY scope, version')
+        .all(),
     );
-    assert.deepEqual(migrations, [{ version: 1, name: 'hub database foundation' }]);
+    assert.deepEqual(migrations, [{ scope: 'core', version: 1, name: 'hub database foundation' }]);
 
     const diagnostics = getHubDatabaseDiagnostics();
     assert.deepEqual(
@@ -82,6 +84,50 @@ describe('hub database foundation', () => {
       ),
       { count: 1 },
     );
+  });
+
+  test('tracks domain migration versions independently', () => {
+    const connection = new Database(':memory:');
+    try {
+      applyHubDatabaseMigrations(
+        connection,
+        [
+          {
+            version: 1,
+            name: 'create prompt probe',
+            migrate(db) {
+              db.exec('CREATE TABLE prompt_probe (value TEXT NOT NULL)');
+            },
+          },
+        ],
+        'prompts',
+      );
+      applyHubDatabaseMigrations(
+        connection,
+        [
+          {
+            version: 1,
+            name: 'create assistant probe',
+            migrate(db) {
+              db.exec('CREATE TABLE assistant_probe (value TEXT NOT NULL)');
+            },
+          },
+        ],
+        'assistant',
+      );
+
+      assert.deepEqual(
+        connection
+          .prepare('SELECT scope, version FROM hub_schema_migrations ORDER BY scope, version')
+          .all(),
+        [
+          { scope: 'assistant', version: 1 },
+          { scope: 'prompts', version: 1 },
+        ],
+      );
+    } finally {
+      connection.close();
+    }
   });
 
   test('rolls back the complete migration batch when a migration fails', () => {

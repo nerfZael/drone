@@ -36,6 +36,8 @@ type MigrationRow = {
   name: string;
 };
 
+export type HubDatabaseMigrationScope = string;
+
 type ScalarPragmaRow = Record<string, string | number>;
 
 type UnavailableState = {
@@ -132,22 +134,28 @@ function validateMigrations(migrations: readonly HubDatabaseMigration[]): void {
 export function applyHubDatabaseMigrations(
   connection: HubDatabaseConnection,
   migrations: readonly HubDatabaseMigration[] = HUB_DATABASE_MIGRATIONS,
+  scope: HubDatabaseMigrationScope = 'core',
 ): void {
   validateMigrations(migrations);
+  const normalizedScope = scope.trim();
+  if (!normalizedScope) throw new Error('Hub database migration scope cannot be empty');
 
   connection
     .transaction(() => {
       connection.exec(`
       CREATE TABLE IF NOT EXISTS hub_schema_migrations (
-        version INTEGER NOT NULL PRIMARY KEY CHECK (version > 0),
-        name TEXT NOT NULL UNIQUE,
-        applied_at TEXT NOT NULL
+        scope TEXT NOT NULL,
+        version INTEGER NOT NULL CHECK (version > 0),
+        name TEXT NOT NULL,
+        applied_at TEXT NOT NULL,
+        PRIMARY KEY (scope, version),
+        UNIQUE (scope, name)
       );
     `);
 
       const applied = connection
-        .prepare('SELECT version, name FROM hub_schema_migrations ORDER BY version')
-        .all() as MigrationRow[];
+        .prepare('SELECT version, name FROM hub_schema_migrations WHERE scope = ? ORDER BY version')
+        .all(normalizedScope) as MigrationRow[];
       const appliedByVersion = new Map(applied.map((row) => [row.version, row.name]));
       const knownVersions = new Set(migrations.map((migration) => migration.version));
       for (const row of applied) {
@@ -159,7 +167,7 @@ export function applyHubDatabaseMigrations(
       }
 
       const recordMigration = connection.prepare(
-        'INSERT INTO hub_schema_migrations (version, name, applied_at) VALUES (?, ?, ?)',
+        'INSERT INTO hub_schema_migrations (scope, version, name, applied_at) VALUES (?, ?, ?, ?)',
       );
       for (const migration of migrations) {
         const appliedName = appliedByVersion.get(migration.version);
@@ -172,7 +180,12 @@ export function applyHubDatabaseMigrations(
           continue;
         }
         migration.migrate(connection);
-        recordMigration.run(migration.version, migration.name, new Date().toISOString());
+        recordMigration.run(
+          normalizedScope,
+          migration.version,
+          migration.name,
+          new Date().toISOString(),
+        );
       }
     })
     .immediate();
