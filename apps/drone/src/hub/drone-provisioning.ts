@@ -5,6 +5,7 @@ import path from 'node:path';
 import { loadRegistry, updateRegistry } from '../host/registry';
 import { droneRootPath } from '../host/paths';
 import { dvmRepoExport, dvmRepoSeed } from '../host/dvm';
+import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 import { normalizeDroneRuntime } from '../host/runtime';
 import { normalizeDisabledRepoKeys, normalizeEnvVarMap } from './environment-config';
 import {
@@ -23,6 +24,7 @@ import { commitDroneMetadataPatch } from './drone-metadata-commands';
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
 import type { PendingPhase, PendingPromptProjection, PendingStartupPrompt } from './drone-pending-state';
 import { deleteHostRefBestEffort, gitCurrentBranchOrSha, gitResolveRemoteBranchForCreate, gitTopLevel, importBundleHeadToHostRef } from './repoOps';
+import { upsertChatInStore } from './transcript-store';
 
 type PendingDronePatch = Partial<{
   phase: PendingPhase;
@@ -302,13 +304,25 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         return d;
         },
       });
-      await updateRegistry((registry: any) => {
-        const found = findDroneEntryByIdentity(registry, pendingDroneId);
-        if (!found) return;
-        materializeSeedChatConfigOnDroneEntry(found.entry, latestPendingForCreate?.seed);
-        registry.drones = registry.drones ?? {};
-        registry.drones[found.key] = found.entry;
-      });
+      const registryAfterPromotion: any = await loadRegistry();
+      const foundAfterPromotion = findDroneEntryByIdentity(registryAfterPromotion, pendingDroneId);
+      if (foundAfterPromotion) {
+        materializeSeedChatConfigOnDroneEntry(foundAfterPromotion.entry, latestPendingForCreate?.seed);
+        const seedChatName = deps.normalizeChatName(latestPendingForCreate?.seed?.chatName ?? 'default');
+        const seedChat = foundAfterPromotion.entry?.chats?.[seedChatName];
+        if (seedChat) {
+          if ((globalThis as any).Bun) {
+            await updateRegistry((registry: any) => {
+              const found = findDroneEntryByIdentity(registry, pendingDroneId);
+              if (!found) return;
+              found.entry.chats = found.entry.chats ?? {};
+              found.entry.chats[seedChatName] = seedChat;
+            });
+          } else {
+            await upsertChatInStore({ droneId: pendingDroneId, chatName: seedChatName, chatEntry: seedChat });
+          }
+        }
+      }
     } catch {
       // ignore (best-effort lineage persistence)
     }
@@ -479,36 +493,44 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     if (cloneFrom && cloneChats) {
       const agentSuggestionEnabledByDefault = await deps.resolveAgentSuggestionEnabledByDefault();
       try {
-        await updateRegistry((reg3Any: any) => {
-          const src = reg3Any?.drones?.[cloneFrom];
-          const dstFound = findDroneEntryByIdentity(reg3Any, pendingDroneId);
-          if (!dstFound) return;
+        const registryForClone: any = await loadRegistry();
+        const srcFound = findDroneEntryByIdentity(registryForClone, cloneFrom);
+        const dstFound = findDroneEntryByIdentity(registryForClone, pendingDroneId);
+        if (srcFound && dstFound) {
+          const src = srcFound.entry;
           const dst = dstFound.entry;
           const srcChats = src?.chats && typeof src.chats === 'object' ? src.chats : null;
-          if (!src || !srcChats) return;
-          const cloned: any = {};
-          for (const [chatName, entryRaw] of Object.entries(srcChats)) {
-            const entry = deps.cloneChatEntryForDroneClone(entryRaw);
-            const agent = deps.inferChatAgent(entry, dst);
-            const model = deps.normalizeChatModel(entry?.model);
-            const createdAt = typeof entry?.createdAt === 'string' && entry.createdAt.trim() ? String(entry.createdAt) : deps.nowIso();
-            entry.createdAt = createdAt;
-            entry.agent = agent;
-            if (model) entry.model = model;
-            else delete entry.model;
-            delete entry.agentSuggestionEnabled;
-            delete entry.agentSuggestionEnabledAt;
-            if (agentSuggestionEnabledByDefault && agent?.kind === 'builtin') {
-              entry.agentSuggestionEnabled = true;
-              entry.agentSuggestionEnabledAt = createdAt;
+          if (srcChats) {
+            const cloned: any = {};
+            for (const [chatName, entryRaw] of Object.entries(srcChats)) {
+              const entry = deps.cloneChatEntryForDroneClone(entryRaw);
+              const agent = deps.inferChatAgent(entry, dst);
+              const model = deps.normalizeChatModel(entry?.model);
+              const createdAt = typeof entry?.createdAt === 'string' && entry.createdAt.trim() ? String(entry.createdAt) : deps.nowIso();
+              entry.createdAt = createdAt;
+              entry.agent = agent;
+              if (model) entry.model = model;
+              else delete entry.model;
+              delete entry.agentSuggestionEnabled;
+              delete entry.agentSuggestionEnabledAt;
+              if (agentSuggestionEnabledByDefault && agent?.kind === 'builtin') {
+                entry.agentSuggestionEnabled = true;
+                entry.agentSuggestionEnabledAt = createdAt;
+              }
+              cloned[String(chatName)] = entry;
+              if (!(globalThis as any).Bun) {
+                await upsertChatInStore({ droneId: pendingDroneId, chatName: String(chatName), chatEntry: entry });
+              }
             }
-            cloned[String(chatName)] = entry;
+            if ((globalThis as any).Bun) {
+              await updateRegistry((reg3Any: any) => {
+                const latestDst = findDroneEntryByIdentity(reg3Any, pendingDroneId);
+                if (!latestDst) return;
+                latestDst.entry.chats = { ...(latestDst.entry.chats ?? {}), ...cloned };
+              });
+            }
           }
-          dst.chats = dst.chats ?? {};
-          dst.chats = { ...dst.chats, ...cloned };
-          reg3Any.drones = reg3Any.drones ?? {};
-          reg3Any.drones[dstFound.key] = dst;
-        });
+        }
       } catch {
         // ignore (best-effort)
       }
@@ -516,7 +538,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
 
     let startupQueuedPromptChats: string[] = [];
     if (queuedPromptsForMaterialization.length > 0) {
-      startupQueuedPromptChats = await updateRegistry((reg4Any: any) => {
+      if ((globalThis as any).Bun) startupQueuedPromptChats = await updateRegistry((reg4Any: any) => {
         const found = findDroneEntryByIdentity(reg4Any, pendingDroneId);
         if (!found) return [] as string[];
         const d: any = found.entry;
@@ -550,6 +572,19 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         reg4Any.drones[found.key] = d;
         return Array.from(touched.values());
       });
+      else {
+        const queue = getPromptQueueRepository();
+        if (!queue) throw new Error('canonical prompt queue is unavailable');
+        const touched = new Set<string>();
+        for (const queued of queuedPromptsForMaterialization) {
+          const chatName = deps.normalizeChatName(queued.chatName);
+          const row = deps.startupPromptToPendingPrompt(queued);
+          await deps.ensureChatEntry({ droneId: pendingDroneId, chatName });
+          await queue.enqueue({ droneId: pendingDroneId, chatName, prompt: row });
+          touched.add(chatName);
+        }
+        startupQueuedPromptChats = [...touched];
+      }
     }
 
     if (seed && (seedAgent || seedModel || seedAgentPermissionMode || seedPrompt)) {
