@@ -1268,11 +1268,13 @@ async function resolveDroneOrRejectUpgrade(socket: any, droneRef: string): Promi
 
 const FLEET_AUDIT_MAX_EVENTS = 500;
 const FLEET_RECONCILE_INTERVAL_MS = 1500;
-const FLEET_TASK_POLL_INTERVAL_MS = 5_000;
+const FLEET_TASK_IDLE_POLL_INTERVAL_MS = 15_000;
+const FLEET_TASK_ACTIVE_POLL_INTERVAL_MS = 5_000;
 
 let FLEET_RECONCILE_INTERVAL: ReturnType<typeof setInterval> | null = null;
 let FLEET_RECONCILE_BUSY = false;
-let FLEET_TASK_POLL_LAST_STARTED_AT = 0;
+let FLEET_TASK_POLL_LAST_COMPLETED_AT = 0;
+let FLEET_TASK_KNOWN_ACTOR_IDS = new Set<string>();
 const FLEET_SNAPSHOT_DELIVERY_CACHE = new FleetSnapshotDeliveryCache();
 const PROMPT_SKILL_SYNC_WARNINGS = new Set<string>();
 
@@ -1473,17 +1475,17 @@ async function drainPendingTaskCreatesForDrone(
   droneEntry: any,
   snapshot?: FleetReconcilerSnapshot,
   daemonOverride?: ResolvedFleetDaemon,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const daemon = daemonOverride === undefined ? await resolveDroneDaemonClientForEntry(droneEntry) : daemonOverride;
-    if (!daemon) return;
+    if (!daemon) return false;
     const pending = await droneTasksPendingCreateList(daemon.client).catch(() => null);
     const requests = Array.isArray(pending?.requests) ? pending.requests : [];
-    if (requests.length === 0) return;
+    if (requests.length === 0) return false;
     const acceptedIds = new Set<string>();
     const registrySnapshot = snapshot ?? await loadFleetReconcilerSnapshot();
     const droneSnapshot = registrySnapshot?.drones?.[droneId] ?? null;
-    if (!droneSnapshot) return;
+    if (!droneSnapshot) return true;
     const playbook = playbookMetaFromEntry(droneSnapshot?.playbook);
     const repoPath = String(droneSnapshot?.repoPath ?? '').trim();
     await transformStoredKanbanBoardSettings((currentBoard) => {
@@ -1519,15 +1521,17 @@ async function drainPendingTaskCreatesForDrone(
       }
       return board;
     });
-    if (acceptedIds.size === 0) return;
+    if (acceptedIds.size === 0) return true;
     for (const requestId of acceptedIds) {
       await droneTasksPendingCreateAck(daemon.client, requestId, {}).catch(() => {});
     }
     const regLatest = await loadFleetReconcilerSnapshot();
     const latestDrone = regLatest?.drones?.[droneId] ?? null;
     if (latestDrone) await syncTaskStateSnapshotToDrone(droneId, latestDrone, regLatest, daemon);
+    return true;
   } catch {
     // ignore (best-effort sync)
+    return false;
   }
 }
 
@@ -1536,18 +1540,18 @@ async function drainPendingTaskDeletesForDrone(
   droneEntry: any,
   snapshot?: FleetReconcilerSnapshot,
   daemonOverride?: ResolvedFleetDaemon,
-): Promise<void> {
+): Promise<boolean> {
   try {
     const daemon = daemonOverride === undefined ? await resolveDroneDaemonClientForEntry(droneEntry) : daemonOverride;
-    if (!daemon) return;
+    if (!daemon) return false;
     const pending = await droneTasksPendingDeleteList(daemon.client).catch(() => null);
     const requests = Array.isArray(pending?.requests) ? pending.requests : [];
-    if (requests.length === 0) return;
+    if (requests.length === 0) return false;
     const acknowledgedIds = new Set<string>();
     let boardChanged = false;
     const registrySnapshot = snapshot ?? await loadFleetReconcilerSnapshot();
     const droneSnapshot = registrySnapshot?.drones?.[droneId] ?? null;
-    if (!droneSnapshot) return;
+    if (!droneSnapshot) return true;
     const playbook = playbookMetaFromEntry(droneSnapshot?.playbook);
     const repoPath = String(droneSnapshot?.repoPath ?? '').trim();
     await transformStoredKanbanBoardSettings((currentBoard) => {
@@ -1563,16 +1567,18 @@ async function drainPendingTaskDeletesForDrone(
       }
       return board;
     });
-    if (acknowledgedIds.size === 0) return;
+    if (acknowledgedIds.size === 0) return true;
     for (const requestId of acknowledgedIds) {
       await droneTasksPendingDeleteAck(daemon.client, requestId, {}).catch(() => {});
     }
-    if (!boardChanged) return;
+    if (!boardChanged) return true;
     const regLatest = await loadFleetReconcilerSnapshot();
     const latestDrone = regLatest?.drones?.[droneId] ?? null;
     if (latestDrone) await syncTaskStateSnapshotToDrone(droneId, latestDrone, regLatest, daemon);
+    return true;
   } catch {
     // ignore (best-effort sync)
+    return false;
   }
 }
 
@@ -1867,7 +1873,10 @@ async function runFleetReconcilerCycle(): Promise<void> {
     const regAny = await loadFleetReconcilerSnapshot();
     const actorIds = new Set(Object.keys(regAny.drones ?? {}));
     FLEET_SNAPSHOT_DELIVERY_CACHE.prune(actorIds);
-    const pollTasks = Date.now() - FLEET_TASK_POLL_LAST_STARTED_AT >= FLEET_TASK_POLL_INTERVAL_MS;
+    const hasNewActor = Array.from(actorIds).some((actorId) => !FLEET_TASK_KNOWN_ACTOR_IDS.has(actorId));
+    FLEET_TASK_KNOWN_ACTOR_IDS = actorIds;
+    const pollTasks = hasNewActor || Date.now() - FLEET_TASK_POLL_LAST_COMPLETED_AT >= FLEET_TASK_IDLE_POLL_INTERVAL_MS;
+    let taskWorkObserved = false;
     for (const [actorId, actorEntry] of Object.entries(regAny?.drones ?? {})) {
       const fleetEnabled = fleetActorConfig(actorEntry).enabled;
       let daemon: Awaited<ReturnType<typeof resolveDroneDaemonClientForEntry>> | null = null;
@@ -1882,8 +1891,9 @@ async function runFleetReconcilerCycle(): Promise<void> {
       await syncFleetPolicySnapshotToDrone(String(actorId), actorEntry, regAny, daemonOverride, FLEET_SNAPSHOT_DELIVERY_CACHE);
       await syncTaskStateSnapshotToDrone(String(actorId), actorEntry, regAny, daemonOverride, FLEET_SNAPSHOT_DELIVERY_CACHE);
       if (pollTasks) {
-        await drainPendingTaskCreatesForDrone(String(actorId), actorEntry, regAny, daemon);
-        await drainPendingTaskDeletesForDrone(String(actorId), actorEntry, regAny, daemon);
+        const created = await drainPendingTaskCreatesForDrone(String(actorId), actorEntry, regAny, daemon);
+        const deleted = await drainPendingTaskDeletesForDrone(String(actorId), actorEntry, regAny, daemon);
+        taskWorkObserved ||= created || deleted;
       }
       if (!daemon) continue;
       if (!fleetEnabled) continue;
@@ -1920,7 +1930,10 @@ async function runFleetReconcilerCycle(): Promise<void> {
     // Measure the interval from completion. Large fleets can take longer than
     // the nominal interval to scan; measuring from start would make every
     // subsequent reconciler cycle immediately launch another full task scan.
-    if (pollTasks) FLEET_TASK_POLL_LAST_STARTED_AT = Date.now();
+    if (pollTasks) {
+      const nextIntervalMs = taskWorkObserved ? FLEET_TASK_ACTIVE_POLL_INTERVAL_MS : FLEET_TASK_IDLE_POLL_INTERVAL_MS;
+      FLEET_TASK_POLL_LAST_COMPLETED_AT = Date.now() - (FLEET_TASK_IDLE_POLL_INTERVAL_MS - nextIntervalMs);
+    }
   } finally {
     FLEET_RECONCILE_BUSY = false;
   }
@@ -29885,7 +29898,8 @@ export async function startDroneHubApiServer(opts: {
         FLEET_RECONCILE_INTERVAL = null;
       }
       FLEET_SNAPSHOT_DELIVERY_CACHE.clear();
-      FLEET_TASK_POLL_LAST_STARTED_AT = 0;
+      FLEET_TASK_POLL_LAST_COMPLETED_AT = 0;
+      FLEET_TASK_KNOWN_ACTOR_IDS = new Set<string>();
       if (droneStatusRefreshTimer) {
         try {
           clearInterval(droneStatusRefreshTimer);
