@@ -10,6 +10,15 @@ export function IconSettings({ className }: { className?: string }) {
   );
 }
 
+export function IconShieldCheck({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M8 1.5l5 2v3.6c0 3.35-1.95 5.95-5 7.4-3.05-1.45-5-4.05-5-7.4V3.5l5-2z" />
+      <path d="M5.6 7.8l1.55 1.55 3.35-3.5" />
+    </svg>
+  );
+}
+
 export function IconPlus({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
