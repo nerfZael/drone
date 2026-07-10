@@ -12,6 +12,7 @@ const {
   resetHubDatabaseForTests,
 } = require('../../dist/host/hub-database.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
+const { HubOutboxRepository } = require('../../dist/host/hub-outbox.js');
 
 const originalDataDir = process.env.DRONE_DATA_DIR;
 const tempRoots = [];
@@ -138,6 +139,48 @@ describe('DroneLifecycleRepository', () => {
     const removed = await repository.delete('transition', 'real');
     assert.equal(removed.state, 'real');
     assert.equal(repository.get('transition'), null);
+  });
+
+  test('commits lifecycle state and outbox events atomically', async () => {
+    useTempDataDir('outbox');
+    const repository = await getDroneLifecycleRepository();
+    const outbox = new HubOutboxRepository();
+
+    const created = await repository.commitUpsert('real', 'evented', realEntry('evented'), {
+      topic: 'fleet.lifecycle',
+      eventType: 'drone.created',
+    });
+    assert.equal(created.state, 'real');
+    assert.deepEqual(
+      outbox.list().map((event) => ({ type: event.eventType, aggregateId: event.aggregateId })),
+      [{ type: 'drone.created', aggregateId: 'evented' }],
+    );
+
+    await assert.rejects(
+      repository.commitPatch(
+        'real',
+        'evented',
+        (entry) => ({ ...entry, name: 'must roll back' }),
+        {
+          topic: 'fleet.lifecycle',
+          eventType: 'drone.renamed',
+          payload: { unsupported: 1n },
+        },
+      ),
+      /JSON serializable/,
+    );
+    assert.equal(repository.get('evented').name, 'evented');
+    assert.equal(outbox.list().length, 1);
+
+    await repository.commitDelete('evented', 'real', {
+      topic: 'fleet.lifecycle',
+      eventType: 'drone.deleted',
+    });
+    assert.equal(repository.get('evented'), null);
+    assert.deepEqual(outbox.list().map((event) => event.eventType), [
+      'drone.created',
+      'drone.deleted',
+    ]);
   });
 
   test('switches repository and connection when DRONE_DATA_DIR changes', async () => {

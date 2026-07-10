@@ -5,6 +5,7 @@ import {
   type HubDatabaseConnection,
   type HubDatabaseMigration,
 } from './hub-database';
+import { appendHubOutboxEvent, initializeHubOutbox, type AppendHubOutboxEvent } from './hub-outbox';
 
 export type CanonicalDroneLifecycleState = 'real' | 'pending' | 'archived';
 
@@ -239,6 +240,7 @@ export class DroneLifecycleRepository {
     database.read((connection) => {
       applyHubDatabaseMigrations(connection, LIFECYCLE_MIGRATIONS, 'drone-lifecycle');
     });
+    initializeHubOutbox(database);
     return new DroneLifecycleRepository(database);
   }
 
@@ -334,6 +336,73 @@ export class DroneLifecycleRepository {
       if (!current) return null;
       if (state) connection.prepare(`DELETE FROM ${TABLES[state]} WHERE drone_id = ?`).run(id);
       else for (const table of Object.values(TABLES)) connection.prepare(`DELETE FROM ${table} WHERE drone_id = ?`).run(id);
+      return current;
+    });
+  }
+
+  commitUpsert(
+    state: CanonicalDroneLifecycleState,
+    idRaw: string,
+    entry: unknown,
+    event: Omit<AppendHubOutboxEvent, 'aggregateType' | 'aggregateId'>,
+  ): Promise<CanonicalDroneLifecycleRecord> {
+    const id = normalizeId(idRaw);
+    return this.database.writeTransaction(`commit ${event.eventType} for drone ${id}`, (connection) => {
+      const record = writeRecord(connection, state, id, entry, new Date().toISOString());
+      appendHubOutboxEvent(connection, {
+        ...event,
+        aggregateType: 'drone',
+        aggregateId: id,
+        payload: event.payload ?? { id, state, version: record.version },
+      });
+      return record;
+    });
+  }
+
+  commitPatch(
+    state: CanonicalDroneLifecycleState,
+    idRaw: string,
+    transform: (lifecycle: Record<string, any>) => Record<string, any>,
+    event: Omit<AppendHubOutboxEvent, 'aggregateType' | 'aggregateId'>,
+  ): Promise<CanonicalDroneLifecycleRecord | null> {
+    const id = normalizeId(idRaw);
+    return this.database.writeTransaction(`commit ${event.eventType} for drone ${id}`, (connection) => {
+      const current = selectById(connection, state, id);
+      if (!current) return null;
+      const record = writeRecord(
+        connection,
+        state,
+        id,
+        transform(cloneLifecyclePayload(current.lifecycle)),
+        new Date().toISOString(),
+      );
+      appendHubOutboxEvent(connection, {
+        ...event,
+        aggregateType: 'drone',
+        aggregateId: id,
+        payload: event.payload ?? { id, state, version: record.version },
+      });
+      return record;
+    });
+  }
+
+  commitDelete(
+    idRaw: string,
+    state: CanonicalDroneLifecycleState | undefined,
+    event: Omit<AppendHubOutboxEvent, 'aggregateType' | 'aggregateId'>,
+  ): Promise<CanonicalDroneLifecycleRecord | null> {
+    const id = normalizeId(idRaw);
+    return this.database.writeTransaction(`commit ${event.eventType} for drone ${id}`, (connection) => {
+      const current = state ? selectById(connection, state, id) : selectAnyById(connection, id);
+      if (!current) return null;
+      if (state) connection.prepare(`DELETE FROM ${TABLES[state]} WHERE drone_id = ?`).run(id);
+      else for (const table of Object.values(TABLES)) connection.prepare(`DELETE FROM ${table} WHERE drone_id = ?`).run(id);
+      appendHubOutboxEvent(connection, {
+        ...event,
+        aggregateType: 'drone',
+        aggregateId: id,
+        payload: event.payload ?? { id, priorState: current.state, version: current.version },
+      });
       return current;
     });
   }
