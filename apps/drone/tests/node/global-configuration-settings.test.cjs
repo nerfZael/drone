@@ -11,7 +11,7 @@ const {
 } = require('../../dist/host/hub-settings-repository.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const { readRegistryJsonFromSqlite } = require('../../dist/host/sqlite-registry-store.js');
-const { updateRegistry } = require('../../dist/host/registry.js');
+const { saveRegistry, updateRegistry } = require('../../dist/host/registry.js');
 const {
   resolveCanonicalDefaultAgentsConfig,
   upsertCanonicalDefaultAgentsConfig,
@@ -42,18 +42,17 @@ afterEach(async () => {
 
 test('default AGENTS and non-repository environment backfill once, then remain canonical', async () => {
   useRoot('precedence');
-  await updateRegistry((registry) => {
-    registry.settings ??= {};
-    registry.settings.agents = {
+  await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {}, settings: {
+    agents: {
       content: 'legacy instructions\r\n',
       updatedAt: '2026-01-01T00:00:00.000Z',
-    };
-    registry.settings.nonRepoEnvironment = {
+    },
+    nonRepoEnvironment: {
       vars: { LEGACY: 'one', 'bad-key': 'ignored' },
       autoApplyToNewContainerDrones: true,
       updatedAt: '2026-01-02T00:00:00.000Z',
-    };
-  });
+    },
+  } });
 
   assert.deepEqual(await resolveCanonicalDefaultAgentsConfig(), {
     content: 'legacy instructions\n',
@@ -117,4 +116,3 @@ test('canonical writes and clears do not rewrite or resurrect the registry snaps
   assert.deepEqual((await resolveCanonicalNonRepoEnvironmentConfig()).vars, {});
   assert.equal(readRegistryJsonFromSqlite(), registryBefore);
 });
-

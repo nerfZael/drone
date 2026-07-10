@@ -182,6 +182,22 @@ function deleteOtherStates(connection: HubDatabaseConnection, id: string, keep: 
   }
 }
 
+function assertActiveNameAvailable(
+  connection: HubDatabaseConnection,
+  state: CanonicalDroneLifecycleState,
+  id: string,
+  name: string,
+): void {
+  if (state === 'archived') return;
+  const conflict = connection.prepare(`
+    SELECT drone_id FROM hub_canonical_drones WHERE name = ? AND drone_id != ?
+    UNION ALL
+    SELECT drone_id FROM hub_canonical_pending_drones WHERE name = ? AND drone_id != ?
+    LIMIT 1
+  `).get(name, id, name, id) as { drone_id: string } | undefined;
+  if (conflict) throw new Error(`drone display name already exists: ${name}`);
+}
+
 function writeRecord(
   connection: HubDatabaseConnection,
   state: CanonicalDroneLifecycleState,
@@ -191,6 +207,7 @@ function writeRecord(
   version = nextVersion(connection, normalizeId(idRaw)),
 ): CanonicalDroneLifecycleRecord {
   const fields = lifecycleFields(idRaw, entryRaw, now);
+  assertActiveNameAvailable(connection, state, fields.id, fields.name);
   deleteOtherStates(connection, fields.id, state);
   if (state === 'archived') {
     const archivedAt = String(fields.lifecycle.archivedAt ?? '').trim();

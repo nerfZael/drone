@@ -12,6 +12,7 @@ const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const {
   appendHubOutboxEvent,
   HubOutboxDispatcher,
+  HubOutboxDispatchLoop,
   HubOutboxRepository,
 } = require('../../dist/host/hub-outbox.js');
 
@@ -201,6 +202,32 @@ test('the dispatcher performs effects after claim transactions and persists deli
   assert.equal(outbox.list({ status: 'pending' }).length, 1);
 });
 
+test('the dispatch loop acknowledges rows and does not redeliver them after restart', async () => {
+  const outbox = repository('dispatch-loop-restart');
+  await outbox.enqueue({ topic: 'projection', eventType: 'projection.invalidated' });
+  const delivered = [];
+
+  const firstLoop = new HubOutboxDispatchLoop(
+    new HubOutboxDispatcher(outbox, (event) => delivered.push(event.id), 'first-loop'),
+    { intervalMs: 60_000, batchSize: 5 },
+  );
+  firstLoop.start();
+  await firstLoop.drainNow();
+  await firstLoop.stop();
+  assert.equal(outbox.list({ status: 'delivered' }).length, 1);
+  assert.equal(delivered.length, 1);
+
+  const reopened = new HubOutboxRepository();
+  const secondLoop = new HubOutboxDispatchLoop(
+    new HubOutboxDispatcher(reopened, (event) => delivered.push(event.id), 'second-loop'),
+    { intervalMs: 60_000, batchSize: 5 },
+  );
+  secondLoop.start();
+  await secondLoop.drainNow();
+  await secondLoop.stop();
+  assert.deepEqual(delivered, [outbox.list({ status: 'delivered' })[0].id]);
+});
+
 test('repositories follow data-directory switches', async () => {
   const firstRoot = useRoot('switch-a');
   const first = new HubOutboxRepository();
@@ -221,4 +248,3 @@ test('repositories follow data-directory switches', async () => {
   const reopened = new HubOutboxRepository();
   assert.deepEqual(reopened.list().map((event) => event.eventType), ['first']);
 });
-

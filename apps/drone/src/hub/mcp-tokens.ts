@@ -101,7 +101,7 @@ function timingSafeStringEqual(aRaw: string, bRaw: string): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-function listStoredTokensFromRegistry(reg: any): McpAccessTokenRecord[] {
+export function listStoredTokensFromRegistry(reg: any): McpAccessTokenRecord[] {
   const rawTokens = (reg as any)?.mcpTokens;
   if (!rawTokens || typeof rawTokens !== 'object' || Array.isArray(rawTokens)) return [];
   const out: McpAccessTokenRecord[] = [];

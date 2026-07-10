@@ -172,7 +172,7 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
   const afterFileEdit = await loadRegistry();
   assert.equal(afterFileEdit.drones.drone1.name, 'drone one');
   assert.equal(afterFileEdit.drones.fileOnly, undefined);
-  assert.equal(fs.existsSync(registryPath), true);
+  assert.equal(fs.existsSync(registryPath), false);
 
   await updateRegistry((reg) => {
     reg.settings = reg.settings ?? {};
@@ -196,10 +196,14 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
 
   const dbAfter = new Database(sqlitePath, { readonly: true });
   try {
-    assert.equal(dbAfter.prepare('SELECT COUNT(*) AS count FROM hub_drones').get().count, 2);
+    assert.equal(dbAfter.prepare('SELECT COUNT(*) AS count FROM hub_drones').get().count, 1);
+    assert.equal(dbAfter.prepare('SELECT COUNT(*) AS count FROM hub_canonical_drones').get().count, 2);
     const state = JSON.parse(dbAfter.prepare("SELECT registry_json FROM hub_registry_state WHERE id = 'current'").get().registry_json);
-    assert.equal(state.settings.openai.apiKey, 'new-key');
-    assert.equal(state.drones.drone2.name, 'drone two');
+    assert.equal(state.settings.openai.apiKey, 'old-key');
+    assert.equal(state.drones.drone2, undefined);
+    const residual = JSON.parse(dbAfter.prepare("SELECT state_json FROM legacy_residual_state WHERE id = 'current'").get().state_json);
+    assert.equal(residual.drones, undefined);
+    assert.equal(residual.settings?.openai, undefined);
   } finally {
     dbAfter.close();
   }

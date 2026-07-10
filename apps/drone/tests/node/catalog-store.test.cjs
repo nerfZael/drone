@@ -7,7 +7,7 @@ const { afterEach, test } = require('node:test');
 const { getCatalogStore } = require('../../dist/host/catalog-store.js');
 const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
-const { loadRegistry, updateRegistry } = require('../../dist/host/registry.js');
+const { loadRegistryRawSnapshot, saveRegistry, updateRegistry } = require('../../dist/host/registry.js');
 const { createSkill, deleteSkillRecord, listSkills, updateSkillRecord } = require('../../dist/hub/skills.js');
 const { createMcpServer, listMcpServers } = require('../../dist/hub/mcp-servers.js');
 const {
@@ -164,15 +164,12 @@ test('group tombstones prevent resurrection while repository backfill remains in
 test('skill and MCP server modules backfill once then stop rewriting registry state', async () => {
   useDataDir('domains');
   const legacySkill = skill('legacy', 'legacy');
-  await updateRegistry((registry) => {
-    registry.skills = { legacy: legacySkill };
-    registry.mcpServers = {
-      old: {
-        id: 'old', name: 'old-server', enabled: true, transport: 'stdio', command: 'old', agents: ['codex'],
-        createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
-      },
-    };
-  });
+  await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {}, skills: { legacy: legacySkill }, mcpServers: {
+    old: {
+      id: 'old', name: 'old-server', enabled: true, transport: 'stdio', command: 'old', agents: ['codex'],
+      createdAt: '2026-01-01T00:00:00.000Z', updatedAt: '2026-01-01T00:00:00.000Z',
+    },
+  } });
   assert.equal((await listSkills())[0].description, 'legacy description');
   await updateSkillRecord('legacy', { description: 'canonical update' });
   await updateRegistry((registry) => { registry.skills.legacy.description = 'stale rewrite'; });
@@ -182,7 +179,7 @@ test('skill and MCP server modules backfill once then stop rewriting registry st
 
   const createdSkill = await createSkill({ name: 'New Skill', description: 'new', markdownBody: '' });
   const createdServer = await createMcpServer({ name: 'new-server', transport: 'stdio', command: 'new', agents: ['codex'] });
-  const registry = await loadRegistry();
+  const registry = await loadRegistryRawSnapshot();
   assert.equal(registry.skills[createdSkill.id], undefined);
   assert.equal(registry.mcpServers[createdServer.id], undefined);
   assert.deepEqual((await listMcpServers()).map((record) => record.name), ['new-server', 'old-server']);
@@ -193,7 +190,7 @@ test('MCP token create/authenticate/revoke lifecycle is canonical and leaves leg
   await updateRegistry((registry) => { registry.mcpTokens = {}; });
   const signingSecret = 'test-signing-secret';
   const created = await createMcpAccessToken({ name: 'host', signingSecret });
-  assert.equal((await loadRegistry()).mcpTokens[created.token.id], undefined);
+  assert.equal((await loadRegistryRawSnapshot()).mcpTokens?.[created.token.id], undefined);
   assert.deepEqual(await authenticateMcpBearerToken(created.tokenValue, signingSecret), {
     kind: 'host',
     tokenId: created.token.id,

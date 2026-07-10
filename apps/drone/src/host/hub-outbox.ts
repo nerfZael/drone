@@ -433,3 +433,83 @@ export class HubOutboxDispatcher {
     return { claimed: events.length, delivered, failed, deadLettered };
   }
 }
+
+export type HubOutboxDispatchLoopOptions = {
+  intervalMs?: number;
+  batchSize?: number;
+  leaseMs?: number;
+  topics?: string[];
+  maxAttempts?: number;
+  onError?: (error: unknown) => void;
+};
+
+/**
+ * Bounded startup/interval pump for the durable outbox.
+ *
+ * A timeout is scheduled only after the current batch finishes, so slow
+ * projection or SSE effects cannot overlap. `stop()` waits for an in-flight
+ * batch and is safe to call repeatedly.
+ */
+export class HubOutboxDispatchLoop {
+  private timer: ReturnType<typeof setTimeout> | null = null;
+  private inFlight: Promise<unknown> | null = null;
+  private stopped = true;
+  private readonly intervalMs: number;
+  private readonly drainOptions: {
+    limit: number;
+    leaseMs: number;
+    topics?: string[];
+    maxAttempts: number;
+  };
+
+  constructor(
+    private readonly dispatcher: HubOutboxDispatcher,
+    private readonly options: HubOutboxDispatchLoopOptions = {},
+  ) {
+    this.intervalMs = Math.max(25, Math.floor(options.intervalMs ?? 500));
+    this.drainOptions = {
+      limit: Math.max(1, Math.min(100, Math.floor(options.batchSize ?? 25))),
+      leaseMs: Math.max(1_000, Math.floor(options.leaseMs ?? 30_000)),
+      ...(options.topics?.length ? { topics: options.topics } : {}),
+      maxAttempts: Math.max(1, Math.floor(options.maxAttempts ?? 10)),
+    };
+  }
+
+  start(): void {
+    if (!this.stopped) return;
+    this.stopped = false;
+    void this.drainNow();
+  }
+
+  async drainNow(): Promise<void> {
+    if (this.stopped) return;
+    if (this.inFlight) {
+      await this.inFlight;
+      return;
+    }
+    const operation = this.dispatcher.drainOnce(this.drainOptions)
+      .catch((error) => this.options.onError?.(error))
+      .finally(() => {
+        if (this.inFlight === operation) this.inFlight = null;
+        this.schedule();
+      });
+    this.inFlight = operation;
+    await operation;
+  }
+
+  private schedule(): void {
+    if (this.stopped || this.timer) return;
+    this.timer = setTimeout(() => {
+      this.timer = null;
+      void this.drainNow();
+    }, this.intervalMs);
+    (this.timer as any).unref?.();
+  }
+
+  async stop(): Promise<void> {
+    this.stopped = true;
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = null;
+    await this.inFlight?.catch(() => {});
+  }
+}

@@ -9,7 +9,7 @@ const { getCatalogStore } = require('../../dist/host/catalog-store.js');
 const { resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const { HubOutboxRepository } = require('../../dist/host/hub-outbox.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
-const { updateRegistry } = require('../../dist/host/registry.js');
+const { saveRegistry } = require('../../dist/host/registry.js');
 const {
   ensureCanonicalGroup,
   listCanonicalGroups,
@@ -45,9 +45,11 @@ afterEach(async () => {
 test('canonical tombstones beat repeated legacy imports for groups and repositories', async () => {
   useDataDir('precedence');
   const at = '2026-01-01T00:00:00.000Z';
-  await updateRegistry((registry) => {
-    registry.groups = { legacy: { name: 'legacy', createdAt: at, updatedAt: at } };
-    registry.repos = { '/repo': { path: '/repo', addedAt: at, remoteUrl: 'legacy' } };
+  await saveRegistry({
+    version: 2,
+    drones: {}, pending: {}, archived: {},
+    groups: { legacy: { name: 'legacy', createdAt: at, updatedAt: at } },
+    repos: { '/repo': { path: '/repo', addedAt: at, remoteUrl: 'legacy' } },
   });
   assert.equal((await listCanonicalGroups()).length, 1);
   assert.equal((await listCanonicalRepositories()).length, 1);
