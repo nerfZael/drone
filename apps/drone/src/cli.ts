@@ -359,7 +359,7 @@ async function recordChatTurn(opts: {
     syncedTurns = entry.turns;
   });
   if (syncedDroneId && syncedTurns) {
-    importTranscriptTurnsFromRegistry({ droneId: syncedDroneId, chatName: opts.chatName, turns: syncedTurns });
+    await importTranscriptTurnsFromRegistry({ droneId: syncedDroneId, chatName: opts.chatName, turns: syncedTurns });
   }
 }
 

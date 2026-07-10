@@ -239,7 +239,7 @@ export function createDronePendingPromptStore(deps: {
       return pruneCompletedPendingPrompts(stored, turns, { keepRecentlyCompleted: true }).slice(-50);
     }
     if (entry) {
-      importChatFromRegistry({ droneId, chatName, chatEntry: entry });
+      await importChatFromRegistry({ droneId, chatName, chatEntry: entry });
       const read = readChatFromStore({ droneId, chatName });
       if (read.available && read.chat) {
         return pendingPromptsFromChatEntry(read.chat, { keepRecentlyCompleted: true }).slice(-50);

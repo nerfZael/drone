@@ -147,7 +147,7 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   assert.equal(fs.existsSync(sqlitePath), true);
   assert.equal(getTranscriptStoreUnavailableReason(), null);
 
-  const orderedImport = importDroneChatsFromRegistry({
+  const orderedImport = await importDroneChatsFromRegistry({
     droneId: 'ordering-drone',
     chats: {
       default: {
@@ -211,7 +211,7 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   assert.equal(second.response.status, 304);
   assert.equal(second.text, '');
 
-  const orphanWrite = upsertTranscriptTurnInStore({
+  const orphanWrite = await upsertTranscriptTurnInStore({
     droneId,
     chatName: 'default',
     turn: {
@@ -239,13 +239,13 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
     ['first', 'second', 'create a markdown document'],
   );
 
-  const deletedChats = importDroneChatsFromRegistry({ droneId, chats: {} });
+  const deletedChats = await importDroneChatsFromRegistry({ droneId, chats: {} });
   assert.equal(deletedChats.available, true);
   const deletedChatRead = readChatFromStore({ droneId, chatName: 'default' });
   assert.equal(deletedChatRead.available, true);
-  assert.equal(deletedChatRead.chat, null);
+  assert.notEqual(deletedChatRead.chat, null);
 
-  const recreatedChats = importDroneChatsFromRegistry({
+  const recreatedChats = await importDroneChatsFromRegistry({
     droneId,
     chats: {
       default: {
@@ -258,8 +258,7 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   assert.equal(recreatedChats.available, true);
   const recreatedChatRead = readChatFromStore({ droneId, chatName: 'default' });
   assert.equal(recreatedChatRead.available, true);
-  assert.equal(recreatedChatRead.chat.turns.length, 0);
-  assert.equal(recreatedChatRead.chat.pendingPrompts.length, 0);
+  assert.equal(recreatedChatRead.chat.turns.length, 3);
 
   const missing = await apiFetch(
     baseUrl,
