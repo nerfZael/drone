@@ -175,6 +175,8 @@ describe('dvm clone persistence behavior', () => {
     expect(dockerMock.exportVolumeToTarGz).not.toHaveBeenCalled();
     expect(dockerMock.importVolumeFromTarGz).not.toHaveBeenCalled();
     expect(dockerMock.importTarGzToContainerPath).not.toHaveBeenCalled();
+    expect(dockerMock.startContainer).toHaveBeenCalledTimes(1);
+    expect(dockerMock.startContainer).toHaveBeenCalledWith('clone');
   });
 
   test('can clone a volume-backed source into image-layer persistence', async () => {
