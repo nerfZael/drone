@@ -799,8 +799,8 @@ export function DroneFilesDock({
                 onContextMenu={(event) => openEntryContextMenu(node.entry, event)}
                 className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[13px] transition-colors disabled:opacity-60 ${
                   selected
-                    ? 'bg-[rgba(55,118,171,.32)] text-[var(--fg)]'
-                    : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)]'
+                    ? 'bg-[rgba(55,118,171,.32)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[rgba(55,118,171,.42)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                    : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                 }`}
                 style={{ paddingLeft: `${indentPx}px` }}
                 title={`${title} • Click to ${open ? 'collapse' : 'expand'} • Right-click for actions`}
@@ -863,10 +863,10 @@ export function DroneFilesDock({
             onContextMenu={(event) => openEntryContextMenu(entry, event)}
             className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[13px] transition-colors disabled:opacity-60 ${
               selected
-                ? 'bg-[rgba(55,118,171,.32)] text-[var(--fg)]'
+                ? 'bg-[rgba(55,118,171,.32)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[rgba(55,118,171,.42)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                 : active
-                  ? 'bg-[rgba(255,255,255,.035)] text-[var(--fg)] hover:bg-[rgba(255,255,255,.055)]'
-                  : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)]'
+                  ? 'bg-[rgba(255,255,255,.035)] text-[var(--fg)] hover:bg-[rgba(255,255,255,.055)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                  : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
             }`}
             style={{ paddingLeft: `${indentPx}px` }}
             title={`${entry.path} • ${modified} • Right-click for actions`}
@@ -964,9 +964,10 @@ export function DroneFilesDock({
       <div className="flex-1 min-h-0 flex overflow-hidden">
         <div className="w-full bg-[var(--panel)] flex flex-col">
           <div
-            className="flex-1 min-h-0 overflow-auto py-1 outline-none"
+            className="flex-1 min-h-0 overflow-auto py-1 outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]"
             role="tree"
             aria-label="Files"
+            aria-multiselectable="true"
             tabIndex={0}
             onClick={(event) => {
               if (event.target !== event.currentTarget) return;
