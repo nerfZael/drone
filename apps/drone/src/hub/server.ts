@@ -153,7 +153,6 @@ import {
   removeTasksForScope,
   renameTasksForScope,
   normalizeTaskTypeId,
-  persistTaskBoardState,
   removeScopedTaskFromBoard,
   type TaskBoardCard,
 } from './task-board';
@@ -326,6 +325,7 @@ import {
   resolveTaskPlaybookButtonSettingsResponse,
   resolveUiPreferencesSettingsResponse,
   resolveVoiceApprovalSettingsResponse,
+  transformStoredKanbanBoardSettings,
   upsertStoredDeleteActionSettings,
   upsertStoredFilesystemSettings,
   upsertStoredKanbanBoardSettings,
@@ -1405,12 +1405,13 @@ async function drainPendingTaskCreatesForDrone(droneId: string, droneEntry: any)
     const requests = Array.isArray(pending?.requests) ? pending.requests : [];
     if (requests.length === 0) return;
     const acceptedIds = new Set<string>();
-    await updateRegistry((regLatest: any) => {
-      const latestDrone = regLatest?.drones?.[droneId] ?? null;
-      const playbook = playbookMetaFromEntry(latestDrone?.playbook);
-      if (!latestDrone) return;
-      const repoPath = String(latestDrone?.repoPath ?? '').trim();
-      let board = getTaskBoardStateFromRegistry(regLatest);
+    const registrySnapshot: any = await loadRegistry();
+    const droneSnapshot = registrySnapshot?.drones?.[droneId] ?? null;
+    if (!droneSnapshot) return;
+    const playbook = playbookMetaFromEntry(droneSnapshot?.playbook);
+    const repoPath = String(droneSnapshot?.repoPath ?? '').trim();
+    await transformStoredKanbanBoardSettings((currentBoard) => {
+      let board = currentBoard;
       const fallbackType = fallbackTaskTypeId(board.taskTypes);
       for (const request of requests) {
         const requestId = String(request?.id ?? '').trim();
@@ -1430,7 +1431,7 @@ async function drainPendingTaskCreatesForDrone(droneId: string, droneEntry: any)
           ...(repoPath ? { scopeValue: repoPath } : {}),
           repoPath,
           droneId,
-          droneName: String(latestDrone?.name ?? droneId).trim() || droneId,
+          droneName: String(droneSnapshot?.name ?? droneId).trim() || droneId,
           ...(playbook
             ? {
                 playbookId: playbook.id,
@@ -1440,7 +1441,7 @@ async function drainPendingTaskCreatesForDrone(droneId: string, droneEntry: any)
         });
         acceptedIds.add(requestId);
       }
-      if (acceptedIds.size > 0) persistTaskBoardState(regLatest, board);
+      return board;
     });
     if (acceptedIds.size === 0) return;
     for (const requestId of acceptedIds) {
@@ -1463,12 +1464,13 @@ async function drainPendingTaskDeletesForDrone(droneId: string, droneEntry: any)
     if (requests.length === 0) return;
     const acknowledgedIds = new Set<string>();
     let boardChanged = false;
-    await updateRegistry((regLatest: any) => {
-      const latestDrone = regLatest?.drones?.[droneId] ?? null;
-      const playbook = playbookMetaFromEntry(latestDrone?.playbook);
-      if (!latestDrone) return;
-      const repoPath = String(latestDrone?.repoPath ?? '').trim();
-      let board = getTaskBoardStateFromRegistry(regLatest);
+    const registrySnapshot: any = await loadRegistry();
+    const droneSnapshot = registrySnapshot?.drones?.[droneId] ?? null;
+    if (!droneSnapshot) return;
+    const playbook = playbookMetaFromEntry(droneSnapshot?.playbook);
+    const repoPath = String(droneSnapshot?.repoPath ?? '').trim();
+    await transformStoredKanbanBoardSettings((currentBoard) => {
+      let board = currentBoard;
       for (const request of requests) {
         const requestId = String(request?.id ?? '').trim();
         const taskId = String(request?.taskId ?? '').trim();
@@ -1478,7 +1480,7 @@ async function drainPendingTaskDeletesForDrone(droneId: string, droneEntry: any)
         if (removed.removed) boardChanged = true;
         acknowledgedIds.add(requestId);
       }
-      if (boardChanged) persistTaskBoardState(regLatest, board);
+      return board;
     });
     if (acknowledgedIds.size === 0) return;
     for (const requestId of acknowledgedIds) {
@@ -11457,13 +11459,12 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
     removedRegistry = await updateRegistry((reg: any) => {
       if (reg?.drones?.[droneId]) {
         delete reg.drones[droneId];
-        const removed = removeTasksForScope(getTaskBoardStateFromRegistry(reg), 'drone', droneId);
-        if (removed.removedCount > 0) persistTaskBoardState(reg, removed.board);
         return true;
       }
       return false;
     });
     if (removedRegistry) {
+      await transformStoredKanbanBoardSettings((board) => removeTasksForScope(board, 'drone', droneId).board);
       await deleteCanonicalDroneLifecycle(droneId, 'real');
       await revokeMcpAccessTokensForDrone(droneId);
       await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, reason: 'delete-drone' });
@@ -11958,8 +11959,6 @@ async function archiveDroneById(opts: {
     regAny.archived[droneId] = archivedEntry;
     if (regAny?.drones?.[droneId]) delete regAny.drones[droneId];
     if (regAny?.pending?.[droneId]) delete regAny.pending[droneId];
-    const removed = removeTasksForScope(getTaskBoardStateFromRegistry(regAny), 'drone', droneId);
-    if (removed.removedCount > 0) persistTaskBoardState(regAny, removed.board);
 
     return {
       hadEntry: true,
@@ -11973,6 +11972,7 @@ async function archiveDroneById(opts: {
     };
   });
   if (result.archived && canonicalArchivedEntry) {
+    await transformStoredKanbanBoardSettings((board) => removeTasksForScope(board, 'drone', droneId).board);
     await upsertCanonicalDroneLifecycle('archived', droneId, canonicalArchivedEntry);
   }
   return result;
@@ -26577,9 +26577,6 @@ export async function startDroneHubApiServer(opts: {
             movedPending += 1;
           }
 
-          const renamed = renameTasksForScope(getTaskBoardStateFromRegistry(regAny), 'group', oldName, newName);
-          if (renamed.renamedCount > 0) persistTaskBoardState(regAny, renamed.board);
-
           return { ok: true as const, movedDrones, movedPending };
         });
 
@@ -26587,6 +26584,8 @@ export async function startDroneHubApiServer(opts: {
           json(res, result.status ?? 500, { ok: false, error: result.error ?? 'failed to rename group' });
           return;
         }
+
+        await transformStoredKanbanBoardSettings((board) => renameTasksForScope(board, 'group', oldName, newName).board);
 
         if (!canonicalGroupNames.some((name) => isSameOrDescendantGroupPath(name, oldName))) {
           await ensureCanonicalGroup(oldName, at);
@@ -26665,17 +26664,12 @@ export async function startDroneHubApiServer(opts: {
               isSameOrDescendantGroupPath(name, group),
             );
             for (const name of removedGroupNames) await deleteCanonicalGroup(name);
-            await updateRegistry((regLatest: any) => {
-              let board = getTaskBoardStateFromRegistry(regLatest);
-              let boardChanged = false;
+            await transformStoredKanbanBoardSettings((currentBoard) => {
+              let board = currentBoard;
               for (const name of removedGroupNames) {
-                const removed = removeTasksForScope(board, 'group', name);
-                if (removed.removedCount > 0) {
-                  board = removed.board;
-                  boardChanged = true;
-                }
+                board = removeTasksForScope(board, 'group', name).board;
               }
-              if (boardChanged) persistTaskBoardState(regLatest, board);
+              return board;
             });
           } catch {
             // ignore
@@ -26721,19 +26715,16 @@ export async function startDroneHubApiServer(opts: {
             for (const n of pendingDeleted) {
               if (regLatest?.pending?.[n] && !regLatest?.drones?.[n]) delete regLatest.pending[n];
             }
-            if (!scopedRepoPath && !wantsUngrouped) {
-              let board = getTaskBoardStateFromRegistry(regLatest);
-              let boardChanged = false;
-              for (const name of removedGroupNames) {
-                const removed = removeTasksForScope(board, 'group', name);
-                if (removed.removedCount > 0) {
-                  board = removed.board;
-                  boardChanged = true;
-                }
-              }
-              if (boardChanged) persistTaskBoardState(regLatest, board);
-            }
           });
+          if (!scopedRepoPath && !wantsUngrouped) {
+            await transformStoredKanbanBoardSettings((currentBoard) => {
+              let board = currentBoard;
+              for (const name of removedGroupNames) {
+                board = removeTasksForScope(board, 'group', name).board;
+              }
+              return board;
+            });
+          }
         } catch {
           // ignore (drones are already deleted)
         }

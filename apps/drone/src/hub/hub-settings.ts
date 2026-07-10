@@ -10,10 +10,11 @@ import {
   HubSettingVersionConflictError,
   type HubSettingRecord,
 } from '../host/hub-settings-repository';
-import { loadRegistry, type DroneRegistry } from '../host/registry';
+import { loadRegistry, updateRegistry, type DroneRegistry } from '../host/registry';
 import { readActiveProfileName } from '../host/profiles';
 import {
   normalizeTaskTypeId,
+  persistTaskBoardState,
   sanitizeTaskBoardState,
   type TaskBoardCard as KanbanBoardCard,
   type TaskBoardLane as KanbanBoardLane,
@@ -1707,6 +1708,34 @@ async function getStoredKanbanBoardSettings(): Promise<{ board: KanbanBoardSetti
   return {
     board: sanitizeTaskBoardState(record?.value),
     updatedAt: record?.updatedAt ?? null,
+  };
+}
+
+/**
+ * Atomically transforms the canonical Kanban board.
+ *
+ * Reading first completes the one-time legacy registry backfill. The repository
+ * update then creates a canonical row even when no legacy value exists, so a
+ * later stale registry projection cannot resurrect old board state.
+ */
+export async function transformStoredKanbanBoardSettings(
+  transform: (board: KanbanBoardSettings) => KanbanBoardSettings,
+): Promise<{ board: KanbanBoardSettings; updatedAt: string | null }> {
+  await getStoredKanbanBoardSettings();
+  const record = await (await getHubSettingsRepository()).update<KanbanBoardSettings>(SETTING_KEYS.kanbanBoard, (current) => {
+    const board = sanitizeTaskBoardState(current?.value);
+    return sanitizeTaskBoardState(transform(board));
+  });
+  // Bun does not have the native SQLite projection yet. Keep its legacy read
+  // model synchronized explicitly; production Node writes only the canonical row.
+  if ((globalThis as any).Bun) {
+    await updateRegistry((registry) => {
+      persistTaskBoardState(registry, record.value);
+    });
+  }
+  return {
+    board: sanitizeTaskBoardState(record.value),
+    updatedAt: record.updatedAt,
   };
 }
 

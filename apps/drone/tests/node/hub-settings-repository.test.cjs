@@ -19,6 +19,8 @@ const {
   resolveAgentSuggestionSettingsResponse,
   resolveDeleteActionSettingsResponse,
   resolveEffectiveProviderApiKeySettings,
+  resolveKanbanBoardSettingsResponse,
+  transformStoredKanbanBoardSettings,
   upsertStoredAgentSuggestionSettings,
   upsertStoredDeleteActionSettings,
   upsertStoredProviderApiKey,
@@ -127,6 +129,80 @@ describe('HubSettingsRepository', () => {
 });
 
 describe('remaining canonical Hub settings', () => {
+  test('atomically transforms a legacy Kanban board without rewriting or accepting stale registry state', async () => {
+    useTempDroneDataDir('kanban-transform');
+    const at = '2026-06-01T00:00:00.000Z';
+    await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {}, settings: {
+      kanbanBoard: {
+        taskTypes: [{ id: 'task', label: 'Task', active: true }],
+        lanes: [{
+          id: 'todo',
+          title: 'Todo',
+          cards: [{ id: 'legacy', title: 'Legacy task', description: '', typeId: 'task', createdAt: at, updatedAt: at }],
+        }],
+        updatedAt: at,
+      },
+    } });
+    const registryBefore = readRegistryJsonFromSqlite();
+
+    const addCard = (id, title) => transformStoredKanbanBoardSettings((board) => ({
+      ...board,
+      lanes: board.lanes.map((lane, index) => index === 0
+        ? { ...lane, cards: [...lane.cards, { id, title, description: '', typeId: 'task', createdAt: at, updatedAt: at }] }
+        : lane),
+    }));
+    await Promise.all([addCard('first', 'First task'), addCard('second', 'Second task')]);
+
+    const transformed = await resolveKanbanBoardSettingsResponse();
+    assert.deepEqual(
+      transformed.kanbanBoard.lanes.flatMap((lane) => lane.cards.map((card) => card.id)).sort(),
+      ['first', 'legacy', 'second'],
+    );
+    assert.equal(readRegistryJsonFromSqlite(), registryBefore, 'Node command must not mirror into registry_json');
+
+    await updateRegistry((registry) => {
+      registry.settings ??= {};
+      registry.settings.kanbanBoard = {
+        taskTypes: [{ id: 'task', label: 'Task', active: true }],
+        lanes: [{ id: 'todo', title: 'Todo', cards: [] }],
+        updatedAt: '2027-01-01T00:00:00.000Z',
+      };
+    });
+    const afterStaleWrite = await resolveKanbanBoardSettingsResponse();
+    assert.deepEqual(
+      afterStaleWrite.kanbanBoard.lanes.flatMap((lane) => lane.cards.map((card) => card.id)).sort(),
+      ['first', 'legacy', 'second'],
+    );
+  });
+
+  test('an initial Kanban transform creates a canonical tombstone against later legacy resurrection', async () => {
+    useTempDroneDataDir('kanban-tombstone');
+    await transformStoredKanbanBoardSettings((board) => board);
+    assert.equal((await getHubSettingsRepository()).get('kanban-board').version, 1);
+
+    await updateRegistry((registry) => {
+      registry.settings ??= {};
+      registry.settings.kanbanBoard = {
+        taskTypes: [{ id: 'task', label: 'Task', active: true }],
+        lanes: [{
+          id: 'todo',
+          title: 'Todo',
+          cards: [{
+            id: 'stale',
+            title: 'Must not resurrect',
+            description: '',
+            typeId: 'task',
+            createdAt: '2027-01-01T00:00:00.000Z',
+            updatedAt: '2027-01-01T00:00:00.000Z',
+          }],
+        }],
+      };
+    });
+
+    const resolved = await resolveKanbanBoardSettingsResponse();
+    assert.equal(resolved.kanbanBoard.lanes.flatMap((lane) => lane.cards).some((card) => card.id === 'stale'), false);
+  });
+
   test('imports a legacy secret once, gives canonical state precedence, and tombstones clears', async () => {
     useTempDroneDataDir('secret-migration');
     delete process.env.OPENAI_API_KEY;
