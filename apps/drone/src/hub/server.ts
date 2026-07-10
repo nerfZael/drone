@@ -1264,7 +1264,7 @@ async function resolveDroneOrRejectUpgrade(socket: any, droneRef: string): Promi
 
 const FLEET_AUDIT_MAX_EVENTS = 500;
 const FLEET_RECONCILE_INTERVAL_MS = 1500;
-const FLEET_TASK_POLL_INTERVAL_MS = 10_000;
+const FLEET_TASK_POLL_INTERVAL_MS = 5_000;
 
 let FLEET_RECONCILE_INTERVAL: ReturnType<typeof setInterval> | null = null;
 let FLEET_RECONCILE_BUSY = false;
@@ -15500,6 +15500,7 @@ export async function startDroneHubApiServer(opts: {
   let canonicalActiveModelCache: { loadedAtMs: number; model: any } | null = null;
 
   async function loadCanonicalActiveModel(): Promise<any> {
+    if ((globalThis as any).Bun) return await loadRegistry();
     if (canonicalActiveModelCache && Date.now() - canonicalActiveModelCache.loadedAtMs < CANONICAL_ACTIVE_MODEL_CACHE_TTL_MS) {
       return canonicalActiveModelCache.model;
     }
