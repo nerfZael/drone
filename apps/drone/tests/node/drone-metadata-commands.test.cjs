@@ -7,7 +7,7 @@ const { afterEach, describe, test } = require('node:test');
 const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle-repository.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
-const { loadRegistry, updateRegistry } = require('../../dist/host/registry.js');
+const { loadRegistry, saveRegistry, updateRegistry } = require('../../dist/host/registry.js');
 const {
   commitDroneMetadataPatch,
   setDroneEnvironmentMetadata,
@@ -72,11 +72,17 @@ describe('drone metadata application commands', () => {
     assert.deepEqual(canonical.fleet.assigned, ['drone-2']);
     assert.equal(canonical.group, 'Review');
 
-    await updateRegistry((registry) => { registry.drones['drone-1'].group = 'stale-registry'; });
+    const staleSnapshot = await loadRegistry();
+    staleSnapshot.drones['drone-1'].group = 'stale-registry';
+    await saveRegistry(staleSnapshot);
     await repository.backfillLegacyInsertOnly(await loadRegistry());
     assert.equal(repository.get('drone-1').lifecycle.group, 'Review');
     assert.deepEqual((await loadRegistry()).drones['drone-1'].chats, {
-      default: { createdAt: '2026-07-01T00:00:00.000Z' },
+      default: {
+        createdAt: '2026-07-01T00:00:00.000Z',
+        turns: [],
+        pendingPrompts: [],
+      },
     });
   });
 
