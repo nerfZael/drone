@@ -44,18 +44,10 @@ export async function pruneMissingRegistryDrones(
     for (const entry of removed) {
       await deleteCanonicalDroneLifecycle(entry.id, 'real');
     }
-    if (removed.length > 0) {
-      const removedIds = new Set(removed.map((entry) => entry.id));
-      await updateRegistry((regAny: any) => {
-        for (const [key, entry] of Object.entries(regAny?.drones ?? {}) as Array<[string, any]>) {
-          const id = String(entry?.id ?? key).trim();
-          if (removedIds.has(id)) delete regAny.drones[key];
-        }
-      });
-    }
     return removed;
   }
 
+  // Explicit native-binding fallback used by Bun tests only.
   return await updateRegistry((regAny: any) => {
     const removed: PrunedRegistryDrone[] = [];
     for (const [rawDroneId, droneEntry] of Object.entries(regAny?.drones ?? {}) as Array<[string, any]>) {

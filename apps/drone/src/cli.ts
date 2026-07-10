@@ -85,6 +85,17 @@ import { ensureCanonicalGroup, listCanonicalGroups, listCanonicalRepositories, r
 
 const requireFromCli = createRequire(__filename);
 
+async function persistRealDroneEntry(droneId: string, entry: any): Promise<void> {
+  const canonical = await upsertCanonicalDroneLifecycle('real', droneId, entry);
+  if (canonical) return;
+  // Bun/native-binding compatibility only. Production Node must commit the
+  // lifecycle row before any legacy projection exists.
+  await updateRegistry((registry: any) => {
+    registry.drones = registry.drones ?? {};
+    registry.drones[droneId] = entry;
+  });
+}
+
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
 }
@@ -1612,10 +1623,10 @@ createCommand
 
       try {
         if (group) await ensureCanonicalGroup(group);
-        const createdEntry = await updateRegistry((reg) => {
-          const at = new Date().toISOString();
-          if (registryHasDisplayName(reg, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
-          const entry = {
+        const registry = await loadRegistry();
+        if (registryHasDisplayName(registry, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
+        const at = new Date().toISOString();
+        const createdEntry = {
             id: stableId,
             runtime: 'host',
             name: displayName,
@@ -1636,10 +1647,7 @@ createCommand
               tokenPath: hostDroneDaemonTokenPath(stableId),
             },
           } as any;
-          reg.drones[stableId] = entry;
-          return entry;
-        });
-        await upsertCanonicalDroneLifecycle('real', stableId, createdEntry);
+        await persistRealDroneEntry(stableId, createdEntry);
       } catch (error) {
         await stopHostDaemonByPid(hostPid);
         throw error;
@@ -1778,10 +1786,10 @@ createCommand
     await waitForHealth(hostPort, token);
 
     if (group) await ensureCanonicalGroup(group);
-    const createdEntry = await updateRegistry((reg) => {
-      const at = new Date().toISOString();
-      if (registryHasDisplayName(reg, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
-      const entry = {
+    const registry = await loadRegistry();
+    if (registryHasDisplayName(registry, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
+    const at = new Date().toISOString();
+    const createdEntry = {
         id: stableId,
         runtime: 'container' as const,
         name: displayName,
@@ -1795,10 +1803,7 @@ createCommand
         ...(persistVolume === false ? { persistVolume: false } : {}),
         createdAt: at,
       };
-      reg.drones[stableId] = entry;
-      return entry;
-    });
-    await upsertCanonicalDroneLifecycle('real', stableId, createdEntry);
+    await persistRealDroneEntry(stableId, createdEntry);
 
     // eslint-disable-next-line no-console
     console.log(
@@ -1854,15 +1859,15 @@ importCommand
     }
 
     if (group) await ensureCanonicalGroup(group);
-    const importedEntry = await updateRegistry((reg) => {
-      const at = new Date().toISOString();
-      // Enforce unique display names (unless this is updating the same id).
-      for (const [k, v] of Object.entries((reg as any)?.drones ?? {})) {
+    const registry = await loadRegistry();
+    // Enforce unique display names (unless this is updating the same id).
+    for (const [k, v] of Object.entries((registry as any)?.drones ?? {})) {
         if (String((v as any)?.name ?? '').trim() === displayName && String(k) !== String(stableId)) {
           throw new Error(`drone already exists: ${displayName}`);
         }
-      }
-      const entry = {
+    }
+    const at = new Date().toISOString();
+    const importedEntry = {
         id: stableId,
         runtime: 'container' as const,
         name: displayName,
@@ -1876,10 +1881,7 @@ importCommand
         ...(persistVolume === false ? { persistVolume: false } : {}),
         createdAt: at,
       };
-      reg.drones[stableId] = entry;
-      return entry;
-    });
-    await upsertCanonicalDroneLifecycle('real', stableId, importedEntry);
+    await persistRealDroneEntry(stableId, importedEntry);
 
     // eslint-disable-next-line no-console
     console.log(
@@ -1937,15 +1939,18 @@ program
 
     let removedRegistry = false;
     if (options.forget) {
-      removedRegistry = await updateRegistry((reg) => {
-        const key = resolvedKey ? String(resolvedKey) : '';
-        if (key && (reg as any)?.drones?.[key]) {
-          delete (reg as any).drones[key];
-          return true;
-        }
-        return false;
-      });
-      if (removedRegistry && resolvedKey) await deleteCanonicalDroneLifecycle(resolvedKey, 'real');
+      const removed = resolvedKey ? await deleteCanonicalDroneLifecycle(resolvedKey, 'real') : null;
+      removedRegistry = Boolean(removed);
+      if (!removed && (globalThis as any).Bun) {
+        removedRegistry = await updateRegistry((reg) => {
+          const key = resolvedKey ? String(resolvedKey) : '';
+          if (key && (reg as any)?.drones?.[key]) {
+            delete (reg as any).drones[key];
+            return true;
+          }
+          return false;
+        });
+      }
     }
 
     if (removeErr) throw new Error(removeErr);
@@ -2066,30 +2071,37 @@ program
     }
 
     const errors: Array<{ name: string; error: string }> = [];
+    const lifecycleIdsByContainer = new Map<string, string[]>();
+    for (const [key, drone] of Object.entries((reg as any)?.drones ?? {})) {
+      const container = String((drone as any)?.containerName ?? (drone as any)?.name ?? key).trim();
+      if (!container) continue;
+      const ids = lifecycleIdsByContainer.get(container) ?? [];
+      ids.push(String((drone as any)?.id ?? key).trim() || String(key));
+      lifecycleIdsByContainer.set(container, ids);
+    }
     for (const t of targets) {
       try {
         await dvmRemove(t, { keepVolume: Boolean(options.keepVolume) });
       } catch (err: any) {
         errors.push({ name: t, error: err?.message ?? String(err) });
       }
-      // Remove any registry entries that reference this container.
-      for (const [key, d] of Object.entries((reg as any)?.drones ?? {})) {
-        const c = String((d as any)?.containerName ?? (d as any)?.name ?? key).trim();
-        if (c && c === t) {
-          delete (reg as any).drones[key];
-        }
+      for (const droneId of lifecycleIdsByContainer.get(t) ?? []) {
+        // eslint-disable-next-line no-await-in-loop
+        await deleteCanonicalDroneLifecycle(droneId, 'real');
       }
     }
-    await updateRegistry((regLatest) => {
-      for (const t of targets) {
-        for (const [key, d] of Object.entries((regLatest as any)?.drones ?? {})) {
-          const c = String((d as any)?.containerName ?? (d as any)?.name ?? key).trim();
-          if (c && c === t) {
-            delete (regLatest as any).drones[key];
+    if ((globalThis as any).Bun) {
+      await updateRegistry((regLatest) => {
+        for (const t of targets) {
+          for (const [key, d] of Object.entries((regLatest as any)?.drones ?? {})) {
+            const c = String((d as any)?.containerName ?? (d as any)?.name ?? key).trim();
+            if (c && c === t) {
+              delete (regLatest as any).drones[key];
+            }
           }
         }
-      }
-    });
+      });
+    }
 
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ ok: errors.length === 0, removed: targets.length - errors.length, errors }, null, 2));
