@@ -109,6 +109,17 @@ export type TranscriptRollbackResult = {
   removedTurns: StoredTranscriptTurn[];
   turn: StoredTranscriptTurn | null;
 };
+export type PermanentDroneChatCleanupResult = {
+  available: boolean;
+  removedLifecycle: boolean;
+  alreadyDeleted: boolean;
+  activeChatsDeleted: number;
+  turnsDeleted: number;
+  archivedChatsDeleted: number;
+  chatTombstonesDeleted: number;
+  archivedChatTombstonesDeleted: number;
+  promptsDeleted: number;
+};
 
 export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
   {
@@ -242,6 +253,19 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    name: 'permanently deleted drone chat tombstones',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE IF NOT EXISTS canonical_drone_chat_tombstones (
+          drone_id TEXT NOT NULL PRIMARY KEY,
+          deleted_at TEXT NOT NULL,
+          reason TEXT NOT NULL CHECK (reason = 'drone-deleted')
+        );
+      `);
+    },
+  },
 ];
 
 type ChatRow = {
@@ -269,6 +293,7 @@ const memoryCancelledPrompts = new Set<string>();
 const memoryChatTombstones = new Set<string>();
 const memoryArchivedChats = new Map<string, ArchivedChatRecord>();
 const memoryArchivedChatTombstones = new Set<string>();
+const memoryDroneChatTombstones = new Set<string>();
 let cachedRepository: { database: HubDatabase; repository: ChatTranscriptRepository } | null = null;
 let unavailableReason: string | null = null;
 
@@ -584,6 +609,9 @@ export class ChatTranscriptRepository {
       ? opts.archivedChats as Record<string, unknown>
       : {};
     return await this.database.writeTransaction('backfill legacy archived chats', (connection) => {
+      if (this.droneChatTombstoned(connection, opts.droneId)) {
+        return this.listArchivedChatsWithConnection(connection, opts.droneId);
+      }
       for (const [chatName, raw] of Object.entries(archivedChats)) {
         const value = archivedChatValue(raw);
         if (!value) continue;
@@ -738,6 +766,9 @@ export class ChatTranscriptRepository {
 
   async upsertChat(opts: { droneId: string; chatName: string; chatEntry: unknown }): Promise<ChatStoreImportResult> {
     return await this.database.writeTransaction('upsert canonical chat', (connection) => {
+      if (this.droneChatTombstoned(connection, opts.droneId)) {
+        throw new Error(`cannot write chat for permanently deleted drone: ${opts.droneId}`);
+      }
       const now = new Date().toISOString();
       const value = opts.chatEntry && typeof opts.chatEntry === 'object' ? opts.chatEntry : {};
       const sourceHash = chatEntrySourceHash(value);
@@ -848,6 +879,99 @@ export class ChatTranscriptRepository {
         appendChatEvent(connection, 'chat.deleted', opts.droneId, opts.chatName, {});
       }
       return Number(info.changes) === 1;
+    });
+  }
+
+  async commitPermanentDroneDeletion(opts: {
+    droneId: string;
+    lifecycleState: 'real' | 'archived';
+  }): Promise<PermanentDroneChatCleanupResult> {
+    const lifecycleTable = opts.lifecycleState === 'real' ? 'hub_canonical_drones' : 'hub_canonical_archived_drones';
+    const otherLifecycleTables = opts.lifecycleState === 'real'
+      ? ['hub_canonical_pending_drones', 'hub_canonical_archived_drones']
+      : ['hub_canonical_drones', 'hub_canonical_pending_drones'];
+    return await this.database.writeTransaction('permanently delete drone lifecycle and chats', (connection) => {
+      const lifecycle = connection.prepare(`SELECT version FROM ${lifecycleTable} WHERE drone_id = ?`)
+        .get(opts.droneId) as { version: number } | undefined;
+      if (!lifecycle) {
+        const conflictingState = otherLifecycleTables.some((table) =>
+          Boolean(connection.prepare(`SELECT 1 FROM ${table} WHERE drone_id = ?`).get(opts.droneId)));
+        if (conflictingState) {
+          return {
+            available: true,
+            removedLifecycle: false,
+            alreadyDeleted: false,
+            activeChatsDeleted: 0,
+            turnsDeleted: 0,
+            archivedChatsDeleted: 0,
+            chatTombstonesDeleted: 0,
+            archivedChatTombstonesDeleted: 0,
+            promptsDeleted: 0,
+          };
+        }
+      }
+
+      const count = (table: string): number => Number((connection.prepare(
+        `SELECT COUNT(*) AS count FROM ${table} WHERE drone_id = ?`,
+      ).get(opts.droneId) as { count: number }).count);
+      const activeChatsDeleted = count('canonical_chats');
+      const turnsDeleted = count('canonical_chat_turns');
+      const archivedChatsDeleted = count('canonical_archived_chats');
+      const chatTombstonesDeleted = count('canonical_chat_tombstones');
+      const archivedChatTombstonesDeleted = count('canonical_archived_chat_tombstones');
+      const promptsDeleted = count('prompts');
+      const alreadyDeleted = Boolean(connection.prepare(`SELECT 1 FROM canonical_drone_chat_tombstones
+        WHERE drone_id = ?`).get(opts.droneId));
+
+      connection.prepare(`INSERT OR IGNORE INTO canonical_drone_chat_tombstones (
+        drone_id, deleted_at, reason
+      ) VALUES (?, ?, 'drone-deleted')`).run(opts.droneId, new Date().toISOString());
+      connection.prepare('DELETE FROM prompts WHERE drone_id = ?').run(opts.droneId);
+      connection.prepare('DELETE FROM canonical_chats WHERE drone_id = ?').run(opts.droneId);
+      connection.prepare('DELETE FROM canonical_archived_chats WHERE drone_id = ?').run(opts.droneId);
+      connection.prepare('DELETE FROM canonical_chat_tombstones WHERE drone_id = ?').run(opts.droneId);
+      connection.prepare('DELETE FROM canonical_archived_chat_tombstones WHERE drone_id = ?').run(opts.droneId);
+      const lifecycleDelete = connection.prepare(`DELETE FROM ${lifecycleTable} WHERE drone_id = ?`).run(opts.droneId);
+      const removedLifecycle = Number(lifecycleDelete.changes ?? 0) === 1;
+      const changed = !alreadyDeleted || removedLifecycle || activeChatsDeleted > 0 || archivedChatsDeleted > 0 ||
+        chatTombstonesDeleted > 0 || archivedChatTombstonesDeleted > 0 || promptsDeleted > 0;
+      if (changed) {
+        appendHubOutboxEvent(connection, {
+          topic: 'chat.changes',
+          eventType: 'drone.chats.deleted',
+          aggregateType: 'drone',
+          aggregateId: opts.droneId,
+          payload: {
+            droneId: opts.droneId,
+            activeChatsDeleted,
+            turnsDeleted,
+            archivedChatsDeleted,
+            chatTombstonesDeleted,
+            archivedChatTombstonesDeleted,
+            promptsDeleted,
+          },
+        });
+      }
+      if (removedLifecycle) {
+        appendHubOutboxEvent(connection, {
+          topic: 'drone.lifecycle.changes',
+          eventType: 'drone.lifecycle.deleted',
+          aggregateType: 'drone',
+          aggregateId: opts.droneId,
+          payload: { id: opts.droneId, priorState: opts.lifecycleState, version: Number(lifecycle?.version ?? 0) },
+        });
+      }
+      return {
+        available: true,
+        removedLifecycle,
+        alreadyDeleted,
+        activeChatsDeleted,
+        turnsDeleted,
+        archivedChatsDeleted,
+        chatTombstonesDeleted,
+        archivedChatTombstonesDeleted,
+        promptsDeleted,
+      };
     });
   }
 
@@ -986,6 +1110,7 @@ export class ChatTranscriptRepository {
         DELETE FROM canonical_chat_tombstones;
         DELETE FROM canonical_archived_chats;
         DELETE FROM canonical_archived_chat_tombstones;
+        DELETE FROM canonical_drone_chat_tombstones;
       `);
     });
   }
@@ -996,6 +1121,9 @@ export class ChatTranscriptRepository {
     chatName: string,
     raw: unknown,
   ): void {
+    if (this.droneChatTombstoned(connection, droneId)) {
+      throw new Error(`cannot write chat for permanently deleted drone: ${droneId}`);
+    }
     const value = raw && typeof raw === 'object' ? raw : {};
     const now = new Date().toISOString();
     connection.prepare(`
@@ -1089,6 +1217,7 @@ export class ChatTranscriptRepository {
   }
 
   private insertMissingChat(connection: HubDatabaseConnection, droneId: string, chatName: string, raw: unknown, sourceHash?: string): void {
+    if (this.droneChatTombstoned(connection, droneId)) return;
     const tombstone = connection.prepare(`SELECT 1 FROM canonical_chat_tombstones
       WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName);
     if (tombstone) return;
@@ -1164,6 +1293,7 @@ export class ChatTranscriptRepository {
   }
 
   private ensureChat(connection: HubDatabaseConnection, droneId: string, chatName: string, clearTombstone: boolean): boolean {
+    if (this.droneChatTombstoned(connection, droneId)) return false;
     if (this.chatRow(connection, droneId, chatName)) return true;
     const tombstone = connection.prepare(`SELECT 1 FROM canonical_chat_tombstones
       WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName);
@@ -1179,6 +1309,11 @@ export class ChatTranscriptRepository {
     ) VALUES (?, ?, ?, ?, '{}', '', 0, '')`).run(droneId, chatName, now, now);
     appendChatEvent(connection, 'chat.created', droneId, chatName, { source: 'turn-reconciliation' });
     return true;
+  }
+
+  private droneChatTombstoned(connection: HubDatabaseConnection, droneId: string): boolean {
+    return Boolean(connection.prepare(`SELECT 1 FROM canonical_drone_chat_tombstones
+      WHERE drone_id = ?`).get(droneId));
   }
 
   private patchMetadataWithConnection(
@@ -1296,6 +1431,7 @@ function memoryReadChat(droneId: string, chatName: string): ChatStoreReadResult 
 
 async function memoryBackfillChat(droneId: string, chatName: string, raw: unknown): Promise<ChatStoreImportResult> {
   const k = key(droneId, chatName);
+  if (memoryDroneChatTombstones.has(droneId)) return { available: true, sourceHash: '' };
   const value = raw && typeof raw === 'object' ? raw : {};
   if (memoryChatTombstones.has(k)) return { available: true, sourceHash: '' };
   if (!memoryChats.has(k)) {
@@ -1316,6 +1452,7 @@ async function memoryBackfillChat(droneId: string, chatName: string, raw: unknow
 }
 
 async function memoryBackfillArchivedChats(droneId: string, raw: unknown): Promise<ArchivedChatStoreListResult> {
+  if (memoryDroneChatTombstones.has(droneId)) return listArchivedChatsFromStore({ droneId });
   const archivedChats = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
   for (const [chatName, entry] of Object.entries(archivedChats)) {
     const k = key(droneId, chatName);
@@ -1556,6 +1693,9 @@ export function readArchivedChatFromStore(opts: { droneId: string; chatName: str
 export async function upsertChatInStore(opts: { droneId: string; chatName: string; chatEntry: unknown }): Promise<ChatStoreImportResult> {
   const store = repository();
   if (store) return await store.upsertChat(opts);
+  if (memoryDroneChatTombstones.has(opts.droneId)) {
+    throw new Error(`cannot write chat for permanently deleted drone: ${opts.droneId}`);
+  }
   const value = opts.chatEntry && typeof opts.chatEntry === 'object' ? opts.chatEntry : {};
   const k = key(opts.droneId, opts.chatName);
   memoryChatTombstones.delete(k);
@@ -1646,6 +1786,45 @@ export async function deleteChatFromStore(opts: { droneId: string; chatName: str
   return deleted;
 }
 
+export async function commitPermanentDroneDeletionInStore(opts: {
+  droneId: string;
+  lifecycleState: 'real' | 'archived';
+}): Promise<PermanentDroneChatCleanupResult> {
+  const store = repository();
+  if (store) return await store.commitPermanentDroneDeletion(opts);
+  const prefix = `${opts.droneId}\u0000`;
+  const activeChatKeys = [...memoryChats.keys()].filter((item) => item.startsWith(prefix));
+  const archivedChatKeys = [...memoryArchivedChats.keys()].filter((item) => item.startsWith(prefix));
+  const chatTombstoneKeys = [...memoryChatTombstones].filter((item) => item.startsWith(prefix));
+  const archivedTombstoneKeys = [...memoryArchivedChatTombstones].filter((item) => item.startsWith(prefix));
+  const turnsDeleted = [...memoryTurns.entries()]
+    .filter(([item]) => item.startsWith(prefix))
+    .reduce((total, [, turns]) => total + turns.size, 0);
+  const promptsDeleted = [...memoryPrompts.entries()]
+    .filter(([item]) => item.startsWith(prefix))
+    .reduce((total, [, prompts]) => total + prompts.size, 0);
+  const alreadyDeleted = memoryDroneChatTombstones.has(opts.droneId);
+  for (const item of activeChatKeys) memoryChats.delete(item);
+  for (const item of [...memoryTurns.keys()].filter((keyValue) => keyValue.startsWith(prefix))) memoryTurns.delete(item);
+  for (const item of [...memoryPrompts.keys()].filter((keyValue) => keyValue.startsWith(prefix))) memoryPrompts.delete(item);
+  for (const item of archivedChatKeys) memoryArchivedChats.delete(item);
+  for (const item of chatTombstoneKeys) memoryChatTombstones.delete(item);
+  for (const item of archivedTombstoneKeys) memoryArchivedChatTombstones.delete(item);
+  for (const item of [...memoryCancelledPrompts].filter((keyValue) => keyValue.startsWith(prefix))) memoryCancelledPrompts.delete(item);
+  memoryDroneChatTombstones.add(opts.droneId);
+  return {
+    available: true,
+    removedLifecycle: false,
+    alreadyDeleted,
+    activeChatsDeleted: activeChatKeys.length,
+    turnsDeleted,
+    archivedChatsDeleted: archivedChatKeys.length,
+    chatTombstonesDeleted: chatTombstoneKeys.length,
+    archivedChatTombstonesDeleted: archivedTombstoneKeys.length,
+    promptsDeleted,
+  };
+}
+
 export function listChatsFromStore(opts: { droneId: string }): ChatStoreListResult {
   const store = repository();
   if (store) return store.listChats(opts);
@@ -1661,6 +1840,9 @@ export function readChatFromStore(opts: { droneId: string; chatName: string }): 
 export async function importTranscriptTurnsFromRegistry(opts: { droneId: string; chatName: string; turns: unknown; sourceHash?: string }): Promise<TranscriptImportResult> {
   const store = repository();
   if (store) return await store.importTurns(opts);
+  if (memoryDroneChatTombstones.has(opts.droneId)) {
+    return { available: true, transcriptVersion: 0, sourceHash: transcriptTurnsSourceHash([]) };
+  }
   await memoryBackfillChat(opts.droneId, opts.chatName, {});
   for (const turn of sortedTurns(Array.isArray(opts.turns) ? opts.turns : [])) if (!memoryTurnMap(opts.droneId, opts.chatName).has(turnId(turn))) memoryTurnMap(opts.droneId, opts.chatName).set(turnId(turn), turn);
   const turns = sortedTurns(memoryTurnMap(opts.droneId, opts.chatName).values());
@@ -1682,6 +1864,9 @@ export function countTranscriptTurnsFromStore(opts: { droneId: string; chatName:
 export async function upsertTranscriptTurnInStore(opts: { droneId: string; chatName: string; turn: StoredTranscriptTurn }): Promise<ChatStoreImportResult> {
   const store = repository();
   if (store) return await store.upsertTurn(opts);
+  if (memoryDroneChatTombstones.has(opts.droneId)) {
+    throw new Error(`cannot write turn for permanently deleted drone: ${opts.droneId}`);
+  }
   await memoryBackfillChat(opts.droneId, opts.chatName, {});
   const turn = normalizeTurn(opts.turn); memoryTurnMap(opts.droneId, opts.chatName).set(turnId(turn), turn);
   return { available: true, sourceHash: transcriptTurnsSourceHash(sortedTurns(memoryTurnMap(opts.droneId, opts.chatName).values())) };
@@ -1730,6 +1915,9 @@ export async function rollbackTranscriptToTurnInStore(opts: {
 // Prompt compatibility exists only for Bun tests. Production callers use PromptQueueRepository.
 export function upsertPendingPromptInStore(opts: { droneId: string; chatName: string; pending: StoredPendingPrompt }): ChatStoreImportResult {
   if (!(globalThis as any).Bun) throw new Error('pending prompts are owned by PromptQueueRepository');
+  if (memoryDroneChatTombstones.has(opts.droneId)) {
+    throw new Error(`cannot enqueue prompt for permanently deleted drone: ${opts.droneId}`);
+  }
   memoryCancelledPrompts.delete(`${key(opts.droneId, opts.chatName)}\u0000${opts.pending.id}`);
   memoryPromptMap(opts.droneId, opts.chatName).set(opts.pending.id, opts.pending);
   return { available: true, sourceHash: '' };
@@ -1762,4 +1950,5 @@ export async function resetTranscriptStoreForTests(): Promise<void> {
   if (store) await store.clearAllForTests();
   memoryChats.clear(); memoryTurns.clear(); memoryPrompts.clear(); memoryCancelledPrompts.clear();
   memoryChatTombstones.clear(); memoryArchivedChats.clear(); memoryArchivedChatTombstones.clear();
+  memoryDroneChatTombstones.clear();
 }

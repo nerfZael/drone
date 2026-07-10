@@ -1,7 +1,8 @@
 import { dvmLs } from '../host/dvm';
-import { updateRegistry } from '../host/registry';
+import { loadRegistry } from '../host/registry';
 import { normalizeDroneRuntime } from '../host/runtime';
-import { deleteCanonicalDroneLifecycle, listCanonicalDroneLifecycle } from './drone-lifecycle-service';
+import { listCanonicalDroneLifecycle } from './drone-lifecycle-service';
+import { permanentlyDeleteCanonicalDrone } from './drone-deletion-service';
 
 export type PrunedRegistryDrone = {
   id: string;
@@ -42,29 +43,28 @@ export async function pruneMissingRegistryDrones(
       .map(({ record, containerName }) => ({ id: record.id, name: record.name, containerName }));
 
     for (const entry of removed) {
-      await deleteCanonicalDroneLifecycle(entry.id, 'real');
+      await permanentlyDeleteCanonicalDrone({ droneId: entry.id, lifecycleState: 'real' });
     }
     return removed;
   }
 
   // Explicit native-binding fallback used by Bun tests only.
-  return await updateRegistry((regAny: any) => {
-    const removed: PrunedRegistryDrone[] = [];
-    for (const [rawDroneId, droneEntry] of Object.entries(regAny?.drones ?? {}) as Array<[string, any]>) {
-      if (!droneEntry || typeof droneEntry !== 'object') continue;
+  const regAny: any = await loadRegistry();
+  const removed: PrunedRegistryDrone[] = [];
+  for (const [rawDroneId, droneEntry] of Object.entries(regAny?.drones ?? {}) as Array<[string, any]>) {
+    if (!droneEntry || typeof droneEntry !== 'object') continue;
 
-      // Future host-mode drones should not be pruned based on missing containers.
-      const runtime = normalizeDroneRuntime((droneEntry as any)?.runtime);
-      if (runtime === 'host') continue;
+    // Future host-mode drones should not be pruned based on missing containers.
+    const runtime = normalizeDroneRuntime((droneEntry as any)?.runtime);
+    if (runtime === 'host') continue;
 
-      const containerName = String(droneEntry?.containerName ?? '').trim();
-      if (!containerName || existingContainers.has(containerName)) continue;
+    const containerName = String(droneEntry?.containerName ?? '').trim();
+    if (!containerName || existingContainers.has(containerName)) continue;
 
-      const droneId = String(rawDroneId ?? '').trim() || containerName;
-      const name = String(droneEntry?.name ?? '').trim() || droneId;
-      delete regAny.drones[rawDroneId];
-      removed.push({ id: droneId, name, containerName });
-    }
-    return removed;
-  });
+    const droneId = String((droneEntry as any)?.id ?? rawDroneId).trim() || containerName;
+    const name = String(droneEntry?.name ?? '').trim() || droneId;
+    await permanentlyDeleteCanonicalDrone({ droneId, lifecycleState: 'real' });
+    removed.push({ id: droneId, name, containerName });
+  }
+  return removed;
 }
