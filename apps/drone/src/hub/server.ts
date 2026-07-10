@@ -17284,10 +17284,60 @@ export async function startDroneHubApiServer(opts: {
         ) {
           const threadId = decodeURIComponent(assistantParts[3] ?? '');
 
+          if (assistantParts.length === 5 && assistantParts[4] === 'events' && method === 'GET') {
+            try {
+              await assistantService.threadSnapshot(threadId);
+            } catch {
+              json(res, 404, { ok: false, error: `unknown assistant thread: ${threadId}` });
+              return;
+            }
+            res.statusCode = 200;
+            res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+            res.setHeader('cache-control', 'no-cache, no-transform');
+            res.setHeader('connection', 'keep-alive');
+            req.socket.setTimeout(0);
+            (res as any).flushHeaders?.();
+            const unsubscribe = blipAssistantHost.subscribeEvents(threadId, (event) => {
+              writeAssistantSseEvent(res, 'blip_event', { type: 'blip_event', version: 1, threadId, event });
+            });
+            writeAssistantSseEvent(res, 'connected', {
+              type: 'connected',
+              version: 1,
+              threadId,
+              running: blipAssistantHost.isThreadRunning(threadId),
+              at: nowIso(),
+            });
+            const keepAlive = setInterval(() => {
+              if (!res.destroyed && !res.writableEnded) res.write(': keepalive\n\n');
+            }, 25_000);
+            (keepAlive as any).unref?.();
+            const cleanup = () => {
+              clearInterval(keepAlive);
+              unsubscribe();
+            };
+            req.once('close', cleanup);
+            res.once('close', cleanup);
+            return;
+          }
+
+          if (assistantParts.length === 5 && assistantParts[4] === 'history' && method === 'GET') {
+            try {
+              await assistantService.threadSnapshot(threadId);
+              const beforeRaw = Number(u.searchParams.get('before'));
+              const limitRaw = Number(u.searchParams.get('limit'));
+              json(res, 200, await blipAssistantHost.historyPage(threadId, {
+                ...(Number.isFinite(beforeRaw) && beforeRaw > 0 ? { before: beforeRaw } : {}),
+                ...(Number.isFinite(limitRaw) && limitRaw > 0 ? { limit: limitRaw } : {}),
+              }));
+            } catch (e: any) {
+              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
+
           if (assistantParts.length === 4 && method === 'GET') {
             try {
-              const snapshot = await assistantService.threadSnapshot(threadId);
-              json(res, 200, blipAssistantHost ? await blipAssistantHost.projectSnapshot(threadId, snapshot) : snapshot);
+              json(res, 200, await assistantService.threadSnapshot(threadId));
             } catch (e: any) {
               json(res, 404, { ok: false, error: `unknown assistant thread: ${threadId}` });
             }
@@ -17304,8 +17354,8 @@ export async function startDroneHubApiServer(opts: {
             }
             try {
               const snapshot = await assistantService.updateThread(threadId, body ?? {});
-              blipAssistantHost?.invalidateThread(threadId);
-              json(res, 200, blipAssistantHost ? await blipAssistantHost.projectSnapshot(threadId, snapshot) : snapshot);
+              blipAssistantHost.invalidateThread(threadId);
+              json(res, 200, snapshot);
             } catch (e: any) {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
             }
@@ -17326,7 +17376,7 @@ export async function startDroneHubApiServer(opts: {
           if (assistantParts.length === 5 && assistantParts[4] === 'activate' && method === 'POST') {
             try {
               const snapshot = await assistantService.activateThread(threadId);
-              json(res, 200, blipAssistantHost ? await blipAssistantHost.projectSnapshot(threadId, snapshot) : snapshot);
+              json(res, 200, snapshot);
             } catch (e: any) {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
             }
@@ -17335,9 +17385,8 @@ export async function startDroneHubApiServer(opts: {
 
           if (assistantParts.length === 5 && assistantParts[4] === 'stop' && method === 'POST') {
             try {
-              blipAssistantHost?.stopThread(threadId);
-              const snapshot = await assistantService.stopThread(threadId);
-              json(res, 200, blipAssistantHost ? await blipAssistantHost.projectSnapshot(threadId, snapshot) : snapshot);
+              blipAssistantHost.stopThread(threadId);
+              json(res, 200, await assistantService.stopThread(threadId));
             } catch (e: any) {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
             }
@@ -17398,7 +17447,11 @@ export async function startDroneHubApiServer(opts: {
               return;
             }
             try {
-              json(res, 200, await assistantService.generateThreadOverview(threadId, body ?? {}));
+              const history = await blipAssistantHost.historyPage(threadId, { limit: 200 });
+              json(res, 200, await assistantService.generateThreadOverview(threadId, {
+                ...(body ?? {}),
+                ...(history.sessionId ? { messages: history.entries.map((entry) => entry.message) } : {}),
+              }));
             } catch (e: any) {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
             }
@@ -17470,13 +17523,17 @@ export async function startDroneHubApiServer(opts: {
                   prompt = `${prompt}${prompt ? '\n\n' : ''}Attached assistant files:\n${references}`;
                 }
                 if (!prompt && promptImages.length === 0) throw new Error('missing prompt');
-                const baseSnapshot = await assistantService.threadSnapshot(threadId);
+                const threadSnapshot = await assistantService.threadSnapshot(threadId);
+                const threadMetadata = threadSnapshot.threads.find((thread) => thread.id === threadId);
+                const requestedTitle = String(body?.prompt ?? '').replace(/\s+/g, ' ').trim();
+                if (threadMetadata?.title === 'New thread' && requestedTitle) {
+                  await assistantService.updateThread(threadId, { title: requestedTitle.slice(0, 80) });
+                }
                 await blipAssistantHost.promptThread(threadId, promptImages.length > 0 ? {
                   text: prompt,
                   images: promptImages.map((item: any) => ({ type: 'image', data: String(item.dataBase64 ?? ''), mimeType: String(item.mime ?? 'image/png') })),
                 } : prompt, async (event) => {
-                  writeEvent({ type: 'blip_event', threadId, event });
-                  writeEvent({ type: 'snapshot', snapshot: await blipAssistantHost.projectSnapshot(threadId, baseSnapshot) });
+                  writeEvent({ type: 'blip_event', version: 1, threadId, event });
                 });
               }
               writeEvent({ type: 'done' });

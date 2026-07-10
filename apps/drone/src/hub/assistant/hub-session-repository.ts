@@ -11,6 +11,7 @@ import type {
   SessionRepository,
   TranscriptEntry,
 } from '@blip/core';
+import type { BlipHistoryPage } from '@blip/protocol';
 
 import { droneRootPath } from '../../host/paths';
 
@@ -166,6 +167,45 @@ export class HubSessionRepository implements SessionRepository {
   async sessionIdForThread(threadId: string): Promise<string | undefined> {
     const row = this.db.prepare('SELECT session_id FROM assistant_blip_thread_bindings WHERE thread_id = ?').get(threadId) as { session_id?: string } | undefined;
     return row?.session_id;
+  }
+
+  async readThreadHistoryPage(threadId: string, input?: { before?: number; limit?: number }): Promise<BlipHistoryPage> {
+    const sessionId = await this.sessionIdForThread(threadId);
+    const limit = Number.isFinite(input?.limit) ? Math.max(1, Math.min(200, Math.floor(input!.limit!))) : 80;
+    if (!sessionId) {
+      return { version: 1, threadId, sessionId: null, entries: [], page: { limit, beforeCursor: null, hasOlder: false } };
+    }
+    const before = Number.isFinite(input?.before) && Number(input?.before) > 0 ? Math.floor(Number(input?.before)) : null;
+    const rows = this.db.prepare(`
+      SELECT sequence, entry_json
+      FROM assistant_blip_entries
+      WHERE session_id = ?
+        AND json_extract(entry_json, '$.type') = 'message'
+        AND (? IS NULL OR sequence < ?)
+      ORDER BY sequence DESC
+      LIMIT ?
+    `).all(sessionId, before, before, limit + 1) as Array<{ sequence: number; entry_json: string }>;
+    const hasOlder = rows.length > limit;
+    const selected = (hasOlder ? rows.slice(0, limit) : rows).reverse();
+    const entries = selected.flatMap((row) => {
+      try {
+        const entry = JSON.parse(row.entry_json) as Extract<TranscriptEntry, { type: 'message' }>;
+        return [{ sequence: Number(row.sequence), id: entry.id, timestamp: entry.timestamp, message: entry.message }];
+      } catch {
+        return [];
+      }
+    });
+    return {
+      version: 1,
+      threadId,
+      sessionId,
+      entries,
+      page: {
+        limit,
+        beforeCursor: hasOlder && entries.length > 0 ? entries[0].sequence : null,
+        hasOlder,
+      },
+    };
   }
 
   async bindThread(threadId: string, sessionId: string): Promise<void> {

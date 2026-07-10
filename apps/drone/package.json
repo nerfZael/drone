@@ -36,6 +36,7 @@
   "dependencies": {
     "@blip/core": "workspace:*",
     "@blip/mcp": "workspace:*",
+    "@blip/protocol": "workspace:*",
     "@blip/tools": "workspace:*",
     "@ai-sdk/google": "^3.0.29",
     "@ai-sdk/openai": "^3.0.26",

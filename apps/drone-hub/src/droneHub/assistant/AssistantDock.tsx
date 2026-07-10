@@ -25,6 +25,7 @@ import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { IconChevron, IconDrone, IconFile, IconFolder, iconForFilePath } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
+import { useBlipThreadSession } from './useBlipThreadSession';
 import {
   canSendAssistantDesktopVoiceRealtimeText,
   desktopAssistantVoiceControlLabel,
@@ -2973,6 +2974,18 @@ export function AssistantDock() {
   const autoApprove = Boolean(activeThread?.autoApprove);
   const voiceEnabled = Boolean(activeThread?.voiceEnabled);
   voiceEnabledRef.current = voiceEnabled;
+  const blipSession = useBlipThreadSession(activeThreadId, Boolean(activeThread) && !voiceEnabled);
+  const loadOlderMessages = React.useCallback(async () => {
+    const node = scrollRef.current;
+    const previousHeight = node?.scrollHeight ?? 0;
+    const previousTop = node?.scrollTop ?? 0;
+    await blipSession.loadOlder();
+    requestAnimationFrame(() => {
+      const current = scrollRef.current;
+      if (!current) return;
+      current.scrollTop = previousTop + Math.max(0, current.scrollHeight - previousHeight);
+    });
+  }, [blipSession]);
   const realtimeTextReady = voiceEnabled && canSendAssistantDesktopVoiceRealtimeText();
   const realtimeTextBlocked = voiceEnabled && !realtimeTextReady;
   const promptDeliveryMode: AssistantPromptDeliveryMode = activeThread?.promptDeliveryMode === 'asap' ? 'asap' : 'queue';
@@ -2983,7 +2996,7 @@ export function AssistantDock() {
     [activeThread?.id, snapshot?.pendingApprovals],
   );
   const activeRunningModel = activeThread ? snapshot?.runningModels?.[activeThread.id] ?? null : null;
-  const running = activeThread?.status === 'running' || activeThread?.status === 'waiting_for_approval' || Boolean(activeRunningModel);
+  const running = blipSession.running || activeThread?.status === 'running' || activeThread?.status === 'waiting_for_approval' || Boolean(activeRunningModel);
   const activeChatIdleSubscriptionsForThread = React.useMemo(
     () =>
       (snapshot?.chatIdleSubscriptions ?? []).filter((sub) => sub.threadId === activeThreadId && sub.status === 'active'),
@@ -3025,16 +3038,20 @@ export function AssistantDock() {
   });
   const droneReferenceDropActive = droneReferenceDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
   const visibleMessages = React.useMemo(() => {
-    const messages = activeThread?.messages ?? [];
-    const streamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
-      ? snapshot.streamingMessages
-      : snapshot?.streamingMessage
-        ? [snapshot.streamingMessage]
+    const messages = voiceEnabled ? activeThread?.messages ?? [] : blipSession.messages as AssistantMessage[];
+    const streamingMessages = voiceEnabled
+      ? Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
+        ? snapshot.streamingMessages
+        : snapshot?.streamingMessage
+          ? [snapshot.streamingMessage]
+          : []
+      : blipSession.streamingMessage
+        ? [blipSession.streamingMessage as AssistantMessage]
         : [];
     const visibleStreaming = streamingMessages.filter((streaming) => streaming.role === 'assistant' || streaming.role === 'user');
     if (visibleStreaming.length === 0) return messages;
     return [...messages, ...visibleStreaming];
-  }, [activeThread?.messages, snapshot?.streamingMessage, snapshot?.streamingMessages]);
+  }, [activeThread?.messages, blipSession.messages, blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages, voiceEnabled]);
   const visibleItems = React.useMemo(() => {
     const items = renderItemsFromMessages(visibleMessages);
     for (const prompt of activeThread?.queuedPrompts ?? []) {
@@ -3050,23 +3067,31 @@ export function AssistantDock() {
     return '';
   }, [visibleItems]);
   const streamingAssistantSourceIndex = React.useMemo(() => {
-    const streamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
-      ? snapshot.streamingMessages
-      : snapshot?.streamingMessage
-        ? [snapshot.streamingMessage]
+    const streamingMessages = voiceEnabled
+      ? Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
+        ? snapshot.streamingMessages
+        : snapshot?.streamingMessage
+          ? [snapshot.streamingMessage]
+          : []
+      : blipSession.streamingMessage
+        ? [blipSession.streamingMessage as AssistantMessage]
         : [];
     const assistantStreamingOffset = streamingMessages.findIndex((streaming) => streaming.role === 'assistant');
     if (assistantStreamingOffset < 0) return -1;
-    return (activeThread?.messages?.length ?? 0) + assistantStreamingOffset;
-  }, [activeThread?.messages?.length, snapshot?.streamingMessage, snapshot?.streamingMessages]);
+    return (voiceEnabled ? activeThread?.messages?.length ?? 0 : blipSession.messages.length) + assistantStreamingOffset;
+  }, [activeThread?.messages?.length, blipSession.messages.length, blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages, voiceEnabled]);
   const streamingAssistantMessage = React.useMemo(() => {
-    const streamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
-      ? snapshot.streamingMessages
-      : snapshot?.streamingMessage
-        ? [snapshot.streamingMessage]
+    const streamingMessages = voiceEnabled
+      ? Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
+        ? snapshot.streamingMessages
+        : snapshot?.streamingMessage
+          ? [snapshot.streamingMessage]
+          : []
+      : blipSession.streamingMessage
+        ? [blipSession.streamingMessage as AssistantMessage]
         : [];
     return streamingMessages.find((streaming) => streaming.role === 'assistant') ?? null;
-  }, [snapshot?.streamingMessage, snapshot?.streamingMessages]);
+  }, [blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages, voiceEnabled]);
   const latestActivityShowsReasoning = React.useMemo(() => {
     if (!running || !latestActivityItemKey) return false;
     const item = visibleItems.find((candidate) => candidate.key === latestActivityItemKey);
@@ -3079,7 +3104,7 @@ export function AssistantDock() {
     activePendingApprovals.length === 0 &&
     !latestActivityShowsReasoning &&
     !messageText(streamingAssistantMessage ?? { role: 'assistant' }).trim();
-  const showEmptyAssistantThread = !(loading && !snapshot) && visibleItems.length === 0 && !showThinking;
+  const showEmptyAssistantThread = !(loading && !snapshot) && !blipSession.historyLoading && visibleItems.length === 0 && !showThinking;
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
   const applySnapshot = React.useCallback((next: AssistantSnapshot, preferredThreadId?: string | null) => {
@@ -4097,8 +4122,7 @@ export function AssistantDock() {
     try {
       await readNdjson(response, (event) => {
         if (!snapshotMutationCurrent(requestSeq)) return;
-        if (event?.type === 'snapshot' && event.snapshot) applySnapshot(event.snapshot, activeThread.id);
-        if (event?.type === 'approval_pending' && event.snapshot) applySnapshot(event.snapshot, activeThread.id);
+        blipSession.handleStreamEvent(event);
         if (event?.type === 'error') {
           sentOk = false;
           setError(String(event.error ?? 'Assistant failed.'));
@@ -4116,7 +4140,10 @@ export function AssistantDock() {
       if (sentOk && attachmentSnapshot.length > 0) {
         revokeAssistantAttachmentPreviewUrls(attachmentSnapshot);
       }
-      if (snapshotMutationCurrent(requestSeq)) void refresh();
+      if (snapshotMutationCurrent(requestSeq)) {
+        void blipSession.refreshHistory({ quiet: true });
+        void refresh({ silent: true });
+      }
       if (snapshotMutationCurrent(requestSeq) && sentOk && attachmentSnapshot.length > 0) {
         requestJson<{ ok: true; threadId: string; files: AssistantArtifactSummary[] }>(
           `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/artifacts`,
@@ -4127,7 +4154,7 @@ export function AssistantDock() {
           .catch(() => {});
       }
     }
-  }, [activeThread, applySnapshot, beginSnapshotMutation, draft, refresh, scrollAssistantToBottom, snapshotMutationCurrent, waitForScopeSave]);
+  }, [activeThread, beginSnapshotMutation, blipSession, draft, refresh, scrollAssistantToBottom, snapshotMutationCurrent, waitForScopeSave]);
 
   const stop = React.useCallback(async () => {
     if (!activeThread) return;
@@ -4684,8 +4711,22 @@ export function AssistantDock() {
                 ref={scrollContentRef}
                 className={showEmptyAssistantThread ? 'flex min-h-full items-center justify-center px-3 py-3' : 'space-y-2 py-3'}
               >
+                {!voiceEnabled && blipSession.hasOlder ? (
+                  <div className="px-3 text-center">
+                    <button
+                      type="button"
+                      className="rounded border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--fg-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
+                      disabled={blipSession.olderLoading}
+                      onClick={() => void loadOlderMessages()}
+                    >
+                      {blipSession.olderLoading ? 'Loading older messages...' : 'Load older messages'}
+                    </button>
+                  </div>
+                ) : null}
                 {loading && !snapshot ? (
                   <div className="px-3 text-[12px] text-[var(--muted)]">Loading assistant...</div>
+                ) : blipSession.historyLoading && !voiceEnabled && visibleItems.length === 0 ? (
+                  <div className="px-3 text-[12px] text-[var(--muted)]">Loading conversation...</div>
                 ) : showEmptyAssistantThread ? (
                   <div className="w-full rounded border border-dashed border-[var(--border)] px-3 py-5 text-center">
                     <div className="text-[12px] text-[var(--fg-secondary)]">Start a thread to inspect drones or coordinate work.</div>
@@ -4730,7 +4771,7 @@ export function AssistantDock() {
                     onDeny={() => void resolveApproval(approval, false)}
                   />
                 ))}
-                {error ? <div className="mx-3 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-3 py-2 text-[11px] text-[var(--red)]">{error}</div> : null}
+                {error || blipSession.runError || blipSession.historyError ? <div className="mx-3 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-3 py-2 text-[11px] text-[var(--red)]">{error ?? blipSession.runError ?? blipSession.historyError}</div> : null}
               </div>
             </div>
             {overviewOpen ? (

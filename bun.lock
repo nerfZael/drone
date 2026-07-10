@@ -24,6 +24,7 @@
         "@ai-sdk/openai": "^3.0.26",
         "@blip/core": "workspace:*",
         "@blip/mcp": "workspace:*",
+        "@blip/protocol": "workspace:*",
         "@blip/tools": "workspace:*",
         "@mariozechner/pi-agent-core": "workspace:*",
         "@mariozechner/pi-ai": "workspace:*",
@@ -60,6 +61,7 @@
       "name": "drone-hub",
       "version": "0.1.0",
       "dependencies": {
+        "@blip/protocol": "workspace:*",
         "@dnd-kit/core": "^6.3.1",
         "@dnd-kit/sortable": "^10.0.0",
         "@dnd-kit/utilities": "^3.2.2",
@@ -216,6 +218,7 @@
       "name": "@blip/core",
       "version": "0.1.0",
       "dependencies": {
+        "@blip/protocol": "workspace:*",
         "@blip/tools": "workspace:*",
         "@mariozechner/pi-agent-core": "workspace:*",
         "@mariozechner/pi-ai": "workspace:*",
@@ -236,6 +239,13 @@
       },
       "devDependencies": {
         "@types/node": "^24.3.0",
+        "typescript": "^5.7.3",
+      },
+    },
+    "blip/packages/protocol": {
+      "name": "@blip/protocol",
+      "version": "0.1.0",
+      "devDependencies": {
         "typescript": "^5.7.3",
       },
     },
@@ -493,6 +503,8 @@
     "@blip/core": ["@blip/core@workspace:blip/packages/core"],
 
     "@blip/mcp": ["@blip/mcp@workspace:blip/packages/mcp"],
+
+    "@blip/protocol": ["@blip/protocol@workspace:blip/packages/protocol"],
 
     "@blip/tools": ["@blip/tools@workspace:blip/packages/tools"],
 

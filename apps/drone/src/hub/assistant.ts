@@ -2527,7 +2527,7 @@ export class HubAssistantService {
 
   async generateThreadOverview(
     threadId: string,
-    input?: { force?: unknown; reuseLastInput?: unknown },
+    input?: { force?: unknown; reuseLastInput?: unknown; messages?: any[] },
   ): Promise<AssistantThreadOverviewResult> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
@@ -2535,7 +2535,7 @@ export class HubAssistantService {
     const promptFingerprint = assistantTextFingerprint(prompt);
     const prior = this.overviewCache.get(thread.id) ?? null;
     const reuseLastInput = input?.reuseLastInput === true || String(input?.reuseLastInput ?? '').trim() === '1';
-    const inputText = reuseLastInput ? prior?.inputText : this.buildOverviewInput(thread);
+    const inputText = reuseLastInput ? prior?.inputText : this.buildOverviewInput(thread, input?.messages);
     if (!inputText) throw new Error(reuseLastInput ? 'no previous overview input is available' : 'assistant thread has no overview input');
     const inputFingerprint = assistantTextFingerprint(inputText);
     const force = input?.force === true || String(input?.force ?? '').trim() === '1';
@@ -3422,9 +3422,10 @@ export class HubAssistantService {
     }));
   }
 
-  private buildOverviewInput(thread: AssistantThread): string {
+  private buildOverviewInput(thread: AssistantThread, messageOverride?: any[]): string {
     const streamingMessages = this.activeThreadId === thread.id ? this.threadStreamingMessages(thread.id) : [];
-    const messages = streamingMessages.length > 0 ? [...thread.messages, ...streamingMessages] : thread.messages;
+    const storedMessages = Array.isArray(messageOverride) ? messageOverride : thread.messages;
+    const messages = streamingMessages.length > 0 ? [...storedMessages, ...streamingMessages] : storedMessages;
     const approvals = this.pendingApprovals().filter((approval) => approval.threadId === thread.id && approval.status === 'pending');
     const queuedPrompts = Array.isArray(thread.queuedPrompts) ? thread.queuedPrompts : [];
     const activeSubscriptions: AssistantChatIdleSubscription[] = [];

@@ -44,8 +44,11 @@ describe('Blip assistant host', () => {
         systemPrompt: 'Hub host prompt',
         tools: [],
       }));
+      const subscribedEvents: any[] = [];
+      const unsubscribe = host.subscribeEvents('thread-one', (event) => subscribedEvents.push(event));
 
       await host.promptThread('thread-one', 'one', (event) => events.push(event));
+      unsubscribe();
       await host.promptThread('thread-one', 'two', (event) => events.push(event));
 
       const repository = new HubSessionRepository();
@@ -58,11 +61,13 @@ describe('Blip assistant host', () => {
       expect(messages.filter((message) => message.role === 'assistant')).toHaveLength(2);
       expect(events.filter((event) => event.type === 'session_started')).toHaveLength(1);
       expect(events.filter((event) => event.type === 'session_finished')).toHaveLength(2);
-      const projected = await host.projectSnapshot('thread-one', {
-        threads: [{ id: 'thread-one', messages: [], status: 'idle', error: null }],
-      });
-      expect(projected.threads[0].messages).toHaveLength(4);
-      expect(projected.threads[0]).toMatchObject({ status: 'idle', error: null, messageCount: 4 });
+      expect(subscribedEvents.filter((event) => event.type === 'session_finished')).toHaveLength(1);
+      const latestPage = await host.historyPage('thread-one', { limit: 2 });
+      expect(latestPage.entries).toHaveLength(2);
+      expect(latestPage.page.hasOlder).toBe(true);
+      const olderPage = await host.historyPage('thread-one', { limit: 2, before: latestPage.page.beforeCursor! });
+      expect(olderPage.entries).toHaveLength(2);
+      expect(olderPage.page.hasOlder).toBe(false);
       faux.unregister();
     });
   });

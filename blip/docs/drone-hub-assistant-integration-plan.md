@@ -146,19 +146,19 @@ Owns only a generic MCP-client-to-Blip-tool adapter:
 
 It does not contain Drone Hub tool behavior, service calls, or authorization rules.
 
-### `blip/packages/protocol` (`@blip/protocol`, add when needed)
+### `blip/packages/protocol` (`@blip/protocol`)
 
-Owns serializable, dependency-light runtime event and session DTOs shared with browser clients. Create it when the Drone Hub frontend consumes the protocol directly. Until then, keep the types in core and use the compatibility projector instead of creating an empty package.
+Owns serializable, dependency-light runtime events, prompt-stream envelopes, and paginated history DTOs shared with browser clients. It contains no runtime, filesystem, Node.js, or Drone Hub dependencies.
 
 ### `apps/drone/src/hub/assistant`
 
 Owns the Drone Hub embedding and concrete implementations injected into Blip:
 
-- `HubSessionRepository` and legacy state migration.
+- `HubSessionRepository` and SQLite-backed assistant state.
 - `HostWorkspaceTarget`, `DroneWorkspaceTarget`, and `AssistantArtifactsTarget`.
 - Target discovery and active-target catalog behavior.
 - Permission and approval brokering.
-- Runtime-event projection into the current assistant API.
+- Versioned runtime-event and paginated-history transport.
 - App-context, web, voice, realtime voice, and UI-control providers.
 - MCP client setup and principal propagation.
 
@@ -168,7 +168,7 @@ These modules depend on `@blip/core` and `@blip/tools`; the reverse dependency i
 
 - [`apps/drone/src/hub/mcp-server.ts`](../../apps/drone/src/hub/mcp-server.ts) remains the canonical Drone Hub MCP boundary for domain actions.
 - Existing Drone Hub storage and domain services remain under `apps/drone`; adapters call them instead of moving their logic into Blip.
-- `apps/drone-hub` remains the browser UI. It consumes projected state initially and may later consume `@blip/protocol`. It never executes target operations or hosts the agent runtime.
+- `apps/drone-hub` remains the browser UI. It consumes `@blip/protocol` directly for text-assistant events and history. It never executes target operations or hosts the agent runtime.
 
 ## 1. Embeddable Blip Runtime
 
@@ -434,7 +434,7 @@ The MCP server now receives its authenticated principal, enforces drone scope at
 
 ### Phase 4: Add The Drone Hub Blip Host — Complete
 
-Run assistant threads through Blip. Add the Hub repository, host service, target and MCP providers, permissions, voice integration, and compatibility projector.
+Run assistant threads through Blip. Add the Hub repository, host service, target and MCP providers, permissions, voice integration, and the temporary compatibility projector used during migration.
 
 Exit when current AssistantDock streaming, stop, queueing, steering, approvals, artifacts, model settings, and scopes work through the new path.
 
@@ -452,13 +452,15 @@ Exit is satisfied when restarts reuse SQLite thread/session bindings, no assista
 
 After parity, remove the old agent construction, custom assistant tool catalog, duplicate filesystem and patch code, and assistant-owned copies of Hub domain tools.
 
-Keep only the Blip host, projectors, target adapters, policy, storage, and app-specific providers.
+Keep only the Blip host, target adapters, policy, storage, and app-specific providers. Remove the temporary projector in Phase 7.
 
 The old Pi text-agent construction, prompt pump, runtime queues, and monolithic custom tool catalog have been removed. Drone Hub now supplies only app context, web tools, target executors, permission projection, artifacts, and voice metadata. Hub domain operations and durable chat-idle subscriptions come from MCP; filesystem operations come from the canonical workspace tools and Hub-owned targets. Local and remote targets share the parser and operation model exported by `@blip/tools` for patches. Realtime voice loads and executes the same catalog through the Blip host instead of rebuilding the legacy catalog.
 
-### Phase 7: Simplify The Frontend
+### Phase 7: Simplify The Frontend — Complete
 
-Optionally move the panel to `@blip/protocol`, paginated history, and direct versioned events. Split large assistant UI components and remove obsolete snapshot interpretation only after backend cutover is stable.
+The browser-safe `@blip/protocol` package now owns versioned runtime events, prompt-stream envelopes, and paginated history contracts. AssistantDock keeps Hub snapshots only for Hub-owned thread settings, scopes, models, approvals, artifacts, and voice metadata. Text messages and run state come from `useBlipThreadSession`, which consumes direct versioned Blip events over the prompt stream and a reconnectable per-thread event stream, deduplicates delivery, and loads SQLite history in bounded pages.
+
+The compatibility projector and per-event snapshot writes have been removed. The latest 80 messages load initially, older pages load on demand without moving the user's scroll position, and overview generation reads the native Blip history. The remaining large presentational pieces in AssistantDock can be split further as ordinary UI maintenance; they no longer interpret or own agent runtime state.
 
 ## Feature-Parity Checklist
 
@@ -517,7 +519,7 @@ Persist Hub subscriptions and one-time delivery state.
 
 ### Large simultaneous rewrite
 
-Keep the current assistant API through a projector, use a feature flag, and separate runtime, targets, MCP, state migration, and frontend phases.
+The migration was split across runtime, targets, MCP, state, duplicate-runtime removal, and frontend phases. The temporary compatibility projector was retained only until the frontend could consume the native protocol, then removed in Phase 7.
 
 ## Expected Code Organization
 
@@ -537,14 +539,13 @@ blip/packages/tools/
   patch/
   contract-tests/
 
-blip/packages/mcp/             # generic adapter only; create when needed
+blip/packages/mcp/             # generic adapter only
   client/
   tool-adapter/
   notifications/
 
-blip/packages/protocol/        # dependency-light DTOs; create when needed
-  events/
-  sessions/
+blip/packages/protocol/        # dependency-light browser-safe DTOs
+  src/index.ts
 
 blip/packages/cli/
   local-workspace-target.ts
@@ -552,23 +553,23 @@ blip/packages/cli/
   CLI configuration, prompts, and rendering
 
 apps/drone/src/hub/assistant/
-  assistant-host.ts
-  assistant-session-projector.ts
-  assistant-permission-broker.ts
-  assistant-target-catalog.ts
-  assistant-state-migration.ts
-  assistant-voice-host.ts
+  blip-assistant-host.ts
   hub-session-repository.ts
+  hub-assistant-state-store.ts
+  blip-runtime-loader.ts
+  in-process-drone-hub-mcp.ts
+  mcp-idle-subscription-store.ts
   targets/
-    host-workspace-target.ts
-    drone-workspace-target.ts
+    workspace-targets.ts
     assistant-artifacts-target.ts
 
 apps/drone/src/hub/
   mcp-server.ts                 # Hub domain operations and authorization
 
 apps/drone-hub/src/
-  assistant UI and projected-state consumers only
+  droneHub/assistant/
+    AssistantDock.tsx
+    useBlipThreadSession.ts
 ```
 
 Do not create empty directories or packages in advance. This layout describes ownership and dependency direction.

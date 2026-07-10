@@ -1,7 +1,14 @@
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import type { PermissionMode, ToolProfile } from "@blip/tools";
+import type { BlipRuntimeEvent } from "@blip/protocol";
 
-export type BlipSessionStatus = "completed" | "cancelled" | "error";
+export type {
+  BlipContextUsage,
+  BlipRuntimeEvent,
+  BlipRuntimeEventBase,
+  BlipSessionStatus,
+  BlipSessionTiming,
+} from "@blip/protocol";
 
 export interface BlipSessionState {
   id: string;
@@ -37,114 +44,6 @@ export type TranscriptEntry =
       summary: string;
       details: { readFiles: string[]; modifiedFiles: string[] };
     };
-
-export interface BlipRuntimeEventBase {
-  version: 1;
-  type: string;
-  sessionId: string;
-  turnId?: string;
-  timestamp: string;
-}
-
-export type BlipSessionTiming = {
-  startedAt: string;
-  finishedAt: string;
-  durationMs: number;
-  turnCount: number;
-  toolTurnCount: number;
-  singleToolTurnCount: number;
-  parallelToolTurnCount: number;
-  maxToolsInTurn: number;
-  toolCallCount: number;
-  toolCallCompletedCount: number;
-  toolCallFailedCount: number;
-  toolCallSumMs: number;
-  toolCallWallMs: number;
-  nonToolWallMs: number;
-  longestToolCall?: {
-    callId: string;
-    tool: string;
-    durationMs: number;
-  };
-  toolCallsByName: Record<
-    string,
-    {
-      count: number;
-      completed: number;
-      failed: number;
-      sumMs: number;
-    }
-  >;
-};
-
-export type BlipContextUsage = {
-  tokens: number;
-  contextWindow: number;
-  percent: number;
-};
-
-export type BlipRuntimeEvent =
-  | (BlipRuntimeEventBase & {
-      type: "session_started";
-      workspaceRoot: string;
-      model: string;
-      permissionMode: PermissionMode;
-      toolProfile: ToolProfile;
-      resumed: boolean;
-    })
-  | (BlipRuntimeEventBase & { type: "turn_started"; prompt?: string })
-  | (BlipRuntimeEventBase & { type: "assistant_delta"; text: string })
-  | (BlipRuntimeEventBase & { type: "assistant_message"; messageId: string; text: string })
-  | (BlipRuntimeEventBase & {
-      type: "tool_call_started";
-      callId: string;
-      tool: string;
-      args: unknown;
-    })
-  | (BlipRuntimeEventBase & {
-      type: "tool_call_progress";
-      callId: string;
-      tool: string;
-      message: string;
-      details?: unknown;
-    })
-  | (BlipRuntimeEventBase & {
-      type: "tool_call_completed";
-      callId: string;
-      tool: string;
-      result: unknown;
-    })
-  | (BlipRuntimeEventBase & {
-      type: "tool_call_failed";
-      callId: string;
-      tool: string;
-      error: string;
-    })
-  | (BlipRuntimeEventBase & {
-      type: "process_diagnostics";
-      reason: string;
-      activeHandles: Array<{ type: string; count: number }>;
-      activeRequests: Array<{ type: string; count: number }>;
-    })
-  | (BlipRuntimeEventBase & { type: "compaction_started"; reason: string })
-  | (BlipRuntimeEventBase & { type: "compaction_skipped"; reason: string })
-  | (BlipRuntimeEventBase & {
-      type: "compaction_completed";
-      summaryId: string;
-      tokensBefore: number;
-      tokensAfter: number;
-    })
-  | (BlipRuntimeEventBase & { type: "session_error"; error: string; recoverable: boolean })
-  | (BlipRuntimeEventBase & {
-      type: "session_finished";
-      status: BlipSessionStatus;
-      changedFiles: string[];
-      durationMs: number;
-      timing?: BlipSessionTiming;
-      contextUsage?: BlipContextUsage;
-      error?: string;
-      toolFailures?: Array<{ callId: string; tool: string; error: string }>;
-    });
 
 export interface RunBlipOptions {
   prompt: string;
