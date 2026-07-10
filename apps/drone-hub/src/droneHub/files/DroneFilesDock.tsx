@@ -1,5 +1,4 @@
 import React from 'react';
-import { IconPencil, IconTrash } from '../app/icons';
 import { invalidateFsListCachesForDrone } from '../app/use-files-and-ports-pane-state';
 import { requestJson, requestJsonWithTimeout } from '../http';
 import { IconChevron, IconFolder, iconForFilePath } from '../icons';
@@ -7,7 +6,6 @@ import type { DroneFsEntry, DroneFsListPayload, DroneFsUploadPayload } from '../
 import { runDroneFsAction } from './file-actions-api';
 import type { DroneOpenedFileState } from './opened-file-types';
 import {
-  allVisibleSelected,
   isPathInsideOrEqual,
   movedPathForEntry,
   pruneSelectedPaths,
@@ -18,7 +16,11 @@ import {
   toggleSelectedPath,
   type FileClipboardState,
 } from './explorer-state';
-import { DroneFilesToolbar, type DroneFilesActionMode } from './DroneFilesToolbar';
+import {
+  DroneFilesContextMenu,
+  type DroneFilesActionMode,
+  type DroneFilesContextMenuState,
+} from './DroneFilesContextMenu';
 import { buildFileExplorerTree, type FileExplorerNode } from './tree';
 
 const CHILD_DIRECTORY_CACHE_MAX_AGE_MS = 5 * 60_000;
@@ -59,6 +61,15 @@ function normalizeContainerPathInput(raw: string): string {
   const trimmed = String(raw ?? '').trim();
   if (!trimmed) return '/';
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+function contextMenuPosition(x: number, y: number): { x: number; y: number } {
+  const menuWidth = 220;
+  const menuHeight = 380;
+  return {
+    x: Math.max(4, Math.min(x, window.innerWidth - menuWidth - 4)),
+    y: Math.max(4, Math.min(y, window.innerHeight - menuHeight - 4)),
+  };
 }
 
 function formatLocalDateTime(ms: number | null | undefined): string {
@@ -108,14 +119,6 @@ function InlineSpinner() {
   );
 }
 
-function IconDownload({ className }: { className?: string }) {
-  return (
-    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
-      <path d="M8.75 1.5a.75.75 0 00-1.5 0v6.19L5.53 5.97a.75.75 0 10-1.06 1.06l3 3a.75.75 0 001.06 0l3-3a.75.75 0 00-1.06-1.06L8.75 7.69V1.5zM2 10.75A1.75 1.75 0 013.75 9h8.5A1.75 1.75 0 0114 10.75v1.5A1.75 1.75 0 0112.25 14h-8.5A1.75 1.75 0 012 12.25v-1.5zm1.75-.25a.25.25 0 00-.25.25v1.5c0 .138.112.25.25.25h8.5a.25.25 0 00.25-.25v-1.5a.25.25 0 00-.25-.25h-8.5z" />
-    </svg>
-  );
-}
-
 function TreeIndentGuides({ depth }: { depth: number }) {
   if (depth <= 0) return null;
   return (
@@ -133,8 +136,6 @@ function TreeIndentGuides({ depth }: { depth: number }) {
 
 export function DroneFilesDock({
   droneId,
-  droneName,
-  droneLabel,
   path,
   homePath: _homePath,
   entries,
@@ -176,11 +177,10 @@ export function DroneFilesDock({
   onRemapOpenedFilesForPathChange?: (sourcePath: string, targetPath: string) => void;
   openedFile: DroneOpenedFileState;
 }) {
-  const shownName = String(droneLabel ?? droneName).trim() || droneName;
   const normalizedPath = normalizeContainerPathInput(path);
   const activeOpenedFilePath = String(openedFile.path ?? '').trim();
-  const [pathInput, setPathInput] = React.useState(normalizedPath);
-  const [pathEntryOpen, setPathEntryOpen] = React.useState(false);
+  const explorerRef = React.useRef<HTMLDivElement | null>(null);
+  const selectionAnchorRef = React.useRef<string | null>(null);
   const [expandedDirs, setExpandedDirs] = React.useState<Record<string, boolean>>({});
   const [childEntriesByPath, setChildEntriesByPath] = React.useState<Record<string, DroneFsEntry[]>>({});
   const [childLoadingByPath, setChildLoadingByPath] = React.useState<Record<string, boolean>>({});
@@ -199,10 +199,7 @@ export function DroneFilesDock({
   const [actionLoading, setActionLoading] = React.useState(false);
   const [actionStatus, setActionStatus] = React.useState<string | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
-
-  React.useEffect(() => {
-    setPathInput(normalizedPath);
-  }, [normalizedPath]);
+  const [contextMenu, setContextMenu] = React.useState<DroneFilesContextMenuState | null>(null);
 
   React.useEffect(() => {
     setExpandedDirs({});
@@ -224,6 +221,8 @@ export function DroneFilesDock({
     setActionError(null);
     setActionStatus(null);
     setSelectedPaths(new Set());
+    setContextMenu(null);
+    selectionAnchorRef.current = null;
   }, [droneId, normalizedPath]);
 
   React.useEffect(
@@ -256,29 +255,60 @@ export function DroneFilesDock({
     return out;
   }, [expandedDirs, explorerTree]);
 
-  const crumbs = React.useMemo(() => {
-    if (normalizedPath === '/') return [{ label: '/', path: '/' }];
-    const out: Array<{ label: string; path: string }> = [{ label: '/', path: '/' }];
-    const segs = normalizedPath.split('/').filter(Boolean);
-    let current = '';
-    for (const seg of segs) {
-      current += `/${seg}`;
-      out.push({ label: seg, path: current });
-    }
-    return out;
-  }, [normalizedPath]);
-
   const selectedEntries = React.useMemo(() => selectedEntriesFromPaths(visibleEntries, selectedPaths), [selectedPaths, visibleEntries]);
   const actionEntries = React.useMemo(() => topLevelSelectedEntries(selectedEntries), [selectedEntries]);
   const selectedCount = selectedEntries.length;
   const selectedOne = selectedCount === 1 ? selectedEntries[0] ?? null : null;
-  const visibleAllSelected = React.useMemo(() => allVisibleSelected(visibleEntries, selectedPaths), [selectedPaths, visibleEntries]);
   const busy = uploading || actionLoading;
 
-  const submitPath = React.useCallback(() => {
-    setPathEntryOpen(false);
-    onOpenPath(normalizeContainerPathInput(pathInput));
-  }, [onOpenPath, pathInput]);
+  const openContextMenu = React.useCallback((x: number, y: number, entry: DroneFsEntry | null) => {
+    const position = contextMenuPosition(x, y);
+    setContextMenu({ ...position, entry });
+  }, []);
+
+  const ensureContextMenu = React.useCallback((entry: DroneFsEntry | null) => {
+    setContextMenu((current) => {
+      if (current) return { ...current, entry };
+      const rect = explorerRef.current?.getBoundingClientRect();
+      const position = contextMenuPosition((rect?.left ?? 0) + 12, (rect?.top ?? 0) + 12);
+      return { ...position, entry };
+    });
+  }, []);
+
+  const closeContextMenu = React.useCallback(() => {
+    if (actionLoading) return;
+    setContextMenu(null);
+    setActionMode(null);
+    setActionInput('');
+  }, [actionLoading]);
+
+  const selectEntryFromClick = React.useCallback(
+    (entry: DroneFsEntry, event: React.MouseEvent<HTMLElement>) => {
+      const additive = event.metaKey || event.ctrlKey;
+      if (event.shiftKey && selectionAnchorRef.current) {
+        const anchorIndex = visibleEntries.findIndex((visibleEntry) => visibleEntry.path === selectionAnchorRef.current);
+        const entryIndex = visibleEntries.findIndex((visibleEntry) => visibleEntry.path === entry.path);
+        if (anchorIndex >= 0 && entryIndex >= 0) {
+          const start = Math.min(anchorIndex, entryIndex);
+          const end = Math.max(anchorIndex, entryIndex);
+          setSelectedPaths((previous) => {
+            const next = additive ? new Set(previous) : new Set<string>();
+            for (const visibleEntry of visibleEntries.slice(start, end + 1)) next.add(visibleEntry.path);
+            return next;
+          });
+          return;
+        }
+      }
+
+      selectionAnchorRef.current = entry.path;
+      if (additive) {
+        setSelectedPaths((previous) => toggleSelectedPath(previous, entry.path));
+      } else {
+        setSelectedPaths(new Set([entry.path]));
+      }
+    },
+    [visibleEntries],
+  );
 
   const loadDirectory = React.useCallback(
     async (dirPathRaw: string, opts?: { force?: boolean }) => {
@@ -415,6 +445,13 @@ export function DroneFilesDock({
   const submitInlineAction = React.useCallback(() => {
     const value = actionInput.trim();
     if (!actionMode || !value) return;
+    if (actionMode === 'go-to-path') {
+      setActionMode(null);
+      setActionInput('');
+      setContextMenu(null);
+      onOpenPath(normalizeContainerPathInput(value));
+      return;
+    }
     if (actionMode === 'create-file' || actionMode === 'create-directory') {
       void runAction(actionMode === 'create-file' ? 'Creating file' : 'Creating folder', async () => {
         const result = await runDroneFsAction(droneId, {
@@ -424,6 +461,7 @@ export function DroneFilesDock({
         });
         setActionMode(null);
         setActionInput('');
+        setContextMenu(null);
         if (actionMode === 'create-file' && result.path) {
           onOpenFile({
             name: value,
@@ -454,6 +492,7 @@ export function DroneFilesDock({
         setSelectedPaths(new Set());
         setActionMode(null);
         setActionInput('');
+        setContextMenu(null);
         refreshAfterMutation(`Renamed ${previous.name} to ${value}.`);
       });
       return;
@@ -475,6 +514,7 @@ export function DroneFilesDock({
         setSelectedPaths(new Set());
         setActionMode(null);
         setActionInput('');
+        setContextMenu(null);
         refreshAfterMutation(`Moved ${moving.length} item${moving.length === 1 ? '' : 's'}.`);
       });
     }
@@ -485,6 +525,7 @@ export function DroneFilesDock({
     clearClipboardForChangedEntries,
     normalizedPath,
     onOpenFile,
+    onOpenPath,
     onRemapOpenedFilesForPathChange,
     refreshAfterMutation,
     runAction,
@@ -494,29 +535,41 @@ export function DroneFilesDock({
   ]);
 
   const beginCreate = React.useCallback((mode: 'create-file' | 'create-directory') => {
+    ensureContextMenu(null);
     setActionMode(mode);
     setActionInput('');
     setActionError(null);
     setActionStatus(null);
-  }, []);
+  }, [ensureContextMenu]);
 
   const beginRename = React.useCallback((entry?: DroneFsEntry) => {
     const target = entry ?? selectedOne;
     if (!target) return;
     setSelectedPaths(new Set([target.path]));
+    selectionAnchorRef.current = target.path;
+    ensureContextMenu(target);
     setActionMode('rename');
     setActionInput(target.name);
     setActionError(null);
     setActionStatus(null);
-  }, [selectedOne]);
+  }, [ensureContextMenu, selectedOne]);
 
   const beginMove = React.useCallback(() => {
     if (selectedCount === 0) return;
+    ensureContextMenu(selectedOne);
     setActionMode('move');
     setActionInput(normalizedPath);
     setActionError(null);
     setActionStatus(null);
-  }, [normalizedPath, selectedCount]);
+  }, [ensureContextMenu, normalizedPath, selectedCount, selectedOne]);
+
+  const beginGoToPath = React.useCallback(() => {
+    ensureContextMenu(null);
+    setActionMode('go-to-path');
+    setActionInput(normalizedPath);
+    setActionError(null);
+    setActionStatus(null);
+  }, [ensureContextMenu, normalizedPath]);
 
   const deleteEntries = React.useCallback(
     (entriesToDelete: DroneFsEntry[]) => {
@@ -695,30 +748,31 @@ export function DroneFilesDock({
     [onOpenFile, onOpenFileInPanel],
   );
 
-  const renderDownloadButton = React.useCallback(
-    (entry: DroneFsEntry, className: string) => {
-      if (entry.kind !== 'directory' && entry.kind !== 'file') return null;
-      return (
-        <button
-          type="button"
-          disabled={busy}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            downloadEntry(entry);
-          }}
-          className={`${className} disabled:opacity-40 disabled:cursor-not-allowed`}
-          title={`Download ${entry.kind === 'directory' ? 'directory' : 'file'}`}
-        >
-          <IconDownload className="opacity-80" />
-        </button>
-      );
+  const activateEntry = React.useCallback(
+    (entry: DroneFsEntry, event: React.MouseEvent<HTMLElement>) => {
+      selectEntryFromClick(entry, event);
+      if (event.metaKey || event.ctrlKey || event.shiftKey) return;
+      if (entry.kind === 'directory') {
+        toggleDirectory(entry.path);
+      } else if (entry.kind === 'file') {
+        openFileEntry(entry);
+      }
     },
-    [busy, downloadEntry],
+    [openFileEntry, selectEntryFromClick, toggleDirectory],
   );
 
-  const actionButtonClassName =
-    'w-5 h-5 rounded-sm text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.07)] flex items-center justify-center';
+  const openEntryContextMenu = React.useCallback(
+    (entry: DroneFsEntry, event: React.MouseEvent<HTMLElement>) => {
+      event.preventDefault();
+      event.stopPropagation();
+      if (!selectedPaths.has(entry.path)) {
+        setSelectedPaths(new Set([entry.path]));
+        selectionAnchorRef.current = entry.path;
+      }
+      openContextMenu(event.clientX, event.clientY, entry);
+    },
+    [openContextMenu, selectedPaths],
+  );
 
   function renderExplorer(nodes: FileExplorerNode[], depth: number): React.ReactNode {
     return nodes.map((node) => {
@@ -733,93 +787,39 @@ export function DroneFilesDock({
 
         return (
           <React.Fragment key={`dir:${node.path}`}>
-            <div className="relative w-full group/dir">
+            <div className="relative w-full">
               <TreeIndentGuides depth={depth} />
-              <div
-                className={`flex h-[22px] items-center gap-0.5 pr-1 text-[13px] transition-colors ${
+              <button
+                type="button"
+                role="treeitem"
+                aria-expanded={open}
+                aria-selected={selected}
+                disabled={busy}
+                onClick={(event) => activateEntry(node.entry, event)}
+                onContextMenu={(event) => openEntryContextMenu(node.entry, event)}
+                className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[13px] transition-colors disabled:opacity-60 ${
                   selected
-                    ? 'bg-[rgba(55,118,171,.20)] text-[var(--fg)] shadow-[inset_0_0_0_1px_rgba(64,156,255,.55)]'
+                    ? 'bg-[rgba(55,118,171,.32)] text-[var(--fg)]'
                     : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)]'
                 }`}
                 style={{ paddingLeft: `${indentPx}px` }}
+                title={`${title} • Click to ${open ? 'collapse' : 'expand'} • Right-click for actions`}
               >
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => toggleDirectory(node.path)}
-                  className="flex h-full min-w-0 flex-1 items-center gap-1 rounded-none border-0 px-0 text-left disabled:opacity-60"
-                  title={`${title} • Click to ${open ? 'collapse' : 'expand'}`}
-                >
-                  <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
-                    <IconChevron down={open} size={12} />
+                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
+                  <IconChevron down={open} size={12} />
+                </span>
+                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[#d7b85a]">
+                  <IconFolder size={13} />
+                </span>
+                <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
+                {childError ? <span className="px-1 text-[9px] uppercase text-[var(--red)]">Error</span> : null}
+                {childLoading ? (
+                  <span className="inline-flex items-center gap-1 px-1 text-[9px] uppercase text-[var(--accent)]">
+                    <InlineSpinner />
+                    Loading
                   </span>
-                  <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[#d7b85a]">
-                    <IconFolder size={13} />
-                  </span>
-                  <span className="min-w-0 flex-1 truncate text-[13px] leading-none">{node.name}</span>
-                  {childError ? (
-                    <span
-                      className="inline-flex items-center justify-center rounded-sm px-1 text-[9px] uppercase text-[var(--red)]"
-                      title={childError}
-                    >
-                      Error
-                    </span>
-                  ) : null}
-                  {childLoading ? (
-                    <span
-                      className="inline-flex items-center gap-1 rounded-sm px-1 text-[9px] uppercase text-[var(--accent)]"
-                      title={`Loading ${node.path}`}
-                    >
-                      <InlineSpinner />
-                      Loading
-                    </span>
-                  ) : null}
-                </button>
-                <input
-                  type="checkbox"
-                  checked={selected}
-                  disabled={busy}
-                  onChange={(event) => {
-                    const checked = event.currentTarget.checked;
-                    setSelectedPaths((prev) => toggleSelectedPath(prev, node.path, checked));
-                  }}
-                  onClick={(event) => event.stopPropagation()}
-                  className={`h-3 w-3 flex-shrink-0 accent-[var(--accent)] transition-opacity ${
-                    selected ? 'opacity-100' : 'opacity-0 group-hover/dir:opacity-100 focus:opacity-100'
-                  }`}
-                  title={`Select ${node.path}`}
-                />
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    beginRename(node.entry);
-                  }}
-                  className={`${actionButtonClassName} opacity-0 transition-opacity group-hover/dir:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-40`}
-                  title={`Rename ${node.path}`}
-                >
-                  <IconPencil className="w-3 h-3" />
-                </button>
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    deleteEntries([node.entry]);
-                  }}
-                  className={`${actionButtonClassName} opacity-0 transition-opacity group-hover/dir:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-40`}
-                  title={`Delete ${node.path}`}
-                >
-                  <IconTrash className="w-3 h-3" />
-                </button>
-                {renderDownloadButton(
-                  node.entry,
-                  `${actionButtonClassName} opacity-0 transition-opacity group-hover/dir:opacity-100 focus:opacity-100`,
-                )}
-              </div>
+                ) : null}
+              </button>
             </div>
             {open ? (
               <>
@@ -852,91 +852,70 @@ export function DroneFilesDock({
       const modified = formatLocalDateTime(entry.mtimeMs);
       const openable = entry.kind === 'file';
       return (
-        <div key={`file:${entry.path}`} className="relative w-full group/file">
+        <div key={`file:${entry.path}`} className="relative w-full">
           <TreeIndentGuides depth={depth} />
-          <div
-            className={`flex h-[22px] items-center gap-0.5 pr-1 text-[13px] transition-colors ${
-              selected || active
-                ? 'bg-[rgba(55,118,171,.20)] text-[var(--fg)] shadow-[inset_0_0_0_1px_rgba(64,156,255,.55)]'
-                : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)]'
+          <button
+            type="button"
+            role="treeitem"
+            aria-selected={selected}
+            disabled={busy}
+            onClick={(event) => activateEntry(entry, event)}
+            onContextMenu={(event) => openEntryContextMenu(entry, event)}
+            className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[13px] transition-colors disabled:opacity-60 ${
+              selected
+                ? 'bg-[rgba(55,118,171,.32)] text-[var(--fg)]'
+                : active
+                  ? 'bg-[rgba(255,255,255,.035)] text-[var(--fg)] hover:bg-[rgba(255,255,255,.055)]'
+                  : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)]'
             }`}
             style={{ paddingLeft: `${indentPx}px` }}
+            title={`${entry.path} • ${modified} • Right-click for actions`}
           >
-            {openable ? (
-              <button
-                type="button"
-                disabled={busy}
-                onClick={() => openFileEntry(entry)}
-                className="flex h-full min-w-0 flex-1 items-center gap-1 rounded-none border-0 px-0 text-left disabled:opacity-60"
-                title={`${entry.path} • ${modified}`}
-              >
-                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]" aria-hidden="true" />
-                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
-                  <FileIcon size={13} />
-                </span>
-                <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
-              </button>
-            ) : (
-              <div
-                className="flex h-full min-w-0 flex-1 items-center gap-1 text-left opacity-70"
-                title={`${entry.path} • ${modified}`}
-              >
-                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]" aria-hidden="true" />
-                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
-                  <FileIcon size={13} />
-                </span>
-                <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
-              </div>
-            )}
-            <input
-              type="checkbox"
-              checked={selected}
-              disabled={busy}
-              onChange={(event) => {
-                const checked = event.currentTarget.checked;
-                setSelectedPaths((prev) => toggleSelectedPath(prev, entry.path, checked));
-              }}
-              onClick={(event) => event.stopPropagation()}
-              className={`h-3 w-3 flex-shrink-0 accent-[var(--accent)] transition-opacity ${
-                selected ? 'opacity-100' : 'opacity-0 group-hover/file:opacity-100 focus:opacity-100'
-              }`}
-              title={`Select ${entry.path}`}
-            />
-            <button
-              type="button"
-              disabled={busy}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                beginRename(entry);
-              }}
-              className={`${actionButtonClassName} opacity-0 transition-opacity group-hover/file:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-40`}
-              title={`Rename ${entry.path}`}
-            >
-              <IconPencil className="w-3 h-3" />
-            </button>
-            <button
-              type="button"
-              disabled={busy}
-              onClick={(event) => {
-                event.preventDefault();
-                event.stopPropagation();
-                deleteEntries([entry]);
-              }}
-              className={`${actionButtonClassName} opacity-0 transition-opacity group-hover/file:opacity-100 focus:opacity-100 disabled:cursor-not-allowed disabled:opacity-40`}
-              title={`Delete ${entry.path}`}
-            >
-              <IconTrash className="w-3 h-3" />
-            </button>
-            {renderDownloadButton(
-              entry,
-              `${actionButtonClassName} opacity-0 transition-opacity group-hover/file:opacity-100 focus:opacity-100`,
-            )}
-          </div>
+            <span className="inline-flex h-4 w-4 flex-shrink-0" aria-hidden="true" />
+            <span className={`inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)] ${openable ? '' : 'opacity-70'}`}>
+              <FileIcon size={13} />
+            </span>
+            <span className={`min-w-0 flex-1 truncate leading-none ${openable ? '' : 'opacity-70'}`}>{node.name}</span>
+          </button>
         </div>
       );
     });
   }
+
+  const handleExplorerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.target instanceof HTMLInputElement || event.target instanceof HTMLTextAreaElement) return;
+    if (event.target instanceof HTMLElement && event.target.closest('[role="menu"]')) return;
+    const commandKey = event.metaKey || event.ctrlKey;
+    if (commandKey && event.key.toLowerCase() === 'a') {
+      event.preventDefault();
+      setSelectedPaths((previous) => setAllVisibleSelected(visibleEntries, previous, true));
+      return;
+    }
+    if (commandKey && event.key.toLowerCase() === 'c' && selectedCount > 0) {
+      event.preventDefault();
+      copySelected();
+      return;
+    }
+    if (commandKey && event.key.toLowerCase() === 'v' && clipboard) {
+      event.preventDefault();
+      pasteClipboard();
+      return;
+    }
+    if (event.key === 'F2' && selectedOne) {
+      event.preventDefault();
+      beginRename();
+      return;
+    }
+    if (event.key === 'Delete' && selectedCount > 0) {
+      event.preventDefault();
+      deleteEntries(actionEntries);
+      return;
+    }
+    if (event.key === 'Escape' && selectedCount > 0) {
+      setSelectedPaths(new Set());
+      selectionAnchorRef.current = null;
+    }
+  };
 
   const showStartupPlaceholder = Boolean(startup?.waiting) && !error && entries.length === 0;
   const startupLabel = startup?.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
@@ -946,6 +925,7 @@ export function DroneFilesDock({
     : 'Waiting for filesystem…';
   return (
     <div
+      ref={explorerRef}
       className={`w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative ${
         dragActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''
       }`}
@@ -953,112 +933,8 @@ export function DroneFilesDock({
       onDragOver={onPanelDragOver}
       onDragLeave={onPanelDragLeave}
       onDrop={onPanelDrop}
+      onKeyDown={handleExplorerKeyDown}
     >
-      <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] flex items-center gap-2">
-        <div className="min-w-0 flex-1">
-          {pathEntryOpen ? (
-            <div className="flex items-center gap-1">
-              <input
-                type="text"
-                value={pathInput}
-                disabled={busy}
-                onChange={(e) => setPathInput(e.currentTarget.value)}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') {
-                    e.preventDefault();
-                    submitPath();
-                  } else if (e.key === 'Escape') {
-                    e.preventDefault();
-                    setPathInput(normalizedPath);
-                    setPathEntryOpen(false);
-                  }
-                }}
-                autoFocus
-                className="flex-1 min-w-0 h-7 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] px-2 text-[11px] text-[var(--fg-secondary)] focus:outline-none disabled:opacity-60"
-                title={`Container path for ${shownName}`}
-              />
-              <button
-                type="button"
-                disabled={busy}
-                onClick={submitPath}
-                className="h-7 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-                title="Go to path"
-              >
-                Go
-              </button>
-            </div>
-          ) : (
-            <div className="overflow-x-auto whitespace-nowrap text-[11px] text-[var(--muted)]">
-              {crumbs.map((c, idx) => (
-                <React.Fragment key={c.path}>
-                  {idx > 0 && <span className="mx-1 text-[var(--muted-dim)]">/</span>}
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => onOpenPath(c.path)}
-                    className={`hover:text-[var(--fg-secondary)] disabled:opacity-50 disabled:cursor-not-allowed ${idx === crumbs.length - 1 ? 'text-[var(--fg-secondary)]' : ''}`}
-                    title={c.path}
-                  >
-                    {c.label}
-                  </button>
-                </React.Fragment>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="flex items-center gap-1 shrink-0">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => {
-              setPathInput(normalizedPath);
-              setPathEntryOpen((prev) => !prev);
-            }}
-            className={`h-7 px-2.5 rounded-md border text-[10px] font-semibold transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
-              pathEntryOpen
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[var(--panel)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-            }`}
-            title="Jump to path"
-          >
-            Path
-          </button>
-          <button
-            type="button"
-            onClick={refreshExplorer}
-            disabled={busy}
-            className="h-7 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--panel)] text-[10px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
-            title="Refresh explorer"
-          >
-            {loading ? 'Refreshing' : 'Refresh'}
-          </button>
-        </div>
-      </div>
-
-      <DroneFilesToolbar
-        busy={busy}
-        visibleAllSelected={visibleAllSelected}
-        visibleCount={visibleEntries.length}
-        selectedCount={selectedCount}
-        clipboardCount={clipboard?.entries.length ?? 0}
-        actionMode={actionMode}
-        actionInput={actionInput}
-        actionLoading={actionLoading}
-        onSelectAllVisible={(selected) => setSelectedPaths((prev) => setAllVisibleSelected(visibleEntries, prev, selected))}
-        onCreate={beginCreate}
-        onRename={() => beginRename()}
-        onDeleteSelected={() => deleteEntries(actionEntries)}
-        onMove={beginMove}
-        onCopy={copySelected}
-        onPaste={pasteClipboard}
-        onActionInputChange={setActionInput}
-        onSubmitAction={submitInlineAction}
-        onCancelAction={() => {
-          setActionMode(null);
-          setActionInput('');
-        }}
-      />
-
       {uploadStatus ? (
         <div className="mx-2.5 mt-2 p-2 rounded-md bg-[rgba(66,153,225,.12)] border border-[rgba(66,153,225,.28)] text-[12px] text-[var(--fg-secondary)]">
           {uploadStatus}
@@ -1087,7 +963,22 @@ export function DroneFilesDock({
 
       <div className="flex-1 min-h-0 flex overflow-hidden">
         <div className="w-full bg-[var(--panel)] flex flex-col">
-          <div className="flex-1 min-h-0 overflow-auto py-1">
+          <div
+            className="flex-1 min-h-0 overflow-auto py-1 outline-none"
+            role="tree"
+            aria-label="Files"
+            tabIndex={0}
+            onClick={(event) => {
+              if (event.target !== event.currentTarget) return;
+              setSelectedPaths(new Set());
+              selectionAnchorRef.current = null;
+            }}
+            onContextMenu={(event) => {
+              if (event.defaultPrevented) return;
+              event.preventDefault();
+              openContextMenu(event.clientX, event.clientY, null);
+            }}
+          >
             {showStartupPlaceholder ? (
               <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[12px] text-[var(--muted)]">
                 <div className="text-[11px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -1102,7 +993,7 @@ export function DroneFilesDock({
               </div>
             ) : !error && !loading && entries.length === 0 ? (
               <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[12px] text-[var(--muted)]">
-                Directory is empty.
+                Directory is empty. Right-click to create a file or folder.
               </div>
             ) : (
               renderExplorer(explorerTree, 0)
@@ -1110,6 +1001,51 @@ export function DroneFilesDock({
           </div>
         </div>
       </div>
+
+      {contextMenu ? (
+        <DroneFilesContextMenu
+          menu={contextMenu}
+          busy={busy}
+          selectedCount={selectedCount}
+          clipboardCount={clipboard?.entries.length ?? 0}
+          actionMode={actionMode}
+          actionInput={actionInput}
+          actionLoading={actionLoading}
+          onOpen={() => {
+            const entry = contextMenu.entry;
+            if (entry?.kind === 'directory') toggleDirectory(entry.path);
+            if (entry?.kind === 'file') openFileEntry(entry);
+            setContextMenu(null);
+          }}
+          onCreate={beginCreate}
+          onRename={() => beginRename()}
+          onDelete={() => {
+            setContextMenu(null);
+            deleteEntries(actionEntries);
+          }}
+          onMove={beginMove}
+          onCopy={() => {
+            copySelected();
+            setContextMenu(null);
+          }}
+          onPaste={() => {
+            pasteClipboard();
+            setContextMenu(null);
+          }}
+          onDownload={() => {
+            if (contextMenu.entry) downloadEntry(contextMenu.entry);
+            setContextMenu(null);
+          }}
+          onRefresh={() => {
+            refreshExplorer();
+            setContextMenu(null);
+          }}
+          onGoToPath={beginGoToPath}
+          onActionInputChange={setActionInput}
+          onSubmitAction={submitInlineAction}
+          onClose={closeContextMenu}
+        />
+      ) : null}
 
       {dragActive ? (
         <div className="pointer-events-none absolute inset-0 z-30 px-3 py-3">
