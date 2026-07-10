@@ -1,0 +1,236 @@
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+const { afterEach, describe, test } = require('node:test');
+
+const { resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
+const {
+  getHubSettingsRepository,
+  HubSettingVersionConflictError,
+} = require('../../dist/host/hub-settings-repository.js');
+const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
+const { readRegistryJsonFromSqlite } = require('../../dist/host/sqlite-registry-store.js');
+const { updateRegistry } = require('../../dist/host/registry.js');
+const {
+  resolveUiPreferencesSettingsResponse,
+  UiPreferencesSettingsConflictError,
+  UiPreferencesSettingsValidationError,
+  upsertStoredUiPreferencesSettings,
+} = require('../../dist/hub/hub-settings.js');
+
+const originalDroneDataDir = process.env.DRONE_DATA_DIR;
+const tempRoots = [];
+
+function useTempDroneDataDir(label) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `drone-hub-settings-${label}-`));
+  tempRoots.push(root);
+  const dataDir = path.join(root, 'data');
+  fs.mkdirSync(dataDir, { recursive: true });
+  process.env.DRONE_DATA_DIR = dataDir;
+  resetDroneRootDirForTests();
+  return dataDir;
+}
+
+afterEach(async () => {
+  await resetHubDatabaseForTests();
+  if (originalDroneDataDir == null) delete process.env.DRONE_DATA_DIR;
+  else process.env.DRONE_DATA_DIR = originalDroneDataDir;
+  resetDroneRootDirForTests();
+  for (const root of tempRoots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+});
+
+describe('HubSettingsRepository', () => {
+  test('performs concurrent read-modify-write updates without losing either change', async () => {
+    useTempDroneDataDir('concurrent-update');
+    const repository = await getHubSettingsRepository();
+    await repository.put('concurrency-probe', { left: 0, right: 0 });
+
+    await Promise.all([
+      repository.update('concurrency-probe', (current) => ({
+        ...current.value,
+        left: current.value.left + 1,
+      })),
+      repository.update('concurrency-probe', (current) => ({
+        ...current.value,
+        right: current.value.right + 1,
+      })),
+    ]);
+
+    assert.deepEqual(repository.get('concurrency-probe'), {
+      key: 'concurrency-probe',
+      value: { left: 1, right: 1 },
+      updatedAt: repository.get('concurrency-probe').updatedAt,
+      version: 3,
+    });
+  });
+
+  test('enforces compare-and-swap versions and returns the winning row on conflict', async () => {
+    useTempDroneDataDir('version-conflict');
+    const repository = await getHubSettingsRepository();
+    const created = await repository.put(
+      'cas-probe',
+      { value: 'first' },
+      { expectedVersion: null },
+    );
+    const updated = await repository.put(
+      'cas-probe',
+      { value: 'second' },
+      { expectedVersion: created.version },
+    );
+
+    assert.equal(updated.version, 2);
+    await assert.rejects(
+      repository.put('cas-probe', { value: 'stale' }, { expectedVersion: created.version }),
+      (error) => {
+        assert.ok(error instanceof HubSettingVersionConflictError);
+        assert.equal(error.expectedVersion, 1);
+        assert.deepEqual(error.current.value, { value: 'second' });
+        assert.equal(error.current.version, 2);
+        return true;
+      },
+    );
+  });
+});
+
+describe('canonical UI preferences settings', () => {
+  test('preserves the existing default response before anything is stored', async () => {
+    useTempDroneDataDir('defaults');
+    const resolved = await resolveUiPreferencesSettingsResponse();
+
+    assert.equal(resolved.updatedAt, null);
+    assert.equal(resolved.version, null);
+    assert.equal(resolved.uiPreferences.sidebarGroupingMode, 'groups');
+    assert.deepEqual(resolved.uiPreferences.sidebarGroupOrder, []);
+    assert.equal(resolved.uiPreferences.autoDelete, false);
+    assert.deepEqual(resolved.uiPreferences.automations, []);
+    assert.equal(resolved.uiPreferences.spawnAgentKey, 'builtin:cursor');
+    assert.equal(resolved.uiPreferences.spawnModel, '');
+    assert.equal(resolved.uiPreferences.repoBranchSource, 'host');
+    assert.equal(resolved.uiPreferences.repoCreateRemoteBranch, '');
+    assert.equal(resolved.uiPreferences.pullHostBranchBeforeCreate, true);
+  });
+
+  test('backfills legacy UI preferences once and gives canonical data precedence afterward', async () => {
+    useTempDroneDataDir('legacy-backfill');
+    await updateRegistry((registry) => {
+      registry.settings ??= {};
+      registry.settings.uiPreferences = {
+        autoDelete: true,
+        spawnAgentKey: 'builtin:codex',
+        updatedAt: '2026-01-02T03:04:05.000Z',
+      };
+    });
+
+    const backfilled = await resolveUiPreferencesSettingsResponse();
+    assert.equal(backfilled.uiPreferences.autoDelete, true);
+    assert.equal(backfilled.uiPreferences.spawnAgentKey, 'builtin:codex');
+    assert.equal(backfilled.updatedAt, '2026-01-02T03:04:05.000Z');
+    assert.equal(backfilled.version, 1);
+
+    await updateRegistry((registry) => {
+      registry.settings.uiPreferences = {
+        autoDelete: false,
+        spawnAgentKey: 'builtin:cursor',
+        updatedAt: '2027-01-02T03:04:05.000Z',
+      };
+    });
+
+    const canonical = await resolveUiPreferencesSettingsResponse();
+    assert.equal(canonical.uiPreferences.autoDelete, true);
+    assert.equal(canonical.uiPreferences.spawnAgentKey, 'builtin:codex');
+    assert.equal(canonical.updatedAt, '2026-01-02T03:04:05.000Z');
+    assert.equal(canonical.version, 1);
+  });
+
+  test('round-trips sanitized preferences without rewriting the legacy registry snapshot', async () => {
+    useTempDroneDataDir('round-trip');
+    await updateRegistry((registry) => {
+      registry.settings ??= {};
+      registry.settings.nonRepoEnvironment = {
+        vars: { PRESERVE: 'registry snapshot' },
+        updatedAt: '2026-01-01T00:00:00.000Z',
+      };
+    });
+    const registryBefore = readRegistryJsonFromSqlite();
+
+    await upsertStoredUiPreferencesSettings({
+      sidebarGroupingMode: 'repos',
+      sidebarGroupOrder: ['alpha', 'beta', 'alpha', '', '  '],
+      sidebarDroneOrderByGroup: { alpha: ['drone-a', 'drone-b', 'drone-a'], '': ['ignored'] },
+      sidebarChatOrderByDrone: { 'drone-a': ['default', 'review', 'default'] },
+      hiddenSidebarGroups: ['archive', 'archive', ''],
+      autoDelete: true,
+      spawnAgentKey: 'builtin:codex',
+      spawnModel: 'gpt-5.5',
+      repoBranchSource: 'remote',
+      repoCreateRemoteBranch: 'origin/feature/voice',
+      pullHostBranchBeforeCreate: false,
+      automations: [
+        {
+          id: 'automation-a',
+          label: '  Nightly build  ',
+          prompt: 'ship it',
+          runs: 999,
+          sleepAmount: 5,
+          sleepUnit: 'hours',
+          stopPhrase: 'done',
+          stopPhraseCaseSensitive: true,
+        },
+        { id: 'automation-a', label: 'duplicate id should be dropped' },
+      ],
+    });
+
+    const resolved = await resolveUiPreferencesSettingsResponse();
+    assert.equal(resolved.version, 1);
+    assert.equal(resolved.uiPreferences.sidebarGroupingMode, 'repos');
+    assert.deepEqual(resolved.uiPreferences.sidebarGroupOrder, ['alpha', 'beta']);
+    assert.deepEqual(resolved.uiPreferences.sidebarDroneOrderByGroup, {
+      alpha: ['drone-a', 'drone-b'],
+    });
+    assert.deepEqual(resolved.uiPreferences.sidebarChatOrderByDrone, {
+      'drone-a': ['default', 'review'],
+    });
+    assert.deepEqual(resolved.uiPreferences.hiddenSidebarGroups, ['archive']);
+    assert.equal(resolved.uiPreferences.autoDelete, true);
+    assert.equal(resolved.uiPreferences.spawnAgentKey, 'builtin:codex');
+    assert.equal(resolved.uiPreferences.spawnModel, 'gpt-5.5');
+    assert.equal(resolved.uiPreferences.repoBranchSource, 'remote');
+    assert.equal(resolved.uiPreferences.repoCreateRemoteBranch, 'origin/feature/voice');
+    assert.equal(resolved.uiPreferences.pullHostBranchBeforeCreate, false);
+    assert.equal(resolved.uiPreferences.automations.length, 1);
+    assert.equal(resolved.uiPreferences.automations[0].label, 'Nightly build');
+    assert.equal(resolved.uiPreferences.automations[0].runs, 20);
+    assert.equal(readRegistryJsonFromSqlite(), registryBefore);
+  });
+
+  test('offers additive version-based conflict handling while preserving unconditional writes', async () => {
+    useTempDroneDataDir('ui-conflict');
+    await upsertStoredUiPreferencesSettings({ autoDelete: false });
+    const first = await resolveUiPreferencesSettingsResponse();
+    await upsertStoredUiPreferencesSettings({ autoDelete: true }, first.version);
+    const second = await resolveUiPreferencesSettingsResponse();
+    assert.equal(second.version, 2);
+    assert.equal(second.uiPreferences.autoDelete, true);
+
+    await assert.rejects(
+      upsertStoredUiPreferencesSettings({ autoDelete: false }, first.version),
+      (error) => {
+        assert.ok(error instanceof UiPreferencesSettingsConflictError);
+        assert.equal(error.version, 2);
+        assert.equal(error.uiPreferences.autoDelete, true);
+        return true;
+      },
+    );
+
+    await upsertStoredUiPreferencesSettings({ autoDelete: false });
+    const unconditional = await resolveUiPreferencesSettingsResponse();
+    assert.equal(unconditional.version, 3);
+    assert.equal(unconditional.uiPreferences.autoDelete, false);
+
+    await assert.rejects(
+      upsertStoredUiPreferencesSettings({ autoDelete: true }, 0),
+      UiPreferencesSettingsValidationError,
+    );
+  });
+});
