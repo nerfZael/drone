@@ -114,7 +114,9 @@ import {
   applyChatReconciliationInStore,
   archiveChatInStore,
   countTranscriptTurnsFromStore,
+  createChatInStore,
   deleteArchivedChatFromStore,
+  deleteActiveChatFromStore,
   deleteChatFromStore,
   importArchivedChatsFromRegistry,
   importChatFromRegistry,
@@ -132,6 +134,7 @@ import {
   upsertChatInStore,
   upsertTranscriptTurnInStore,
   updateTranscriptTurnInStore,
+  updateChatInStore,
 } from './transcript-store';
 import { requireWhiteboardStore, type WhiteboardDocument } from './whiteboard-store';
 import { renderWhiteboardPng } from './whiteboard-export';
@@ -12550,6 +12553,20 @@ async function projectCanonicalChatToRegistry(droneIdRaw: string, chatNameRaw: s
   });
 }
 
+async function projectCanonicalChatsToRegistry(droneIdRaw: string): Promise<void> {
+  if (!(globalThis as any).Bun) return;
+  const droneId = normalizeDroneIdentity(droneIdRaw);
+  const chats = Object.fromEntries(listChatsFromStore({ droneId }).chats.flatMap((chatName) => {
+    const stored = readChatFromStore({ droneId, chatName });
+    return stored.available && stored.chat ? [[chatName, stored.chat]] : [];
+  }));
+  await updateRegistry((registry: any) => {
+    const drone = registry?.drones?.[droneId];
+    if (!drone) return;
+    drone.chats = chats;
+  });
+}
+
 async function importResolvedDroneChatsToStore(droneId: string, droneEntry: any): Promise<string[]> {
   const chats = droneEntry?.chats && typeof droneEntry.chats === 'object' ? droneEntry.chats : {};
   const imported = await importDroneChatsFromRegistry({ droneId, chats });
@@ -12985,18 +13002,16 @@ async function setChatAgentConfig(opts: {
   setBlipClonesEnabled?: boolean;
   blipClonesEnabled?: boolean;
 }) {
-  let syncedDroneId = '';
-  let syncedChatName = '';
-  let syncedChat: any = null;
-  await updateRegistry((reg: any) => {
-    const droneId = normalizeDroneIdentity(opts.droneId);
-    const d = droneId ? reg?.drones?.[droneId] : null;
-    if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
-    syncedDroneId = droneId;
-    syncedChatName = opts.chatName;
-    d.chats = d.chats ?? {};
-    const cur = d.chats?.[opts.chatName];
-    if (!cur) throw new Error(`unknown chat: ${opts.chatName}`);
+  const registry: any = await loadRegistry();
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const d = droneId ? registry?.drones?.[droneId] : null;
+  if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
+  await importDroneChatsFromRegistry({ droneId, chats: d.chats });
+  await updateChatInStore({
+    droneId,
+    chatName: opts.chatName,
+    update: (current) => {
+    const cur = { ...current };
     const effectiveAgent = opts.agent ?? inferChatAgent(cur, d);
     if (opts.setAgentMessageAutoContinueEnabled && opts.agentMessageAutoContinueEnabled && effectiveAgent.kind !== 'builtin') {
       const error: Error & { statusCode?: number } = new Error(
@@ -13103,14 +13118,10 @@ async function setChatAgentConfig(opts: {
     if (opts.setBlipClonesEnabled) {
       cur.blipClonesEnabled = opts.blipClonesEnabled !== false;
     }
-    d.chats[opts.chatName] = cur;
-    reg.drones = reg.drones ?? {};
-    reg.drones[droneId] = d;
-    syncedChat = cur;
+    return cur;
+    },
   });
-  if (syncedDroneId && syncedChatName && syncedChat) {
-    await upsertChatInStore({ droneId: syncedDroneId, chatName: syncedChatName, chatEntry: syncedChat });
-  }
+  await projectCanonicalChatToRegistry(droneId, opts.chatName);
 }
 
 async function resolveChatTmuxCommand(opts: { droneId: string; chatName: string }): Promise<string> {
@@ -28412,54 +28423,32 @@ export async function startDroneHubApiServer(opts: {
         const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings()).enabledByDefault;
 
         try {
-          const chats = await updateRegistry((regAny: any) => {
-            const d = regAny?.drones?.[droneId];
-            if (!d) throw new Error(`unknown drone: ${droneId}`);
-            d.chats = d.chats ?? {};
-            if (d.chats[chatName]) throw new Error(`chat already exists: ${chatName}`);
-            const createdAt = nowIso();
-            if (copyFrom && !d.chats[copyFrom]) {
-              // Older drones may still rely on the implicit UI fallback for "default"
-              // and have no materialized chat entries yet. Backfill that default entry
-              // so creating a second chat from it does not fail with 404.
-              if (copyFrom === 'default' && Object.keys(d.chats).length === 0) {
-                d.chats.default = buildNewChatEntry({
-                  droneEntry: d,
-                  createdAt,
-                  autoContinueEnabledByDefault,
-                  agentSuggestionEnabledByDefault,
-                });
-              } else {
-                throw new Error(`unknown chat: ${copyFrom}`);
-              }
-            }
-            let entry: any = buildNewChatEntry({
-              droneEntry: d,
-              createdAt,
-              autoContinueEnabledByDefault,
-              agentSuggestionEnabledByDefault,
-            });
-            if (copyFrom) {
-              const source = d.chats?.[copyFrom];
-              if (!source) throw new Error(`unknown chat: ${copyFrom}`);
-              entry = buildNewChatEntry({
-                droneEntry: d,
+          const droneEntry = resolved.drone;
+          await importDroneChatsFromRegistry({ droneId, chats: droneEntry?.chats });
+          const createdAt = nowIso();
+          const defaultEntry = buildNewChatEntry({
+            droneEntry,
+            createdAt,
+            autoContinueEnabledByDefault,
+            agentSuggestionEnabledByDefault,
+          });
+          const created = await createChatInStore({
+            droneId,
+            chatName,
+            ...(copyFrom ? { copyFromChatName: copyFrom, implicitDefaultEntry: defaultEntry } : {}),
+            createEntry: (source) => {
+              const entry: any = buildNewChatEntry({
+                droneEntry,
                 createdAt,
-                sourceChatEntry: source,
+                ...(source ? { sourceChatEntry: source } : {}),
                 autoContinueEnabledByDefault,
                 agentSuggestionEnabledByDefault,
               });
-            }
-            if (createAsDraft) entry.draft = true;
-            d.chats[chatName] = entry;
-            regAny.drones = regAny.drones ?? {};
-            regAny.drones[droneId] = d;
-            return Object.keys(d.chats ?? {});
+              if (createAsDraft) entry.draft = true;
+              return entry;
+            },
           });
-
-          const createdRegistry = await loadRegistry();
-          const createdEntry = (createdRegistry as any)?.drones?.[droneId]?.chats?.[chatName];
-          if (createdEntry) await upsertChatInStore({ droneId, chatName, chatEntry: createdEntry });
+          await projectCanonicalChatsToRegistry(droneId);
 
           json(res, 201, {
             ok: true,
@@ -28467,7 +28456,7 @@ export async function startDroneHubApiServer(opts: {
             name: droneName,
             chat: chatName,
             draft: createAsDraft,
-            chats,
+            chats: created.chats,
           });
           return;
         } catch (e: any) {
@@ -28515,30 +28504,16 @@ export async function startDroneHubApiServer(opts: {
         }
 
         try {
-          const chats = await updateRegistry((regAny: any) => {
-            const d = regAny?.drones?.[droneId];
-            if (!d) throw new Error(`unknown drone: ${droneId}`);
-            d.chats = d.chats ?? {};
-            const current = d.chats?.[chatName];
-            if (!current) throw new Error(`unknown chat: ${chatName}`);
-            if (newChatName !== chatName && d.chats?.[newChatName]) throw new Error(`chat already exists: ${newChatName}`);
-            if (newChatName !== chatName) {
-              d.chats[newChatName] = current;
-              delete d.chats[chatName];
-            }
-            regAny.drones = regAny.drones ?? {};
-            regAny.drones[droneId] = d;
-            return Object.keys(d.chats ?? {});
-          });
-
-          if (newChatName !== chatName) {
-            await renameChatInStore({ droneId, chatName, newChatName });
+          await importDroneChatsFromRegistry({ droneId, chats: resolved.drone?.chats });
+          const renamed = await renameChatInStore({ droneId, chatName, newChatName });
+          if (renamed) {
             migrateInMemoryChatStateForRename({
               droneId,
               fromChatName: chatName,
               toChatName: newChatName,
             });
           }
+          await projectCanonicalChatsToRegistry(droneId);
 
           json(res, 200, {
             ok: true,
@@ -28546,7 +28521,7 @@ export async function startDroneHubApiServer(opts: {
             name: droneName,
             oldChat: chatName,
             chat: newChatName,
-            chats,
+            chats: listChatsFromStore({ droneId }).chats,
           });
           return;
         } catch (e: any) {
@@ -28574,23 +28549,21 @@ export async function startDroneHubApiServer(opts: {
         const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
 
         try {
-          const result = await updateRegistry((regAny: any) => {
-            const d = regAny?.drones?.[droneId];
-            if (!d) throw new Error(`unknown drone: ${droneId}`);
-            d.chats = d.chats ?? {};
-            const entry = d.chats?.[chatName];
-            if (!entry) throw new Error(`unknown chat: ${chatName}`);
+          await importDroneChatsFromRegistry({ droneId, chats: resolved.drone?.chats });
+          let pendingCount = 0;
+          await updateChatInStore({
+            droneId,
+            chatName,
+            update: (current) => {
+            const entry = { ...current };
             if (!isDraftChatEntry(entry)) throw new Error(`chat is not a draft: ${chatName}`);
+            pendingCount = Array.isArray(entry.pendingPrompts) ? entry.pendingPrompts.length : 0;
             delete entry.draft;
             entry.updatedAt = nowIso();
-            d.chats[chatName] = entry;
-            regAny.drones = regAny.drones ?? {};
-            regAny.drones[droneId] = d;
-            return { published: true, pendingCount: Array.isArray(entry.pendingPrompts) ? entry.pendingPrompts.length : 0 };
+            return entry;
+            },
           });
-          const publishedRegistry = await loadRegistry();
-          const publishedEntry = (publishedRegistry as any)?.drones?.[droneId]?.chats?.[chatName];
-          if (publishedEntry) await upsertChatInStore({ droneId, chatName, chatEntry: publishedEntry });
+          await projectCanonicalChatToRegistry(droneId, chatName);
           enqueuePendingPromptPump(droneId, chatName);
           json(res, 202, {
             ok: true,
@@ -28598,8 +28571,8 @@ export async function startDroneHubApiServer(opts: {
             name: droneName,
             chat: chatName,
             draft: false,
-            published: result.published,
-            pendingCount: result.pendingCount,
+            published: true,
+            pendingCount,
           });
           return;
         } catch (e: any) {
@@ -28713,30 +28686,22 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
 
-          let snapshotImageRefs: string[] = [];
-          const chats = await updateRegistry((regAny: any) => {
-            const d = regAny?.drones?.[droneId];
-            if (!d) throw new Error(`unknown drone: ${droneId}`);
-            d.chats = d.chats ?? {};
-            if (!d.chats?.[chatName]) throw new Error(`unknown chat: ${chatName}`);
-            snapshotImageRefs = collectDockerSnapshotImageRefsFromChatEntry(d.chats[chatName]);
-            delete d.chats[chatName];
-            if (Object.keys(d.chats).length === 0) {
-              d.chats.default = buildNewChatEntry({
-                droneEntry: d,
+          await importDroneChatsFromRegistry({ droneId, chats: resolved.drone?.chats });
+          const deleted = await deleteActiveChatFromStore({
+            droneId,
+            chatName,
+            fallbackChat: {
+              chatName: 'default',
+              chatEntry: buildNewChatEntry({
+                droneEntry: resolved.drone,
                 createdAt: nowIso(),
                 autoContinueEnabledByDefault,
                 agentSuggestionEnabledByDefault,
-              });
-            }
-            regAny.drones = regAny.drones ?? {};
-            regAny.drones[droneId] = d;
-            return Object.keys(d.chats ?? {});
+              }),
+            },
           });
-          await deleteChatFromStore({ droneId, chatName });
-          const deleteRegistry = await loadRegistry();
-          const defaultEntry = (deleteRegistry as any)?.drones?.[droneId]?.chats?.default;
-          if (defaultEntry) await importChatFromRegistry({ droneId, chatName: 'default', chatEntry: defaultEntry });
+          const snapshotImageRefs = collectDockerSnapshotImageRefsFromChatEntry(deleted.deletedChat);
+          await projectCanonicalChatsToRegistry(droneId);
           await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, chatName, reason: 'delete-chat' });
 
           json(res, 200, {
@@ -28744,7 +28709,7 @@ export async function startDroneHubApiServer(opts: {
             id: droneId,
             name: droneName,
             deletedChat: chatName,
-            chats,
+            chats: deleted.chats,
           });
           return;
         } catch (e: any) {

@@ -57,6 +57,9 @@ export type TranscriptStoreReadResult = {
 export type ChatStoreImportResult = { available: boolean; sourceHash: string };
 export type ChatStoreReadResult = { available: boolean; chat: any | null; sourceHash: string };
 export type ChatStoreListResult = { available: boolean; chats: string[] };
+export type CreateChatStoreResult = { available: boolean; chat: any; chats: string[] };
+export type UpdateChatStoreResult = { available: boolean; chat: any; chats: string[] };
+export type DeleteActiveChatStoreResult = { available: boolean; deletedChat: any; chats: string[] };
 export type ArchivedChatRecord = {
   droneId: string;
   chatName: string;
@@ -500,6 +503,82 @@ export class ChatTranscriptRepository {
     });
   }
 
+  async createChat(opts: {
+    droneId: string;
+    chatName: string;
+    copyFromChatName?: string;
+    implicitDefaultEntry?: unknown;
+    createEntry: (source: any | null) => unknown;
+  }): Promise<CreateChatStoreResult> {
+    return await this.database.writeTransaction('create canonical chat', (connection) => {
+      if (this.chatRow(connection, opts.droneId, opts.chatName)) throw new Error(`chat already exists: ${opts.chatName}`);
+      let source: any | null = null;
+      if (opts.copyFromChatName) {
+        source = this.projectChatWithConnection(connection, opts.droneId, opts.copyFromChatName);
+        if (!source && opts.copyFromChatName === 'default' && this.listChatsWithConnection(connection, opts.droneId).chats.length === 0) {
+          this.writeChatWithConnection(connection, opts.droneId, 'default', opts.implicitDefaultEntry ?? {});
+          source = this.projectChatWithConnection(connection, opts.droneId, 'default');
+        }
+        if (!source) throw new Error(`unknown chat: ${opts.copyFromChatName}`);
+      }
+      const entry = opts.createEntry(source);
+      this.writeChatWithConnection(connection, opts.droneId, opts.chatName, entry);
+      appendChatEvent(connection, 'chat.created', opts.droneId, opts.chatName, {
+        ...(opts.copyFromChatName ? { copiedFromChatName: opts.copyFromChatName } : {}),
+      });
+      return {
+        available: true,
+        chat: this.projectChatWithConnection(connection, opts.droneId, opts.chatName),
+        chats: this.listChatsWithConnection(connection, opts.droneId).chats,
+      };
+    });
+  }
+
+  async updateChat(opts: {
+    droneId: string;
+    chatName: string;
+    update: (chat: any) => unknown;
+  }): Promise<UpdateChatStoreResult> {
+    return await this.database.writeTransaction('update canonical chat', (connection) => {
+      const current = this.projectChatWithConnection(connection, opts.droneId, opts.chatName);
+      if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
+      const next = opts.update(current);
+      this.writeChatWithConnection(connection, opts.droneId, opts.chatName, next);
+      appendChatEvent(connection, 'chat.updated', opts.droneId, opts.chatName, {});
+      return {
+        available: true,
+        chat: this.projectChatWithConnection(connection, opts.droneId, opts.chatName),
+        chats: this.listChatsWithConnection(connection, opts.droneId).chats,
+      };
+    });
+  }
+
+  async deleteActiveChat(opts: {
+    droneId: string;
+    chatName: string;
+    fallbackChat?: { chatName: string; chatEntry: unknown };
+  }): Promise<DeleteActiveChatStoreResult> {
+    return await this.database.writeTransaction('delete active canonical chat', (connection) => {
+      if (opts.chatName === 'default') throw new Error('cannot delete default chat');
+      const current = this.projectChatWithConnection(connection, opts.droneId, opts.chatName);
+      if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
+      connection.prepare('DELETE FROM canonical_chats WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.chatName);
+      connection.prepare(`INSERT OR REPLACE INTO canonical_chat_tombstones (
+        drone_id, chat_name, reason, replacement_chat_name, deleted_at
+      ) VALUES (?, ?, 'deleted', NULL, ?)`).run(opts.droneId, opts.chatName, new Date().toISOString());
+      if (this.listChatsWithConnection(connection, opts.droneId).chats.length === 0 && opts.fallbackChat) {
+        this.writeChatWithConnection(connection, opts.droneId, opts.fallbackChat.chatName, opts.fallbackChat.chatEntry);
+      }
+      appendChatEvent(connection, 'chat.deleted', opts.droneId, opts.chatName, {});
+      return {
+        available: true,
+        deletedChat: current,
+        chats: this.listChatsWithConnection(connection, opts.droneId).chats,
+      };
+    });
+  }
+
   async backfillArchivedChats(opts: { droneId: string; archivedChats: unknown }): Promise<ArchivedChatStoreListResult> {
     const archivedChats = opts.archivedChats && typeof opts.archivedChats === 'object' && !Array.isArray(opts.archivedChats)
       ? opts.archivedChats as Record<string, unknown>
@@ -730,6 +809,11 @@ export class ChatTranscriptRepository {
 
   async renameChat(opts: { droneId: string; chatName: string; newChatName: string }): Promise<boolean> {
     return await this.database.writeTransaction('rename canonical chat', (connection) => {
+      if (opts.chatName === 'default') throw new Error('cannot rename default chat');
+      if (opts.chatName === opts.newChatName) {
+        if (!this.chatRow(connection, opts.droneId, opts.chatName)) throw new Error(`unknown chat: ${opts.chatName}`);
+        return false;
+      }
       if (this.chatRow(connection, opts.droneId, opts.newChatName)) throw new Error(`chat already exists: ${opts.newChatName}`);
       const info = connection
         .prepare(`UPDATE canonical_chats SET chat_name = ?, updated_at = ? WHERE drone_id = ? AND chat_name = ?`)
@@ -748,7 +832,7 @@ export class ChatTranscriptRepository {
         appendChatEvent(connection, 'chat.renamed', opts.droneId, opts.newChatName, { previousChatName: opts.chatName });
         return true;
       }
-      return false;
+      throw new Error(`unknown chat: ${opts.chatName}`);
     });
   }
 
@@ -946,7 +1030,7 @@ export class ChatTranscriptRepository {
     const hasPrompts = connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompts'").get();
     if (hasPrompts) {
       const rows = connection.prepare(`SELECT prompt_id, created_at, updated_at, state, prompt, payload_json
-        FROM prompts WHERE drone_id = ? AND chat_name = ? ORDER BY sequence`).all(droneId, chatName) as any[];
+        FROM prompts WHERE drone_id = ? AND chat_name = ? AND state != 'cancelled' ORDER BY sequence`).all(droneId, chatName) as any[];
       pendingPrompts = rows.map((promptRow) => ({
         ...(parseJson(promptRow.payload_json) ?? {}),
         id: promptRow.prompt_id,
@@ -1266,6 +1350,81 @@ export async function importChatFromRegistry(opts: { droneId: string; chatName: 
   return store ? await store.backfillChat(opts) : await memoryBackfillChat(opts.droneId, opts.chatName, opts.chatEntry);
 }
 
+export async function createChatInStore(opts: {
+  droneId: string;
+  chatName: string;
+  copyFromChatName?: string;
+  implicitDefaultEntry?: unknown;
+  createEntry: (source: any | null) => unknown;
+}): Promise<CreateChatStoreResult> {
+  const store = repository();
+  if (store) return await store.createChat(opts);
+  if (memoryReadChat(opts.droneId, opts.chatName).chat) throw new Error(`chat already exists: ${opts.chatName}`);
+  let source: any | null = null;
+  if (opts.copyFromChatName) {
+    source = memoryReadChat(opts.droneId, opts.copyFromChatName).chat;
+    if (!source && opts.copyFromChatName === 'default' && listChatsFromStore({ droneId: opts.droneId }).chats.length === 0) {
+      await upsertChatInStore({ droneId: opts.droneId, chatName: 'default', chatEntry: opts.implicitDefaultEntry ?? {} });
+      source = memoryReadChat(opts.droneId, 'default').chat;
+    }
+    if (!source) throw new Error(`unknown chat: ${opts.copyFromChatName}`);
+  }
+  await upsertChatInStore({ droneId: opts.droneId, chatName: opts.chatName, chatEntry: opts.createEntry(source) });
+  return {
+    available: true,
+    chat: memoryReadChat(opts.droneId, opts.chatName).chat,
+    chats: listChatsFromStore({ droneId: opts.droneId }).chats,
+  };
+}
+
+export async function updateChatInStore(opts: {
+  droneId: string;
+  chatName: string;
+  update: (chat: any) => unknown;
+}): Promise<UpdateChatStoreResult> {
+  const store = repository();
+  if (store) return await store.updateChat(opts);
+  const current = memoryReadChat(opts.droneId, opts.chatName).chat;
+  if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
+  await upsertChatInStore({ droneId: opts.droneId, chatName: opts.chatName, chatEntry: opts.update(current) });
+  return {
+    available: true,
+    chat: memoryReadChat(opts.droneId, opts.chatName).chat,
+    chats: listChatsFromStore({ droneId: opts.droneId }).chats,
+  };
+}
+
+export async function deleteActiveChatFromStore(opts: {
+  droneId: string;
+  chatName: string;
+  fallbackChat?: { chatName: string; chatEntry: unknown };
+}): Promise<DeleteActiveChatStoreResult> {
+  const store = repository();
+  let result: DeleteActiveChatStoreResult;
+  if (store) {
+    result = await store.deleteActiveChat(opts);
+  } else {
+    if (opts.chatName === 'default') throw new Error('cannot delete default chat');
+    const current = memoryReadChat(opts.droneId, opts.chatName).chat;
+    if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
+    await deleteChatFromStore({ droneId: opts.droneId, chatName: opts.chatName });
+    if (listChatsFromStore({ droneId: opts.droneId }).chats.length === 0 && opts.fallbackChat) {
+      await upsertChatInStore({
+        droneId: opts.droneId,
+        chatName: opts.fallbackChat.chatName,
+        chatEntry: opts.fallbackChat.chatEntry,
+      });
+    }
+    result = {
+      available: true,
+      deletedChat: current,
+      chats: listChatsFromStore({ droneId: opts.droneId }).chats,
+    };
+  }
+  await getPromptQueueRepository()?.deleteChat({ droneId: opts.droneId, chatName: opts.chatName });
+  return result;
+}
+
 export async function importArchivedChatsFromRegistry(opts: {
   droneId: string;
   archivedChats: unknown;
@@ -1455,11 +1614,21 @@ export async function applyChatReconciliationInStore(opts: {
 
 export async function renameChatInStore(opts: { droneId: string; chatName: string; newChatName: string }): Promise<boolean> {
   const store = repository();
-  if (store) return await store.renameChat(opts);
+  if (store) {
+    const renamed = await store.renameChat(opts);
+    if (renamed) await getPromptQueueRepository()?.renameChat(opts);
+    return renamed;
+  }
+  if (opts.chatName === 'default') throw new Error('cannot rename default chat');
+  if (opts.chatName === opts.newChatName) {
+    if (!memoryReadChat(opts.droneId, opts.chatName).chat) throw new Error(`unknown chat: ${opts.chatName}`);
+    return false;
+  }
   const oldKey = key(opts.droneId, opts.chatName);
   const nextKey = key(opts.droneId, opts.newChatName);
+  if (memoryChats.has(nextKey)) throw new Error(`chat already exists: ${opts.newChatName}`);
   const row = memoryChats.get(oldKey);
-  if (!row) return false;
+  if (!row) throw new Error(`unknown chat: ${opts.chatName}`);
   memoryChats.set(nextKey, row); memoryChats.delete(oldKey);
   const turns = memoryTurns.get(oldKey); if (turns) { memoryTurns.set(nextKey, turns); memoryTurns.delete(oldKey); }
   const prompts = memoryPrompts.get(oldKey); if (prompts) { memoryPrompts.set(nextKey, prompts); memoryPrompts.delete(oldKey); }

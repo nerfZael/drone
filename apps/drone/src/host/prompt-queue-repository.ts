@@ -335,6 +335,24 @@ export class PromptQueueRepository {
     });
   }
 
+  async renameChat(opts: { droneId: string; chatName: string; newChatName: string }): Promise<number> {
+    return await this.database.writeTransaction('rename chat prompt queue', (connection) => {
+      connection.prepare('DELETE FROM prompts WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.newChatName);
+      const info = connection.prepare('UPDATE prompts SET chat_name = ? WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.newChatName, opts.droneId, opts.chatName);
+      return Number(info.changes ?? 0);
+    });
+  }
+
+  async deleteChat(opts: { droneId: string; chatName: string }): Promise<number> {
+    return await this.database.writeTransaction('delete chat prompt queue', (connection) => {
+      const info = connection.prepare('DELETE FROM prompts WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.chatName);
+      return Number(info.changes ?? 0);
+    });
+  }
+
   get(opts: { droneId: string; chatName: string; promptId: string }): PromptQueueRecord | null {
     return this.database.read((connection) =>
       rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId),
