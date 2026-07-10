@@ -388,11 +388,14 @@ import {
   resolveStableDroneOrPendingIdFromRef,
 } from './drone-lifecycle-registry';
 import {
+  deleteCanonicalDroneLifecycle,
+  listCanonicalDroneLifecycle,
   resolveDroneContainerNameByIdentity,
   resolveDroneFromRegistryRef,
   resolveDroneNameByIdentity,
   resolveDroneOrPendingForReadRef,
   setDroneHubMetaByIdentity,
+  upsertCanonicalDroneLifecycle,
   type ResolvedDrone,
   type ResolvedOrPendingDrone,
 } from './drone-lifecycle-service';
@@ -11391,6 +11394,7 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
       return false;
     });
     if (removedRegistry) {
+      await deleteCanonicalDroneLifecycle(droneId, 'real');
       await revokeMcpAccessTokensForDrone(droneId);
       await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, reason: 'delete-drone' });
     }
@@ -11418,6 +11422,7 @@ async function removeDroneLifecycleEntryById(opts: {
     await updateRegistry((regAny: any) => {
       if (regAny?.pending?.[droneId] && !regAny?.drones?.[droneId]) delete regAny.pending[droneId];
     });
+    await deleteCanonicalDroneLifecycle(droneId, 'pending');
     dequeueProvisioning(droneId);
     return { kind: 'pending', removedRegistry: false, removeErr: null };
   }
@@ -11839,7 +11844,8 @@ async function archiveDroneById(opts: {
   }
   const retention = normalizeArchiveRetention(opts.archiveRetention);
   const runtimePolicy = normalizeArchiveRuntimePolicy(opts.archiveRuntimePolicy);
-  return await updateRegistry((regAny: any) => {
+  let canonicalArchivedEntry: any = null;
+  const result = await updateRegistry((regAny: any) => {
     const droneEntry = regAny?.drones?.[droneId];
     if (!droneEntry) {
       return {
@@ -11868,6 +11874,7 @@ async function archiveDroneById(opts: {
       archiveRetention: retention,
       archiveRuntimePolicy: runtimePolicy,
     };
+    canonicalArchivedEntry = archivedEntry;
 
     regAny.archived = regAny.archived ?? {};
     regAny.archived[droneId] = archivedEntry;
@@ -11887,6 +11894,10 @@ async function archiveDroneById(opts: {
       deleteAt,
     };
   });
+  if (result.archived && canonicalArchivedEntry) {
+    await upsertCanonicalDroneLifecycle('archived', droneId, canonicalArchivedEntry);
+  }
+  return result;
 }
 
 async function restoreArchivedDroneById(opts: { id: string }): Promise<{
@@ -11957,7 +11968,8 @@ async function restoreArchivedDroneById(opts: { id: string }): Promise<{
     }
   }
 
-  return await updateRegistry((regAny: any) => {
+  let canonicalRestoredEntry: any = null;
+  const result = await updateRegistry((regAny: any) => {
     const latest = regAny?.archived?.[droneId];
     if (!latest) {
       return {
@@ -11982,6 +11994,7 @@ async function restoreArchivedDroneById(opts: { id: string }): Promise<{
     delete restoredEntry.deleteAt;
     delete restoredEntry.archiveRetention;
     delete restoredEntry.archiveRuntimePolicy;
+    canonicalRestoredEntry = restoredEntry;
 
     regAny.drones = regAny.drones ?? {};
     regAny.drones[droneId] = restoredEntry;
@@ -11998,6 +12011,10 @@ async function restoreArchivedDroneById(opts: { id: string }): Promise<{
       error: null,
     };
   });
+  if (result.restored && canonicalRestoredEntry) {
+    await upsertCanonicalDroneLifecycle('real', droneId, canonicalRestoredEntry);
+  }
+  return result;
 }
 
 async function removeArchivedDroneById(opts: { id: string; keepVolume: boolean }): Promise<{
@@ -12049,6 +12066,7 @@ async function removeArchivedDroneById(opts: { id: string; keepVolume: boolean }
       return true;
     });
     if (removedArchive) {
+      await deleteCanonicalDroneLifecycle(droneId, 'archived');
       await revokeMcpAccessTokensForDrone(droneId);
       await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, reason: 'delete-archived-drone' });
     }
@@ -12083,8 +12101,12 @@ async function cleanupExpiredArchivedDrones(opts?: { maxDeletes?: number; reason
 
   ARCHIVE_CLEANUP_TASK = (async () => {
     const regAny: any = await loadRegistry();
+    const canonicalArchived = await listCanonicalDroneLifecycle('archived');
     const nowMs = Date.now();
-    const expiredIds = (Object.entries(regAny?.archived ?? {}) as Array<[string, any]>)
+    const archiveEntries: Array<[string, any]> = canonicalArchived
+      ? canonicalArchived.map((record) => [record.id, record.lifecycle])
+      : (Object.entries(regAny?.archived ?? {}) as Array<[string, any]>);
+    const expiredIds = archiveEntries
       .map(([id, entry]) => {
         const parsedId = normalizeDroneIdentity(id);
         if (!parsedId) return null;

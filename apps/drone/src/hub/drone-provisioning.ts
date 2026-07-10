@@ -14,7 +14,13 @@ import {
   sanitizeFleetReadScopes,
   setFleetActorConfig,
 } from './fleet-helpers';
-import { resolveDroneContainerNameByIdentity, setDroneHubMetaByIdentity } from './drone-lifecycle-service';
+import {
+  deleteCanonicalDroneLifecycle,
+  patchCanonicalDroneLifecycle,
+  resolveDroneContainerNameByIdentity,
+  setDroneHubMetaByIdentity,
+  upsertCanonicalDroneLifecycle,
+} from './drone-lifecycle-service';
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
 import type { PendingPhase, PendingPromptProjection, PendingStartupPrompt } from './drone-pending-state';
 import { deleteHostRefBestEffort, gitCurrentBranchOrSha, gitResolveRemoteBranchForCreate, gitTopLevel, importBundleHeadToHostRef } from './repoOps';
@@ -86,8 +92,15 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
   let PROVISION_PUMP_SCHEDULED = false;
 
   async function updatePendingDrone(droneIdRaw: string, patch: PendingDronePatch) {
+    const droneId = normalizeDroneIdentity(droneIdRaw);
+    if (droneId) {
+      await patchCanonicalDroneLifecycle('pending', droneId, (pending) => ({
+        ...pending,
+        ...patch,
+        updatedAt: patch.updatedAt ?? deps.nowIso(),
+      }));
+    }
     await updateRegistry((regAny: any) => {
-      const droneId = normalizeDroneIdentity(droneIdRaw);
       const pending = droneId ? regAny?.pending?.[droneId] : null;
       if (!pending) return;
       regAny.pending = regAny.pending ?? {};
@@ -292,6 +305,9 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         materializeSeedChatConfigOnDroneEntry(d, pendingLatest?.seed);
         regLatest.drones[found.key] = d;
       });
+      const regAfterLifecyclePromotion: any = await loadRegistry();
+      const promoted = findDroneEntryByIdentity(regAfterLifecyclePromotion, pendingDroneId)?.entry ?? null;
+      if (promoted) await upsertCanonicalDroneLifecycle('real', pendingDroneId, promoted);
     } catch {
       // ignore (best-effort lineage persistence)
     }
@@ -404,6 +420,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       if (regLatest?.pending?.[name]) delete regLatest.pending[name];
       return { seed, startupQueuedPrompts, createdAt };
     });
+    await deleteCanonicalDroneLifecycle(pendingDroneId, 'pending');
     const seed = pendingTransition?.seed ?? null;
     const startupQueuedPrompts = Array.isArray(pendingTransition?.startupQueuedPrompts)
       ? (pendingTransition.startupQueuedPrompts as PendingStartupPrompt[])

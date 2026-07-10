@@ -57,6 +57,10 @@ import {
 import { ensureHubSetupState } from './host/setup-state';
 import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
 import { readRawBody } from './hub/hub-http';
+import {
+  deleteCanonicalDroneLifecycle,
+  upsertCanonicalDroneLifecycle,
+} from './hub/drone-lifecycle-service';
 import { parseHubRunnerProcessesFromPsOutput, parseHubUiServerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import {
   normalizeRemotePublicUrl,
@@ -78,6 +82,12 @@ import {
 import { buildVoiceStreamProcessEnv } from './hub/voice-stream-launch';
 
 const requireFromCli = createRequire(__filename);
+
+async function syncCanonicalRealDroneFromRegistry(droneId: string): Promise<void> {
+  const registry: any = await loadRegistry();
+  const entry = registry?.drones?.[droneId] ?? null;
+  if (entry) await upsertCanonicalDroneLifecycle('real', droneId, entry);
+}
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -1634,6 +1644,7 @@ createCommand
             },
           } as any;
         });
+        await syncCanonicalRealDroneFromRegistry(stableId);
       } catch (error) {
         await stopHostDaemonByPid(hostPid);
         throw error;
@@ -1793,6 +1804,7 @@ createCommand
         createdAt: at,
       };
     });
+    await syncCanonicalRealDroneFromRegistry(stableId);
 
     // eslint-disable-next-line no-console
     console.log(
@@ -1874,6 +1886,7 @@ importCommand
         createdAt: at,
       };
     });
+    await syncCanonicalRealDroneFromRegistry(stableId);
 
     // eslint-disable-next-line no-console
     console.log(
@@ -1939,6 +1952,7 @@ program
         }
         return false;
       });
+      if (removedRegistry && resolvedKey) await deleteCanonicalDroneLifecycle(resolvedKey, 'real');
     }
 
     if (removeErr) throw new Error(removeErr);
