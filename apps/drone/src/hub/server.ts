@@ -93,14 +93,17 @@ import { suggestReplyToAgentMessage } from './agent-suggestion';
 import { resolveTranscriptPromptAt } from './transcript-order';
 import {
   countTranscriptTurnsFromStore,
+  deleteChatFromStore,
   importChatFromRegistry,
   importDroneChatsFromRegistry,
   importTranscriptTurnsFromRegistry,
   listChatsFromStore,
   readChatFromStore,
   readTranscriptTurnsFromStore,
+  renameChatInStore,
   resetTranscriptStoreForTests,
   transcriptTurnsSourceHash,
+  upsertChatInStore,
   upsertTranscriptTurnInStore,
 } from './transcript-store';
 import { requireWhiteboardStore, type WhiteboardDocument } from './whiteboard-store';
@@ -7299,7 +7302,7 @@ async function markDronePendingPromptsStopped(opts: {
   if (!droneId) return { promptIds: [], sessionNames: [] };
   const stopError = droneChatStopError(opts.reason);
 
-  return await updateRegistry((regAny: any) => {
+  const result = await updateRegistry((regAny: any) => {
     const d = regAny?.drones?.[droneId] ?? null;
     if (!d) return { promptIds: [] as string[], sessionNames: [] as string[] };
 
@@ -7322,6 +7325,7 @@ async function markDronePendingPromptsStopped(opts: {
     regAny.drones[droneId] = d;
     return { promptIds: [...promptIds], sessionNames: [...sessionNames] };
   });
+  return result;
 }
 
 async function cancelDronePromptJobsBestEffort(opts: { droneEntry: any; promptIds: string[] }): Promise<void> {
@@ -9451,7 +9455,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
 
   const registryEntry = d?.chats?.[chatName];
   if (!registryEntry) return;
-  importChatFromRegistry({ droneId, chatName, chatEntry: registryEntry });
+  await importChatFromRegistry({ droneId, chatName, chatEntry: registryEntry });
   const projectedEntry = readChatFromStore({ droneId, chatName });
   const entry = projectedEntry.available && projectedEntry.chat ? projectedEntry.chat : registryEntry;
   const agent = inferChatAgent(entry, d);
@@ -9937,7 +9941,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
   if (changed) {
     entry.turns = turns;
     entry.pendingPrompts = pendingList;
-    importChatFromRegistry({ droneId, chatName, chatEntry: entry });
+    await upsertChatInStore({ droneId, chatName, chatEntry: entry });
     const projected = readChatFromStore({ droneId, chatName });
     const committedEntry = projected.available && projected.chat ? projected.chat : entry;
     const committedTurns: any[] = Array.isArray(committedEntry?.turns) ? committedEntry.turns : turns;
@@ -9976,7 +9980,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       regLatest.drones = regLatest.drones ?? {};
       regLatest.drones[droneId] = dLatest;
     });
-    importTranscriptTurnsFromRegistry({ droneId, chatName, turns: committedTurns });
+    await importTranscriptTurnsFromRegistry({ droneId, chatName, turns: committedTurns });
 
   }
 
@@ -10948,11 +10952,11 @@ async function failStaleDockerSnapshotsForChat(opts: { droneId: string; chatName
     }
   });
   if (syncedTurns) {
-    importTranscriptTurnsFromRegistry({ droneId, chatName, turns: syncedTurns });
+    await importTranscriptTurnsFromRegistry({ droneId, chatName, turns: syncedTurns });
     for (const candidate of candidates) {
       const updated = (syncedTurns as TranscriptTurn[]).find((turn: any) => String(turn?.id ?? '').trim() === candidate.promptId);
       if (!updated) continue;
-      upsertTranscriptTurnInStore({ droneId, chatName, turn: updated });
+      await upsertTranscriptTurnInStore({ droneId, chatName, turn: updated });
     }
   }
 }
@@ -11542,7 +11546,7 @@ async function archiveChatById(opts: {
     };
   }
 
-  return await updateRegistry((regAny: any) => {
+  const result = await updateRegistry((regAny: any) => {
     const droneEntry = regAny?.drones?.[droneId];
     if (!droneEntry) {
       return {
@@ -11605,6 +11609,8 @@ async function archiveChatById(opts: {
       chats: Object.keys(droneEntry.chats ?? {}),
     };
   });
+  if (result.archived) await deleteChatFromStore({ droneId, chatName });
+  return result;
 }
 
 async function restoreArchivedChatById(opts: {
@@ -11633,7 +11639,7 @@ async function restoreArchivedChatById(opts: {
     };
   }
 
-  return await updateRegistry((regAny: any) => {
+  const result = await updateRegistry((regAny: any) => {
     const droneEntry = regAny?.drones?.[droneId];
     if (!droneEntry) {
       return {
@@ -11682,6 +11688,12 @@ async function restoreArchivedChatById(opts: {
       chats: Object.keys(droneEntry.chats ?? {}),
     };
   });
+  if (result.restored) {
+    const registry = await loadRegistry();
+    const restored = (registry as any)?.drones?.[droneId]?.chats?.[result.chatName];
+    if (restored) await upsertChatInStore({ droneId, chatName: result.chatName, chatEntry: restored });
+  }
+  return result;
 }
 
 async function deleteArchivedChatById(opts: {
@@ -12373,7 +12385,7 @@ async function ensureChatEntry(opts: { droneId: string; chatName: string }): Pro
     }
     syncedChats = d.chats;
   });
-  if (syncedDroneId && syncedChats) importDroneChatsFromRegistry({ droneId: syncedDroneId, chats: syncedChats });
+  if (syncedDroneId && syncedChats) await importDroneChatsFromRegistry({ droneId: syncedDroneId, chats: syncedChats });
 }
 
 async function ensureChatEntryCopiedFromChat(opts: {
@@ -12432,7 +12444,7 @@ async function ensureChatEntryCopiedFromChat(opts: {
     reg.drones[droneId] = d;
     syncedChats = d.chats;
   });
-  if (syncedDroneId && syncedChats) importDroneChatsFromRegistry({ droneId: syncedDroneId, chats: syncedChats });
+  if (syncedDroneId && syncedChats) await importDroneChatsFromRegistry({ droneId: syncedDroneId, chats: syncedChats });
 }
 
 function inferChatAgent(entry: any, droneEntry?: any): ChatAgentConfig {
@@ -12465,20 +12477,20 @@ async function getChatEntry(opts: { droneId: string; chatName: string }) {
   if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
   const chat = d.chats?.[opts.chatName];
   if (!chat) throw new Error(`unknown chat: ${opts.chatName}`);
-  importChatFromRegistry({ droneId, chatName: opts.chatName, chatEntry: chat });
+  await importChatFromRegistry({ droneId, chatName: opts.chatName, chatEntry: chat });
   const read = readChatFromStore({ droneId, chatName: opts.chatName });
   return { reg, d, chat: read.available && read.chat ? read.chat : chat, droneId };
 }
 
-function importResolvedDroneChatsToStore(droneId: string, droneEntry: any): string[] {
+async function importResolvedDroneChatsToStore(droneId: string, droneEntry: any): Promise<string[]> {
   const chats = droneEntry?.chats && typeof droneEntry.chats === 'object' ? droneEntry.chats : {};
-  const imported = importDroneChatsFromRegistry({ droneId, chats });
+  const imported = await importDroneChatsFromRegistry({ droneId, chats });
   if (imported.available) return imported.chats;
   return Object.keys(chats);
 }
 
-function importResolvedChatToStore(droneId: string, chatName: string, chatEntry: any): any {
-  importChatFromRegistry({ droneId, chatName, chatEntry });
+async function importResolvedChatToStore(droneId: string, chatName: string, chatEntry: any): Promise<any> {
+  await importChatFromRegistry({ droneId, chatName, chatEntry });
   const read = readChatFromStore({ droneId, chatName });
   return read.available ? read.chat : chatEntry;
 }
@@ -12500,11 +12512,11 @@ type ChatStateContext =
       projectedChatEntry: any;
     };
 
-function buildChatStateContext(opts: {
+async function buildChatStateContext(opts: {
   droneRef: string;
   chatName: string;
   resolved: ResolvedOrPendingDrone;
-}): ChatStateContext | { kind: 'missing-chat'; droneId: string; chatName: string } {
+}): Promise<ChatStateContext | { kind: 'missing-chat'; droneId: string; chatName: string }> {
   if (opts.resolved.kind === 'pending') {
     const droneName = String(opts.resolved.pending?.name ?? opts.droneRef).trim() || opts.droneRef;
     return {
@@ -12521,7 +12533,7 @@ function buildChatStateContext(opts: {
   const registryChatEntry = (droneEntry as any)?.chats?.[opts.chatName] ?? null;
   if (!registryChatEntry) return { kind: 'missing-chat', droneId, chatName: opts.chatName };
   const droneName = String(droneEntry?.name ?? opts.droneRef).trim() || opts.droneRef;
-  const projectedChatEntry = importResolvedChatToStore(droneId, opts.chatName, registryChatEntry) ?? registryChatEntry;
+  const projectedChatEntry = (await importResolvedChatToStore(droneId, opts.chatName, registryChatEntry)) ?? registryChatEntry;
   return {
     kind: 'real',
     droneId,
@@ -12693,7 +12705,7 @@ function formatTranscriptRow(turnIndex: number, turn: any): any {
   };
 }
 
-function buildTranscriptRowsForChat(opts: {
+async function buildTranscriptRowsForChat(opts: {
   droneId: string;
   droneName: string;
   chatName: string;
@@ -12701,7 +12713,7 @@ function buildTranscriptRowsForChat(opts: {
   droneEntry: any;
   selection: string;
   tailRaw?: string | null;
-}): BuiltChatTranscriptRows {
+}): Promise<BuiltChatTranscriptRows> {
   const agent = inferChatAgent(opts.chatEntry as any, opts.droneEntry);
   if (agent.kind === 'custom') {
     return {
@@ -12715,7 +12727,7 @@ function buildTranscriptRowsForChat(opts: {
   const turns = (opts.chatEntry as any).turns as TranscriptTurn[] | undefined;
   const rawList = Array.isArray(turns) ? turns : [];
   const sourceHash = transcriptTurnsSourceHash(rawList);
-  const imported = importTranscriptTurnsFromRegistry({
+  const imported = await importTranscriptTurnsFromRegistry({
     droneId: opts.droneId,
     chatName: opts.chatName,
     turns: rawList,
@@ -12792,7 +12804,7 @@ async function readChatSnapshot(opts: {
     return { ok: false, statusCode: 404, error: `unknown drone: ${opts.droneRef}` };
   }
 
-  const context = buildChatStateContext({ droneRef: opts.droneRef, chatName: opts.chatName, resolved });
+  const context = await buildChatStateContext({ droneRef: opts.droneRef, chatName: opts.chatName, resolved });
   if (context.kind === 'pending') {
     return {
       ok: true,
@@ -12814,7 +12826,7 @@ async function readChatSnapshot(opts: {
   const droneId = context.droneId;
   const entry = context.projectedChatEntry;
   const transcriptResult = opts.includeTranscript
-    ? buildTranscriptRowsForChat({
+    ? await buildTranscriptRowsForChat({
         droneId,
         droneName: context.droneName,
         chatName: opts.chatName,
@@ -13029,7 +13041,7 @@ async function setChatAgentConfig(opts: {
     syncedChat = cur;
   });
   if (syncedDroneId && syncedChatName && syncedChat) {
-    importChatFromRegistry({ droneId: syncedDroneId, chatName: syncedChatName, chatEntry: syncedChat });
+    await upsertChatInStore({ droneId: syncedDroneId, chatName: syncedChatName, chatEntry: syncedChat });
   }
 }
 
@@ -13338,8 +13350,8 @@ async function recordTranscriptTurn(opts: {
     syncedTurns = chat.turns;
   });
   if (syncedDroneId && syncedTurns) {
-    importTranscriptTurnsFromRegistry({ droneId: syncedDroneId, chatName: opts.chatName, turns: syncedTurns });
-    upsertTranscriptTurnInStore({ droneId: syncedDroneId, chatName: opts.chatName, turn: opts.turn });
+    await importTranscriptTurnsFromRegistry({ droneId: syncedDroneId, chatName: opts.chatName, turns: syncedTurns });
+    await upsertTranscriptTurnInStore({ droneId: syncedDroneId, chatName: opts.chatName, turn: opts.turn });
   }
 }
 
@@ -13366,14 +13378,14 @@ async function updateTranscriptTurnById(opts: {
     changed = true;
   });
   if (changed && syncedTurns) {
-    importTranscriptTurnsFromRegistry({
+    await importTranscriptTurnsFromRegistry({
       droneId: normalizeDroneIdentity(opts.droneId),
       chatName: normalizeChatName(opts.chatName),
       turns: syncedTurns,
     });
     const updated = (syncedTurns as TranscriptTurn[]).find((turn: any) => String(turn?.id ?? '').trim() === opts.promptId);
     if (updated) {
-      upsertTranscriptTurnInStore({
+      await upsertTranscriptTurnInStore({
         droneId: normalizeDroneIdentity(opts.droneId),
         chatName: normalizeChatName(opts.chatName),
         turn: updated,
@@ -28652,6 +28664,10 @@ export async function startDroneHubApiServer(opts: {
             return Object.keys(d.chats ?? {});
           });
 
+          const createdRegistry = await loadRegistry();
+          const createdEntry = (createdRegistry as any)?.drones?.[droneId]?.chats?.[chatName];
+          if (createdEntry) await upsertChatInStore({ droneId, chatName, chatEntry: createdEntry });
+
           json(res, 201, {
             ok: true,
             id: droneId,
@@ -28723,6 +28739,7 @@ export async function startDroneHubApiServer(opts: {
           });
 
           if (newChatName !== chatName) {
+            await renameChatInStore({ droneId, chatName, newChatName });
             migrateInMemoryChatStateForRename({
               droneId,
               fromChatName: chatName,
@@ -28778,6 +28795,9 @@ export async function startDroneHubApiServer(opts: {
             regAny.drones[droneId] = d;
             return { published: true, pendingCount: Array.isArray(entry.pendingPrompts) ? entry.pendingPrompts.length : 0 };
           });
+          const publishedRegistry = await loadRegistry();
+          const publishedEntry = (publishedRegistry as any)?.drones?.[droneId]?.chats?.[chatName];
+          if (publishedEntry) await upsertChatInStore({ droneId, chatName, chatEntry: publishedEntry });
           enqueuePendingPromptPump(droneId, chatName);
           json(res, 202, {
             ok: true,
@@ -28920,6 +28940,10 @@ export async function startDroneHubApiServer(opts: {
             regAny.drones[droneId] = d;
             return Object.keys(d.chats ?? {});
           });
+          await deleteChatFromStore({ droneId, chatName });
+          const deleteRegistry = await loadRegistry();
+          const defaultEntry = (deleteRegistry as any)?.drones?.[droneId]?.chats?.default;
+          if (defaultEntry) await importChatFromRegistry({ droneId, chatName: 'default', chatEntry: defaultEntry });
           await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, chatName, reason: 'delete-chat' });
 
           json(res, 200, {
@@ -28964,7 +28988,7 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
           const droneName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
-          const importedChats = importResolvedDroneChatsToStore(droneId, resolved.drone);
+          const importedChats = await importResolvedDroneChatsToStore(droneId, resolved.drone);
           timer.mark('import');
           const storeChats = listChatsFromStore({ droneId });
           timer.mark('store');
@@ -29022,7 +29046,7 @@ export async function startDroneHubApiServer(opts: {
             json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
             return;
           }
-          const chatEntry = importResolvedChatToStore(droneId, chatName, c) ?? c;
+          const chatEntry = (await importResolvedChatToStore(droneId, chatName, c)) ?? c;
           timer.mark('import');
           const agent = inferChatAgent(chatEntry as any, resolved.drone);
           timer.mark('format');
