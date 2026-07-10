@@ -162,6 +162,7 @@ type AssistantSnapshot = {
   pendingApprovals: AssistantApproval[];
   chatIdleSubscriptions?: AssistantChatIdleSubscription[];
   models: AssistantModelOption[];
+  defaultModel: { provider: AssistantProviderId; model: string };
   availableTools?: AssistantToolSummary[];
   accessScope?: AssistantAccessScope;
   runningModels?: Record<string, AssistantRunModel>;
@@ -826,7 +827,7 @@ async function encodeAssistantAttachment(attachment: AssistantDraftAttachment): 
 }
 
 function modelSelectionKey(selection: Pick<AssistantRunModel, 'provider' | 'model' | 'thinkingLevel'>): string {
-  return `${selection.provider}:${selection.model}:${selection.thinkingLevel}`;
+  return `${selection.provider}:${selection.model}`;
 }
 
 function modelSelectionLabel(
@@ -834,15 +835,38 @@ function modelSelectionLabel(
   options: AssistantModelOption[],
 ): string {
   const match = options.find(
-    (option) =>
-      modelSelectionKey({ provider: option.provider, model: option.id, thinkingLevel: option.thinkingLevel }) === modelSelectionKey(selection),
+    (option) => option.provider === selection.provider && option.id === selection.model,
   );
   if (match) return match.name;
-  return `${selection.provider}/${selection.model}${selection.thinkingLevel !== 'off' ? ` ${selection.thinkingLevel}` : ''}`;
+  return selection.model;
 }
 
 function compactModelSelectionLabel(label: string): string {
   return label.replace(/^GPT-/, '').replace(/\bMedium\b/, 'Med');
+}
+
+function uniqueAssistantModels(options: AssistantModelOption[]): AssistantModelOption[] {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    const key = `${option.provider}:${option.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function assistantReasoningLabel(level: string): string {
+  if (level === 'off') return 'None';
+  if (level === 'xhigh') return 'X-high';
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
+function DefaultModelStar({ selected }: { selected: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill={selected ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m12 3.2 2.65 5.37 5.93.86-4.29 4.18 1.01 5.91L12 16.73l-5.3 2.79 1.01-5.91-4.29-4.18 5.93-.86L12 3.2Z" />
+    </svg>
+  );
 }
 
 function assistantThreadStatusTone(status: AssistantThreadStatus): string {
@@ -2819,6 +2843,7 @@ export function AssistantDock() {
   const [approvalBusyId, setApprovalBusyId] = React.useState<string | null>(null);
   const [queuedCancelBusyId, setQueuedCancelBusyId] = React.useState<string | null>(null);
   const [assistantStopBusy, setAssistantStopBusy] = React.useState(false);
+  const [defaultModelBusy, setDefaultModelBusy] = React.useState(false);
   const [toolsPanelOpen, setToolsPanelOpen] = React.useState(false);
   const [enabledToolDraftNames, setEnabledToolDraftNames] = React.useState<string[]>([]);
   const [systemPromptOpen, setSystemPromptOpen] = React.useState(false);
@@ -3822,6 +3847,25 @@ export function AssistantDock() {
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
+  const setActiveModelAsDefault = React.useCallback(async () => {
+    if (!activeThread) return;
+    if (snapshot?.defaultModel.provider === activeThread.provider && snapshot.defaultModel.model === activeThread.model) return;
+    const requestSeq = beginSnapshotMutation();
+    setDefaultModelBusy(true);
+    try {
+      const next = await requestJson<AssistantSnapshot>('/api/assistant/default-model', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: activeThread.provider, model: activeThread.model }),
+      });
+      if (snapshotMutationCurrent(requestSeq)) applySnapshot(next, activeThread.id);
+    } catch (err: any) {
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
+    } finally {
+      setDefaultModelBusy(false);
+    }
+  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshot?.defaultModel, snapshotMutationCurrent]);
+
   const attachmentControlsLocked = !activeThread || voiceEnabled || assistantChatIdleHold;
   const imageAttachmentCount = React.useMemo(
     () => attachments.filter((attachment) => attachment.kind === 'image').length,
@@ -4146,7 +4190,7 @@ export function AssistantDock() {
   const providerOptions = React.useMemo(
     () => ASSISTANT_PROVIDERS.map((provider) => ({
       ...provider,
-      models: modelOptions.filter((model) => model.provider === provider.id),
+      models: uniqueAssistantModels(modelOptions.filter((model) => model.provider === provider.id)),
     })),
     [modelOptions],
   );
@@ -4156,8 +4200,8 @@ export function AssistantDock() {
   );
   const displayedModelOptions = React.useMemo(() => {
     if (!activeThread) return activeProviderOptions;
-    const selectedKey = `${activeThread.provider}:${activeThread.model}:${activeThread.thinkingLevel}`;
-    const hasSelected = activeProviderOptions.some((model) => `${model.provider}:${model.id}:${model.thinkingLevel}` === selectedKey);
+    const selectedKey = `${activeThread.provider}:${activeThread.model}`;
+    const hasSelected = activeProviderOptions.some((model) => `${model.provider}:${model.id}` === selectedKey);
     if (hasSelected) return activeProviderOptions;
     return [
       {
@@ -4174,17 +4218,30 @@ export function AssistantDock() {
   const modelMenuEntries = React.useMemo<UiMenuSelectEntry[]>(
     () =>
       displayedModelOptions.map((model) => ({
-        value: `${model.provider}:${model.id}:${model.thinkingLevel}`,
+        value: `${model.provider}:${model.id}`,
         label: model.name,
-        title: `${model.provider}/${model.id}${model.thinkingLevel !== 'off' ? ` ${model.thinkingLevel}` : ''}`,
-        searchText: `${model.name} ${model.id} ${model.thinkingLevel}`,
+        title: model.id,
+        searchText: `${model.name} ${model.id}`,
       })),
     [displayedModelOptions],
   );
+  const reasoningMenuEntries = React.useMemo<UiMenuSelectEntry[]>(() => {
+    if (!activeThread) return [];
+    const levels = new Set(
+      modelOptions
+        .filter((option) => option.provider === activeThread.provider && option.id === activeThread.model)
+        .map((option) => option.thinkingLevel),
+    );
+    if (levels.size === 0) levels.add(activeThread.thinkingLevel);
+    return [...levels].map((level) => ({ value: level, label: assistantReasoningLabel(level) }));
+  }, [activeThread, modelOptions]);
   const selectedModelLabel = React.useMemo(() => {
     if (!activeThread) return '';
     return modelSelectionLabel({ provider: activeThread.provider, model: activeThread.model, thinkingLevel: activeThread.thinkingLevel }, modelOptions);
   }, [activeThread, modelOptions]);
+  const activeModelIsDefault = Boolean(
+    activeThread && snapshot?.defaultModel.provider === activeThread.provider && snapshot.defaultModel.model === activeThread.model,
+  );
   const activeProviderMeta = providerOptions.find((provider) => provider.id === activeProvider) ?? ASSISTANT_PROVIDERS[0];
   const activeRunningModelLabel = activeRunningModel ? modelSelectionLabel(activeRunningModel, modelOptions) : '';
   const availableTools = snapshot?.availableTools ?? EMPTY_ASSISTANT_TOOL_SUMMARIES;
@@ -4696,14 +4753,14 @@ export function AssistantDock() {
         <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
           <UiMenuSelect
             value={activeProvider}
-            disabled={!activeThread}
+            disabled={!activeThread || defaultModelBusy}
             onValueChange={(value) => {
               const provider = providerOptions.find((option) => option.id === value);
               if (!provider) return;
               const nextModel = provider.models[0];
               void updateThread({
                 provider: provider.id,
-                ...(nextModel ? { model: nextModel.id, thinkingLevel: nextModel.thinkingLevel } : {}),
+                ...(nextModel ? { model: nextModel.id } : {}),
               });
             }}
             entries={providerOptions.map((provider) => ({
@@ -4725,10 +4782,10 @@ export function AssistantDock() {
           />
           <UiMenuSelect
             value={selectedModelKey}
-            disabled={!activeThread}
+            disabled={!activeThread || defaultModelBusy}
             onValueChange={(value) => {
-              const [provider, model, thinkingLevel] = value.split(':');
-              void updateThread({ provider: provider as AssistantThread['provider'], model, thinkingLevel });
+              const [provider, model] = value.split(':');
+              void updateThread({ provider: provider as AssistantThread['provider'], model });
             }}
             entries={modelMenuEntries}
             variant="toolbar"
@@ -4743,6 +4800,37 @@ export function AssistantDock() {
             header="Model"
             searchable
             searchPlaceholder="Search models"
+          />
+          <button
+            type="button"
+            disabled={!activeThread || defaultModelBusy}
+            aria-pressed={activeModelIsDefault}
+            aria-label={activeModelIsDefault ? 'Current default model' : 'Set current model as default'}
+            title={activeModelIsDefault ? 'Default model for new threads' : 'Make this the default model for new threads'}
+            onClick={() => void setActiveModelAsDefault()}
+            className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+              activeModelIsDefault
+                ? 'border-[rgba(250,204,21,.42)] bg-[rgba(250,204,21,.10)] text-[var(--yellow)]'
+                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:border-[rgba(250,204,21,.28)] hover:text-[var(--yellow)]'
+            }`}
+          >
+            <DefaultModelStar selected={activeModelIsDefault} />
+          </button>
+          <UiMenuSelect
+            value={activeThread?.thinkingLevel ?? ''}
+            disabled={!activeThread || defaultModelBusy || reasoningMenuEntries.length === 0}
+            onValueChange={(thinkingLevel) => void updateThread({ thinkingLevel })}
+            entries={reasoningMenuEntries}
+            variant="toolbar"
+            role="listbox"
+            itemRole="option"
+            title={`Reasoning: ${assistantReasoningLabel(activeThread?.thinkingLevel ?? 'off')}`}
+            triggerLabel={assistantReasoningLabel(activeThread?.thinkingLevel ?? 'off')}
+            triggerClassName="h-7 w-[82px] justify-between border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+            triggerLabelClassName="font-semibold"
+            panelClassName="bottom-full mb-1.5 w-[140px]"
+            menuClassName="max-h-56 overflow-y-auto"
+            header="Reasoning"
           />
           <div
             className="grid h-7 flex-shrink-0 grid-cols-2 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"

@@ -83,6 +83,29 @@ export interface ConvertResponsesToolsOptions {
 	strict?: boolean | null;
 }
 
+type ResponsesUsage = {
+	input_tokens?: number | null;
+	output_tokens?: number | null;
+	total_tokens?: number | null;
+	input_tokens_details?: {
+		cached_tokens?: number | null;
+		cache_write_tokens?: number | null;
+	} | null;
+};
+
+export function parseResponsesUsage(rawUsage: ResponsesUsage): Usage {
+	const cacheRead = rawUsage.input_tokens_details?.cached_tokens || 0;
+	const cacheWrite = rawUsage.input_tokens_details?.cache_write_tokens || 0;
+	return {
+		input: Math.max(0, (rawUsage.input_tokens || 0) - cacheRead - cacheWrite),
+		output: rawUsage.output_tokens || 0,
+		cacheRead,
+		cacheWrite,
+		totalTokens: rawUsage.total_tokens || 0,
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+	};
+}
+
 // =============================================================================
 // Message conversion
 // =============================================================================
@@ -491,16 +514,7 @@ export async function processResponsesStream<TApi extends Api>(
 				output.responseId = response.id;
 			}
 			if (response?.usage) {
-				const cachedTokens = response.usage.input_tokens_details?.cached_tokens || 0;
-				output.usage = {
-					// OpenAI includes cached tokens in input_tokens, so subtract to get non-cached input
-					input: (response.usage.input_tokens || 0) - cachedTokens,
-					output: response.usage.output_tokens || 0,
-					cacheRead: cachedTokens,
-					cacheWrite: 0,
-					totalTokens: response.usage.total_tokens || 0,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				};
+				output.usage = parseResponsesUsage(response.usage);
 			}
 			calculateCost(model, output.usage);
 			if (options?.applyServiceTierPricing) {

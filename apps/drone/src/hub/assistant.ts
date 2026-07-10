@@ -520,11 +520,17 @@ export type AssistantSnapshot = {
   chatIdleSubscriptions: AssistantChatIdleSubscription[];
   pendingApprovals: AssistantApproval[];
   models: AssistantModelOption[];
+  defaultModel: AssistantDefaultModel;
   availableTools: AssistantToolSummary[];
   accessScope: AssistantAccessScope;
   runningModels: Record<string, AssistantRunModel>;
   streamingMessage?: any;
   streamingMessages?: any[];
+};
+
+export type AssistantDefaultModel = {
+  provider: LlmProviderId;
+  model: string;
 };
 
 export type AssistantSnapshotMode = 'full' | 'compact';
@@ -654,9 +660,9 @@ const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30_000;
 const ASSISTANT_BASH_MAX_TIMEOUT_MS = 120_000;
 const ASSISTANT_SEARCH_MAX_CONTEXT_LINES = 10;
 const ASSISTANT_CHANGED_FILES_LIMIT = 200;
-const DEFAULT_OPENAI_MODEL = 'gpt-5.5';
+const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';
 const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
-const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
 const DEFAULT_THREAD_TITLE = 'New thread';
 const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
   'Current access scope is appended at run time. The assistant must not claim read or write access outside that scope.';
@@ -794,20 +800,28 @@ const ASSISTANT_OVERVIEW_PROMPT_DEFAULT = [
   'Prefer compact sections and bullets. Keep it useful at a glance.',
   'Use present tense for current work and past tense for completed actions.',
 ].join('\n');
-const ASSISTANT_MODEL_OPTIONS: Array<{
+type AssistantModelOptionDefinition = {
   provider: LlmProviderId;
   id: string;
   name: string;
   thinkingLevel: AssistantThinkingLevel;
-}> = [
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 Instant', thinkingLevel: 'off' },
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 Low', thinkingLevel: 'low' },
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 Medium', thinkingLevel: 'medium' },
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 High', thinkingLevel: 'high' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 Instant', thinkingLevel: 'off' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 Low', thinkingLevel: 'low' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 Medium', thinkingLevel: 'medium' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 High', thinkingLevel: 'high' },
+};
+
+const ASSISTANT_REASONING_LEVELS: AssistantThinkingLevel[] = ['off', 'low', 'medium', 'high'];
+
+function reasoningModelOptions(provider: LlmProviderId, id: string, name: string): AssistantModelOptionDefinition[] {
+  return ASSISTANT_REASONING_LEVELS.map((thinkingLevel) => ({ provider, id, name, thinkingLevel }));
+}
+
+const ASSISTANT_MODEL_OPTIONS: AssistantModelOptionDefinition[] = [
+  ...reasoningModelOptions('openai', 'gpt-5.6-sol', 'GPT-5.6 Sol'),
+  ...reasoningModelOptions('openai', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
+  ...reasoningModelOptions('openai', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
+  ...reasoningModelOptions('openai', 'gpt-5.5', 'GPT-5.5'),
+  ...reasoningModelOptions('codex', 'gpt-5.6-sol', 'GPT-5.6 Sol'),
+  ...reasoningModelOptions('codex', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
+  ...reasoningModelOptions('codex', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
+  ...reasoningModelOptions('codex', 'gpt-5.5', 'GPT-5.5'),
   { provider: 'gemini', id: 'gemini-3-flash-preview', name: 'Gemini 3 Flash', thinkingLevel: 'medium' },
 ];
 
@@ -2468,6 +2482,7 @@ function normalizeThread(
 function serializeState(input: {
   activeThreadId: string;
   threads: AssistantThread[];
+  defaultModel: AssistantDefaultModel;
   chatIdleSubscriptions: AssistantChatIdleSubscription[];
   systemPrompt: string;
   systemPromptUpdatedAt: string | null;
@@ -2485,6 +2500,7 @@ function serializeState(input: {
   return {
     activeThreadId: input.activeThreadId,
     threads: input.threads.slice(0, ASSISTANT_REGISTRY_MAX_THREADS).map(sanitizeThread),
+    defaultModel: input.defaultModel,
     ...(chatIdleSubscriptions.length > 0 ? { chatIdleSubscriptions } : {}),
     webSearchToolMigrationApplied: true,
     fetchContentToolMigrationApplied: true,
@@ -2537,6 +2553,7 @@ export class HubAssistantService {
   private defaultVoiceSystemPromptUpdatedAt: string | null = null;
   private defaultOverviewPrompt = ASSISTANT_OVERVIEW_PROMPT_DEFAULT;
   private defaultOverviewPromptUpdatedAt: string | null = null;
+  private defaultModelSelection: AssistantDefaultModel = { provider: 'openai', model: DEFAULT_OPENAI_MODEL };
   private overviewCache = new Map<string, AssistantThreadOverviewCacheEntry>();
   private overviewInFlight = new Map<string, Promise<AssistantThreadOverviewResult>>();
   private changeSequence = 0;
@@ -3113,6 +3130,7 @@ export class HubAssistantService {
       chatIdleSubscriptions: compact ? activeChatIdleSubscriptionSummaries(this.chatIdleSubscriptions) : this.chatIdleSubscriptions.map(sanitizeChatIdleSubscription),
       pendingApprovals: this.pendingApprovals(),
       models: await this.modelOptions(),
+      defaultModel: { ...this.defaultModelSelection },
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(this.activeAccessScope()),
       runningModels: Object.fromEntries([...this.runningModels.entries()].map(([threadId, model]) => [threadId, sanitizeMessage(model)])),
@@ -3139,6 +3157,7 @@ export class HubAssistantService {
       chatIdleSubscriptions: activeChatIdleSubscriptionSummaries(this.chatIdleSubscriptions),
       pendingApprovals: this.pendingApprovals(),
       models: await this.modelOptions(),
+      defaultModel: { ...this.defaultModelSelection },
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       runningModels: Object.fromEntries([...this.runningModels.entries()].map(([targetThreadId, model]) => [targetThreadId, sanitizeMessage(model)])),
@@ -3157,11 +3176,12 @@ export class HubAssistantService {
   async createThread(input?: { title?: unknown; model?: unknown; provider?: unknown; activeDroneId?: unknown; activeChatName?: unknown; voiceEnabled?: unknown }): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const explicitProvider = String(input?.provider ?? '').trim();
-    const provider = explicitProvider ? normalizeProvider(explicitProvider) : await defaultAssistantProvider();
+    const provider = explicitProvider ? normalizeProvider(explicitProvider) : this.defaultModelSelection.provider;
+    const defaultModel = provider === this.defaultModelSelection.provider ? this.defaultModelSelection.model : defaultModelForProvider(provider);
     const voiceEnabled = normalizeAssistantVoiceEnabled(input?.voiceEnabled);
     const thread = this.makeThread({
       provider,
-      model: String(input?.model ?? '').trim() || defaultModelForProvider(provider),
+      model: String(input?.model ?? '').trim() || defaultModel,
       title: String(input?.title ?? '').trim() || DEFAULT_THREAD_TITLE,
       accessScope: this.defaultAccessScopeForNewThread({ ...input, voiceEnabled }),
       voiceEnabled,
@@ -3181,10 +3201,9 @@ export class HubAssistantService {
       return { ok: true, threadId: existing.id, created: false, thread: sanitizeThread(existing) };
     }
 
-    const provider = await defaultAssistantProvider();
     const thread = this.makeThread({
-      provider,
-      model: defaultModelForProvider(provider),
+      provider: this.defaultModelSelection.provider,
+      model: this.defaultModelSelection.model,
       title: String(input?.title ?? '').trim() || 'Realtime thread',
       voiceEnabled: true,
       accessScope: this.defaultAccessScopeForNewThread({ voiceEnabled: true }),
@@ -3193,6 +3212,20 @@ export class HubAssistantService {
     this.activeThreadId = thread.id;
     await this.persist();
     return { ok: true, threadId: thread.id, created: true, thread: sanitizeThread(thread) };
+  }
+
+  async updateDefaultModel(input?: { provider?: unknown; model?: unknown }): Promise<AssistantSnapshot> {
+    await this.ensureLoaded();
+    const provider = normalizeProvider(input?.provider);
+    const model = String(input?.model ?? '').trim();
+    if (!ASSISTANT_MODEL_OPTIONS.some((option) => option.provider === provider && option.id === model)) {
+      throw new Error(`unknown assistant model: ${provider}/${model}`);
+    }
+    if (this.defaultModelSelection.provider !== provider || this.defaultModelSelection.model !== model) {
+      this.defaultModelSelection = { provider, model };
+      await this.persist();
+    }
+    return await this.threadSnapshot(this.activeThreadId);
   }
 
   private async createNewThreadFromThread(threadId: string, input?: { title?: unknown }): Promise<{ ok: true; previousThreadId: string; threadId: string; thread: AssistantThread }> {
@@ -3461,8 +3494,7 @@ export class HubAssistantService {
     await deleteAssistantArtifactsForThread(threadId);
     this.threads = this.threads.filter((thread) => thread.id !== threadId);
     if (this.threads.length === 0) {
-      const provider = await defaultAssistantProvider();
-      this.threads = [this.makeThread({ provider, model: defaultModelForProvider(provider) })];
+      this.threads = [this.makeThread(this.defaultModelSelection)];
     }
     if (!this.threads.some((thread) => thread.id === this.activeThreadId)) {
       this.activeThreadId = this.threads[0].id;
@@ -4057,6 +4089,12 @@ export class HubAssistantService {
       storedOverviewPrompt && typeof stored?.overviewPromptUpdatedAt === 'string' && stored.overviewPromptUpdatedAt.trim()
         ? stored.overviewPromptUpdatedAt.trim()
         : null;
+    const fallbackDefaultProvider = await defaultAssistantProvider();
+    const storedDefaultProvider = normalizeProvider(stored?.defaultModel?.provider ?? fallbackDefaultProvider);
+    this.defaultModelSelection = {
+      provider: storedDefaultProvider,
+      model: allowedModelForProvider(storedDefaultProvider, stored?.defaultModel?.model),
+    };
     const storedThreads = Array.isArray(stored?.threads) ? stored.threads : [];
     const storedFallbackProvider = normalizeProvider(storedThreads.find((thread: any) => thread && typeof thread === 'object')?.provider);
     const storedFallback = {
@@ -4072,8 +4110,7 @@ export class HubAssistantService {
     if (threads.length > 0) {
       this.threads = threads;
     } else {
-      const provider = await defaultAssistantProvider();
-      this.threads = [this.makeThread({ provider, model: defaultModelForProvider(provider), systemPrompt: this.defaultSystemPrompt })];
+      this.threads = [this.makeThread({ ...this.defaultModelSelection, systemPrompt: this.defaultSystemPrompt })];
     }
     const threadIds = new Set(this.threads.map((thread) => thread.id));
     this.chatIdleSubscriptions = (Array.isArray(stored?.chatIdleSubscriptions) ? stored.chatIdleSubscriptions : [])
@@ -4161,6 +4198,7 @@ export class HubAssistantService {
     const state = serializeState({
       activeThreadId: activeThread.id,
       threads: this.threads,
+      defaultModel: this.defaultModelSelection,
       chatIdleSubscriptions: this.chatIdleSubscriptions,
       systemPrompt: this.defaultSystemPrompt,
       systemPromptUpdatedAt: this.defaultSystemPromptUpdatedAt,
@@ -5724,6 +5762,7 @@ export class HubAssistantService {
       chatIdleSubscriptions: activeChatIdleSubscriptionSummaries(this.chatIdleSubscriptions),
       pendingApprovals: this.pendingApprovals(),
       models: [],
+      defaultModel: { ...this.defaultModelSelection },
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       runningModels: Object.fromEntries([...this.runningModels.entries()].map(([threadId, model]) => [threadId, sanitizeMessage(model)])),

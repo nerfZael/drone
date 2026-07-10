@@ -17538,6 +17538,17 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
+      if (pathname === '/api/assistant/default-model' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+          json(res, 200, await assistantService.updateDefaultModel(body ?? {}));
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
       if (pathname === '/api/assistant/context' && method === 'POST') {
         let body: any = null;
         try {

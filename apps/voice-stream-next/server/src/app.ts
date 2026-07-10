@@ -4325,7 +4325,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       if (body.assistantProfileId !== undefined) patch.assistantProfileId = cleanText(body.assistantProfileId) || null;
       if (body.provider !== undefined) patch.provider = cleanText(body.provider, 'openai') || 'openai';
       if (body.model !== undefined) {
-        const modelFallback = (patch.provider ?? existingThread.provider) === 'codex' ? 'gpt-5.5' : 'chat-latest';
+        const modelFallback = 'gpt-5.6-luna';
         patch.model = cleanText(body.model, modelFallback) || modelFallback;
       }
       if (body.thinkingLevel !== undefined) patch.thinkingLevel = cleanText(body.thinkingLevel, 'off') || 'off';
@@ -4589,14 +4589,14 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       db.deleteCodexOAuthState(state);
       db.updateAssistantSettings(ctx.user.id, {
         defaultProvider: 'codex',
-        defaultModel: 'gpt-5.5',
+        defaultModel: 'gpt-5.6-luna',
         defaultThinkingLevel: 'medium',
       });
       for (const thread of db.listThreads(ctx.user.id)) {
         if (thread.provider === 'openai' && thread.model === 'gpt-5.2') {
           db.updateThread(ctx.user.id, thread.id, {
             provider: 'codex',
-            model: 'gpt-5.5',
+            model: 'gpt-5.6-luna',
             thinkingLevel: thread.thinkingLevel === 'off' ? 'medium' : thread.thinkingLevel,
             status: thread.status === 'error' ? 'idle' : thread.status,
             error: null,
@@ -4628,9 +4628,8 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   app.patch('/api/assistant/settings', async (req, reply) =>
     withUser(req, reply, db, clerkEnabled, async (ctx) => {
       const body = jsonBody(req);
-      const existingSettings = db.ensureAssistantSettings(ctx.user.id);
       const defaultProvider = body.defaultProvider === undefined ? undefined : cleanText(body.defaultProvider, 'openai');
-      const modelFallback = (defaultProvider ?? existingSettings.defaultProvider) === 'codex' ? 'gpt-5.5' : 'chat-latest';
+      const modelFallback = 'gpt-5.6-luna';
       const settings = db.updateAssistantSettings(ctx.user.id, {
         normalSystemPrompt: body.normalSystemPrompt === undefined ? undefined : cleanText(body.normalSystemPrompt),
         voiceSystemPrompt: body.voiceSystemPrompt === undefined ? undefined : cleanText(body.voiceSystemPrompt),
