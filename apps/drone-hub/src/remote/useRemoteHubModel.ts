@@ -16,6 +16,7 @@ import {
   type TranscriptResponse,
 } from './remote-api';
 import { remoteBusyChatNodeIds, updateRemoteUnreadChats } from './remote-unread';
+import { buildRemoteChatTimeline, normalizeRemotePendingPrompts } from './remote-chat-timeline';
 
 type RemoteChatState = {
   transcripts: TranscriptItem[];
@@ -53,6 +54,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const [chats, setChats] = React.useState<string[]>([]);
   const [draftChats, setDraftChats] = React.useState<Record<string, boolean>>({});
   const [transcripts, setTranscripts] = React.useState<TranscriptItem[]>([]);
+  const transcriptsRef = React.useRef<TranscriptItem[]>([]);
   const [pending, setPending] = React.useState<PendingPrompt[]>([]);
   const [draft, setDraft] = React.useState('');
   const [loading, setLoading] = React.useState(true);
@@ -123,6 +125,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setSelectedDroneId(null);
     setChats([]);
     setDraftChats({});
+    transcriptsRef.current = [];
     setTranscripts([]);
     setPending([]);
     setChatStateLoading(false);
@@ -215,7 +218,10 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     );
     return {
       transcripts: Array.isArray(data.transcripts) ? data.transcripts : [],
-      pending: Array.isArray(data.pending) ? data.pending : [],
+      pending: normalizeRemotePendingPrompts(
+        Array.isArray(data.pending) ? data.pending : [],
+        Array.isArray(data.transcripts) ? data.transcripts : [],
+      ),
       agent: data.agent ?? null,
       model: String(data.model ?? '').trim() || null,
     };
@@ -232,8 +238,12 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const applyChatState = React.useCallback((droneId: string, chatName: string, next: RemoteChatState, opts?: { preserveTranscripts?: boolean }) => {
     const key = remoteChatStateKey(droneId, chatName);
     if (activeChatStateKeyRef.current !== key) return false;
-    if (opts?.preserveTranscripts !== true) setTranscripts(next.transcripts);
-    setPending(next.pending);
+    const visibleTranscripts = opts?.preserveTranscripts === true ? transcriptsRef.current : next.transcripts;
+    if (opts?.preserveTranscripts !== true) {
+      transcriptsRef.current = next.transcripts;
+      setTranscripts(next.transcripts);
+    }
+    setPending(normalizeRemotePendingPrompts(next.pending, visibleTranscripts));
     setChatRuntime({
       key,
       agent: next.agent,
@@ -249,7 +259,9 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const applyFullTranscript = React.useCallback((droneId: string, chatName: string, next: TranscriptItem[]) => {
     const key = remoteChatStateKey(droneId, chatName);
     if (activeChatStateKeyRef.current !== key) return false;
+    transcriptsRef.current = next;
     setTranscripts(next);
+    setPending((current) => normalizeRemotePendingPrompts(current, next));
     loadedFullTranscriptKeyRef.current = key;
     setChatStateLoading(false);
     return true;
@@ -310,6 +322,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   React.useEffect(() => {
     if (authenticated && effectiveDroneId) return;
     setChats([]);
+    transcriptsRef.current = [];
     setTranscripts([]);
     setPending([]);
     setChatStateLoading(false);
@@ -531,6 +544,10 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
         loading: Boolean(selectedChatRuntimeKey),
         error: null,
       };
+  const chatTimeline = React.useMemo(
+    () => buildRemoteChatTimeline(transcripts, pending),
+    [pending, transcripts],
+  );
 
   return {
     authenticated,
@@ -546,6 +563,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     draftChats,
     transcripts,
     pending,
+    chatTimeline,
     draft,
     setDraft,
     loading,

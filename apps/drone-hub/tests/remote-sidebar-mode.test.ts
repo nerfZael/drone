@@ -17,7 +17,6 @@ const remoteMobileSidebarSource = readFileSync(
   new URL('../src/remote/RemoteMobileSidebarDrawer.tsx', import.meta.url),
   'utf8',
 );
-
 describe('RemoteHubSidebar', () => {
   test('uses the read-only tree renderer so repo sections can show group folders', () => {
     expect(remoteHubSidebarSource).toContain(
@@ -57,5 +56,14 @@ describe('RemoteHubSidebar', () => {
     expect(remoteHubSidebarSource).toContain("remoteRequestJson('/api/groups')");
     expect(remoteHubSidebarSource).toContain('remoteGroupCreatedAtByName(registryGroups)');
     expect(remoteHubSidebarSource).toContain('sidebarGroupCreatedAtByName=');
+  });
+
+  test('renders one chronological transcript and pending timeline', () => {
+    expect(remoteHubModelSource).toContain('buildRemoteChatTimeline(transcripts, pending)');
+    expect(remoteHubModelSource).toContain('normalizeRemotePendingPrompts(');
+    expect(remoteHubModelSource).toContain(
+      'normalizeRemotePendingPrompts(next.pending, visibleTranscripts)',
+    );
+    expect(remoteHubAppSource).toContain('model.chatTimeline.map((entry) =>');
   });
 });
