@@ -5,11 +5,14 @@ const path = require('node:path');
 const { afterEach, describe, test } = require('node:test');
 
 const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
+const { getPromptQueueRepository } = require('../../dist/host/prompt-queue-repository.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const {
   applyChatReconciliationInStore,
   archiveChatInStore,
+  createChatInStore,
   deleteArchivedChatFromStore,
+  deleteActiveChatFromStore,
   deleteChatFromStore,
   importArchivedChatsFromRegistry,
   importDroneChatsFromRegistry,
@@ -24,6 +27,7 @@ const {
   upsertChatInStore,
   upsertTranscriptTurnInStore,
   updateTranscriptTurnInStore,
+  updateChatInStore,
 } = require('../../dist/hub/transcript-store.js');
 
 const originalDataDir = process.env.DRONE_DATA_DIR;
@@ -185,6 +189,99 @@ describe('canonical chat and transcript repository', () => {
     await importDroneChatsFromRegistry({ droneId: 'drone-1', chats: { final: legacyChat('resurrect') } });
     assert.equal(readChatFromStore({ droneId: 'drone-1', chatName: 'final' }).chat, null);
     assert.deepEqual(listChatsFromStore({ droneId: 'drone-1' }).chats, []);
+  });
+
+  test('active chat commands serialize create and metadata updates and roll back invalid writes', async () => {
+    tempDataDir('active-commands');
+    await upsertChatInStore({ droneId: 'drone-1', chatName: 'default', chatEntry: legacyChat('default') });
+
+    const creates = await Promise.allSettled([
+      createChatInStore({
+        droneId: 'drone-1',
+        chatName: 'review',
+        createEntry: () => legacyChat('first'),
+      }),
+      createChatInStore({
+        droneId: 'drone-1',
+        chatName: 'review',
+        createEntry: () => legacyChat('second'),
+      }),
+    ]);
+    assert.equal(creates.filter((result) => result.status === 'fulfilled').length, 1);
+    assert.equal(creates.filter((result) => result.status === 'rejected').length, 1);
+
+    await Promise.all([
+      updateChatInStore({
+        droneId: 'drone-1', chatName: 'review',
+        update: (chat) => ({ ...chat, model: 'model-a' }),
+      }),
+      updateChatInStore({
+        droneId: 'drone-1', chatName: 'review',
+        update: (chat) => ({ ...chat, agentPermissionMode: 'read-only' }),
+      }),
+    ]);
+    const updated = readChatFromStore({ droneId: 'drone-1', chatName: 'review' }).chat;
+    assert.equal(updated.model, 'model-a');
+    assert.equal(updated.agentPermissionMode, 'read-only');
+
+    const circular = {}; circular.self = circular;
+    await assert.rejects(
+      updateChatInStore({
+        droneId: 'drone-1', chatName: 'review',
+        update: (chat) => ({ ...chat, circular }),
+      }),
+      /circular/i,
+    );
+    assert.equal(readChatFromStore({ droneId: 'drone-1', chatName: 'review' }).chat.circular, undefined);
+    await assert.rejects(
+      renameChatInStore({ droneId: 'drone-1', chatName: 'default', newChatName: 'renamed-default' }),
+      /cannot rename default chat/,
+    );
+    await assert.rejects(
+      deleteActiveChatFromStore({ droneId: 'drone-1', chatName: 'default' }),
+      /cannot delete default chat/,
+    );
+
+    await assert.rejects(
+      createChatInStore({
+        droneId: 'drone-2',
+        chatName: 'review',
+        copyFromChatName: 'default',
+        implicitDefaultEntry: legacyChat('implicit default'),
+        createEntry: () => { throw new Error('intentional create failure'); },
+      }),
+      /intentional create failure/,
+    );
+    assert.deepEqual(listChatsFromStore({ droneId: 'drone-2' }).chats, []);
+  });
+
+  test('rename and delete commands coordinate prompt rows outside chat transactions', async () => {
+    tempDataDir('active-prompt-coordination');
+    await upsertChatInStore({ droneId: 'drone-1', chatName: 'review', chatEntry: legacyChat('review') });
+    const prompts = getPromptQueueRepository();
+    await prompts.enqueue({
+      droneId: 'drone-1',
+      chatName: 'review',
+      prompt: {
+        id: 'prompt-1',
+        at: '2026-01-01T00:00:00.000Z',
+        prompt: 'queued work',
+        state: 'queued',
+      },
+    });
+
+    assert.equal(await renameChatInStore({ droneId: 'drone-1', chatName: 'review', newChatName: 'final' }), true);
+    assert.equal(prompts.get({ droneId: 'drone-1', chatName: 'review', promptId: 'prompt-1' }), null);
+    assert.equal(prompts.get({ droneId: 'drone-1', chatName: 'final', promptId: 'prompt-1' }).id, 'prompt-1');
+
+    const deleted = await deleteActiveChatFromStore({
+      droneId: 'drone-1',
+      chatName: 'final',
+      fallbackChat: { chatName: 'default', chatEntry: legacyChat('replacement default') },
+    });
+    assert.deepEqual(deleted.chats, ['default']);
+    assert.equal(prompts.get({ droneId: 'drone-1', chatName: 'final', promptId: 'prompt-1' }), null);
+    assert.equal(readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat.title, 'replacement default');
   });
 
   test('emits aggregate imports and transactional change events without a legacy-turn event flood', async () => {
