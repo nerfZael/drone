@@ -141,7 +141,7 @@ export async function renameDroneDisplayName(opts: {
   name: string;
   dependencies?: DroneMetadataCommandDependencies;
 }): Promise<CanonicalDroneLifecycleRecord> {
-  const record = await commitDroneMetadataPatch({
+  return await commitDroneMetadataPatch({
     droneId: opts.droneId,
     state: opts.state,
     eventType: 'drone.display-name.changed',
@@ -149,19 +149,6 @@ export async function renameDroneDisplayName(opts: {
     dependencies: opts.dependencies,
     transform: (lifecycle) => ({ ...lifecycle, name: opts.name }),
   });
-  if (!opts.dependencies?.project) {
-    try {
-      await updateRegistry((registry: any) => {
-        for (const bucketName of ['drones', 'pending', 'archived']) {
-          const found = findDroneEntryByIdentity({ drones: registry?.[bucketName] }, opts.droneId);
-          if (found) found.entry.name = opts.name;
-        }
-      });
-    } catch {
-      // Compatibility projection cannot invalidate the canonical rename.
-    }
-  }
-  return record;
 }
 
 export async function setDroneGroupMetadata(opts: {
