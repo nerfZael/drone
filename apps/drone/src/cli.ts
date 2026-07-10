@@ -74,7 +74,14 @@ import {
 import { startRemoteHubServer } from './hub/remote-server';
 import { createRemoteHubPairing, ensureDesiredRemoteHubDetached, redactRemoteHubState, startRemoteHubDetached, stopRemoteHubDetached } from './hub/remote-control';
 import { startDroneHubApiServer } from './hub/server';
-import { importTranscriptTurnsFromRegistry } from './hub/transcript-store';
+import {
+  deleteChatFromStore,
+  importChatFromRegistry,
+  patchChatMetadataInStore,
+  readChatFromStore,
+  upsertChatInStore,
+  upsertTranscriptTurnInStore,
+} from './hub/transcript-store';
 import {
   resolveEffectiveVoiceTranscriptionSettings,
   resolveGroqApiKeySettings,
@@ -308,12 +315,43 @@ async function createCursorAgentChatId(containerName: string): Promise<string> {
 async function ensureChatId(opts: { droneName: string; chatName: string; model?: string; reset?: boolean }): Promise<string> {
   const reg = await loadRegistry();
   const { key, drone: d, containerName } = resolveDroneFromRegistry(reg, opts.droneName);
+  const droneId = String((d as any)?.id ?? key).trim() || key;
 
   d.chats = d.chats ?? {};
   const existing = d.chats[opts.chatName];
   if (existing && !opts.reset && typeof existing.chatId === 'string' && existing.chatId.trim()) return existing.chatId;
 
   const createdId = await createCursorAgentChatId(containerName);
+  if (!(globalThis as any).Bun) {
+    if (existing) await importChatFromRegistry({ droneId, chatName: opts.chatName, chatEntry: existing });
+    const stored = readChatFromStore({ droneId, chatName: opts.chatName }).chat;
+    const storedId = !opts.reset && typeof stored?.chatId === 'string' ? String(stored.chatId).trim() : '';
+    if (storedId) return storedId;
+    if (!stored) {
+      await upsertChatInStore({
+        droneId,
+        chatName: opts.chatName,
+        chatEntry: {
+          chatId: createdId,
+          createdAt: new Date().toISOString(),
+          ...(opts.model ? { model: opts.model } : {}),
+        },
+      });
+    } else {
+      await patchChatMetadataInStore({
+        droneId,
+        chatName: opts.chatName,
+        patch: {
+          set: {
+            chatId: createdId,
+            createdAt: String(stored.createdAt ?? '').trim() || new Date().toISOString(),
+            ...(opts.model ? { model: opts.model } : {}),
+          },
+        },
+      });
+    }
+    return createdId;
+  }
   return await updateRegistry((reg2) => {
     const { key: key2, drone: d2 } = resolveDroneFromRegistry(reg2 as any, key);
     d2.chats = d2.chats ?? {};
@@ -341,11 +379,37 @@ async function recordChatTurn(opts: {
   promptAt?: string;
   completedAt?: string;
 }): Promise<void> {
-  let syncedDroneId = '';
-  let syncedTurns: any[] | null = null;
+  if (!(globalThis as any).Bun) {
+    const registry = await loadRegistry();
+    const { key, drone } = resolveDroneFromRegistry(registry as any, opts.droneName);
+    const droneId = String((drone as any)?.id ?? key ?? opts.droneName).trim() || opts.droneName;
+    const legacyChat = (drone as any)?.chats?.[opts.chatName];
+    if (legacyChat) await importChatFromRegistry({ droneId, chatName: opts.chatName, chatEntry: legacyChat });
+    else {
+      await upsertChatInStore({
+        droneId,
+        chatName: opts.chatName,
+        chatEntry: { createdAt: new Date().toISOString() },
+      });
+    }
+    const completedAt = String(opts.completedAt ?? new Date().toISOString());
+    await upsertTranscriptTurnInStore({
+      droneId,
+      chatName: opts.chatName,
+      turn: {
+        at: completedAt,
+        prompt: opts.prompt,
+        ok: Boolean(opts.ok),
+        output: String(opts.output ?? ''),
+        ...(opts.error ? { error: String(opts.error) } : {}),
+        ...(opts.promptAt ? { promptAt: String(opts.promptAt) } : {}),
+        ...(opts.completedAt ? { completedAt: String(opts.completedAt) } : {}),
+      },
+    });
+    return;
+  }
   await updateRegistry((reg) => {
     const { key, drone: d } = resolveDroneFromRegistry(reg as any, opts.droneName);
-    syncedDroneId = String((d as any)?.id ?? key ?? opts.droneName).trim() || opts.droneName;
     d.chats = d.chats ?? {};
     d.chats[opts.chatName] = d.chats[opts.chatName] ?? { chatId: '', createdAt: new Date().toISOString() };
     const entry: any = d.chats[opts.chatName];
@@ -362,11 +426,7 @@ async function recordChatTurn(opts: {
     });
     d.chats[opts.chatName] = entry;
     (reg as any).drones[key] = d;
-    syncedTurns = entry.turns;
   });
-  if (syncedDroneId && syncedTurns) {
-    await importTranscriptTurnsFromRegistry({ droneId: syncedDroneId, chatName: opts.chatName, turns: syncedTurns });
-  }
 }
 
 async function followOutput(opts: {
@@ -3361,13 +3421,16 @@ program
   .option('--chat <name>', 'Chat name to reset', 'default')
   .action(async (name, options) => {
     const chatName = String(options.chat || 'default');
-    const had = await updateRegistry((reg) => {
+    const registry = await loadRegistry();
+    const { key, drone } = resolveDroneFromRegistry(registry as any, String(name));
+    const droneId = String((drone as any)?.id ?? key ?? name).trim() || String(name);
+    const had = Boolean((drone as any)?.chats?.[chatName]);
+    if ((globalThis as any).Bun) await updateRegistry((reg) => {
       const { key, drone: d } = resolveDroneFromRegistry(reg as any, String(name));
-      const had = Boolean(d.chats?.[chatName]);
       if (d.chats) delete d.chats[chatName];
       (reg as any).drones[key] = d;
-      return had;
     });
+    else await deleteChatFromStore({ droneId, chatName });
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ ok: true, name: String(name), chat: chatName, removed: had }, null, 2));
   });
