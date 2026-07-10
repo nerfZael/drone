@@ -1,0 +1,731 @@
+import React from 'react';
+
+import { MarkdownMessage, type MarkdownTextMentionLink } from '../chat/MarkdownMessage';
+import { IconDrone } from '../icons';
+import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
+import {
+  compactPreview,
+  isChatIdleToolName,
+  lastAssistantContentBlock,
+  latestThinkingText,
+  messageDroneDetails,
+  messageImageParts,
+  messageText,
+  normalizeAssistantWaitTargets,
+  summarizeWaitTargets,
+  toolActivityTitle,
+  toolCalls,
+  toolItemName,
+  toolLabel,
+  type AssistantMessageDroneSummary,
+  type AssistantToolCall,
+  type AssistantToolRenderItem,
+  type AssistantWaitTargetLabel,
+} from './assistant-message-model';
+import type {
+  AssistantApproval,
+  AssistantChatIdleSubscription,
+  AssistantDroneNameMap,
+  AssistantMessage,
+  AssistantQueuedPrompt,
+} from './assistant-types';
+
+function ToolDisclosure({
+  title,
+  status,
+  children,
+}: {
+  title: string;
+  status?: 'ok' | 'error';
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = React.useState(false);
+  return (
+    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[rgba(255,255,255,.025)] hover:text-[var(--fg-secondary)]"
+        style={{ fontFamily: 'var(--display)' }}
+      >
+        {status ? (
+          <span
+            className={`inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-full ${
+              status === 'error'
+                ? 'bg-[var(--red)] text-[var(--bg)]'
+                : 'bg-[var(--green)] text-[var(--bg)]'
+            }`}
+          >
+            {status === 'error' ? (
+              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+            ) : (
+              <ToolCheckIcon className="h-2.5 w-2.5" />
+            )}
+          </span>
+        ) : null}
+        <span className="min-w-0 flex-1 truncate">{title}</span>
+      </button>
+      {open ? (
+        <div className="border-t border-[var(--border-subtle)] px-2 py-1.5">{children}</div>
+      ) : null}
+    </div>
+  );
+}
+
+function ToolCheckIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      width="10"
+      height="10"
+      viewBox="0 0 10 10"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M2 5.2l2 2 4-4.4" />
+    </svg>
+  );
+}
+
+function ThinkingPulseDots() {
+  return (
+    <span
+      className="inline-flex h-6 flex-shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2"
+      aria-hidden="true"
+    >
+      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--muted)]" />
+      <span
+        className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--muted)]"
+        style={{ animationDelay: '120ms' }}
+      />
+      <span
+        className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--muted)]"
+        style={{ animationDelay: '240ms' }}
+      />
+    </span>
+  );
+}
+
+export function AssistantThinkingRow() {
+  return (
+    <div className="px-3 py-2">
+      <div
+        className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+        style={{ fontFamily: 'var(--display)' }}
+      >
+        Assistant
+      </div>
+      <ThinkingPulseDots />
+    </div>
+  );
+}
+
+function ReasoningBlock({ text, headerPulse }: { text: string; headerPulse: boolean }) {
+  const [open, setOpen] = React.useState(false);
+  const trimmed = text.trim();
+  if (!trimmed && !headerPulse) return null;
+
+  return (
+    <div className="mb-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.015)]">
+      <button
+        type="button"
+        onClick={() => setOpen((value) => !value)}
+        aria-expanded={open}
+        className="flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left hover:bg-[rgba(255,255,255,.04)]"
+      >
+        <span
+          className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+          style={{ fontFamily: 'var(--display)' }}
+        >
+          Reasoning
+        </span>
+        {headerPulse ? <ThinkingPulseDots /> : null}
+        <span className="ml-auto flex-shrink-0 text-[10px] text-[var(--muted)]">
+          {open ? 'Hide' : 'Show'}
+        </span>
+      </button>
+      {trimmed ? (
+        open ? (
+          <div className="border-t border-[var(--border-subtle)] px-2.5 py-2">
+            <div className="max-h-[min(70vh,28rem)] overflow-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-[var(--muted)]">
+              {trimmed}
+            </div>
+          </div>
+        ) : (
+          <div className="border-t border-[var(--border-subtle)] px-2.5 pb-2 pt-1">
+            <div className="line-clamp-3 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-[var(--muted-dim)]">
+              {trimmed}
+            </div>
+          </div>
+        )
+      ) : headerPulse ? (
+        <div className="border-t border-[var(--border-subtle)] px-2.5 py-2 text-[11px] text-[var(--muted-dim)]">
+          …
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function summarizeChatIdleBannerTargets(
+  subscriptions: AssistantChatIdleSubscription[],
+  droneNameById: AssistantDroneNameMap,
+): string {
+  const parts: string[] = [];
+  const seen = new Set<string>();
+  for (const sub of subscriptions) {
+    for (const target of sub.targets) {
+      const droneId = String(target.droneId ?? '').trim();
+      const chatName = String(target.chatName ?? '').trim() || 'default';
+      const droneLabel = (droneId && droneNameById[droneId]) || droneId || 'drone';
+      const label = chatName !== 'default' ? `${droneLabel} / ${chatName}` : droneLabel;
+      if (!label.trim() || seen.has(label)) continue;
+      seen.add(label);
+      parts.push(label);
+    }
+  }
+  if (parts.length === 0) return '';
+  const visible = parts.slice(0, 4);
+  const extra = parts.length - visible.length;
+  return extra > 0 ? `${visible.join(' · ')} +${extra}` : visible.join(' · ');
+}
+
+function chatIdleBannerTitle(subscriptions: AssistantChatIdleSubscription[]): string {
+  const modes = new Set(subscriptions.map((sub) => sub.mode ?? 'all'));
+  if (modes.size === 1 && modes.has('any')) return 'Subscribed — waiting for any chat to go idle';
+  if (modes.size === 1 && modes.has('all')) return 'Subscribed — waiting for all chats to go idle';
+  return 'Subscribed — waiting for chat idle events';
+}
+
+function formatChatIdleExpiryHint(expiresAtIso: string): string {
+  const ms = Date.parse(expiresAtIso);
+  if (!Number.isFinite(ms)) return '';
+  const delta = ms - Date.now();
+  if (delta <= 0) return 'Subscription expires soon';
+  if (delta < 60_000) return 'Expires in under a minute';
+  if (delta < 60 * 60_000) return `Expires in ${Math.ceil(delta / 60_000)}m`;
+  return `Expires ${new Date(ms).toLocaleString()}`;
+}
+
+function earliestChatIdleExpiryIso(subscriptions: AssistantChatIdleSubscription[]): string | null {
+  let best: number | null = null;
+  for (const sub of subscriptions) {
+    const ms = Date.parse(sub.expiresAt);
+    if (!Number.isFinite(ms)) continue;
+    if (best === null || ms < best) best = ms;
+  }
+  return best === null ? null : new Date(best).toISOString();
+}
+
+export function AssistantChatIdleFooterBanner({
+  subscriptions,
+  droneNameById,
+}: {
+  subscriptions: AssistantChatIdleSubscription[];
+  droneNameById: AssistantDroneNameMap;
+}) {
+  const targetLine = React.useMemo(
+    () => summarizeChatIdleBannerTargets(subscriptions, droneNameById),
+    [subscriptions, droneNameById],
+  );
+  const title = React.useMemo(() => chatIdleBannerTitle(subscriptions), [subscriptions]);
+  const expiryHint = React.useMemo(() => {
+    const iso = earliestChatIdleExpiryIso(subscriptions);
+    return iso ? formatChatIdleExpiryHint(iso) : '';
+  }, [subscriptions]);
+
+  return (
+    <div
+      className="flex-shrink-0 border-t border-[rgba(255,200,80,.28)] bg-[rgba(255,200,80,.08)] px-3 py-2"
+      role="status"
+      aria-live="polite"
+    >
+      <div className="flex items-start gap-2">
+        <span
+          className="mt-1 h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-[var(--yellow)]"
+          aria-hidden="true"
+        />
+        <div className="min-w-0 flex-1">
+          <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">{title}</div>
+          {targetLine ? (
+            <div className="mt-0.5 truncate text-[10px] text-[var(--muted)]" title={targetLine}>
+              Watching {targetLine}
+            </div>
+          ) : (
+            <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+              The assistant resumes this thread automatically when monitored chats become idle. Use
+              Stop below to cancel.
+            </div>
+          )}
+          {expiryHint ? (
+            <div className="mt-1 text-[10px] text-[var(--muted-dim)]">{expiryHint}</div>
+          ) : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ToolStatusIndicator({ result }: { result?: AssistantMessage }) {
+  const dotClass = !result
+    ? 'bg-[var(--accent)]'
+    : result.isError
+      ? 'bg-[var(--red)]'
+      : 'bg-[var(--green)]';
+  if (!result || result.isError)
+    return <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${dotClass}`} />;
+  return (
+    <span
+      className={`inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-full ${dotClass} text-[var(--bg)]`}
+    >
+      <ToolCheckIcon className="h-2.5 w-2.5" />
+    </span>
+  );
+}
+
+function ToolDetailsButton({ open, onClick }: { open: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className="ml-auto flex h-5 flex-shrink-0 items-center rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-1.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+      style={{ fontFamily: 'var(--display)' }}
+    >
+      {open ? 'Hide details' : 'Details'}
+    </button>
+  );
+}
+
+function ToolPayloadDetails({
+  call,
+  result,
+}: {
+  call?: AssistantToolCall;
+  result?: AssistantMessage;
+}) {
+  const resultText = result ? messageText(result) : '';
+  return (
+    <div className="grid gap-2 border-t border-[var(--border-subtle)] px-2.5 py-2">
+      {call ? (
+        <div>
+          <div
+            className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Arguments
+          </div>
+          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--muted-dim)]">
+            {JSON.stringify(call.args, null, 2)}
+          </pre>
+        </div>
+      ) : null}
+      {result ? (
+        <div className={call ? 'border-t border-[var(--border-subtle)] pt-2' : ''}>
+          <div
+            className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Result
+          </div>
+          {resultText ? (
+            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[11px] text-[var(--fg-secondary)]">
+              {resultText}
+            </pre>
+          ) : (
+            <div className="mt-1 text-[11px] text-[var(--muted-dim)]">No result payload.</div>
+          )}
+        </div>
+      ) : (
+        <div className="text-[11px] text-[var(--muted-dim)]">Waiting for result...</div>
+      )}
+    </div>
+  );
+}
+
+export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderItem[] }) {
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const first = items[0];
+  const name = toolItemName(first);
+  const label = toolLabel(name);
+  const errorCount = items.filter((item) => item.result?.isError).length;
+  const pendingCount = items.filter((item) => !item.result).length;
+  const statusParts = [
+    pendingCount > 0 ? `${pendingCount} pending` : '',
+    errorCount > 0 ? `${errorCount} failed` : '',
+  ].filter(Boolean);
+  const statusText = statusParts.length > 0 ? statusParts.join(', ') : 'Complete';
+  const statusResult: AssistantMessage | undefined =
+    errorCount > 0
+      ? { role: 'toolResult', isError: true, content: '' }
+      : pendingCount > 0
+        ? undefined
+        : { role: 'toolResult', content: '' };
+
+  return (
+    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]">
+      <div className="flex min-w-0 items-center gap-2 px-2.5 py-2">
+        <ToolStatusIndicator result={statusResult} />
+        <div
+          className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+          style={{ fontFamily: 'var(--display)' }}
+        >
+          {label}
+        </div>
+        <span className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--fg-secondary)]">
+          x{items.length}
+        </span>
+        <span className="hidden flex-shrink-0 text-[10px] text-[var(--muted-dim)] sm:inline">
+          {statusText}
+        </span>
+        <ToolDetailsButton open={detailsOpen} onClick={() => setDetailsOpen((value) => !value)} />
+      </div>
+      {detailsOpen ? (
+        <div className="grid gap-2 border-t border-[var(--border-subtle)] p-2">
+          {items.map((item, index) => (
+            <div
+              key={item.key}
+              className="overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)]"
+            >
+              <div className="flex min-w-0 items-center gap-2 border-b border-[var(--border-subtle)] px-2.5 py-1.5">
+                <ToolStatusIndicator result={item.result} />
+                <div
+                  className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  {label} #{index + 1}
+                </div>
+              </div>
+              <ToolPayloadDetails call={item.call} result={item.result} />
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+export function MessageDroneActivityRow({
+  call,
+  result,
+  droneNameById,
+}: {
+  call: AssistantToolCall;
+  result?: AssistantMessage;
+  droneNameById: AssistantDroneNameMap;
+}) {
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const summary = messageDroneDetails(call.args, droneNameById);
+  const preview = compactPreview(summary.message, 220);
+  return (
+    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]">
+      <div className="px-2.5 py-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <ToolStatusIndicator result={result} />
+            <div
+              className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              Send user message
+            </div>
+            <ToolDetailsButton
+              open={detailsOpen}
+              onClick={() => setDetailsOpen((value) => !value)}
+            />
+          </div>
+          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
+            <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-1.5 py-0.5 text-[11px] text-[var(--fg-secondary)]">
+              <span className="truncate">{summary.droneLabel || 'Target drone'}</span>
+            </span>
+            {summary.chatName && summary.chatName !== 'default' ? (
+              <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-1.5 py-0.5 text-[11px] text-[var(--muted)]">
+                <span className="truncate">{summary.chatName}</span>
+              </span>
+            ) : null}
+          </div>
+          {preview ? (
+            <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-2 py-1.5 text-[12px] leading-5 text-[var(--fg-secondary)]">
+              {preview}
+            </div>
+          ) : (
+            <div className="mt-2 text-[11px] text-[var(--muted-dim)]">
+              No message preview available.
+            </div>
+          )}
+        </div>
+      </div>
+      {detailsOpen ? <ToolPayloadDetails call={call} result={result} /> : null}
+    </div>
+  );
+}
+
+export function ChatsIdleActivityRow({
+  call,
+  result,
+  droneNameById,
+}: {
+  call: AssistantToolCall;
+  result?: AssistantMessage;
+  droneNameById: AssistantDroneNameMap;
+}) {
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const targets = normalizeAssistantWaitTargets(call.args, droneNameById);
+  const targetSummary = summarizeWaitTargets(targets);
+  const label = toolLabel(call.name);
+  return (
+    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]">
+      <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+            <ToolStatusIndicator result={result} />
+            <div
+              className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              {label}
+            </div>
+            <ToolDetailsButton
+              open={detailsOpen}
+              onClick={() => setDetailsOpen((value) => !value)}
+            />
+          </div>
+          <div className="mt-1 text-[12px] text-[var(--fg-secondary)]">
+            {targetSummary || 'Resolving target drones'}
+          </div>
+        </div>
+      </div>
+      <div className="grid gap-1.5 p-2">
+        {targets.length > 0 ? (
+          targets.map((target) => (
+            <div
+              key={target.key}
+              className="flex min-h-8 min-w-0 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-2"
+            >
+              <div className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--fg-secondary)]">
+                {target.droneLabel}
+              </div>
+              {target.chatName && target.chatName !== 'default' ? (
+                <div className="max-w-[42%] truncate rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-1.5 py-0.5 text-[10px] text-[var(--muted)]">
+                  {target.chatName}
+                </div>
+              ) : null}
+            </div>
+          ))
+        ) : (
+          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-2 py-2 text-[11px] text-[var(--muted-dim)]">
+            Waiting for result...
+          </div>
+        )}
+      </div>
+      {detailsOpen ? <ToolPayloadDetails call={call} result={result} /> : null}
+    </div>
+  );
+}
+
+export function ToolActivityRow({
+  call,
+  result,
+  droneNameById = {},
+}: {
+  call?: AssistantToolCall;
+  result?: AssistantMessage;
+  droneNameById?: AssistantDroneNameMap;
+}) {
+  if (call?.name === 'message_drone') {
+    return <MessageDroneActivityRow call={call} result={result} droneNameById={droneNameById} />;
+  }
+
+  if (call && isChatIdleToolName(call.name)) {
+    return <ChatsIdleActivityRow call={call} result={result} droneNameById={droneNameById} />;
+  }
+
+  const title = toolActivityTitle(call, result, droneNameById);
+  const resultText = result ? messageText(result) : '';
+  return (
+    <div className="mx-3">
+      <ToolDisclosure title={title} status={result ? (result.isError ? 'error' : 'ok') : undefined}>
+        {call ? (
+          <div>
+            <div
+              className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              Arguments
+            </div>
+            <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--muted-dim)]">
+              {JSON.stringify(call.args, null, 2)}
+            </pre>
+          </div>
+        ) : null}
+        {result ? (
+          <div className={call ? 'mt-2 border-t border-[var(--border-subtle)] pt-2' : ''}>
+            <div
+              className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              Result
+            </div>
+            {resultText ? (
+              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[11px] text-[var(--fg-secondary)]">
+                {resultText}
+              </pre>
+            ) : (
+              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">No result payload.</div>
+            )}
+          </div>
+        ) : (
+          <div
+            className={
+              call
+                ? 'mt-2 border-t border-[var(--border-subtle)] pt-2 text-[11px] text-[var(--muted-dim)]'
+                : 'text-[11px] text-[var(--muted-dim)]'
+            }
+          >
+            Waiting for result...
+          </div>
+        )}
+      </ToolDisclosure>
+    </div>
+  );
+}
+
+export function AssistantMessageRow({
+  message,
+  droneMentionLinks,
+  onOpenDroneMention,
+  showToolCalls = true,
+  isStreamingAssistant = false,
+  showReasoning = false,
+}: {
+  message: AssistantMessage;
+  droneMentionLinks?: MarkdownTextMentionLink[];
+  onOpenDroneMention?: (mention: MarkdownTextMentionLink) => void;
+  showToolCalls?: boolean;
+  isStreamingAssistant?: boolean;
+  showReasoning?: boolean;
+}) {
+  const calls = showToolCalls ? toolCalls(message) : [];
+  const content = message.content;
+  const structuredAssistant =
+    message.role === 'assistant' &&
+    Array.isArray(content) &&
+    content.some(
+      (part) => part?.type === 'thinking' || part?.type === 'text' || part?.type === 'toolCall',
+    );
+
+  if (message.role === 'toolResult') {
+    return <ToolActivityRow result={message} />;
+  }
+
+  let body: React.ReactNode = null;
+  if (message.role === 'assistant' && structuredAssistant) {
+    const blocks: React.ReactNode[] = [];
+    let lastThinkingPartIndex = -1;
+    for (let i = 0; i < content.length; i += 1) {
+      if (content[i]?.type === 'thinking') lastThinkingPartIndex = i;
+    }
+    const lastBlock = lastAssistantContentBlock(message);
+    for (let i = 0; i < content.length; i += 1) {
+      const part = content[i];
+      if (!part || typeof part !== 'object') continue;
+      if (part.type === 'thinking') {
+        const thinkingText = String(part.thinking ?? '');
+        const currentReasoning = Boolean(
+          showReasoning && lastBlock?.type === 'thinking' && i === lastThinkingPartIndex,
+        );
+        const headerPulse = Boolean(isStreamingAssistant && currentReasoning);
+        if (currentReasoning) {
+          blocks.push(
+            <ReasoningBlock key={`th:${i}`} text={thinkingText} headerPulse={headerPulse} />,
+          );
+        }
+      } else if (part.type === 'text') {
+        const t = String(part.text ?? '').trim();
+        if (t) {
+          blocks.push(
+            <MarkdownMessage
+              key={`tx:${i}`}
+              text={t}
+              className="dh-markdown text-[12px]"
+              textMentionLinks={droneMentionLinks}
+              onOpenTextMention={onOpenDroneMention}
+            />,
+          );
+        }
+      }
+    }
+    body = blocks.length > 0 ? <div className="space-y-1">{blocks}</div> : null;
+  } else {
+    const text = messageText(message);
+    const images = messageImageParts(message);
+    const textBody = text ? (
+      message.role === 'assistant' ? (
+        <MarkdownMessage
+          text={text}
+          className="dh-markdown text-[12px]"
+          textMentionLinks={droneMentionLinks}
+          onOpenTextMention={onOpenDroneMention}
+        />
+      ) : (
+        <div className="whitespace-pre-wrap break-words text-[12px] text-[var(--fg-secondary)]">
+          {text}
+        </div>
+      )
+    ) : null;
+    const imageBody =
+      images.length > 0 ? (
+        <div className="flex flex-wrap gap-2">
+          {images.map((image, index) => (
+            <img
+              key={`${image.mimeType}:${index}`}
+              src={`data:${image.mimeType};base64,${image.data}`}
+              alt="Attached image"
+              className="max-h-44 max-w-[min(260px,100%)] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] object-contain"
+            />
+          ))}
+        </div>
+      ) : null;
+    body =
+      textBody || imageBody ? (
+        <div className="space-y-2">
+          {textBody}
+          {imageBody}
+        </div>
+      ) : null;
+  }
+
+  if (message.role === 'assistant' && !body && !message.errorMessage && calls.length === 0)
+    return null;
+
+  return (
+    <div
+      className={`px-3 py-2 ${message.role === 'user' ? 'bg-[rgba(255,255,255,.025)] border-y border-[var(--border-subtle)]' : ''}`}
+    >
+      <div
+        className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+        style={{ fontFamily: 'var(--display)' }}
+      >
+        {message.role === 'user' ? 'You' : 'Assistant'}
+      </div>
+      {body}
+      {!body && message.errorMessage ? (
+        <div className="text-[12px] text-[var(--red)]">{message.errorMessage}</div>
+      ) : null}
+      {calls.length > 0 ? (
+        <div className="mt-2 space-y-1.5">
+          {calls.map((call) => (
+            <ToolDisclosure key={call.id} title={toolLabel(call.name)}>
+              <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--muted-dim)]">
+                {JSON.stringify(call.args, null, 2)}
+              </pre>
+            </ToolDisclosure>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
