@@ -3,6 +3,7 @@ import { loadRegistry } from '../src/host/registry';
 import {
   KanbanBoardSettingsConflictError,
   resolveKanbanBoardSettingsResponse,
+  transformStoredKanbanBoardSettings,
   upsertStoredKanbanBoardSettings,
 } from '../src/hub/hub-settings';
 import { withTempDroneDataDir } from './test-helpers';
@@ -104,6 +105,34 @@ describe('kanban board settings persistence', () => {
       );
 
       await expect(staleWrite).rejects.toBeInstanceOf(KanbanBoardSettingsConflictError);
+    });
+  });
+
+  test('atomic transforms keep the Bun compatibility projection synchronized', async () => {
+    await withTempDroneDataDir('drone-kanban-settings-', async () => {
+      const at = '2026-06-01T00:00:00.000Z';
+      await transformStoredKanbanBoardSettings((board) => ({
+        ...board,
+        lanes: board.lanes.map((lane, index) => index === 0
+          ? {
+              ...lane,
+              cards: [...lane.cards, {
+                id: 'daemon-task',
+                title: 'Created by daemon',
+                description: '',
+                typeId: board.taskTypes[0]?.id ?? 'task',
+                createdAt: at,
+                updatedAt: at,
+              }],
+            }
+          : lane),
+      }));
+
+      const canonical = await resolveKanbanBoardSettingsResponse();
+      expect(canonical.kanbanBoard.lanes.flatMap((lane) => lane.cards).some((card) => card.id === 'daemon-task')).toBe(true);
+      const compatibility = await loadRegistry();
+      const projectedCards = compatibility.settings?.kanbanBoard?.lanes?.flatMap((lane) => lane.cards) ?? [];
+      expect(projectedCards.some((card) => card.id === 'daemon-task')).toBe(true);
     });
   });
 });
