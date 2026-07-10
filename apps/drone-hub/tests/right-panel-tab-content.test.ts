@@ -60,15 +60,11 @@ describe('right panel tab content', () => {
     expect(source.match(/<PaneModule tab=\{tab\}/g)?.length).toBe(RIGHT_PANEL_TABS.length - 3);
   });
 
-  test('keeps pull request panel independent from changes dock module load', () => {
+  test('loads the changes dock only when inspecting a pull request', () => {
     const sourcePath = path.join(import.meta.dir, '../src/droneHub/pullRequests/DronePullRequestsDock.tsx');
     const source = fs.readFileSync(sourcePath, 'utf8');
-    const detailSourcePath = path.join(import.meta.dir, '../src/droneHub/pullRequests/PullRequestDetailView.tsx');
-    const detailSource = fs.readFileSync(detailSourcePath, 'utf8');
     expect(source).not.toContain("from '../changes'");
-    expect(source).not.toContain("import('../changes/DroneChangesDock')");
-    expect(detailSource).not.toContain("from '../changes'");
-    expect(detailSource).not.toContain('DroneChangesDock');
-    expect(detailSource).toContain('/repo/pull-requests/${normalizedPullNumber ?? 0}/changes');
+    expect(source).toContain("import('../changes/DroneChangesDock')");
+    expect(source).toContain('fixedContextMode="pull-request"');
   });
 });
