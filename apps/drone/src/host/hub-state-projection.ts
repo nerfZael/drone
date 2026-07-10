@@ -12,7 +12,9 @@ import { listMcpServersFromRegistry } from '../hub/mcp-servers';
 import { listSkillsFromRegistry } from '../hub/skills';
 import { readStoredSyncSets } from '../hub/sync-sets';
 import {
+  importArchivedChatsFromRegistry,
   importDroneChatsFromRegistry,
+  listArchivedChatsFromStore,
   listChatsFromStore,
   readChatFromStore,
 } from '../hub/transcript-store';
@@ -138,6 +140,17 @@ function chatsForDrone(droneId: string): Record<string, any> {
   return out;
 }
 
+function archivedChatsForDrone(droneId: string): Record<string, any> {
+  const listed = listArchivedChatsFromStore({ droneId });
+  if (!listed.available) return {};
+  return Object.fromEntries(listed.archivedChats.map((record) => [record.chatName, {
+    ...(record.chat && typeof record.chat === 'object' ? record.chat : {}),
+    archivedAt: record.archivedAt,
+    deleteAt: record.deleteAt,
+    archiveRetention: record.archiveRetention,
+  }]));
+}
+
 function legacyPlaybooks(registry: any): CatalogPlaybookRecord[] {
   return recordValues(registry?.playbooks).flatMap((raw: any) => {
     const id = String(raw?.id ?? '').trim();
@@ -172,11 +185,13 @@ export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Pro
   if (lifecycle) {
     for (const [droneId, entry] of Object.entries(base.drones ?? {}) as Array<[string, any]>) {
       await importDroneChatsFromRegistry({ droneId, chats: entry?.chats });
+      await importArchivedChatsFromRegistry({ droneId, archivedChats: entry?.archivedChats });
     }
     await lifecycle.backfillLegacyInsertOnly(base);
     base.drones = mapBy(lifecycle.list('real').map((record) => ({
       ...lifecycleProjection(record),
       chats: chatsForDrone(record.id),
+      archivedChats: archivedChatsForDrone(record.id),
     })), (record: any) => record.id);
     base.pending = mapBy(lifecycle.list('pending').map(lifecycleProjection), (record: any) => record.id);
     base.archived = mapBy(lifecycle.list('archived').map(lifecycleProjection), (record: any) => record.id);

@@ -8,13 +8,18 @@ const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/hos
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const {
   applyChatReconciliationInStore,
+  archiveChatInStore,
+  deleteArchivedChatFromStore,
   deleteChatFromStore,
+  importArchivedChatsFromRegistry,
   importDroneChatsFromRegistry,
+  listArchivedChatsFromStore,
   listChatsFromStore,
   patchChatMetadataInStore,
   readChatFromStore,
   readTranscriptTurnsFromStore,
   renameChatInStore,
+  restoreArchivedChatInStore,
   rollbackTranscriptToTurnInStore,
   upsertChatInStore,
   upsertTranscriptTurnInStore,
@@ -78,8 +83,91 @@ describe('canonical chat and transcript repository', () => {
       requireHubDatabase().read((connection) =>
         connection.prepare("SELECT COUNT(*) AS count FROM hub_schema_migrations WHERE scope = 'chats'").get().count,
       ),
-      1,
+      2,
     );
+  });
+
+  test('backfills archived chats once and tombstones prevent stale archive resurrection', async () => {
+    tempDataDir('archived-backfill');
+    const archived = {
+      review: {
+        ...legacyChat('first archive'),
+        archivedAt: '2026-02-01T00:00:00.000Z',
+        deleteAt: '2026-02-02T00:00:00.000Z',
+        archiveRetention: '1d',
+      },
+    };
+    await importArchivedChatsFromRegistry({ droneId: 'drone-1', archivedChats: archived });
+    await importArchivedChatsFromRegistry({
+      droneId: 'drone-1',
+      archivedChats: { review: { ...archived.review, title: 'stale replacement' } },
+    });
+    assert.equal(listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats.length, 1);
+    assert.equal(listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats[0].chat.title, 'first archive');
+
+    const deleted = await deleteArchivedChatFromStore({ droneId: 'drone-1', archivedChatName: 'review' });
+    assert.equal(deleted.deleted, true);
+    await importArchivedChatsFromRegistry({ droneId: 'drone-1', archivedChats: archived });
+    assert.deepEqual(listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats, []);
+  });
+
+  test('atomically archives, restores with collision allocation, and deletes canonical chats', async () => {
+    tempDataDir('archive-commands');
+    const review = legacyChat('review', [
+      { id: 'turn-1', at: '2026-01-01T00:01:00.000Z', prompt: 'inspect', ok: true, output: 'done' },
+    ]);
+    await upsertChatInStore({ droneId: 'drone-1', chatName: 'default', chatEntry: legacyChat('default') });
+    await upsertChatInStore({ droneId: 'drone-1', chatName: 'review', chatEntry: review });
+
+    const archived = await archiveChatInStore({
+      droneId: 'drone-1',
+      chatName: 'review',
+      archivedAt: '2026-02-01T00:00:00.000Z',
+      deleteAt: '2026-02-02T00:00:00.000Z',
+      archiveRetention: '1d',
+    });
+    assert.equal(archived.archived, true);
+    assert.equal(readChatFromStore({ droneId: 'drone-1', chatName: 'review' }).chat, null);
+    assert.deepEqual(archived.archivedChat.chat.turns.map((turn) => turn.id), ['turn-1']);
+
+    await importDroneChatsFromRegistry({ droneId: 'drone-1', chats: { review: legacyChat('stale active') } });
+    assert.equal(readChatFromStore({ droneId: 'drone-1', chatName: 'review' }).chat, null);
+    await upsertChatInStore({ droneId: 'drone-1', chatName: 'review', chatEntry: legacyChat('new active') });
+
+    const restored = await restoreArchivedChatInStore({
+      droneId: 'drone-1',
+      archivedChatName: 'review',
+      maxChatNameLength: 64,
+    });
+    assert.equal(restored.restored, true);
+    assert.equal(restored.chatName, 'review (2)');
+    assert.deepEqual(readChatFromStore({ droneId: 'drone-1', chatName: 'review (2)' }).chat.turns.map((turn) => turn.id), ['turn-1']);
+    assert.deepEqual(listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats, []);
+
+    await importArchivedChatsFromRegistry({
+      droneId: 'drone-1',
+      archivedChats: {
+        review: {
+          ...review,
+          archivedAt: '2026-02-01T00:00:00.000Z',
+          deleteAt: '2026-02-02T00:00:00.000Z',
+          archiveRetention: '1d',
+        },
+      },
+    });
+    assert.deepEqual(listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats, []);
+
+    await archiveChatInStore({
+      droneId: 'drone-1',
+      chatName: 'review (2)',
+      archivedAt: '2026-02-03T00:00:00.000Z',
+      deleteAt: '2026-02-04T00:00:00.000Z',
+      archiveRetention: '1d',
+    });
+    const deleted = await deleteArchivedChatFromStore({ droneId: 'drone-1', archivedChatName: 'review (2)' });
+    assert.equal(deleted.deleted, true);
+    assert.deepEqual(deleted.archivedChat.chat.turns.map((turn) => turn.id), ['turn-1']);
+    assert.deepEqual(listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats, []);
   });
 
   test('delete and rename tombstones prevent stale imports from resurrecting old names', async () => {

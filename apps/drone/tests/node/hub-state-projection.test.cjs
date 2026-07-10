@@ -51,6 +51,15 @@ function seedRegistry() {
         id: 'alpha', name: 'Legacy Alpha', containerName: 'legacy-alpha', runtime: 'container',
         token: 'token', containerPort: 7777, createdAt: '2026-01-01T00:00:00.000Z',
         chats: { default: { createdAt: '2026-01-01T00:00:00.000Z', turns: [] } },
+        archivedChats: {
+          review: {
+            createdAt: '2026-01-01T00:00:00.000Z',
+            turns: [{ id: 'archived-turn', at: '2026-01-01T00:01:00.000Z', prompt: 'review', ok: true, output: 'done' }],
+            archivedAt: '2026-01-02T00:00:00.000Z',
+            deleteAt: '2026-01-03T00:00:00.000Z',
+            archiveRetention: '1d',
+          },
+        },
       },
     },
   };
@@ -72,6 +81,7 @@ test('projection backfills once, then canonical columns and tombstones win', asy
   assert.equal(first.skills.skill.description, 'legacy skill');
   assert.equal(first.groups.stale.name, 'stale');
   assert.ok(first.drones.alpha.chats.default);
+  assert.equal(first.drones.alpha.archivedChats.review.turns[0].id, 'archived-turn');
 
   const lifecycle = await getDroneLifecycleRepository();
   await lifecycle.upsert('real', 'alpha', {
