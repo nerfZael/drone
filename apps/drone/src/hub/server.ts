@@ -112,8 +112,11 @@ import { suggestReplyToAgentMessage } from './agent-suggestion';
 import { resolveTranscriptPromptAt } from './transcript-order';
 import {
   applyChatReconciliationInStore,
+  archiveChatInStore,
   countTranscriptTurnsFromStore,
+  deleteArchivedChatFromStore,
   deleteChatFromStore,
+  importArchivedChatsFromRegistry,
   importChatFromRegistry,
   importDroneChatsFromRegistry,
   importTranscriptTurnsFromRegistry,
@@ -123,6 +126,7 @@ import {
   readTranscriptTurnsFromStore,
   renameChatInStore,
   resetTranscriptStoreForTests,
+  restoreArchivedChatInStore,
   rollbackTranscriptToTurnInStore,
   transcriptTurnsSourceHash,
   upsertChatInStore,
@@ -11571,21 +11575,6 @@ function allocateRestoredDroneName(regAny: any, preferredRaw: unknown): string {
   return allocateUntitledDisplayName(regAny);
 }
 
-function allocateRestoredChatName(droneEntry: any, preferredRaw: unknown): string {
-  const preferred = String(preferredRaw ?? '').trim();
-  const fallback = preferred || 'chat';
-  if (!chatNameExists(droneEntry, fallback)) return fallback;
-
-  const maxBaseLen = Math.max(8, CHAT_NAME_MAX_LEN - 8);
-  const base = fallback.length > maxBaseLen ? fallback.slice(0, maxBaseLen).trim() : fallback;
-  for (let i = 2; i <= 999; i += 1) {
-    const candidate = `${base} (${i})`;
-    if (candidate.length > CHAT_NAME_MAX_LEN) continue;
-    if (!chatNameExists(droneEntry, candidate)) return candidate;
-  }
-  return fallback.slice(0, CHAT_NAME_MAX_LEN).trim() || 'chat';
-}
-
 async function archiveChatById(opts: {
   droneId: string;
   chatName: string;
@@ -11620,71 +11609,83 @@ async function archiveChatById(opts: {
     };
   }
 
-  const result = await updateRegistry((regAny: any) => {
-    const droneEntry = regAny?.drones?.[droneId];
-    if (!droneEntry) {
-      return {
-        hadDrone: false,
-        hadChat: false,
-        archived: false,
-        droneId,
-        chatName,
-        archiveRetention: retention,
-        archivedAt: null,
-        deleteAt: null,
-        chats: [] as string[],
-      };
-    }
-    droneEntry.chats = droneEntry.chats ?? {};
-    const chatEntry = droneEntry.chats?.[chatName];
-    if (!chatEntry) {
-      return {
-        hadDrone: true,
-        hadChat: false,
-        archived: false,
-        droneId,
-        chatName,
-        archiveRetention: retention,
-        archivedAt: null,
-        deleteAt: null,
-        chats: Object.keys(droneEntry.chats ?? {}),
-      };
-    }
-
-    const archivedAt = nowIso();
-    const deleteAt = new Date(Date.now() + archiveRetentionMs(retention)).toISOString();
-    droneEntry.archivedChats = droneEntry.archivedChats ?? {};
-    droneEntry.archivedChats[chatName] = {
-      ...chatEntry,
-      archivedAt,
-      deleteAt,
-      archiveRetention: retention,
-    };
-    delete droneEntry.chats[chatName];
-    if (Object.keys(droneEntry.chats).length === 0) {
-      droneEntry.chats.default = buildNewChatEntry({
-        droneEntry,
-        createdAt: nowIso(),
-        autoContinueEnabledByDefault,
-        agentSuggestionEnabledByDefault,
-      });
-    }
-    regAny.drones = regAny.drones ?? {};
-    regAny.drones[droneId] = droneEntry;
+  const registry: any = await loadRegistry();
+  const droneEntry = registry?.drones?.[droneId] ?? null;
+  if (!droneEntry) {
     return {
-      hadDrone: true,
-      hadChat: true,
-      archived: true,
+      hadDrone: false,
+      hadChat: false,
+      archived: false,
       droneId,
       chatName,
       archiveRetention: retention,
-      archivedAt,
-      deleteAt,
-      chats: Object.keys(droneEntry.chats ?? {}),
+      archivedAt: null,
+      deleteAt: null,
+      chats: [] as string[],
     };
+  }
+  await importDroneChatsFromRegistry({ droneId, chats: droneEntry.chats });
+  await importArchivedChatsFromRegistry({ droneId, archivedChats: droneEntry.archivedChats });
+  if (!readChatFromStore({ droneId, chatName }).chat) {
+    return {
+      hadDrone: true,
+      hadChat: false,
+      archived: false,
+      droneId,
+      chatName,
+      archiveRetention: retention,
+      archivedAt: null,
+      deleteAt: null,
+      chats: listChatsFromStore({ droneId }).chats,
+    };
+  }
+
+  const archivedAt = nowIso();
+  const deleteAt = new Date(Date.now() + archiveRetentionMs(retention)).toISOString();
+  const fallbackChat = {
+    chatName: 'default',
+    chatEntry: buildNewChatEntry({
+      droneEntry,
+      createdAt: nowIso(),
+      autoContinueEnabledByDefault,
+      agentSuggestionEnabledByDefault,
+    }),
+  };
+  const stored = await archiveChatInStore({
+    droneId,
+    chatName,
+    archivedAt,
+    deleteAt,
+    archiveRetention: retention,
+    fallbackChat,
   });
-  if (result.archived) await deleteChatFromStore({ droneId, chatName });
-  return result;
+  if (stored.archived && (globalThis as any).Bun) {
+    await updateRegistry((regAny: any) => {
+      const entry = regAny?.drones?.[droneId];
+      if (!entry) return;
+      entry.chats = entry.chats ?? {};
+      delete entry.chats[chatName];
+      entry.archivedChats = entry.archivedChats ?? {};
+      entry.archivedChats[chatName] = {
+        ...(stored.archivedChat?.chat ?? {}),
+        archivedAt,
+        deleteAt,
+        archiveRetention: retention,
+      };
+      if (Object.keys(entry.chats).length === 0) entry.chats.default = fallbackChat.chatEntry;
+    });
+  }
+  return {
+    hadDrone: true,
+    hadChat: stored.archived,
+    archived: stored.archived,
+    droneId,
+    chatName,
+    archiveRetention: retention,
+    archivedAt: stored.archived ? archivedAt : null,
+    deleteAt: stored.archived ? deleteAt : null,
+    chats: stored.chats,
+  };
 }
 
 async function restoreArchivedChatById(opts: {
@@ -11713,61 +11714,45 @@ async function restoreArchivedChatById(opts: {
     };
   }
 
-  const result = await updateRegistry((regAny: any) => {
-    const droneEntry = regAny?.drones?.[droneId];
-    if (!droneEntry) {
-      return {
-        hadDrone: false,
-        hadChat: false,
-        restored: false,
-        droneId,
-        chatName: archivedChatName,
-        renamed: false,
-        chats: [] as string[],
-      };
-    }
-    droneEntry.archivedChats = droneEntry.archivedChats ?? {};
-    const archivedEntry = droneEntry.archivedChats?.[archivedChatName];
-    if (!archivedEntry) {
-      return {
-        hadDrone: true,
-        hadChat: false,
-        restored: false,
-        droneId,
-        chatName: archivedChatName,
-        renamed: false,
-        chats: Object.keys(droneEntry.chats ?? {}),
-      };
-    }
-
-    const restoredChatName = allocateRestoredChatName(droneEntry, archivedChatName);
-    const restoredEntry = { ...archivedEntry };
-    delete (restoredEntry as any).archivedAt;
-    delete (restoredEntry as any).deleteAt;
-    delete (restoredEntry as any).archiveRetention;
-
-    droneEntry.chats = droneEntry.chats ?? {};
-    droneEntry.chats[restoredChatName] = restoredEntry;
-    delete droneEntry.archivedChats[archivedChatName];
-    if (Object.keys(droneEntry.archivedChats).length === 0) delete droneEntry.archivedChats;
-    regAny.drones = regAny.drones ?? {};
-    regAny.drones[droneId] = droneEntry;
+  const registry: any = await loadRegistry();
+  const droneEntry = registry?.drones?.[droneId] ?? null;
+  if (!droneEntry) {
     return {
-      hadDrone: true,
-      hadChat: true,
-      restored: true,
+      hadDrone: false,
+      hadChat: false,
+      restored: false,
       droneId,
-      chatName: restoredChatName,
-      renamed: restoredChatName !== archivedChatName,
-      chats: Object.keys(droneEntry.chats ?? {}),
+      chatName: archivedChatName,
+      renamed: false,
+      chats: [] as string[],
     };
-  });
-  if (result.restored) {
-    const registry = await loadRegistry();
-    const restored = (registry as any)?.drones?.[droneId]?.chats?.[result.chatName];
-    if (restored) await upsertChatInStore({ droneId, chatName: result.chatName, chatEntry: restored });
   }
-  return result;
+  await importDroneChatsFromRegistry({ droneId, chats: droneEntry.chats });
+  await importArchivedChatsFromRegistry({ droneId, archivedChats: droneEntry.archivedChats });
+  const stored = await restoreArchivedChatInStore({
+    droneId,
+    archivedChatName,
+    maxChatNameLength: CHAT_NAME_MAX_LEN,
+  });
+  if (stored.restored && (globalThis as any).Bun) {
+    await updateRegistry((regAny: any) => {
+      const entry = regAny?.drones?.[droneId];
+      if (!entry) return;
+      entry.chats = entry.chats ?? {};
+      entry.chats[stored.chatName] = stored.chat ?? {};
+      if (entry.archivedChats?.[archivedChatName]) delete entry.archivedChats[archivedChatName];
+      if (entry.archivedChats && Object.keys(entry.archivedChats).length === 0) delete entry.archivedChats;
+    });
+  }
+  return {
+    hadDrone: true,
+    hadChat: stored.restored,
+    restored: stored.restored,
+    droneId,
+    chatName: stored.chatName,
+    renamed: stored.renamed,
+    chats: stored.chats,
+  };
 }
 
 async function deleteArchivedChatById(opts: {
@@ -11792,45 +11777,37 @@ async function deleteArchivedChatById(opts: {
     };
   }
 
-  let snapshotImageRefs: string[] = [];
-  const result = await updateRegistry((regAny: any) => {
-    const droneEntry = regAny?.drones?.[droneId];
-    if (!droneEntry) {
-      return {
-        hadDrone: false,
-        hadChat: false,
-        deleted: false,
-        droneId,
-        chatName: archivedChatName,
-      };
-    }
-    droneEntry.archivedChats = droneEntry.archivedChats ?? {};
-    if (!droneEntry.archivedChats?.[archivedChatName]) {
-      return {
-        hadDrone: true,
-        hadChat: false,
-        deleted: false,
-        droneId,
-        chatName: archivedChatName,
-      };
-    }
-    snapshotImageRefs = collectDockerSnapshotImageRefsFromChatEntry(droneEntry.archivedChats[archivedChatName]);
-    delete droneEntry.archivedChats[archivedChatName];
-    if (Object.keys(droneEntry.archivedChats).length === 0) delete droneEntry.archivedChats;
-    regAny.drones = regAny.drones ?? {};
-    regAny.drones[droneId] = droneEntry;
+  const registry: any = await loadRegistry();
+  const droneEntry = registry?.drones?.[droneId] ?? null;
+  if (!droneEntry) {
     return {
-      hadDrone: true,
-      hadChat: true,
-      deleted: true,
+      hadDrone: false,
+      hadChat: false,
+      deleted: false,
       droneId,
       chatName: archivedChatName,
     };
-  });
-  if (result.deleted) {
+  }
+  await importArchivedChatsFromRegistry({ droneId, archivedChats: droneEntry.archivedChats });
+  const stored = await deleteArchivedChatFromStore({ droneId, archivedChatName });
+  if (stored.deleted && (globalThis as any).Bun) {
+    await updateRegistry((regAny: any) => {
+      const entry = regAny?.drones?.[droneId];
+      if (entry?.archivedChats?.[archivedChatName]) delete entry.archivedChats[archivedChatName];
+      if (entry?.archivedChats && Object.keys(entry.archivedChats).length === 0) delete entry.archivedChats;
+    });
+  }
+  if (stored.deleted) {
+    const snapshotImageRefs = collectDockerSnapshotImageRefsFromChatEntry(stored.archivedChat?.chat);
     await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, chatName: archivedChatName, reason: 'delete-archived-chat' });
   }
-  return result;
+  return {
+    hadDrone: true,
+    hadChat: stored.deleted,
+    deleted: stored.deleted,
+    droneId,
+    chatName: archivedChatName,
+  };
 }
 
 async function cleanupExpiredArchivedChats(opts?: { reason?: string }): Promise<void> {
