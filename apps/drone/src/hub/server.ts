@@ -125,6 +125,8 @@ import {
   listChatsFromStore,
   patchChatMetadataInStore,
   readChatFromStore,
+  readChatRowsFromStore,
+  readChatVersionFromStore,
   readTranscriptTurnsFromStore,
   renameChatInStore,
   resetTranscriptStoreForTests,
@@ -426,6 +428,7 @@ import {
   resolveDroneContainerNameByIdentity,
   resolveDroneFromRegistryRef,
   resolveDroneNameByIdentity,
+  resolveCanonicalDroneOrPendingForReadRef,
   resolveDroneOrPendingForReadRef,
   setDroneHubMetaByIdentity,
   upsertCanonicalDroneLifecycle,
@@ -12660,6 +12663,8 @@ type ChatSnapshotRead =
       model: string | null;
       turnCount: number;
       transcriptEtag: string | null;
+      responseEtag?: string;
+      notModified?: boolean;
     }
   | {
       ok: false;
@@ -12885,7 +12890,11 @@ async function readChatSnapshot(opts: {
   includePending: boolean;
   maintenance?: ChatSnapshotMaintenance;
   includeDockerSnapshotMaintenance?: boolean;
+  ifNoneMatch?: string;
+  mark?: (name: string) => void;
 }): Promise<ChatSnapshotRead> {
+  if (!(globalThis as any).Bun) return await readCanonicalChatSnapshot(opts);
+
   const resolved = await resolveDroneOrPendingForReadRef(opts.droneRef);
   if (!resolved) {
     return { ok: false, statusCode: 404, error: `unknown drone: ${opts.droneRef}` };
@@ -12957,6 +12966,110 @@ async function readChatSnapshot(opts: {
     model: normalizeChatModel((entry as any)?.model),
     turnCount: transcriptResult?.turnCount ?? 0,
     transcriptEtag: transcriptResult?.etag ?? null,
+  };
+}
+
+async function readCanonicalChatSnapshot(opts: {
+  droneRef: string;
+  chatName: string;
+  selection: string;
+  tailRaw?: string | null;
+  includeTranscript: boolean;
+  includePending: boolean;
+  maintenance?: ChatSnapshotMaintenance;
+  includeDockerSnapshotMaintenance?: boolean;
+  ifNoneMatch?: string;
+  mark?: (name: string) => void;
+}): Promise<ChatSnapshotRead> {
+  const resolved = await resolveCanonicalDroneOrPendingForReadRef(opts.droneRef);
+  opts.mark?.('lifecycle');
+  if (!resolved) return { ok: false, statusCode: 404, error: `unknown drone: ${opts.droneRef}` };
+  const droneName = String((resolved.kind === 'real' ? resolved.drone : resolved.pending)?.name ?? opts.droneRef).trim() || opts.droneRef;
+  if (resolved.kind === 'pending') {
+    const pending = opts.includePending
+      ? normalizePendingStartupPrompts((resolved.pending as any)?.startupQueuedPrompts, opts.chatName).map(startupPromptToPendingPrompt)
+      : [];
+    return {
+      ok: true, id: resolved.id, name: droneName, chat: opts.chatName,
+      selection: opts.selection, transcripts: [], pending,
+      model: normalizeChatModel((resolved.pending as any)?.model), turnCount: 0, transcriptEtag: null,
+    };
+  }
+
+  const version = readChatVersionFromStore({
+    droneId: resolved.id,
+    chatName: opts.chatName,
+    includePending: opts.includePending,
+  });
+  opts.mark?.('version');
+  if (!version.chat) return { ok: false, statusCode: 404, error: `unknown chat: ${opts.chatName}` };
+  const agent = inferChatAgent(version.chat, resolved.drone);
+  if (opts.includeTranscript && agent.kind === 'custom') {
+    return {
+      ok: false, statusCode: 410,
+      error: 'transcript is only available for builtin agents (cursor/codex/claude/opencode/pi/blip). Use /output for custom agents.',
+      agent,
+    };
+  }
+  const indexes = opts.includeTranscript ? parseTurnSelection(opts.selection, version.turnCount, opts.tailRaw) : [];
+  const automationLane = opts.includePending ? getPromptAutomationLane(resolved.id, opts.chatName) : null;
+  const responseEtag = `"sha256-${stableResponseFingerprint({
+    droneId: resolved.id,
+    droneName,
+    chatName: opts.chatName,
+    selection: opts.selection,
+    tail: opts.tailRaw ?? '',
+    includeTranscript: opts.includeTranscript,
+    includePending: opts.includePending,
+    chatSourceHash: version.chatSourceHash,
+    transcriptVersion: version.transcriptVersion,
+    transcriptSourceHash: version.transcriptSourceHash,
+    pendingVersion: version.pendingVersion,
+    automationLane,
+  })}"`;
+  const requestedEtags = String(opts.ifNoneMatch ?? '').split(',').map((item) => item.trim());
+  if (requestedEtags.includes(responseEtag) || requestedEtags.includes('*')) {
+    opts.mark?.('conditional');
+    return {
+      ok: true, id: resolved.id, name: droneName, chat: opts.chatName,
+      selection: opts.selection, transcripts: [], pending: [], agent,
+      model: normalizeChatModel((version.chat as any)?.model), turnCount: version.turnCount,
+      transcriptEtag: responseEtag, responseEtag, notModified: true,
+    };
+  }
+
+  const rows = readChatRowsFromStore({
+    droneId: resolved.id,
+    chatName: opts.chatName,
+    indexes,
+    includePending: opts.includePending,
+  });
+  opts.mark?.('rows');
+  const transcripts = rows.turns.map((item) => formatTranscriptRow(item.index, item.turn));
+  const pending = opts.includePending
+    ? appendPromptAutomationHistoryRows(
+        pruneCompletedPendingPrompts(rows.pending as PendingPrompt[], rows.pendingTurns, { keepRecentlyCompleted: true }),
+        automationLane,
+      )
+    : [];
+  opts.mark?.('format');
+  const maintenanceEntry = { ...version.chat, pendingPrompts: pending };
+  if (opts.maintenance === 'run') {
+    runChatReadMaintenance({
+      droneId: resolved.id, chatName: opts.chatName, chatEntry: maintenanceEntry,
+      includeDockerSnapshotMaintenance: opts.includeDockerSnapshotMaintenance,
+    });
+  } else if (opts.maintenance === 'schedule') {
+    scheduleChatStateReadMaintenance({
+      droneId: resolved.id, chatName: opts.chatName, chatEntry: maintenanceEntry,
+      includeDockerSnapshotMaintenance: opts.includeDockerSnapshotMaintenance,
+    });
+  }
+  return {
+    ok: true, id: resolved.id, name: droneName, chat: opts.chatName,
+    selection: opts.selection, transcripts, pending, agent,
+    model: normalizeChatModel((version.chat as any)?.model), turnCount: version.turnCount,
+    transcriptEtag: responseEtag, responseEtag,
   };
 }
 
@@ -27849,12 +27962,22 @@ export async function startDroneHubApiServer(opts: {
             includePending,
             maintenance: 'schedule',
             includeDockerSnapshotMaintenance: true,
+            ifNoneMatch: String(req.headers['if-none-match'] ?? ''),
+            mark: (name) => timer.mark(name),
           });
-          timer.mark('read');
+          if ((globalThis as any).Bun) timer.mark('read');
           if (!snapshot.ok) {
             timer.setHeader(res);
             logSlowHubRequest('chat state', timer, { droneRef, chatName, status: snapshot.statusCode, error: snapshot.error });
             json(res, snapshot.statusCode, { ok: false, error: snapshot.error, ...(snapshot.agent ? { agent: snapshot.agent } : {}) });
+            return;
+          }
+          if (snapshot.notModified && snapshot.responseEtag) {
+            res.setHeader('etag', snapshot.responseEtag);
+            res.setHeader('cache-control', 'no-store');
+            timer.setHeader(res);
+            res.statusCode = 304;
+            res.end();
             return;
           }
           timer.setHeader(res);
@@ -27866,7 +27989,11 @@ export async function startDroneHubApiServer(opts: {
             pendingCount: snapshot.pending.length,
             status: 200,
           });
-          jsonWithEtag(req, res, 200, chatSnapshotResponseBody(snapshot, { includeTranscriptMeta: true }));
+          if (snapshot.responseEtag) {
+            jsonWithKnownEtag(req, res, 200, chatSnapshotResponseBody(snapshot, { includeTranscriptMeta: true }), snapshot.responseEtag);
+          } else {
+            jsonWithEtag(req, res, 200, chatSnapshotResponseBody(snapshot, { includeTranscriptMeta: true }));
+          }
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
@@ -27899,8 +28026,9 @@ export async function startDroneHubApiServer(opts: {
             includeTranscript: false,
             includePending: true,
             maintenance: 'run',
+            mark: (name) => timer.mark(name),
           });
-          timer.mark('read');
+          if ((globalThis as any).Bun) timer.mark('read');
           if (!snapshot.ok) {
             timer.setHeader(res);
             logSlowHubRequest('chat pending', timer, { droneRef, chatName, status: snapshot.statusCode, error: snapshot.error });
@@ -29200,8 +29328,10 @@ export async function startDroneHubApiServer(opts: {
             includePending: false,
             maintenance: 'run',
             includeDockerSnapshotMaintenance: true,
+            ifNoneMatch: String(req.headers['if-none-match'] ?? ''),
+            mark: (name) => timer.mark(name),
           });
-          timer.mark('read');
+          if ((globalThis as any).Bun) timer.mark('read');
           if (!snapshot.ok) {
             timer.setHeader(res);
             logSlowHubRequest('chat transcript', timer, { droneRef, chatName, status: snapshot.statusCode, error: snapshot.error });
@@ -29210,6 +29340,14 @@ export async function startDroneHubApiServer(opts: {
               error: snapshot.error,
               ...(snapshot.agent ? { agent: snapshot.agent } : {}),
             });
+            return;
+          }
+          if (snapshot.notModified && snapshot.responseEtag) {
+            res.setHeader('etag', snapshot.responseEtag);
+            res.setHeader('cache-control', 'no-store');
+            timer.setHeader(res);
+            res.statusCode = 304;
+            res.end();
             return;
           }
           timer.setHeader(res);
