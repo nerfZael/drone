@@ -1028,13 +1028,23 @@ async function resolveDroneContainerContext(opts: {
   let droneEntry = seedEntry;
 
   if (seedId) {
-    const regLatest: any = await loadRegistry();
-    const found = findDroneEntryByIdentity(regLatest, seedId);
-    if (found) {
-      registryDroneName = String(found.key ?? requestedDroneName).trim() || requestedDroneName;
-      droneEntry = found.entry ?? droneEntry;
-      const resolvedContainerName = String((found.entry as any)?.containerName ?? (found.entry as any)?.name ?? found.key ?? '').trim();
+    const canonical = !(globalThis as any).Bun
+      ? await resolveCanonicalDroneOrPendingForReadRef(seedId)
+      : null;
+    if (canonical?.kind === 'real') {
+      registryDroneName = canonical.id;
+      droneEntry = canonical.drone;
+      const resolvedContainerName = String(canonical.drone?.containerName ?? canonical.drone?.name ?? canonical.id).trim();
       if (resolvedContainerName) containerName = resolvedContainerName;
+    } else if ((globalThis as any).Bun) {
+      const regLatest: any = await loadRegistry();
+      const found = findDroneEntryByIdentity(regLatest, seedId);
+      if (found) {
+        registryDroneName = String(found.key ?? requestedDroneName).trim() || requestedDroneName;
+        droneEntry = found.entry ?? droneEntry;
+        const resolvedContainerName = String((found.entry as any)?.containerName ?? (found.entry as any)?.name ?? found.key ?? '').trim();
+        if (resolvedContainerName) containerName = resolvedContainerName;
+      }
     }
   }
 
@@ -1119,6 +1129,16 @@ function normalizeFleetAssignedRefsForSummary(regAny: any, actorIdRaw: unknown, 
 
 async function resolveDroneOrRespond(res: http.ServerResponse, droneRef: string): Promise<ResolvedDrone | null> {
   const ref = String(droneRef ?? '').trim();
+  if (!(globalThis as any).Bun) {
+    const canonical = await resolveCanonicalDroneOrPendingForReadRef(ref);
+    if (canonical?.kind === 'pending') {
+      json(res, 409, { ok: false, error: `drone "${ref}" is still starting` });
+      return null;
+    }
+    if (canonical?.kind === 'real') return { id: canonical.id, drone: canonical.drone };
+    json(res, 404, { ok: false, error: `unknown drone: ${ref}` });
+    return null;
+  }
   return resolveDroneFromRegistryRef(ref, {
     onStillStarting: () => {
       json(res, 409, { ok: false, error: `drone "${ref}" is still starting` });
@@ -9526,10 +9546,25 @@ function samePendingBlipClones(leftRaw: any, rightRaw: any): boolean {
 }
 
 async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string }): Promise<void> {
-  const regAny: any = await loadRegistry();
   const droneId = normalizeDroneIdentity(opts.droneId);
   const chatName = normalizeChatName(opts.chatName);
-  const d = droneId ? regAny?.drones?.[droneId] : null;
+  let d: any = null;
+  let entry: any = null;
+  if (!(globalThis as any).Bun) {
+    const resolved = droneId ? await resolveCanonicalDroneOrPendingForReadRef(droneId) : null;
+    if (resolved?.kind === 'real') d = resolved.drone;
+    const stored = droneId ? readChatFromStore({ droneId, chatName }) : null;
+    entry = stored?.available ? stored.chat : null;
+  } else {
+    const regAny: any = await loadRegistry();
+    d = droneId ? regAny?.drones?.[droneId] : null;
+    const registryEntry = d?.chats?.[chatName];
+    if (registryEntry) {
+      await importChatFromRegistry({ droneId, chatName, chatEntry: registryEntry });
+      const projectedEntry = readChatFromStore({ droneId, chatName });
+      entry = projectedEntry.available && projectedEntry.chat ? projectedEntry.chat : registryEntry;
+    }
+  }
   if (!d) return;
   const token = typeof d.token === 'string' ? d.token : '';
   const containerName = String(d?.containerName ?? d?.name ?? droneId).trim() || droneId;
@@ -9540,11 +9575,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       : await resolveHostPort(containerName, d.containerPort);
   if (!hostPort || !token) return;
 
-  const registryEntry = d?.chats?.[chatName];
-  if (!registryEntry) return;
-  await importChatFromRegistry({ droneId, chatName, chatEntry: registryEntry });
-  const projectedEntry = readChatFromStore({ droneId, chatName });
-  const entry = projectedEntry.available && projectedEntry.chat ? projectedEntry.chat : registryEntry;
+  if (!entry) return;
   const agent = inferChatAgent(entry, d);
   if (!agent || agent.kind !== 'builtin') return;
 
@@ -12528,6 +12559,14 @@ function assertReadOnlySupportedForAgent(agent: ChatAgentConfig): void {
 }
 
 async function getChatEntry(opts: { droneId: string; chatName: string }) {
+  if (!(globalThis as any).Bun) {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const resolved = droneId ? await resolveCanonicalDroneOrPendingForReadRef(droneId) : null;
+    if (resolved?.kind !== 'real') throw new Error(`unknown drone: ${opts.droneId}`);
+    const stored = readChatFromStore({ droneId, chatName: opts.chatName });
+    if (!stored.available || !stored.chat) throw new Error(`unknown chat: ${opts.chatName}`);
+    return { reg: null, d: resolved.drone, chat: stored.chat, droneId };
+  }
   const reg = await loadRegistry();
   const droneId = normalizeDroneIdentity(opts.droneId);
   const d = droneId ? (reg as any).drones?.[droneId] : null;
@@ -15392,6 +15431,7 @@ export async function startDroneHubApiServer(opts: {
   const DRONE_STATUS_REFRESH_CONCURRENCY = 4;
   const DRONE_STATUS_REFRESH_INTERVAL_MS = 15_000;
   const DRONE_SUMMARY_REGISTRY_CACHE_TTL_MS = 1_000;
+  const CANONICAL_ACTIVE_MODEL_CACHE_TTL_MS = 250;
   const DRONE_SUMMARY_MAINTENANCE_MIN_INTERVAL_MS = 5_000;
   const droneStatusSummaryCache = new Map<string, CachedDroneStatusSummary>();
   let droneSummaryRegistryCache: { loadedAtMs: number; registry: any } | null = null;
@@ -15403,6 +15443,16 @@ export async function startDroneHubApiServer(opts: {
   let droneStatusRefreshTimer: ReturnType<typeof setInterval> | null = null;
   let droneStatusRefreshTimeout: ReturnType<typeof setTimeout> | null = null;
   let droneStatusRefreshBusy = false;
+  let canonicalActiveModelCache: { loadedAtMs: number; model: any } | null = null;
+
+  async function loadCanonicalActiveModel(): Promise<any> {
+    if (canonicalActiveModelCache && Date.now() - canonicalActiveModelCache.loadedAtMs < CANONICAL_ACTIVE_MODEL_CACHE_TTL_MS) {
+      return canonicalActiveModelCache.model;
+    }
+    const model = readCanonicalActiveDroneModel() ?? await loadRegistry();
+    canonicalActiveModelCache = { loadedAtMs: Date.now(), model };
+    return model;
+  }
 
   async function mapDroneRegistrySummaryConcurrent<T, R>(
     items: T[],
@@ -15522,7 +15572,7 @@ export async function startDroneHubApiServer(opts: {
     if (droneStatusRefreshBusy) return;
     droneStatusRefreshBusy = true;
     try {
-      const regAny: any = await loadRegistry();
+      const regAny: any = await loadCanonicalActiveModel();
       const realDrones = Object.values(regAny?.drones ?? {}) as any[];
       const changed = await mapDroneRegistrySummaryConcurrent(
         realDrones,
@@ -15551,7 +15601,7 @@ export async function startDroneHubApiServer(opts: {
     }
     if (!droneSummaryRegistryCacheLoad) {
       const loadEpoch = droneSummaryRegistryCacheEpoch;
-      const loadPromise = Promise.resolve(readCanonicalActiveDroneModel() ?? loadRegistry())
+      const loadPromise = loadCanonicalActiveModel()
         .then((registry) => {
           if (loadEpoch === droneSummaryRegistryCacheEpoch) {
             droneSummaryRegistryCache = { loadedAtMs: Date.now(), registry };
@@ -15803,7 +15853,7 @@ export async function startDroneHubApiServer(opts: {
     droneSummaryMaintenanceBusy = true;
     droneSummaryMaintenanceLastStartedAt = Date.now();
     try {
-      const regAny: any = await loadRegistry();
+      const regAny: any = await loadCanonicalActiveModel();
       enqueueDroneRegistryReconcilers(regAny);
       await reconcileSeedingPromptCompletion(regAny);
       await autoClearStaleRepoConflictHubErrors(regAny);
@@ -16089,7 +16139,7 @@ export async function startDroneHubApiServer(opts: {
   }
 
   async function buildDroneChatEventSnapshot(): Promise<Map<string, string>> {
-    const regAny: any = readCanonicalActiveDroneModel() ?? await loadRegistry();
+    const regAny: any = await loadCanonicalActiveModel();
     const next = new Map<string, string>();
     for (const [droneIdRaw, drone] of Object.entries(regAny?.drones ?? {}) as Array<[string, any]>) {
       const droneId = normalizeDroneIdentity(droneIdRaw || drone?.id);
@@ -16422,6 +16472,7 @@ export async function startDroneHubApiServer(opts: {
   }
 
   notifyDroneRegistryWrite = () => {
+    canonicalActiveModelCache = null;
     invalidateDroneSummaryRegistryCache();
     scheduleDroneSummaryMaintenance('registry-write', 0);
     scheduleDroneStatusRefresh('registry-write', 0);
@@ -16649,7 +16700,7 @@ export async function startDroneHubApiServer(opts: {
           return;
         }
         try {
-          const regAny: any = readCanonicalActiveDroneModel() ?? await loadRegistry();
+          const regAny: any = await loadCanonicalActiveModel();
           const statuses = targets.map((target) => summarizeAssistantChatIdle(regAny, target, { requireChat: true }));
           const matched = mode === 'any' ? statuses.some((status) => status.idle) : statuses.every((status) => status.idle);
           json(res, 200, { ok: true, mode, matched, targets: statuses });
@@ -20973,7 +21024,7 @@ export async function startDroneHubApiServer(opts: {
       if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'drones' && parts[2] === 'summary') {
         const timer = createRequestTimer();
         try {
-          const regAny: any = readCanonicalActiveDroneModel() ?? await loadRegistry();
+          const regAny: any = await loadCanonicalActiveModel();
           timer.mark('load');
           const drones = buildAssistantDroneSummariesFromRegistry(regAny);
           timer.mark('format');
