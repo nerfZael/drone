@@ -32,4 +32,10 @@ describe('RemoteHubSidebar', () => {
     expect(remoteHubModelSource).toContain('droneEvents.connected ? 60_000 : 2_000');
     expect(remoteHubModelSource).toContain('polledDronesResponse?.drones ?? droneEvents.value?.drones');
   });
+
+  test('loads sanitized group creation times for shared newest-first ordering', () => {
+    expect(remoteHubSidebarSource).toContain("remoteRequestJson('/api/groups')");
+    expect(remoteHubSidebarSource).toContain('remoteGroupCreatedAtByName(registryGroups)');
+    expect(remoteHubSidebarSource).toContain('sidebarGroupCreatedAtByName=');
+  });
 });

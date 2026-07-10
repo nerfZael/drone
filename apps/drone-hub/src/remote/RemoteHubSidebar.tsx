@@ -3,10 +3,12 @@ import { useShallow } from 'zustand/react/shallow';
 import { createCanvasChatNodeId } from '../droneHub/app/app-config';
 import { DroneSidebar, type DroneSidebarReadOnlyMode } from '../droneHub/app/DroneSidebar';
 import { IconPlus } from '../droneHub/app/icons';
+import { usePoll } from '../droneHub/app/hooks';
 import { useDroneHubUiStore } from '../droneHub/app/use-drone-hub-ui-store';
 import { useSidebarViewModel } from '../droneHub/app/use-sidebar-view-model';
-import type { DroneSummary, RepoSummary } from '../droneHub/types';
+import type { DroneSummary, GroupSummary, RepoSummary } from '../droneHub/types';
 import { REMOTE_HUB_CAPABILITIES } from './remote-capabilities';
+import { remoteRequestJson } from './remote-api';
 
 type RemoteHubSidebarProps = {
   drones: DroneSummary[];
@@ -20,6 +22,7 @@ type RemoteHubSidebarProps = {
 
 const EMPTY_RECORD: Record<string, never> = {};
 const EMPTY_DRONE_SET = new Set<string>();
+const EMPTY_GROUPS: GroupSummary[] = [];
 const NOOP = () => {};
 const REMOTE_DRONE_SIDEBAR_CAPABILITIES = {
   actions: REMOTE_HUB_CAPABILITIES.sidebarActions,
@@ -49,10 +52,35 @@ function remoteDroneCountByRepoPath(drones: DroneSummary[]): Map<string, number>
   return out;
 }
 
-function remoteRegistryGroupNames(drones: DroneSummary[]): string[] {
+function remoteRegistryGroupNames(drones: DroneSummary[], groups: GroupSummary[]): string[] {
   return Array.from(
-    new Set(drones.map((drone) => String(drone.group ?? '').trim()).filter(Boolean)),
+    new Set([
+      ...groups.map((group) => String(group.name ?? '').trim()).filter(Boolean),
+      ...drones.map((drone) => String(drone.group ?? '').trim()).filter(Boolean),
+    ]),
   ).sort((a, b) => a.localeCompare(b));
+}
+
+function remoteGroupCreatedAtByName(groups: GroupSummary[]): Record<string, string | null> {
+  const out: Record<string, string | null> = {};
+  for (const group of groups) {
+    const name = String(group?.name ?? '').trim();
+    if (!name) continue;
+    const createdAt = String(group?.createdAt ?? '').trim();
+    out[name] = createdAt || null;
+  }
+  return out;
+}
+
+function sameRemoteGroups(
+  previous: { ok: true; groups: GroupSummary[] },
+  next: { ok: true; groups: GroupSummary[] },
+): boolean {
+  if (previous.groups.length !== next.groups.length) return false;
+  return previous.groups.every(
+    (group, index) =>
+      group.name === next.groups[index]?.name && group.createdAt === next.groups[index]?.createdAt,
+  );
 }
 
 const REMOTE_SIDEBAR_MODE: DroneSidebarReadOnlyMode = 'static-tree';
@@ -109,8 +137,22 @@ function RemoteHubSidebarComponent({
   }, [drones]);
 
   const repos = React.useMemo(() => remoteSidebarRepos(drones), [drones]);
+  const { value: groupsResponse } = usePoll<{ ok: true; groups: GroupSummary[] }>(
+    () => remoteRequestJson('/api/groups'),
+    5_000,
+    [],
+    { isEqual: sameRemoteGroups },
+  );
+  const registryGroups = groupsResponse?.groups ?? EMPTY_GROUPS;
   const droneCountByRepoPath = React.useMemo(() => remoteDroneCountByRepoPath(drones), [drones]);
-  const registryGroupNames = React.useMemo(() => remoteRegistryGroupNames(drones), [drones]);
+  const registryGroupNames = React.useMemo(
+    () => remoteRegistryGroupNames(drones, registryGroups),
+    [drones, registryGroups],
+  );
+  const registryGroupCreatedAtByName = React.useMemo(
+    () => remoteGroupCreatedAtByName(registryGroups),
+    [registryGroups],
+  );
   const registeredRepoPaths = React.useMemo(() => repos.map((repo) => repo.path), [repos]);
   const busyChatNodeIdSet = React.useMemo(() => {
     const next = new Set<string>();
@@ -149,6 +191,7 @@ function RemoteHubSidebarComponent({
     activeRepoPath: sidebarState.activeRepoPath,
     showRecentDronesOnly: sidebarState.showRecentDronesOnly,
     registryGroupNames,
+    registryGroupCreatedAtByName,
     registeredRepoPaths,
   });
 
@@ -255,6 +298,7 @@ function RemoteHubSidebarComponent({
       settingBaseImages={EMPTY_RECORD}
       movingDroneGroups={false}
       sidebarGroups={viewModel.sidebarGroups}
+      sidebarGroupCreatedAtByName={registryGroupCreatedAtByName}
       sidebarHiddenGroupCount={viewModel.sidebarHiddenGroupCount}
       collapsedGroups={sidebarState.collapsedGroups}
       deletingGroups={EMPTY_RECORD}

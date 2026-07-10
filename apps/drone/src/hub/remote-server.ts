@@ -225,6 +225,18 @@ export function sanitizeRemoteDroneSummaries(raw: unknown): any[] {
   return raw.map(sanitizeDroneSummary);
 }
 
+export function sanitizeRemoteGroupSummaries(raw: unknown): Array<{ name: string; createdAt: string | null }> {
+  if (!Array.isArray(raw)) return [];
+  const groups: Array<{ name: string; createdAt: string | null }> = [];
+  for (const item of raw) {
+    const name = String((item as any)?.name ?? '').trim();
+    if (!name) continue;
+    const createdAt = String((item as any)?.createdAt ?? '').trim();
+    groups.push({ name, createdAt: createdAt || null });
+  }
+  return groups;
+}
+
 export function sanitizeRemoteDroneRegistryEvent(eventNameRaw: unknown, dataRaw: unknown): unknown | null {
   const eventName = String(eventNameRaw ?? '').trim();
   const data = (() => {
@@ -402,6 +414,7 @@ export function routeAllowed(method: string, pathname: string): boolean {
   if (method === 'POST' && pathname === '/api/drones/name-from-message') return true;
   if (method === 'GET' && pathname === '/api/drones/events') return true;
   if (method === 'GET' && pathname === '/api/drones/chat-events') return true;
+  if (method === 'GET' && pathname === '/api/groups') return true;
   if (method === 'GET' && pathname === '/api/repos') return true;
   if (method === 'GET' && pathname === '/api/repos/branches') return true;
   if (parts.length < 3 || parts[0] !== 'api' || parts[1] !== 'drones') return false;
@@ -462,6 +475,15 @@ async function proxyAllowedRequest(
     appendServerTiming(res, timer);
     logRemoteProxyRequest({ method, pathname, status: 200, upstreamStatus: 200, timer, requestId });
     json(res, 200, { ok: true, drones: sanitizeRemoteDroneSummaries(data.drones) });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/groups') {
+    const data = await fetchJsonFromHub<{ ok: true; groups: unknown[] }>(opts, '/api/groups');
+    timer.mark('upstream');
+    appendServerTiming(res, timer);
+    logRemoteProxyRequest({ method, pathname, status: 200, upstreamStatus: 200, timer, requestId });
+    json(res, 200, { ok: true, groups: sanitizeRemoteGroupSummaries(data.groups) });
     return;
   }
 

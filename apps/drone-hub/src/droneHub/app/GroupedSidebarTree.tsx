@@ -64,6 +64,7 @@ type ChatEditorState = {
 
 type GroupedSidebarTreeProps = {
   sidebarGroups: SidebarGroup[];
+  sidebarGroupCreatedAtByName: Record<string, string | null>;
   sidebarDensityMode: SidebarDensityMode;
   sidebarFolderTree: import('./sidebar-folder-tree').SidebarFolderNode[];
   sidebarGroupOrder: string[];
@@ -1389,6 +1390,7 @@ function GroupedSidebarNodeEntry({ nodeId, groupPath }: { nodeId: string; groupP
 export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
   const {
     sidebarGroups,
+    sidebarGroupCreatedAtByName,
     sidebarFolderTree,
     sidebarGroupOrder,
     repoScopedGroupPathsByRepoGroup,
@@ -1420,8 +1422,9 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
         repoScopedGroupPathsByRepoGroup,
         sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent,
+        sidebarGroupCreatedAtByName,
       }),
-    [repoScopedGroupPathsByRepoGroup, sidebarDroneOrderByGroup, sidebarFolderTree, sidebarGroupOrder, sidebarGroups, sidebarNodeOrderByParent],
+    [repoScopedGroupPathsByRepoGroup, sidebarDroneOrderByGroup, sidebarFolderTree, sidebarGroupCreatedAtByName, sidebarGroupOrder, sidebarGroups, sidebarNodeOrderByParent],
   );
   const visibleDroneOrder = React.useMemo(
     () => flattenVisibleDroneOrderFromNodeTree(nodeTree, props.collapsedGroups),

@@ -1397,6 +1397,7 @@ export type DroneSidebarProps = {
   settingBaseImages: Record<string, boolean>;
   movingDroneGroups: boolean;
   sidebarGroups: SidebarGroup[];
+  sidebarGroupCreatedAtByName: Record<string, string | null>;
   sidebarHiddenGroupCount: number;
   collapsedGroups: Record<string, boolean>;
   deletingGroups: Record<string, boolean>;
@@ -1487,6 +1488,7 @@ export function DroneSidebar({
   settingBaseImages,
   movingDroneGroups,
   sidebarGroups,
+  sidebarGroupCreatedAtByName,
   sidebarHiddenGroupCount,
   collapsedGroups,
   deletingGroups,
@@ -1617,7 +1619,11 @@ export function DroneSidebar({
     [sidebarRepoScopedGroupByPath],
   );
   const visibleFolderNodeOrderByParent = React.useMemo(() => {
-    const baseSidebarFolderTree = buildSidebarFolderTree(sidebarGroups, sidebarGroupOrder);
+    const baseSidebarFolderTree = buildSidebarFolderTree(
+      sidebarGroups,
+      sidebarGroupOrder,
+      sidebarGroupCreatedAtByName,
+    );
     const nodeTree = buildSidebarNodeTree({
       sidebarFolderTree: baseSidebarFolderTree,
       sidebarGroups,
@@ -1625,6 +1631,7 @@ export function DroneSidebar({
       repoScopedGroupPathsByRepoGroup,
       sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent,
+      sidebarGroupCreatedAtByName,
     });
     return Object.fromEntries(
       Object.entries(nodeTree.childIdsByParent).map(([parentId, childIds]) => [
@@ -1637,6 +1644,7 @@ export function DroneSidebar({
     sidebarDroneOrderByGroup,
     sidebarGroupOrder,
     sidebarGroups,
+    sidebarGroupCreatedAtByName,
     sidebarNodeOrderByParent,
   ]);
   const handleRenameGroup = React.useCallback(
@@ -1749,6 +1757,7 @@ export function DroneSidebar({
     showHiddenSidebarGroups,
     sidebarGroupOrder,
     sidebarGroupingMode: effectiveSidebarGroupingMode,
+    sidebarGroupCreatedAtByName,
   });
   const staticReadOnlyNodeTree = React.useMemo(
     () =>
@@ -1759,6 +1768,7 @@ export function DroneSidebar({
         repoScopedGroupPathsByRepoGroup,
         sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent,
+        sidebarGroupCreatedAtByName,
       }),
     [
       renderSidebarGroups,
@@ -1767,6 +1777,7 @@ export function DroneSidebar({
       sidebarFolderTree,
       sidebarGroupOrder,
       sidebarNodeOrderByParent,
+      sidebarGroupCreatedAtByName,
     ],
   );
   const {
@@ -2803,6 +2814,7 @@ export function DroneSidebar({
                     ) : null}
                     <GroupedSidebarTree
                       sidebarGroups={renderSidebarGroups}
+                      sidebarGroupCreatedAtByName={sidebarGroupCreatedAtByName}
                       sidebarDensityMode={sidebarDensityMode}
                       sidebarFolderTree={sidebarFolderTree}
                       sidebarGroupOrder={sidebarGroupOrder}

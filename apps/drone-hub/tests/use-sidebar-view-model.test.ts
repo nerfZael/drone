@@ -25,6 +25,21 @@ function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>):
 }
 
 describe('buildRepoSidebarGroups', () => {
+  test('sorts drones newest first before applying manual order', () => {
+    const groups = buildRepoSidebarGroups({
+      drones: [
+        drone({ id: 'older', name: 'older', repoPath: '/work/repo-a', createdAt: '2026-07-09T12:00:00.000Z' }),
+        drone({ id: 'newer', name: 'newer', repoPath: '/work/repo-a', createdAt: '2026-07-10T12:00:00.000Z' }),
+      ],
+      activeRepoPath: '',
+      registeredRepoPaths: ['/work/repo-a'],
+      sidebarDroneOrderByGroup: {},
+      sidebarGroupOrder: [],
+    });
+
+    expect(groups[0]?.items.map((item) => item.id)).toEqual(['newer', 'older']);
+  });
+
   test('includes registered repos even when they have no drones', () => {
     expect(
       buildRepoSidebarGroups({

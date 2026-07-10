@@ -1,6 +1,6 @@
 import React from 'react';
 import { isUngroupedGroupName } from '../../domain';
-import type { DroneSummary, RepoSummary } from '../types';
+import type { DroneSummary, GroupSummary, RepoSummary } from '../types';
 import { compareDronesByNewestFirst } from './helpers';
 import { isHiddenDrone } from './helpers';
 import { fetchJson, usePoll } from './hooks';
@@ -330,14 +330,15 @@ function sameRepoResponse(
 }
 
 function sameGroupsResponse(
-  left: { ok: true; groups: Array<{ name: string }> },
-  right: { ok: true; groups: Array<{ name: string }> },
+  left: { ok: true; groups: GroupSummary[] },
+  right: { ok: true; groups: GroupSummary[] },
 ): boolean {
   const leftGroups = Array.isArray(left?.groups) ? left.groups : [];
   const rightGroups = Array.isArray(right?.groups) ? right.groups : [];
   if (leftGroups.length !== rightGroups.length) return false;
   for (let i = 0; i < leftGroups.length; i++) {
     if (String(leftGroups[i]?.name ?? '') !== String(rightGroups[i]?.name ?? '')) return false;
+    if (!sameOptionalText(leftGroups[i]?.createdAt, rightGroups[i]?.createdAt)) return false;
   }
   return true;
 }
@@ -412,7 +413,7 @@ export function useDroneHubRegistryData({
   );
   const registeredRepoPathSet = React.useMemo(() => new Set(registeredRepoPaths), [registeredRepoPaths]);
 
-  const { value: groupsResp } = usePoll<{ ok: true; groups: Array<{ name: string }> }>(
+  const { value: groupsResp } = usePoll<{ ok: true; groups: GroupSummary[] }>(
     () => fetchJson('/api/groups'),
     5000,
     [],
@@ -427,6 +428,16 @@ export function useDroneHubRegistryData({
       out.add(name);
     }
     return Array.from(out.values()).sort((a, b) => a.localeCompare(b));
+  }, [groupsResp]);
+  const registryGroupCreatedAtByName = React.useMemo(() => {
+    const out: Record<string, string | null> = {};
+    for (const group of groupsResp?.groups ?? []) {
+      const name = String(group?.name ?? '').trim();
+      if (!name || isUngroupedGroupName(name)) continue;
+      const createdAt = String(group?.createdAt ?? '').trim();
+      out[name] = createdAt || null;
+    }
+    return out;
   }, [groupsResp]);
 
   React.useEffect(() => {
@@ -513,6 +524,7 @@ export function useDroneHubRegistryData({
     registeredRepoPaths,
     registeredRepoPathSet,
     registryGroupNames,
+    registryGroupCreatedAtByName,
     dronesFilteredByRepo,
     dronesFilteredByRepoIdSet,
     sidebarDronesFilteredByRepoBase,

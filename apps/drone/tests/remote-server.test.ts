@@ -14,6 +14,7 @@ import {
   sanitizeRemoteDroneRegistryEvent,
   sanitizeDroneSummary,
   sanitizeRemoteDroneSummaries,
+  sanitizeRemoteGroupSummaries,
   shouldServeRemoteHtmlFallback,
 } from '../src/hub/remote-server';
 import { withTempDroneDataDir } from './test-helpers';
@@ -59,6 +60,21 @@ describe('remote Hub server', () => {
 
     expect(summary.fleetParentId).toBe('parent-a');
     expect(summary.fleetAssignedIds).toEqual([]);
+  });
+
+  test('exposes only group names and creation times for remote sorting', () => {
+    expect(
+      sanitizeRemoteGroupSummaries([
+        {
+          name: 'new-group',
+          createdAt: '2026-07-10T12:00:00.000Z',
+          updatedAt: '2026-07-10T13:00:00.000Z',
+          privateField: 'not forwarded',
+        },
+        { name: '', createdAt: '2026-07-10T14:00:00.000Z' },
+      ]),
+    ).toEqual([{ name: 'new-group', createdAt: '2026-07-10T12:00:00.000Z' }]);
+    expect(routeAllowed('GET', '/api/groups')).toBe(true);
   });
 
   test('sanitizes registry SSE snapshots and deltas', () => {
