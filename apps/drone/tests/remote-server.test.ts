@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import fs from 'node:fs';
+import { Readable } from 'node:stream';
 import type { IncomingMessage, ServerResponse } from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -7,9 +8,13 @@ import { resetDroneRootDirCache } from '../src/host/paths';
 import { updateRegistry } from '../src/host/registry';
 import { RemoteAuthStore } from '../src/hub/remote-auth';
 import {
+  createRemoteDroneRegistrySseTransform,
   resolveContainerDroneForRemoteRequest,
   routeAllowed,
+  sanitizeRemoteDroneRegistryEvent,
   sanitizeDroneSummary,
+  sanitizeRemoteDroneSummaries,
+  sanitizeRemoteGroupSummaries,
   shouldServeRemoteHtmlFallback,
 } from '../src/hub/remote-server';
 import { withTempDroneDataDir } from './test-helpers';
@@ -29,6 +34,103 @@ describe('remote Hub server', () => {
     expect(summary.repoAttached).toBe(true);
     expect(summary.repoPath).toBe('/work/repos/example');
     expect(summary.repoBranch).toBe('feature/remote');
+  });
+
+  test('includes host runtime drones in the sanitized remote sidebar list', () => {
+    const summaries = sanitizeRemoteDroneSummaries([
+      { id: 'container-a', name: 'Container A', runtime: 'container', statusOk: true },
+      { id: 'host-a', name: 'Host A', runtime: 'host', statusOk: true },
+    ]);
+
+    expect(summaries.map((summary) => [summary.id, summary.runtime])).toEqual([
+      ['container-a', 'container'],
+      ['host-a', 'host'],
+    ]);
+  });
+
+  test('preserves fleet parent relationships without exposing assignment lists', () => {
+    const summary = sanitizeDroneSummary({
+      id: 'child-a',
+      name: 'Child A',
+      runtime: 'container',
+      fleetParentId: 'parent-a',
+      fleetAssignedIds: ['assigned-a'],
+      statusOk: true,
+    });
+
+    expect(summary.fleetParentId).toBe('parent-a');
+    expect(summary.fleetAssignedIds).toEqual([]);
+  });
+
+  test('exposes only group names and creation times for remote sorting', () => {
+    expect(
+      sanitizeRemoteGroupSummaries([
+        {
+          name: 'new-group',
+          createdAt: '2026-07-10T12:00:00.000Z',
+          updatedAt: '2026-07-10T13:00:00.000Z',
+          privateField: 'not forwarded',
+        },
+        { name: '', createdAt: '2026-07-10T14:00:00.000Z' },
+      ]),
+    ).toEqual([{ name: 'new-group', createdAt: '2026-07-10T12:00:00.000Z' }]);
+    expect(routeAllowed('GET', '/api/groups')).toBe(true);
+  });
+
+  test('sanitizes registry SSE snapshots and deltas', () => {
+    expect(
+      sanitizeRemoteDroneRegistryEvent('snapshot', {
+        ok: true,
+        drones: [{ id: 'child-a', name: 'Child A', runtime: 'host', fleetParentId: 'parent-a' }],
+      }),
+    ).toMatchObject({
+      ok: true,
+      drones: [{ id: 'child-a', runtime: 'host', fleetParentId: 'parent-a' }],
+    });
+    expect(
+      sanitizeRemoteDroneRegistryEvent('delta', {
+        ok: true,
+        upserts: [{ id: 'child-b', name: 'Child B', runtime: 'container', fleetParentId: 'parent-a' }],
+        removedIds: ['old-child'],
+        order: ['parent-a', 'child-b'],
+        privateField: 'not forwarded',
+      }),
+    ).toMatchObject({
+      ok: true,
+      upserts: [{ id: 'child-b', fleetParentId: 'parent-a' }],
+      removedIds: ['old-child'],
+      order: ['parent-a', 'child-b'],
+    });
+    expect(routeAllowed('GET', '/api/drones/events')).toBe(true);
+  });
+
+  test('sanitizes fragmented registry SSE stream chunks', async () => {
+    const upstreamSnapshot = JSON.stringify({
+      ok: true,
+      drones: [
+        {
+          id: 'child-a',
+          name: 'Child A',
+          runtime: 'container',
+          fleetParentId: 'parent-a',
+          token: 'must-not-leak',
+        },
+      ],
+    });
+    let output = '';
+    const stream = Readable.from([
+      'event: connected\ndata: {"ok":true,"at":"now"}\n\n',
+      `event: snapshot\ndata: ${upstreamSnapshot.slice(0, 35)}`,
+      `${upstreamSnapshot.slice(35)}\n\n: keepalive\n\n`,
+    ]).pipe(createRemoteDroneRegistrySseTransform());
+    for await (const chunk of stream) output += String(chunk);
+
+    expect(output).toContain('event: connected');
+    expect(output).toContain('event: snapshot');
+    expect(output).toContain('"fleetParentId":"parent-a"');
+    expect(output).toContain(': keepalive');
+    expect(output).not.toContain('must-not-leak');
+    expect(output).not.toContain('token');
   });
 
   test('preserves repo seed metadata for remote create defaults', () => {

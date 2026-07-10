@@ -2,6 +2,8 @@ import React from 'react';
 import type { ChatAgentConfig } from '../domain';
 import { droneChatEventMatches } from '../droneHub/app/chat-api';
 import { subscribeDroneChatEvents } from '../droneHub/app/chat-events';
+import { useDroneRegistryEvents } from '../droneHub/app/use-drone-hub-registry-data';
+import { usePoll } from '../droneHub/app/hooks';
 import type { ChatSendPayload } from '../droneHub/chat';
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../droneHub/types';
 import {
@@ -13,6 +15,8 @@ import {
   type RemoteSession,
   type TranscriptResponse,
 } from './remote-api';
+import { remoteBusyChatNodeIds, updateRemoteUnreadChats } from './remote-unread';
+import { buildRemoteChatTimeline, normalizeRemotePendingPrompts } from './remote-chat-timeline';
 
 type RemoteChatState = {
   transcripts: TranscriptItem[];
@@ -37,6 +41,10 @@ function remoteChatStateKey(droneId: string, chatName: string): string {
   return `${droneId}\u0000${chatName}`;
 }
 
+function isRemoteSelectableDrone(drone: DroneSummary | null | undefined): boolean {
+  return Boolean(drone && drone.runtime !== 'host');
+}
+
 export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const pauseChatPolling = options.pauseChatPolling === true;
   const [session, setSession] = React.useState<RemoteSession | null>(null);
@@ -46,6 +54,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const [chats, setChats] = React.useState<string[]>([]);
   const [draftChats, setDraftChats] = React.useState<Record<string, boolean>>({});
   const [transcripts, setTranscripts] = React.useState<TranscriptItem[]>([]);
+  const transcriptsRef = React.useRef<TranscriptItem[]>([]);
   const [pending, setPending] = React.useState<PendingPrompt[]>([]);
   const [draft, setDraft] = React.useState('');
   const [loading, setLoading] = React.useState(true);
@@ -60,6 +69,8 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const [sending, setSending] = React.useState(false);
   const [publishing, setPublishing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [unreadAgentMessageByChatNodeId, setUnreadAgentMessageByChatNodeId] = React.useState<Record<string, boolean>>({});
+  const previousBusyChatNodeIdsRef = React.useRef<Set<string>>(new Set());
   const [chatEventsConnected, setChatEventsConnected] = React.useState(false);
   const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
   const activeChatStateKeyRef = React.useRef<string | null>(null);
@@ -67,8 +78,39 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const loadedFullTranscriptKeyRef = React.useRef<string | null>(null);
 
   const authenticated = session?.authenticated === true;
-  const selectedDrone = drones.find((drone) => drone.id === selectedDroneId) ?? drones[0] ?? null;
+  const droneEvents = useDroneRegistryEvents(authenticated);
+  const dronePollIntervalMs = droneEvents.connected ? 60_000 : 2_000;
+  const { value: polledDronesResponse } = usePoll<DroneListResponse>(
+    () => remoteRequestJson<DroneListResponse>('/api/drones'),
+    dronePollIntervalMs,
+    [authenticated, droneEvents.connected],
+    { enabled: authenticated },
+  );
+  const selectedDrone =
+    drones.find((drone) => drone.id === selectedDroneId && isRemoteSelectableDrone(drone)) ??
+    drones.find(isRemoteSelectableDrone) ??
+    null;
   const effectiveDroneId = selectedDrone?.id ?? null;
+
+  React.useEffect(() => {
+    const busyChatNodeIds = remoteBusyChatNodeIds(drones);
+    const previousBusyChatNodeIds = previousBusyChatNodeIdsRef.current;
+    previousBusyChatNodeIdsRef.current = busyChatNodeIds;
+    setUnreadAgentMessageByChatNodeId((current) => {
+      const next = updateRemoteUnreadChats({
+        drones,
+        previousBusyChatNodeIds,
+        busyChatNodeIds,
+        unreadAgentMessageByChatNodeId: current,
+        selectedDroneId: effectiveDroneId,
+        selectedChat,
+      });
+      const currentKeys = Object.keys(current);
+      const nextKeys = Object.keys(next);
+      if (currentKeys.length === nextKeys.length && nextKeys.every((key) => current[key] === next[key])) return current;
+      return next;
+    });
+  }, [drones, effectiveDroneId, selectedChat]);
 
   React.useEffect(() => {
     activeChatStateKeyRef.current = effectiveDroneId && selectedChat ? remoteChatStateKey(effectiveDroneId, selectedChat) : null;
@@ -78,9 +120,12 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setRemoteCsrf(null);
     setSession({ ok: true, authenticated: false, csrf: null });
     setDrones([]);
+    setUnreadAgentMessageByChatNodeId({});
+    previousBusyChatNodeIdsRef.current = new Set();
     setSelectedDroneId(null);
     setChats([]);
     setDraftChats({});
+    transcriptsRef.current = [];
     setTranscripts([]);
     setPending([]);
     setChatStateLoading(false);
@@ -110,7 +155,10 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     const data = await remoteRequestJson<DroneListResponse>('/api/drones');
     const nextDrones = Array.isArray(data.drones) ? data.drones : [];
     setDrones(nextDrones);
-    setSelectedDroneId((current) => (current && nextDrones.some((drone) => drone.id === current) ? current : nextDrones[0]?.id ?? null));
+    setSelectedDroneId((current) => {
+      if (current && nextDrones.some((drone) => drone.id === current && isRemoteSelectableDrone(drone))) return current;
+      return nextDrones.find(isRemoteSelectableDrone)?.id ?? null;
+    });
   }, []);
   const reloadDrones = React.useCallback(async (preferredDroneId?: string | null) => {
     const data = await remoteRequestJson<DroneListResponse>('/api/drones');
@@ -118,10 +166,23 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     const preferred = String(preferredDroneId ?? '').trim();
     setDrones(nextDrones);
     setSelectedDroneId((current) => {
-      if (preferred && nextDrones.some((drone) => drone.id === preferred)) return preferred;
-      return current && nextDrones.some((drone) => drone.id === current) ? current : nextDrones[0]?.id ?? null;
+      if (preferred && nextDrones.some((drone) => drone.id === preferred && isRemoteSelectableDrone(drone))) return preferred;
+      if (current && nextDrones.some((drone) => drone.id === current && isRemoteSelectableDrone(drone))) return current;
+      return nextDrones.find(isRemoteSelectableDrone)?.id ?? null;
     });
   }, []);
+
+  const registryDrones = droneEvents.connected
+    ? droneEvents.value?.drones
+    : polledDronesResponse?.drones ?? droneEvents.value?.drones;
+  React.useEffect(() => {
+    if (!authenticated || !Array.isArray(registryDrones)) return;
+    setDrones(registryDrones);
+    setSelectedDroneId((current) => {
+      if (current && registryDrones.some((drone) => drone.id === current && isRemoteSelectableDrone(drone))) return current;
+      return registryDrones.find(isRemoteSelectableDrone)?.id ?? null;
+    });
+  }, [authenticated, registryDrones]);
 
   const fetchChats = React.useCallback(async (droneId: string) => {
     const data = await remoteRequestJson<ChatListResponse>(`/api/drones/${encodeURIComponent(droneId)}/chats`);
@@ -157,7 +218,10 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     );
     return {
       transcripts: Array.isArray(data.transcripts) ? data.transcripts : [],
-      pending: Array.isArray(data.pending) ? data.pending : [],
+      pending: normalizeRemotePendingPrompts(
+        Array.isArray(data.pending) ? data.pending : [],
+        Array.isArray(data.transcripts) ? data.transcripts : [],
+      ),
       agent: data.agent ?? null,
       model: String(data.model ?? '').trim() || null,
     };
@@ -174,8 +238,12 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const applyChatState = React.useCallback((droneId: string, chatName: string, next: RemoteChatState, opts?: { preserveTranscripts?: boolean }) => {
     const key = remoteChatStateKey(droneId, chatName);
     if (activeChatStateKeyRef.current !== key) return false;
-    if (opts?.preserveTranscripts !== true) setTranscripts(next.transcripts);
-    setPending(next.pending);
+    const visibleTranscripts = opts?.preserveTranscripts === true ? transcriptsRef.current : next.transcripts;
+    if (opts?.preserveTranscripts !== true) {
+      transcriptsRef.current = next.transcripts;
+      setTranscripts(next.transcripts);
+    }
+    setPending(normalizeRemotePendingPrompts(next.pending, visibleTranscripts));
     setChatRuntime({
       key,
       agent: next.agent,
@@ -191,7 +259,9 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const applyFullTranscript = React.useCallback((droneId: string, chatName: string, next: TranscriptItem[]) => {
     const key = remoteChatStateKey(droneId, chatName);
     if (activeChatStateKeyRef.current !== key) return false;
+    transcriptsRef.current = next;
     setTranscripts(next);
+    setPending((current) => normalizeRemotePendingPrompts(current, next));
     loadedFullTranscriptKeyRef.current = key;
     setChatStateLoading(false);
     return true;
@@ -252,6 +322,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   React.useEffect(() => {
     if (authenticated && effectiveDroneId) return;
     setChats([]);
+    transcriptsRef.current = [];
     setTranscripts([]);
     setPending([]);
     setChatStateLoading(false);
@@ -473,6 +544,10 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
         loading: Boolean(selectedChatRuntimeKey),
         error: null,
       };
+  const chatTimeline = React.useMemo(
+    () => buildRemoteChatTimeline(transcripts, pending),
+    [pending, transcripts],
+  );
 
   return {
     authenticated,
@@ -483,10 +558,12 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setSelectedDroneId,
     selectedChat,
     setSelectedChat,
+    unreadAgentMessageByChatNodeId,
     chats,
     draftChats,
     transcripts,
     pending,
+    chatTimeline,
     draft,
     setDraft,
     loading,

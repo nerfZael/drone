@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import http from 'node:http';
 import path from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { URL } from 'node:url';
 
@@ -132,7 +132,7 @@ function logRemoteProxyRequest(opts: {
   const route = remoteRouteLabel(opts.method, opts.pathname);
   const durationMs = Math.round(opts.timer.total());
   if (
-    opts.pathname === '/api/drones/chat-events' &&
+    (opts.pathname === '/api/drones/events' || opts.pathname === '/api/drones/chat-events') &&
     opts.status < 500 &&
     opts.error &&
     /premature close|aborted/i.test(opts.error)
@@ -173,6 +173,7 @@ async function readRawBody(req: http.IncomingMessage, maxBytes = 1024 * 1024): P
 }
 
 export function sanitizeDroneSummary(raw: any): any {
+  const runtime = String(raw?.runtime ?? 'container') === 'host' ? 'host' : 'container';
   const repoPath = String(raw?.repoPath ?? '').trim();
   const repoAttached = raw?.repoAttached === true || repoPath.length > 0;
   const statusOk = raw?.statusOk === true;
@@ -189,10 +190,13 @@ export function sanitizeDroneSummary(raw: any): any {
     lastActivityAt: raw?.lastActivityAt ?? null,
     lastMessageAt: raw?.lastMessageAt ?? null,
     lastActivityChat: raw?.lastActivityChat ?? null,
-    fleetParentId: null,
+    fleetParentId:
+      typeof raw?.fleetParentId === 'string' && raw.fleetParentId.trim()
+        ? raw.fleetParentId.trim()
+        : null,
     fleetAssignedIds: [],
-    runtime: 'container',
-    persistVolume: false,
+    runtime,
+    persistVolume: runtime === 'container' ? false : undefined,
     repoAttached,
     repoPath: repoAttached ? repoPath : '',
     repoBranch: typeof raw?.repoBranch === 'string' && raw.repoBranch.trim() ? raw.repoBranch.trim() : null,
@@ -214,6 +218,94 @@ export function sanitizeDroneSummary(raw: any): any {
     hubMessage: raw?.hubMessage ?? null,
     busy: raw?.busy === true,
   };
+}
+
+export function sanitizeRemoteDroneSummaries(raw: unknown): any[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.map(sanitizeDroneSummary);
+}
+
+export function sanitizeRemoteGroupSummaries(raw: unknown): Array<{ name: string; createdAt: string | null }> {
+  if (!Array.isArray(raw)) return [];
+  const groups: Array<{ name: string; createdAt: string | null }> = [];
+  for (const item of raw) {
+    const name = String((item as any)?.name ?? '').trim();
+    if (!name) continue;
+    const createdAt = String((item as any)?.createdAt ?? '').trim();
+    groups.push({ name, createdAt: createdAt || null });
+  }
+  return groups;
+}
+
+export function sanitizeRemoteDroneRegistryEvent(eventNameRaw: unknown, dataRaw: unknown): unknown | null {
+  const eventName = String(eventNameRaw ?? '').trim();
+  const data = (() => {
+    if (typeof dataRaw !== 'string') return dataRaw;
+    try {
+      return JSON.parse(dataRaw || '{}');
+    } catch {
+      return null;
+    }
+  })() as any;
+  if (!data || typeof data !== 'object') return null;
+
+  if (eventName === 'connected') {
+    return { ok: data.ok === true, at: typeof data.at === 'string' ? data.at : null };
+  }
+  if (eventName === 'snapshot') {
+    return { ok: data.ok === true, drones: sanitizeRemoteDroneSummaries(data.drones) };
+  }
+  if (eventName === 'delta') {
+    return {
+      ok: data.ok === true,
+      upserts: sanitizeRemoteDroneSummaries(data.upserts),
+      removedIds: Array.isArray(data.removedIds) ? data.removedIds.map(String) : [],
+      order: Array.isArray(data.order) ? data.order.map(String) : [],
+    };
+  }
+  if (eventName === 'stream-error') {
+    return { ok: false, error: String(data.error ?? 'Drone registry event stream failed.') };
+  }
+  return null;
+}
+
+function sanitizeRemoteDroneRegistrySseBlock(blockRaw: string): string {
+  const block = String(blockRaw ?? '').trimEnd();
+  if (!block) return '';
+  if (block.startsWith(':')) return `${block}\n\n`;
+  let eventName = '';
+  const dataLines: string[] = [];
+  for (const line of block.split('\n')) {
+    if (line.startsWith('event:')) eventName = line.slice('event:'.length).trim();
+    else if (line.startsWith('data:')) dataLines.push(line.slice('data:'.length).trimStart());
+  }
+  if (!eventName || dataLines.length === 0) return '';
+  const sanitized = sanitizeRemoteDroneRegistryEvent(eventName, dataLines.join('\n'));
+  return sanitized ? `event: ${eventName}\ndata: ${JSON.stringify(sanitized)}\n\n` : '';
+}
+
+export function createRemoteDroneRegistrySseTransform(): Transform {
+  let buffered = '';
+  return new Transform({
+    transform(chunk, _encoding, callback) {
+      buffered += Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk);
+      buffered = buffered.replace(/\r\n/g, '\n');
+      let boundary = buffered.indexOf('\n\n');
+      while (boundary >= 0) {
+        const block = buffered.slice(0, boundary);
+        buffered = buffered.slice(boundary + 2);
+        const sanitized = sanitizeRemoteDroneRegistrySseBlock(block);
+        if (sanitized) this.push(sanitized);
+        boundary = buffered.indexOf('\n\n');
+      }
+      callback();
+    },
+    flush(callback) {
+      const sanitized = sanitizeRemoteDroneRegistrySseBlock(buffered);
+      if (sanitized) this.push(sanitized);
+      callback();
+    },
+  });
 }
 
 function isContainerDrone(raw: any): boolean {
@@ -320,7 +412,9 @@ export function routeAllowed(method: string, pathname: string): boolean {
   if (method === 'GET' && pathname === '/api/drones') return true;
   if (method === 'POST' && pathname === '/api/drones') return true;
   if (method === 'POST' && pathname === '/api/drones/name-from-message') return true;
+  if (method === 'GET' && pathname === '/api/drones/events') return true;
   if (method === 'GET' && pathname === '/api/drones/chat-events') return true;
+  if (method === 'GET' && pathname === '/api/groups') return true;
   if (method === 'GET' && pathname === '/api/repos') return true;
   if (method === 'GET' && pathname === '/api/repos/branches') return true;
   if (parts.length < 3 || parts[0] !== 'api' || parts[1] !== 'drones') return false;
@@ -361,6 +455,7 @@ async function proxyAllowedRequest(
     parts[0] === 'api' &&
     parts[1] === 'drones' &&
     parts[2] &&
+    pathname !== '/api/drones/events' &&
     pathname !== '/api/drones/chat-events' &&
     pathname !== '/api/drones/name-from-message'
   ) {
@@ -379,7 +474,16 @@ async function proxyAllowedRequest(
     timer.mark('upstream');
     appendServerTiming(res, timer);
     logRemoteProxyRequest({ method, pathname, status: 200, upstreamStatus: 200, timer, requestId });
-    json(res, 200, { ok: true, drones: (data.drones ?? []).filter(isContainerDrone).map(sanitizeDroneSummary) });
+    json(res, 200, { ok: true, drones: sanitizeRemoteDroneSummaries(data.drones) });
+    return;
+  }
+
+  if (method === 'GET' && pathname === '/api/groups') {
+    const data = await fetchJsonFromHub<{ ok: true; groups: unknown[] }>(opts, '/api/groups');
+    timer.mark('upstream');
+    appendServerTiming(res, timer);
+    logRemoteProxyRequest({ method, pathname, status: 200, upstreamStatus: 200, timer, requestId });
+    json(res, 200, { ok: true, groups: sanitizeRemoteGroupSummaries(data.groups) });
     return;
   }
 
@@ -425,7 +529,12 @@ async function proxyAllowedRequest(
     return;
   }
   try {
-    await pipeline(Readable.fromWeb(response.body as any), res);
+    const readable = Readable.fromWeb(response.body as any);
+    if (method === 'GET' && pathname === '/api/drones/events') {
+      await pipeline(readable, createRemoteDroneRegistrySseTransform(), res);
+    } else {
+      await pipeline(readable, res);
+    }
     timer.mark('stream');
     logRemoteProxyRequest({
       method,

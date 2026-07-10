@@ -3,6 +3,7 @@ import type { DroneSummary } from '../types';
 import type { SidebarGroup } from './use-sidebar-view-model';
 import { sidebarGroupBaseName, sidebarGroupParentPath, splitSidebarGroupPath } from './sidebar-group-paths';
 import type { SidebarGroupOrderKind } from './sidebar-group-order';
+import { parseIsoTimestampMs } from './helpers';
 
 export type SidebarFolderNode = {
   path: string;
@@ -146,7 +147,11 @@ function flattenOrderedNodes(nodes: SidebarFolderNode[], out: SidebarFolderNode[
   return out;
 }
 
-function sortNodesByFlatOrder(nodes: SidebarFolderNode[], orderIndex: Map<string, number>): SidebarFolderNode[] {
+function sortNodesByFlatOrder(
+  nodes: SidebarFolderNode[],
+  orderIndex: Map<string, number>,
+  groupCreatedAtByName: Record<string, string | null>,
+): SidebarFolderNode[] {
   const sorted = nodes
     .map((node, index) => ({
       node,
@@ -155,19 +160,32 @@ function sortNodesByFlatOrder(nodes: SidebarFolderNode[], orderIndex: Map<string
     }))
     .sort((a, b) => {
       if (a.order !== b.order) return a.order - b.order;
-      if (a.node.depth !== b.node.depth && a.order === Number.POSITIVE_INFINITY && b.order === Number.POSITIVE_INFINITY) {
-        return a.node.label.localeCompare(b.node.label);
+      if (a.order === Number.POSITIVE_INFINITY && b.order === Number.POSITIVE_INFINITY) {
+        if (isUngroupedGroupName(a.node.path) && !isUngroupedGroupName(b.node.path)) return -1;
+        if (!isUngroupedGroupName(a.node.path) && isUngroupedGroupName(b.node.path)) return 1;
+        if (a.node.kind === 'group' && b.node.kind === 'group') {
+          const aMs = parseIsoTimestampMs(groupCreatedAtByName[a.node.path]);
+          const bMs = parseIsoTimestampMs(groupCreatedAtByName[b.node.path]);
+          if (aMs != null && bMs == null) return -1;
+          if (aMs == null && bMs != null) return 1;
+          if (aMs != null && bMs != null && aMs !== bMs) return bMs - aMs;
+          return a.node.label.localeCompare(b.node.label);
+        }
       }
       return a.index - b.index;
     })
     .map((entry) => entry.node);
   return sorted.map((node) => ({
     ...node,
-    children: sortNodesByFlatOrder(node.children, orderIndex),
+    children: sortNodesByFlatOrder(node.children, orderIndex, groupCreatedAtByName),
   }));
 }
 
-export function buildSidebarFolderTree(sidebarGroups: SidebarGroup[], sidebarGroupOrder: string[]): SidebarFolderNode[] {
+export function buildSidebarFolderTree(
+  sidebarGroups: SidebarGroup[],
+  sidebarGroupOrder: string[],
+  groupCreatedAtByName: Record<string, string | null> = {},
+): SidebarFolderNode[] {
   const root = createNode({
     path: '__root__',
     label: '__root__',
@@ -188,7 +206,7 @@ export function buildSidebarFolderTree(sidebarGroups: SidebarGroup[], sidebarGro
     orderIndex.set(token, orderIndex.size);
   }
 
-  return sortNodesByFlatOrder(finalized, orderIndex);
+  return sortNodesByFlatOrder(finalized, orderIndex, groupCreatedAtByName);
 }
 
 export function flattenSidebarFolderTree(nodes: SidebarFolderNode[]): SidebarFolderNode[] {
