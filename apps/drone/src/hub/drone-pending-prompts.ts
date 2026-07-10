@@ -15,6 +15,7 @@ export type PendingPrompt = {
   id: string;
   at: string;
   prompt: string;
+  model?: string;
   messageId?: string;
   cwd?: string | null;
   attachments?: ChatImageAttachmentRef[];
@@ -110,6 +111,7 @@ export function createDronePendingPromptStore(deps: {
           id: String(p?.id ?? '').trim(),
           at: String(p?.at ?? '').trim(),
           prompt: deps.normalizePendingPromptText(p?.prompt),
+          ...(typeof p?.model === 'string' && String(p.model).trim() ? { model: String(p.model).trim() } : {}),
           ...(typeof p?.messageId === 'string' && String(p.messageId).trim() ? { messageId: String(p.messageId).trim() } : {}),
           cwd: typeof p?.cwd === 'string' ? String(p.cwd) : p?.cwd === null ? null : undefined,
           attachments: deps.normalizeChatImageAttachmentRefs(p?.attachments),

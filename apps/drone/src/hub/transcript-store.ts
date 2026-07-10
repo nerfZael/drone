@@ -17,6 +17,7 @@ export type StoredTranscriptTurn = {
   error?: string;
   promptAt?: string;
   completedAt?: string;
+  model?: string;
   attachments?: unknown;
   automation?: unknown;
   inheritedFromClone?: boolean;
@@ -75,6 +76,7 @@ export type StoredPendingPrompt = {
   id: string;
   at: string;
   prompt: string;
+  model?: string;
   messageId?: string;
   cwd?: string | null;
   attachments?: unknown;
@@ -208,6 +210,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
   const id = typeof raw?.id === 'string' && raw.id.trim() ? String(raw.id).trim() : undefined;
   const promptAt = typeof raw?.promptAt === 'string' && raw.promptAt.trim() ? String(raw.promptAt).trim() : undefined;
   const completedAt = typeof raw?.completedAt === 'string' && raw.completedAt.trim() ? String(raw.completedAt).trim() : undefined;
+  const model = typeof raw?.model === 'string' && raw.model.trim() ? String(raw.model).trim() : undefined;
   const error = raw?.ok ? undefined : String(raw?.error ?? 'failed');
   return {
     at,
@@ -218,6 +221,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
     ...(error ? { error } : {}),
     ...(promptAt ? { promptAt } : {}),
     ...(completedAt ? { completedAt } : {}),
+    ...(model ? { model } : {}),
     ...(Array.isArray(raw?.attachments) ? { attachments: raw.attachments } : {}),
     ...(raw?.automation && typeof raw.automation === 'object' ? { automation: raw.automation } : {}),
     ...(raw?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
@@ -268,6 +272,7 @@ function normalizePendingPrompt(raw: any): StoredPendingPrompt | null {
     id,
     at,
     prompt,
+    ...(typeof raw?.model === 'string' && raw.model.trim() ? { model: String(raw.model).trim() } : {}),
     ...(typeof raw?.messageId === 'string' && raw.messageId.trim() ? { messageId: String(raw.messageId).trim() } : {}),
     ...(typeof raw?.cwd === 'string' ? { cwd: String(raw.cwd) } : raw?.cwd === null ? { cwd: null } : {}),
     ...(Array.isArray(raw?.attachments) ? { attachments: raw.attachments } : {}),

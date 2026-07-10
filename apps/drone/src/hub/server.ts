@@ -112,6 +112,7 @@ import {
   hasKnownBuiltinTranscriptSession,
   parseBlipJobTranscript,
   parseCodexJobTranscript,
+  parseCodexRolloutModel,
   parsePiJobTranscript,
   readBuiltinTranscriptSessionId,
 } from './builtin-transcript-sessions';
@@ -4396,6 +4397,7 @@ type TranscriptTurn = {
   at: string;
   id?: string;
   prompt: string;
+  model?: string;
   ok: boolean;
   output: string;
   error?: string;
@@ -5975,6 +5977,32 @@ async function discoverModelsForBuiltinAgent(opts: {
     : `no model discovery command available for ${opts.agentId}`;
   chatModelDiscoveryCache.set(key, { atMs: now, models: [], error });
   return { models: [], source: 'none', discoveredAt: new Date(now).toISOString(), error };
+}
+
+async function readCodexLastTurnModel(opts: {
+  runtime: DroneRuntime;
+  containerName: string;
+  threadId: string;
+}): Promise<string | null> {
+  const threadId = String(opts.threadId ?? '').trim();
+  if (!/^[0-9a-f-]{20,64}$/i.test(threadId)) return null;
+  const script = [
+    'set -euo pipefail',
+    'roots=("${CODEX_HOME:-$HOME/.codex}/sessions" "$HOME/.codex/sessions" "/root/.codex/sessions" "/dvm-data/home/.codex/sessions")',
+    'files=()',
+    'for root in "${roots[@]}"; do',
+    '  [ -d "$root" ] || continue',
+    `  while IFS= read -r file; do files+=("$file"); done < <(find "$root" -type f -name ${bashQuote(`*${threadId}*.jsonl`)} -print 2>/dev/null)`,
+    'done',
+    '[ "${#files[@]}" -gt 0 ] || exit 1',
+    'file=$(printf "%s\\n" "${files[@]}" | sort | tail -n 1)',
+    `grep '"type":"turn_context"' -- "$file" | tail -n 1`,
+  ].join('\n');
+  const result = opts.runtime === 'host'
+    ? await runHostCommand('bash', ['-lc', script], { timeoutMs: defaultSeedBootstrapTimeoutMs() })
+    : await dvmExec(opts.containerName, 'bash', ['-lc', script], { timeoutMs: defaultSeedBootstrapTimeoutMs() });
+  if (result.code !== 0) return null;
+  return normalizeChatModel(parseCodexRolloutModel(result.stdout));
 }
 
 async function cliSupportsModelFlag(opts: { bin: string; runtime: DroneRuntime; containerName?: string; cwd?: string | null }): Promise<boolean> {
@@ -9401,6 +9429,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
   if (!d) return;
   const token = typeof d.token === 'string' ? d.token : '';
   const containerName = String(d?.containerName ?? d?.name ?? droneId).trim() || droneId;
+  const runtime = droneRuntime(d);
   const hostPort =
     typeof d.hostPort === 'number' && Number.isFinite(d.hostPort)
       ? d.hostPort
@@ -9447,6 +9476,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     const state = String(p?.state ?? '');
     const promptAttachments = normalizeChatImageAttachmentRefs((p as any)?.attachments);
     const promptAutomation = normalizePromptAutomationMeta((p as any)?.automation);
+    const pendingModel = normalizeChatModel((p as any)?.model) ?? normalizeChatModel((entry as any)?.model);
     if (!id) continue;
     if (state === 'queued') continue;
 
@@ -9587,6 +9617,14 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       });
       if (jobKind === 'codex') {
         const parsed = parseCodexJobTranscript(job);
+        const turnModel =
+          normalizeChatModel(parsed.model) ??
+          pendingModel ??
+          (await readCodexLastTurnModel({
+            runtime,
+            containerName,
+            threadId: String(parsed.threadId ?? entry?.codexThreadId ?? ''),
+          }).catch(() => null));
         const threadId = parsed.threadId;
         const msg = parsed.message;
         const output = String(msg ?? '').trimEnd();
@@ -9613,6 +9651,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           completedAt: finishedAt,
           id,
           prompt: String(p?.prompt ?? ''),
+          ...(turnModel ? { model: turnModel } : {}),
           ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
           ...(promptAutomation ? { automation: promptAutomation } : {}),
           ok: true,
@@ -9627,6 +9666,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
 
       if (jobKind === 'pi') {
         const parsed = parsePiJobTranscript(job);
+        const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
         if (parsed.sessionId && String(parsed.sessionId).trim() && String(entry?.piSessionId ?? '').trim() !== parsed.sessionId) {
           entry.piSessionId = parsed.sessionId;
           changed = true;
@@ -9643,6 +9683,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           completedAt: finishedAt,
           id,
           prompt: String(p?.prompt ?? ''),
+          ...(turnModel ? { model: turnModel } : {}),
           ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
           ...(promptAutomation ? { automation: promptAutomation } : {}),
           ok: true,
@@ -9657,6 +9698,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
 
       if (jobKind === 'blip') {
         const parsed = parseBlipJobTranscript(job);
+        const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
         if (parsed.sessionId && String(parsed.sessionId).trim() && String(entry?.blipSessionId ?? '').trim() !== parsed.sessionId) {
           entry.blipSessionId = parsed.sessionId;
           changed = true;
@@ -9673,6 +9715,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           completedAt: finishedAt,
           id,
           prompt: String(p?.prompt ?? ''),
+          ...(turnModel ? { model: turnModel } : {}),
           ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
           ...(promptAutomation ? { automation: promptAutomation } : {}),
           ok: true,
@@ -9711,6 +9754,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         completedAt: finishedAt,
         id,
         prompt: String(p?.prompt ?? ''),
+        ...(pendingModel ? { model: pendingModel } : {}),
         ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
         ...(promptAutomation ? { automation: promptAutomation } : {}),
         ok: true,
@@ -9728,6 +9772,14 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         const stdout = String(job?.stdout ?? '');
         const stderr = String(job?.stderr ?? '');
         const parsed = parseCodexJobTranscript(job);
+        const turnModel =
+          normalizeChatModel(parsed.model) ??
+          pendingModel ??
+          (await readCodexLastTurnModel({
+            runtime,
+            containerName,
+            threadId: String(parsed.threadId ?? entry?.codexThreadId ?? ''),
+          }).catch(() => null));
         const output = String(parsed.message ?? '').trimEnd();
         const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
         const promptAt = resolveTranscriptPromptAt({
@@ -9750,6 +9802,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             completedAt: finishedAt,
             id,
             prompt: String(p?.prompt ?? ''),
+            ...(turnModel ? { model: turnModel } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ...(promptAutomation ? { automation: promptAutomation } : {}),
             ok: true,
@@ -9765,6 +9818,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       if (jobKind === 'pi') {
         const stdout = String(job?.stdout ?? '');
         const parsed = parsePiJobTranscript(job);
+        const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
         const output = String(parsed.message ?? '').trimEnd();
         const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
         const promptAt = resolveTranscriptPromptAt({
@@ -9785,6 +9839,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             completedAt: finishedAt,
             id,
             prompt: String(p?.prompt ?? ''),
+            ...(turnModel ? { model: turnModel } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ...(promptAutomation ? { automation: promptAutomation } : {}),
             ok: true,
@@ -9799,6 +9854,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       }
       if (jobKind === 'blip') {
         const parsed = parseBlipJobTranscript(job);
+        const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
         const output = String(parsed.message ?? '').trimEnd();
         const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
         const promptAt = resolveTranscriptPromptAt({
@@ -9817,6 +9873,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             completedAt: finishedAt,
             id,
             prompt: String(p?.prompt ?? ''),
+            ...(turnModel ? { model: turnModel } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ...(promptAutomation ? { automation: promptAutomation } : {}),
             ok: true,
@@ -9980,6 +10037,7 @@ async function enqueuePrompt(opts: {
   opts.mark?.('ensureChat');
   const { d, chat } = await getChatEntry({ droneId, chatName });
   const runtime = droneRuntime(d);
+  const configuredModel = normalizeChatModel((chat as any)?.model);
   const disposition = getPromptEnqueueDisposition({
     droneId,
     chatName,
@@ -10008,6 +10066,7 @@ async function enqueuePrompt(opts: {
       id,
       at,
       prompt: opts.prompt,
+      ...(configuredModel ? { model: configuredModel } : {}),
       cwd: opts.cwd ?? null,
       ...(attachmentsForPending.length > 0 ? { attachments: attachmentsForPending } : {}),
       ...(opts.automation ? { automation: normalizePromptAutomationMeta(opts.automation) } : {}),
@@ -12478,6 +12537,7 @@ type ChatSnapshotRead =
       transcripts: any[];
       pending: PendingPrompt[];
       agent?: ChatAgentConfig;
+      model: string | null;
       turnCount: number;
       transcriptEtag: string | null;
     }
@@ -12572,6 +12632,7 @@ function formatTranscriptRow(turnIndex: number, turn: any): any {
   const completedAt = typeof turn?.completedAt === 'string' && turn.completedAt.trim() ? String(turn.completedAt).trim() : undefined;
   const id = typeof turn?.id === 'string' && turn.id.trim() ? String(turn.id).trim() : undefined;
   const prompt = String(turn?.prompt ?? '');
+  const model = normalizeChatModel((turn as any)?.model);
   const attachments = normalizeChatImageAttachmentRefs((turn as any)?.attachments);
   const automation = normalizePromptAutomationMeta((turn as any)?.automation);
   const agentMessageAutoContinue = normalizeAgentMessageAutoContinueTurnState((turn as any)?.agentMessageAutoContinue);
@@ -12587,6 +12648,7 @@ function formatTranscriptRow(turnIndex: number, turn: any): any {
     ...(completedAt ? { completedAt } : {}),
     ...(id ? { id } : {}),
     prompt,
+    ...(model ? { model } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(automation ? { automation } : {}),
     ...(agentMessageAutoContinue ? { agentMessageAutoContinue } : {}),
@@ -12719,6 +12781,7 @@ async function readChatSnapshot(opts: {
       selection: opts.selection,
       transcripts: [],
       pending: opts.includePending ? await readPendingStartupPrompts({ droneId: context.droneId, chatName: opts.chatName }) : [],
+      model: normalizeChatModel((context.pendingEntry as any)?.model),
       turnCount: 0,
       transcriptEtag: null,
     };
@@ -12769,6 +12832,7 @@ async function readChatSnapshot(opts: {
     transcripts: transcriptResult?.transcripts ?? [],
     pending,
     agent,
+    model: normalizeChatModel((entry as any)?.model),
     turnCount: transcriptResult?.turnCount ?? 0,
     transcriptEtag: transcriptResult?.etag ?? null,
   };
@@ -12784,6 +12848,7 @@ function chatSnapshotResponseBody(snapshot: Extract<ChatSnapshotRead, { ok: true
     transcripts: snapshot.transcripts,
     pending: snapshot.pending,
     ...(snapshot.agent ? { agent: snapshot.agent } : {}),
+    model: snapshot.model,
     ...(opts?.includeTranscriptMeta
       ? {
           transcript: {

@@ -143,17 +143,24 @@ export function useChatConfigState({
       return;
     }
 
+    const requested = chatModelsRefreshNonce > chatModelsRefreshHandledRef.current;
+    if (!requested) {
+      setChatModels([]);
+      setChatModelsSource('none');
+      setChatModelsDiscoveredAt(null);
+      setChatModelsError(null);
+      setLoadingChatModels(false);
+      return;
+    }
+
     let mounted = true;
-    const forceRefresh = chatModelsRefreshNonce > chatModelsRefreshHandledRef.current;
-    if (forceRefresh) chatModelsRefreshHandledRef.current = chatModelsRefreshNonce;
+    chatModelsRefreshHandledRef.current = chatModelsRefreshNonce;
     setLoadingChatModels(true);
     setChatModelsError(null);
     fetchJson<any>(
       `/api/drones/${encodeURIComponent(
         selectedDrone,
-      )}/chats/${encodeURIComponent(selectedChat)}/models?refresh=${
-        forceRefresh ? '1' : '0'
-      }`,
+      )}/chats/${encodeURIComponent(selectedChat)}/models?refresh=1`,
     )
       .then((data) => {
         if (!mounted) return;

@@ -1,6 +1,5 @@
 import type { DroneSummary, PendingPrompt, TranscriptItem } from '../droneHub/types';
 import type { ChatAgentConfig } from '../domain';
-import type { ChatModelOption } from '../droneHub/app/app-types';
 import { setRequestJsonRemoteCsrf } from '../droneHub/http';
 
 export type RemoteSession = {
@@ -20,18 +19,12 @@ export type ChatListResponse = {
 };
 export type TranscriptResponse = { ok: true; transcripts: TranscriptItem[] };
 export type PendingResponse = { ok: true; pending: PendingPrompt[] };
-export type ChatStateResponse = { ok: true; transcripts: TranscriptItem[]; pending: PendingPrompt[] };
-export type ChatRuntimeResponse = {
+export type ChatStateResponse = {
   ok: true;
-  id: string;
-  name: string;
-  chat: string;
-  agent: ChatAgentConfig;
+  transcripts: TranscriptItem[];
+  pending: PendingPrompt[];
+  agent?: ChatAgentConfig;
   model: string | null;
-  models: ChatModelOption[];
-  source: 'live' | 'cache' | 'none';
-  discoveredAt: string;
-  error?: string;
 };
 
 let csrfToken: string | null = null;
