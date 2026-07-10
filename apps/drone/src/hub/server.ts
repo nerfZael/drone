@@ -10992,9 +10992,8 @@ async function failStaleDockerSnapshotsForChat(opts: { droneId: string; chatName
   }
 
   let syncedTurns: TranscriptTurn[] | null = null;
-  await updateRegistry((reg: any) => {
-    const chat = reg?.drones?.[droneId]?.chats?.[chatName];
-    const turns: TranscriptTurn[] = Array.isArray(chat?.turns) ? chat.turns : [];
+  {
+    const turns: TranscriptTurn[] = initialTurns.map((turn) => ({ ...turn }));
     let changed = false;
     for (let i = 0; i < turns.length; i += 1) {
       const turn: any = turns[i];
@@ -11026,13 +11025,9 @@ async function failStaleDockerSnapshotsForChat(opts: { droneId: string; chatName
       turns[i] = turn;
       changed = true;
     }
-    if (changed) {
-      chat.turns = turns;
-      syncedTurns = turns;
-    }
-  });
+    if (changed) syncedTurns = turns;
+  }
   if (syncedTurns) {
-    await importTranscriptTurnsFromRegistry({ droneId, chatName, turns: syncedTurns });
     for (const candidate of candidates) {
       const updated = (syncedTurns as TranscriptTurn[]).find((turn: any) => String(turn?.id ?? '').trim() === candidate.promptId);
       if (!updated) continue;
@@ -11439,16 +11434,9 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
   // Otherwise we can strand a drone in an "offline but still present" state that is harder to delete by group.
   if (hadEntry && opts.forget && containerGone) {
     const snapshotImageRefs = collectDockerSnapshotImageRefsFromDroneEntry(droneEntry);
-    removedRegistry = await updateRegistry((reg: any) => {
-      if (reg?.drones?.[droneId]) {
-        delete reg.drones[droneId];
-        return true;
-      }
-      return false;
-    });
+    removedRegistry = Boolean(await deleteCanonicalDroneLifecycle(droneId, 'real'));
     if (removedRegistry) {
       await transformStoredKanbanBoardSettings((board) => removeTasksForScope(board, 'drone', droneId).board);
-      await deleteCanonicalDroneLifecycle(droneId, 'real');
       await revokeMcpAccessTokensForDrone(droneId);
       await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, reason: 'delete-drone' });
     }
@@ -11876,59 +11864,45 @@ async function archiveDroneById(opts: {
   }
   const retention = normalizeArchiveRetention(opts.archiveRetention);
   const runtimePolicy = normalizeArchiveRuntimePolicy(opts.archiveRuntimePolicy);
-  let canonicalArchivedEntry: any = null;
-  const result = await updateRegistry((regAny: any) => {
-    const droneEntry = regAny?.drones?.[droneId];
-    if (!droneEntry) {
-      return {
-        hadEntry: false,
-        archived: false,
-        id: droneId,
-        name: droneId,
-        archiveRetention: retention,
-        archiveRuntimePolicy: runtimePolicy,
-        archivedAt: null,
-        deleteAt: null,
-      };
-    }
-
-    const now = nowIso();
-    const deleteAt = new Date(Date.now() + archiveRetentionMs(retention)).toISOString();
-    const name = String(droneEntry?.name ?? '').trim() || droneId;
-    const containerName = String(droneEntry?.containerName ?? droneEntry?.name ?? `drone-${droneId}`).trim() || `drone-${droneId}`;
-    const archivedEntry = {
-      ...droneEntry,
-      id: droneId,
-      name,
-      containerName,
-      archivedAt: now,
-      deleteAt,
-      archiveRetention: retention,
-      archiveRuntimePolicy: runtimePolicy,
-    };
-    canonicalArchivedEntry = archivedEntry;
-
-    regAny.archived = regAny.archived ?? {};
-    regAny.archived[droneId] = archivedEntry;
-    if (regAny?.drones?.[droneId]) delete regAny.drones[droneId];
-    if (regAny?.pending?.[droneId]) delete regAny.pending[droneId];
-
+  const registry: any = await loadRegistry();
+  const droneEntry = registry?.drones?.[droneId];
+  if (!droneEntry) {
     return {
-      hadEntry: true,
-      archived: true,
+      hadEntry: false,
+      archived: false,
       id: droneId,
-      name,
+      name: droneId,
       archiveRetention: retention,
       archiveRuntimePolicy: runtimePolicy,
-      archivedAt: now,
-      deleteAt,
+      archivedAt: null,
+      deleteAt: null,
     };
-  });
-  if (result.archived && canonicalArchivedEntry) {
-    await transformStoredKanbanBoardSettings((board) => removeTasksForScope(board, 'drone', droneId).board);
-    await upsertCanonicalDroneLifecycle('archived', droneId, canonicalArchivedEntry);
   }
-  return result;
+  const archivedAt = nowIso();
+  const deleteAt = new Date(Date.now() + archiveRetentionMs(retention)).toISOString();
+  const name = String(droneEntry?.name ?? '').trim() || droneId;
+  const containerName = String(droneEntry?.containerName ?? droneEntry?.name ?? `drone-${droneId}`).trim() || `drone-${droneId}`;
+  await upsertCanonicalDroneLifecycle('archived', droneId, {
+    ...droneEntry,
+    id: droneId,
+    name,
+    containerName,
+    archivedAt,
+    deleteAt,
+    archiveRetention: retention,
+    archiveRuntimePolicy: runtimePolicy,
+  });
+  await transformStoredKanbanBoardSettings((board) => removeTasksForScope(board, 'drone', droneId).board);
+  return {
+    hadEntry: true,
+    archived: true,
+    id: droneId,
+    name,
+    archiveRetention: retention,
+    archiveRuntimePolicy: runtimePolicy,
+    archivedAt,
+    deleteAt,
+  };
 }
 
 async function restoreArchivedDroneById(opts: { id: string }): Promise<{
@@ -11999,53 +11973,27 @@ async function restoreArchivedDroneById(opts: { id: string }): Promise<{
     }
   }
 
-  let canonicalRestoredEntry: any = null;
-  const result = await updateRegistry((regAny: any) => {
-    const latest = regAny?.archived?.[droneId];
-    if (!latest) {
-      return {
-        hadEntry: false,
-        restored: false,
-        id: droneId,
-        name: droneId,
-        renamed: false,
-        error: `unknown archived drone: ${droneId}`,
-      };
-    }
-
-    const previousName = String(latest?.name ?? '').trim() || droneId;
-    const restoredName = allocateRestoredDroneName(regAny, previousName);
-    const restoredEntry: any = {
-      ...latest,
-      id: droneId,
-      name: restoredName,
-      containerName,
-    };
-    delete restoredEntry.archivedAt;
-    delete restoredEntry.deleteAt;
-    delete restoredEntry.archiveRetention;
-    delete restoredEntry.archiveRuntimePolicy;
-    canonicalRestoredEntry = restoredEntry;
-
-    regAny.drones = regAny.drones ?? {};
-    regAny.drones[droneId] = restoredEntry;
-    if (regAny?.archived?.[droneId]) delete regAny.archived[droneId];
-    if (regAny?.pending?.[droneId]) delete regAny.pending[droneId];
-    if (Object.keys(regAny?.archived ?? {}).length === 0) delete regAny.archived;
-
-    return {
-      hadEntry: true,
-      restored: true,
-      id: droneId,
-      name: restoredName,
-      renamed: restoredName !== previousName,
-      error: null,
-    };
-  });
-  if (result.restored && canonicalRestoredEntry) {
-    await upsertCanonicalDroneLifecycle('real', droneId, canonicalRestoredEntry);
-  }
-  return result;
+  const previousName = String(archivedEntry?.name ?? '').trim() || droneId;
+  const restoredName = allocateRestoredDroneName(regSnapshot, previousName);
+  const restoredEntry: any = {
+    ...archivedEntry,
+    id: droneId,
+    name: restoredName,
+    containerName,
+  };
+  delete restoredEntry.archivedAt;
+  delete restoredEntry.deleteAt;
+  delete restoredEntry.archiveRetention;
+  delete restoredEntry.archiveRuntimePolicy;
+  await upsertCanonicalDroneLifecycle('real', droneId, restoredEntry);
+  return {
+    hadEntry: true,
+    restored: true,
+    id: droneId,
+    name: restoredName,
+    renamed: restoredName !== previousName,
+    error: null,
+  };
 }
 
 async function removeArchivedDroneById(opts: { id: string; keepVolume: boolean }): Promise<{
