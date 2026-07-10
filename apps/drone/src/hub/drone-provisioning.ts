@@ -15,12 +15,11 @@ import {
   setFleetActorConfig,
 } from './fleet-helpers';
 import {
-  deleteCanonicalDroneLifecycle,
-  patchCanonicalDroneLifecycle,
+  getCanonicalDroneLifecycle,
   resolveDroneContainerNameByIdentity,
   setDroneHubMetaByIdentity,
-  upsertCanonicalDroneLifecycle,
 } from './drone-lifecycle-service';
+import { commitDroneMetadataPatch } from './drone-metadata-commands';
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
 import type { PendingPhase, PendingPromptProjection, PendingStartupPrompt } from './drone-pending-state';
 import { deleteHostRefBestEffort, gitCurrentBranchOrSha, gitResolveRemoteBranchForCreate, gitTopLevel, importBundleHeadToHostRef } from './repoOps';
@@ -94,22 +93,18 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
   async function updatePendingDrone(droneIdRaw: string, patch: PendingDronePatch) {
     const droneId = normalizeDroneIdentity(droneIdRaw);
     if (droneId) {
-      await patchCanonicalDroneLifecycle('pending', droneId, (pending) => ({
-        ...pending,
-        ...patch,
-        updatedAt: patch.updatedAt ?? deps.nowIso(),
-      }));
+      await commitDroneMetadataPatch({
+        droneId,
+        state: 'pending',
+        eventType: 'drone.provisioning.updated',
+        payload: { phase: patch.phase ?? null },
+        transform: (pending) => ({
+          ...pending,
+          ...patch,
+          updatedAt: patch.updatedAt ?? deps.nowIso(),
+        }),
+      });
     }
-    await updateRegistry((regAny: any) => {
-      const pending = droneId ? regAny?.pending?.[droneId] : null;
-      if (!pending) return;
-      regAny.pending = regAny.pending ?? {};
-      regAny.pending[droneId] = {
-        ...pending,
-        ...patch,
-        updatedAt: patch.updatedAt ?? deps.nowIso(),
-      };
-    });
   }
 
   function provisionConcurrencyLimit(): number {
@@ -157,19 +152,16 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
 
   async function provisionDroneFromPending(name: string) {
     const regAny: any = await loadRegistry();
-    const pending = regAny?.pending?.[name];
+    const canonical = await getCanonicalDroneLifecycle(name);
+    if (canonical?.state === 'real') return;
+    const pending = canonical?.state === 'pending' ? canonical.lifecycle : regAny?.pending?.[name];
     if (!pending) return;
     const pendingDroneId = normalizeDroneIdentity(pending?.id);
     if (!pendingDroneId) {
       await updatePendingDrone(name, { phase: 'error', message: 'Failed to start', error: 'missing pending drone identity' });
       return;
     }
-    if (regAny?.drones?.[name]) {
-      await updateRegistry((regLatest: any) => {
-        if (regLatest?.pending?.[name]) delete regLatest.pending[name];
-      });
-      return;
-    }
+    if (regAny?.drones?.[name]) return;
 
     const repoPath = String(pending.repoPath ?? '').trim();
     const group = typeof pending.group === 'string' ? pending.group.trim() : '';
@@ -204,7 +196,8 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
 
     const droneCli = deps.resolveDroneCliPath();
     const repoArg = repoPath ? repoPath : '-';
-    const latestPendingForCreate: any = (await loadRegistry())?.pending?.[name] ?? pending;
+    const latestCanonicalPending = await getCanonicalDroneLifecycle(pendingDroneId);
+    const latestPendingForCreate: any = latestCanonicalPending?.state === 'pending' ? latestCanonicalPending.lifecycle : pending;
     const displayName = deps.resolvePendingDroneDisplayName(latestPendingForCreate, String(pending?.name ?? '').trim() || name);
     const args: string[] = [droneCli, 'create', displayName, '--runtime', runtime, '--repo', repoArg, '--drone-id', pendingDroneId];
     if (group) args.push('--group', group);
@@ -237,18 +230,21 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     }
 
     try {
-      await updateRegistry((regLatest: any) => {
-        const pendingLatest = regLatest?.pending?.[name] ?? null;
+      const registrySnapshot = await loadRegistry();
+      const cloneSourceLatest = cloneFrom ? findDroneEntryByIdentity(registrySnapshot, cloneFrom)?.entry : null;
+      await commitDroneMetadataPatch({
+        droneId: pendingDroneId,
+        state: 'real',
+        eventType: 'drone.provisioning.promoted',
+        transform: (current) => {
+        const pendingLatest = latestPendingForCreate ?? pending;
         const fleetMeta = pendingLatest?.fleet && typeof pendingLatest.fleet === 'object' ? pendingLatest.fleet : null;
         const environment = pendingLatest?.environment ?? null;
         const pendingKind = deps.normalizeDroneEntryKind(pendingLatest?.kind);
         const pendingVisibility = deps.normalizeDroneEntryVisibility(pendingLatest?.visibility);
         const pendingPlaybook = deps.playbookMetaFromEntry(pendingLatest?.playbook);
         const pendingPlaybookQueueGate = deps.normalizePlaybookRunQueueGate?.(pendingLatest?.playbookQueueGate) ?? null;
-        const cloneSourceLatest = cloneFrom ? findDroneEntryByIdentity(regLatest, cloneFrom)?.entry : null;
-        const found = findDroneEntryByIdentity(regLatest, pendingDroneId);
-        if (!found) return;
-        const d = found.entry;
+        const d = { ...current };
         deps.applyPendingDisplayNameToProvisionedDrone(d, pendingLatest, displayName);
         d.kind = pendingKind;
         d.visibility = pendingVisibility;
@@ -302,12 +298,16 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
             }
           }
         }
-        materializeSeedChatConfigOnDroneEntry(d, pendingLatest?.seed);
-        regLatest.drones[found.key] = d;
+        return d;
+        },
       });
-      const regAfterLifecyclePromotion: any = await loadRegistry();
-      const promoted = findDroneEntryByIdentity(regAfterLifecyclePromotion, pendingDroneId)?.entry ?? null;
-      if (promoted) await upsertCanonicalDroneLifecycle('real', pendingDroneId, promoted);
+      await updateRegistry((registry: any) => {
+        const found = findDroneEntryByIdentity(registry, pendingDroneId);
+        if (!found) return;
+        materializeSeedChatConfigOnDroneEntry(found.entry, latestPendingForCreate?.seed);
+        registry.drones = registry.drones ?? {};
+        registry.drones[found.key] = found.entry;
+      });
     } catch {
       // ignore (best-effort lineage persistence)
     }
@@ -379,19 +379,22 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
           timeoutMs: deps.defaultRepoSeedTimeoutMs(),
         });
 
-        await updateRegistry((reg2: any) => {
-          const found = findDroneEntryByIdentity(reg2, pendingDroneId);
-          if (!found) return;
-          const d = found.entry;
-          d.repoPath = repoRoot;
-          d.cwd = '/work/repo';
-          d.repo = d.repo ?? {};
-          d.repo.dest = '/work/repo';
-          d.repo.branch = 'dvm/work';
-          d.repo.baseRef = baseRef;
-          d.repo.seededAt = deps.nowIso();
-          reg2.drones = reg2.drones ?? {};
-          reg2.drones[found.key] = d;
+        await commitDroneMetadataPatch({
+          droneId: pendingDroneId,
+          state: 'real',
+          eventType: 'drone.repository.seeded',
+          transform: (drone) => ({
+            ...drone,
+            repoPath: repoRoot,
+            cwd: '/work/repo',
+            repo: {
+              ...(drone.repo && typeof drone.repo === 'object' ? drone.repo : {}),
+              dest: '/work/repo',
+              branch: 'dvm/work',
+              baseRef,
+              seededAt: deps.nowIso(),
+            },
+          }),
         });
 
         await setDroneHubMetaByIdentity({ droneId: pendingDroneId, hub: null });
@@ -412,15 +415,19 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       }
     }
 
-    const pendingTransition = await updateRegistry((regLatest: any) => {
-      const pendingEntry = regLatest?.pending?.[name] ?? pending ?? null;
-      const seed = pendingEntry?.seed ?? null;
-      const startupQueuedPrompts = deps.normalizePendingStartupPrompts((pendingEntry as any)?.startupQueuedPrompts);
-      const createdAt = typeof pendingEntry?.createdAt === 'string' && pendingEntry.createdAt.trim() ? String(pendingEntry.createdAt) : deps.nowIso();
-      if (regLatest?.pending?.[name]) delete regLatest.pending[name];
-      return { seed, startupQueuedPrompts, createdAt };
-    });
-    await deleteCanonicalDroneLifecycle(pendingDroneId, 'pending');
+    const transitionEntry = latestPendingForCreate ?? pending ?? null;
+    const pendingTransition = {
+      seed: transitionEntry?.seed ?? null,
+      startupQueuedPrompts: deps.normalizePendingStartupPrompts((transitionEntry as any)?.startupQueuedPrompts),
+      createdAt: typeof transitionEntry?.createdAt === 'string' && transitionEntry.createdAt.trim()
+        ? String(transitionEntry.createdAt)
+        : deps.nowIso(),
+    };
+    if ((globalThis as any).Bun) {
+      await updateRegistry((registry: any) => {
+        if (registry?.pending?.[name]) delete registry.pending[name];
+      });
+    }
     const seed = pendingTransition?.seed ?? null;
     const startupQueuedPrompts = Array.isArray(pendingTransition?.startupQueuedPrompts)
       ? (pendingTransition.startupQueuedPrompts as PendingStartupPrompt[])

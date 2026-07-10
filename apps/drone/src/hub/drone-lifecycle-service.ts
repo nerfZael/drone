@@ -14,10 +14,23 @@ export type ResolvedOrPendingDrone =
 
 async function canonicalRepositoryWithLegacyBackfill(): Promise<DroneLifecycleRepository | null> {
   const repository = await getDroneLifecycleRepository();
-  if (!repository) return null;
+  if (!repository) {
+    if ((globalThis as any).Bun) return null;
+    throw new Error('canonical drone lifecycle repository is unavailable');
+  }
   const registry = await loadRegistry();
   await repository.backfillLegacyInsertOnly(registry);
   return repository;
+}
+
+function allowUnavailableStoreFallback(): boolean {
+  return Boolean((globalThis as any).Bun);
+}
+
+function requireRepository(repository: DroneLifecycleRepository | null): DroneLifecycleRepository {
+  if (repository) return repository;
+  if (allowUnavailableStoreFallback()) return null as unknown as DroneLifecycleRepository;
+  throw new Error('canonical drone lifecycle repository is unavailable');
 }
 
 function hydrateCanonicalLifecycle(record: CanonicalDroneLifecycleRecord, registry: any): any {
@@ -42,7 +55,14 @@ export async function upsertCanonicalDroneLifecycle(
   entry: unknown,
 ): Promise<CanonicalDroneLifecycleRecord | null> {
   const repository = await canonicalRepositoryWithLegacyBackfill();
-  return repository ? await repository.upsert(state, droneId, entry) : null;
+  if (!repository) {
+    requireRepository(repository);
+    return null;
+  }
+  return await repository.commitUpsert(state, droneId, entry, {
+    topic: 'drone.lifecycle.changes',
+    eventType: `drone.lifecycle.${state}.upserted`,
+  });
 }
 
 export async function deleteCanonicalDroneLifecycle(
@@ -50,7 +70,14 @@ export async function deleteCanonicalDroneLifecycle(
   state?: CanonicalDroneLifecycleState,
 ): Promise<CanonicalDroneLifecycleRecord | null> {
   const repository = await canonicalRepositoryWithLegacyBackfill();
-  return repository ? await repository.delete(droneId, state) : null;
+  if (!repository) {
+    requireRepository(repository);
+    return null;
+  }
+  return await repository.commitDelete(droneId, state, {
+    topic: 'drone.lifecycle.changes',
+    eventType: 'drone.lifecycle.deleted',
+  });
 }
 
 export async function patchCanonicalDroneLifecycle(
@@ -59,7 +86,23 @@ export async function patchCanonicalDroneLifecycle(
   transform: (lifecycle: Record<string, any>) => Record<string, any>,
 ): Promise<CanonicalDroneLifecycleRecord | null> {
   const repository = await canonicalRepositoryWithLegacyBackfill();
-  return repository ? await repository.patch(state, droneId, transform) : null;
+  if (!repository) {
+    requireRepository(repository);
+    return null;
+  }
+  return await repository.commitPatch(state, droneId, transform, {
+    topic: 'drone.lifecycle.changes',
+    eventType: 'drone.lifecycle.patched',
+  });
+}
+
+export async function getCanonicalDroneLifecycle(droneId: string): Promise<CanonicalDroneLifecycleRecord | null> {
+  const repository = await canonicalRepositoryWithLegacyBackfill();
+  if (!repository) {
+    requireRepository(repository);
+    return null;
+  }
+  return repository.get(droneId);
 }
 
 export async function listCanonicalDroneLifecycle(
@@ -152,7 +195,7 @@ export async function setDroneHubMetaByIdentity(
 ): Promise<void> {
   const repository = await canonicalRepositoryWithLegacyBackfill();
   if (repository) {
-    await repository.patch('real', opts.droneId, (entry) => {
+    await repository.commitPatch('real', opts.droneId, (entry) => {
       if (!opts.hub) {
         delete entry.hub;
       } else {
@@ -164,8 +207,13 @@ export async function setDroneHubMetaByIdentity(
         };
       }
       return entry;
+    }, {
+      topic: 'drone.lifecycle.changes',
+      eventType: 'drone.hub-metadata.changed',
     });
+    return;
   }
+  requireRepository(repository);
   await updateRegistry((regAny: any) => {
     const found = findDroneEntryByIdentity(regAny, opts.droneId);
     if (!found) return;
