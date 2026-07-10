@@ -1,5 +1,6 @@
 import { getDroneLifecycleRepository, type CanonicalDroneLifecycleRecord, type CanonicalDroneLifecycleState } from '../host/drone-lifecycle-repository';
 import { loadRegistry, updateRegistry } from '../host/registry';
+import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
 import { ensureCanonicalGroup } from './groups-repositories';
 
 export type DroneMetadataCommandDependencies = {
@@ -20,11 +21,12 @@ async function projectLifecycleToRegistry(record: CanonicalDroneLifecycleRecord)
   await updateRegistry((registry: any) => {
     const bucketName = record.state === 'real' ? 'drones' : record.state === 'pending' ? 'pending' : 'archived';
     const bucket = registry?.[bucketName];
-    const current = bucket?.[record.id];
-    if (!current) return;
+    const found = findDroneEntryByIdentity({ drones: bucket }, record.id);
+    if (!found) return;
+    const current = found.entry;
     const chats = current.chats;
     const archivedChats = current.archivedChats;
-    bucket[record.id] = {
+    bucket[found.key] = {
       ...record.lifecycle,
       id: record.id,
       name: record.name,
@@ -48,19 +50,22 @@ export async function commitDroneMetadataPatch(opts: {
     const state = opts.state ?? 'real';
     return await updateRegistry((registry: any) => {
       const bucketName = state === 'real' ? 'drones' : state === 'pending' ? 'pending' : 'archived';
-      const current = registry?.[bucketName]?.[opts.droneId];
-      if (!current) throw new Error(`unknown drone: ${opts.droneId}`);
+      const bucket = registry?.[bucketName];
+      const found = findDroneEntryByIdentity({ drones: bucket }, opts.droneId);
+      if (!found) throw new Error(`unknown drone: ${opts.droneId}`);
+      const current = found.entry;
       const chats = current.chats;
       const archivedChats = current.archivedChats;
       const next = opts.transform({ ...current });
       if (chats !== undefined) next.chats = chats;
       if (archivedChats !== undefined) next.archivedChats = archivedChats;
-      registry[bucketName][opts.droneId] = next;
+      registry[bucketName][found.key] = next;
       const runtimeRaw = next.runtime;
+      const stableId = normalizeDroneIdentity(next.id) || normalizeDroneIdentity(opts.droneId);
       return {
         state,
-        id: opts.droneId,
-        name: String(next.name ?? opts.droneId),
+        id: stableId,
+        name: String(next.name ?? stableId),
         containerName: String(next.containerName ?? '').trim() || null,
         runtimeKind: String(runtimeRaw && typeof runtimeRaw === 'object' ? runtimeRaw.kind : runtimeRaw ?? 'container'),
         phase: String(next.phase ?? '').trim() || null,
@@ -167,8 +172,8 @@ export async function renameDroneDisplayName(opts: {
     try {
       await updateRegistry((registry: any) => {
         for (const bucketName of ['drones', 'pending', 'archived']) {
-          const entry = registry?.[bucketName]?.[opts.droneId];
-          if (entry) entry.name = opts.name;
+          const found = findDroneEntryByIdentity({ drones: registry?.[bucketName] }, opts.droneId);
+          if (found) found.entry.name = opts.name;
         }
       });
     } catch {

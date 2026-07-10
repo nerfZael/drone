@@ -91,20 +91,21 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
   let PROVISION_PUMP_SCHEDULED = false;
 
   async function updatePendingDrone(droneIdRaw: string, patch: PendingDronePatch) {
-    const droneId = normalizeDroneIdentity(droneIdRaw);
-    if (droneId) {
-      await commitDroneMetadataPatch({
-        droneId,
-        state: 'pending',
-        eventType: 'drone.provisioning.updated',
-        payload: { phase: patch.phase ?? null },
-        transform: (pending) => ({
-          ...pending,
-          ...patch,
-          updatedAt: patch.updatedAt ?? deps.nowIso(),
-        }),
-      });
-    }
+    const registry = await loadRegistry();
+    const found = findDroneEntryByIdentity({ drones: registry?.pending }, droneIdRaw);
+    const droneId = normalizeDroneIdentity(found?.entry?.id ?? found?.key);
+    if (!droneId) return;
+    await commitDroneMetadataPatch({
+      droneId,
+      state: 'pending',
+      eventType: 'drone.provisioning.updated',
+      payload: { phase: patch.phase ?? null },
+      transform: (pending) => ({
+        ...pending,
+        ...patch,
+        updatedAt: patch.updatedAt ?? deps.nowIso(),
+      }),
+    });
   }
 
   function provisionConcurrencyLimit(): number {
