@@ -30,13 +30,17 @@ work happen before or after a database transaction, never inside it.
 Each aggregate has one canonical owner:
 
 - `host/drone-lifecycle-repository.ts`: real, pending, and archived drone identity and lifecycle
-- `host/transcript-store.ts`: chat metadata and ordered transcript turns
+- `host/transcript-store.ts`: active/archived chat metadata, ordered transcript turns, and archive tombstones
 - `host/prompt-queue-repository.ts`: prompt enqueue, claim, retry, cancellation, and lease recovery
 - `host/assistant-store.ts`: assistant preferences, threads, messages, prompts, and subscriptions
 - `host/hub-settings-repository.ts`: provider secrets and all Hub/UI/voice/agent/backup settings, one row per key
 - `host/catalog-store.ts`: groups, repositories, skills, MCP servers and tokens, and playbooks
 - `host/fleet-workflow-store.ts`: sync sets, durable playbook work, and append-only workflow audit
 - `host/hub-outbox.ts`: post-commit notifications and background effects
+
+Cross-domain group rename/delete is coordinated by `hub/group-orchestration.ts`, which
+composes catalog subtree changes, lifecycle membership batches, and canonical Kanban
+transforms without returning to a global aggregate.
 
 Application commands compose repository changes with an outbox append in the same SQLite
 transaction. External effects are dispatched after commit using FIFO claims, leases,
@@ -67,11 +71,14 @@ Compatibility follows these rules:
    unavailable, principally for the existing Bun test/fallback path.
 5. No new domain or high-frequency state may be added to the residual JSON shape.
 
-During the last call-site migration, `updateRegistry()` translates legacy lifecycle and chat
-mutations into their canonical owners. This bridge is deliberately temporary: its residual
-write and canonical command are separate transactions, so a process crash between them is
-not atomic. Production callers should use domain commands directly; once they all do, remove
-the translator and retain only projection/export support.
+The production lifecycle, prompt, settings, catalog, workflow, Kanban, CLI, provisioning,
+group-orchestration, and archived-chat paths now call canonical owners directly. A bounded
+active-chat compatibility surface remains in the large Hub server: chat configuration and
+the composite create, rename, draft-publish, and permanent-delete/default-recreation routes
+still enter through `updateRegistry()` before their explicit chat-store operations. The
+translator keeps these routes correct, but its residual write and canonical command are
+separate transactions, so this is deliberately the final retirement slice rather than a
+pattern for new work.
 
 ## Command and concurrency rules
 
@@ -99,8 +106,15 @@ Every canonical domain covers the relevant subset of:
 
 ## Retirement gate
 
-The compatibility bridge can be removed when searches find no production Node mutation that
-enters through `updateRegistry()` for lifecycle, chats, prompts, catalog data, settings, or
-workflows. At that point `registry_json`, residual mutation support, and the Bun file-lock
-fallback can be deprecated independently; read projection and JSON export may remain for API
-and backup compatibility.
+The remaining retirement work is intentionally narrow:
+
+1. Replace the five composite active-chat server mutations with dedicated chat application
+   commands, including prompt/default-chat coordination.
+2. Add lifecycle-wide archived-chat cleanup when an entire drone is permanently deleted.
+3. Remove the lifecycle/chat compatibility translator once searches find no production Node
+   caller entering through `updateRegistry()`.
+
+At that point `registry_json`, residual mutation support, and the Bun file-lock fallback can
+be deprecated independently; read projection and JSON export may remain for API and backup
+compatibility. Until then, all remaining direct registry mutations outside those five routes
+are explicit Bun/native-SQLite-unavailable or workflow-store-unavailable fallbacks.
