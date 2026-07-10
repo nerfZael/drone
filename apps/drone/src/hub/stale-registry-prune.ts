@@ -1,6 +1,7 @@
 import { dvmLs } from '../host/dvm';
 import { updateRegistry } from '../host/registry';
 import { normalizeDroneRuntime } from '../host/runtime';
+import { deleteCanonicalDroneLifecycle, listCanonicalDroneLifecycle } from './drone-lifecycle-service';
 
 export type PrunedRegistryDrone = {
   id: string;
@@ -28,6 +29,32 @@ export async function pruneMissingRegistryDrones(
       .map((name) => String(name ?? '').trim())
       .filter(Boolean),
   );
+
+  const canonicalDrones = await listCanonicalDroneLifecycle('real');
+  if (canonicalDrones) {
+    const removed = canonicalDrones
+      .filter((record) => record.runtimeKind !== 'host')
+      .map((record) => ({
+        record,
+        containerName: String(record.containerName ?? '').trim(),
+      }))
+      .filter(({ containerName }) => containerName && !existingContainers.has(containerName))
+      .map(({ record, containerName }) => ({ id: record.id, name: record.name, containerName }));
+
+    for (const entry of removed) {
+      await deleteCanonicalDroneLifecycle(entry.id, 'real');
+    }
+    if (removed.length > 0) {
+      const removedIds = new Set(removed.map((entry) => entry.id));
+      await updateRegistry((regAny: any) => {
+        for (const [key, entry] of Object.entries(regAny?.drones ?? {}) as Array<[string, any]>) {
+          const id = String(entry?.id ?? key).trim();
+          if (removedIds.has(id)) delete regAny.drones[key];
+        }
+      });
+    }
+    return removed;
+  }
 
   return await updateRegistry((regAny: any) => {
     const removed: PrunedRegistryDrone[] = [];
