@@ -142,8 +142,6 @@ export function DroneFilesDock({
   loading,
   error,
   startup,
-  viewMode: _viewMode,
-  onSetViewMode: _onSetViewMode,
   onOpenPath,
   onOpenFile,
   onOpenFileInPanel,
@@ -164,8 +162,6 @@ export function DroneFilesDock({
   loading: boolean;
   error: string | null;
   startup?: { waiting: boolean; timedOut: boolean; hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null; hubMessage?: string | null } | null;
-  viewMode: 'list' | 'thumb';
-  onSetViewMode: (next: 'list' | 'thumb') => void;
   onOpenPath: (nextPath: string) => void;
   onOpenFile: (entry: DroneFsEntry) => void;
   onOpenFileInPanel?: (entry: DroneFsEntry) => boolean;
