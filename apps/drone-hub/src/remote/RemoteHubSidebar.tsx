@@ -14,6 +14,7 @@ type RemoteHubSidebarProps = {
   drones: DroneSummary[];
   selectedDroneId: string | null;
   activeChatName: string;
+  unreadAgentMessageByChatNodeId: Record<string, boolean>;
   onSelectDrone: (droneId: string) => void;
   onSelectChat: (chatName: string) => void;
   onOpenCreateDrone?: () => void;
@@ -91,6 +92,7 @@ function RemoteHubSidebarComponent({
   drones,
   selectedDroneId,
   activeChatName,
+  unreadAgentMessageByChatNodeId,
   onSelectDrone,
   onSelectChat,
   onOpenCreateDrone,
@@ -290,7 +292,7 @@ function RemoteHubSidebarComponent({
       selectedDroneSet={viewModel.selectedDroneSet}
       highlightedDroneIds={EMPTY_DRONE_SET}
       busyChatNodeIdSet={busyChatNodeIdSet}
-      unreadAgentMessageByChatNodeId={EMPTY_RECORD}
+      unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
       deletingDrones={EMPTY_RECORD}
       deleteOperationModeById={EMPTY_RECORD}
       deleteMode="permanent"

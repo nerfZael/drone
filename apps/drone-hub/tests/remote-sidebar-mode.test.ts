@@ -9,6 +9,14 @@ const remoteHubModelSource = readFileSync(
   new URL('../src/remote/useRemoteHubModel.ts', import.meta.url),
   'utf8',
 );
+const remoteHubAppSource = readFileSync(
+  new URL('../src/remote/RemoteDroneHubApp.tsx', import.meta.url),
+  'utf8',
+);
+const remoteMobileSidebarSource = readFileSync(
+  new URL('../src/remote/RemoteMobileSidebarDrawer.tsx', import.meta.url),
+  'utf8',
+);
 
 describe('RemoteHubSidebar', () => {
   test('uses the read-only tree renderer so repo sections can show group folders', () => {
@@ -31,6 +39,18 @@ describe('RemoteHubSidebar', () => {
     expect(remoteHubModelSource).toContain('useDroneRegistryEvents(authenticated)');
     expect(remoteHubModelSource).toContain('droneEvents.connected ? 60_000 : 2_000');
     expect(remoteHubModelSource).toContain('polledDronesResponse?.drones ?? droneEvents.value?.drones');
+  });
+
+  test('passes model-owned unread notifications into both sidebar layouts', () => {
+    expect(remoteHubSidebarSource).toContain(
+      'unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}',
+    );
+    expect(remoteHubModelSource).toContain('updateRemoteUnreadChats({');
+    expect(remoteHubModelSource).toContain('unreadAgentMessageByChatNodeId,');
+    expect(remoteHubAppSource.match(/unreadAgentMessageByChatNodeId=\{model\.unreadAgentMessageByChatNodeId\}/g)).toHaveLength(2);
+    expect(remoteMobileSidebarSource).toContain(
+      'unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}',
+    );
   });
 
   test('loads sanitized group creation times for shared newest-first ordering', () => {

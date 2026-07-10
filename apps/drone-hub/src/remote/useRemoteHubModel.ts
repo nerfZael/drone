@@ -15,6 +15,7 @@ import {
   type RemoteSession,
   type TranscriptResponse,
 } from './remote-api';
+import { remoteBusyChatNodeIds, updateRemoteUnreadChats } from './remote-unread';
 
 type RemoteChatState = {
   transcripts: TranscriptItem[];
@@ -66,6 +67,8 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const [sending, setSending] = React.useState(false);
   const [publishing, setPublishing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [unreadAgentMessageByChatNodeId, setUnreadAgentMessageByChatNodeId] = React.useState<Record<string, boolean>>({});
+  const previousBusyChatNodeIdsRef = React.useRef<Set<string>>(new Set());
   const [chatEventsConnected, setChatEventsConnected] = React.useState(false);
   const [chatEventsNonce, setChatEventsNonce] = React.useState(0);
   const activeChatStateKeyRef = React.useRef<string | null>(null);
@@ -88,6 +91,26 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const effectiveDroneId = selectedDrone?.id ?? null;
 
   React.useEffect(() => {
+    const busyChatNodeIds = remoteBusyChatNodeIds(drones);
+    const previousBusyChatNodeIds = previousBusyChatNodeIdsRef.current;
+    previousBusyChatNodeIdsRef.current = busyChatNodeIds;
+    setUnreadAgentMessageByChatNodeId((current) => {
+      const next = updateRemoteUnreadChats({
+        drones,
+        previousBusyChatNodeIds,
+        busyChatNodeIds,
+        unreadAgentMessageByChatNodeId: current,
+        selectedDroneId: effectiveDroneId,
+        selectedChat,
+      });
+      const currentKeys = Object.keys(current);
+      const nextKeys = Object.keys(next);
+      if (currentKeys.length === nextKeys.length && nextKeys.every((key) => current[key] === next[key])) return current;
+      return next;
+    });
+  }, [drones, effectiveDroneId, selectedChat]);
+
+  React.useEffect(() => {
     activeChatStateKeyRef.current = effectiveDroneId && selectedChat ? remoteChatStateKey(effectiveDroneId, selectedChat) : null;
   }, [effectiveDroneId, selectedChat]);
 
@@ -95,6 +118,8 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setRemoteCsrf(null);
     setSession({ ok: true, authenticated: false, csrf: null });
     setDrones([]);
+    setUnreadAgentMessageByChatNodeId({});
+    previousBusyChatNodeIdsRef.current = new Set();
     setSelectedDroneId(null);
     setChats([]);
     setDraftChats({});
@@ -516,6 +541,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setSelectedDroneId,
     selectedChat,
     setSelectedChat,
+    unreadAgentMessageByChatNodeId,
     chats,
     draftChats,
     transcripts,

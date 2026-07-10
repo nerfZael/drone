@@ -282,6 +282,7 @@ export function RemoteDroneHubApp() {
         drones={model.drones}
         selectedDroneId={model.selectedDrone?.id ?? null}
         activeChatName={model.selectedChat}
+        unreadAgentMessageByChatNodeId={model.unreadAgentMessageByChatNodeId}
         onOpenChange={setRemoteMobileSidebarOpen}
         onSelectDrone={model.setSelectedDroneId}
         onSelectChat={model.setSelectedChat}
@@ -298,6 +299,7 @@ export function RemoteDroneHubApp() {
           drones={model.drones}
           selectedDroneId={model.selectedDrone?.id ?? null}
           activeChatName={model.selectedChat}
+          unreadAgentMessageByChatNodeId={model.unreadAgentMessageByChatNodeId}
           onSelectDrone={model.setSelectedDroneId}
           onSelectChat={model.setSelectedChat}
           onOpenCreateDrone={openCreateDrone}
