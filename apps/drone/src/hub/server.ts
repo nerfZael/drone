@@ -440,6 +440,11 @@ import {
 import { permanentlyDeleteCanonicalDrone } from './drone-deletion-service';
 import { readCanonicalActiveDroneModel } from './canonical-drone-read-model';
 import {
+  FleetSnapshotDeliveryCache,
+  loadFleetReconcilerSnapshot,
+  type FleetReconcilerSnapshot,
+} from './fleet-reconciler-model';
+import {
   commitDroneMetadataPatch,
   renameDroneDisplayName,
   setDroneEnvironmentMetadata,
@@ -1259,9 +1264,12 @@ async function resolveDroneOrRejectUpgrade(socket: any, droneRef: string): Promi
 
 const FLEET_AUDIT_MAX_EVENTS = 500;
 const FLEET_RECONCILE_INTERVAL_MS = 1500;
+const FLEET_TASK_POLL_INTERVAL_MS = 10_000;
 
 let FLEET_RECONCILE_INTERVAL: ReturnType<typeof setInterval> | null = null;
 let FLEET_RECONCILE_BUSY = false;
+let FLEET_TASK_POLL_LAST_STARTED_AT = 0;
+const FLEET_SNAPSHOT_DELIVERY_CACHE = new FleetSnapshotDeliveryCache();
 const PROMPT_SKILL_SYNC_WARNINGS = new Set<string>();
 
 async function fleetWorkflowStoreOrCompatibility(): Promise<FleetWorkflowStore | null> {
@@ -1385,15 +1393,21 @@ function buildTaskStateSnapshotForDrone(regAny: any, droneId: string, droneEntry
   };
 }
 
-async function syncFleetPolicySnapshotToDrone(actorId: string, actorEntry: any): Promise<void> {
+type ResolvedFleetDaemon = Awaited<ReturnType<typeof resolveDroneDaemonClientForEntry>>;
+
+async function syncFleetPolicySnapshotToDrone(
+  actorId: string,
+  actorEntry: any,
+  snapshot?: FleetReconcilerSnapshot,
+  daemonOverride?: ResolvedFleetDaemon,
+  deliveryCache?: FleetSnapshotDeliveryCache,
+): Promise<void> {
   try {
-    const daemon = await resolveDroneDaemonClientForEntry(actorEntry);
-    if (!daemon) return;
-    const regAny: any = await loadRegistry();
+    const regAny = snapshot ?? await loadFleetReconcilerSnapshot();
     const actorConfig = fleetActorConfig(actorEntry);
     const limits = effectiveFleetLimits(actorEntry);
     const actorPayload = fleetActorPayload(regAny, actorId);
-    await droneFleetPolicySet(daemon.client, {
+    const payload = {
       apiVersion: FLEET_API_VERSION,
       enabled: actorConfig.enabled,
       actor: {
@@ -1414,32 +1428,56 @@ async function syncFleetPolicySnapshotToDrone(actorId: string, actorEntry: any):
       readScopes: actorConfig.readScopes,
       sendScopes: ['children', 'assigned'],
       limits,
-    });
-  } catch {
-    // ignore (best-effort sync)
-  }
-}
-
-async function syncTaskStateSnapshotToDrone(droneId: string, droneEntry: any): Promise<void> {
-  try {
-    const daemon = await resolveDroneDaemonClientForEntry(droneEntry);
+    };
+    const fingerprint = JSON.stringify(payload);
+    const cacheKey = `policy\0${actorId}`;
+    if (deliveryCache && !deliveryCache.needsDelivery(cacheKey, fingerprint)) return;
+    const daemon = daemonOverride === undefined ? await resolveDroneDaemonClientForEntry(actorEntry) : daemonOverride;
     if (!daemon) return;
-    const regAny: any = await loadRegistry();
-    await droneTasksStateSet(daemon.client, buildTaskStateSnapshotForDrone(regAny, droneId, droneEntry));
+    await droneFleetPolicySet(daemon.client, payload);
+    deliveryCache?.markDelivered(cacheKey, fingerprint);
   } catch {
     // ignore (best-effort sync)
   }
 }
 
-async function drainPendingTaskCreatesForDrone(droneId: string, droneEntry: any): Promise<void> {
+async function syncTaskStateSnapshotToDrone(
+  droneId: string,
+  droneEntry: any,
+  snapshot?: FleetReconcilerSnapshot,
+  daemonOverride?: ResolvedFleetDaemon,
+  deliveryCache?: FleetSnapshotDeliveryCache,
+): Promise<void> {
   try {
-    const daemon = await resolveDroneDaemonClientForEntry(droneEntry);
+    const regAny = snapshot ?? await loadFleetReconcilerSnapshot();
+    const payload = buildTaskStateSnapshotForDrone(regAny, droneId, droneEntry);
+    const { updatedAt: _updatedAt, ...stablePayload } = payload;
+    const fingerprint = JSON.stringify(stablePayload);
+    const cacheKey = `tasks\0${droneId}`;
+    if (deliveryCache && !deliveryCache.needsDelivery(cacheKey, fingerprint)) return;
+    const daemon = daemonOverride === undefined ? await resolveDroneDaemonClientForEntry(droneEntry) : daemonOverride;
+    if (!daemon) return;
+    await droneTasksStateSet(daemon.client, payload);
+    deliveryCache?.markDelivered(cacheKey, fingerprint);
+  } catch {
+    // ignore (best-effort sync)
+  }
+}
+
+async function drainPendingTaskCreatesForDrone(
+  droneId: string,
+  droneEntry: any,
+  snapshot?: FleetReconcilerSnapshot,
+  daemonOverride?: ResolvedFleetDaemon,
+): Promise<void> {
+  try {
+    const daemon = daemonOverride === undefined ? await resolveDroneDaemonClientForEntry(droneEntry) : daemonOverride;
     if (!daemon) return;
     const pending = await droneTasksPendingCreateList(daemon.client).catch(() => null);
     const requests = Array.isArray(pending?.requests) ? pending.requests : [];
     if (requests.length === 0) return;
     const acceptedIds = new Set<string>();
-    const registrySnapshot: any = await loadRegistry();
+    const registrySnapshot = snapshot ?? await loadFleetReconcilerSnapshot();
     const droneSnapshot = registrySnapshot?.drones?.[droneId] ?? null;
     if (!droneSnapshot) return;
     const playbook = playbookMetaFromEntry(droneSnapshot?.playbook);
@@ -1481,24 +1519,29 @@ async function drainPendingTaskCreatesForDrone(droneId: string, droneEntry: any)
     for (const requestId of acceptedIds) {
       await droneTasksPendingCreateAck(daemon.client, requestId, {}).catch(() => {});
     }
-    const regLatest: any = await loadRegistry();
+    const regLatest = await loadFleetReconcilerSnapshot();
     const latestDrone = regLatest?.drones?.[droneId] ?? null;
-    if (latestDrone) await syncTaskStateSnapshotToDrone(droneId, latestDrone);
+    if (latestDrone) await syncTaskStateSnapshotToDrone(droneId, latestDrone, regLatest, daemon);
   } catch {
     // ignore (best-effort sync)
   }
 }
 
-async function drainPendingTaskDeletesForDrone(droneId: string, droneEntry: any): Promise<void> {
+async function drainPendingTaskDeletesForDrone(
+  droneId: string,
+  droneEntry: any,
+  snapshot?: FleetReconcilerSnapshot,
+  daemonOverride?: ResolvedFleetDaemon,
+): Promise<void> {
   try {
-    const daemon = await resolveDroneDaemonClientForEntry(droneEntry);
+    const daemon = daemonOverride === undefined ? await resolveDroneDaemonClientForEntry(droneEntry) : daemonOverride;
     if (!daemon) return;
     const pending = await droneTasksPendingDeleteList(daemon.client).catch(() => null);
     const requests = Array.isArray(pending?.requests) ? pending.requests : [];
     if (requests.length === 0) return;
     const acknowledgedIds = new Set<string>();
     let boardChanged = false;
-    const registrySnapshot: any = await loadRegistry();
+    const registrySnapshot = snapshot ?? await loadFleetReconcilerSnapshot();
     const droneSnapshot = registrySnapshot?.drones?.[droneId] ?? null;
     if (!droneSnapshot) return;
     const playbook = playbookMetaFromEntry(droneSnapshot?.playbook);
@@ -1521,9 +1564,9 @@ async function drainPendingTaskDeletesForDrone(droneId: string, droneEntry: any)
       await droneTasksPendingDeleteAck(daemon.client, requestId, {}).catch(() => {});
     }
     if (!boardChanged) return;
-    const regLatest: any = await loadRegistry();
+    const regLatest = await loadFleetReconcilerSnapshot();
     const latestDrone = regLatest?.drones?.[droneId] ?? null;
-    if (latestDrone) await syncTaskStateSnapshotToDrone(droneId, latestDrone);
+    if (latestDrone) await syncTaskStateSnapshotToDrone(droneId, latestDrone, regLatest, daemon);
   } catch {
     // ignore (best-effort sync)
   }
@@ -1817,19 +1860,30 @@ async function runFleetReconcilerCycle(): Promise<void> {
   FLEET_RECONCILE_BUSY = true;
   try {
     await drainPlaybookRunLaunchQueue();
-    const regAny: any = await loadRegistry();
+    const regAny = await loadFleetReconcilerSnapshot();
+    const actorIds = new Set(Object.keys(regAny.drones ?? {}));
+    FLEET_SNAPSHOT_DELIVERY_CACHE.prune(actorIds);
+    const pollTasks = Date.now() - FLEET_TASK_POLL_LAST_STARTED_AT >= FLEET_TASK_POLL_INTERVAL_MS;
+    if (pollTasks) FLEET_TASK_POLL_LAST_STARTED_AT = Date.now();
     for (const [actorId, actorEntry] of Object.entries(regAny?.drones ?? {})) {
+      const fleetEnabled = fleetActorConfig(actorEntry).enabled;
       let daemon: Awaited<ReturnType<typeof resolveDroneDaemonClientForEntry>> | null = null;
-      try {
-        daemon = await resolveDroneDaemonClientForEntry(actorEntry);
-      } catch {
-        daemon = null;
+      if (pollTasks || fleetEnabled) {
+        try {
+          daemon = await resolveDroneDaemonClientForEntry(actorEntry);
+        } catch {
+          daemon = null;
+        }
       }
-      await syncFleetPolicySnapshotToDrone(String(actorId), actorEntry);
-      await syncTaskStateSnapshotToDrone(String(actorId), actorEntry);
-      await drainPendingTaskCreatesForDrone(String(actorId), actorEntry);
-      await drainPendingTaskDeletesForDrone(String(actorId), actorEntry);
+      const daemonOverride = pollTasks || fleetEnabled ? daemon : undefined;
+      await syncFleetPolicySnapshotToDrone(String(actorId), actorEntry, regAny, daemonOverride, FLEET_SNAPSHOT_DELIVERY_CACHE);
+      await syncTaskStateSnapshotToDrone(String(actorId), actorEntry, regAny, daemonOverride, FLEET_SNAPSHOT_DELIVERY_CACHE);
+      if (pollTasks) {
+        await drainPendingTaskCreatesForDrone(String(actorId), actorEntry, regAny, daemon);
+        await drainPendingTaskDeletesForDrone(String(actorId), actorEntry, regAny, daemon);
+      }
       if (!daemon) continue;
+      if (!fleetEnabled) continue;
       let requests: any[] = [];
       try {
         const [queued, running] = await Promise.all([
@@ -29811,6 +29865,8 @@ export async function startDroneHubApiServer(opts: {
         }
         FLEET_RECONCILE_INTERVAL = null;
       }
+      FLEET_SNAPSHOT_DELIVERY_CACHE.clear();
+      FLEET_TASK_POLL_LAST_STARTED_AT = 0;
       if (droneStatusRefreshTimer) {
         try {
           clearInterval(droneStatusRefreshTimer);
