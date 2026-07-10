@@ -1,9 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 import { updateRegistry } from '../src/host/registry';
 import {
+  deleteCanonicalDroneLifecycle,
+  patchCanonicalDroneLifecycle,
   resolveDroneFromRegistryRef,
   resolveDroneOrPendingForReadRef,
   setDroneHubMetaByIdentity,
+  upsertCanonicalDroneLifecycleBatch,
 } from '../src/hub/drone-lifecycle-service';
 import { withTempDroneDataDir } from './test-helpers';
 
@@ -72,6 +75,30 @@ describe('drone lifecycle service', () => {
         message: 'Seeding repo…',
         promptId: 'prompt-1',
       });
+    });
+  });
+
+  test('uses explicit registry compatibility commands when canonical SQLite is unavailable', async () => {
+    await withTempDroneDataDir('drone-lifecycle-service-', async () => {
+      await upsertCanonicalDroneLifecycleBatch([
+        {
+          state: 'pending',
+          droneId: 'drone-4',
+          entry: { id: 'drone-4', name: 'pending-four', runtime: 'container', phase: 'starting' },
+        },
+        {
+          state: 'pending',
+          droneId: 'drone-5',
+          entry: { id: 'drone-5', name: 'pending-five', runtime: 'host', phase: 'draft', draft: true },
+        },
+      ]);
+      await patchCanonicalDroneLifecycle('pending', 'drone-4', (entry) => ({ ...entry, phase: 'ready' }));
+      await deleteCanonicalDroneLifecycle('drone-5', 'pending');
+
+      const patched = await resolveDroneOrPendingForReadRef('drone-4');
+      expect(patched?.kind).toBe('pending');
+      expect((patched as any)?.pending?.phase).toBe('ready');
+      expect(await resolveDroneOrPendingForReadRef('drone-5')).toBeNull();
     });
   });
 });

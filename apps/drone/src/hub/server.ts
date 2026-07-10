@@ -423,10 +423,12 @@ import {
   resolveDroneOrPendingForReadRef,
   setDroneHubMetaByIdentity,
   upsertCanonicalDroneLifecycle,
+  upsertCanonicalDroneLifecycleBatch,
   type ResolvedDrone,
   type ResolvedOrPendingDrone,
 } from './drone-lifecycle-service';
 import {
+  commitDroneMetadataPatch,
   renameDroneDisplayName,
   setDroneEnvironmentMetadata,
   setDroneGroupMetadata,
@@ -1554,43 +1556,39 @@ async function processFleetRequest(actorId: string, actorEntry: any, request: an
     if (pendingGlobal >= limits.maxPendingCreationsGlobal) await reject(`global pending creation limit reached (${limits.maxPendingCreationsGlobal})`, 429);
     const childId = makeDroneIdentity();
     const at = nowIso();
-    await updateRegistry((regLatest: any) => {
-      if (findDroneIdByRef(regLatest, name)) throw fleetError(`drone already exists: ${name}`, 409);
-      ensureGroupRegistered(regLatest, group || null, at);
-      regLatest.pending = regLatest.pending ?? {};
-      regLatest.pending[childId] = {
-        id: childId,
-        name,
-        group: group || undefined,
-        runtime: droneRuntime(actorEntryLatest),
-        repoPath: String(actorEntryLatest?.repoPath ?? '').trim(),
-        containerPort: Number(actorEntryLatest?.containerPort ?? 7777),
-        build: false,
+    if (group) await ensureCanonicalGroup(group, at);
+    await upsertCanonicalDroneLifecycle('pending', childId, {
+      id: childId,
+      name,
+      group: group || undefined,
+      runtime: droneRuntime(actorEntryLatest),
+      repoPath: String(actorEntryLatest?.repoPath ?? '').trim(),
+      containerPort: Number(actorEntryLatest?.containerPort ?? 7777),
+      build: false,
+      createdAt: at,
+      updatedAt: at,
+      phase: 'starting',
+      message: 'Starting…',
+      ...(cloneParent ? { cloneFrom: actorId, cloneChats: false } : {}),
+      ...(cloneParent && sourceEnvironment ? { environment: sourceEnvironment } : {}),
+      ...(cloneParent && (sourceChatAgent || sourceChatModel)
+        ? {
+            seed: {
+              chatName: 'default',
+              ...(sourceChatAgent ? { agent: sourceChatAgent } : {}),
+              ...(sourceChatModel ? { model: sourceChatModel } : {}),
+            },
+          }
+        : {}),
+      fleet: setFleetActorConfig({}, {
+        createdBy: actorId,
         createdAt: at,
-        updatedAt: at,
-        phase: 'starting',
-        message: 'Starting…',
-        ...(cloneParent ? { cloneFrom: actorId, cloneChats: false } : {}),
-        ...(cloneParent && sourceEnvironment ? { environment: sourceEnvironment } : {}),
-        ...(cloneParent && (sourceChatAgent || sourceChatModel)
-          ? {
-              seed: {
-                chatName: 'default',
-                ...(sourceChatAgent ? { agent: sourceChatAgent } : {}),
-                ...(sourceChatModel ? { model: sourceChatModel } : {}),
-              },
-            }
-          : {}),
-        fleet: setFleetActorConfig({}, {
-          createdBy: actorId,
-          createdAt: at,
-          enabled: false,
-          capabilities: [],
-          readScopes: ['children'],
-          assigned: [],
-          quotas: {},
-        }).fleet,
-      };
+        enabled: false,
+        capabilities: [],
+        readScopes: ['children'],
+        assigned: [],
+        quotas: {},
+      }).fleet,
     });
     enqueueProvisioning(childId);
     await appendFleetAuditEvent({
@@ -4632,9 +4630,11 @@ async function reconcilePendingHostMirrorApply(opts: {
   const isCommitted = /^[0-9a-f]{40}$/.test(droneHeadSha) && (await gitIsAncestor(opts.repoRoot, pendingSha, 'HEAD'));
   if (!isCommitted) {
     await deleteHostRefBestEffort({ repoRoot: opts.repoRoot, refName: pendingRef });
-    await updateRegistry((reg2: any) => {
-      const dd = reg2?.drones?.[opts.droneId];
-      if (!dd) return;
+    await commitDroneMetadataPatch({
+      droneId: opts.droneId,
+      state: 'real',
+      eventType: 'drone.repo-mirror.aborted',
+      transform: (dd) => {
       dd.repo = dd.repo ?? {};
       const previousLastPull = dd.repo.lastPull && typeof dd.repo.lastPull === 'object' ? dd.repo.lastPull : {};
       dd.repo.lastPullAt = nowIso();
@@ -4650,8 +4650,8 @@ async function reconcilePendingHostMirrorApply(opts: {
         baseAdvanced: false,
         baseAdvanceError: null,
       };
-      reg2.drones = reg2.drones ?? {};
-      reg2.drones[opts.droneId] = dd;
+        return dd;
+      },
     });
     return {
       promoted: false,
@@ -4672,9 +4672,11 @@ async function reconcilePendingHostMirrorApply(opts: {
     if (pendingRef !== appliedRef) {
       await deleteHostRefBestEffort({ repoRoot: opts.repoRoot, refName: pendingRef });
     }
-    await updateRegistry((reg2: any) => {
-      const dd = reg2?.drones?.[opts.droneId];
-      if (!dd) return;
+    await commitDroneMetadataPatch({
+      droneId: opts.droneId,
+      state: 'real',
+      eventType: 'drone.repo-mirror.committed',
+      transform: (dd) => {
       dd.repo = dd.repo ?? {};
       const previousLastPull = dd.repo.lastPull && typeof dd.repo.lastPull === 'object' ? dd.repo.lastPull : {};
       dd.repo.lastPull = {
@@ -4687,8 +4689,8 @@ async function reconcilePendingHostMirrorApply(opts: {
         baseAdvanced: true,
         baseAdvanceError: null,
       };
-      reg2.drones = reg2.drones ?? {};
-      reg2.drones[opts.droneId] = dd;
+        return dd;
+      },
     });
     return {
       promoted: true,
@@ -5393,9 +5395,7 @@ async function startPlaybookRunLaunch(opts: {
           initialPromptIds: startupQueuedPrompts.map((item) => item.id),
         }
       : null;
-  await updateRegistry((regLatest: any) => {
-    regLatest.pending = regLatest.pending ?? {};
-    regLatest.pending[droneId] = {
+  await upsertCanonicalDroneLifecycle('pending', droneId, {
       id: droneId,
       name,
       kind: 'playbook-run',
@@ -5424,21 +5424,6 @@ async function startPlaybookRunLaunch(opts: {
       },
       startupQueuedPrompts,
       ...(queueGate ? { playbookQueueGate: queueGate } : {}),
-    };
-  });
-  await setDronePresentationMetadata({
-    droneId,
-    state: 'pending',
-    kind: 'playbook-run',
-    visibility: 'hidden',
-    playbook: {
-      id: playbook.id,
-      label: playbook.label,
-      messageCount: playbookMessages.length,
-      chatName: 'default',
-      artifacts: playbook.artifacts,
-      actions: playbookActions,
-    },
   });
   enqueueProvisioning(droneId);
   return {
@@ -5453,8 +5438,26 @@ async function startPlaybookRunLaunch(opts: {
 }
 
 async function drainPlaybookRunLaunchQueue(): Promise<void> {
-  await updateRegistry((regLatest:any)=>{reconcilePlaybookRunQueueGates(regLatest);});
-  const regLatest = await loadRegistry();
+  const regLatest: any = await loadRegistry();
+  const previousGates = new Map<string, string>();
+  for (const [state, bucket] of [['pending', regLatest?.pending], ['real', regLatest?.drones]] as const) {
+    for (const [droneId, entry] of Object.entries(bucket ?? {}) as Array<[string, any]>) {
+      previousGates.set(`${state}:${droneId}`, JSON.stringify(entry?.playbookQueueGate ?? null));
+    }
+  }
+  if (reconcilePlaybookRunQueueGates(regLatest)) {
+    for (const [state, bucket] of [['pending', regLatest?.pending], ['real', regLatest?.drones]] as const) {
+      for (const [droneId, entry] of Object.entries(bucket ?? {}) as Array<[string, any]>) {
+        if (previousGates.get(`${state}:${droneId}`) === JSON.stringify(entry?.playbookQueueGate ?? null)) continue;
+        await commitDroneMetadataPatch({
+          droneId,
+          state,
+          eventType: 'drone.playbook-queue-gate.released',
+          transform: (lifecycle) => ({ ...lifecycle, playbookQueueGate: entry.playbookQueueGate }),
+        });
+      }
+    }
+  }
   const items = await canonicalPlaybookQueueItems(regLatest);
   const store = await fleetWorkflowStoreOrCompatibility();
     const claimedSerialPlaybookIds = new Set<string>();
@@ -7180,13 +7183,7 @@ function buildFleetWorkPayload(regAny: any) {
 async function clearDroneHubState(droneIdRaw: string): Promise<void> {
   const droneId = normalizeDroneIdentity(droneIdRaw);
   if (!droneId) return;
-  await updateRegistry((regAny: any) => {
-    const entry = regAny?.drones?.[droneId];
-    if (!entry || typeof entry !== 'object') return;
-    if (entry.hub) delete entry.hub;
-    regAny.drones = regAny.drones ?? {};
-    regAny.drones[droneId] = entry;
-  });
+  await setDroneHubMetaByIdentity({ droneId, hub: null });
 }
 
 async function runDroneLifecycleAction(opts: {
@@ -11489,9 +11486,6 @@ async function removeDroneLifecycleEntryById(opts: {
     return { kind: result.hadEntry ? 'real' : 'none', removedRegistry: result.removedRegistry, removeErr: result.removeErr };
   }
   if (regSnapshot?.pending?.[droneId]) {
-    await updateRegistry((regAny: any) => {
-      if (regAny?.pending?.[droneId] && !regAny?.drones?.[droneId]) delete regAny.pending[droneId];
-    });
     await deleteCanonicalDroneLifecycle(droneId, 'pending');
     dequeueProvisioning(droneId);
     return { kind: 'pending', removedRegistry: false, removeErr: null };
@@ -12137,14 +12131,8 @@ async function removeArchivedDroneById(opts: { id: string; keepVolume: boolean }
   let removedArchive = false;
   if (containerGone) {
     const snapshotImageRefs = collectDockerSnapshotImageRefsFromDroneEntry(archivedEntry);
-    removedArchive = await updateRegistry((regAny: any) => {
-      if (!regAny?.archived?.[droneId]) return false;
-      delete regAny.archived[droneId];
-      if (Object.keys(regAny.archived).length === 0) delete regAny.archived;
-      return true;
-    });
+    removedArchive = Boolean(await deleteCanonicalDroneLifecycle(droneId, 'archived'));
     if (removedArchive) {
-      await deleteCanonicalDroneLifecycle(droneId, 'archived');
       await revokeMcpAccessTokensForDrone(droneId);
       await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, reason: 'delete-archived-drone' });
     }
@@ -12294,14 +12282,11 @@ async function refreshRegistryTokenFromContainer(opts: { droneId: string }): Pro
     token = String(token ?? '').trim();
     if (!token) return null;
 
-    await updateRegistry((regUpdate: any) => {
-      const d = regUpdate?.drones?.[droneId];
-      if (!d) return;
-      const current = typeof d.token === 'string' ? String(d.token) : '';
-      if (current === token) return;
-      d.token = token;
-      regUpdate.drones = regUpdate.drones ?? {};
-      regUpdate.drones[droneId] = d;
+    await commitDroneMetadataPatch({
+      droneId,
+      state: 'real',
+      eventType: 'drone.token.refreshed',
+      transform: (lifecycle) => ({ ...lifecycle, token }),
     });
 
     return token;
@@ -15662,21 +15647,23 @@ export async function startDroneHubApiServer(opts: {
     }
     if (hubPatches.length === 0) return;
     try {
-      await updateRegistry((regLatest: any) => {
-        for (const p of hubPatches) {
-          const id = normalizeDroneIdentity(p?.id);
-          if (!id) continue;
-          const d = regLatest?.drones?.[id];
-          if (!d) continue;
+      for (const p of hubPatches) {
+        const id = normalizeDroneIdentity(p?.id);
+        if (!id) continue;
+        await commitDroneMetadataPatch({
+          droneId: id,
+          state: 'real',
+          eventType: 'drone.seeding-status.reconciled',
+          transform: (d) => {
           if (p.hub == null) {
             delete d.hub;
           } else {
             d.hub = p.hub;
           }
-          regLatest.drones = regLatest.drones ?? {};
-          regLatest.drones[id] = d;
-        }
-      });
+            return d;
+          },
+        });
+      }
     } catch {
       // ignore
     }
@@ -15728,20 +15715,22 @@ export async function startDroneHubApiServer(opts: {
     if (autoClearedConflictErrors.size === 0) return;
     try {
       const cleared = Array.from(autoClearedConflictErrors.entries());
-      await updateRegistry((regLatest: any) => {
-        for (const [rawDroneId, conflictMode] of cleared) {
-          const droneId = normalizeDroneIdentity(rawDroneId);
-          if (!droneId) continue;
-          const d = regLatest?.drones?.[droneId];
-          if (!d) continue;
+      for (const [rawDroneId, conflictMode] of cleared) {
+        const droneId = normalizeDroneIdentity(rawDroneId);
+        if (!droneId) continue;
+        await commitDroneMetadataPatch({
+          droneId,
+          state: 'real',
+          eventType: 'drone.repo-conflict.cleared',
+          transform: (d) => {
           if (String(d?.hub?.phase ?? '').trim().toLowerCase() === 'error') delete d.hub;
           d.repo = d.repo ?? {};
           if (conflictMode === 'pull' && typeof d.repo.lastPullError === 'string') d.repo.lastPullError = null;
           if (conflictMode === 'push' && typeof d.repo.lastPushError === 'string') d.repo.lastPushError = null;
-          regLatest.drones = regLatest.drones ?? {};
-          regLatest.drones[droneId] = d;
-        }
-      });
+            return d;
+          },
+        });
+      }
     } catch {
       // ignore
     }
@@ -20349,26 +20338,27 @@ export async function startDroneHubApiServer(opts: {
         const createdEnvironment = await deriveCanonicalCreatedDroneEnvironmentConfig(preRegAny, { repoPath, runtime });
         const droneId = makeDroneIdentity();
         if (group) await ensureCanonicalGroup(group);
-        const pendingWrite: { ok: boolean; status?: number; error?: string } = await updateRegistry((regAny: any) => {
-          if (droneDisplayNameExists(regAny, name)) return { ok: false, status: 409, error: `drone already exists: ${name}` };
-          regAny.pending = regAny.pending ?? {};
-          const at = nowIso();
-          ensureGroupRegistered(regAny, group ?? null, at);
-          const startupQueuedPrompts =
-            createAsDraft && seedPrompt
-              ? [
-                  {
-                    id: seedPromptId || crypto.randomBytes(9).toString('hex'),
-                    chatName: seedChatName,
-                    at: seedSubmittedAt,
-                    prompt: seedPrompt,
-                    ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
-                    state: 'queued' as const,
-                    updatedAt: seedSubmittedAt,
-                  },
-                ]
-              : [];
-          regAny.pending[droneId] = {
+        if (droneDisplayNameExists(preRegAny, name)) {
+          json(res, 409, { ok: false, error: `drone already exists: ${name}` });
+          return;
+        }
+        const at = nowIso();
+        const startupQueuedPrompts =
+          createAsDraft && seedPrompt
+            ? [
+                {
+                  id: seedPromptId || crypto.randomBytes(9).toString('hex'),
+                  chatName: seedChatName,
+                  at: seedSubmittedAt,
+                  prompt: seedPrompt,
+                  ...(seedCwdRaw ? { cwd: String(seedCwdRaw) } : {}),
+                  state: 'queued' as const,
+                  updatedAt: seedSubmittedAt,
+                },
+              ]
+            : [];
+        try {
+          await upsertCanonicalDroneLifecycle('pending', droneId, {
             id: droneId,
             name,
             ...(createAsDraft ? { draft: true } : {}),
@@ -20415,12 +20405,13 @@ export async function startDroneHubApiServer(opts: {
                   },
                 }
               : {}),
-          };
-          return { ok: true };
-        });
-        if (!pendingWrite.ok) {
-          json(res, pendingWrite.status ?? 500, { ok: false, error: pendingWrite.error ?? 'failed to queue drone' });
-          return;
+          });
+        } catch (error: any) {
+          if (/display name already exists/i.test(String(error?.message ?? ''))) {
+            json(res, 409, { ok: false, error: `drone already exists: ${name}` });
+            return;
+          }
+          throw error;
         }
 
         if (!createAsDraft) enqueueProvisioning(droneId);
@@ -20610,7 +20601,10 @@ export async function startDroneHubApiServer(opts: {
         let rejected: Array<{ name: string; error: string; status?: number }> = [];
         try {
           const canonicalRepos = await canonicalRepositoriesMap();
-          const result = await updateRegistry((regAny: any) => {
+          const regAny: any = await loadRegistry();
+          const pendingEntries: Array<{ state: 'pending'; droneId: string; entry: any }> = [];
+          const groupsToEnsure = new Set<string>();
+          const result = (() => {
             regAny.pending = regAny.pending ?? {};
             const accepted: Array<{ id: string; name: string; phase: 'draft' | 'starting'; draft?: boolean }> = [];
             const rejected: Array<{ name: string; error: string; status?: number }> = [];
@@ -20765,7 +20759,7 @@ export async function startDroneHubApiServer(opts: {
 
               const id = makeDroneIdentity();
               const at = nowIso();
-              ensureGroupRegistered(regAny, group ?? null, at);
+              if (group) groupsToEnsure.add(group);
               const startupQueuedPrompts =
                 createAsDraft && seedPrompt
                   ? [
@@ -20780,7 +20774,7 @@ export async function startDroneHubApiServer(opts: {
                       },
                     ]
                   : [];
-              regAny.pending[id] = {
+              const pendingEntry = {
                 id,
                 name,
                 ...(createAsDraft ? { draft: true } : {}),
@@ -20829,12 +20823,16 @@ export async function startDroneHubApiServer(opts: {
                     }
                   : {}),
               };
+              regAny.pending[id] = pendingEntry;
+              pendingEntries.push({ state: 'pending', droneId: id, entry: pendingEntry });
 
               accepted.push({ id, name, phase: createAsDraft ? 'draft' : 'starting', ...(createAsDraft ? { draft: true } : {}) });
             }
 
             return { accepted, rejected };
-          });
+          })();
+          for (const groupName of groupsToEnsure) await ensureCanonicalGroup(groupName);
+          await upsertCanonicalDroneLifecycleBatch(pendingEntries);
           accepted = result.accepted;
           rejected = result.rejected;
         } catch (e: any) {
@@ -20965,17 +20963,19 @@ export async function startDroneHubApiServer(opts: {
         const droneId = resolved.id;
         const resolvedName = String(resolved.drone?.name ?? droneRef).trim() || droneRef;
         let cleared = false;
-        await updateRegistry((reg2: any) => {
-          const dd = reg2?.drones?.[droneId];
-          if (!dd) return;
+        await commitDroneMetadataPatch({
+          droneId,
+          state: 'real',
+          eventType: 'drone.hub-error.cleared',
+          transform: (dd) => {
           if (String(dd?.hub?.phase ?? '').trim().toLowerCase() === 'error') {
             delete dd.hub;
             cleared = true;
           }
           dd.repo = dd.repo ?? {};
           if (typeof dd.repo.lastPullError === 'string') dd.repo.lastPullError = null;
-          reg2.drones = reg2.drones ?? {};
-          reg2.drones[droneId] = dd;
+            return dd;
+          },
         });
         json(res, 200, { ok: true, id: droneId, name: resolvedName, cleared });
         return;
@@ -24018,9 +24018,11 @@ export async function startDroneHubApiServer(opts: {
               timeoutMs: defaultRepoSeedTimeoutMs(),
             });
           });
-          await updateRegistry((reg2: any) => {
-            const dd = reg2?.drones?.[droneId];
-            if (!dd) return;
+          await commitDroneMetadataPatch({
+            droneId,
+            state: 'real',
+            eventType: 'drone.repo.reseeded',
+            transform: (dd) => {
             dd.repoPath = repoRoot;
             dd.cwd = '/work/repo';
             dd.repo = dd.repo ?? {};
@@ -24029,8 +24031,8 @@ export async function startDroneHubApiServer(opts: {
             dd.repo.baseRef = baseRef;
             dd.repo.seededAt = nowIso();
             dd.repo.lastSeedError = null;
-            reg2.drones = reg2.drones ?? {};
-            reg2.drones[droneId] = dd;
+              return dd;
+            },
           });
           const regAfterReseed: any = await loadRegistry();
           const reseededDrone = regAfterReseed?.drones?.[droneId] ?? d;
@@ -24040,13 +24042,15 @@ export async function startDroneHubApiServer(opts: {
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
-          await updateRegistry((reg2: any) => {
-            const dd = reg2?.drones?.[droneId];
-            if (!dd) return;
+          await commitDroneMetadataPatch({
+            droneId,
+            state: 'real',
+            eventType: 'drone.repo-reseed.failed',
+            transform: (dd) => {
             dd.repo = dd.repo ?? {};
             dd.repo.lastSeedError = msg;
-            reg2.drones = reg2.drones ?? {};
-            reg2.drones[droneId] = dd;
+              return dd;
+            },
           });
           await setDroneHubMetaByIdentity({ droneId, hub: { phase: 'error', message: `Repo seed failed: ${msg}` } });
           json(res, 500, { ok: false, error: msg });
@@ -24245,9 +24249,11 @@ export async function startDroneHubApiServer(opts: {
           });
 
           if (mergeResult.ok) {
-            await updateRegistry((reg2: any) => {
-              const dd = reg2?.drones?.[droneId];
-              if (!dd) return;
+            await commitDroneMetadataPatch({
+              droneId,
+              state: 'real',
+              eventType: 'drone.repo-push.completed',
+              transform: (dd) => {
               dd.repo = dd.repo ?? {};
               dd.repo.baseRef = fromRef;
               dd.repo.lastPushAt = nowIso();
@@ -24263,8 +24269,8 @@ export async function startDroneHubApiServer(opts: {
                 baseAdvanced,
                 baseAdvanceError,
               };
-              reg2.drones = reg2.drones ?? {};
-              reg2.drones[droneId] = dd;
+                return dd;
+              },
             });
             await setDroneHubMetaByIdentity({ droneId, hub: null });
             json(res, 200, {
@@ -24307,9 +24313,11 @@ export async function startDroneHubApiServer(opts: {
               fromRef,
               importRefName,
             });
-            await updateRegistry((reg2: any) => {
-              const dd = reg2?.drones?.[droneId];
-              if (!dd) return;
+            await commitDroneMetadataPatch({
+              droneId,
+              state: 'real',
+              eventType: 'drone.repo-push.conflicted',
+              transform: (dd) => {
               dd.repo = dd.repo ?? {};
               dd.repo.lastPushAt = nowIso();
               dd.repo.lastPushError = fullMsg;
@@ -24324,8 +24332,8 @@ export async function startDroneHubApiServer(opts: {
                 baseAdvanced,
                 baseAdvanceError,
               };
-              reg2.drones = reg2.drones ?? {};
-              reg2.drones[droneId] = dd;
+                return dd;
+              },
             });
             await setDroneHubMetaByIdentity({
               droneId,
@@ -24358,9 +24366,11 @@ export async function startDroneHubApiServer(opts: {
             importRefName,
             error: msg,
           });
-          await updateRegistry((reg2: any) => {
-            const dd = reg2?.drones?.[droneId];
-            if (!dd) return;
+          await commitDroneMetadataPatch({
+            droneId,
+            state: 'real',
+            eventType: 'drone.repo-push.failed',
+            transform: (dd) => {
             dd.repo = dd.repo ?? {};
             dd.repo.lastPushAt = nowIso();
             dd.repo.lastPushError = msg;
@@ -24375,8 +24385,8 @@ export async function startDroneHubApiServer(opts: {
               baseAdvanced,
               baseAdvanceError,
             };
-            reg2.drones = reg2.drones ?? {};
-            reg2.drones[droneId] = dd;
+              return dd;
+            },
           });
           await setDroneHubMetaByIdentity({ droneId, hub: { phase: 'error', message: `Repo push failed: ${msg}` } });
           json(res, 500, {
@@ -24735,9 +24745,11 @@ export async function startDroneHubApiServer(opts: {
 
           if (noChangesToPull) {
             await tryAdvanceContainerExportBase();
-            await updateRegistry((reg2: any) => {
-              const dd = reg2?.drones?.[droneId];
-              if (!dd) return;
+            await commitDroneMetadataPatch({
+              droneId,
+              state: 'real',
+              eventType: 'drone.repo-pull.no-changes',
+              transform: (dd) => {
               dd.repo = dd.repo ?? {};
               dd.repo.baseRef = fromRef;
               dd.repo.dest = dd.repo.dest ?? '/work/repo';
@@ -24770,8 +24782,8 @@ export async function startDroneHubApiServer(opts: {
                 droneAutoCommitSha,
                 droneAutoCommitMessage,
               };
-              reg2.drones = reg2.drones ?? {};
-              reg2.drones[droneId] = dd;
+                return dd;
+              },
             });
             hubLog('info', 'Repo pull completed with no new commits', { droneName, repoRoot, fromRef, exportedHeadSha });
             await setDroneHubMetaByIdentity({ droneId, hub: null });
@@ -24818,9 +24830,11 @@ export async function startDroneHubApiServer(opts: {
                 importRefName,
                 error: importMsg,
               });
-              await updateRegistry((reg2: any) => {
-                const dd = reg2?.drones?.[droneId];
-                if (!dd) return;
+              await commitDroneMetadataPatch({
+                droneId,
+                state: 'real',
+                eventType: 'drone.repo-pull.missing-prerequisite',
+                transform: (dd) => {
                 dd.repo = dd.repo ?? {};
                 dd.repo.lastPullAt = nowIso();
                 dd.repo.lastPullError = `${userMsg}\n\n${importMsg}`;
@@ -24841,8 +24855,8 @@ export async function startDroneHubApiServer(opts: {
                   prePullBaseAdvanced,
                   prePullBaseAdvanceError,
                 };
-                reg2.drones = reg2.drones ?? {};
-                reg2.drones[droneId] = dd;
+                  return dd;
+                },
               });
               await setDroneHubMetaByIdentity({ droneId, hub: { phase: 'error', message: 'Repo pull needs reseed (history mismatch)' } });
               json(res, 409, {
@@ -24896,9 +24910,11 @@ export async function startDroneHubApiServer(opts: {
           await applyBranchMergeNoCommitToMainWorkingTree({ repoRoot, branch: mirrorCandidateRef, applyConflictsToHost });
           mirrorAppliedToHost = true;
 
-          await updateRegistry((reg2: any) => {
-            const dd = reg2?.drones?.[droneId];
-            if (!dd) return;
+          await commitDroneMetadataPatch({
+            droneId,
+            state: 'real',
+            eventType: 'drone.repo-pull.pending',
+            transform: (dd) => {
             dd.repo = dd.repo ?? {};
             dd.repo.baseRef = fromRef;
             dd.repo.dest = dd.repo.dest ?? '/work/repo';
@@ -24931,8 +24947,8 @@ export async function startDroneHubApiServer(opts: {
               droneAutoCommitSha,
               droneAutoCommitMessage,
             };
-            reg2.drones = reg2.drones ?? {};
-            reg2.drones[droneId] = dd;
+              return dd;
+            },
           });
 
           await setDroneHubMetaByIdentity({ droneId, hub: null });
@@ -24984,9 +25000,11 @@ export async function startDroneHubApiServer(opts: {
                 importRefName,
                 error: msg,
               });
-              await updateRegistry((reg2: any) => {
-                const dd = reg2?.drones?.[droneId];
-                if (!dd) return;
+              await commitDroneMetadataPatch({
+                droneId,
+                state: 'real',
+                eventType: 'drone.repo-pull.prepare-conflicted',
+                transform: (dd) => {
                 dd.repo = dd.repo ?? {};
                 dd.repo.lastPullAt = nowIso();
                 dd.repo.lastPullError = fullMsg;
@@ -25013,8 +25031,8 @@ export async function startDroneHubApiServer(opts: {
                   prePullBaseAdvanced,
                   prePullBaseAdvanceError,
                 };
-                reg2.drones = reg2.drones ?? {};
-                reg2.drones[droneId] = dd;
+                  return dd;
+                },
               });
               await setDroneHubMetaByIdentity({ droneId, hub: { phase: 'error', message: 'Repo pull found conflicts before host apply' } });
               json(res, 409, {
@@ -25055,9 +25073,11 @@ export async function startDroneHubApiServer(opts: {
               fromRef,
               importRefName,
             });
-            await updateRegistry((reg2: any) => {
-              const dd = reg2?.drones?.[droneId];
-              if (!dd) return;
+            await commitDroneMetadataPatch({
+              droneId,
+              state: 'real',
+              eventType: 'drone.repo-pull.conflicted',
+              transform: (dd) => {
               dd.repo = dd.repo ?? {};
               dd.repo.lastPullAt = nowIso();
               dd.repo.lastPullError = fullMsg;
@@ -25086,8 +25106,8 @@ export async function startDroneHubApiServer(opts: {
                 prePullBaseAdvanced,
                 prePullBaseAdvanceError,
               };
-              reg2.drones = reg2.drones ?? {};
-              reg2.drones[droneId] = dd;
+                return dd;
+              },
             });
             await setDroneHubMetaByIdentity({
               droneId,
@@ -25125,9 +25145,11 @@ export async function startDroneHubApiServer(opts: {
             importRefName,
             error: msg,
           });
-          await updateRegistry((reg2: any) => {
-            const dd = reg2?.drones?.[droneId];
-            if (!dd) return;
+          await commitDroneMetadataPatch({
+            droneId,
+            state: 'real',
+            eventType: 'drone.repo-pull.failed',
+            transform: (dd) => {
             dd.repo = dd.repo ?? {};
             dd.repo.lastPullAt = nowIso();
             dd.repo.lastPullError = msg;
@@ -25148,8 +25170,8 @@ export async function startDroneHubApiServer(opts: {
               prePullBaseAdvanced,
               prePullBaseAdvanceError,
             };
-            reg2.drones = reg2.drones ?? {};
-            reg2.drones[droneId] = dd;
+              return dd;
+            },
           });
           await setDroneHubMetaByIdentity({ droneId, hub: { phase: 'error', message: `Repo pull failed: ${msg}` } });
           json(res, statusCode, {
@@ -25967,17 +25989,29 @@ export async function startDroneHubApiServer(opts: {
           json(res, 500, { ok: false, error: `drone CLI not found at ${droneCli}` });
           return;
         }
-        const published = await updateRegistry((regAny: any) => {
-          const draft = regAny?.pending?.[droneId];
-          if (!draft || regAny?.drones?.[droneId] || !isDraftDroneEntry(draft)) return null;
-          draft.draft = false;
-          draft.phase = 'starting';
-          draft.message = 'Starting…';
-          draft.updatedAt = nowIso();
-          regAny.pending = regAny.pending ?? {};
-          regAny.pending[droneId] = draft;
-          return { id: droneId, name: String(draft?.name ?? droneId).trim() || droneId, runtime: normalizeDroneRuntime(draft?.runtime) };
-        });
+        let published: { id: string; name: string; runtime: DroneRuntime } | null = null;
+        try {
+          const record = await commitDroneMetadataPatch({
+            droneId,
+            state: 'pending',
+            eventType: 'drone.draft.published',
+            transform: (draft) => {
+              if (!isDraftDroneEntry(draft)) throw new Error('drone is not a draft');
+              draft.draft = false;
+              draft.phase = 'starting';
+              draft.message = 'Starting…';
+              draft.updatedAt = nowIso();
+              return draft;
+            },
+          });
+          published = {
+            id: droneId,
+            name: String(record.lifecycle?.name ?? droneId).trim() || droneId,
+            runtime: normalizeDroneRuntime(record.lifecycle?.runtime),
+          };
+        } catch (error: any) {
+          if (!/not a draft|unknown drone/i.test(String(error?.message ?? ''))) throw error;
+        }
         if (!published) {
           json(res, 409, { ok: false, error: `drone is not a draft: ${droneRef}` });
           return;
@@ -26172,14 +26206,11 @@ export async function startDroneHubApiServer(opts: {
         const archiveRetention = deleteSettings.archiveRetention;
         const archiveRuntimePolicy = deleteSettings.archiveRuntimePolicy;
 
-        const pendingResult = await updateRegistry((regAny: any) => {
-          if (regAny?.drones?.[droneId]) return { kind: 'real' as const };
-          if (regAny?.pending?.[droneId]) {
-            delete regAny.pending[droneId];
-            return { kind: 'pending' as const };
-          }
-          return { kind: 'none' as const };
-        });
+        const pendingResult = regAnySnapshot?.drones?.[droneId]
+          ? { kind: 'real' as const }
+          : regAnySnapshot?.pending?.[droneId]
+            ? { kind: (await deleteCanonicalDroneLifecycle(droneId, 'pending')) ? 'pending' as const : 'none' as const }
+            : { kind: 'none' as const };
         if (pendingResult.kind === 'pending') {
           dequeueProvisioning(droneId);
           json(res, 200, {

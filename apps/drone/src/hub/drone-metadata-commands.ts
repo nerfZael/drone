@@ -17,26 +17,6 @@ async function repositoryWithBackfill() {
   return repository;
 }
 
-async function projectLifecycleToRegistry(record: CanonicalDroneLifecycleRecord): Promise<void> {
-  await updateRegistry((registry: any) => {
-    const bucketName = record.state === 'real' ? 'drones' : record.state === 'pending' ? 'pending' : 'archived';
-    const bucket = registry?.[bucketName];
-    const found = findDroneEntryByIdentity({ drones: bucket }, record.id);
-    if (!found) return;
-    const current = found.entry;
-    const chats = current.chats;
-    const archivedChats = current.archivedChats;
-    bucket[found.key] = {
-      ...record.lifecycle,
-      id: record.id,
-      name: record.name,
-      ...(record.containerName ? { containerName: record.containerName } : {}),
-      ...(chats !== undefined ? { chats } : {}),
-      ...(archivedChats !== undefined ? { archivedChats } : {}),
-    };
-  });
-}
-
 export async function commitDroneMetadataPatch(opts: {
   droneId: string;
   state?: CanonicalDroneLifecycleState;
@@ -89,11 +69,12 @@ export async function commitDroneMetadataPatch(opts: {
     payload: { id: opts.droneId, state, ...(opts.payload ?? {}) },
   });
   if (!record) throw new Error(`unknown drone: ${opts.droneId}`);
-  const project = opts.dependencies?.project ?? projectLifecycleToRegistry;
-  try {
-    await project(record);
-  } catch {
-    // Compatibility projection cannot invalidate a committed canonical command.
+  if (opts.dependencies?.project) {
+    try {
+      await opts.dependencies.project(record);
+    } catch {
+      // Compatibility projection cannot invalidate a committed canonical command.
+    }
   }
   return record;
 }

@@ -25,6 +25,13 @@ export type CanonicalDroneLifecycleRecord = {
   updatedAt: string;
 };
 
+export type CanonicalDroneLifecycleUpsert = {
+  state: CanonicalDroneLifecycleState;
+  id: string;
+  entry: unknown;
+  event: Omit<AppendHubOutboxEvent, 'aggregateType' | 'aggregateId'>;
+};
+
 type LifecycleRow = {
   drone_id: string;
   name: string;
@@ -373,6 +380,24 @@ export class DroneLifecycleRepository {
         payload: event.payload ?? { id, state, version: record.version },
       });
       return record;
+    });
+  }
+
+  commitUpsertBatch(items: CanonicalDroneLifecycleUpsert[]): Promise<CanonicalDroneLifecycleRecord[]> {
+    return this.database.writeTransaction('commit canonical drone lifecycle batch', (connection) => {
+      const records: CanonicalDroneLifecycleRecord[] = [];
+      for (const item of items) {
+        const id = normalizeId(item.id);
+        const record = writeRecord(connection, item.state, id, item.entry, new Date().toISOString());
+        appendHubOutboxEvent(connection, {
+          ...item.event,
+          aggregateType: 'drone',
+          aggregateId: id,
+          payload: item.event.payload ?? { id, state: item.state, version: record.version },
+        });
+        records.push(record);
+      }
+      return records;
     });
   }
 
