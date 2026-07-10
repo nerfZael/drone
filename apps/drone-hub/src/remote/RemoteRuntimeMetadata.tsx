@@ -6,7 +6,7 @@ import { repoPathLabel } from '../droneHub/app/repo-path-label';
 import {
   displayedChatModelTitle,
   formatAgentModelMetadata,
-  latestTranscriptModel,
+  latestTranscriptRuntime,
   resolveDisplayedChatModel,
 } from '../droneHub/app/selected-drone-workspace-utils';
 
@@ -40,14 +40,15 @@ export function RemoteRuntimeMetadata({
   const normalizedRepoPath = String(repoPath ?? '').trim();
   const runtimeUnavailable = Boolean(error && !agent);
   const agentLabel = remoteAgentLabel(agent);
+  const transcriptRuntime = latestTranscriptRuntime(transcripts);
   const displayedModel = resolveDisplayedChatModel(
     configuredModel,
     [],
     false,
     agent?.kind === 'builtin',
-    latestTranscriptModel(transcripts),
+    transcriptRuntime.model,
   );
-  const agentModelLabel = formatAgentModelMetadata(agentLabel, displayedModel);
+  const agentModelLabel = formatAgentModelMetadata(agentLabel, displayedModel, transcriptRuntime.reasoning);
 
   return (
     <div
@@ -68,7 +69,7 @@ export function RemoteRuntimeMetadata({
         ) : (
           <span
             className="min-w-0 max-w-[240px] truncate font-mono"
-            title={`${agentLabel} · ${displayedChatModelTitle(displayedModel)}`}
+            title={`${agentLabel} · ${displayedChatModelTitle(displayedModel, transcriptRuntime.reasoning)}`}
           >
             {agentModelLabel}
           </span>

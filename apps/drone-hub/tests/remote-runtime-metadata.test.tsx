@@ -10,7 +10,7 @@ function renderMetadata(overrides: Partial<React.ComponentProps<typeof RemoteRun
       repoPath="/work/repo"
       agent={{ kind: 'builtin', id: 'codex' }}
       configuredModel={null}
-      transcripts={[{ ok: true, model: 'gpt-test' } as any]}
+      transcripts={[{ ok: true, model: 'gpt-test', reasoning: 'high' } as any]}
       loading={false}
       error={null}
       draft={false}
@@ -23,7 +23,7 @@ describe('RemoteRuntimeMetadata', () => {
   test('shows repo, agent CLI, and detected model without the old container-only subtitle', () => {
     const html = renderMetadata();
     expect(html).toContain('repo');
-    expect(html).toContain('Codex (gpt-test)');
+    expect(html).toContain('Codex (gpt-test high)');
     expect(html).not.toContain('>CLI<');
     expect(html).not.toContain('>Model<');
     expect(html).not.toContain('Container-only remote surface');

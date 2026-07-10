@@ -21,6 +21,7 @@ export type StoredTranscriptTurn = {
   promptAt?: string;
   completedAt?: string;
   model?: string;
+  reasoning?: string;
   attachments?: unknown;
   automation?: unknown;
   inheritedFromClone?: boolean;
@@ -346,6 +347,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
     ...(typeof raw?.promptAt === 'string' && raw.promptAt.trim() ? { promptAt: raw.promptAt.trim() } : {}),
     ...(typeof raw?.completedAt === 'string' && raw.completedAt.trim() ? { completedAt: raw.completedAt.trim() } : {}),
     ...(typeof raw?.model === 'string' && raw.model.trim() ? { model: raw.model.trim() } : {}),
+    ...(typeof raw?.reasoning === 'string' && raw.reasoning.trim() ? { reasoning: raw.reasoning.trim() } : {}),
     ...(Array.isArray(raw?.attachments) ? { attachments: raw.attachments } : {}),
     ...(raw?.automation && typeof raw.automation === 'object' ? { automation: raw.automation } : {}),
     ...(raw?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
