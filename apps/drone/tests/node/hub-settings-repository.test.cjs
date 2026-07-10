@@ -12,7 +12,7 @@ const {
 } = require('../../dist/host/hub-settings-repository.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const { readRegistryJsonFromSqlite } = require('../../dist/host/sqlite-registry-store.js');
-const { updateRegistry } = require('../../dist/host/registry.js');
+const { saveRegistry, updateRegistry } = require('../../dist/host/registry.js');
 const {
   resolveUiPreferencesSettingsResponse,
   clearStoredProviderApiKey,
@@ -130,13 +130,12 @@ describe('remaining canonical Hub settings', () => {
   test('imports a legacy secret once, gives canonical state precedence, and tombstones clears', async () => {
     useTempDroneDataDir('secret-migration');
     delete process.env.OPENAI_API_KEY;
-    await updateRegistry((registry) => {
-      registry.settings ??= {};
-      registry.settings.openai = {
+    await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {}, settings: {
+      openai: {
         apiKey: 'legacy-openai-key',
         updatedAt: '2026-01-02T03:04:05.000Z',
-      };
-    });
+      },
+    } });
 
     const migrated = await resolveEffectiveProviderApiKeySettings('openai');
     assert.equal(migrated.apiKey, 'legacy-openai-key');
@@ -184,15 +183,14 @@ describe('remaining canonical Hub settings', () => {
 
   test('preserves partial-update API behavior while importing legacy composite values', async () => {
     useTempDroneDataDir('delete-action-api');
-    await updateRegistry((registry) => {
-      registry.settings ??= {};
-      registry.settings.deleteAction = {
+    await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {}, settings: {
+      deleteAction: {
         mode: 'archive',
         archiveRetention: '1w',
         archiveRuntimePolicy: 'keep-running',
         updatedAt: '2026-02-03T04:05:06.000Z',
-      };
-    });
+      },
+    } });
 
     await upsertStoredDeleteActionSettings({ archiveRuntimePolicy: 'stop' });
     const response = await resolveDeleteActionSettingsResponse();
@@ -246,14 +244,13 @@ describe('canonical UI preferences settings', () => {
 
   test('backfills legacy UI preferences once and gives canonical data precedence afterward', async () => {
     useTempDroneDataDir('legacy-backfill');
-    await updateRegistry((registry) => {
-      registry.settings ??= {};
-      registry.settings.uiPreferences = {
+    await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {}, settings: {
+      uiPreferences: {
         autoDelete: true,
         spawnAgentKey: 'builtin:codex',
         updatedAt: '2026-01-02T03:04:05.000Z',
-      };
-    });
+      },
+    } });
 
     const backfilled = await resolveUiPreferencesSettingsResponse();
     assert.equal(backfilled.uiPreferences.autoDelete, true);

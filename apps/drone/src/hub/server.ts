@@ -15,6 +15,12 @@ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
 
 import { ensureContainerDroneDaemonSession } from '../host/container-daemon';
 import { getFleetWorkflowStore, type FleetWorkflowStore } from '../host/fleet-workflow-store';
+import {
+  HubOutboxDispatcher,
+  HubOutboxDispatchLoop,
+  HubOutboxRepository,
+} from '../host/hub-outbox';
+import { getHubDatabase } from '../host/hub-database';
 import { droneRootPath } from '../host/paths';
 import { readActiveProfileName } from '../host/profiles';
 import {
@@ -29582,6 +29588,22 @@ export async function startDroneHubApiServer(opts: {
   });
 
   await new Promise<void>((resolve) => server.listen(opts.port, host, () => resolve()));
+  const outboxDatabase = getHubDatabase();
+  const hubOutboxDispatchLoop = outboxDatabase ? new HubOutboxDispatchLoop(
+    new HubOutboxDispatcher(new HubOutboxRepository(outboxDatabase), async () => {
+      // Canonical transactions only enqueue. Projection/SSE effects happen here,
+      // after claim commit, and are coalesced by the existing refresh scheduler.
+      notifyDroneRegistryWrite?.();
+    }),
+    {
+      intervalMs: 500,
+      batchSize: 25,
+      onError: (error) => hubLog('warn', 'hub outbox dispatch failed', {
+        error: error instanceof Error ? error.message : String(error),
+      }),
+    },
+  ) : null;
+  hubOutboxDispatchLoop?.start();
   void auditStartupRegistryPresence();
   startDroneStatusRefresher();
   scheduleDroneSummaryMaintenance('startup', 0);
@@ -29647,6 +29669,7 @@ export async function startDroneHubApiServer(opts: {
           }
         : null,
     close: async () => {
+      await hubOutboxDispatchLoop?.stop();
       if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
         activeDroneHubMcpProjectionConfig = null;
       }

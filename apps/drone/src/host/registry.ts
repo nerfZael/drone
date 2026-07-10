@@ -4,6 +4,11 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { droneRootPath, legacyDroneRootDirs } from './paths';
+import {
+  getLegacyResidualStateRepository,
+  mergeRegistryResidualState,
+} from './legacy-residual-state';
+import { applyRegistryCompatibilityMutation } from './registry-compatibility-writes';
 import { normalizeDroneRuntime, type DroneRuntime } from './runtime';
 import {
   getSqliteRegistryStoreUnavailableReason,
@@ -659,9 +664,14 @@ function legacyRegistryPaths(): string[] {
   return Array.from(new Set(candidates));
 }
 
+// Compatibility transforms may span a residual transaction followed by
+// canonical repository commands. Keep that bridge FIFO within the process;
+// each individual repository command remains its own short SQLite transaction.
+let legacyRegistryUpdateQueue: Promise<void> = Promise.resolve();
+
 function registryLockPath(): string {
-  // Simple cross-process lockfile next to the registry.
-  // NOTE: This is a dev tool; a lockfile is sufficient and avoids native deps.
+  // Bun/native-binding fallback only. Node writes use canonical repositories or
+  // the short legacy_residual_state SQLite transaction instead.
   const p = registryPath();
   return path.join(path.dirname(p), 'registry.json.lock');
 }
@@ -1341,7 +1351,14 @@ async function consolidateRegistryPaths(): Promise<DroneRegistry | null> {
   return preferred;
 }
 
-export async function loadRegistry(): Promise<DroneRegistry> {
+/**
+ * Reads the migration-era registry snapshot without overlaying canonical stores.
+ *
+ * Canonical read models must use this as their seed to avoid recursively loading
+ * themselves. Most callers should continue to use `loadRegistry()` until they
+ * have moved to a domain repository or the compatibility projection.
+ */
+export async function loadRegistryRawSnapshot(): Promise<DroneRegistry> {
   const sqliteRaw = readRegistryJsonFromSqlite();
   if (sqliteRaw === undefined && (await sqlitePrimaryExists())) {
     const reason = getSqliteRegistryStoreUnavailableReason();
@@ -1349,7 +1366,13 @@ export async function loadRegistry(): Promise<DroneRegistry> {
   }
   if (typeof sqliteRaw === 'string') {
     const sqliteRegistry = parseRegistry(sqliteRaw);
-    if (sqliteRegistry) return sqliteRegistry;
+    if (sqliteRegistry) {
+      // A registry.json created after the one-time migration is not a live
+      // writer. Preserve it as recovery evidence, then remove it immediately
+      // instead of waiting for a later compatibility update.
+      await backupAndRemoveRegistryJsonBestEffort(registryPath());
+      return sqliteRegistry;
+    }
     throw new Error('hub SQLite registry state is invalid');
   }
 
@@ -1366,6 +1389,23 @@ export async function loadRegistry(): Promise<DroneRegistry> {
   }
 
   return normalized;
+}
+
+/** Reads the compatibility base (raw migration seed plus live residual state). */
+export async function loadRegistryCompatibilityBase(): Promise<DroneRegistry> {
+  const raw = await loadRegistryRawSnapshot();
+  const residual = getLegacyResidualStateRepository();
+  if (!residual) return raw;
+  const state = residual.read() ?? await residual.seedIfAbsent(raw);
+  return mergeRegistryResidualState(raw, state);
+}
+
+export async function loadRegistry(): Promise<DroneRegistry> {
+  if ((globalThis as any).Bun) return await loadRegistryCompatibilityBase();
+  // Dynamic import keeps the migration seed acyclic: the projection itself
+  // reads `loadRegistryCompatibilityBase`, never this projected entry point.
+  const { buildHubStateProjection } = await import('./hub-state-projection');
+  return await buildHubStateProjection();
 }
 
 export async function saveRegistry(reg: DroneRegistry): Promise<void> {
@@ -1403,8 +1443,8 @@ async function setPrivateFileModeBestEffort(p: string): Promise<void> {
 }
 
 /**
- * Acquire an exclusive lock for short read/modify/write operations on the registry.
- * Prefer `updateRegistry()` for correctness.
+ * Acquire the legacy registry.json lock explicitly. Production Node paths no
+ * longer call this; it remains public for Bun/native-binding compatibility.
  */
 export async function withRegistryLock<T>(fn: () => Promise<T>, opts?: { timeoutMs?: number; staleAfterMs?: number }): Promise<T> {
   const lock = await acquireRegistryLock(opts);
@@ -1416,17 +1456,29 @@ export async function withRegistryLock<T>(fn: () => Promise<T>, opts?: { timeout
 }
 
 /**
- * Safely update the registry under an exclusive lock.
- *
- * This avoids "lost update" races when multiple hub/CLI processes write the registry file
- * concurrently (e.g. batch provisioning, multiple `drone create`, pending state updates).
- *
- * Keep the callback fast: do not run long-lived operations while holding the lock.
+ * Updates stripped compatibility state through SQLite on Node and translates
+ * remaining registry-first lifecycle/chat changes into canonical commands.
+ * Bun retains the registry.json lock fallback when native SQLite is unavailable.
  */
 export async function updateRegistry<T>(
   mutator: (reg: DroneRegistry) => T | Promise<T>,
   opts?: { timeoutMs?: number; staleAfterMs?: number }
 ): Promise<T> {
+  const residual = getLegacyResidualStateRepository();
+  if (residual) {
+    const previous = legacyRegistryUpdateQueue;
+    let resolveCurrent!: () => void;
+    legacyRegistryUpdateQueue = new Promise<void>((resolve) => { resolveCurrent = resolve; });
+    await previous.catch(() => {});
+    try {
+      const compatibility = await loadRegistry();
+      const updated = await residual.update(compatibility, mutator as (reg: DroneRegistry) => T);
+      await applyRegistryCompatibilityMutation(compatibility, updated.state);
+      return updated.result;
+    } finally {
+      resolveCurrent();
+    }
+  }
   return await withRegistryLock(async () => {
     const reg = await loadRegistry();
     const result = await mutator(reg);

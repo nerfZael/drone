@@ -14,7 +14,7 @@ const { looksLikeTransientPromptEnqueueError } = require('../../dist/hub/pending
 const { createDronePendingPromptStore } = require('../../dist/hub/drone-pending-prompts.js');
 const { createPendingDroneStateHelpers } = require('../../dist/hub/drone-pending-state.js');
 const { resetTranscriptStoreForTests } = require('../../dist/hub/transcript-store.js');
-const { loadRegistry, updateRegistry } = require('../../dist/host/registry.js');
+const { loadRegistryRawSnapshot, updateRegistry } = require('../../dist/host/registry.js');
 
 const originalDroneDataDir = process.env.DRONE_DATA_DIR;
 const roots = [];
@@ -313,17 +313,14 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
       },
     };
   });
+  const rawBeforeEnqueue = await loadRegistryRawSnapshot();
 
   await store.pushPendingPrompt({
     droneId: 'alpha',
     chatName: 'default',
     pending: prompt('canonical', now),
   });
-  assert.deepEqual(
-    (await loadRegistry()).drones.alpha.chats.default.pendingPrompts,
-    [],
-    'enqueue must not mirror into the registry',
-  );
+  assert.deepEqual(await loadRegistryRawSnapshot(), rawBeforeEnqueue, 'enqueue must not mirror into registry_json');
   assert.deepEqual(
     (await store.readPendingPrompts({ droneId: 'alpha', chatName: 'default' })).map((item) => ({
       id: item.id,
@@ -349,6 +346,6 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
     (await store.readPendingPrompts({ droneId: 'alpha', chatName: 'default' }))[0].state,
     'sent',
   );
-  assert.deepEqual((await loadRegistry()).drones.alpha.chats.default.pendingPrompts, []);
+  assert.deepEqual(await loadRegistryRawSnapshot(), rawBeforeEnqueue);
   resetTranscriptStoreForTests();
 });

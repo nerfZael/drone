@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 
 import { getHubSettingsRepository } from './hub-settings-repository';
+import { buildHubStateProjection } from './hub-state-projection';
 import { droneRootPath } from './paths';
 import { loadRegistry, type DroneRegistry } from './registry';
 import { hubSqlitePath, readRegistryJsonFromSqlitePath } from './sqlite-registry-store';
@@ -484,7 +485,13 @@ async function createRegistryBackupUnlocked(kind: 'hourly' | 'daily' | 'manual',
   const bucket = backupBucket(kind);
   if (!opts?.force && kind !== 'manual' && (await manifestForBucket(kind, bucket))) return null;
 
-  const reg = await loadRegistry();
+  // Export a compatibility snapshot assembled from canonical owners. Bun may
+  // not be able to load Node's native SQLite binding, so retain the raw legacy
+  // snapshot only as that runtime's migration fallback.
+  const reg = await buildHubStateProjection().catch((error) => {
+    if ((globalThis as any).Bun) return loadRegistry();
+    throw error;
+  });
   const counts = registryCounts(reg);
   const latestHealthy = await latestHealthyManifest();
   if (counts.total === 0 && latestHealthy && latestHealthy.counts.total >= SUSPICIOUS_EMPTY_MIN_PREVIOUS) {
