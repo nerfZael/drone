@@ -69,7 +69,7 @@ import {
   displayedChatModelTitle,
   formatAgentModelMetadata,
   formatBytes,
-  latestTranscriptModel,
+  latestTranscriptRuntime,
   parseGithubPullRequestHref,
   resolveDisplayedChatModel,
 } from './selected-drone-workspace-utils';
@@ -637,15 +637,16 @@ export function SelectedDroneWorkspace({
   });
   const compactRepoPath = String(currentDrone.repoPath ?? '').trim();
   const compactRepoLabel = compactRepoPath ? repoPathLabel(compactRepoPath) : '';
+  const compactTranscriptRuntime = latestTranscriptRuntime(transcripts);
   const compactModel = resolveDisplayedChatModel(
     currentModel,
     availableChatModels,
     loadingChatModels,
     modelControlEnabled,
-    latestTranscriptModel(transcripts),
+    compactTranscriptRuntime.model,
   );
-  const compactModelTitle = displayedChatModelTitle(compactModel);
-  const compactAgentModelLabel = formatAgentModelMetadata(agentLabel, compactModel);
+  const compactModelTitle = displayedChatModelTitle(compactModel, compactTranscriptRuntime.reasoning);
+  const compactAgentModelLabel = formatAgentModelMetadata(agentLabel, compactModel, compactTranscriptRuntime.reasoning);
   const showCompactRuntimeMetadata = hasChats && chatRuntimeMetadataAvailable;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;

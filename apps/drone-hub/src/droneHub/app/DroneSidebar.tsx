@@ -455,6 +455,8 @@ function StaticReadOnlySidebarTree({
   activeChatName,
   busyChatNodeIdSet,
   unreadAgentMessageByChatNodeId,
+  disabledDroneReasonById,
+  droneStatusHintById,
   collapsedGroups,
   uiDroneName,
   onSelectDroneCard,
@@ -471,6 +473,8 @@ function StaticReadOnlySidebarTree({
   activeChatName: string;
   busyChatNodeIdSet: Set<string>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
+  disabledDroneReasonById: Record<string, string>;
+  droneStatusHintById: Record<string, string>;
   collapsedGroups: Record<string, boolean>;
   uiDroneName: (nameRaw: string) => string;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
@@ -496,6 +500,7 @@ function StaticReadOnlySidebarTree({
     );
     const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
     const selected = selectedDroneSet.has(drone.id);
+    const disabledReason = String(disabledDroneReasonById[drone.id] ?? '').trim();
     const defaultChatNodeId = createCanvasChatNodeId(drone.id, 'default');
     const defaultChatBusy =
       (Array.isArray(drone.busyChats) && drone.busyChats.includes('default')) ||
@@ -509,6 +514,8 @@ function StaticReadOnlySidebarTree({
           density={sidebarDensityMode}
           displayName={uiDroneName(drone.name)}
           selected={selected}
+          disabled={Boolean(disabledReason)}
+          disabledReason={disabledReason || undefined}
           highlighted={highlightedDroneIds.has(drone.id)}
           active={selectedDrone === drone.id && hasOnlyDefaultChat && activeChatName === 'default'}
           activeIndicatorStyle="edge"
@@ -518,6 +525,7 @@ function StaticReadOnlySidebarTree({
           selectionTone="muted"
           showSelectionEdge={false}
           busy={busy && hasOnlyDefaultChat}
+          statusHint={droneStatusHintById[drone.id]}
           unreadAgentMessage={
             hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true
           }
@@ -537,13 +545,18 @@ function StaticReadOnlySidebarTree({
                 <button
                   key={chatName}
                   type="button"
+                  disabled={Boolean(disabledReason)}
                   className={`relative flex items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${
-                    active
-                      ? 'border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.045)] text-[var(--fg)]'
-                      : 'border-transparent text-[var(--muted)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] hover:text-[var(--fg-secondary)]'
+                    disabledReason
+                      ? 'cursor-not-allowed border-transparent text-[var(--muted-dim)] opacity-60'
+                      : active
+                        ? 'border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.045)] text-[var(--fg)]'
+                        : 'border-transparent text-[var(--muted)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] hover:text-[var(--fg-secondary)]'
                   }`}
-                  onClick={() => onSelectDroneChat(drone.id, chatName)}
-                  title={`${uiDroneName(drone.name)} / ${chatName}`}
+                  onClick={() => {
+                    if (!disabledReason) onSelectDroneChat(drone.id, chatName);
+                  }}
+                  title={disabledReason || `${uiDroneName(drone.name)} / ${chatName}`}
                 >
                   {active ? (
                     <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
@@ -1384,6 +1397,7 @@ export type DroneSidebarProps = {
   settingBaseImages: Record<string, boolean>;
   movingDroneGroups: boolean;
   sidebarGroups: SidebarGroup[];
+  sidebarGroupCreatedAtByName: Record<string, string | null>;
   sidebarHiddenGroupCount: number;
   collapsedGroups: Record<string, boolean>;
   deletingGroups: Record<string, boolean>;
@@ -1451,6 +1465,8 @@ export type DroneSidebarProps = {
   fillContainer?: boolean;
   readOnlyMode?: DroneSidebarReadOnlyMode;
   headerAccessory?: React.ReactNode;
+  readOnlyDisabledDroneReasonById?: Record<string, string>;
+  readOnlyDroneStatusHintById?: Record<string, string>;
 };
 
 export function DroneSidebar({
@@ -1472,6 +1488,7 @@ export function DroneSidebar({
   settingBaseImages,
   movingDroneGroups,
   sidebarGroups,
+  sidebarGroupCreatedAtByName,
   sidebarHiddenGroupCount,
   collapsedGroups,
   deletingGroups,
@@ -1516,6 +1533,8 @@ export function DroneSidebar({
   fillContainer,
   readOnlyMode = 'read-only',
   headerAccessory,
+  readOnlyDisabledDroneReasonById = {},
+  readOnlyDroneStatusHintById = {},
 }: DroneSidebarProps) {
   const sidebarCapabilities = React.useMemo(
     () => resolveDroneSidebarCapabilities(capabilities),
@@ -1600,7 +1619,11 @@ export function DroneSidebar({
     [sidebarRepoScopedGroupByPath],
   );
   const visibleFolderNodeOrderByParent = React.useMemo(() => {
-    const baseSidebarFolderTree = buildSidebarFolderTree(sidebarGroups, sidebarGroupOrder);
+    const baseSidebarFolderTree = buildSidebarFolderTree(
+      sidebarGroups,
+      sidebarGroupOrder,
+      sidebarGroupCreatedAtByName,
+    );
     const nodeTree = buildSidebarNodeTree({
       sidebarFolderTree: baseSidebarFolderTree,
       sidebarGroups,
@@ -1608,6 +1631,7 @@ export function DroneSidebar({
       repoScopedGroupPathsByRepoGroup,
       sidebarDroneOrderByGroup,
       sidebarNodeOrderByParent,
+      sidebarGroupCreatedAtByName,
     });
     return Object.fromEntries(
       Object.entries(nodeTree.childIdsByParent).map(([parentId, childIds]) => [
@@ -1620,6 +1644,7 @@ export function DroneSidebar({
     sidebarDroneOrderByGroup,
     sidebarGroupOrder,
     sidebarGroups,
+    sidebarGroupCreatedAtByName,
     sidebarNodeOrderByParent,
   ]);
   const handleRenameGroup = React.useCallback(
@@ -1732,6 +1757,7 @@ export function DroneSidebar({
     showHiddenSidebarGroups,
     sidebarGroupOrder,
     sidebarGroupingMode: effectiveSidebarGroupingMode,
+    sidebarGroupCreatedAtByName,
   });
   const staticReadOnlyNodeTree = React.useMemo(
     () =>
@@ -1742,6 +1768,7 @@ export function DroneSidebar({
         repoScopedGroupPathsByRepoGroup,
         sidebarDroneOrderByGroup,
         sidebarNodeOrderByParent,
+        sidebarGroupCreatedAtByName,
       }),
     [
       renderSidebarGroups,
@@ -1750,6 +1777,7 @@ export function DroneSidebar({
       sidebarFolderTree,
       sidebarGroupOrder,
       sidebarNodeOrderByParent,
+      sidebarGroupCreatedAtByName,
     ],
   );
   const {
@@ -2699,6 +2727,8 @@ export function DroneSidebar({
                 activeChatName={activeChatName}
                 busyChatNodeIdSet={busyChatNodeIdSet}
                 unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
+                disabledDroneReasonById={readOnlyDisabledDroneReasonById}
+                droneStatusHintById={readOnlyDroneStatusHintById}
                 collapsedGroups={collapsedGroups}
                 uiDroneName={uiDroneName}
                 onSelectDroneCard={onSelectDroneCard}
@@ -2784,6 +2814,7 @@ export function DroneSidebar({
                     ) : null}
                     <GroupedSidebarTree
                       sidebarGroups={renderSidebarGroups}
+                      sidebarGroupCreatedAtByName={sidebarGroupCreatedAtByName}
                       sidebarDensityMode={sidebarDensityMode}
                       sidebarFolderTree={sidebarFolderTree}
                       sidebarGroupOrder={sidebarGroupOrder}

@@ -309,31 +309,60 @@ function useAssistantViewportHeight() {
 }
 
 function modelSelectionKey(selection: { provider: string; model: string; thinkingLevel: string }): string {
-  return `${selection.provider}:${selection.model}:${selection.thinkingLevel}`;
+  return `${selection.provider}:${selection.model}`;
 }
 
 function modelSelectionLabel(selection: { provider: string; model: string; thinkingLevel: string }, options: AssistantModelOption[]): string {
-  const match = options.find((option) => modelSelectionKey({ provider: option.provider, model: option.id, thinkingLevel: option.thinkingLevel }) === modelSelectionKey(selection));
+  const match = options.find((option) => option.provider === selection.provider && option.id === selection.model);
   if (match) return match.name;
-  return `${selection.provider}/${selection.model}${selection.thinkingLevel !== 'off' ? ` ${selection.thinkingLevel}` : ''}`;
+  return selection.model;
 }
 
 function compactModelSelectionLabel(label: string): string {
   return label.replace(/^Codex\s+/, '').replace(/^GPT-/, '').replace(/\bMedium\b/, 'Med');
 }
 
+function uniqueAssistantModels(options: AssistantModelOption[]): AssistantModelOption[] {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    const key = `${option.provider}:${option.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function assistantReasoningLabel(level: string): string {
+  if (level === 'off') return 'None';
+  if (level === 'xhigh') return 'X-high';
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
+function DefaultModelStar({ selected }: { selected: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill={selected ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m12 3.2 2.65 5.37 5.93.86-4.29 4.18 1.01 5.91L12 16.73l-5.3 2.79 1.01-5.91-4.29-4.18 5.93-.86L12 3.2Z" />
+    </svg>
+  );
+}
+
+function reasoningMenuEntries(options: AssistantModelOption[], provider: string, model: string, fallbackLevel: string): UiMenuSelectEntry[] {
+  const levels = new Set(
+    options
+      .filter((option) => option.provider === provider && option.id === model)
+      .map((option) => option.thinkingLevel),
+  );
+  if (levels.size === 0) levels.add(fallbackLevel);
+  return [...levels].map((level) => ({ value: level, label: assistantReasoningLabel(level) }));
+}
+
 function modelMenuEntry(model: AssistantModelOption): UiMenuSelectEntry {
   const key = modelSelectionKey({ provider: model.provider, model: model.id, thinkingLevel: model.thinkingLevel });
   return {
     value: key,
-    title: `${model.provider}/${model.id}${model.thinkingLevel !== 'off' ? ` ${model.thinkingLevel}` : ''}`,
-    searchText: `${model.provider} ${model.name} ${model.id} ${model.thinkingLevel}`,
-    label: (
-      <span className="flex w-full min-w-0 items-center justify-between gap-2.5">
-        <span className="min-w-0 truncate font-display text-[10px] font-bold uppercase">{compactModelSelectionLabel(model.name)}</span>
-        <small className="shrink-0 text-[10px] normal-case text-[var(--muted)]">{model.provider}{model.thinkingLevel !== 'off' ? ` · ${model.thinkingLevel}` : ''}</small>
-      </span>
-    ),
+    title: model.id,
+    searchText: `${model.name} ${model.id}`,
+    label: <span className="min-w-0 truncate font-display text-[10px] font-bold uppercase">{compactModelSelectionLabel(model.name)}</span>,
   };
 }
 
@@ -3950,15 +3979,15 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
   const codexConnection = assistantSnapshotData?.codexConnection ?? { connected: false, accountId: null, expiresAt: null, updatedAt: null };
   const assistantSettings = assistantSnapshotData?.assistantSettings ?? null;
   const activeProvider = activeThread?.provider ?? 'openai';
-  const activeModel = activeThread?.model ?? 'chat-latest';
-  const activeThinkingLevel = activeThread?.thinkingLevel ?? 'off';
+  const activeModel = activeThread?.model ?? 'gpt-5.6-luna';
+  const activeThinkingLevel = activeThread?.thinkingLevel ?? 'medium';
   const defaultProvider = assistantSettings?.defaultProvider ?? 'openai';
-  const defaultModel = assistantSettings?.defaultModel ?? 'chat-latest';
-  const defaultThinkingLevel = assistantSettings?.defaultThinkingLevel ?? 'off';
+  const defaultModel = assistantSettings?.defaultModel ?? 'gpt-5.6-luna';
+  const defaultThinkingLevel = assistantSettings?.defaultThinkingLevel ?? 'medium';
   const modelOptions = assistantSnapshotData?.models ?? [];
   const providerOptions = ASSISTANT_PROVIDERS.map((provider) => ({
     ...provider,
-    models: modelOptions.filter((model) => model.provider === provider.id),
+    models: uniqueAssistantModels(modelOptions.filter((model) => model.provider === provider.id)),
   }));
   const activeProviderModels = providerOptions.find((provider) => provider.id === activeProvider)?.models ?? [];
   const selectedModelKey = activeThread ? modelSelectionKey({ provider: activeProvider, model: activeModel, thinkingLevel: activeThinkingLevel }) : '';
@@ -3995,9 +4024,18 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
         ]
       : defaultProviderModels;
   const defaultModelMenuEntries: UiMenuSelectEntry[] = displayedDefaultModelOptions.map(modelMenuEntry);
+  const activeReasoningMenuEntries = activeThread
+    ? reasoningMenuEntries(modelOptions, activeProvider, activeModel, activeThinkingLevel)
+    : [];
+  const defaultReasoningMenuEntries = assistantSettings
+    ? reasoningMenuEntries(modelOptions, defaultProvider, defaultModel, defaultThinkingLevel)
+    : [];
   const selectedDefaultModelLabel = assistantSettings
     ? modelSelectionLabel({ provider: defaultProvider, model: defaultModel, thinkingLevel: defaultThinkingLevel }, modelOptions)
     : 'Model';
+  const activeModelIsDefault = Boolean(
+    activeThread && assistantSettings && defaultProvider === activeProvider && defaultModel === activeModel,
+  );
   const codexNeedsReconnect = activeProvider === 'codex' && !codexConnection.connected && /Codex authentication has expired|Connect Codex|Reconnect Codex/i.test(activeThread?.error ?? '');
   const providerAuthLabel = activeProvider === 'codex'
     ? codexConnection.connected
@@ -4717,7 +4755,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                             const nextModel = provider.models[0];
                             void updateThreadSettings({
                               provider: provider.id,
-                              ...(nextModel ? { model: nextModel.id, thinkingLevel: nextModel.thinkingLevel } : {}),
+                              ...(nextModel ? { model: nextModel.id } : {}),
                             });
                           }}
                           className={cn(
@@ -4746,23 +4784,57 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                       void updateThreadSettings({ assistantProfileId: value });
                     }}
                   />
+                  <div className="flex min-w-0 items-center gap-1.5">
+                    <UiMenuSelect
+                      value={selectedModelKey}
+                      entries={modelMenuEntries}
+                      variant="toolbar"
+                      role="listbox"
+                      itemRole="option"
+                      title={selectedModelLabel}
+                      header="Model"
+                      searchable
+                      searchPlaceholder="Search models"
+                      triggerLabel={compactModelSelectionLabel(selectedModelLabel)}
+                      panelClassName="w-[220px]"
+                      disabled={!activeThread || busy}
+                      onValueChange={(value) => {
+                        const [provider, nextModel] = value.split(':');
+                        void updateThreadSettings({ provider, model: nextModel });
+                      }}
+                    />
+                    <button
+                      type="button"
+                      disabled={!activeThread || busy}
+                      aria-pressed={activeModelIsDefault}
+                      aria-label={activeModelIsDefault ? 'Current default model' : 'Set current model as default'}
+                      title={activeModelIsDefault ? 'Default model for new threads' : 'Make this the default model for new threads'}
+                      onClick={() => {
+                        if (activeModelIsDefault) return;
+                        void updateAssistantSettings({ defaultProvider: activeProvider, defaultModel: activeModel });
+                      }}
+                      className={cn(
+                        'inline-flex h-7 w-7 shrink-0 items-center justify-center rounded border transition-colors disabled:cursor-not-allowed disabled:opacity-45',
+                        activeModelIsDefault
+                          ? 'border-[rgba(250,204,21,.42)] bg-[rgba(250,204,21,.10)] text-[var(--yellow)]'
+                          : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] text-[var(--muted-dim)] hover:border-[rgba(250,204,21,.28)] hover:text-[var(--yellow)]',
+                      )}
+                    >
+                      <DefaultModelStar selected={activeModelIsDefault} />
+                    </button>
+                  </div>
                   <UiMenuSelect
-                    value={selectedModelKey}
-                    entries={modelMenuEntries}
+                    value={activeThinkingLevel}
+                    entries={activeReasoningMenuEntries}
                     variant="toolbar"
                     role="listbox"
                     itemRole="option"
-                    title={selectedModelLabel}
-                    header="Model"
-                    searchable
-                    searchPlaceholder="Search models"
-                    triggerLabel={compactModelSelectionLabel(selectedModelLabel)}
-                    panelClassName="w-[220px]"
-                    disabled={!activeThread || busy}
-                    onValueChange={(value) => {
-                      const [provider, nextModel, thinkingLevel] = value.split(':');
-                      void updateThreadSettings({ provider, model: nextModel, thinkingLevel });
-                    }}
+                    title={`Reasoning: ${assistantReasoningLabel(activeThinkingLevel)}`}
+                    header="Reasoning"
+                    triggerLabel={assistantReasoningLabel(activeThinkingLevel)}
+                    panelClassName="w-[160px]"
+                    disabled={!activeThread || busy || activeReasoningMenuEntries.length === 0}
+                    onValueChange={(thinkingLevel) => void updateThreadSettings({ thinkingLevel })}
                   />
                   <div className="inline-flex shrink-0 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]" role="group" aria-label="Assistant message delivery">
                     {(['queue', 'asap'] as const).map((mode) => (
@@ -5349,11 +5421,11 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                     <h2 className={assistantPanelTitleClass}>New Thread Model</h2>
                   </div>
                   <span className="max-w-[220px] truncate text-right text-[11px] text-[var(--muted)]">
-                    {assistantSettings ? `${defaultProvider}/${defaultModel}${defaultThinkingLevel !== 'off' ? ` · ${defaultThinkingLevel}` : ''}` : 'Loading'}
+                    {assistantSettings ? selectedDefaultModelLabel : 'Loading'}
                   </span>
                 </div>
                 <div className="grid gap-2.5">
-                  <div className="grid grid-cols-[minmax(160px,220px)_minmax(220px,1fr)] items-end gap-2.5 max-[760px]:grid-cols-1">
+                  <div className="grid grid-cols-[minmax(160px,220px)_minmax(220px,1fr)_minmax(140px,180px)] items-end gap-2.5 max-[900px]:grid-cols-1">
                     <div className={assistantFieldLabelClass}>
                       <span>Provider</span>
                       <div className="inline-flex h-[30px] min-w-0 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]" role="group" aria-label="Default assistant provider">
@@ -5371,7 +5443,7 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                                 const nextModel = provider.models[0];
                                 void updateAssistantSettings({
                                   defaultProvider: provider.id,
-                                  ...(nextModel ? { defaultModel: nextModel.id, defaultThinkingLevel: nextModel.thinkingLevel } : {}),
+                                  ...(nextModel ? { defaultModel: nextModel.id } : {}),
                                 });
                               }}
                               className={cn(
@@ -5402,9 +5474,26 @@ function AppShell({ client, identitySlot }: { client: ApiClient; identitySlot: R
                         panelClassName="w-[260px]"
                         disabled={busy || !assistantSettings || defaultModelMenuEntries.length === 0}
                         onValueChange={(value) => {
-                          const [provider, nextModel, thinkingLevel] = value.split(':');
-                          void updateAssistantSettings({ defaultProvider: provider, defaultModel: nextModel, defaultThinkingLevel: thinkingLevel });
+                          const [provider, nextModel] = value.split(':');
+                          void updateAssistantSettings({ defaultProvider: provider, defaultModel: nextModel });
                         }}
+                      />
+                    </div>
+                    <div className={assistantFieldLabelClass}>
+                      <span>Reasoning</span>
+                      <UiMenuSelect
+                        value={defaultThinkingLevel}
+                        entries={defaultReasoningMenuEntries}
+                        role="listbox"
+                        itemRole="option"
+                        title={`Default reasoning: ${assistantReasoningLabel(defaultThinkingLevel)}`}
+                        header="Default reasoning"
+                        triggerLabel={assistantReasoningLabel(defaultThinkingLevel)}
+                        triggerClassName="h-[30px]"
+                        placement="below"
+                        panelClassName="w-[180px]"
+                        disabled={busy || !assistantSettings || defaultReasoningMenuEntries.length === 0}
+                        onValueChange={(defaultThinkingLevel) => void updateAssistantSettings({ defaultThinkingLevel })}
                       />
                     </div>
                   </div>

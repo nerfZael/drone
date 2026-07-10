@@ -8,6 +8,7 @@ type RemoteMobileSidebarDrawerProps = {
   drones: DroneSummary[];
   selectedDroneId: string | null;
   activeChatName: string;
+  unreadAgentMessageByChatNodeId: Record<string, boolean>;
   onOpenChange: (open: boolean) => void;
   onSelectDrone: (droneId: string) => void;
   onSelectChat: (chatName: string) => void;
@@ -39,6 +40,7 @@ function RemoteMobileSidebarDrawerComponent({
   drones,
   selectedDroneId,
   activeChatName,
+  unreadAgentMessageByChatNodeId,
   onOpenChange,
   onSelectDrone,
   onSelectChat,
@@ -119,6 +121,7 @@ function RemoteMobileSidebarDrawerComponent({
             drones={drones}
             selectedDroneId={selectedDroneId}
             activeChatName={activeChatName}
+            unreadAgentMessageByChatNodeId={unreadAgentMessageByChatNodeId}
             onSelectDrone={selectDrone}
             onSelectChat={selectChat}
             onOpenCreateDrone={onOpenCreateDrone}

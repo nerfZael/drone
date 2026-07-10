@@ -139,8 +139,37 @@ describe('assistant thread isolation', () => {
         const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
 
         expect(thread.provider).toBe('openai');
-        expect(thread.model).toBe('gpt-5.5');
+        expect(thread.model).toBe('gpt-5.6-sol');
         expect(thread.thinkingLevel).toBe('off');
+      } finally {
+        if (previousCodexAuthFile == null) delete process.env.DRONE_HUB_CODEX_AUTH_FILE;
+        else process.env.DRONE_HUB_CODEX_AUTH_FILE = previousCodexAuthFile;
+      }
+    });
+  });
+
+  test('persists the selected default model and uses it for new threads', async () => {
+    await withTempDroneDataDir('assistant-default-model-', async (droneDataDir) => {
+      const previousCodexAuthFile = process.env.DRONE_HUB_CODEX_AUTH_FILE;
+      process.env.DRONE_HUB_CODEX_AUTH_FILE = path.join(droneDataDir, 'missing-codex-auth.json');
+      try {
+        const service = makeService();
+        installFakeRuntime(service, {});
+        await service.createThread({ title: 'first thread' });
+
+        const updated = await service.updateDefaultModel({ provider: 'openai', model: 'gpt-5.6-terra' });
+        expect(updated.defaultModel).toEqual({ provider: 'openai', model: 'gpt-5.6-terra' });
+
+        const next = await service.createThread({ title: 'uses default' });
+        const nextThread = next.threads.find((item) => item.id === next.activeThreadId) as any;
+        expect(nextThread.model).toBe('gpt-5.6-terra');
+
+        const reloadedService = makeService();
+        installFakeRuntime(reloadedService, {});
+        const reloaded = await reloadedService.createThread({ title: 'uses persisted default' });
+        const reloadedThread = reloaded.threads.find((item) => item.id === reloaded.activeThreadId) as any;
+        expect(reloaded.defaultModel).toEqual({ provider: 'openai', model: 'gpt-5.6-terra' });
+        expect(reloadedThread.model).toBe('gpt-5.6-terra');
       } finally {
         if (previousCodexAuthFile == null) delete process.env.DRONE_HUB_CODEX_AUTH_FILE;
         else process.env.DRONE_HUB_CODEX_AUTH_FILE = previousCodexAuthFile;
@@ -884,7 +913,7 @@ describe('assistant thread isolation', () => {
     });
   });
 
-  test('defaults new assistant threads to Codex GPT-5.5 instant when Codex is connected', async () => {
+  test('defaults new assistant threads to Codex GPT-5.6 Sol with no reasoning when Codex is connected', async () => {
     await withTempDroneDataDir('assistant-default-codex-', async (droneDataDir) => {
       const previousCodexAuthFile = process.env.DRONE_HUB_CODEX_AUTH_FILE;
       const authPath = path.join(droneDataDir, 'codex-auth.json');
@@ -901,7 +930,7 @@ describe('assistant thread isolation', () => {
         const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
 
         expect(thread.provider).toBe('codex');
-        expect(thread.model).toBe('gpt-5.5');
+        expect(thread.model).toBe('gpt-5.6-sol');
         expect(thread.thinkingLevel).toBe('off');
       } finally {
         if (previousCodexAuthFile == null) delete process.env.DRONE_HUB_CODEX_AUTH_FILE;
@@ -1031,7 +1060,7 @@ describe('assistant thread isolation', () => {
     });
   });
 
-  test('offers the same GPT-5.5 assistant model choices for Codex as OpenAI', async () => {
+  test('offers the same GPT-5.6 assistant model choices for Codex as OpenAI', async () => {
     await withTempDroneDataDir('assistant-codex-model-options-', async () => {
       const service = makeService();
       installFakeRuntime(service, {});
@@ -1040,13 +1069,21 @@ describe('assistant thread isolation', () => {
       const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
       const codexOptions = snapshot.models.filter((option) => option.provider === 'codex');
 
-      expect(thread.model).toBe('gpt-5.5');
+      expect(thread.model).toBe('gpt-5.6-sol');
       expect(thread.thinkingLevel).toBe('off');
-      expect(codexOptions.map((option) => `${option.id}:${option.thinkingLevel}`)).toEqual([
-        'gpt-5.5:off',
-        'gpt-5.5:low',
-        'gpt-5.5:medium',
-        'gpt-5.5:high',
+      expect(codexOptions.filter((option) => option.id.startsWith('gpt-5.6-')).map((option) => `${option.id}:${option.thinkingLevel}`)).toEqual([
+        'gpt-5.6-sol:off',
+        'gpt-5.6-sol:low',
+        'gpt-5.6-sol:medium',
+        'gpt-5.6-sol:high',
+        'gpt-5.6-terra:off',
+        'gpt-5.6-terra:low',
+        'gpt-5.6-terra:medium',
+        'gpt-5.6-terra:high',
+        'gpt-5.6-luna:off',
+        'gpt-5.6-luna:low',
+        'gpt-5.6-luna:medium',
+        'gpt-5.6-luna:high',
       ]);
     });
   });

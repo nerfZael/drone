@@ -1,7 +1,7 @@
 import React from 'react';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary } from '../types';
-import { compareDronesByNewestFirst, isHiddenDrone } from './helpers';
+import { compareDronesByNewestFirst, isHiddenDrone, parseIsoTimestampMs } from './helpers';
 import { isStartupSeedFresh } from './app-config';
 import type { StartupSeedState } from './app-types';
 import { orderSidebarEntries, orderSidebarGroups, sidebarGroupOrderToken } from './sidebar-group-order';
@@ -37,8 +37,24 @@ type UseSidebarViewModelArgs = {
   activeRepoPath: string;
   showRecentDronesOnly: boolean;
   registryGroupNames: string[];
+  registryGroupCreatedAtByName: Record<string, string | null>;
   registeredRepoPaths: string[];
 };
+
+function compareGroupNamesByNewestFirst(
+  a: string,
+  b: string,
+  createdAtByName: Record<string, string | null>,
+): number {
+  if (isUngroupedGroupName(a) && !isUngroupedGroupName(b)) return -1;
+  if (!isUngroupedGroupName(a) && isUngroupedGroupName(b)) return 1;
+  const aMs = parseIsoTimestampMs(createdAtByName[a]);
+  const bMs = parseIsoTimestampMs(createdAtByName[b]);
+  if (aMs != null && bMs == null) return -1;
+  if (aMs == null && bMs != null) return 1;
+  if (aMs != null && bMs != null && aMs !== bMs) return bMs - aMs;
+  return a.localeCompare(b);
+}
 
 export function useSidebarViewModel({
   selectedDroneIds,
@@ -56,6 +72,7 @@ export function useSidebarViewModel({
   activeRepoPath,
   showRecentDronesOnly,
   registryGroupNames,
+  registryGroupCreatedAtByName,
   registeredRepoPaths,
 }: UseSidebarViewModelArgs) {
   const selectedDroneSet = React.useMemo(() => new Set(selectedDroneIds), [selectedDroneIds]);
@@ -193,17 +210,14 @@ export function useSidebarViewModel({
         }),
       };
     });
-    out.sort((a, b) => {
-      if (isUngroupedGroupName(a.label) && !isUngroupedGroupName(b.label)) return -1;
-      if (!isUngroupedGroupName(a.label) && isUngroupedGroupName(b.label)) return 1;
-      return a.label.localeCompare(b.label);
-    });
+    out.sort((a, b) => compareGroupNamesByNewestFirst(a.group, b.group, registryGroupCreatedAtByName));
     return orderSidebarGroups(out, sidebarGroupOrder).filter((group) => !isSidebarGroupDeleting(group));
   }, [
     activeRepoPath,
     isSidebarGroupDeleting,
     registeredRepoPaths,
     registryGroupNames,
+    registryGroupCreatedAtByName,
     sidebarDroneOrderByGroup,
     sidebarDronesFilteredByRepoBase,
     sidebarGroupOrder,
@@ -276,5 +290,6 @@ export function useSidebarViewModel({
     sidebarGroups,
     sidebarHiddenGroupCount,
     sidebarHasUngroupedGroup,
+    sidebarGroupCreatedAtByName: registryGroupCreatedAtByName,
   };
 }

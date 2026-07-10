@@ -14,6 +14,7 @@ import { droneRootPath } from './paths';
 
 export type StoredAssistantState = {
   activeThreadId?: string | null;
+  defaultModel?: { provider?: string; model?: string };
   threads?: any[];
   chatIdleSubscriptions?: any[];
   webSearchToolMigrationApplied?: boolean;
@@ -128,10 +129,22 @@ export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: 'assistant default model',
+    migrate(connection) {
+      connection.exec(`
+        ALTER TABLE assistant_preferences ADD COLUMN default_provider TEXT;
+        ALTER TABLE assistant_preferences ADD COLUMN default_model TEXT;
+      `);
+    },
+  },
 ];
 
 type PreferenceRow = {
   active_thread_id: string | null;
+  default_provider: string | null;
+  default_model: string | null;
   web_search_tool_migration_applied: number | null;
   fetch_content_tool_migration_applied: number | null;
   system_prompt: string | null;
@@ -266,13 +279,16 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
     .prepare(
       `
     INSERT INTO assistant_preferences (
-      singleton, active_thread_id, web_search_tool_migration_applied,
+      singleton, active_thread_id, default_provider, default_model,
+      web_search_tool_migration_applied,
       fetch_content_tool_migration_applied, system_prompt, system_prompt_updated_at,
       voice_system_prompt, voice_system_prompt_updated_at, overview_prompt,
       overview_prompt_updated_at, state_updated_at
-    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(singleton) DO UPDATE SET
       active_thread_id = excluded.active_thread_id,
+      default_provider = excluded.default_provider,
+      default_model = excluded.default_model,
       web_search_tool_migration_applied = excluded.web_search_tool_migration_applied,
       fetch_content_tool_migration_applied = excluded.fetch_content_tool_migration_applied,
       system_prompt = excluded.system_prompt,
@@ -283,6 +299,8 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       overview_prompt_updated_at = excluded.overview_prompt_updated_at,
       state_updated_at = excluded.state_updated_at
     WHERE active_thread_id IS NOT excluded.active_thread_id
+       OR default_provider IS NOT excluded.default_provider
+       OR default_model IS NOT excluded.default_model
        OR web_search_tool_migration_applied IS NOT excluded.web_search_tool_migration_applied
        OR fetch_content_tool_migration_applied IS NOT excluded.fetch_content_tool_migration_applied
        OR system_prompt IS NOT excluded.system_prompt
@@ -296,6 +314,8 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
     )
     .run(
       optionalText(state.activeThreadId),
+      optionalText(state.defaultModel?.provider),
+      optionalText(state.defaultModel?.model),
       optionalBoolean(state.webSearchToolMigrationApplied),
       optionalBoolean(state.fetchContentToolMigrationApplied),
       optionalText(state.systemPrompt),
@@ -638,6 +658,14 @@ function readStateRows(connection: HubDatabaseConnection): StoredAssistantState 
 
   return removeUndefined({
     activeThreadId: preferences.active_thread_id,
+    ...(preferences.default_provider || preferences.default_model
+      ? {
+          defaultModel: {
+            provider: preferences.default_provider ?? undefined,
+            model: preferences.default_model ?? undefined,
+          },
+        }
+      : {}),
     threads,
     ...(subscriptions.length > 0 ? { chatIdleSubscriptions: subscriptions } : {}),
     webSearchToolMigrationApplied:

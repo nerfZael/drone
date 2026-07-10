@@ -631,6 +631,7 @@ describeSocketSuite('chat management api', () => {
           completedAt: secondAt,
           prompt: 'second',
           model: 'actual-turn-model',
+          reasoning: 'high',
           ok: true,
           output: 'second done',
         },
@@ -670,6 +671,7 @@ describeSocketSuite('chat management api', () => {
     expect(state.data?.model).toBe('configured-model');
     expect(state.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-2']);
     expect(state.data?.transcripts?.[0]?.model).toBe('actual-turn-model');
+    expect(state.data?.transcripts?.[0]?.reasoning).toBe('high');
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('queued-1');
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('prompt-2');
 

@@ -60,6 +60,11 @@ export type RepoSummary = {
   github: { owner: string; repo: string } | null;
 };
 
+export type GroupSummary = {
+  name: string;
+  createdAt: string | null;
+};
+
 export type RepoRemoteBranchOption = {
   name: string;
   remote: string;
@@ -533,6 +538,7 @@ export type TranscriptItem = {
   id?: string;
   prompt: string;
   model?: string;
+  reasoning?: string;
   attachments?: ChatImageAttachmentRef[];
   automation?: ChatPromptAutomationMeta;
   inheritedFromClone?: boolean;

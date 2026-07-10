@@ -7,6 +7,7 @@ import {
   parseCodexJobTranscript,
   parseCodexJsonl,
   parseCodexRolloutModel,
+  parseCodexRolloutRuntime,
   parsePiJsonl,
 } from '../src/hub/builtin-transcript-sessions';
 
@@ -110,15 +111,17 @@ describe('parseCodexJsonl', () => {
 });
 
 describe('parseCodexRolloutModel', () => {
-  test('uses the latest turn context model from a persisted Codex rollout', () => {
+  test('uses the latest turn context runtime from a persisted Codex rollout', () => {
+    const raw = [
+      '{"type":"turn_context","payload":{"model":"gpt-5.1-codex","reasoning_effort":"low"}}',
+      '{"type":"event_msg","payload":{"type":"agent_message","message":"Done."}}',
+      '{"type":"turn_context","payload":{"model":"gpt-5.2-codex","reasoning_effort":"xhigh"}}',
+    ].join('\n');
     expect(
-      parseCodexRolloutModel(
-        [
-          '{"type":"turn_context","payload":{"model":"gpt-5.1-codex"}}',
-          '{"type":"event_msg","payload":{"type":"agent_message","message":"Done."}}',
-          '{"type":"turn_context","payload":{"model":"gpt-5.2-codex"}}',
-        ].join('\n'),
-      ),
+      parseCodexRolloutRuntime(raw),
+    ).toEqual({ model: 'gpt-5.2-codex', reasoning: 'xhigh' });
+    expect(
+      parseCodexRolloutModel(raw),
     ).toBe('gpt-5.2-codex');
   });
 });
@@ -173,16 +176,16 @@ describe('parseBlipJsonl', () => {
 
   test('records the model attached to the assistant message', () => {
     expect(
-      parseBlipJsonl('{"type":"assistant_message","sessionId":"sess_blip","model":"claude-sonnet-4-5","text":"Done."}'),
-    ).toMatchObject({ message: 'Done.', model: 'claude-sonnet-4-5' });
+      parseBlipJsonl('{"type":"assistant_message","sessionId":"sess_blip","model":"claude-sonnet-4-5","reasoning_effort":"high","text":"Done."}'),
+    ).toMatchObject({ message: 'Done.', model: 'claude-sonnet-4-5', reasoning: 'high' });
   });
 });
 
 describe('parsePiJsonl', () => {
   test('records the model attached to the assistant message', () => {
     expect(
-      parsePiJsonl('{"message":{"role":"assistant","model":"anthropic/claude-sonnet-4-5","content":"Done."}}'),
-    ).toMatchObject({ message: 'Done.', model: 'anthropic/claude-sonnet-4-5' });
+      parsePiJsonl('{"message":{"role":"assistant","model":"anthropic/claude-sonnet-4-5","thinkingLevel":"high","content":"Done."}}'),
+    ).toMatchObject({ message: 'Done.', model: 'anthropic/claude-sonnet-4-5', reasoning: 'high' });
   });
 });
 

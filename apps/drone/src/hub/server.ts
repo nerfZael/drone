@@ -151,9 +151,10 @@ import {
   hasKnownBuiltinTranscriptSession,
   parseBlipJobTranscript,
   parseCodexJobTranscript,
-  parseCodexRolloutModel,
+  parseCodexRolloutRuntime,
   parsePiJobTranscript,
   readBuiltinTranscriptSessionId,
+  type AgentTurnRuntimeMetadata,
 } from './builtin-transcript-sessions';
 import {
   appendTaskToBoard,
@@ -4554,6 +4555,7 @@ type TranscriptTurn = {
   id?: string;
   prompt: string;
   model?: string;
+  reasoning?: string;
   ok: boolean;
   output: string;
   error?: string;
@@ -5889,6 +5891,12 @@ function normalizeChatModel(raw: any): string | null {
   return s;
 }
 
+function normalizeChatReasoning(raw: any): string | null {
+  const text = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (!text || text.length > 32 || !/^[a-z0-9._-]+$/.test(text)) return null;
+  return text;
+}
+
 function parseChatModelForUpdate(raw: any): string | null {
   if (raw == null) return null;
   const s = String(raw).trim();
@@ -6195,13 +6203,13 @@ async function discoverModelsForBuiltinAgent(opts: {
   return { models: [], source: 'none', discoveredAt: new Date(now).toISOString(), error };
 }
 
-async function readCodexLastTurnModel(opts: {
+async function readCodexLastTurnRuntime(opts: {
   runtime: DroneRuntime;
   containerName: string;
   threadId: string;
-}): Promise<string | null> {
+}): Promise<AgentTurnRuntimeMetadata> {
   const threadId = String(opts.threadId ?? '').trim();
-  if (!/^[0-9a-f-]{20,64}$/i.test(threadId)) return null;
+  if (!/^[0-9a-f-]{20,64}$/i.test(threadId)) return {};
   const script = [
     'set -euo pipefail',
     'roots=("${CODEX_HOME:-$HOME/.codex}/sessions" "$HOME/.codex/sessions" "/root/.codex/sessions" "/dvm-data/home/.codex/sessions")',
@@ -6217,8 +6225,39 @@ async function readCodexLastTurnModel(opts: {
   const result = opts.runtime === 'host'
     ? await runHostCommand('bash', ['-lc', script], { timeoutMs: defaultSeedBootstrapTimeoutMs() })
     : await dvmExec(opts.containerName, 'bash', ['-lc', script], { timeoutMs: defaultSeedBootstrapTimeoutMs() });
-  if (result.code !== 0) return null;
-  return normalizeChatModel(parseCodexRolloutModel(result.stdout));
+  if (result.code !== 0) return {};
+  const parsed = parseCodexRolloutRuntime(result.stdout);
+  const model = normalizeChatModel(parsed.model);
+  const reasoning = normalizeChatReasoning(parsed.reasoning);
+  return {
+    ...(model ? { model } : {}),
+    ...(reasoning ? { reasoning } : {}),
+  };
+}
+
+async function resolveCodexTurnRuntime(opts: {
+  parsed: { model?: string; reasoning?: string; threadId: string | null };
+  pendingModel: string | null;
+  runtime: DroneRuntime;
+  containerName: string;
+  fallbackThreadId?: string | null;
+}): Promise<AgentTurnRuntimeMetadata> {
+  const parsedModel = normalizeChatModel(opts.parsed.model);
+  const parsedReasoning = normalizeChatReasoning(opts.parsed.reasoning);
+  const knownModel = parsedModel ?? opts.pendingModel;
+  const rollout = knownModel && parsedReasoning
+    ? {}
+    : await readCodexLastTurnRuntime({
+        runtime: opts.runtime,
+        containerName: opts.containerName,
+        threadId: String(opts.parsed.threadId ?? opts.fallbackThreadId ?? ''),
+      }).catch(() => ({}));
+  const model = knownModel ?? rollout.model;
+  const reasoning = parsedReasoning ?? rollout.reasoning;
+  return {
+    ...(model ? { model } : {}),
+    ...(reasoning ? { reasoning } : {}),
+  };
 }
 
 async function cliSupportsModelFlag(opts: { bin: string; runtime: DroneRuntime; containerName?: string; cwd?: string | null }): Promise<boolean> {
@@ -9845,14 +9884,13 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       });
       if (jobKind === 'codex') {
         const parsed = parseCodexJobTranscript(job);
-        const turnModel =
-          normalizeChatModel(parsed.model) ??
-          pendingModel ??
-          (await readCodexLastTurnModel({
-            runtime,
-            containerName,
-            threadId: String(parsed.threadId ?? entry?.codexThreadId ?? ''),
-          }).catch(() => null));
+        const turnRuntime = await resolveCodexTurnRuntime({
+          parsed,
+          pendingModel,
+          runtime,
+          containerName,
+          fallbackThreadId: entry?.codexThreadId,
+        });
         const threadId = parsed.threadId;
         const msg = parsed.message;
         const output = String(msg ?? '').trimEnd();
@@ -9879,7 +9917,8 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           completedAt: finishedAt,
           id,
           prompt: String(p?.prompt ?? ''),
-          ...(turnModel ? { model: turnModel } : {}),
+          ...(turnRuntime.model ? { model: turnRuntime.model } : {}),
+          ...(turnRuntime.reasoning ? { reasoning: turnRuntime.reasoning } : {}),
           ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
           ...(promptAutomation ? { automation: promptAutomation } : {}),
           ok: true,
@@ -9895,6 +9934,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       if (jobKind === 'pi') {
         const parsed = parsePiJobTranscript(job);
         const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
+        const turnReasoning = normalizeChatReasoning(parsed.reasoning);
         if (parsed.sessionId && String(parsed.sessionId).trim() && String(entry?.piSessionId ?? '').trim() !== parsed.sessionId) {
           entry.piSessionId = parsed.sessionId;
           changed = true;
@@ -9912,6 +9952,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           id,
           prompt: String(p?.prompt ?? ''),
           ...(turnModel ? { model: turnModel } : {}),
+          ...(turnReasoning ? { reasoning: turnReasoning } : {}),
           ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
           ...(promptAutomation ? { automation: promptAutomation } : {}),
           ok: true,
@@ -9927,6 +9968,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       if (jobKind === 'blip') {
         const parsed = parseBlipJobTranscript(job);
         const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
+        const turnReasoning = normalizeChatReasoning(parsed.reasoning);
         if (parsed.sessionId && String(parsed.sessionId).trim() && String(entry?.blipSessionId ?? '').trim() !== parsed.sessionId) {
           entry.blipSessionId = parsed.sessionId;
           changed = true;
@@ -9944,6 +9986,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           id,
           prompt: String(p?.prompt ?? ''),
           ...(turnModel ? { model: turnModel } : {}),
+          ...(turnReasoning ? { reasoning: turnReasoning } : {}),
           ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
           ...(promptAutomation ? { automation: promptAutomation } : {}),
           ok: true,
@@ -10000,14 +10043,13 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         const stdout = String(job?.stdout ?? '');
         const stderr = String(job?.stderr ?? '');
         const parsed = parseCodexJobTranscript(job);
-        const turnModel =
-          normalizeChatModel(parsed.model) ??
-          pendingModel ??
-          (await readCodexLastTurnModel({
-            runtime,
-            containerName,
-            threadId: String(parsed.threadId ?? entry?.codexThreadId ?? ''),
-          }).catch(() => null));
+        const turnRuntime = await resolveCodexTurnRuntime({
+          parsed,
+          pendingModel,
+          runtime,
+          containerName,
+          fallbackThreadId: entry?.codexThreadId,
+        });
         const output = String(parsed.message ?? '').trimEnd();
         const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
         const promptAt = resolveTranscriptPromptAt({
@@ -10030,7 +10072,8 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             completedAt: finishedAt,
             id,
             prompt: String(p?.prompt ?? ''),
-            ...(turnModel ? { model: turnModel } : {}),
+            ...(turnRuntime.model ? { model: turnRuntime.model } : {}),
+            ...(turnRuntime.reasoning ? { reasoning: turnRuntime.reasoning } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ...(promptAutomation ? { automation: promptAutomation } : {}),
             ok: true,
@@ -10047,6 +10090,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         const stdout = String(job?.stdout ?? '');
         const parsed = parsePiJobTranscript(job);
         const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
+        const turnReasoning = normalizeChatReasoning(parsed.reasoning);
         const output = String(parsed.message ?? '').trimEnd();
         const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
         const promptAt = resolveTranscriptPromptAt({
@@ -10068,6 +10112,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             id,
             prompt: String(p?.prompt ?? ''),
             ...(turnModel ? { model: turnModel } : {}),
+            ...(turnReasoning ? { reasoning: turnReasoning } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ...(promptAutomation ? { automation: promptAutomation } : {}),
             ok: true,
@@ -10083,6 +10128,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       if (jobKind === 'blip') {
         const parsed = parseBlipJobTranscript(job);
         const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
+        const turnReasoning = normalizeChatReasoning(parsed.reasoning);
         const output = String(parsed.message ?? '').trimEnd();
         const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
         const promptAt = resolveTranscriptPromptAt({
@@ -10102,6 +10148,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             id,
             prompt: String(p?.prompt ?? ''),
             ...(turnModel ? { model: turnModel } : {}),
+            ...(turnReasoning ? { reasoning: turnReasoning } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ...(promptAutomation ? { automation: promptAutomation } : {}),
             ok: true,
@@ -12884,6 +12931,7 @@ function formatTranscriptRow(turnIndex: number, turn: any): any {
   const id = typeof turn?.id === 'string' && turn.id.trim() ? String(turn.id).trim() : undefined;
   const prompt = String(turn?.prompt ?? '');
   const model = normalizeChatModel((turn as any)?.model);
+  const reasoning = normalizeChatReasoning((turn as any)?.reasoning);
   const attachments = normalizeChatImageAttachmentRefs((turn as any)?.attachments);
   const automation = normalizePromptAutomationMeta((turn as any)?.automation);
   const agentMessageAutoContinue = normalizeAgentMessageAutoContinueTurnState((turn as any)?.agentMessageAutoContinue);
@@ -12900,6 +12948,7 @@ function formatTranscriptRow(turnIndex: number, turn: any): any {
     ...(id ? { id } : {}),
     prompt,
     ...(model ? { model } : {}),
+    ...(reasoning ? { reasoning } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
     ...(automation ? { automation } : {}),
     ...(agentMessageAutoContinue ? { agentMessageAutoContinue } : {}),
@@ -17486,6 +17535,17 @@ export async function startDroneHubApiServer(opts: {
           return;
         }
         json(res, 201, await assistantService.createThread(body ?? {}));
+        return;
+      }
+
+      if (pathname === '/api/assistant/default-model' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+          json(res, 200, await assistantService.updateDefaultModel(body ?? {}));
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
         return;
       }
 
