@@ -434,6 +434,7 @@ import {
   type ResolvedOrPendingDrone,
 } from './drone-lifecycle-service';
 import { permanentlyDeleteCanonicalDrone } from './drone-deletion-service';
+import { readCanonicalActiveDroneModel } from './canonical-drone-read-model';
 import {
   commitDroneMetadataPatch,
   renameDroneDisplayName,
@@ -15435,7 +15436,7 @@ export async function startDroneHubApiServer(opts: {
     }
     if (!droneSummaryRegistryCacheLoad) {
       const loadEpoch = droneSummaryRegistryCacheEpoch;
-      const loadPromise = loadRegistry()
+      const loadPromise = Promise.resolve(readCanonicalActiveDroneModel() ?? loadRegistry())
         .then((registry) => {
           if (loadEpoch === droneSummaryRegistryCacheEpoch) {
             droneSummaryRegistryCache = { loadedAtMs: Date.now(), registry };
@@ -15973,7 +15974,7 @@ export async function startDroneHubApiServer(opts: {
   }
 
   async function buildDroneChatEventSnapshot(): Promise<Map<string, string>> {
-    const regAny: any = await loadRegistry();
+    const regAny: any = readCanonicalActiveDroneModel() ?? await loadRegistry();
     const next = new Map<string, string>();
     for (const [droneIdRaw, drone] of Object.entries(regAny?.drones ?? {}) as Array<[string, any]>) {
       const droneId = normalizeDroneIdentity(droneIdRaw || drone?.id);
@@ -16533,7 +16534,7 @@ export async function startDroneHubApiServer(opts: {
           return;
         }
         try {
-          const regAny: any = await loadRegistry();
+          const regAny: any = readCanonicalActiveDroneModel() ?? await loadRegistry();
           const statuses = targets.map((target) => summarizeAssistantChatIdle(regAny, target, { requireChat: true }));
           const matched = mode === 'any' ? statuses.some((status) => status.idle) : statuses.every((status) => status.idle);
           json(res, 200, { ok: true, mode, matched, targets: statuses });
@@ -20857,7 +20858,7 @@ export async function startDroneHubApiServer(opts: {
       if (method === 'GET' && parts.length === 3 && parts[0] === 'api' && parts[1] === 'drones' && parts[2] === 'summary') {
         const timer = createRequestTimer();
         try {
-          const regAny: any = await loadRegistry();
+          const regAny: any = readCanonicalActiveDroneModel() ?? await loadRegistry();
           timer.mark('load');
           const drones = buildAssistantDroneSummariesFromRegistry(regAny);
           timer.mark('format');
