@@ -5,6 +5,11 @@ import path from 'node:path';
 
 import dotenv from 'dotenv';
 
+import {
+  getHubSettingsRepository,
+  HubSettingVersionConflictError,
+  type HubSettingRecord,
+} from '../host/hub-settings-repository';
 import { loadRegistry, updateRegistry } from '../host/registry';
 import { readActiveProfileName } from '../host/profiles';
 import {
@@ -1747,66 +1752,113 @@ export async function resolveTaskPlaybookButtonSettingsResponse(): Promise<{
   };
 }
 
-async function getStoredUiPreferencesSettings(): Promise<{ uiPreferences: UiPreferencesSettings; updatedAt: string | null }> {
-  const reg = await loadRegistry();
-  const raw = reg.settings?.uiPreferences;
-  const updatedAtRaw = raw?.updatedAt;
+const UI_PREFERENCES_SETTING_KEY = 'ui-preferences';
+
+type StoredUiPreferencesSettings = {
+  uiPreferences: UiPreferencesSettings;
+  updatedAt: string | null;
+  version: number | null;
+};
+
+function storedUiPreferencesFromRecord(record: HubSettingRecord<unknown>): StoredUiPreferencesSettings {
   return {
-    uiPreferences: sanitizeUiPreferencesSettings(raw),
-    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw : null,
+    uiPreferences: sanitizeUiPreferencesSettings(record.value),
+    updatedAt: record.updatedAt,
+    version: record.version,
   };
 }
 
-export async function upsertStoredUiPreferencesSettings(valueRaw: unknown): Promise<void> {
-  const uiPreferences = sanitizeUiPreferencesSettings(valueRaw);
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    reg.settings.uiPreferences = {
-      sidebarGroupingMode: uiPreferences.sidebarGroupingMode,
-      sidebarDensityMode: uiPreferences.sidebarDensityMode,
-      sidebarGroupOrder: uiPreferences.sidebarGroupOrder.slice(),
-      sidebarDroneOrderByGroup: Object.fromEntries(
-        Object.entries(uiPreferences.sidebarDroneOrderByGroup).map(([key, value]) => [key, value.slice()]),
-      ),
-      sidebarNodeOrderByParent: Object.fromEntries(
-        Object.entries(uiPreferences.sidebarNodeOrderByParent).map(([key, value]) => [key, value.slice()]),
-      ),
-      sidebarChatOrderByDrone: Object.fromEntries(
-        Object.entries(uiPreferences.sidebarChatOrderByDrone).map(([key, value]) => [key, value.slice()]),
-      ),
-      hiddenSidebarGroups: uiPreferences.hiddenSidebarGroups.slice(),
-      autoDelete: uiPreferences.autoDelete,
-      automations: uiPreferences.automations.map((automation) => ({
-        id: automation.id,
-        label: automation.label,
-        prompt: automation.prompt,
-        onFailurePrompt: automation.onFailurePrompt,
-        runs: automation.runs,
-        sleepAmount: automation.sleepAmount,
-        sleepUnit: automation.sleepUnit,
-        stopPhrase: automation.stopPhrase,
-        stopPhraseCaseSensitive: automation.stopPhraseCaseSensitive,
-      })),
-      spawnAgentKey: uiPreferences.spawnAgentKey,
-      spawnModel: uiPreferences.spawnModel,
-      repoBranchSource: uiPreferences.repoBranchSource,
-      repoCreateRemoteBranch: uiPreferences.repoCreateRemoteBranch,
-      pullHostBranchBeforeCreate: uiPreferences.pullHostBranchBeforeCreate,
+/**
+ * UI preferences are the first canonical settings slice. All settings helpers
+ * above and below this block intentionally remain on the legacy registry until
+ * they receive their own bounded migration.
+ */
+async function getStoredUiPreferencesSettings(): Promise<StoredUiPreferencesSettings> {
+  const repository = await getHubSettingsRepository();
+  const canonical = repository.get<unknown>(UI_PREFERENCES_SETTING_KEY);
+  if (canonical) return storedUiPreferencesFromRecord(canonical);
+
+  const reg = await loadRegistry();
+  const legacyRaw = reg.settings?.uiPreferences;
+  if (legacyRaw !== undefined) {
+    const updatedAtRaw = legacyRaw?.updatedAt;
+    const updatedAt = typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null;
+    const winner = await repository.backfillIfAbsent(
+      UI_PREFERENCES_SETTING_KEY,
+      sanitizeUiPreferencesSettings(legacyRaw),
       updatedAt,
-    };
-  });
+    );
+    return storedUiPreferencesFromRecord(winner);
+  }
+
+  // A concurrent writer may have inserted the row while the registry was read.
+  const concurrent = repository.get<unknown>(UI_PREFERENCES_SETTING_KEY);
+  if (concurrent) return storedUiPreferencesFromRecord(concurrent);
+  return {
+    uiPreferences: sanitizeUiPreferencesSettings(undefined),
+    updatedAt: null,
+    version: null,
+  };
+}
+
+export class UiPreferencesSettingsConflictError extends Error {
+  readonly uiPreferences: UiPreferencesSettings;
+  readonly updatedAt: string | null;
+  readonly version: number | null;
+
+  constructor(current: HubSettingRecord<unknown> | null) {
+    super('UI preferences changed on the server');
+    this.name = 'UiPreferencesSettingsConflictError';
+    this.uiPreferences = sanitizeUiPreferencesSettings(current?.value);
+    this.updatedAt = current?.updatedAt ?? null;
+    this.version = current?.version ?? null;
+  }
+}
+
+export class UiPreferencesSettingsValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UiPreferencesSettingsValidationError';
+  }
+}
+
+function parseExpectedUiPreferencesVersion(raw: unknown): number | null | undefined {
+  if (raw === undefined || raw === null) return raw;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new UiPreferencesSettingsValidationError('expectedVersion must be a positive integer or null');
+  }
+  return value;
+}
+
+export async function upsertStoredUiPreferencesSettings(
+  valueRaw: unknown,
+  expectedVersionRaw?: unknown,
+): Promise<void> {
+  const uiPreferences = sanitizeUiPreferencesSettings(valueRaw);
+  const expectedVersion = parseExpectedUiPreferencesVersion(expectedVersionRaw);
+  const repository = await getHubSettingsRepository();
+  try {
+    await repository.put(UI_PREFERENCES_SETTING_KEY, uiPreferences, { expectedVersion });
+  } catch (error) {
+    if (error instanceof HubSettingVersionConflictError) {
+      throw new UiPreferencesSettingsConflictError(error.current);
+    }
+    throw error;
+  }
 }
 
 export async function resolveUiPreferencesSettingsResponse(): Promise<{
   ok: true;
   uiPreferences: UiPreferencesSettings;
   updatedAt: string | null;
+  version: number | null;
 }> {
   const stored = await getStoredUiPreferencesSettings();
   return {
     ok: true,
     uiPreferences: stored.uiPreferences,
     updatedAt: stored.updatedAt,
+    version: stored.version,
   };
 }

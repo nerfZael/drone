@@ -265,6 +265,8 @@ import {
   normalizeAgentMessageAutoContinuePrompt,
   normalizeAgentSuggestionPolicyMarkdown,
   KanbanBoardSettingsConflictError,
+  UiPreferencesSettingsConflictError,
+  UiPreferencesSettingsValidationError,
   hubLog,
   loadHubEnv,
   parseArchiveRetentionId,
@@ -18474,7 +18476,25 @@ export async function startDroneHubApiServer(opts: {
             json(res, 400, { ok: false, error: e?.message ?? String(e) });
             return;
           }
-          await upsertStoredUiPreferencesSettings(body?.uiPreferences);
+          try {
+            await upsertStoredUiPreferencesSettings(body?.uiPreferences, body?.expectedVersion);
+          } catch (e: any) {
+            if (e instanceof UiPreferencesSettingsConflictError) {
+              json(res, 409, {
+                ok: false,
+                error: e.message,
+                uiPreferences: e.uiPreferences,
+                updatedAt: e.updatedAt,
+                version: e.version,
+              });
+              return;
+            }
+            if (e instanceof UiPreferencesSettingsValidationError) {
+              json(res, 400, { ok: false, error: e.message });
+              return;
+            }
+            throw e;
+          }
           json(res, 200, await resolveUiPreferencesSettingsResponse());
           return;
         }
