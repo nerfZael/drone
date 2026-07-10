@@ -54,6 +54,21 @@ export type TranscriptStoreReadResult = {
   sourceHash: string;
   turns: Array<{ index: number; turn: StoredTranscriptTurn }>;
 };
+export type ChatReadVersion = {
+  available: boolean;
+  chat: Record<string, unknown> | null;
+  chatSourceHash: string;
+  turnCount: number;
+  transcriptVersion: number;
+  transcriptSourceHash: string;
+  pendingVersion: string;
+};
+export type ChatReadRows = {
+  available: boolean;
+  turns: Array<{ index: number; turn: StoredTranscriptTurn }>;
+  pending: StoredPendingPrompt[];
+  pendingTurns: StoredTranscriptTurn[];
+};
 export type ChatStoreImportResult = { available: boolean; sourceHash: string };
 export type ChatStoreReadResult = { available: boolean; chat: any | null; sourceHash: string };
 export type ChatStoreListResult = { available: boolean; chats: string[] };
@@ -1102,6 +1117,66 @@ export class ChatTranscriptRepository {
     });
   }
 
+  readVersion(opts: { droneId: string; chatName: string; includePending: boolean }): ChatReadVersion {
+    return this.database.read((connection) => {
+      const row = this.chatRow(connection, opts.droneId, opts.chatName);
+      if (!row) {
+        return {
+          available: true, chat: null, chatSourceHash: '', turnCount: 0,
+          transcriptVersion: 0, transcriptSourceHash: '', pendingVersion: '',
+        };
+      }
+      const countRow = connection.prepare(`SELECT COUNT(*) AS count FROM canonical_chat_turns
+        WHERE drone_id = ? AND chat_name = ?`).get(opts.droneId, opts.chatName) as { count: number };
+      const pendingVersion = opts.includePending ? this.pendingVersion(connection, opts.droneId, opts.chatName) : '';
+      const parsed = parseJson(row.metadata_json);
+      return {
+        available: true,
+        chat: parsed && typeof parsed === 'object' ? parsed : {},
+        chatSourceHash: row.source_hash,
+        turnCount: Number(countRow?.count ?? 0),
+        transcriptVersion: Number(row.transcript_version ?? 0),
+        transcriptSourceHash: row.turns_source_hash || transcriptTurnsSourceHash([]),
+        pendingVersion,
+      };
+    });
+  }
+
+  readRows(opts: { droneId: string; chatName: string; indexes: number[]; includePending: boolean }): ChatReadRows {
+    return this.database.read((connection) => {
+      const indexes = [...new Set(opts.indexes.filter((value) => Number.isSafeInteger(value) && value >= 0))].sort((a, b) => a - b);
+      let turns: Array<{ index: number; turn: StoredTranscriptTurn }> = [];
+      if (indexes.length > 0) {
+        for (let offset = 0; offset < indexes.length; offset += 400) {
+          const batch = indexes.slice(offset, offset + 400);
+          const placeholders = batch.map(() => '?').join(', ');
+          const rows = connection.prepare(`WITH ordered AS (
+            SELECT ROW_NUMBER() OVER (
+              ORDER BY COALESCE(prompt_at, at), completed_at, ordinal, turn_id
+            ) - 1 AS turn_index, turn_json
+            FROM canonical_chat_turns WHERE drone_id = ? AND chat_name = ?
+          ) SELECT turn_index, turn_json FROM ordered WHERE turn_index IN (${placeholders}) ORDER BY turn_index`)
+            .all(opts.droneId, opts.chatName, ...batch) as Array<{ turn_index: number; turn_json: string }>;
+          turns.push(...rows.map((row) => ({ index: Number(row.turn_index), turn: normalizeTurn(parseJson(row.turn_json)) })));
+        }
+      }
+      const pending = opts.includePending ? this.projectPending(connection, opts.droneId, opts.chatName) : [];
+      const pendingIds = pending.map((item) => String(item.id ?? '').trim()).filter(Boolean);
+      const pendingTurns = pendingIds.length > 0
+        ? (connection.prepare(`SELECT turn_json FROM canonical_chat_turns
+            WHERE drone_id = ? AND chat_name = ? AND turn_id IN (${pendingIds.map(() => '?').join(', ')})`)
+          .all(opts.droneId, opts.chatName, ...pendingIds) as TurnRow[])
+          .map((row) => normalizeTurn(parseJson(row.turn_json)))
+        : [];
+      return {
+        available: true,
+        turns: turns.sort((a, b) => a.index - b.index),
+        pending,
+        pendingTurns,
+      };
+    });
+  }
+
   async clearAllForTests(): Promise<void> {
     await this.database.writeTransaction('clear canonical chats for tests', (connection) => {
       connection.exec(`
@@ -1380,6 +1455,31 @@ export class ChatTranscriptRepository {
     return (connection.prepare(`SELECT chat_name, metadata_json, source_hash,
       transcript_version, turns_source_hash FROM canonical_chats
       WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName) as ChatRow | undefined) ?? null;
+  }
+
+  private promptRows(connection: HubDatabaseConnection, droneId: string, chatName: string): any[] {
+    const hasPrompts = connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompts'").get();
+    if (!hasPrompts) return [];
+    return connection.prepare(`SELECT prompt_id, created_at, updated_at, state, prompt, payload_json
+      FROM prompts WHERE drone_id = ? AND chat_name = ? AND state != 'cancelled'
+      ORDER BY sequence DESC LIMIT 60`).all(droneId, chatName).reverse() as any[];
+  }
+
+  private projectPending(connection: HubDatabaseConnection, droneId: string, chatName: string): StoredPendingPrompt[] {
+    return this.promptRows(connection, droneId, chatName).map((row) => ({
+      ...(parseJson(row.payload_json) ?? {}),
+      id: row.prompt_id,
+      at: row.created_at,
+      prompt: row.prompt,
+      state: row.state,
+      updatedAt: row.updated_at,
+    }));
+  }
+
+  private pendingVersion(connection: HubDatabaseConnection, droneId: string, chatName: string): string {
+    return crypto.createHash('sha256').update(stableJson(this.promptRows(connection, droneId, chatName).map((row) => [
+      row.prompt_id, row.updated_at, row.state, row.payload_json,
+    ]))).digest('base64url');
   }
 
   private listChatsWithConnection(connection: HubDatabaseConnection, droneId: string): ChatStoreListResult {
@@ -1835,6 +1935,42 @@ export function listChatsFromStore(opts: { droneId: string }): ChatStoreListResu
 export function readChatFromStore(opts: { droneId: string; chatName: string }): ChatStoreReadResult {
   const store = repository();
   return store ? store.readChat(opts) : memoryReadChat(opts.droneId, opts.chatName);
+}
+
+export function readChatVersionFromStore(opts: { droneId: string; chatName: string; includePending: boolean }): ChatReadVersion {
+  const store = repository();
+  if (store) return store.readVersion(opts);
+  const read = memoryReadChat(opts.droneId, opts.chatName);
+  const turns = Array.isArray(read.chat?.turns) ? read.chat.turns : [];
+  const pending = opts.includePending && Array.isArray(read.chat?.pendingPrompts) ? read.chat.pendingPrompts : [];
+  const chat = read.chat ? metadata(read.chat) : null;
+  return {
+    available: true,
+    chat,
+    chatSourceHash: read.sourceHash,
+    turnCount: turns.length,
+    transcriptVersion: turns.length,
+    transcriptSourceHash: transcriptTurnsSourceHash(turns),
+    pendingVersion: opts.includePending ? chatEntrySourceHash(pending) : '',
+  };
+}
+
+export function readChatRowsFromStore(opts: {
+  droneId: string;
+  chatName: string;
+  indexes: number[];
+  includePending: boolean;
+}): ChatReadRows {
+  const store = repository();
+  if (store) return store.readRows(opts);
+  const read = memoryReadChat(opts.droneId, opts.chatName);
+  const turns = Array.isArray(read.chat?.turns) ? read.chat.turns : [];
+  return {
+    available: true,
+    turns: opts.indexes.flatMap((index) => turns[index] ? [{ index, turn: turns[index] }] : []),
+    pending: opts.includePending && Array.isArray(read.chat?.pendingPrompts) ? read.chat.pendingPrompts : [],
+    pendingTurns: turns,
+  };
 }
 
 export async function importTranscriptTurnsFromRegistry(opts: { droneId: string; chatName: string; turns: unknown; sourceHash?: string }): Promise<TranscriptImportResult> {
