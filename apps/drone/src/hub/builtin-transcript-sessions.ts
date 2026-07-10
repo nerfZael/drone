@@ -62,13 +62,34 @@ function parseUuid(text: string): string | null {
   return match ? match[0] : null;
 }
 
+function extractModelId(raw: any): string | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const direct =
+    raw.model ??
+    raw.modelId ??
+    raw.modelID ??
+    raw.model_id ??
+    raw.metadata?.model ??
+    raw.info?.model ??
+    raw.info?.modelId ??
+    raw.info?.modelID;
+  const value =
+    direct && typeof direct === 'object'
+      ? direct.id ?? direct.modelId ?? direct.modelID ?? direct.model_id ?? direct.name
+      : direct;
+  const text = typeof value === 'string' ? value.trim() : '';
+  if (!text || text.length > 160 || /[\r\n\t]/.test(text)) return null;
+  return text;
+}
+
 type CodexTerminalEvent = 'turn.completed' | 'response.completed' | 'response.failed' | 'error';
 type CodexJsonlParseResult = {
   threadId: string | null;
   message: string | null;
+  model?: string;
   terminalEvent?: CodexTerminalEvent;
 };
-type PiJsonlParseResult = { sessionId: string | null; message: string | null };
+type PiJsonlParseResult = { sessionId: string | null; message: string | null; model?: string };
 export type BlipCloneActivity = {
   status: 'running';
   count: number;
@@ -89,6 +110,7 @@ export type BlipToolCallSummary = {
 type BlipJsonlParseResult = {
   sessionId: string | null;
   message: string | null;
+  model?: string;
   terminalEvent?: 'session_finished' | 'session_error';
   firstEventAt?: string;
   lastEventAt?: string;
@@ -110,6 +132,7 @@ function createCodexJsonlParser(): {
 } {
   let threadId: string | null = null;
   let lastMsg: string | null = null;
+  let lastModel: string | null = null;
   let streamedMsg = '';
   let terminalEvent: CodexTerminalEvent | null = null;
 
@@ -141,9 +164,11 @@ function createCodexJsonlParser(): {
     if (!isAssistantItem(item)) return;
     const text = extractItemText(item);
     if (text) lastMsg = text;
+    lastModel = extractModelId(item) ?? lastModel;
   }
 
   function considerResponse(response: any) {
+    lastModel = extractModelId(response) ?? lastModel;
     const responseText = takeStringText(response?.output_text);
     if (responseText) {
       lastMsg = responseText;
@@ -165,6 +190,7 @@ function createCodexJsonlParser(): {
       }
       if (!obj || typeof obj !== 'object') return;
       const type = String(obj.type ?? '').trim();
+      lastModel = extractModelId(obj) ?? lastModel;
       if (
         type === 'turn.completed' ||
         type === 'response.completed' ||
@@ -199,6 +225,7 @@ function createCodexJsonlParser(): {
       if (obj.type === 'turn.completed') {
         const text = takeStringText(obj.last_agent_message) ?? takeStringText(obj.message);
         if (text) lastMsg = text;
+        lastModel = extractModelId(obj) ?? lastModel;
       }
 
       considerAssistantItem(obj);
@@ -209,6 +236,7 @@ function createCodexJsonlParser(): {
       return {
         threadId,
         message: lastMsg ?? (streamedMsg ? streamedMsg : null),
+        ...(lastModel ? { model: lastModel } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
       };
     },
@@ -221,6 +249,7 @@ function createPiJsonlParser(): {
 } {
   let sessionId: string | null = null;
   let lastMsg: string | null = null;
+  let lastModel: string | null = null;
 
   const extractAssistantText = (message: any): string | null => {
     if (!message || typeof message !== 'object') return null;
@@ -243,7 +272,9 @@ function createPiJsonlParser(): {
 
   const considerMessage = (message: any) => {
     const text = extractAssistantText(message);
-    if (text) lastMsg = text;
+    if (!text) return;
+    lastMsg = text;
+    lastModel = extractModelId(message) ?? lastModel;
   };
 
   return {
@@ -257,6 +288,7 @@ function createPiJsonlParser(): {
         return;
       }
       if (!obj || typeof obj !== 'object') return;
+      lastModel = extractModelId(obj) ?? lastModel;
       if (obj.type === 'session') {
         const parsedId = parseUuid(String(obj.id ?? obj.sessionId ?? obj.session_id ?? '').trim());
         if (parsedId) sessionId = parsedId;
@@ -267,7 +299,7 @@ function createPiJsonlParser(): {
       }
     },
     result() {
-      return { sessionId, message: lastMsg };
+      return { sessionId, message: lastMsg, ...(lastModel ? { model: lastModel } : {}) };
     },
   };
 }
@@ -342,6 +374,7 @@ function createBlipJsonlParser(): {
 } {
   let sessionId: string | null = null;
   let lastMsg: string | null = null;
+  let lastModel: string | null = null;
   let streamedMsg = '';
   let terminalEvent: BlipJsonlParseResult['terminalEvent'];
   let firstEventAt: string | null = null;
@@ -373,6 +406,7 @@ function createBlipJsonlParser(): {
         return;
       }
       if (!obj || typeof obj !== 'object') return;
+      lastModel = extractModelId(obj) ?? lastModel;
       const parsedSessionId = String(obj.sessionId ?? '').trim();
       if (parsedSessionId) sessionId = parsedSessionId;
       const type = String(obj.type ?? '').trim();
@@ -452,11 +486,13 @@ function createBlipJsonlParser(): {
       if (type === 'assistant_delta') {
         const delta = takeStringText(obj.text);
         if (delta) streamedMsg += delta;
+        lastModel = extractModelId(obj) ?? lastModel;
         return;
       }
       if (type === 'assistant_message') {
         const text = takeStringText(obj.text) ?? takeStringText(obj.message);
         if (text) lastMsg = text;
+        lastModel = extractModelId(obj) ?? lastModel;
         return;
       }
       if (type === 'session_finished') {
@@ -465,6 +501,7 @@ function createBlipJsonlParser(): {
         terminalStatus = String(obj.status ?? '').trim() || null;
         terminalError = extractBlipErrorText(obj.error);
         durationMs = optionalFiniteDurationMs(obj.durationMs);
+        lastModel = extractModelId(obj) ?? lastModel;
         return;
       }
       if (type === 'session_error') {
@@ -485,6 +522,7 @@ function createBlipJsonlParser(): {
       return {
         sessionId,
         message: lastMsg ?? (streamedMsg ? streamedMsg : null),
+        ...(lastModel ? { model: lastModel } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
         ...(firstEventAt ? { firstEventAt } : {}),
         ...(lastEventAt ? { lastEventAt } : {}),
@@ -507,6 +545,22 @@ export function parseCodexJsonl(stdout: string): CodexJsonlParseResult {
   const parser = createCodexJsonlParser();
   for (const line of String(stdout || '').split('\n')) parser.pushLine(line);
   return parser.result();
+}
+
+export function parseCodexRolloutModel(raw: string): string | null {
+  let lastModel: string | null = null;
+  for (const lineRaw of String(raw ?? '').split('\n')) {
+    const line = lineRaw.trim();
+    if (!line) continue;
+    try {
+      const event = JSON.parse(line);
+      if (String(event?.type ?? '').trim() !== 'turn_context') continue;
+      lastModel = extractModelId(event?.payload ?? event) ?? lastModel;
+    } catch {
+      // Ignore malformed or unrelated rollout rows.
+    }
+  }
+  return lastModel;
 }
 
 export async function parseCodexJsonlLines(
@@ -550,6 +604,7 @@ export type BuiltinPromptJobTranscript =
       kind: 'codex';
       message: string | null;
       threadId: string | null;
+      model?: string;
       terminalEvent?: CodexTerminalEvent;
       stdoutBytes?: number;
       stdoutTruncated?: boolean;
@@ -559,6 +614,7 @@ export type BuiltinPromptJobTranscript =
       kind: 'pi';
       message: string | null;
       sessionId: string | null;
+      model?: string;
       stdoutBytes?: number;
       stdoutTruncated?: boolean;
       parsedAt?: string;
@@ -567,6 +623,7 @@ export type BuiltinPromptJobTranscript =
       kind: 'blip';
       message: string | null;
       sessionId: string | null;
+      model?: string;
       terminalEvent?: 'session_finished' | 'session_error';
       firstEventAt?: string;
       lastEventAt?: string;
@@ -643,6 +700,7 @@ export function parseBuiltinPromptJobTranscript(
       kind: 'codex',
       message: parsed.message,
       threadId: parsed.threadId,
+      ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
       ...promptJobTranscriptMeta(opts),
     };
@@ -653,6 +711,7 @@ export function parseBuiltinPromptJobTranscript(
       kind: 'pi',
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.model ? { model: parsed.model } : {}),
       ...promptJobTranscriptMeta(opts),
     };
   }
@@ -662,6 +721,7 @@ export function parseBuiltinPromptJobTranscript(
       kind: 'blip',
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
       ...blipTranscriptDiagnostics(parsed),
       ...(parsed.cloneActivity ? { cloneActivity: parsed.cloneActivity } : {}),
@@ -683,6 +743,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
       kind: 'codex',
       message: parsed.message,
       threadId: parsed.threadId,
+      ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
       ...promptJobTranscriptMeta(opts),
     };
@@ -693,6 +754,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
       kind: 'pi',
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.model ? { model: parsed.model } : {}),
       ...promptJobTranscriptMeta(opts),
     };
   }
@@ -702,6 +764,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
       kind: 'blip',
       message: parsed.message,
       sessionId: parsed.sessionId,
+      ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
       ...blipTranscriptDiagnostics(parsed),
       ...(parsed.cloneActivity ? { cloneActivity: parsed.cloneActivity } : {}),
@@ -714,6 +777,7 @@ export async function parseBuiltinPromptJobTranscriptLines(
 export function parseCodexJobTranscript(job: any): {
   threadId: string | null;
   message: string | null;
+  model?: string;
   terminalEvent?: CodexTerminalEvent;
 } {
   const transcript = job?.transcript;
@@ -723,6 +787,7 @@ export function parseCodexJobTranscript(job: any): {
     String(transcript.kind ?? '').trim() === 'codex'
   ) {
     if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
+      const model = optionalString(transcript.model);
       const terminalEventRaw = String(transcript.terminalEvent ?? '').trim();
       const terminalEvent =
         terminalEventRaw === 'turn.completed' ||
@@ -734,6 +799,7 @@ export function parseCodexJobTranscript(job: any): {
       return {
         threadId: optionalString(transcript.threadId),
         message: optionalString(transcript.message),
+        ...(model ? { model } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
       };
     }
@@ -744,6 +810,7 @@ export function parseCodexJobTranscript(job: any): {
 export function parsePiJobTranscript(job: any): {
   sessionId: string | null;
   message: string | null;
+  model?: string;
 } {
   const transcript = job?.transcript;
   if (
@@ -752,9 +819,11 @@ export function parsePiJobTranscript(job: any): {
     String(transcript.kind ?? '').trim() === 'pi'
   ) {
     if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
+      const model = optionalString(transcript.model);
       return {
         sessionId: optionalString(transcript.sessionId),
         message: optionalString(transcript.message),
+        ...(model ? { model } : {}),
       };
     }
   }
@@ -764,6 +833,7 @@ export function parsePiJobTranscript(job: any): {
 export function parseBlipJobTranscript(job: any): {
   sessionId: string | null;
   message: string | null;
+  model?: string;
   terminalEvent?: 'session_finished' | 'session_error';
   firstEventAt?: string;
   lastEventAt?: string;
@@ -785,6 +855,7 @@ export function parseBlipJobTranscript(job: any): {
     String(transcript.kind ?? '').trim() === 'blip'
   ) {
     if (Object.prototype.hasOwnProperty.call(transcript, 'message')) {
+      const model = optionalString(transcript.model);
       const terminalEventRaw = String(transcript.terminalEvent ?? '').trim();
       const terminalEvent =
         terminalEventRaw === 'session_finished' || terminalEventRaw === 'session_error'
@@ -794,6 +865,7 @@ export function parseBlipJobTranscript(job: any): {
       return {
         sessionId: optionalString(transcript.sessionId),
         message: optionalString(transcript.message),
+        ...(model ? { model } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
         ...blipTranscriptDiagnostics(transcript as any),
         ...(cloneActivity ? { cloneActivity } : {}),

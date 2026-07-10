@@ -4,7 +4,7 @@ export { editorLanguageForPath } from '../code-languages';
 
 export type DisplayedChatModel = {
   label: string;
-  source: 'configured' | 'current' | 'default' | 'loading' | 'unknown' | 'unsupported';
+  source: 'transcript' | 'configured' | 'current' | 'default' | 'loading' | 'unknown' | 'unsupported';
 };
 
 export function resolveDisplayedChatModel(
@@ -12,7 +12,10 @@ export function resolveDisplayedChatModel(
   discoveredModels: ChatModelOption[],
   discoveryLoading: boolean,
   discoverySupported = true,
+  lastAgentModelRaw?: string | null,
 ): DisplayedChatModel {
+  const lastAgentModel = String(lastAgentModelRaw ?? '').trim();
+  if (lastAgentModel) return { label: lastAgentModel, source: 'transcript' };
   const configuredModel = String(configuredModelRaw ?? '').trim();
   if (configuredModel) return { label: configuredModel, source: 'configured' };
   if (!discoverySupported) return { label: 'Not reported', source: 'unsupported' };
@@ -28,12 +31,26 @@ export function resolveDisplayedChatModel(
 }
 
 export function displayedChatModelTitle(model: DisplayedChatModel): string {
+  if (model.source === 'transcript') return `Model: ${model.label} (used for the last agent message)`;
   if (model.source === 'configured') return `Model: ${model.label} (configured for this chat)`;
   if (model.source === 'current') return `Model: ${model.label} (reported as current by the agent CLI)`;
   if (model.source === 'default') return `Model: ${model.label} (reported as default by the agent CLI)`;
   if (model.source === 'loading') return 'Detecting the default model from the agent CLI';
   if (model.source === 'unsupported') return 'Model is not reported by this custom agent command';
   return 'Model: agent CLI default (the CLI did not report a specific model)';
+}
+
+export function latestTranscriptModel(
+  transcripts: ReadonlyArray<{ model?: string | null; ok?: boolean }> | null | undefined,
+): string | null {
+  const list = Array.isArray(transcripts) ? transcripts : [];
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const item = list[index];
+    if (!item || item.ok === false) continue;
+    const model = String(item.model ?? '').trim();
+    if (model) return model;
+  }
+  return null;
 }
 
 export function formatAgentModelMetadata(agentLabelRaw: string, model: DisplayedChatModel): string {

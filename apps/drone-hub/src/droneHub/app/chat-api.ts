@@ -151,6 +151,7 @@ export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem):
     sameOptionalText(left.completedAt, right.completedAt) &&
     sameOptionalText(left.id, right.id) &&
     left.prompt === right.prompt &&
+    sameOptionalText(left.model, right.model) &&
     left.inheritedFromClone === right.inheritedFromClone &&
     sameOptionalText(left.session, right.session) &&
     sameOptionalText(left.logPath, right.logPath) &&
