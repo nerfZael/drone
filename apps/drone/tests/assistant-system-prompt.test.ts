@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
 
+import { loadAssistantState } from '../src/host/assistant-store';
 import { HubAssistantService } from '../src/hub/assistant';
 import { withTempDroneDataDir } from './test-helpers';
 
@@ -52,8 +53,8 @@ describe('assistant system prompt settings', () => {
       expect(newThread.systemPrompt).toBe('Custom DroneHub assistant prompt.');
       expect(oldThread.systemPrompt).toBe(initialThread.systemPrompt);
 
-      const assistantState = JSON.parse(await fs.readFile(path.join(droneDataDir, 'assistant.json'), 'utf8'));
-      expect(assistantState.systemPrompt).toBe('Custom DroneHub assistant prompt.');
+      const assistantState = await loadAssistantState();
+      expect(assistantState?.systemPrompt).toBe('Custom DroneHub assistant prompt.');
     });
   });
 
@@ -65,9 +66,9 @@ describe('assistant system prompt settings', () => {
       expect(settings.assistantSystemPrompt.prompt).toBe('Normal assistant prompt.');
       expect(settings.assistantVoiceSystemPrompt.prompt).toBe(settings.assistantVoiceSystemPrompt.defaultPrompt);
 
-      let assistantState = JSON.parse(await fs.readFile(path.join(droneDataDir, 'assistant.json'), 'utf8'));
-      expect(assistantState.systemPrompt).toBe('Normal assistant prompt.');
-      expect(assistantState.voiceSystemPrompt).toBe(settings.assistantVoiceSystemPrompt.defaultPrompt);
+      let assistantState = await loadAssistantState();
+      expect(assistantState?.systemPrompt).toBe('Normal assistant prompt.');
+      expect(assistantState?.voiceSystemPrompt).toBe(settings.assistantVoiceSystemPrompt.defaultPrompt);
 
       const reloadedService = makeAssistantService();
       const reloadedSettings = await reloadedService.systemPromptSettings();
@@ -87,9 +88,9 @@ describe('assistant system prompt settings', () => {
       expect(voiceThread.thread.voiceEnabled).toBe(true);
       expect(voiceThread.thread.systemPrompt).toBe('Voice assistant prompt.');
 
-      assistantState = JSON.parse(await fs.readFile(path.join(droneDataDir, 'assistant.json'), 'utf8'));
-      expect(assistantState.systemPrompt).toBe('Normal assistant prompt.');
-      expect(assistantState.voiceSystemPrompt).toBe('Voice assistant prompt.');
+      assistantState = await loadAssistantState();
+      expect(assistantState?.systemPrompt).toBe('Normal assistant prompt.');
+      expect(assistantState?.voiceSystemPrompt).toBe('Voice assistant prompt.');
 
       await reloadedService.updateThreadSystemPrompt(voiceThread.threadId, { prompt: 'Voice thread prompt.' });
       await reloadedService.promoteThreadSystemPrompt(voiceThread.threadId);

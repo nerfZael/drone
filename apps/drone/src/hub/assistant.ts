@@ -1,9 +1,8 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { droneRootPath } from '../host/paths';
-import { loadRegistry, withRegistryLock } from '../host/registry';
+import { loadAssistantState, saveAssistantState, type StoredAssistantState } from '../host/assistant-store';
+import { loadRegistry } from '../host/registry';
 import {
   hubLog,
   providerDisplayName,
@@ -187,21 +186,6 @@ type AssistantApproval = {
   args: any;
   createdAt: string;
   status: 'pending' | 'approved' | 'denied';
-};
-
-type StoredAssistantState = {
-  activeThreadId?: string | null;
-  threads?: AssistantThread[];
-  chatIdleSubscriptions?: AssistantChatIdleSubscription[];
-  webSearchToolMigrationApplied?: boolean;
-  fetchContentToolMigrationApplied?: boolean;
-  systemPrompt?: string;
-  systemPromptUpdatedAt?: string;
-  voiceSystemPrompt?: string;
-  voiceSystemPromptUpdatedAt?: string;
-  overviewPrompt?: string;
-  overviewPromptUpdatedAt?: string;
-  updatedAt?: string;
 };
 
 type AssistantThreadOverviewCacheEntry = {
@@ -647,7 +631,6 @@ export type AssistantThreadOverviewResult = {
 
 const ASSISTANT_THREAD_MESSAGE_LIMIT = 80;
 const ASSISTANT_REGISTRY_MAX_THREADS = 24;
-const ASSISTANT_STATE_FILE_NAME = 'assistant.json';
 const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
 const ASSISTANT_OVERVIEW_PROMPT_MAX_CHARS = 20_000;
 const ASSISTANT_OVERVIEW_INPUT_MAX_CHARS = 48_000;
@@ -811,7 +794,6 @@ const ASSISTANT_OVERVIEW_PROMPT_DEFAULT = [
   'Prefer compact sections and bullets. Keep it useful at a glance.',
   'Use present tense for current work and past tense for completed actions.',
 ].join('\n');
-let assistantStateWriteQueue: Promise<void> = Promise.resolve();
 const ASSISTANT_MODEL_OPTIONS: Array<{
   provider: LlmProviderId;
   id: string;
@@ -2530,41 +2512,6 @@ function serializeState(input: {
   };
 }
 
-function assistantStatePath(): string {
-  return droneRootPath(ASSISTANT_STATE_FILE_NAME);
-}
-
-async function readAssistantStateFile(): Promise<StoredAssistantState | null> {
-  try {
-    const parsed = JSON.parse(await fs.readFile(assistantStatePath(), 'utf8'));
-    return parsed && typeof parsed === 'object' ? (parsed as StoredAssistantState) : null;
-  } catch (error: any) {
-    if (String(error?.code ?? '') === 'ENOENT') return null;
-    throw error;
-  }
-}
-
-async function writeAssistantStateFile(state: StoredAssistantState): Promise<void> {
-  const filePath = assistantStatePath();
-  await fs.mkdir(path.dirname(filePath), { recursive: true });
-  const tmpPath = path.join(path.dirname(filePath), `.assistant.${process.pid}.${Date.now()}.${Math.random().toString(36).slice(2, 8)}.tmp`);
-  try {
-    await fs.writeFile(tmpPath, `${JSON.stringify(state, null, 2)}\n`, 'utf8');
-    await fs.chmod(tmpPath, 0o600).catch(() => {});
-    await fs.rename(tmpPath, filePath);
-    await fs.chmod(filePath, 0o600).catch(() => {});
-  } catch (error) {
-    await fs.rm(tmpPath, { force: true }).catch(() => {});
-    throw error;
-  }
-}
-
-async function enqueueWriteAssistantStateFile(state: StoredAssistantState): Promise<void> {
-  const write = assistantStateWriteQueue.catch(() => {}).then(() => withRegistryLock(() => writeAssistantStateFile(state)));
-  assistantStateWriteQueue = write;
-  await write;
-}
-
 function firstThread(threads: AssistantThread[], id: string): AssistantThread {
   const found = threads.find((thread) => thread.id === id) ?? threads[0];
   if (!found) throw new Error('assistant has no threads');
@@ -4087,7 +4034,7 @@ export class HubAssistantService {
 
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
-    const stored = await readAssistantStateFile() ?? undefined;
+    const stored = await loadAssistantState() ?? undefined;
     const storedSystemPrompt = migrateAssistantSystemPrompt(stored?.systemPrompt);
     const storedVoiceSystemPrompt = migrateAssistantSystemPrompt(stored?.voiceSystemPrompt);
     const storedOverviewPrompt = normalizeAssistantOverviewPrompt(stored?.overviewPrompt);
@@ -4222,7 +4169,7 @@ export class HubAssistantService {
       overviewPrompt: this.defaultOverviewPrompt,
       overviewPromptUpdatedAt: this.defaultOverviewPromptUpdatedAt,
     });
-    await enqueueWriteAssistantStateFile(state);
+    await saveAssistantState(state);
     this.emitChange('persisted', activeThread.id);
   }
 
