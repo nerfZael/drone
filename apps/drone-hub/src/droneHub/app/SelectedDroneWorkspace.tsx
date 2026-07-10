@@ -15,7 +15,7 @@ import {
   TranscriptTurn,
 } from '../chat';
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
-import { GroupBadge, StatusBadge } from '../overview';
+import { StatusBadge } from '../overview';
 import { TypingDots } from '../overview/icons';
 import { requestJson } from '../http';
 import type { AgentPermissionMode } from '../../domain';
@@ -68,6 +68,7 @@ import {
   displayedChatModelTitle,
   formatAgentModelMetadata,
   formatBytes,
+  latestTranscriptModel,
   parseGithubPullRequestHref,
   resolveDisplayedChatModel,
 } from './selected-drone-workspace-utils';
@@ -640,6 +641,7 @@ export function SelectedDroneWorkspace({
     availableChatModels,
     loadingChatModels,
     modelControlEnabled,
+    latestTranscriptModel(transcripts),
   );
   const compactModelTitle = displayedChatModelTitle(compactModel);
   const compactAgentModelLabel = formatAgentModelMetadata(agentLabel, compactModel);
@@ -977,6 +979,30 @@ export function SelectedDroneWorkspace({
   const [workspaceLayoutScope, setWorkspaceLayoutScopeState] = React.useState<WorkspaceLayoutScope>(() => readWorkspaceLayoutScope());
   const [workspacePaneHeaderMode, setWorkspacePaneHeaderModeState] = React.useState<WorkspacePaneHeaderMode>(() => readWorkspacePaneHeaderMode());
   const [droneControlsExpanded, setDroneControlsExpanded] = React.useState(false);
+  React.useEffect(() => {
+    if (
+      !droneControlsExpanded ||
+      !modelControlEnabled ||
+      availableChatModels.length > 0 ||
+      loadingChatModels ||
+      chatModelsError ||
+      chatModelsDiscoveredAt
+    ) {
+      return;
+    }
+    setChatModelsRefreshNonce((nonce) => nonce + 1);
+  }, [
+    activeChatName,
+    availableChatModels.length,
+    chatModelsDiscoveredAt,
+    chatModelsError,
+    currentAgentKey,
+    currentDrone.id,
+    droneControlsExpanded,
+    loadingChatModels,
+    modelControlEnabled,
+    setChatModelsRefreshNonce,
+  ]);
 
   const openPullRequestsTab = React.useCallback(() => {
     requestRightPanelTab('prs');
@@ -1173,7 +1199,6 @@ export function SelectedDroneWorkspace({
                       hubMessage={currentDrone.hubMessage}
                     />
                   )}
-                  {currentDrone.group && <GroupBadge group={currentDrone.group} />}
                   {showFleetBadge ? (
                     <button
                       type="button"

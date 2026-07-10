@@ -100,6 +100,7 @@ type DroneRegistryChatEntry = {
     at: string;
     id?: string;
     prompt: string;
+    model?: string;
     ok: boolean;
     output: string;
     error?: string;
@@ -125,6 +126,7 @@ type DroneRegistryChatEntry = {
     id: string;
     at: string;
     prompt: string;
+    model?: string;
     state: 'queued' | 'sending' | 'sent' | 'failed';
     cwd?: string | null;
     error?: string;

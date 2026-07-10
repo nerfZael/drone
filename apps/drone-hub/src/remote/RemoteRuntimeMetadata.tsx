@@ -1,11 +1,12 @@
 import React from 'react';
 import type { ChatAgentConfig } from '../domain';
 import { BUILTIN_AGENT_OPTIONS } from '../droneHub/app/app-config';
-import type { ChatModelOption } from '../droneHub/app/app-types';
+import type { TranscriptItem } from '../droneHub/types';
 import { repoPathLabel } from '../droneHub/app/repo-path-label';
 import {
   displayedChatModelTitle,
   formatAgentModelMetadata,
+  latestTranscriptModel,
   resolveDisplayedChatModel,
 } from '../droneHub/app/selected-drone-workspace-utils';
 
@@ -14,7 +15,7 @@ type RemoteRuntimeMetadataProps = {
   repoPath: string;
   agent: ChatAgentConfig | null;
   configuredModel: string | null;
-  models: ChatModelOption[];
+  transcripts: TranscriptItem[];
   loading: boolean;
   error: string | null;
   draft: boolean;
@@ -31,7 +32,7 @@ export function RemoteRuntimeMetadata({
   repoPath,
   agent,
   configuredModel,
-  models,
+  transcripts,
   loading,
   error,
   draft,
@@ -41,9 +42,10 @@ export function RemoteRuntimeMetadata({
   const agentLabel = remoteAgentLabel(agent);
   const displayedModel = resolveDisplayedChatModel(
     configuredModel,
-    models,
-    loading,
+    [],
+    false,
     agent?.kind === 'builtin',
+    latestTranscriptModel(transcripts),
   );
   const agentModelLabel = formatAgentModelMetadata(agentLabel, displayedModel);
 
@@ -59,7 +61,7 @@ export function RemoteRuntimeMetadata({
       ) : null}
       {normalizedRepoPath && hasDrone ? <span className="opacity-45" aria-hidden="true">·</span> : null}
       {hasDrone ? (
-        loading ? (
+        loading && !agent ? (
           <span className="truncate font-mono">Detecting runtime…</span>
         ) : runtimeUnavailable ? (
           <span className="truncate font-mono">Runtime not reported</span>

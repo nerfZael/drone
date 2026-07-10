@@ -169,9 +169,9 @@ export function RemoteDroneHubApp() {
                 <RemoteRuntimeMetadata
                   hasDrone={Boolean(model.selectedDrone)}
                   repoPath={model.selectedDrone?.repoPath ?? ''}
-                  agent={model.chatRuntime.info?.agent ?? null}
-                  configuredModel={model.chatRuntime.info?.model ?? null}
-                  models={model.chatRuntime.models}
+                  agent={model.chatRuntime.agent}
+                  configuredModel={model.chatRuntime.configuredModel}
+                  transcripts={model.transcripts}
                   loading={model.chatRuntime.loading}
                   error={model.chatRuntime.error}
                   draft={selectedChatIsDraft}

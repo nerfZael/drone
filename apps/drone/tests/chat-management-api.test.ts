@@ -613,6 +613,7 @@ describeSocketSuite('chat management api', () => {
     await updateRegistry((reg: any) => {
       const entry = reg?.drones?.[droneId]?.chats?.default;
       if (!entry) throw new Error('missing seeded chat entry');
+      entry.model = 'configured-model';
       entry.turns = [
         {
           id: 'prompt-1',
@@ -629,6 +630,7 @@ describeSocketSuite('chat management api', () => {
           promptAt: secondAt,
           completedAt: secondAt,
           prompt: 'second',
+          model: 'actual-turn-model',
           ok: true,
           output: 'second done',
         },
@@ -665,7 +667,9 @@ describeSocketSuite('chat management api', () => {
     expect(state.data?.transcripts).toEqual(transcript.data?.transcripts);
     expect(state.data?.pending).toEqual(pending.data?.pending);
     expect(state.data?.agent).toEqual(transcript.data?.agent);
+    expect(state.data?.model).toBe('configured-model');
     expect(state.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-2']);
+    expect(state.data?.transcripts?.[0]?.model).toBe('actual-turn-model');
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('queued-1');
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('prompt-2');
 
