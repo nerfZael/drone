@@ -32,6 +32,19 @@ export type CanonicalDroneLifecycleUpsert = {
   event: Omit<AppendHubOutboxEvent, 'aggregateType' | 'aggregateId'>;
 };
 
+export type CanonicalDroneLifecyclePatch = {
+  state: CanonicalDroneLifecycleState;
+  id: string;
+  transform: (lifecycle: Record<string, any>) => Record<string, any>;
+  event: Omit<AppendHubOutboxEvent, 'aggregateType' | 'aggregateId'>;
+};
+
+export type CanonicalDroneLifecycleDelete = {
+  state: CanonicalDroneLifecycleState;
+  id: string;
+  event: Omit<AppendHubOutboxEvent, 'aggregateType' | 'aggregateId'>;
+};
+
 type LifecycleRow = {
   drone_id: string;
   name: string;
@@ -428,6 +441,32 @@ export class DroneLifecycleRepository {
     });
   }
 
+  commitPatchBatch(items: CanonicalDroneLifecyclePatch[]): Promise<CanonicalDroneLifecycleRecord[]> {
+    return this.database.writeTransaction('commit canonical drone lifecycle patch batch', (connection) => {
+      const records: CanonicalDroneLifecycleRecord[] = [];
+      for (const item of items) {
+        const id = normalizeId(item.id);
+        const current = selectById(connection, item.state, id);
+        if (!current) throw new Error(`unknown ${item.state} drone: ${id}`);
+        const record = writeRecord(
+          connection,
+          item.state,
+          id,
+          item.transform(cloneLifecyclePayload(current.lifecycle)),
+          new Date().toISOString(),
+        );
+        appendHubOutboxEvent(connection, {
+          ...item.event,
+          aggregateType: 'drone',
+          aggregateId: id,
+          payload: item.event.payload ?? { id, state: item.state, version: record.version },
+        });
+        records.push(record);
+      }
+      return records;
+    });
+  }
+
   commitDelete(
     idRaw: string,
     state: CanonicalDroneLifecycleState | undefined,
@@ -446,6 +485,32 @@ export class DroneLifecycleRepository {
         payload: event.payload ?? { id, priorState: current.state, version: current.version },
       });
       return current;
+    });
+  }
+
+  commitDeleteBatch(
+    items: CanonicalDroneLifecycleDelete[],
+    options: { ignoreMissing?: boolean } = {},
+  ): Promise<CanonicalDroneLifecycleRecord[]> {
+    return this.database.writeTransaction('commit canonical drone lifecycle delete batch', (connection) => {
+      const records: CanonicalDroneLifecycleRecord[] = [];
+      for (const item of items) {
+        const id = normalizeId(item.id);
+        const current = selectById(connection, item.state, id);
+        if (!current) {
+          if (options.ignoreMissing) continue;
+          throw new Error(`unknown ${item.state} drone: ${id}`);
+        }
+        connection.prepare(`DELETE FROM ${TABLES[item.state]} WHERE drone_id = ?`).run(id);
+        appendHubOutboxEvent(connection, {
+          ...item.event,
+          aggregateType: 'drone',
+          aggregateId: id,
+          payload: item.event.payload ?? { id, priorState: item.state, version: current.version },
+        });
+        records.push(current);
+      }
+      return records;
     });
   }
 }

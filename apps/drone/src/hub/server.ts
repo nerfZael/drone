@@ -94,16 +94,15 @@ import {
 import { jobsPlanFromAgentMessage, suggestDroneNameFromMessage, suggestTaskTitleFromMessage } from './jobs-from-message';
 import {
   canonicalRepositoriesMap,
-  deleteCanonicalGroup,
   ensureCanonicalGroup,
   listCanonicalGroups,
   listCanonicalRepositories,
   registerCanonicalRepository,
-  renameCanonicalGroupTree,
   removeCanonicalRepository,
   updateCanonicalRepositoryAgents,
   updateCanonicalRepositoryEnvironment,
 } from './groups-repositories';
+import { deleteCanonicalGroupArtifacts, renameCanonicalGroupOrchestration } from './group-orchestration';
 import { tldrFromAgentMessage } from './tldr-from-message';
 import {
   classifyAgentMessageAutoContinue,
@@ -151,7 +150,6 @@ import {
   listScopedTasksForDroneScope,
   normalizeTaskTitle,
   removeTasksForScope,
-  renameTasksForScope,
   normalizeTaskTypeId,
   removeScopedTaskFromBoard,
   type TaskBoardCard,
@@ -415,6 +413,7 @@ import {
   resolveStableDroneOrPendingIdFromRef,
 } from './drone-lifecycle-registry';
 import {
+  deleteCanonicalDroneLifecycleBatch,
   deleteCanonicalDroneLifecycle,
   listCanonicalDroneLifecycle,
   resolveDroneContainerNameByIdentity,
@@ -4124,15 +4123,6 @@ function isSameOrDescendantGroupPath(pathRaw: any, prefixRaw: any): boolean {
   return path === prefix || path.startsWith(`${prefix}/`);
 }
 
-function rewriteGroupPathPrefix(pathRaw: any, fromPrefixRaw: any, toPrefixRaw: any): string {
-  const path = normalizeGroupName(pathRaw);
-  const fromPrefix = normalizeGroupName(fromPrefixRaw);
-  const toPrefix = normalizeGroupName(toPrefixRaw);
-  if (!path || !fromPrefix || !toPrefix || !isSameOrDescendantGroupPath(path, fromPrefix)) return path;
-  if (path === fromPrefix) return toPrefix;
-  return `${toPrefix}/${path.slice(fromPrefix.length + 1)}`;
-}
-
 const DRONE_DISPLAY_NAME_MAX_LEN = 80;
 function normalizeDroneDisplayName(raw: any): string {
   const s = String(raw ?? '').trim();
@@ -4169,14 +4159,6 @@ function allocateUntitledDisplayName(regAny: any): string {
   // Fallback (extremely unlikely)
   return `Untitled ${Date.now().toString(36)}`;
 }
-function ensureGroupRegistered(regAny: any, groupName: string | null | undefined, atIso: string): void {
-  // Group metadata is canonical in catalog_groups. Membership-only registry
-  // transactions intentionally do not mirror explicit group records.
-  void regAny;
-  void groupName;
-  void atIso;
-}
-
 function normalizeAssistantUiOrderList(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   const out: string[] = [];
@@ -14052,21 +14034,6 @@ export async function startDroneHubApiServer(opts: {
           }
         }
       }
-    } catch {
-      // ignore (best-effort)
-    }
-    // Best-effort: ensure any existing group names are persisted as group entries.
-    // This prevents groups from "disappearing" once the last drone is deleted.
-    try {
-      await updateRegistry((regLatest: any) => {
-        const at = nowIso();
-        for (const d of Object.values(regLatest?.drones ?? {}) as any[]) {
-          ensureGroupRegistered(regLatest, d?.group ?? null, at);
-        }
-        for (const d of Object.values(regLatest?.pending ?? {}) as any[]) {
-          ensureGroupRegistered(regLatest, d?.group ?? null, at);
-        }
-      });
     } catch {
       // ignore (best-effort)
     }
@@ -26561,67 +26528,12 @@ export async function startDroneHubApiServer(opts: {
           return;
         }
 
-        const at = nowIso();
-        const canonicalGroupNames = (await listCanonicalGroups()).map((group) => group.name);
-        const result = await updateRegistry((regAny: any) => {
-          let usedOld = false;
-          let usedNew = false;
-          let movedDrones = 0;
-          let movedPending = 0;
-
-          for (const d of Object.values(regAny?.drones ?? {}) as any[]) {
-            const g = normalizeGroupName(d?.group);
-            if (isSameOrDescendantGroupPath(g, oldName)) usedOld = true;
-            if (isSameOrDescendantGroupPath(g, newName)) usedNew = true;
-          }
-          for (const d of Object.values(regAny?.pending ?? {}) as any[]) {
-            const g = normalizeGroupName(d?.group);
-            if (isSameOrDescendantGroupPath(g, oldName)) usedOld = true;
-            if (isSameOrDescendantGroupPath(g, newName)) usedNew = true;
-          }
-
-          const hasOldEntry = canonicalGroupNames.some((name) => isSameOrDescendantGroupPath(name, oldName));
-          if (!hasOldEntry && !usedOld) return { ok: false as const, status: 404 as const, error: `unknown group: ${oldName}` };
-          const collidesWithExistingGroup = canonicalGroupNames.some((name) => {
-            if (isSameOrDescendantGroupPath(name, oldName)) return false;
-            return isSameOrDescendantGroupPath(name, newName);
-          });
-          if (collidesWithExistingGroup || usedNew) {
-            return { ok: false as const, status: 409 as const, error: `group already exists: ${newName}` };
-          }
-
-          // Migrate drone assignments.
-          for (const [name, d] of Object.entries(regAny?.drones ?? {}) as any) {
-            const g = normalizeGroupName(d?.group);
-            if (!isSameOrDescendantGroupPath(g, oldName)) continue;
-            d.group = rewriteGroupPathPrefix(g, oldName, newName);
-            regAny.drones = regAny.drones ?? {};
-            regAny.drones[String(name)] = d;
-            movedDrones += 1;
-          }
-          for (const [name, d] of Object.entries(regAny?.pending ?? {}) as any) {
-            const g = normalizeGroupName(d?.group);
-            if (!isSameOrDescendantGroupPath(g, oldName)) continue;
-            d.group = rewriteGroupPathPrefix(g, oldName, newName);
-            regAny.pending = regAny.pending ?? {};
-            regAny.pending[String(name)] = d;
-            movedPending += 1;
-          }
-
-          return { ok: true as const, movedDrones, movedPending };
-        });
+        const result = await renameCanonicalGroupOrchestration(oldName, newName, nowIso());
 
         if (!result.ok) {
           json(res, result.status ?? 500, { ok: false, error: result.error ?? 'failed to rename group' });
           return;
         }
-
-        await transformStoredKanbanBoardSettings((board) => renameTasksForScope(board, 'group', oldName, newName).board);
-
-        if (!canonicalGroupNames.some((name) => isSameOrDescendantGroupPath(name, oldName))) {
-          await ensureCanonicalGroup(oldName, at);
-        }
-        await renameCanonicalGroupTree(oldName, newName, at);
 
         json(res, 200, { ok: true, oldName, newName, renamed: true, movedDrones: result.movedDrones, movedPending: result.movedPending });
         return;
@@ -26645,9 +26557,8 @@ export async function startDroneHubApiServer(opts: {
         const scopedRepoPath = String(u.searchParams.get('repoPath') ?? '').trim();
 
         const regAny: any = await loadRegistry();
-        const groupExists =
-          !wantsUngrouped &&
-          Object.keys(regAny?.groups ?? {}).some((name) => isSameOrDescendantGroupPath(name, group));
+        const groupExists = !wantsUngrouped &&
+          (await listCanonicalGroups()).some((entry) => isSameOrDescendantGroupPath(entry.name, group));
 
         const realTargets = (Object.entries(regAny.drones ?? {}) as Array<[string, any]>)
           .map(([id, d]) => ({
@@ -26691,17 +26602,7 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
           try {
-            const removedGroupNames = (await listCanonicalGroups()).map((entry) => entry.name).filter((name) =>
-              isSameOrDescendantGroupPath(name, group),
-            );
-            for (const name of removedGroupNames) await deleteCanonicalGroup(name);
-            await transformStoredKanbanBoardSettings((currentBoard) => {
-              let board = currentBoard;
-              for (const name of removedGroupNames) {
-                board = removeTasksForScope(board, 'group', name).board;
-              }
-              return board;
-            });
+            await deleteCanonicalGroupArtifacts(group);
           } catch {
             // ignore
           }
@@ -26717,7 +26618,6 @@ export async function startDroneHubApiServer(opts: {
           const id = t.id;
           const name = t.name;
           if (regAny?.pending?.[id] && !regAny?.drones?.[id]) {
-            delete regAny.pending[id];
             pendingDeleted.push(id);
             removed.push({ id, name });
             dequeueProvisioning(id);
@@ -26738,23 +26638,12 @@ export async function startDroneHubApiServer(opts: {
 
         // Persist any pending deletions and remove the group entry (if any).
         try {
-          const removedGroupNames = !scopedRepoPath && !wantsUngrouped
-            ? (await listCanonicalGroups()).map((entry) => entry.name).filter((name) => isSameOrDescendantGroupPath(name, group))
-            : [];
-          for (const name of removedGroupNames) await deleteCanonicalGroup(name);
-          await updateRegistry((regLatest: any) => {
-            for (const n of pendingDeleted) {
-              if (regLatest?.pending?.[n] && !regLatest?.drones?.[n]) delete regLatest.pending[n];
-            }
-          });
+          await deleteCanonicalDroneLifecycleBatch(
+            pendingDeleted.map((droneId) => ({ state: 'pending', droneId })),
+            { ignoreMissing: true },
+          );
           if (!scopedRepoPath && !wantsUngrouped) {
-            await transformStoredKanbanBoardSettings((currentBoard) => {
-              let board = currentBoard;
-              for (const name of removedGroupNames) {
-                board = removeTasksForScope(board, 'group', name).board;
-              }
-              return board;
-            });
+            await deleteCanonicalGroupArtifacts(group);
           }
         } catch {
           // ignore (drones are already deleted)

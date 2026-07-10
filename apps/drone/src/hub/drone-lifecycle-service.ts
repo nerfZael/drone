@@ -2,6 +2,8 @@ import { loadRegistry, updateRegistry } from '../host/registry';
 import {
   getDroneLifecycleRepository,
   type CanonicalDroneLifecycleRecord,
+  type CanonicalDroneLifecyclePatch,
+  type CanonicalDroneLifecycleDelete,
   type CanonicalDroneLifecycleState,
   type CanonicalDroneLifecycleUpsert,
   type DroneLifecycleRepository,
@@ -161,6 +163,38 @@ export async function deleteCanonicalDroneLifecycle(
   });
 }
 
+export async function deleteCanonicalDroneLifecycleBatch(
+  entries: Array<{ state: CanonicalDroneLifecycleState; droneId: string }>,
+  options: { ignoreMissing?: boolean } = {},
+): Promise<CanonicalDroneLifecycleRecord[]> {
+  if (entries.length === 0) return [];
+  const repository = await canonicalRepositoryWithLegacyBackfill();
+  if (!repository) {
+    requireRepository(repository);
+    return await updateRegistry((registry: any) => entries.map((entry) => {
+      const bucketName = lifecycleBucketName(entry.state);
+      const found = findDroneEntryByIdentity({ drones: registry?.[bucketName] }, entry.droneId);
+      if (!found) {
+        if (options.ignoreMissing) return null;
+        throw new Error(`unknown ${entry.state} drone: ${entry.droneId}`);
+      }
+      const current = found.entry;
+      delete registry[bucketName][found.key];
+      return compatibilityLifecycleRecord(entry.state, entry.droneId, current);
+    }).filter((record): record is CanonicalDroneLifecycleRecord => Boolean(record)));
+  }
+  const items: CanonicalDroneLifecycleDelete[] = entries.map((entry) => ({
+    state: entry.state,
+    id: entry.droneId,
+    event: {
+      topic: 'drone.lifecycle.changes',
+      eventType: 'drone.lifecycle.deleted',
+      payload: { id: entry.droneId, priorState: entry.state },
+    },
+  }));
+  return await repository.commitDeleteBatch(items, options);
+}
+
 export async function patchCanonicalDroneLifecycle(
   state: CanonicalDroneLifecycleState,
   droneId: string,
@@ -182,6 +216,41 @@ export async function patchCanonicalDroneLifecycle(
     topic: 'drone.lifecycle.changes',
     eventType: 'drone.lifecycle.patched',
   });
+}
+
+export async function patchCanonicalDroneLifecycleBatch(
+  entries: Array<{
+    state: CanonicalDroneLifecycleState;
+    droneId: string;
+    transform: (lifecycle: Record<string, any>) => Record<string, any>;
+    eventType?: string;
+    payload?: Record<string, unknown>;
+  }>,
+): Promise<CanonicalDroneLifecycleRecord[]> {
+  if (entries.length === 0) return [];
+  const repository = await canonicalRepositoryWithLegacyBackfill();
+  if (!repository) {
+    requireRepository(repository);
+    return await updateRegistry((registry: any) => entries.map((entry) => {
+      const bucketName = lifecycleBucketName(entry.state);
+      const found = findDroneEntryByIdentity({ drones: registry?.[bucketName] }, entry.droneId);
+      if (!found) throw new Error(`unknown ${entry.state} drone: ${entry.droneId}`);
+      const next = entry.transform({ ...found.entry });
+      registry[bucketName][found.key] = next;
+      return compatibilityLifecycleRecord(entry.state, entry.droneId, next);
+    }));
+  }
+  const items: CanonicalDroneLifecyclePatch[] = entries.map((entry) => ({
+    state: entry.state,
+    id: entry.droneId,
+    transform: entry.transform,
+    event: {
+      topic: 'drone.lifecycle.changes',
+      eventType: entry.eventType ?? 'drone.lifecycle.patched',
+      payload: { id: entry.droneId, state: entry.state, ...(entry.payload ?? {}) },
+    },
+  }));
+  return await repository.commitPatchBatch(items);
 }
 
 export async function getCanonicalDroneLifecycle(droneId: string): Promise<CanonicalDroneLifecycleRecord | null> {
