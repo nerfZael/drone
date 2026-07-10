@@ -59,9 +59,25 @@ describe('MCP server projection', () => {
       fs.mkdirSync(path.dirname(codexConfig), { recursive: true });
       fs.writeFileSync(codexConfig, 'model = "gpt-5.5"\n', 'utf8');
       fs.mkdirSync(path.dirname(cursorConfig), { recursive: true });
-      fs.writeFileSync(cursorConfig, JSON.stringify({ mcpServers: { unmanaged: { command: 'node' } } }, null, 2), 'utf8');
-      fs.writeFileSync(path.join(path.dirname(cursorConfig), '.drone-managed-mcp.json'), JSON.stringify({ managedNames: ['old'] }), 'utf8');
-      fs.writeFileSync(cursorConfig, JSON.stringify({ mcpServers: { unmanaged: { command: 'node' }, old: { command: 'old' } } }, null, 2), 'utf8');
+      fs.writeFileSync(
+        cursorConfig,
+        JSON.stringify({ mcpServers: { unmanaged: { command: 'node' } } }, null, 2),
+        'utf8',
+      );
+      fs.writeFileSync(
+        path.join(path.dirname(cursorConfig), '.drone-managed-mcp.json'),
+        JSON.stringify({ managedNames: ['old'] }),
+        'utf8',
+      );
+      fs.writeFileSync(
+        cursorConfig,
+        JSON.stringify(
+          { mcpServers: { unmanaged: { command: 'node' }, old: { command: 'old' } } },
+          null,
+          2,
+        ),
+        'utf8',
+      );
 
       await syncMcpServersToHostTargets({
         targets: [
@@ -112,10 +128,73 @@ describe('MCP server projection', () => {
       const opencode = JSON.parse(fs.readFileSync(opencodeConfig, 'utf8'));
       expect(opencode.$schema).toBe('https://opencode.ai/config.json');
       expect(opencode.mcp.github.type).toBe('local');
-      expect(opencode.mcp.github.command).toEqual(['npx', '-y', '@modelcontextprotocol/server-github']);
+      expect(opencode.mcp.github.command).toEqual([
+        'npx',
+        '-y',
+        '@modelcontextprotocol/server-github',
+      ]);
       expect(opencode.mcp.github.environment.GITHUB_TOKEN).toBe('{env:GITHUB_TOKEN}');
       expect(opencode.mcp.remote.type).toBe('remote');
       expect(opencode.mcp.remote.headers.Authorization).toBe('Bearer literal-token');
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('replaces manifest-owned Codex tables after an external config rewrite removes the markers', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-mcp-codex-rewrite-'));
+    try {
+      const codexConfig = path.join(tempRoot, '.codex', 'config.toml');
+      fs.mkdirSync(path.dirname(codexConfig), { recursive: true });
+      fs.writeFileSync(
+        codexConfig,
+        [
+          'model = "gpt-5.6-sol"',
+          '',
+          '[mcp_servers.drone-hub]',
+          'url = "http://old.example/mcp"',
+          '',
+          '[mcp_servers.drone-hub.http_headers]',
+          'Authorization = "Bearer old-token"',
+          '',
+          '[mcp_servers.openaiDeveloperDocs]',
+          'url = "https://developers.openai.com/mcp"',
+          '',
+        ].join('\n'),
+        'utf8',
+      );
+      fs.writeFileSync(
+        path.join(path.dirname(codexConfig), '.drone-managed-mcp.json'),
+        JSON.stringify({ managedNames: ['drone-hub'] }),
+        'utf8',
+      );
+
+      await syncMcpServersToHostTargets({
+        targets: [{ agent: 'codex', configPath: codexConfig }],
+        servers: [
+          sampleServer({
+            name: 'drone-hub',
+            transport: 'http',
+            command: undefined,
+            args: undefined,
+            env: undefined,
+            url: 'http://host.docker.internal:8788/mcp',
+            headers: { Authorization: 'Bearer new-token' },
+            agents: ['codex'],
+          }),
+        ],
+      });
+
+      const codexText = fs.readFileSync(codexConfig, 'utf8');
+      expect(codexText.match(/^\[mcp_servers\.drone-hub\]$/gm)).toHaveLength(1);
+      expect(codexText).not.toContain('[mcp_servers.drone-hub.http_headers]');
+      expect(codexText).not.toContain('old.example');
+      expect(codexText).not.toContain('old-token');
+      expect(codexText).toContain('[mcp_servers.openaiDeveloperDocs]');
+      expect(codexText).toContain('url = "https://developers.openai.com/mcp"');
+      expect(codexText).toContain('# drone-hub-managed-mcp-start');
+      expect(codexText).toContain('url = "http://host.docker.internal:8788/mcp"');
+      expect(codexText).toContain('http_headers = { "Authorization" = "Bearer new-token" }');
     } finally {
       fs.rmSync(tempRoot, { recursive: true, force: true });
     }
