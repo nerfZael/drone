@@ -1,13 +1,17 @@
 import path from 'node:path';
 
 import { getCatalogStore, type CatalogGroupRecord, type CatalogRepositoryRecord, type CatalogStore } from '../host/catalog-store';
-import { loadRegistry, updateRegistry } from '../host/registry';
+import { getHubDatabase } from '../host/hub-database';
+import { loadRegistry, loadRegistryRawSnapshot, updateRegistry } from '../host/registry';
+
+const groupsBackfilled = new WeakSet<CatalogStore>();
+const repositoriesBackfilled = new WeakSet<CatalogStore>();
 
 async function catalogStoreOrCompatibility(): Promise<CatalogStore | null> {
   try {
     return await getCatalogStore();
   } catch (error) {
-    if ((globalThis as any).Bun) return null;
+    if ((globalThis as any).Bun && getHubDatabase() === null) return null;
     throw error;
   }
 }
@@ -44,10 +48,12 @@ function legacyRepositories(registry: any): CatalogRepositoryRecord[] {
 }
 
 export async function listCanonicalGroups(): Promise<CatalogGroupRecord[]> {
-  const registry = await loadRegistry();
   const store = await catalogStoreOrCompatibility();
-  if (!store) return legacyGroups(registry);
-  await store.backfillGroups(legacyGroups(registry));
+  if (!store) return legacyGroups(await loadRegistry());
+  if (!groupsBackfilled.has(store)) {
+    await store.backfillGroups(legacyGroups(await loadRegistryRawSnapshot()));
+    groupsBackfilled.add(store);
+  }
   return store.listGroups();
 }
 
@@ -106,10 +112,12 @@ export type GroupMembershipCoordinator = {
 // command hook before the server rename/delete routes can use it safely.
 
 export async function listCanonicalRepositories(): Promise<CatalogRepositoryRecord[]> {
-  const registry = await loadRegistry();
   const store = await catalogStoreOrCompatibility();
-  if (!store) return legacyRepositories(registry);
-  await store.backfillRepositories(legacyRepositories(registry));
+  if (!store) return legacyRepositories(await loadRegistry());
+  if (!repositoriesBackfilled.has(store)) {
+    await store.backfillRepositories(legacyRepositories(await loadRegistryRawSnapshot()));
+    repositoriesBackfilled.add(store);
+  }
   return store.listRepositories();
 }
 
