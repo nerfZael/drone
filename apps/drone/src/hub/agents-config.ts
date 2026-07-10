@@ -1,4 +1,8 @@
 import { canonicalRepositoriesMap } from './groups-repositories';
+import { getHubSettingsRepository } from '../host/hub-settings-repository';
+import { loadRegistry } from '../host/registry';
+
+const DEFAULT_AGENTS_SETTING_KEY = 'agents.default';
 
 export type RepoAgentsMode = 'inherit' | 'override' | 'disabled';
 
@@ -70,6 +74,39 @@ export function resolveDefaultAgentsConfig(regAny: any): ResolvedDefaultAgentsCo
   };
 }
 
+export async function resolveCanonicalDefaultAgentsConfig(
+  registry?: any,
+): Promise<ResolvedDefaultAgentsConfig> {
+  const repository = await getHubSettingsRepository();
+  let record = repository.get<{ content?: string }>(DEFAULT_AGENTS_SETTING_KEY);
+  if (!record) {
+    const legacyRegistry = registry ?? (await loadRegistry());
+    const legacy = resolveDefaultAgentsConfig(legacyRegistry);
+    record = await repository.backfillIfAbsent(
+      DEFAULT_AGENTS_SETTING_KEY,
+      { content: legacy.content },
+      legacy.updatedAt,
+    );
+  }
+  const content = normalizeAgentsMarkdown(record.value?.content);
+  return {
+    content,
+    enabled: Boolean(content.trim()),
+    updatedAt: record.updatedAt,
+  };
+}
+
+export async function upsertCanonicalDefaultAgentsConfig(
+  contentRaw: unknown,
+): Promise<ResolvedDefaultAgentsConfig> {
+  const content = normalizeAgentsMarkdown(contentRaw);
+  const record = await (await getHubSettingsRepository()).put(
+    DEFAULT_AGENTS_SETTING_KEY,
+    { content },
+  );
+  return { content, enabled: Boolean(content.trim()), updatedAt: record.updatedAt };
+}
+
 export function resolveRepoAgentsConfig(regAny: any, repoPathRaw: unknown): ResolvedRepoAgentsConfig {
   const repoPath = String(repoPathRaw ?? '').trim();
   const entry = findRepoEntry(regAny?.repos ?? null, repoPath);
@@ -95,5 +132,16 @@ export function resolveRepoAgentsConfig(regAny: any, repoPathRaw: unknown): Reso
 }
 
 export async function resolveCanonicalRepoAgentsConfig(regAny: any, repoPathRaw: unknown): Promise<ResolvedRepoAgentsConfig> {
-  return resolveRepoAgentsConfig({ ...regAny, repos: await canonicalRepositoriesMap() }, repoPathRaw);
+  const defaults = await resolveCanonicalDefaultAgentsConfig(regAny);
+  return resolveRepoAgentsConfig(
+    {
+      ...regAny,
+      settings: {
+        ...(regAny?.settings ?? {}),
+        agents: { content: defaults.content, updatedAt: defaults.updatedAt },
+      },
+      repos: await canonicalRepositoriesMap(),
+    },
+    repoPathRaw,
+  );
 }

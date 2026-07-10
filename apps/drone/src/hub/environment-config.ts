@@ -1,4 +1,8 @@
 import { canonicalRepositoriesMap } from './groups-repositories';
+import { getHubSettingsRepository } from '../host/hub-settings-repository';
+import { loadRegistry } from '../host/registry';
+
+const NON_REPO_ENVIRONMENT_SETTING_KEY = 'environment.non-repository';
 
 type EnvVarMap = Record<string, string>;
 
@@ -114,6 +118,70 @@ export function resolveRepoEnvironmentConfig(regAny: any, repoPathRaw: unknown):
   };
 }
 
+export async function resolveCanonicalNonRepoEnvironmentConfig(
+  registry?: any,
+): Promise<RepoEnvironmentConfig> {
+  const repository = await getHubSettingsRepository();
+  let record = repository.get<{
+    vars?: unknown;
+    autoApplyToNewContainerDrones?: boolean;
+  }>(NON_REPO_ENVIRONMENT_SETTING_KEY);
+  if (!record) {
+    const legacyRegistry = registry ?? (await loadRegistry());
+    const legacy = resolveRepoEnvironmentConfig(legacyRegistry, '');
+    record = await repository.backfillIfAbsent(
+      NON_REPO_ENVIRONMENT_SETTING_KEY,
+      {
+        vars: legacy.vars,
+        autoApplyToNewContainerDrones: legacy.autoApplyToNewContainerDrones,
+      },
+      legacy.updatedAt,
+    );
+  }
+  return {
+    vars: normalizeEnvVarMap(record.value?.vars),
+    autoApplyToNewContainerDrones: record.value?.autoApplyToNewContainerDrones === true,
+    updatedAt: record.updatedAt,
+  };
+}
+
+export async function upsertCanonicalNonRepoEnvironmentConfig(opts: {
+  vars: unknown;
+  autoApplyToNewContainerDrones: boolean;
+}): Promise<RepoEnvironmentConfig> {
+  const value = {
+    vars: normalizeEnvVarMap(opts.vars),
+    autoApplyToNewContainerDrones: opts.autoApplyToNewContainerDrones === true,
+  };
+  const record = await (await getHubSettingsRepository()).put(
+    NON_REPO_ENVIRONMENT_SETTING_KEY,
+    value,
+  );
+  return { ...value, updatedAt: record.updatedAt };
+}
+
+export async function resolveCanonicalRepoEnvironmentConfig(
+  regAny: any,
+  repoPathRaw: unknown,
+): Promise<ResolvedRepoEnvironmentConfig> {
+  const nonRepo = await resolveCanonicalNonRepoEnvironmentConfig(regAny);
+  return resolveRepoEnvironmentConfig(
+    {
+      ...regAny,
+      settings: {
+        ...(regAny?.settings ?? {}),
+        nonRepoEnvironment: {
+          vars: nonRepo.vars,
+          autoApplyToNewContainerDrones: nonRepo.autoApplyToNewContainerDrones,
+          updatedAt: nonRepo.updatedAt,
+        },
+      },
+      repos: await canonicalRepositoriesMap(),
+    },
+    repoPathRaw,
+  );
+}
+
 export function resolveDroneEnvironmentConfig(regAny: any, droneEntry: any): ResolvedDroneEnvironmentConfig {
   const repo = resolveRepoEnvironmentConfig(regAny, droneEntry?.repoPath);
   const config = droneEntry?.environment ?? {};
@@ -161,5 +229,20 @@ export async function deriveCanonicalCreatedDroneEnvironmentConfig(regAny: any, 
   repoPath?: string | null;
   runtime?: string | null;
 }): Promise<DroneEnvironmentConfig> {
-  return deriveCreatedDroneEnvironmentConfig({ ...regAny, repos: await canonicalRepositoriesMap() }, opts);
+  const nonRepo = await resolveCanonicalNonRepoEnvironmentConfig(regAny);
+  return deriveCreatedDroneEnvironmentConfig(
+    {
+      ...regAny,
+      settings: {
+        ...(regAny?.settings ?? {}),
+        nonRepoEnvironment: {
+          vars: nonRepo.vars,
+          autoApplyToNewContainerDrones: nonRepo.autoApplyToNewContainerDrones,
+          updatedAt: nonRepo.updatedAt,
+        },
+      },
+      repos: await canonicalRepositoriesMap(),
+    },
+    opts,
+  );
 }

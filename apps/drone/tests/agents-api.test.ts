@@ -70,7 +70,7 @@ describeSocketSuite('agents api', () => {
     expect(read.data.agents.content).toBe('# Default instructions');
 
     const reg = await loadRegistry();
-    expect((reg as any).settings?.agents?.content).toBe('# Default instructions');
+    expect((reg as any).settings?.agents?.content).toBeUndefined();
   });
 
   test('stores per-repo override mode and resolves effective content', async () => {

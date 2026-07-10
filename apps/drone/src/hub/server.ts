@@ -149,9 +149,10 @@ import {
 import {
   normalizeAgentsMarkdown,
   normalizeRepoAgentsMode,
-  resolveDefaultAgentsConfig,
+  resolveCanonicalDefaultAgentsConfig,
   resolveCanonicalRepoAgentsConfig,
   resolveRepoAgentsConfig,
+  upsertCanonicalDefaultAgentsConfig,
 } from './agents-config';
 import {
   buildEnvExportLines,
@@ -159,8 +160,9 @@ import {
   deriveCreatedDroneEnvironmentConfig,
   normalizeDisabledRepoKeys,
   normalizeEnvVarMap,
+  resolveCanonicalRepoEnvironmentConfig,
   resolveDroneEnvironmentConfig,
-  resolveRepoEnvironmentConfig,
+  upsertCanonicalNonRepoEnvironmentConfig,
 } from './environment-config';
 import {
   buildStoredSyncSet,
@@ -1109,8 +1111,8 @@ async function withCanonicalRepositories(registry?: any): Promise<any> {
   return { ...regAny, repos: await canonicalRepositoriesMap() };
 }
 
-function repoEnvironmentPayload(regAny: any, repoPathRaw: unknown) {
-  const repo = resolveRepoEnvironmentConfig(regAny, repoPathRaw);
+async function repoEnvironmentPayload(regAny: any, repoPathRaw: unknown) {
+  const repo = await resolveCanonicalRepoEnvironmentConfig(regAny, repoPathRaw);
   return {
     ok: true as const,
     repoPath: repo.repoPath,
@@ -1123,8 +1125,8 @@ function repoEnvironmentPayload(regAny: any, repoPathRaw: unknown) {
   };
 }
 
-function defaultAgentsPayload(regAny: any) {
-  const agents = resolveDefaultAgentsConfig(regAny);
+async function defaultAgentsPayload(regAny: any) {
+  const agents = await resolveCanonicalDefaultAgentsConfig(regAny);
   return {
     ok: true as const,
     agents: {
@@ -18211,7 +18213,7 @@ export async function startDroneHubApiServer(opts: {
       if (pathname === '/api/settings/agents') {
         if (method === 'GET') {
           const regAny: any = await loadRegistry();
-          json(res, 200, defaultAgentsPayload(regAny));
+          json(res, 200, await defaultAgentsPayload(regAny));
           return;
         }
 
@@ -18224,17 +18226,10 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
           const content = normalizeAgentsMarkdown(body?.content);
-          const updatedAt = nowIso();
-          await updateRegistry((regAny: any) => {
-            regAny.settings = regAny.settings ?? {};
-            regAny.settings.agents = {
-              content,
-              updatedAt,
-            };
-          });
+          await upsertCanonicalDefaultAgentsConfig(content);
 
           const regAny: any = await loadRegistry();
-          json(res, 200, defaultAgentsPayload(regAny));
+          json(res, 200, await defaultAgentsPayload(regAny));
           return;
         }
       }
@@ -19473,7 +19468,7 @@ export async function startDroneHubApiServer(opts: {
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'repo-env') {
         const repoPath = u.searchParams.has('repoPath') ? String(u.searchParams.get('repoPath') ?? '') : '';
         const regAny: any = repoPath ? await withCanonicalRepositories() : await loadRegistry();
-        json(res, 200, repoEnvironmentPayload(regAny, repoPath));
+        json(res, 200, await repoEnvironmentPayload(regAny, repoPath));
         return;
       }
 
@@ -19497,13 +19492,9 @@ export async function startDroneHubApiServer(opts: {
         const updatedAt = nowIso();
 
         if (!repoPath) {
-          await updateRegistry((regAny: any) => {
-            regAny.settings = regAny.settings ?? {};
-            regAny.settings.nonRepoEnvironment = {
-              vars,
-              autoApplyToNewContainerDrones,
-              updatedAt,
-            };
+          await upsertCanonicalNonRepoEnvironmentConfig({
+            vars,
+            autoApplyToNewContainerDrones,
           });
         } else {
           await updateCanonicalRepositoryEnvironment(repoPath, {
@@ -19514,7 +19505,7 @@ export async function startDroneHubApiServer(opts: {
         }
 
         const regAny: any = repoPath ? await withCanonicalRepositories() : await loadRegistry();
-        json(res, 200, repoEnvironmentPayload(regAny, repoPath));
+        json(res, 200, await repoEnvironmentPayload(regAny, repoPath));
         return;
       }
 
