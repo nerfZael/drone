@@ -105,6 +105,7 @@ type DroneRegistryChatEntry = {
     id?: string;
     prompt: string;
     model?: string;
+    reasoning?: string;
     ok: boolean;
     output: string;
     error?: string;

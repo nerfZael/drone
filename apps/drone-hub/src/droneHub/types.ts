@@ -533,6 +533,7 @@ export type TranscriptItem = {
   id?: string;
   prompt: string;
   model?: string;
+  reasoning?: string;
   attachments?: ChatImageAttachmentRef[];
   automation?: ChatPromptAutomationMeta;
   inheritedFromClone?: boolean;
