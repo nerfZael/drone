@@ -28,6 +28,7 @@ import {
 } from './navigation';
 import { DiffBlock } from './DiffBlock';
 import { CommitInspectionView } from './CommitInspectionView';
+import { createSingleFlightPoller, singleFlightByKey } from './singleFlight';
 import { MetaChip } from './MetaChip';
 import type { DiffExpansionRange, DiffState, DiffViewType } from './types';
 import {
@@ -117,6 +118,7 @@ const PULL_PREVIEW_CHANGES_POLL_INTERVAL_MS = 10_000;
 type ChangesCacheMap<T> = Map<string, { atMs: number; payload: T }>;
 
 const workingTreeChangesCache: ChangesCacheMap<Extract<RepoChangesPayload, { ok: true }>> = new Map();
+const workingTreeChangesInflight = new Map<string, Promise<Extract<RepoChangesPayload, { ok: true }>>>();
 const pullPreviewChangesCache: ChangesCacheMap<Extract<RepoPullChangesPayload, { ok: true }>> = new Map();
 const pullRequestChangesCache: ChangesCacheMap<Extract<RepoPullRequestChangesPayload, { ok: true }>> = new Map();
 const branchCommitListCache: ChangesCacheMap<Extract<RepoCommitListPayload, { ok: true }>> = new Map();
@@ -592,7 +594,6 @@ export function DroneChangesDock({
     }
 
     let mounted = true;
-    let timer: ReturnType<typeof setInterval> | null = null;
     const cacheKey = changesCacheKey('working-tree', droneId, repoPath);
     const forceInitialLoad = refreshNonce !== workingTreeRefreshNonceRef.current;
     workingTreeRefreshNonceRef.current = refreshNonce;
@@ -626,8 +627,12 @@ export function DroneChangesDock({
       }
       if (!silent) setChangesLoading(true);
       try {
-        const data = await requestJson<Extract<RepoChangesPayload, { ok: true }>>(
-          `/api/drones/${encodeURIComponent(droneId)}/repo/changes`,
+        const data = await singleFlightByKey(
+          workingTreeChangesInflight,
+          cacheKey,
+          () => requestJson<Extract<RepoChangesPayload, { ok: true }>>(
+            `/api/drones/${encodeURIComponent(droneId)}/repo/changes`,
+          ),
         );
         if (!mounted) return;
         writeChangesCache(workingTreeChangesCache, cacheKey, data);
@@ -646,14 +651,21 @@ export function DroneChangesDock({
       }
     };
 
-    void load(Boolean(cached) && !forceInitialLoad, Boolean(cached) || forceInitialLoad);
-    timer = setInterval(() => {
-      void load(true, true);
-    }, WORKING_TREE_CHANGES_POLL_INTERVAL_MS);
+    let initial = true;
+    const poller = createSingleFlightPoller({
+      intervalMs: WORKING_TREE_CHANGES_POLL_INTERVAL_MS,
+      isActive: () => document.visibilityState !== 'hidden' && Boolean(dockRootRef.current?.isConnected),
+      poll: async () => {
+        const first = initial;
+        initial = false;
+        await load(first ? Boolean(cached) && !forceInitialLoad : true, first ? Boolean(cached) || forceInitialLoad : true);
+      },
+    });
+    poller.start();
 
     return () => {
       mounted = false;
-      if (timer) clearInterval(timer);
+      poller.stop();
     };
   }, [dataMode, disabled, droneId, markModeRefreshed, primaryView, refreshNonce, repoAttached, repoPath, startup.markReady]);
 

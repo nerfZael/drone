@@ -4,7 +4,8 @@ const os = require('node:os');
 const path = require('node:path');
 const { afterEach, test } = require('node:test');
 
-const { resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
+const { getHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
+const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle-repository.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const {
   getPromptQueueRepository,
@@ -13,7 +14,7 @@ const {
 const { looksLikeTransientPromptEnqueueError } = require('../../dist/hub/pendingPromptEnqueue.js');
 const { createDronePendingPromptStore } = require('../../dist/hub/drone-pending-prompts.js');
 const { createPendingDroneStateHelpers } = require('../../dist/hub/drone-pending-state.js');
-const { resetTranscriptStoreForTests } = require('../../dist/hub/transcript-store.js');
+const { resetTranscriptStoreForTests, upsertChatInStore } = require('../../dist/hub/transcript-store.js');
 const { loadRegistryRawSnapshot, saveRegistry } = require('../../dist/host/registry.js');
 
 const originalDroneDataDir = process.env.DRONE_DATA_DIR;
@@ -323,14 +324,58 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
     chatName: 'default',
     pending: prompt('canonical', now),
   });
+  await store.pushPendingPrompt({
+    droneId: 'alpha',
+    chatName: 'default',
+    pending: { ...prompt('failed-canonical', now), state: 'failed', error: 'delivery failed' },
+  });
+  await upsertChatInStore({
+    droneId: 'alpha',
+    chatName: 'default',
+    chatEntry: { createdAt: now, turns: [], pendingPrompts: [] },
+  });
+  await getHubDatabase().writeTransaction('test remove compatibility backfill marker', (connection) => {
+    connection.prepare("DELETE FROM hub_drone_lifecycle_backfill WHERE id = 'legacy-registry'").run();
+  });
+  const canonicalCounts = () => getHubDatabase().read((connection) => ({
+    backfillMarkers: connection.prepare('SELECT COUNT(*) AS count FROM hub_drone_lifecycle_backfill').get().count,
+    lifecycle: connection.prepare('SELECT COUNT(*) AS count FROM hub_canonical_drones').get().count,
+    pendingLifecycle: connection.prepare('SELECT COUNT(*) AS count FROM hub_canonical_pending_drones').get().count,
+    chats: connection.prepare('SELECT COUNT(*) AS count FROM canonical_chats').get().count,
+    prompts: connection.prepare('SELECT COUNT(*) AS count FROM prompts').get().count,
+  }));
+  const beforePendingRead = canonicalCounts();
   assert.deepEqual(await loadRegistryRawSnapshot(), rawBeforeEnqueue, 'enqueue must not mirror into registry_json');
   assert.deepEqual(
     (await store.readPendingPrompts({ droneId: 'alpha', chatName: 'default' })).map((item) => ({
       id: item.id,
       state: item.state,
+      error: item.error,
     })),
-    [{ id: 'canonical', state: 'queued' }],
+    [
+      { id: 'canonical', state: 'queued', error: undefined },
+      { id: 'failed-canonical', state: 'failed', error: 'delivery failed' },
+    ],
   );
+  assert.deepEqual(canonicalCounts(), beforePendingRead, 'pending reads must not project or backfill compatibility state');
+  assert.equal(canonicalCounts().backfillMarkers, 0);
+  await (await getDroneLifecycleRepository()).upsert('pending', 'starting-alpha', {
+    id: 'starting-alpha',
+    name: 'starting-alpha',
+    startupQueuedPrompts: [{
+      id: 'startup-canonical',
+      chatName: 'default',
+      at: now,
+      prompt: 'start canonically',
+      state: 'queued',
+    }],
+  });
+  const beforeStartupRead = canonicalCounts();
+  assert.deepEqual(
+    (await store.readPendingStartupPrompts({ droneId: 'starting-alpha', chatName: 'default' })).map((item) => item.id),
+    ['startup-canonical'],
+  );
+  assert.deepEqual(canonicalCounts(), beforeStartupRead, 'startup pending reads must remain read-only');
   assert.equal(
     await store.claimQueuedPendingPromptForSending({
       droneId: 'alpha',

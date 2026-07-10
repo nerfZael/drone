@@ -231,6 +231,9 @@ export class FleetWorkflowStore {
       return rows.map((r) => ({ ...parse<T>(r.payload_json), state: r.state }));
     });
   }
+  isQueueBackfilled(): boolean {
+    return this.database.read((connection) => this.backfilled(connection, 'playbook-queue'));
+  }
   backfillQueue<T extends WorkflowQueueItem>(records: T[]): Promise<boolean> {
     return this.database.writeTransaction('backfill playbook queue', (c) => {
       if (this.backfilled(c, 'playbook-queue')) return false;

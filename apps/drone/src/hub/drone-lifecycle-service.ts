@@ -320,6 +320,35 @@ export async function resolveDroneOrPendingForReadRef(droneRef: string): Promise
   return null;
 }
 
+/** Read-only resolver for latency-sensitive canonical endpoints.
+ *
+ * Unlike the compatibility resolver, this never loads the global registry
+ * projection and never attempts a legacy backfill. Bun intentionally retains
+ * the registry fallback until it has a supported SQLite adapter.
+ */
+export async function resolveCanonicalDroneOrPendingForReadRef(droneRef: string): Promise<ResolvedOrPendingDrone | null> {
+  const ref = String(droneRef ?? '').trim();
+  if (!ref) return null;
+  const repository = await getDroneLifecycleRepository();
+  if (!repository) {
+    if ((globalThis as any).Bun) return await resolveDroneOrPendingForReadRef(ref);
+    throw new Error('canonical drone lifecycle repository is unavailable');
+  }
+  const record = repository.resolveActiveRef(ref);
+  if (!record) return null;
+  const entry = {
+    ...record.lifecycle,
+    id: record.id,
+    name: record.name,
+    ...(record.containerName ? { containerName: record.containerName } : {}),
+    runtime: record.runtimeKind,
+    ...(record.state === 'pending' && record.phase ? { phase: record.phase } : {}),
+  };
+  return record.state === 'pending'
+    ? { kind: 'pending', id: record.id, pending: entry }
+    : { kind: 'real', id: record.id, drone: entry };
+}
+
 export async function resolveDroneNameByIdentity(droneId: string): Promise<string | null> {
   const repository = await canonicalRepositoryWithLegacyBackfill();
   const canonical = repository?.get(droneId) ?? null;

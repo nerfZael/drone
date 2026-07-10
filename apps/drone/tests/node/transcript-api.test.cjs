@@ -7,6 +7,7 @@ const test = require('node:test');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths');
 const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle-repository');
 const { getPromptQueueRepository } = require('../../dist/host/prompt-queue-repository');
+const { getHubDatabase } = require('../../dist/host/hub-database');
 const { loadRegistry } = require('../../dist/host/registry');
 const { startDroneHubApiServer } = require('../../dist/hub/server');
 const {
@@ -161,7 +162,38 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
     ['first', 'second'],
   );
   const etag = first.response.headers.get('etag');
-  assert.match(etag ?? '', /^"transcript-/);
+  assert.match(etag ?? '', /^"sha256-/);
+  assert.match(first.response.headers.get('server-timing') ?? '', /lifecycle;dur=/);
+  assert.match(first.response.headers.get('server-timing') ?? '', /version;dur=/);
+  assert.match(first.response.headers.get('server-timing') ?? '', /rows;dur=/);
+
+  const readCounts = () => getHubDatabase().read((connection) => ({
+    lifecycleBackfills: connection.prepare('SELECT COUNT(*) AS count FROM hub_drone_lifecycle_backfill').get().count,
+    chats: connection.prepare('SELECT COUNT(*) AS count FROM canonical_chats').get().count,
+    turns: connection.prepare('SELECT COUNT(*) AS count FROM canonical_chat_turns').get().count,
+    prompts: connection.prepare('SELECT COUNT(*) AS count FROM prompts').get().count,
+  }));
+  const beforeCanonicalRead = readCounts();
+  const stateRead = await apiFetch(
+    baseUrl,
+    token,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`,
+  );
+  assert.equal(stateRead.response.status, 200, stateRead.text);
+  assert.deepEqual(readCounts(), beforeCanonicalRead, 'canonical hot reads must not backfill or mutate storage');
+  assert.equal(stateRead.data.transcripts.length, 1);
+  assert.equal(stateRead.data.pending[0].id, 'pending-1');
+  const stateEtag = stateRead.response.headers.get('etag');
+  const unchangedState = await apiFetch(
+    baseUrl,
+    token,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`,
+    { headers: { 'if-none-match': stateEtag ?? '' } },
+  );
+  assert.equal(unchangedState.response.status, 304);
+  assert.equal(unchangedState.text, '');
+  assert.match(unchangedState.response.headers.get('server-timing') ?? '', /conditional;dur=/);
+  assert.doesNotMatch(unchangedState.response.headers.get('server-timing') ?? '', /rows;dur=/);
 
   const sqlitePath = path.join(droneDataDir, 'hub.sqlite');
   assert.equal(fs.existsSync(sqlitePath), true);
@@ -230,6 +262,8 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   );
   assert.equal(second.response.status, 304);
   assert.equal(second.text, '');
+  assert.match(second.response.headers.get('server-timing') ?? '', /conditional;dur=/);
+  assert.doesNotMatch(second.response.headers.get('server-timing') ?? '', /rows;dur=/);
 
   const orphanWrite = await upsertTranscriptTurnInStore({
     droneId,

@@ -2484,8 +2484,6 @@ async function hubRun(options: any) {
           ...process.env,
           DRONE_HUB_API_PORT: String(api.port),
           DRONE_HUB_API_TOKEN: apiToken,
-          VITE_DRONE_HUB_DIRECT_API_BASE: `http://127.0.0.1:${api.port}`,
-          VITE_DRONE_HUB_DIRECT_API_TOKEN: apiToken,
           ...(activeProfile ? { VITE_DRONE_PROFILE_ID: activeProfile } : {}),
         },
       })
