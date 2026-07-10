@@ -9,9 +9,11 @@ import {
   claimQueuedPendingPromptInStore,
   importChatFromRegistry,
   readChatFromStore,
+  readChatRowsFromStore,
   updatePendingPromptInStore,
   upsertPendingPromptInStore,
 } from './transcript-store';
+import { resolveCanonicalDroneOrPendingForReadRef } from './drone-lifecycle-service';
 
 export type PendingPrompt = {
   id: string;
@@ -214,6 +216,26 @@ export function createDronePendingPromptStore(deps: {
   }
 
   async function readPendingPrompts(opts: { droneId: string; chatName: string }): Promise<PendingPrompt[]> {
+    if (!(globalThis as any).Bun) {
+      const ref = normalizeDroneIdentity(opts.droneId);
+      const resolved = ref ? await resolveCanonicalDroneOrPendingForReadRef(ref) : null;
+      if (!resolved) throw new Error(`unknown drone: ${opts.droneId}`);
+      if (resolved.kind === 'pending') throw new Error(`drone "${resolved.id}" is still starting`);
+      // Fail loudly if canonical prompt persistence is unavailable. The row
+      // query below then reads only this chat's prompt rows and matching turns;
+      // it does not build or backfill the compatibility registry projection.
+      promptQueueForActiveDrone();
+      const rows = readChatRowsFromStore({
+        droneId: resolved.id,
+        chatName: opts.chatName || 'default',
+        indexes: [],
+        includePending: true,
+      });
+      return pruneCompletedPendingPrompts(rows.pending as PendingPrompt[], rows.pendingTurns, {
+        keepRecentlyCompleted: true,
+      }).slice(-50);
+    }
+
     const regAny: any = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);
     const drone = droneId ? regAny?.drones?.[droneId] : null;
@@ -250,6 +272,16 @@ export function createDronePendingPromptStore(deps: {
   }
 
   async function readPendingStartupPrompts(opts: { droneId: string; chatName: string }): Promise<PendingPrompt[]> {
+    if (!(globalThis as any).Bun) {
+      const ref = normalizeDroneIdentity(opts.droneId);
+      const resolved = ref ? await resolveCanonicalDroneOrPendingForReadRef(ref) : null;
+      if (!resolved || resolved.kind !== 'pending') return [];
+      return deps.normalizePendingStartupPrompts(
+        (resolved.pending as any)?.startupQueuedPrompts,
+        opts.chatName,
+      ).map(deps.startupPromptToPendingPrompt);
+    }
+
     const regAny: any = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);
     const pending = droneId ? regAny?.pending?.[droneId] : null;
