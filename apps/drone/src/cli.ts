@@ -61,6 +61,7 @@ import {
   deleteCanonicalDroneLifecycle,
   upsertCanonicalDroneLifecycle,
 } from './hub/drone-lifecycle-service';
+import { renameDroneDisplayName, setDroneGroupMetadata } from './hub/drone-metadata-commands';
 import { parseHubRunnerProcessesFromPsOutput, parseHubUiServerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import {
   normalizeRemotePublicUrl,
@@ -83,12 +84,6 @@ import { buildVoiceStreamProcessEnv } from './hub/voice-stream-launch';
 import { ensureCanonicalGroup, listCanonicalGroups, listCanonicalRepositories, registerCanonicalRepository } from './hub/groups-repositories';
 
 const requireFromCli = createRequire(__filename);
-
-async function syncCanonicalRealDroneFromRegistry(droneId: string): Promise<void> {
-  const registry: any = await loadRegistry();
-  const entry = registry?.drones?.[droneId] ?? null;
-  if (entry) await upsertCanonicalDroneLifecycle('real', droneId, entry);
-}
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -1617,10 +1612,10 @@ createCommand
 
       try {
         if (group) await ensureCanonicalGroup(group);
-        await updateRegistry((reg) => {
+        const createdEntry = await updateRegistry((reg) => {
           const at = new Date().toISOString();
           if (registryHasDisplayName(reg, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
-          reg.drones[stableId] = {
+          const entry = {
             id: stableId,
             runtime: 'host',
             name: displayName,
@@ -1641,8 +1636,10 @@ createCommand
               tokenPath: hostDroneDaemonTokenPath(stableId),
             },
           } as any;
+          reg.drones[stableId] = entry;
+          return entry;
         });
-        await syncCanonicalRealDroneFromRegistry(stableId);
+        await upsertCanonicalDroneLifecycle('real', stableId, createdEntry);
       } catch (error) {
         await stopHostDaemonByPid(hostPid);
         throw error;
@@ -1781,12 +1778,12 @@ createCommand
     await waitForHealth(hostPort, token);
 
     if (group) await ensureCanonicalGroup(group);
-    await updateRegistry((reg) => {
+    const createdEntry = await updateRegistry((reg) => {
       const at = new Date().toISOString();
       if (registryHasDisplayName(reg, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
-      reg.drones[stableId] = {
+      const entry = {
         id: stableId,
-        runtime: 'container',
+        runtime: 'container' as const,
         name: displayName,
         containerName,
         group,
@@ -1798,8 +1795,10 @@ createCommand
         ...(persistVolume === false ? { persistVolume: false } : {}),
         createdAt: at,
       };
+      reg.drones[stableId] = entry;
+      return entry;
     });
-    await syncCanonicalRealDroneFromRegistry(stableId);
+    await upsertCanonicalDroneLifecycle('real', stableId, createdEntry);
 
     // eslint-disable-next-line no-console
     console.log(
@@ -1855,7 +1854,7 @@ importCommand
     }
 
     if (group) await ensureCanonicalGroup(group);
-    await updateRegistry((reg) => {
+    const importedEntry = await updateRegistry((reg) => {
       const at = new Date().toISOString();
       // Enforce unique display names (unless this is updating the same id).
       for (const [k, v] of Object.entries((reg as any)?.drones ?? {})) {
@@ -1863,9 +1862,9 @@ importCommand
           throw new Error(`drone already exists: ${displayName}`);
         }
       }
-      reg.drones[stableId] = {
+      const entry = {
         id: stableId,
-        runtime: 'container',
+        runtime: 'container' as const,
         name: displayName,
         containerName,
         group,
@@ -1877,8 +1876,10 @@ importCommand
         ...(persistVolume === false ? { persistVolume: false } : {}),
         createdAt: at,
       };
+      reg.drones[stableId] = entry;
+      return entry;
     });
-    await syncCanonicalRealDroneFromRegistry(stableId);
+    await upsertCanonicalDroneLifecycle('real', stableId, importedEntry);
 
     // eslint-disable-next-line no-console
     console.log(
@@ -1988,15 +1989,7 @@ program
       }
     }
 
-    await updateRegistry((reg2: any) => {
-      const cur = reg2?.drones?.[oldKey] ?? null;
-      if (!cur) throw new Error(`drone disappeared from registry during rename: ${oldName}`);
-      const curId = normalizeDroneIdentity(cur?.id) ?? crypto.randomUUID();
-      cur.id = curId;
-      cur.name = newName;
-      cur.containerName = String(cur?.containerName ?? containerName).trim() || containerName;
-      reg2.drones[oldKey] = cur;
-    });
+    await renameDroneDisplayName({ droneId: oldKey, state: 'real', name: newName });
 
     // eslint-disable-next-line no-console
     console.log(
@@ -2209,13 +2202,10 @@ program
     if (!group) throw new Error('invalid group (must be non-empty)');
 
     await ensureCanonicalGroup(group);
-    const prev = await updateRegistry((reg) => {
-      const { key, drone: d } = resolveDroneFromRegistry(reg as any, String(name));
-      const prev = String(d.group ?? '').trim() || null;
-      d.group = group;
-      (reg as any).drones[key] = d;
-      return prev;
-    });
+    const reg = await loadRegistry();
+    const { key, drone } = resolveDroneFromRegistry(reg as any, String(name));
+    const prev = String(drone.group ?? '').trim() || null;
+    await setDroneGroupMetadata({ droneId: key, state: 'real', group });
 
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ ok: true, name: String(name), previousGroup: prev, group }, null, 2));
@@ -2227,13 +2217,10 @@ program
   .description('Clear a drone group assignment')
   .argument('<name>', 'Drone display name')
   .action(async (name) => {
-    const prev = await updateRegistry((reg) => {
-      const { key, drone: d } = resolveDroneFromRegistry(reg as any, String(name));
-      const prev = String(d.group ?? '').trim() || null;
-      delete (d as any).group;
-      (reg as any).drones[key] = d;
-      return prev;
-    });
+    const reg = await loadRegistry();
+    const { key, drone } = resolveDroneFromRegistry(reg as any, String(name));
+    const prev = String(drone.group ?? '').trim() || null;
+    await setDroneGroupMetadata({ droneId: key, state: 'real', group: null });
 
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ ok: true, name: String(name), previousGroup: prev, group: null }, null, 2));

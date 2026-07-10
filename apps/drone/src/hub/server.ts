@@ -421,6 +421,13 @@ import {
   type ResolvedOrPendingDrone,
 } from './drone-lifecycle-service';
 import {
+  renameDroneDisplayName,
+  setDroneEnvironmentMetadata,
+  setDroneGroupMetadata,
+  setDronePresentationMetadata,
+  updateDroneFleetMetadata,
+} from './drone-metadata-commands';
+import {
   createPendingDroneStateHelpers,
   type PendingPhase,
   type PendingPromptState,
@@ -5412,6 +5419,20 @@ async function startPlaybookRunLaunch(opts: {
       startupQueuedPrompts,
       ...(queueGate ? { playbookQueueGate: queueGate } : {}),
     };
+  });
+  await setDronePresentationMetadata({
+    droneId,
+    state: 'pending',
+    kind: 'playbook-run',
+    visibility: 'hidden',
+    playbook: {
+      id: playbook.id,
+      label: playbook.label,
+      messageCount: playbookMessages.length,
+      chatName: 'default',
+      artifacts: playbook.artifacts,
+      actions: playbookActions,
+    },
   });
   enqueueProvisioning(droneId);
   return {
@@ -19541,11 +19562,11 @@ export async function startDroneHubApiServer(opts: {
           return;
         }
         try {
-          await updateRegistry((regAny: any) => {
-            const actor = regAny?.drones?.[resolved.id];
-            if (!actor) throw fleetError(`unknown drone: ${resolved.id}`, 404);
-            const current = fleetActorConfig(actor);
-            setFleetActorConfig(actor, {
+          await updateDroneFleetMetadata({
+            droneId: resolved.id,
+            transform: (fleet) => {
+              const current = fleetActorConfig({ fleet });
+              return setFleetActorConfig({ fleet }, {
               enabled: body?.enabled == null ? current.enabled : body.enabled === true,
               capabilities: Array.isArray(body?.capabilities) ? sanitizeFleetCapabilities(body.capabilities) : current.capabilities,
               readScopes: Array.isArray(body?.readScopes) ? sanitizeFleetReadScopes(body.readScopes) : current.readScopes,
@@ -19553,8 +19574,8 @@ export async function startDroneHubApiServer(opts: {
               quotas: body?.quotas && typeof body.quotas === 'object' && !Array.isArray(body.quotas) ? sanitizeFleetQuotas(body.quotas) : current.quotas,
               createdBy: current.createdBy,
               createdAt: current.createdAt,
-            });
-            regAny.drones[resolved.id] = actor;
+              }).fleet;
+            },
           });
           const regAny: any = await loadRegistry();
           const actor = regAny?.drones?.[resolved.id] ?? null;
@@ -19594,33 +19615,35 @@ export async function startDroneHubApiServer(opts: {
         try {
           let previousParentId: string | null = null;
           let nextParentId: string | null = null;
-          await updateRegistry((regAny: any) => {
-            const actor = regAny?.drones?.[resolved.id];
-            if (!actor) throw fleetError(`unknown drone: ${resolved.id}`, 404);
-            const current = fleetActorConfig(actor);
-            previousParentId = typeof current.createdBy === 'string' && current.createdBy.trim() ? current.createdBy.trim() : null;
-            if (!parentRef) {
-              nextParentId = null;
-            } else {
-              const parentFound = findDroneIdByRef(regAny, parentRef);
-              if (!parentFound) throw fleetError(`unknown drone: ${parentRef}`, 404);
-              nextParentId = resolveStableDroneOrPendingIdFromRef(regAny, parentRef);
-              if (!nextParentId) throw fleetError(`unknown drone: ${parentRef}`, 404);
-              if (nextParentId === resolved.id) throw fleetError('cannot make a drone its own parent', 400);
-              if (fleetDescendantIdsForActor(regAny, resolved.id).includes(nextParentId)) {
-                throw fleetError('cannot reparent a drone beneath one of its descendants', 400);
-              }
+          const regSnapshot = await loadRegistry();
+          const current = fleetActorConfig(resolved.drone);
+          previousParentId = typeof current.createdBy === 'string' && current.createdBy.trim() ? current.createdBy.trim() : null;
+          if (!parentRef) {
+            nextParentId = null;
+          } else {
+            const parentFound = findDroneIdByRef(regSnapshot, parentRef);
+            if (!parentFound) throw fleetError(`unknown drone: ${parentRef}`, 404);
+            nextParentId = resolveStableDroneOrPendingIdFromRef(regSnapshot, parentRef);
+            if (!nextParentId) throw fleetError(`unknown drone: ${parentRef}`, 404);
+            if (nextParentId === resolved.id) throw fleetError('cannot make a drone its own parent', 400);
+            if (fleetDescendantIdsForActor(regSnapshot, resolved.id).includes(nextParentId)) {
+              throw fleetError('cannot reparent a drone beneath one of its descendants', 400);
             }
-            setFleetActorConfig(actor, {
-              enabled: current.enabled,
-              capabilities: current.capabilities,
-              readScopes: current.readScopes,
-              assigned: current.assigned,
-              quotas: current.quotas,
-              createdBy: nextParentId,
-              createdAt: current.createdAt,
-            });
-            regAny.drones[resolved.id] = actor;
+          }
+          await updateDroneFleetMetadata({
+            droneId: resolved.id,
+            transform: (fleet) => {
+              const latest = fleetActorConfig({ fleet });
+              return setFleetActorConfig({ fleet }, {
+                enabled: latest.enabled,
+                capabilities: latest.capabilities,
+                readScopes: latest.readScopes,
+                assigned: latest.assigned,
+                quotas: latest.quotas,
+                createdBy: nextParentId,
+                createdAt: latest.createdAt,
+              }).fleet;
+            },
           });
           const regAny: any = await loadRegistry();
           const idsToSync = Array.from(
@@ -19667,23 +19690,24 @@ export async function startDroneHubApiServer(opts: {
           return;
         }
         try {
-          await updateRegistry((regAny: any) => {
-            const actor = regAny?.drones?.[resolved.id];
-            if (!actor) throw fleetError(`unknown drone: ${resolved.id}`, 404);
-            const targetFound = findDroneIdByRef(regAny, targetRef);
-            if (!targetFound) throw fleetError(`unknown drone: ${targetRef}`, 404);
-            if (targetFound.id === resolved.id) throw fleetError('cannot assign actor to itself', 400);
-            const current = fleetActorConfig(actor);
-            setFleetActorConfig(actor, {
-              enabled: true,
-              capabilities: Array.from(new Set([...current.capabilities, FLEET_CAPABILITY_SEND, FLEET_CAPABILITY_READ])),
-              readScopes: Array.from(new Set([...current.readScopes, 'assigned'])),
-              assigned: Array.from(new Set([...current.assigned, targetFound.id])),
-              quotas: current.quotas,
-              createdBy: current.createdBy,
-              createdAt: current.createdAt,
-            });
-            regAny.drones[resolved.id] = actor;
+          const regSnapshot = await loadRegistry();
+          const targetFound = findDroneIdByRef(regSnapshot, targetRef);
+          if (!targetFound) throw fleetError(`unknown drone: ${targetRef}`, 404);
+          if (targetFound.id === resolved.id) throw fleetError('cannot assign actor to itself', 400);
+          await updateDroneFleetMetadata({
+            droneId: resolved.id,
+            transform: (fleet) => {
+              const current = fleetActorConfig({ fleet });
+              return setFleetActorConfig({ fleet }, {
+                enabled: true,
+                capabilities: Array.from(new Set([...current.capabilities, FLEET_CAPABILITY_SEND, FLEET_CAPABILITY_READ])),
+                readScopes: Array.from(new Set([...current.readScopes, 'assigned'])),
+                assigned: Array.from(new Set([...current.assigned, targetFound.id])),
+                quotas: current.quotas,
+                createdBy: current.createdBy,
+                createdAt: current.createdAt,
+              }).fleet;
+            },
           });
           const regAny: any = await loadRegistry();
           const actor = regAny?.drones?.[resolved.id] ?? null;
@@ -19709,22 +19733,23 @@ export async function startDroneHubApiServer(opts: {
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         try {
-          await updateRegistry((regAny: any) => {
-            const actor = regAny?.drones?.[resolved.id];
-            if (!actor) throw fleetError(`unknown drone: ${resolved.id}`, 404);
-            const current = fleetActorConfig(actor);
-            const targetFound = findDroneIdByRef(regAny, targetRef);
-            const targetId = targetFound?.id ?? targetRef;
-            setFleetActorConfig(actor, {
-              enabled: current.enabled,
-              capabilities: current.capabilities,
-              readScopes: current.readScopes,
-              assigned: current.assigned.filter((id) => id !== targetId),
-              quotas: current.quotas,
-              createdBy: current.createdBy,
-              createdAt: current.createdAt,
-            });
-            regAny.drones[resolved.id] = actor;
+          const regSnapshot = await loadRegistry();
+          const targetFound = findDroneIdByRef(regSnapshot, targetRef);
+          const targetId = targetFound?.id ?? targetRef;
+          await updateDroneFleetMetadata({
+            droneId: resolved.id,
+            transform: (fleet) => {
+              const current = fleetActorConfig({ fleet });
+              return setFleetActorConfig({ fleet }, {
+                enabled: current.enabled,
+                capabilities: current.capabilities,
+                readScopes: current.readScopes,
+                assigned: current.assigned.filter((id) => id !== targetId),
+                quotas: current.quotas,
+                createdBy: current.createdBy,
+                createdAt: current.createdAt,
+              }).fleet;
+            },
           });
           const regAny: any = await loadRegistry();
           const actor = regAny?.drones?.[resolved.id] ?? null;
@@ -25762,60 +25787,26 @@ export async function startDroneHubApiServer(opts: {
         }
 
         if (nextGroup) await ensureCanonicalGroup(nextGroup);
-        const result = await updateRegistry((regAny: any) => {
-          const at = nowIso();
-          if (nextGroup) ensureGroupRegistered(regAny, nextGroup, at);
-          const moved: Array<{ id: string; name: string; previousGroup: string | null; group: string | null }> = [];
-          const rejected: Array<{ id: string; error: string }> = [];
-
-          for (const id of dronesToMove) {
-            const real = regAny?.drones?.[id] ?? null;
-            const pending = regAny?.pending?.[id] ?? null;
-            const source = real ?? pending;
-            if (!source) {
-              rejected.push({ id, error: `unknown drone: ${id}` });
-              continue;
-            }
-
+        const moved: Array<{ id: string; name: string; previousGroup: string | null; group: string | null }> = [];
+        const rejected: Array<{ id: string; error: string }> = [];
+        for (const id of dronesToMove) {
+          try {
+            // eslint-disable-next-line no-await-in-loop
+            const resolved = await resolveDroneOrPendingForReadRef(id);
+            if (!resolved) throw new Error(`unknown drone: ${id}`);
+            const source = resolved.kind === 'real' ? resolved.drone : resolved.pending;
             const prevRaw = String(source?.group ?? '').trim();
             const previousGroup = !prevRaw || isUngroupedGroupName(prevRaw) ? null : prevRaw;
-
-            const changed = previousGroup !== nextGroup;
-
-            if (real) {
-              const realRaw = String(real?.group ?? '').trim();
-              const realGroup = !realRaw || isUngroupedGroupName(realRaw) ? null : realRaw;
-              if (realGroup !== nextGroup) {
-                if (nextGroup == null) {
-                  delete real.group;
-                } else {
-                  real.group = nextGroup;
-                }
-                regAny.drones = regAny.drones ?? {};
-                regAny.drones[id] = real;
-              }
-            }
-            if (pending) {
-              const pendingRaw = String(pending?.group ?? '').trim();
-              const pendingGroup = !pendingRaw || isUngroupedGroupName(pendingRaw) ? null : pendingRaw;
-              if (pendingGroup !== nextGroup) {
-                if (nextGroup == null) {
-                  delete pending.group;
-                } else {
-                  pending.group = nextGroup;
-                }
-                regAny.pending = regAny.pending ?? {};
-                regAny.pending[id] = pending;
-              }
-            }
-
-            if (changed) moved.push({ id, name: String(source?.name ?? ''), previousGroup, group: nextGroup });
+            if (previousGroup === nextGroup) continue;
+            // eslint-disable-next-line no-await-in-loop
+            const record = await setDroneGroupMetadata({ droneId: id, state: resolved.kind, group: nextGroup });
+            moved.push({ id, name: record.name, previousGroup, group: nextGroup });
+          } catch (error: any) {
+            rejected.push({ id, error: String(error?.message ?? error) });
           }
+        }
 
-          return { moved, rejected };
-        });
-
-        json(res, 200, { ok: true, group: nextGroup, moved: result.moved, rejected: result.rejected, total: dronesToMove.length });
+        json(res, 200, { ok: true, group: nextGroup, moved, rejected, total: dronesToMove.length });
         return;
       }
 
@@ -25900,27 +25891,15 @@ export async function startDroneHubApiServer(opts: {
           json(res, 200, { ok: true, id: droneId, oldName, newName, renamed: false, reason: 'same-name' });
           return;
         }
-        const renamed = await updateRegistry((regAny: any) => {
-          const lifecycle = findDroneLifecycleEntriesByIdentity(regAny, droneId);
-          if (!lifecycle) return { ok: false, status: 404, error: `unknown drone: ${droneId}` };
-          for (const [k, v] of Object.entries(regAny?.drones ?? {})) {
-            const id = normalizeDroneIdentity((v as any)?.id) || String(k);
-            if (id === droneId) continue;
-            if (String((v as any)?.name ?? '').trim() === newName) return { ok: false, status: 409, error: `drone already exists: ${newName}` };
-          }
-          for (const [k, v] of Object.entries(regAny?.pending ?? {})) {
-            const id = normalizeDroneIdentity((v as any)?.id) || String(k);
-            if (id === droneId) continue;
-            if (String((v as any)?.name ?? '').trim() === newName) return { ok: false, status: 409, error: `pending drone already exists: ${newName}` };
-          }
-          if (!applyDroneDisplayNameAcrossLifecycleEntries(regAny, droneId, newName)) {
-            return { ok: false, status: 404, error: `unknown drone: ${droneId}` };
-          }
-          return { ok: true, id: droneId, oldName, newName, renamed: true };
-        });
-        if (!(renamed as any).ok) {
-          const status = (renamed as any).status ?? 500;
-          const error = (renamed as any).error ?? 'rename failed';
+        const conflictingReal = Object.entries(regSnapshot?.drones ?? {}).find(([key, entry]: [string, any]) =>
+          (normalizeDroneIdentity(entry?.id) || key) !== droneId && String(entry?.name ?? '').trim() === newName,
+        );
+        const conflictingPending = Object.entries(regSnapshot?.pending ?? {}).find(([key, entry]: [string, any]) =>
+          (normalizeDroneIdentity(entry?.id) || key) !== droneId && String(entry?.name ?? '').trim() === newName,
+        );
+        if (conflictingReal || conflictingPending) {
+          const status = 409;
+          const error = `${conflictingPending ? 'pending ' : ''}drone already exists: ${newName}`;
           hubLog('warn', 'drone rename failed', {
             droneId,
             oldName,
@@ -25934,6 +25913,16 @@ export async function startDroneHubApiServer(opts: {
           json(res, status, { ok: false, error });
           return;
         }
+        try {
+          await renameDroneDisplayName({ droneId, state: found.kind, name: newName });
+        } catch (error: any) {
+          hubLog('warn', 'drone rename failed', {
+            droneId, oldName, newName, source, attempt, suggestedBase, status: 500,
+            error: String(error?.message ?? error),
+          });
+          json(res, 500, { ok: false, error: String(error?.message ?? error) });
+          return;
+        }
 
         hubLog('info', 'drone renamed', {
           droneId,
@@ -25943,7 +25932,7 @@ export async function startDroneHubApiServer(opts: {
           attempt,
           suggestedBase,
         });
-        json(res, 200, renamed);
+        json(res, 200, { ok: true, id: droneId, oldName, newName, renamed: true });
         return;
       }
 
@@ -26094,22 +26083,10 @@ export async function startDroneHubApiServer(opts: {
         const disabledRepoKeys = useRepoVars ? normalizeDisabledRepoKeys(body?.disabledRepoKeys) : [];
         const updatedAt = nowIso();
 
-        await updateRegistry((regAny: any) => {
-          const target = resolved.kind === 'real' ? regAny?.drones?.[resolved.id] : regAny?.pending?.[resolved.id];
-          if (!target) throw new Error(`unknown drone: ${resolved.id}`);
-          target.environment = {
-            vars,
-            useRepoVars,
-            disabledRepoKeys,
-            updatedAt,
-          };
-          if (resolved.kind === 'real') {
-            regAny.drones = regAny.drones ?? {};
-            regAny.drones[resolved.id] = target;
-          } else {
-            regAny.pending = regAny.pending ?? {};
-            regAny.pending[resolved.id] = target;
-          }
+        await setDroneEnvironmentMetadata({
+          droneId: resolved.id,
+          state: resolved.kind,
+          environment: { vars, useRepoVars, disabledRepoKeys, updatedAt },
         });
 
         const regAny: any = await loadRegistry();
