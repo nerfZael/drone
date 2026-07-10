@@ -853,7 +853,8 @@ async function memoryBackfillChat(droneId: string, chatName: string, raw: unknow
   const prompts = memoryPromptMap(droneId, chatName);
   for (const prompt of Array.isArray((value as any).pendingPrompts) ? (value as any).pendingPrompts : []) {
     const id = String(prompt?.id ?? '').trim();
-    if (id && !prompts.has(id)) prompts.set(id, prompt);
+    const cancelledKey = `${k}\u0000${id}`;
+    if (id && !memoryCancelledPrompts.has(cancelledKey) && !prompts.has(id)) prompts.set(id, prompt);
   }
   return { available: true, sourceHash: memoryChats.get(k)?.sourceHash ?? '' };
 }
@@ -1034,19 +1035,23 @@ export function updatePendingPromptInStore(opts: { droneId: string; chatName: st
   if (!(globalThis as any).Bun) throw new Error('pending prompts are owned by PromptQueueRepository');
   const map = memoryPromptMap(opts.droneId, opts.chatName); const current = map.get(opts.id);
   if (!current) return { available: true, updated: false };
-  map.set(opts.id, { ...current, ...opts.patch }); return { available: true, updated: true };
+  map.set(opts.id, { ...current, ...opts.patch, updatedAt: opts.patch.updatedAt ?? new Date().toISOString() });
+  return { available: true, updated: true };
 }
 export function claimQueuedPendingPromptInStore(opts: { droneId: string; chatName: string; id: string }): { available: boolean; claimed: boolean; state: string | null } {
   const map = memoryPromptMap(opts.droneId, opts.chatName); const current = map.get(opts.id);
   if (!current) return { available: true, claimed: false, state: null };
   if (current.state !== 'queued') return { available: true, claimed: false, state: current.state };
-  map.set(opts.id, { ...current, state: 'sending' }); return { available: true, claimed: true, state: 'sending' };
+  map.set(opts.id, { ...current, state: 'sending', updatedAt: new Date().toISOString() });
+  return { available: true, claimed: true, state: 'sending' };
 }
 export function cancelQueuedPendingPromptInStore(opts: { droneId: string; chatName: string; id: string }): { available: boolean; cancelled: boolean; state: string | null } {
   const map = memoryPromptMap(opts.droneId, opts.chatName); const current = map.get(opts.id);
   if (!current) return { available: true, cancelled: false, state: null };
   if (current.state !== 'queued') return { available: true, cancelled: false, state: current.state };
-  map.delete(opts.id); return { available: true, cancelled: true, state: 'queued' };
+  map.delete(opts.id);
+  memoryCancelledPrompts.add(`${key(opts.droneId, opts.chatName)}\u0000${opts.id}`);
+  return { available: true, cancelled: true, state: 'queued' };
 }
 
 export async function resetTranscriptStoreForTests(): Promise<void> {
