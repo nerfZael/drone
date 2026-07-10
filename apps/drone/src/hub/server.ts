@@ -32,7 +32,11 @@ import {
   renameProfile as renameManagedProfile,
   useProfile as useManagedProfile,
 } from '../host/profile-manager';
-import { loadRegistry, updateRegistry as updateHostRegistry } from '../host/registry';
+import {
+  loadRegistry,
+  loadRegistryCompatibilityBase,
+  updateRegistry as updateHostRegistry,
+} from '../host/registry';
 import { getCatalogStore, type CatalogPlaybookRecord } from '../host/catalog-store';
 import {
   createRegistryBackup,
@@ -5289,17 +5293,26 @@ function writePlaybookRunQueueItems(regAny: any, itemsRaw: PlaybookRunQueueItem[
 }
 
 async function canonicalPlaybookQueueItems(registry?: any): Promise<PlaybookRunQueueItem[]> {
-  const regAny = registry ?? (await loadRegistry());
-  const legacy = readPlaybookRunQueueItems(regAny);
   const store = await fleetWorkflowStoreOrCompatibility();
-  if (!store) return legacy;
-  await store.backfillQueue(legacy);
+  if (!store) return readPlaybookRunQueueItems(registry ?? (await loadRegistry()));
+  if (!store.isQueueBackfilled()) {
+    const legacyRegistry = registry?.playbookRunQueue
+      ? registry
+      : await loadRegistryCompatibilityBase();
+    await store.backfillQueue(readPlaybookRunQueueItems(legacyRegistry));
+  }
   return store.listQueue<PlaybookRunQueueItem>(true).filter((item) => (item as any).state !== 'cancelled' && (item as any).state !== 'completed');
 }
 
 async function enqueueCanonicalPlaybookQueueItem(item: PlaybookRunQueueItem): Promise<void> {
   const store = await fleetWorkflowStoreOrCompatibility();
-  if (store) { await store.backfillQueue(readPlaybookRunQueueItems(await loadRegistry())); await store.enqueue(item); return; }
+  if (store) {
+    if (!store.isQueueBackfilled()) {
+      await store.backfillQueue(readPlaybookRunQueueItems(await loadRegistryCompatibilityBase()));
+    }
+    await store.enqueue(item);
+    return;
+  }
   await updateRegistry((regAny:any)=>{const items=readPlaybookRunQueueItems(regAny);items.push(item);writePlaybookRunQueueItems(regAny,items);});
 }
 
@@ -5509,7 +5522,9 @@ async function startPlaybookRunLaunch(opts: {
 }
 
 async function drainPlaybookRunLaunchQueue(): Promise<void> {
-  const regLatest: any = await loadRegistry();
+  const regLatest: any = (globalThis as any).Bun
+    ? await loadRegistry()
+    : readCanonicalActiveDroneModel() ?? await loadRegistry();
   const previousGates = new Map<string, string>();
   for (const [state, bucket] of [['pending', regLatest?.pending], ['real', regLatest?.drones]] as const) {
     for (const [droneId, entry] of Object.entries(bucket ?? {}) as Array<[string, any]>) {
