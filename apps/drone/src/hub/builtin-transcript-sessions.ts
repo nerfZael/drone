@@ -69,11 +69,6 @@ type CodexJsonlParseResult = {
   terminalEvent?: CodexTerminalEvent;
 };
 type PiJsonlParseResult = { sessionId: string | null; message: string | null };
-export type BlipCloneActivity = {
-  status: 'running';
-  count: number;
-  tasks: string[];
-};
 
 export type BlipToolCallSummary = {
   callId?: string;
@@ -101,7 +96,6 @@ type BlipJsonlParseResult = {
   toolCallCompletedCount?: number;
   toolCallFailedCount?: number;
   longestToolCall?: BlipToolCallSummary;
-  cloneActivity?: BlipCloneActivity;
 };
 
 function createCodexJsonlParser(): {
@@ -272,34 +266,6 @@ function createPiJsonlParser(): {
   };
 }
 
-function normalizeBlipCloneActivity(raw: any): BlipCloneActivity | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  const tasksRaw = Array.isArray(raw.tasks) ? raw.tasks : [];
-  const tasks = tasksRaw
-    .map((task: any) => String(task ?? '').trim())
-    .filter(Boolean)
-    .slice(0, 8);
-  if (tasks.length === 0) return undefined;
-  const countRaw = Number(raw.count);
-  const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.floor(countRaw) : tasks.length;
-  return { status: 'running', count: Math.max(1, count), tasks };
-}
-
-function cloneActivityFromArgs(args: any): BlipCloneActivity | undefined {
-  const tasksRaw =
-    args && typeof args === 'object' && Array.isArray(args.agents)
-      ? args.agents.map((agent: any) => agent?.task)
-      : args && typeof args === 'object' && Array.isArray(args.tasks)
-        ? args.tasks
-        : [];
-  const tasks = tasksRaw
-    .map((task: any) => String(task ?? '').trim())
-    .filter(Boolean)
-    .slice(0, 8);
-  if (tasks.length === 0) return undefined;
-  return { status: 'running', count: tasks.length, tasks };
-}
-
 function optionalBlipTimestamp(raw: any): string | null {
   const text = typeof raw === 'string' ? raw.trim() : '';
   if (!text) return null;
@@ -359,8 +325,6 @@ function createBlipJsonlParser(): {
     string,
     { tool: string; startedAt?: string; startedAtMs?: number }
   >();
-  const activeAgentCallActivities = new Map<string, BlipCloneActivity>();
-  const activeAgentRunActivities = new Map<string, BlipCloneActivity>();
 
   return {
     pushLine(lineRaw: string) {
@@ -422,33 +386,6 @@ function createBlipJsonlParser(): {
         }
         if (callId) activeToolCalls.delete(callId);
       }
-      if (
-        tool === 'agent' &&
-        type === 'tool_call_started' &&
-        String(obj.args?.action ?? 'run') !== 'collect' &&
-        String(obj.args?.action ?? 'run') !== 'cancel'
-      ) {
-        const cloneActivity = cloneActivityFromArgs(obj.args);
-        if (callId && cloneActivity) activeAgentCallActivities.set(callId, cloneActivity);
-        return;
-      }
-      if (
-        tool === 'agent' &&
-        (type === 'tool_call_completed' || type === 'tool_call_failed')
-      ) {
-        const callActivity = callId ? activeAgentCallActivities.get(callId) : undefined;
-        if (callId) activeAgentCallActivities.delete(callId);
-        const runId = String(obj.result?.runId ?? '').trim();
-        const status = String(obj.result?.status ?? '').trim();
-        if (type === 'tool_call_completed' && status === 'running' && runId && callActivity) {
-          activeAgentRunActivities.set(runId, callActivity);
-        } else if (runId) {
-          activeAgentRunActivities.delete(runId);
-        } else if (type === 'tool_call_failed' || status === 'completed' || status === 'cancelled' || status === 'error') {
-          activeAgentRunActivities.clear();
-        }
-        return;
-      }
       if (type === 'assistant_delta') {
         const delta = takeStringText(obj.text);
         if (delta) streamedMsg += delta;
@@ -476,11 +413,6 @@ function createBlipJsonlParser(): {
       }
     },
     result() {
-      const activeCloneActivities = [
-        ...Array.from(activeAgentRunActivities.values()),
-        ...Array.from(activeAgentCallActivities.values()),
-      ];
-      const cloneActivity = activeCloneActivities[activeCloneActivities.length - 1];
       const eventCountsOut = Object.keys(eventCounts).length > 0 ? eventCounts : null;
       return {
         sessionId,
@@ -497,7 +429,6 @@ function createBlipJsonlParser(): {
         ...(toolCallCompletedCount > 0 ? { toolCallCompletedCount } : {}),
         ...(toolCallFailedCount > 0 ? { toolCallFailedCount } : {}),
         ...(longestToolCall ? { longestToolCall } : {}),
-        ...(cloneActivity ? { cloneActivity } : {}),
       };
     },
   };
@@ -579,7 +510,6 @@ export type BuiltinPromptJobTranscript =
       toolCallCompletedCount?: number;
       toolCallFailedCount?: number;
       longestToolCall?: BlipToolCallSummary;
-      cloneActivity?: BlipCloneActivity;
       stdoutBytes?: number;
       stdoutTruncated?: boolean;
       parsedAt?: string;
@@ -664,7 +594,6 @@ export function parseBuiltinPromptJobTranscript(
       sessionId: parsed.sessionId,
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
       ...blipTranscriptDiagnostics(parsed),
-      ...(parsed.cloneActivity ? { cloneActivity: parsed.cloneActivity } : {}),
       ...promptJobTranscriptMeta(opts),
     };
   }
@@ -704,7 +633,6 @@ export async function parseBuiltinPromptJobTranscriptLines(
       sessionId: parsed.sessionId,
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
       ...blipTranscriptDiagnostics(parsed),
-      ...(parsed.cloneActivity ? { cloneActivity: parsed.cloneActivity } : {}),
       ...promptJobTranscriptMeta(opts),
     };
   }
@@ -776,7 +704,6 @@ export function parseBlipJobTranscript(job: any): {
   toolCallCompletedCount?: number;
   toolCallFailedCount?: number;
   longestToolCall?: BlipToolCallSummary;
-  cloneActivity?: BlipCloneActivity;
 } {
   const transcript = job?.transcript;
   if (
@@ -790,13 +717,11 @@ export function parseBlipJobTranscript(job: any): {
         terminalEventRaw === 'session_finished' || terminalEventRaw === 'session_error'
           ? terminalEventRaw
           : undefined;
-      const cloneActivity = normalizeBlipCloneActivity((transcript as any).cloneActivity);
       return {
         sessionId: optionalString(transcript.sessionId),
         message: optionalString(transcript.message),
         ...(terminalEvent ? { terminalEvent } : {}),
         ...blipTranscriptDiagnostics(transcript as any),
-        ...(cloneActivity ? { cloneActivity } : {}),
       };
     }
   }

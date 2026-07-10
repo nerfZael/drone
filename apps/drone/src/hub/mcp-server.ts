@@ -5,9 +5,11 @@ import path from 'node:path';
 
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
+import type { McpTokenIdentity } from './mcp-tokens';
 import { z } from 'zod';
 
 import { defaultProfileDroneRootDir, profileDroneRootDir, readActiveProfileNameSync } from '../host/profiles';
+import { McpIdleSubscriptionStore } from './assistant/mcp-idle-subscription-store';
 import { droneSummary } from './mcp-summaries';
 
 const DEFAULT_HUB_BASE_URL = 'http://127.0.0.1:5174';
@@ -81,6 +83,13 @@ type IdleSubscription = {
 
 const idleSubscriptions = new Map<string, IdleSubscription>();
 let idleSubscriptionSequence = 0;
+let idleSubscriptionsRestored = false;
+let idleSubscriptionStore: McpIdleSubscriptionStore | null = null;
+
+function subscriptionStore(): McpIdleSubscriptionStore {
+  idleSubscriptionStore ??= new McpIdleSubscriptionStore();
+  return idleSubscriptionStore;
+}
 
 function cleanString(value: unknown, fallback = ''): string {
   const text = String(value ?? '').trim();
@@ -363,6 +372,20 @@ async function requestDroneSummaries() {
     if (error?.status !== 404) throw error;
     return requestJson('/api/drones', { method: 'GET' });
   }
+}
+
+async function waitForMcpDroneReady(droneRef: string, timeoutMs = 10 * 60_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const response = await requestDroneSummaries();
+    const drones = Array.isArray(response?.drones) ? response.drones : [];
+    const drone = drones.find((candidate: any) => cleanString(candidate?.id) === droneRef || cleanString(candidate?.name) === droneRef);
+    const phase = cleanString(drone?.hub?.phase || drone?.phase || drone?.status).toLowerCase();
+    if (drone && (phase === 'ready' || phase === 'running' || phase === 'idle')) return droneSummary(drone);
+    if (phase === 'error' || phase === 'failed') throw new Error(`drone failed while becoming ready: ${droneRef}`);
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error(`timed out waiting for drone to be ready: ${droneRef}`);
 }
 
 function compareDronesByRecentActivity(a: any, b: any): number {
@@ -750,6 +773,44 @@ function publicSubscription(subscription: IdleSubscription) {
   };
 }
 
+function persistIdleSubscription(subscription: IdleSubscription) {
+  subscriptionStore().save({
+    id: subscription.id,
+    status: subscription.status,
+    expiresAtMs: subscription.expiresAtMs,
+    updatedAt: new Date().toISOString(),
+    subscription: {
+      ...publicSubscription(subscription),
+      clientMeta: subscription.clientMeta,
+      idleSince: subscription.idleSince,
+    },
+  });
+}
+
+function restoredIdleSubscription(record: ReturnType<McpIdleSubscriptionStore['list']>[number]): IdleSubscription | null {
+  const value = record.subscription as any;
+  const mode = value?.mode === 'all' ? 'all' : value?.mode === 'any' ? 'any' : null;
+  const targets = normalizeIdleTargets({ targets: value?.targets });
+  if (!mode || targets.length === 0) return null;
+  return {
+    id: record.id,
+    mode,
+    targets,
+    clientMeta: normalizeClientMeta(value?.clientMeta),
+    status: record.status,
+    createdAt: cleanIsoTimestamp(value?.createdAt) ?? record.updatedAt,
+    expiresAt: cleanIsoTimestamp(value?.expiresAt) ?? new Date(record.expiresAtMs).toISOString(),
+    expiresAtMs: record.expiresAtMs,
+    idleForMs: cleanPositiveInt(value?.idleForMs, DEFAULT_IDLE_FOR_MS, MAX_IDLE_FOR_MS),
+    pollIntervalMs: cleanPositiveInt(value?.pollIntervalMs, DEFAULT_IDLE_POLL_INTERVAL_MS, MAX_IDLE_POLL_INTERVAL_MS),
+    idleSince: Number.isFinite(Number(value?.idleSince)) ? Number(value.idleSince) : null,
+    inFlight: false,
+    timer: null,
+    lastStatus: value?.lastStatus ?? null,
+    lastError: typeof value?.lastError === 'string' ? value.lastError : null,
+  };
+}
+
 async function sendIdleSubscriptionFiredNotification(server: McpServer, subscription: IdleSubscription) {
   try {
     await server.sendLoggingMessage({
@@ -773,7 +834,7 @@ function stopIdleSubscription(subscription: IdleSubscription, status: IdleSubscr
   if (subscription.timer) clearInterval(subscription.timer);
   subscription.timer = null;
   subscription.status = status;
-  if (status !== 'fired') idleSubscriptions.delete(subscription.id);
+  persistIdleSubscription(subscription);
 }
 
 async function runIdleSubscriptionTick(server: McpServer, subscription: IdleSubscription) {
@@ -803,6 +864,7 @@ async function runIdleSubscriptionTick(server: McpServer, subscription: IdleSubs
     subscription.lastError = error?.message || String(error);
   } finally {
     subscription.inFlight = false;
+    persistIdleSubscription(subscription);
   }
 }
 
@@ -840,8 +902,28 @@ function startIdleSubscription(server: McpServer, mode: 'any' | 'all', args: any
   subscription.timer = setInterval(() => void runIdleSubscriptionTick(server, subscription), subscription.pollIntervalMs);
   subscription.timer.unref?.();
   idleSubscriptions.set(subscription.id, subscription);
+  persistIdleSubscription(subscription);
   void runIdleSubscriptionTick(server, subscription);
   return { ok: true, subscription: publicSubscription(subscription) };
+}
+
+function restoreIdleSubscriptions(server: McpServer): void {
+  if (idleSubscriptionsRestored) return;
+  idleSubscriptionsRestored = true;
+  const now = Date.now();
+  for (const record of subscriptionStore().list()) {
+    const subscription = restoredIdleSubscription(record);
+    if (!subscription) continue;
+    if (subscription.status === 'active' && subscription.expiresAtMs <= now) {
+      subscription.status = 'expired';
+      persistIdleSubscription(subscription);
+    }
+    idleSubscriptions.set(subscription.id, subscription);
+    if (subscription.status !== 'active') continue;
+    subscription.timer = setInterval(() => void runIdleSubscriptionTick(server, subscription), subscription.pollIntervalMs);
+    subscription.timer.unref?.();
+    void runIdleSubscriptionTick(server, subscription);
+  }
 }
 
 function boundedTranscriptTurn(turn: any, maxCharsPerField: number) {
@@ -1203,7 +1285,7 @@ function registerTools(server: McpServer) {
 
   server.registerTool('create_drone', {
     title: 'Create drone',
-    description: 'Create a new Drone Hub container drone. Returns after Drone Hub accepts the create request.',
+    description: 'Create a new Drone Hub container drone. Returns when ready unless completion is accepted.',
     inputSchema: {
       name: z.string(),
       group: z.string().optional(),
@@ -1218,6 +1300,7 @@ function registerTools(server: McpServer) {
       pullHostBranchBeforeCreate: z.boolean().optional(),
       initialMessage: z.string().optional(),
       draft: z.boolean().optional(),
+      completion: z.enum(['ready', 'accepted']).optional(),
     },
   }, async (args) => {
     const resolvedRepo = await resolveRegisteredRepo(args);
@@ -1244,7 +1327,11 @@ function registerTools(server: McpServer) {
       ...(cleanString(args.initialMessage) ? { seedPrompt: cleanString(args.initialMessage), seedSubmittedAt: new Date().toISOString() } : {}),
     };
     const response = await requestJson('/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
-    return toolResult({ ok: true, drone: droneSummary({ ...body, ...response }), raw: response, createDefaults: defaults, repo: resolvedRepo });
+    const accepted = droneSummary({ ...body, ...response });
+    const drone = args.completion === 'accepted'
+      ? accepted
+      : await waitForMcpDroneReady(cleanString(response?.id || response?.name, accepted.id || accepted.name));
+    return toolResult({ ok: true, phase: args.completion === 'accepted' ? 'accepted' : 'ready', drone, raw: response, createDefaults: defaults, repo: resolvedRepo });
   });
 
   server.registerTool('clone_drone', {
@@ -1255,6 +1342,7 @@ function registerTools(server: McpServer) {
       name: z.string(),
       group: z.string().optional(),
       cloneChats: z.boolean().optional(),
+      completion: z.enum(['ready', 'accepted']).optional(),
     },
   }, async (args) => {
     const body = {
@@ -1265,7 +1353,11 @@ function registerTools(server: McpServer) {
       ...(cleanString(args.group) ? { group: cleanString(args.group) } : {}),
     };
     const response = await requestJson('/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
-    return toolResult({ ok: true, drone: droneSummary({ ...body, ...response }), raw: response });
+    const accepted = droneSummary({ ...body, ...response });
+    const drone = args.completion === 'accepted'
+      ? accepted
+      : await waitForMcpDroneReady(cleanString(response?.id || response?.name, accepted.id || accepted.name));
+    return toolResult({ ok: true, phase: args.completion === 'accepted' ? 'accepted' : 'ready', drone, raw: response });
   });
 
   server.registerTool('list_chats', {
@@ -1373,6 +1465,26 @@ function registerTools(server: McpServer) {
     inputSchema: idleInputSchema,
   }, async (args, extra) => toolResult(startIdleSubscription(server, 'all', args, extra)));
 
+  server.registerTool('list_chat_idle_subscriptions', {
+    title: 'List chat idle subscriptions',
+    description: 'List durable Drone Hub chat-idle subscriptions and their latest state.',
+    inputSchema: {},
+  }, async () => toolResult({
+    ok: true,
+    subscriptions: [...idleSubscriptions.values()].map(publicSubscription),
+  }));
+
+  server.registerTool('cancel_chat_idle_subscription', {
+    title: 'Cancel chat idle subscription',
+    description: 'Stop a durable Drone Hub chat-idle subscription.',
+    inputSchema: { subscriptionId: z.string() },
+  }, async (args) => {
+    const subscription = idleSubscriptions.get(cleanString(args.subscriptionId));
+    if (!subscription) throw new Error(`unknown chat-idle subscription: ${args.subscriptionId}`);
+    if (subscription.status === 'active') stopIdleSubscription(subscription, 'stopped');
+    return toolResult({ ok: true, subscription: publicSubscription(subscription) });
+  });
+
   server.registerTool('read_chat', {
     title: 'Read drone chat',
     description: 'Read recent transcript turns for a Drone Hub drone chat.',
@@ -1402,12 +1514,90 @@ function registerTools(server: McpServer) {
   });
 }
 
-export function createDroneHubMcpServer() {
+export type DroneHubMcpServerContext = {
+  principal: McpTokenIdentity;
+  correlationId?: string;
+};
+
+const DRONE_PRINCIPAL_TOOLS = new Set([
+  'list_drones',
+  'open_drone_chat',
+  'open_drone',
+  'highlight_drones',
+  'list_whiteboards',
+  'read_whiteboard',
+  'create_whiteboard',
+  'update_whiteboard',
+  'capture_whiteboard',
+  'open_whiteboard',
+  'close_whiteboard',
+  'list_chats',
+  'create_chat',
+  'send_message',
+  'subscribe_to_any_chat_idle',
+  'subscribe_to_all_chats_idle',
+  'read_chat',
+]);
+
+function assertedDroneRefs(args: any): string[] {
+  const direct = [args?.drone, args?.droneId, args?.targetDroneId, args?.id]
+    .map((value) => cleanString(value))
+    .filter(Boolean);
+  const arrays = [args?.drones, args?.droneIds, args?.targets]
+    .flatMap((value) => Array.isArray(value) ? value : [])
+    .map((value: any) => cleanString(value?.drone || value?.droneId || value?.id || value))
+    .filter(Boolean);
+  return [...new Set([...direct, ...arrays])];
+}
+
+export function authorizeDroneHubMcpTool(context: DroneHubMcpServerContext, tool: string, args: any): void {
+  const principal = context.principal;
+  if (principal.kind === 'legacy' || principal.kind === 'host') return;
+  const scopedDroneId = cleanString(principal.droneId);
+  if (!scopedDroneId || !DRONE_PRINCIPAL_TOOLS.has(tool)) {
+    throw new Error(`MCP principal ${principal.name} is not authorized for ${tool}`);
+  }
+  const refs = assertedDroneRefs(args);
+  if (tool === 'list_drones' && refs.length === 0) return;
+  if (refs.length === 0 || refs.some((ref) => ref !== scopedDroneId)) {
+    throw new Error(`MCP principal ${principal.name} is scoped to drone ${scopedDroneId}`);
+  }
+}
+
+function projectMcpResultForPrincipal(context: DroneHubMcpServerContext, tool: string, result: any): any {
+  const principal = context.principal;
+  if (principal.kind !== 'drone' || tool !== 'list_drones') return result;
+  const structured = result?.structuredContent;
+  if (!structured || typeof structured !== 'object') return result;
+  const drones = Array.isArray(structured.drones)
+    ? structured.drones.filter((drone: any) => cleanString(drone?.id) === principal.droneId)
+    : [];
+  const next = { ...structured, count: drones.length, drones };
+  return toolResult(next);
+}
+
+function registerAuthorizedTools(server: McpServer, context: DroneHubMcpServerContext): void {
+  const registerTool = server.registerTool.bind(server) as any;
+  (server as any).registerTool = (name: string, config: any, handler: (args: any, extra: any) => Promise<any>) =>
+    registerTool(name, config, async (args: any, extra: any) => {
+      authorizeDroneHubMcpTool(context, name, args);
+      return projectMcpResultForPrincipal(context, name, await handler(args, extra));
+    });
+  registerTools(server);
+  (server as any).registerTool = registerTool;
+}
+
+export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext>) {
+  const context: DroneHubMcpServerContext = {
+    principal: input?.principal ?? { kind: 'legacy', tokenId: 'legacy', name: 'Legacy Drone Hub MCP token' },
+    ...(input?.correlationId ? { correlationId: input.correlationId } : {}),
+  };
   const server = new McpServer(
     { name: 'Drone Hub MCP Server', version: '0.1.0' },
     { capabilities: { logging: {} } },
   );
-  registerTools(server);
+  registerAuthorizedTools(server, context);
+  restoreIdleSubscriptions(server);
   return server;
 }
 

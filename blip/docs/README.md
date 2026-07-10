@@ -11,6 +11,8 @@ Blip is a local CLI coding agent built from three workspace packages:
 ## Core Documents
 
 - [Design Matrix](design-matrix.md)
+- [Drone Hub Assistant Integration Plan](drone-hub-assistant-integration-plan.md)
+- [Drone Hub Assistant Contract Baseline](drone-hub-assistant-contract-baseline.md)
 - [Permissions And Sandboxing](permissions.md)
 - [Prompts And Instructions](prompts-and-instructions.md)
 - [Runtime Events And JSONL](runtime-events.md)

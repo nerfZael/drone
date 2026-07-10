@@ -2,6 +2,8 @@
 
 Blip emits runtime events from `@blip/core`. The CLI renders those events for humans, or writes each event as JSON when `--jsonl` is enabled.
 
+For a long-lived embedded session, `session_started` is emitted once when the handle is created. Each call to `prompt()` emits its own turn events and one `session_finished` event. A finished prompt does not close the session handle.
+
 ## Event Envelope
 
 Every event has:
@@ -36,11 +38,8 @@ Tool lifecycle:
 - `tool_call_progress`
 - `tool_call_completed`
 - `tool_call_failed`
-- `agent_results_delivered`
 
-`tool_call_progress` is emitted for tool partial updates. For the `agent` tool, Blip derives progress from child-agent tool activity instead of asking child agents to write status reports. The progress `message` is a compact coverage summary, and `details` includes the agent run id, agent id, task, status, and coverage such as read files, changed files, search queries, listed paths, bash commands, and per-tool counts.
-
-While agent runs are active, Blip also injects compact runtime-generated agent context into the parent model context before each parent model request. Running agents appear as an ephemeral status digest so the parent can avoid duplicate discovery. Completed non-blocking agent runs are delivered once as compact result context, without spending a model-chosen tool turn on `agent collect`. Delivery emits `agent_results_delivered`; the delivered context itself is ephemeral and is not persisted as a transcript message.
+`tool_call_progress` is emitted for partial updates reported by a tool while it runs.
 
 Compaction:
 

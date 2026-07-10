@@ -5,9 +5,30 @@ import {
   readAssistantArtifactFile,
   runAssistantArtifactAction,
 } from '../src/hub/assistant-artifacts';
+import { AssistantArtifactsTarget } from '../src/hub/assistant/targets/assistant-artifacts-target';
 import { withTempDroneDataDir } from './test-helpers';
 
 describe('assistant artifacts', () => {
+  test('implements supported shared workspace target operations', async () => {
+    await withTempDroneDataDir('assistant-artifact-target-', async () => {
+      const target = new AssistantArtifactsTarget('thread-target');
+      await target.execute({
+        callId: 'write',
+        tool: 'write_file',
+        args: { path: 'notes/plan.md', content: 'target content', mode: 'create' },
+      });
+      const read = await target.execute({
+        callId: 'read',
+        tool: 'read_file',
+        args: { path: 'notes/plan.md' },
+      });
+
+      expect(read.content[0]?.type === 'text' ? read.content[0].text : '').toBe('target content');
+      expect(read.details).toMatchObject({ path: 'notes/plan.md', revision: expect.any(String) });
+      expect(target.descriptor.capabilities).not.toContain('shell.execute');
+    });
+  });
+
   test('stores files per assistant thread', async () => {
     await withTempDroneDataDir('assistant-artifacts-', async () => {
       const first = await runAssistantArtifactAction('thread-a', {

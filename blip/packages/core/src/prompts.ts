@@ -27,20 +27,19 @@ const PATCH_RULES = `Patch rules:
 - Do not overwrite unrelated user changes.
 - For local CLI cleanup or generated content, bash may be used when the active profile exposes it.`;
 
-function toolRules(profile: ToolProfile, agentsEnabled: boolean): string {
-  const agentTool = agentsEnabled ? "\nagent is also available for parallel agents with explicit context and authority." : "";
+function toolRules(profile: ToolProfile): string {
   if (profile === "local-trusted-write") {
     return `Tool profile: local-trusted-write.
-Available tools are intentionally small: bash, apply_patch, read_file, search_files, and list_files.${agentTool}
+Available tools are intentionally small: bash, apply_patch, read_file, search_files, and list_files.
 Use bash for git status, simple file moves/deletes/directories, package scripts, tests, and builds.
 Use read_file/search_files/list_files when structured bounded output is clearer than shell output.`;
   }
   if (profile === "read-only") {
     return `Tool profile: read-only.
-Only inspection tools are available. Do not try to mutate files. Bash is unavailable.${agentTool}`;
+Only inspection tools are available. Do not try to mutate files. Bash is unavailable.`;
   }
   return `Tool profile: no-shell-workspace-write.
-Bash is unavailable. Use structured file tools for filesystem mutations and get_working_tree_status for git state.${agentTool}`;
+Bash is unavailable. Use structured file tools for filesystem mutations and get_working_tree_status for git state.`;
 }
 
 function permissionRules(): string {
@@ -49,18 +48,6 @@ function permissionRules(): string {
 - Do not access files outside the workspace.
 - The active tool profile controls which tools exist.
 - Bash has no OS sandbox in v1 and is only available in trusted local write sessions.`;
-}
-
-function agentRules(maxAgents: number): string {
-  return `Agent rules:
-- Use agent when up to ${maxAgents} independent agents can answer bounded questions, review work, or produce isolated patch plans in parallel.
-- Do not use agent for simple discovery that can be handled with parallel read_file/search_files/list_files/bash calls.
-- Prefer authority read_only for discovery, research, and review.
-- Use authority scratch for patch candidates that should not mutate the parent workspace.
-- Use authority workspace_write only when direct shared-workspace edits are explicitly useful and safe.
-- Use wait:false when you can continue useful parent work and collect results later.
-- While agents are running, spend parent time on work unlikely to overlap with their assigned lanes; use agent progress/coverage updates and collect results before repeating broad discovery they are already covering.
-- Give each agent a focused task and expected output.`;
 }
 
 async function readOptional(pathname: string): Promise<string | undefined> {
@@ -73,9 +60,8 @@ async function readOptional(pathname: string): Promise<string | undefined> {
   }
 }
 
-export async function assembleSystemPrompt(input: { workspaceRoot: string; toolProfile: ToolProfile; agentsEnabled?: boolean; maxAgents?: number }): Promise<string> {
+export async function assembleSystemPrompt(input: { workspaceRoot: string; toolProfile: ToolProfile }): Promise<string> {
   const repoInstructions = await readOptional(path.join(input.workspaceRoot, "AGENTS.md"));
-  const agentsEnabled = input.agentsEnabled === true;
-  const sections = [IDENTITY, WORKFLOW, toolRules(input.toolProfile, agentsEnabled), agentsEnabled ? agentRules(input.maxAgents ?? 4) : undefined, PATCH_RULES, permissionRules(), repoInstructions ? `Repository instructions from AGENTS.md:\n${repoInstructions}` : undefined];
+  const sections = [IDENTITY, WORKFLOW, toolRules(input.toolProfile), PATCH_RULES, permissionRules(), repoInstructions ? `Repository instructions from AGENTS.md:\n${repoInstructions}` : undefined];
   return sections.filter(Boolean).join("\n\n");
 }

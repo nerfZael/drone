@@ -121,14 +121,6 @@ export type BlipRuntimeEvent =
       error: string;
     })
   | (BlipRuntimeEventBase & {
-      type: "agent_results_delivered";
-      runId: string;
-      status: "completed" | "error" | "cancelled";
-      agentCount: number;
-      message: string;
-      details?: unknown;
-    })
-  | (BlipRuntimeEventBase & {
       type: "process_diagnostics";
       reason: string;
       activeHandles: Array<{ type: string; count: number }>;
@@ -167,7 +159,6 @@ export interface RunBlipOptions {
   forkSessionId?: string;
   jsonl?: boolean;
   reasoning?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  agentsEnabled?: boolean;
   processExitDiagnosticsDelayMs?: number;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
 }
