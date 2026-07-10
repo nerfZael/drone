@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import type { DroneRegistry } from '../host/registry';
 import { loadRegistry, updateRegistry } from '../host/registry';
+import { getCatalogStore, type CatalogStore } from '../host/catalog-store';
 import { bashQuote } from './hub-format';
 
 const MCP_MANIFEST = '.drone-managed-mcp.json';
@@ -235,7 +236,26 @@ export function listMcpServersFromRegistry(
   return out;
 }
 
+async function canonicalMcpServerStore(): Promise<CatalogStore | null> {
+  try {
+    return await getCatalogStore();
+  } catch (error) {
+    if ((globalThis as any).Bun) return null;
+    throw error;
+  }
+}
+
+async function backfillLegacyMcpServers(store: CatalogStore): Promise<void> {
+  if (store.isBackfillComplete('mcp-servers')) return;
+  await store.backfillMcpServers(listMcpServersFromRegistry(await loadRegistry()));
+}
+
 export async function listMcpServers(): Promise<McpServerRecord[]> {
+  const store = await canonicalMcpServerStore();
+  if (store) {
+    await backfillLegacyMcpServers(store);
+    return store.listMcpServers<McpServerRecord>();
+  }
   const reg = await loadRegistry();
   return listMcpServersFromRegistry(reg);
 }
@@ -243,14 +263,20 @@ export async function listMcpServers(): Promise<McpServerRecord[]> {
 export async function getMcpServerById(idRaw: string): Promise<McpServerRecord | null> {
   const id = String(idRaw ?? '').trim();
   if (!id) return null;
-  const reg = await loadRegistry();
-  return listMcpServersFromRegistry(reg).find((server) => server.id === id) ?? null;
+  const store = await canonicalMcpServerStore();
+  if (store) {
+    await backfillLegacyMcpServers(store);
+    return store.getMcpServer<McpServerRecord>(id);
+  }
+  return listMcpServersFromRegistry(await loadRegistry()).find((server) => server.id === id) ?? null;
 }
 
 export async function createMcpServer(input: any): Promise<McpServerRecord> {
   const current = await listMcpServers();
   const record = normalizeIncomingMcpServer(input);
   assertMcpNameAvailable(current, record.name);
+  const store = await canonicalMcpServerStore();
+  if (store) return await store.putMcpServer(record);
   await updateRegistry((reg: any) => {
     reg.mcpServers = reg.mcpServers ?? {};
     reg.mcpServers[record.id] = record;
@@ -266,6 +292,8 @@ export async function updateMcpServerRecord(idRaw: string, input: any): Promise<
   if (!existing) throw new Error(`unknown MCP server: ${id}`);
   const record = normalizeIncomingMcpServer(input, existing);
   assertMcpNameAvailable(current, record.name, id);
+  const store = await canonicalMcpServerStore();
+  if (store) return await store.putMcpServer(record);
   await updateRegistry((reg: any) => {
     reg.mcpServers = reg.mcpServers ?? {};
     reg.mcpServers[id] = record;
@@ -276,6 +304,11 @@ export async function updateMcpServerRecord(idRaw: string, input: any): Promise<
 export async function deleteMcpServerRecord(idRaw: string): Promise<boolean> {
   const id = String(idRaw ?? '').trim();
   if (!id) return false;
+  const store = await canonicalMcpServerStore();
+  if (store) {
+    await backfillLegacyMcpServers(store);
+    return await store.deleteMcpServer(id);
+  }
   return await updateRegistry((reg: any) => {
     if (!reg?.mcpServers?.[id]) return false;
     delete reg.mcpServers[id];

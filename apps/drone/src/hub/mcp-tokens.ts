@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 
 import { loadRegistry, updateRegistry } from '../host/registry';
+import { getCatalogStore, type CatalogStore } from '../host/catalog-store';
 
 export type McpAccessTokenKind = 'host' | 'drone';
 
@@ -100,8 +101,7 @@ function timingSafeStringEqual(aRaw: string, bRaw: string): boolean {
   return a.length === b.length && crypto.timingSafeEqual(a, b);
 }
 
-async function listStoredTokens(): Promise<McpAccessTokenRecord[]> {
-  const reg = await loadRegistry();
+function listStoredTokensFromRegistry(reg: any): McpAccessTokenRecord[] {
   const rawTokens = (reg as any)?.mcpTokens;
   if (!rawTokens || typeof rawTokens !== 'object' || Array.isArray(rawTokens)) return [];
   const out: McpAccessTokenRecord[] = [];
@@ -114,6 +114,29 @@ async function listStoredTokens(): Promise<McpAccessTokenRecord[]> {
   }
   out.sort((a, b) => a.kind.localeCompare(b.kind) || a.name.localeCompare(b.name));
   return out;
+}
+
+async function canonicalMcpTokenStore(): Promise<CatalogStore | null> {
+  try {
+    return await getCatalogStore();
+  } catch (error) {
+    if ((globalThis as any).Bun) return null;
+    throw error;
+  }
+}
+
+async function backfillLegacyMcpTokens(store: CatalogStore): Promise<void> {
+  if (store.isBackfillComplete('mcp-tokens')) return;
+  await store.backfillMcpTokens(listStoredTokensFromRegistry(await loadRegistry()));
+}
+
+async function listStoredTokens(): Promise<McpAccessTokenRecord[]> {
+  const store = await canonicalMcpTokenStore();
+  if (store) {
+    await backfillLegacyMcpTokens(store);
+    return store.listMcpTokens();
+  }
+  return listStoredTokensFromRegistry(await loadRegistry());
 }
 
 export async function listMcpAccessTokens(): Promise<McpAccessTokenSummary[]> {
@@ -151,6 +174,12 @@ export async function createMcpAccessToken(input: {
   };
   const value = mcpAccessTokenValue(signingSecret, record);
   record.tokenPreview = tokenPreview(value);
+  const store = await canonicalMcpTokenStore();
+  if (store) {
+    await backfillLegacyMcpTokens(store);
+    const stored = await store.putMcpToken(record);
+    return { token: summarizeToken(stored), tokenValue: value };
+  }
   await updateRegistry((reg: any) => {
     reg.mcpTokens = reg.mcpTokens ?? {};
     reg.mcpTokens[record.id] = record;
@@ -165,7 +194,13 @@ export async function ensureHostMcpAccessToken(opts: {
   const name = normalizeOptionalString(opts.name) || 'Drone Hub host token';
   const existing = (await listStoredTokens()).find((token) => token.kind === 'host' && token.name === name && !token.revokedAt);
   if (existing) return { token: summarizeToken(existing), tokenValue: mcpAccessTokenValue(opts.signingSecret, existing) };
-  return createMcpAccessToken({ name, kind: 'host', signingSecret: opts.signingSecret });
+  try {
+    return await createMcpAccessToken({ name, kind: 'host', signingSecret: opts.signingSecret });
+  } catch (error) {
+    const winner = (await listStoredTokens()).find((token) => token.kind === 'host' && token.name === name && !token.revokedAt);
+    if (!winner) throw error;
+    return { token: summarizeToken(winner), tokenValue: mcpAccessTokenValue(opts.signingSecret, winner) };
+  }
 }
 
 export async function ensureDroneMcpAccessToken(opts: {
@@ -178,12 +213,30 @@ export async function ensureDroneMcpAccessToken(opts: {
   const existing = (await listStoredTokens()).find((token) => token.kind === 'drone' && token.droneId === droneId && !token.revokedAt);
   if (existing) return { token: summarizeToken(existing), tokenValue: mcpAccessTokenValue(opts.signingSecret, existing) };
   const droneName = normalizeOptionalString(opts.droneName) || droneId;
-  return createMcpAccessToken({ name: `${droneName} drone token`, kind: 'drone', droneId, signingSecret: opts.signingSecret });
+  try {
+    return await createMcpAccessToken({ name: `${droneName} drone token`, kind: 'drone', droneId, signingSecret: opts.signingSecret });
+  } catch (error) {
+    const winner = (await listStoredTokens()).find((token) => token.kind === 'drone' && token.droneId === droneId && !token.revokedAt);
+    if (!winner) throw error;
+    return { token: summarizeToken(winner), tokenValue: mcpAccessTokenValue(opts.signingSecret, winner) };
+  }
 }
 
 export async function regenerateMcpAccessToken(idRaw: string, signingSecret: string): Promise<{ token: McpAccessTokenSummary; tokenValue: string }> {
   const id = normalizeOptionalString(idRaw);
   if (!id) throw new Error('missing MCP token id');
+  const store = await canonicalMcpTokenStore();
+  if (store) {
+    await backfillLegacyMcpTokens(store);
+    const next = await store.updateMcpToken(id, (existing) => {
+      const updated: McpAccessTokenRecord = { ...existing, secretSeed: randomSegment(24), updatedAt: nowIso() };
+      delete updated.revokedAt;
+      updated.tokenPreview = tokenPreview(mcpAccessTokenValue(signingSecret, updated));
+      return updated;
+    });
+    if (!next) throw new Error(`unknown MCP token: ${id}`);
+    return { token: summarizeToken(next), tokenValue: mcpAccessTokenValue(signingSecret, next) };
+  }
   let updated: McpAccessTokenRecord | null = null;
   await updateRegistry((reg: any) => {
     const existing = normalizeStoredToken(reg?.mcpTokens?.[id], id);
@@ -207,6 +260,16 @@ export async function regenerateMcpAccessToken(idRaw: string, signingSecret: str
 export async function revokeMcpAccessToken(idRaw: string): Promise<McpAccessTokenSummary | null> {
   const id = normalizeOptionalString(idRaw);
   if (!id) return null;
+  const store = await canonicalMcpTokenStore();
+  if (store) {
+    await backfillLegacyMcpTokens(store);
+    const revoked = await store.updateMcpToken(id, (existing) => ({
+      ...existing,
+      revokedAt: existing.revokedAt || nowIso(),
+      updatedAt: nowIso(),
+    }));
+    return revoked ? summarizeToken(revoked) : null;
+  }
   let revoked: McpAccessTokenRecord | null = null;
   await updateRegistry((reg: any) => {
     const existing = normalizeStoredToken(reg?.mcpTokens?.[id], id);
@@ -226,6 +289,11 @@ export async function revokeMcpAccessToken(idRaw: string): Promise<McpAccessToke
 export async function revokeMcpAccessTokensForDrone(droneIdRaw: string): Promise<McpAccessTokenSummary[]> {
   const droneId = normalizeOptionalString(droneIdRaw);
   if (!droneId) return [];
+  const store = await canonicalMcpTokenStore();
+  if (store) {
+    await backfillLegacyMcpTokens(store);
+    return (await store.revokeMcpTokensForDrone(droneId, nowIso())).map(summarizeToken);
+  }
   const revoked: McpAccessTokenRecord[] = [];
   await updateRegistry((reg: any) => {
     const rawTokens = reg?.mcpTokens;
@@ -285,6 +353,11 @@ async function markMcpAccessTokenUsed(id: string): Promise<void> {
   if (now - previous < LAST_USED_WRITE_INTERVAL_MS) return;
   lastUsedWrites.set(id, now);
   const at = nowIso();
+  const store = await canonicalMcpTokenStore();
+  if (store) {
+    await store.updateMcpToken(id, (existing) => ({ ...existing, lastUsedAt: at }));
+    return;
+  }
   await updateRegistry((reg: any) => {
     const existing = normalizeStoredToken(reg?.mcpTokens?.[id], id);
     if (!existing) return false;
