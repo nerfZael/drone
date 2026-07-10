@@ -173,6 +173,7 @@ describe('looksLikeTransientPromptEnqueueError', () => {
     expect(looksLikeTransientPromptEnqueueError('request timeout after 5000ms: POST /v1/prompts/enqueue')).toBe(true);
     expect(looksLikeTransientPromptEnqueueError('drone daemon not ready after 20000ms')).toBe(true);
     expect(looksLikeTransientPromptEnqueueError('fetch failed: ECONNREFUSED 127.0.0.1')).toBe(true);
+    expect(looksLikeTransientPromptEnqueueError('timed out acquiring registry lock (10000ms)')).toBe(true);
   });
 
   test('does not retry terminal auth failures', () => {
