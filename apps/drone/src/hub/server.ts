@@ -12369,29 +12369,43 @@ async function ensureHubSessionRunning(opts: {
 async function ensureChatEntry(opts: { droneId: string; chatName: string }): Promise<void> {
   const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings()).enabledByDefault;
   const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings()).enabledByDefault;
-  let syncedDroneId = '';
-  let syncedChats: any = null;
-  await updateRegistry((reg: any) => {
-    const droneId = normalizeDroneIdentity(opts.droneId);
-    const d = droneId ? reg?.drones?.[droneId] : null;
-    if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
-    syncedDroneId = droneId;
-    d.chats = d.chats ?? {};
-    if (!d.chats[opts.chatName]) {
-      // Fleet-created drones default to Codex; other drones keep Cursor.
-      // NOTE: chatId is intentionally omitted (it is created lazily on first prompt).
-      d.chats[opts.chatName] = buildNewChatEntry({
+  const reg: any = await loadRegistry();
+  const droneId = normalizeDroneIdentity(opts.droneId);
+  const d = droneId ? reg?.drones?.[droneId] : null;
+  if (!d) throw new Error(`unknown drone: ${opts.droneId}`);
+  if (!(globalThis as any).Bun) {
+    await importDroneChatsFromRegistry({ droneId, chats: d.chats });
+    if (readChatFromStore({ droneId, chatName: opts.chatName }).chat) return;
+    await upsertChatInStore({
+      droneId,
+      chatName: opts.chatName,
+      chatEntry: buildNewChatEntry({
         droneEntry: d,
         createdAt: new Date().toISOString(),
         autoContinueEnabledByDefault,
         agentSuggestionEnabledByDefault,
+      }),
+    });
+    return;
+  }
+  await updateRegistry((registry: any) => {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const drone = droneId ? registry?.drones?.[droneId] : null;
+    if (!drone) throw new Error(`unknown drone: ${opts.droneId}`);
+    drone.chats = drone.chats ?? {};
+    if (!drone.chats[opts.chatName]) {
+      // Fleet-created drones default to Codex; other drones keep Cursor.
+      // NOTE: chatId is intentionally omitted (it is created lazily on first prompt).
+      drone.chats[opts.chatName] = buildNewChatEntry({
+        droneEntry: drone,
+        createdAt: new Date().toISOString(),
+        autoContinueEnabledByDefault,
+        agentSuggestionEnabledByDefault,
       }) as any;
-      reg.drones = reg.drones ?? {};
-      reg.drones[droneId] = d;
+      registry.drones = registry.drones ?? {};
+      registry.drones[droneId] = drone;
     }
-    syncedChats = d.chats;
   });
-  if (syncedDroneId && syncedChats) await importDroneChatsFromRegistry({ droneId: syncedDroneId, chats: syncedChats });
 }
 
 async function ensureChatEntryCopiedFromChat(opts: {
@@ -12401,6 +12415,33 @@ async function ensureChatEntryCopiedFromChat(opts: {
 }): Promise<void> {
   const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings()).enabledByDefault;
   const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings()).enabledByDefault;
+  if (!(globalThis as any).Bun) {
+    const registry: any = await loadRegistry();
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const chatName = parseChatNameForMutation(opts.chatName, 'chat name');
+    const copyFromChatName = normalizeChatName(opts.copyFromChatName);
+    const drone = droneId ? registry?.drones?.[droneId] : null;
+    if (!drone) throw new Error(`unknown drone: ${opts.droneId}`);
+    await importDroneChatsFromRegistry({ droneId, chats: drone.chats });
+    if (readChatFromStore({ droneId, chatName }).chat) return;
+    const createdAt = nowIso();
+    const source = copyFromChatName ? readChatFromStore({ droneId, chatName: copyFromChatName }).chat : null;
+    if (copyFromChatName && !source && !(copyFromChatName === 'default' && listChatsFromStore({ droneId }).chats.length === 0)) {
+      throw new Error(`unknown chat: ${copyFromChatName}`);
+    }
+    await upsertChatInStore({
+      droneId,
+      chatName,
+      chatEntry: buildNewChatEntry({
+        droneEntry: drone,
+        createdAt,
+        ...(source ? { sourceChatEntry: source } : {}),
+        autoContinueEnabledByDefault,
+        agentSuggestionEnabledByDefault,
+      }),
+    });
+    return;
+  }
   let syncedDroneId = '';
   let syncedChats: any = null;
   await updateRegistry((reg: any) => {
@@ -12489,6 +12530,7 @@ async function getChatEntry(opts: { droneId: string; chatName: string }) {
 }
 
 async function projectCanonicalChatToRegistry(droneIdRaw: string, chatNameRaw: string): Promise<void> {
+  if (!(globalThis as any).Bun) return;
   const droneId = normalizeDroneIdentity(droneIdRaw);
   const chatName = normalizeChatName(chatNameRaw);
   const stored = readChatFromStore({ droneId, chatName });
