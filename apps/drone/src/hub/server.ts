@@ -85,6 +85,18 @@ import {
   terminalPrompt as droneTerminalPrompt,
 } from '../host/api';
 import { jobsPlanFromAgentMessage, suggestDroneNameFromMessage, suggestTaskTitleFromMessage } from './jobs-from-message';
+import {
+  canonicalRepositoriesMap,
+  deleteCanonicalGroup,
+  ensureCanonicalGroup,
+  listCanonicalGroups,
+  listCanonicalRepositories,
+  registerCanonicalRepository,
+  renameCanonicalGroupTree,
+  removeCanonicalRepository,
+  updateCanonicalRepositoryAgents,
+  updateCanonicalRepositoryEnvironment,
+} from './groups-repositories';
 import { tldrFromAgentMessage } from './tldr-from-message';
 import {
   classifyAgentMessageAutoContinue,
@@ -135,10 +147,12 @@ import {
   normalizeAgentsMarkdown,
   normalizeRepoAgentsMode,
   resolveDefaultAgentsConfig,
+  resolveCanonicalRepoAgentsConfig,
   resolveRepoAgentsConfig,
 } from './agents-config';
 import {
   buildEnvExportLines,
+  deriveCanonicalCreatedDroneEnvironmentConfig,
   deriveCreatedDroneEnvironmentConfig,
   normalizeDisabledRepoKeys,
   normalizeEnvVarMap,
@@ -845,9 +859,8 @@ async function resolveSetupStatusResponse(): Promise<any> {
   const welcomeDismissedAt = setupState.welcomeDismissedAtByScope[setupScope] ?? null;
   const regAny = await loadRegistry();
   const dronesObj = regAny?.drones && typeof regAny.drones === 'object' && !Array.isArray(regAny.drones) ? regAny.drones : {};
-  const reposObj = regAny?.repos && typeof regAny.repos === 'object' && !Array.isArray(regAny.repos) ? regAny.repos : {};
   const droneCount = Object.keys(dronesObj).length;
-  const repoCount = Object.keys(reposObj).length;
+  const repoCount = (await listCanonicalRepositories()).length;
   const llmSettings = await resolveLlmSettingsResponse();
   const activeProvider = llmSettings.provider.selected;
   const activeProviderSettings =
@@ -1083,6 +1096,11 @@ function sortedEnvEntries(varsRaw: unknown, source: 'repo' | 'drone'): Array<{ k
   return Object.entries(normalizeEnvVarMap(varsRaw))
     .sort(([a], [b]) => a.localeCompare(b))
     .map(([key, value]) => ({ key, value, source }));
+}
+
+async function withCanonicalRepositories(registry?: any): Promise<any> {
+  const regAny = registry ?? (await loadRegistry());
+  return { ...regAny, repos: await canonicalRepositoriesMap() };
 }
 
 function repoEnvironmentPayload(regAny: any, repoPathRaw: unknown) {
@@ -2463,7 +2481,7 @@ async function syncRepoAgentsInstructionsForDrone(opts: { droneId: string; drone
   if (!isRepoAttachedDrone(droneEntry)) return;
 
   const regAny: any = await loadRegistry();
-  const repoAgents = resolveRepoAgentsConfig(regAny, (droneEntry as any)?.repoPath);
+  const repoAgents = await resolveCanonicalRepoAgentsConfig(regAny, (droneEntry as any)?.repoPath);
   const effectiveContent = repoAgents.effectiveContent;
   if (!effectiveContent) return;
 
@@ -4105,12 +4123,11 @@ function allocateUntitledDisplayName(regAny: any): string {
   return `Untitled ${Date.now().toString(36)}`;
 }
 function ensureGroupRegistered(regAny: any, groupName: string | null | undefined, atIso: string): void {
-  const g = normalizeGroupName(groupName);
-  if (!g || isUngroupedGroupName(g)) return;
-  regAny.groups = regAny.groups ?? {};
-  if (!regAny.groups[g]) {
-    regAny.groups[g] = { name: g, createdAt: atIso, updatedAt: atIso };
-  }
+  // Group metadata is canonical in catalog_groups. Membership-only registry
+  // transactions intentionally do not mirror explicit group records.
+  void regAny;
+  void groupName;
+  void atIso;
 }
 
 function normalizeAssistantUiOrderList(value: unknown): string[] {
@@ -5295,7 +5312,7 @@ async function startPlaybookRunLaunch(opts: {
   const at = nowIso();
   const runtime: DroneRuntime = 'container';
   const containerPort = 7777;
-  const createdEnvironment = deriveCreatedDroneEnvironmentConfig(regAny, { repoPath, runtime });
+  const createdEnvironment = await deriveCanonicalCreatedDroneEnvironmentConfig(regAny, { repoPath, runtime });
   const startupQueuedPrompts = playbookMessages.map((message, index) => ({
     id: `${droneId.replace(/[^A-Za-z0-9._-]+/g, '').slice(0, 24)}-${String(index + 1).padStart(2, '0')}`,
     chatName: 'default',
@@ -19357,22 +19374,12 @@ export async function startDroneHubApiServer(opts: {
       // GET /api/repos
       // Lists repositories registered via `drone repo`.
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'repos') {
-        const regAny: any = await loadRegistry();
-        const raw = regAny?.repos ?? null;
-        const list: any[] = [];
-        if (raw && typeof raw === 'object' && !Array.isArray(raw)) {
-          for (const v of Object.values(raw)) {
-            const p = typeof (v as any)?.path === 'string' ? String((v as any).path).trim() : '';
-            if (!p) continue;
-            list.push({
-              path: p,
-              addedAt: typeof (v as any)?.addedAt === 'string' ? String((v as any).addedAt) : null,
-              remoteUrl: typeof (v as any)?.remoteUrl === 'string' ? String((v as any).remoteUrl) : null,
-              github: (v as any)?.github ?? null,
-            });
-          }
-        }
-        list.sort((a, b) => String(a.path).localeCompare(String(b.path)));
+        const list = (await listCanonicalRepositories()).map((repo) => ({
+          path: repo.path,
+          addedAt: repo.addedAt ?? null,
+          remoteUrl: repo.remoteUrl ?? null,
+          github: repo.github ?? null,
+        }));
         json(res, 200, { ok: true, repos: list, count: list.length });
         return;
       }
@@ -19422,25 +19429,7 @@ export async function startDroneHubApiServer(opts: {
           return;
         }
 
-        const removed = await updateRegistry((regAny: any) => {
-          const raw = regAny?.repos ?? null;
-          if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return false;
-          // Map form: key is repo root (preferred).
-          let did = false;
-          if (raw[target]) {
-            delete raw[target];
-            did = true;
-          } else {
-            for (const [k, v] of Object.entries(raw)) {
-              if (String((v as any)?.path ?? '').trim() === target) {
-                delete (raw as any)[k];
-                did = true;
-              }
-            }
-          }
-          regAny.repos = raw;
-          return did;
-        });
+        const removed = await removeCanonicalRepository(target);
 
         json(res, 200, { ok: true, removed, path: target });
         return;
@@ -19449,7 +19438,7 @@ export async function startDroneHubApiServer(opts: {
       // GET /api/repo-env?repoPath=<absolute-path-or-empty>
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'repo-env') {
         const repoPath = u.searchParams.has('repoPath') ? String(u.searchParams.get('repoPath') ?? '') : '';
-        const regAny: any = await loadRegistry();
+        const regAny: any = repoPath ? await withCanonicalRepositories() : await loadRegistry();
         json(res, 200, repoEnvironmentPayload(regAny, repoPath));
         return;
       }
@@ -19473,32 +19462,24 @@ export async function startDroneHubApiServer(opts: {
         const autoApplyToNewContainerDrones = body?.autoApplyToNewContainerDrones === true;
         const updatedAt = nowIso();
 
-        await updateRegistry((regAny: any) => {
-          regAny.settings = regAny.settings ?? {};
-          if (!repoPath) {
+        if (!repoPath) {
+          await updateRegistry((regAny: any) => {
+            regAny.settings = regAny.settings ?? {};
             regAny.settings.nonRepoEnvironment = {
               vars,
               autoApplyToNewContainerDrones,
               updatedAt,
             };
-            return;
-          }
-
-          regAny.repos = regAny.repos ?? {};
-          let entry = regAny.repos[repoPath];
-          if (!entry || typeof entry !== 'object') {
-            entry = { path: repoPath, addedAt: updatedAt };
-          }
-          entry.path = repoPath;
-          entry.environment = {
+          });
+        } else {
+          await updateCanonicalRepositoryEnvironment(repoPath, {
             vars,
             autoApplyToNewContainerDrones,
             updatedAt,
-          };
-          regAny.repos[repoPath] = entry;
-        });
+          }, updatedAt);
+        }
 
-        const regAny: any = await loadRegistry();
+        const regAny: any = repoPath ? await withCanonicalRepositories() : await loadRegistry();
         json(res, 200, repoEnvironmentPayload(regAny, repoPath));
         return;
       }
@@ -19514,7 +19495,7 @@ export async function startDroneHubApiServer(opts: {
           json(res, 400, { ok: false, error: 'invalid repoPath (expected absolute path)' });
           return;
         }
-        const regAny: any = await loadRegistry();
+        const regAny: any = await withCanonicalRepositories();
         json(res, 200, repoAgentsPayload(regAny, repoPath));
         return;
       }
@@ -19543,22 +19524,13 @@ export async function startDroneHubApiServer(opts: {
         const content = normalizeAgentsMarkdown(body?.content);
         const updatedAt = nowIso();
 
-        await updateRegistry((regAny: any) => {
-          regAny.repos = regAny.repos ?? {};
-          let entry = regAny.repos[repoPath];
-          if (!entry || typeof entry !== 'object') {
-            entry = { path: repoPath, addedAt: updatedAt };
-          }
-          entry.path = repoPath;
-          entry.agents = {
+        await updateCanonicalRepositoryAgents(repoPath, {
             mode,
             content,
             updatedAt,
-          };
-          regAny.repos[repoPath] = entry;
-        });
+          }, updatedAt);
 
-        const regAny: any = await loadRegistry();
+        const regAny: any = await withCanonicalRepositories();
         json(res, 200, repoAgentsPayload(regAny, repoPath));
         return;
       }
@@ -20412,8 +20384,9 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
         }
-        const createdEnvironment = deriveCreatedDroneEnvironmentConfig(preRegAny, { repoPath, runtime });
+        const createdEnvironment = await deriveCanonicalCreatedDroneEnvironmentConfig(preRegAny, { repoPath, runtime });
         const droneId = makeDroneIdentity();
+        if (group) await ensureCanonicalGroup(group);
         const pendingWrite: { ok: boolean; status?: number; error?: string } = await updateRegistry((regAny: any) => {
           if (droneDisplayNameExists(regAny, name)) return { ok: false, status: 409, error: `drone already exists: ${name}` };
           regAny.pending = regAny.pending ?? {};
@@ -20674,6 +20647,7 @@ export async function startDroneHubApiServer(opts: {
         let accepted: Array<{ id: string; name: string; phase: 'draft' | 'starting'; draft?: boolean }> = [];
         let rejected: Array<{ name: string; error: string; status?: number }> = [];
         try {
+          const canonicalRepos = await canonicalRepositoriesMap();
           const result = await updateRegistry((regAny: any) => {
             regAny.pending = regAny.pending ?? {};
             const accepted: Array<{ id: string; name: string; phase: 'draft' | 'starting'; draft?: boolean }> = [];
@@ -20729,7 +20703,7 @@ export async function startDroneHubApiServer(opts: {
               }
               const build = raw?.build === true;
               const createAsDraft = parseDraftFlag(raw?.draft ?? raw?.isDraft);
-              const createdEnvironment = deriveCreatedDroneEnvironmentConfig(regAny, { repoPath, runtime });
+              const createdEnvironment = deriveCreatedDroneEnvironmentConfig({ ...regAny, repos: canonicalRepos }, { repoPath, runtime });
               let persistVolume: boolean | undefined;
               try {
                 persistVolume = parsePersistVolume(raw?.persistVolume);
@@ -25856,6 +25830,7 @@ export async function startDroneHubApiServer(opts: {
           }
         }
 
+        if (nextGroup) await ensureCanonicalGroup(nextGroup);
         const result = await updateRegistry((regAny: any) => {
           const at = nowIso();
           if (nextGroup) ensureGroupRegistered(regAny, nextGroup, at);
@@ -26537,7 +26512,11 @@ export async function startDroneHubApiServer(opts: {
       // Groups are host-side metadata in the registry file and persist even if empty.
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'groups') {
         const regAny: any = await loadRegistry();
-        const names = listAllKnownGroups(regAny);
+        const names = Array.from(new Set([
+          ...(await listCanonicalGroups()).map((group) => group.name),
+          ...listAllKnownGroups({ ...regAny, groups: {} }),
+        ])).sort((a, b) => a.localeCompare(b));
+        const canonicalGroups = new Map((await listCanonicalGroups()).map((group) => [group.name, group]));
 
         const counts = new Map<string, { drones: number; pending: number }>();
         for (const d of Object.values(regAny.drones ?? {}) as any[]) {
@@ -26556,7 +26535,7 @@ export async function startDroneHubApiServer(opts: {
         }
 
         const groups = names.map((name) => {
-          const entry = regAny?.groups?.[name] ?? null;
+          const entry = canonicalGroups.get(name) ?? null;
           const c = counts.get(name) ?? { drones: 0, pending: 0 };
           return {
             name,
@@ -26592,16 +26571,11 @@ export async function startDroneHubApiServer(opts: {
         }
 
         const at = nowIso();
-        const r = await updateRegistry((regAny: any) => {
-          regAny.groups = regAny.groups ?? {};
-          if (regAny.groups[name]) return { ok: false, status: 409 as const, error: `group already exists: ${name}` };
-          regAny.groups[name] = { name, createdAt: at, updatedAt: at };
-          return { ok: true as const };
-        });
-        if (!r.ok) {
-          json(res, r.status ?? 500, { ok: false, error: r.error ?? 'failed to create group' });
+        if ((await listCanonicalGroups()).some((group) => group.name === name)) {
+          json(res, 409, { ok: false, error: `group already exists: ${name}` });
           return;
         }
+        await ensureCanonicalGroup(name, at);
 
         json(res, 201, { ok: true, name, createdAt: at });
         return;
@@ -26643,9 +26617,8 @@ export async function startDroneHubApiServer(opts: {
         }
 
         const at = nowIso();
+        const canonicalGroupNames = (await listCanonicalGroups()).map((group) => group.name);
         const result = await updateRegistry((regAny: any) => {
-          regAny.groups = regAny.groups ?? {};
-
           let usedOld = false;
           let usedNew = false;
           let movedDrones = 0;
@@ -26662,9 +26635,9 @@ export async function startDroneHubApiServer(opts: {
             if (isSameOrDescendantGroupPath(g, newName)) usedNew = true;
           }
 
-          const hasOldEntry = Object.keys(regAny.groups ?? {}).some((name) => isSameOrDescendantGroupPath(name, oldName));
+          const hasOldEntry = canonicalGroupNames.some((name) => isSameOrDescendantGroupPath(name, oldName));
           if (!hasOldEntry && !usedOld) return { ok: false as const, status: 404 as const, error: `unknown group: ${oldName}` };
-          const collidesWithExistingGroup = Object.keys(regAny.groups ?? {}).some((name) => {
+          const collidesWithExistingGroup = canonicalGroupNames.some((name) => {
             if (isSameOrDescendantGroupPath(name, oldName)) return false;
             return isSameOrDescendantGroupPath(name, newName);
           });
@@ -26690,21 +26663,6 @@ export async function startDroneHubApiServer(opts: {
             movedPending += 1;
           }
 
-          // Rewrite exact + descendant group entries.
-          const rewrittenGroups: Record<string, any> = {};
-          for (const [name, entry] of Object.entries(regAny.groups ?? {}) as Array<[string, any]>) {
-            const rewrittenName = isSameOrDescendantGroupPath(name, oldName)
-              ? rewriteGroupPathPrefix(name, oldName, newName)
-              : name;
-            rewrittenGroups[rewrittenName] = {
-              ...(entry && typeof entry === 'object' ? entry : {}),
-              name: rewrittenName,
-              updatedAt: isSameOrDescendantGroupPath(name, oldName) ? at : entry?.updatedAt,
-            };
-          }
-          if (!rewrittenGroups[newName]) rewrittenGroups[newName] = { name: newName, createdAt: at, updatedAt: at };
-          regAny.groups = rewrittenGroups;
-
           const renamed = renameTasksForScope(getTaskBoardStateFromRegistry(regAny), 'group', oldName, newName);
           if (renamed.renamedCount > 0) persistTaskBoardState(regAny, renamed.board);
 
@@ -26715,6 +26673,11 @@ export async function startDroneHubApiServer(opts: {
           json(res, result.status ?? 500, { ok: false, error: result.error ?? 'failed to rename group' });
           return;
         }
+
+        if (!canonicalGroupNames.some((name) => isSameOrDescendantGroupPath(name, oldName))) {
+          await ensureCanonicalGroup(oldName, at);
+        }
+        await renameCanonicalGroupTree(oldName, newName, at);
 
         json(res, 200, { ok: true, oldName, newName, renamed: true, movedDrones: result.movedDrones, movedPending: result.movedPending });
         return;
@@ -26784,11 +26747,11 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
           try {
+            const removedGroupNames = (await listCanonicalGroups()).map((entry) => entry.name).filter((name) =>
+              isSameOrDescendantGroupPath(name, group),
+            );
+            for (const name of removedGroupNames) await deleteCanonicalGroup(name);
             await updateRegistry((regLatest: any) => {
-              const removedGroupNames = Object.keys(regLatest?.groups ?? {}).filter((name) =>
-                isSameOrDescendantGroupPath(name, group),
-              );
-              for (const name of removedGroupNames) delete regLatest.groups[name];
               let board = getTaskBoardStateFromRegistry(regLatest);
               let boardChanged = false;
               for (const name of removedGroupNames) {
@@ -26836,15 +26799,15 @@ export async function startDroneHubApiServer(opts: {
 
         // Persist any pending deletions and remove the group entry (if any).
         try {
+          const removedGroupNames = !scopedRepoPath && !wantsUngrouped
+            ? (await listCanonicalGroups()).map((entry) => entry.name).filter((name) => isSameOrDescendantGroupPath(name, group))
+            : [];
+          for (const name of removedGroupNames) await deleteCanonicalGroup(name);
           await updateRegistry((regLatest: any) => {
             for (const n of pendingDeleted) {
               if (regLatest?.pending?.[n] && !regLatest?.drones?.[n]) delete regLatest.pending[n];
             }
             if (!scopedRepoPath && !wantsUngrouped) {
-              const removedGroupNames = Object.keys(regLatest?.groups ?? {}).filter((name) =>
-                isSameOrDescendantGroupPath(name, group),
-              );
-              for (const name of removedGroupNames) delete regLatest.groups[name];
               let board = getTaskBoardStateFromRegistry(regLatest);
               let boardChanged = false;
               for (const name of removedGroupNames) {

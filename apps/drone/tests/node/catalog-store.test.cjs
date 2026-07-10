@@ -128,7 +128,7 @@ test('cached store follows DRONE_DATA_DIR switching instead of leaking rows', as
     github: { owner: 'drone', repo: 'catalog' },
     environment: { vars: { A: '1' } },
   });
-  assert.deepEqual(second.listRepositories(), [{
+  assert.deepEqual(second.listRepositories().map(({ updatedAt: _updatedAt, version: _version, environmentVersion: _environmentVersion, agentsVersion: _agentsVersion, ...repo }) => repo), [{
     path: '/tmp/repo',
     addedAt: '2026-01-01T00:00:00.000Z',
     github: { owner: 'drone', repo: 'catalog' },
@@ -136,14 +136,14 @@ test('cached store follows DRONE_DATA_DIR switching instead of leaking rows', as
   }]);
 });
 
-test('deferred domains backfill incrementally while canonical playbooks retain precedence', async () => {
+test('group tombstones prevent resurrection while repository backfill remains incremental', async () => {
   useDataDir('secondary-domains');
   const store = await getCatalogStore();
   const at = '2026-01-01T00:00:00.000Z';
   assert.equal(await store.backfillGroups([{ name: 'legacy', createdAt: at, updatedAt: at }]), true);
   assert.equal(await store.deleteGroup('legacy'), true);
-  assert.equal(await store.backfillGroups([{ name: 'legacy', createdAt: at, updatedAt: at }]), true);
-  assert.deepEqual(store.listGroups(), [{ name: 'legacy', createdAt: at, updatedAt: at }]);
+  assert.equal(await store.backfillGroups([{ name: 'legacy', createdAt: at, updatedAt: at }]), false);
+  assert.deepEqual(store.listGroups(), []);
 
   await store.putRepository({ path: '/repo', addedAt: at, remoteUrl: 'canonical' });
   assert.equal(await store.backfillRepositories([{ path: '/repo', addedAt: at, remoteUrl: 'legacy' }]), false);

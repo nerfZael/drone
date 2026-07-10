@@ -1,3 +1,5 @@
+import { canonicalRepositoriesMap } from './groups-repositories';
+
 type EnvVarMap = Record<string, string>;
 
 export type RepoEnvironmentConfig = {
@@ -153,4 +155,11 @@ export function deriveCreatedDroneEnvironmentConfig(regAny: any, opts: {
     disabledRepoKeys: [],
     updatedAt: null,
   };
+}
+
+export async function deriveCanonicalCreatedDroneEnvironmentConfig(regAny: any, opts: {
+  repoPath?: string | null;
+  runtime?: string | null;
+}): Promise<DroneEnvironmentConfig> {
+  return deriveCreatedDroneEnvironmentConfig({ ...regAny, repos: await canonicalRepositoriesMap() }, opts);
 }
