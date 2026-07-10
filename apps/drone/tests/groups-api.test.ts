@@ -119,6 +119,11 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ name: 'cleanup-source' }),
     });
+    await apiFetch('/api/groups', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'cleanup-source/api' }),
+    });
     await updateRegistry((reg: any) => {
       reg.drones ??= {};
       reg.drones['cleanup-drone'] = {
@@ -145,6 +150,7 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
             title: 'Todo',
             cards: [
               { id: 'group-task', title: 'Group task', description: '', typeId: 'task', scopeType: 'group', scopeValue: 'cleanup-source', createdAt: at, updatedAt: at },
+              { id: 'group-child-task', title: 'Child group task', description: '', typeId: 'task', scopeType: 'group', scopeValue: 'cleanup-source/api', createdAt: at, updatedAt: at },
               { id: 'drone-task', title: 'Drone task', description: '', typeId: 'task', scopeType: 'drone', scopeValue: 'cleanup-drone', droneId: 'cleanup-drone', createdAt: at, updatedAt: at },
               { id: 'keep-task', title: 'Keep task', description: '', typeId: 'task', scopeType: 'global', createdAt: at, updatedAt: at },
             ],
@@ -163,6 +169,7 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     let board = (await apiFetch('/api/settings/kanban-board')).data?.kanbanBoard;
     let cards = board?.lanes?.flatMap((lane: any) => lane.cards ?? []) ?? [];
     expect(cards.find((card: any) => card.id === 'group-task')?.scopeValue).toBe('cleanup-target');
+    expect(cards.find((card: any) => card.id === 'group-child-task')?.scopeValue).toBe('cleanup-target/api');
 
     const archived = await apiFetch('/api/drones/cleanup-drone/archive', { method: 'POST' });
     expect(archived.r.status).toBe(200);
@@ -170,6 +177,7 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     cards = board?.lanes?.flatMap((lane: any) => lane.cards ?? []) ?? [];
     expect(cards.some((card: any) => card.id === 'drone-task')).toBe(false);
     expect(cards.some((card: any) => card.id === 'group-task')).toBe(true);
+    expect(cards.some((card: any) => card.id === 'group-child-task')).toBe(true);
 
     const deleted = await apiFetch('/api/groups/cleanup-target', { method: 'DELETE' });
     expect(deleted.r.status).toBe(200);

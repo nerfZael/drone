@@ -2,6 +2,7 @@ import { getDroneLifecycleRepository, type CanonicalDroneLifecycleRecord, type C
 import { loadRegistry, updateRegistry } from '../host/registry';
 import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
 import { ensureCanonicalGroup } from './groups-repositories';
+import { patchCanonicalDroneLifecycleBatch } from './drone-lifecycle-service';
 
 export type DroneMetadataCommandDependencies = {
   project?: (record: CanonicalDroneLifecycleRecord) => Promise<void>;
@@ -171,4 +172,27 @@ export async function setDroneGroupMetadata(opts: {
       return next;
     },
   });
+}
+
+export async function setDroneGroupMetadataBatch(
+  updates: Array<{ droneId: string; state: 'real' | 'pending'; group: string | null }>,
+  options: { ensureGroups?: boolean } = {},
+): Promise<CanonicalDroneLifecycleRecord[]> {
+  if (options.ensureGroups !== false) {
+    for (const group of new Set(updates.map((update) => update.group).filter((group): group is string => Boolean(group)))) {
+      await ensureCanonicalGroup(group);
+    }
+  }
+  return await patchCanonicalDroneLifecycleBatch(updates.map((update) => ({
+    state: update.state,
+    droneId: update.droneId,
+    eventType: update.group ? 'drone.group.set' : 'drone.group.cleared',
+    payload: { group: update.group },
+    transform: (lifecycle) => {
+      const next = { ...lifecycle };
+      if (update.group) next.group = update.group;
+      else delete next.group;
+      return next;
+    },
+  })));
 }

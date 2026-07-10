@@ -78,6 +78,24 @@ export async function deleteCanonicalGroup(name: string, at?: string): Promise<b
   return await updateRegistry((registry: any) => Boolean(registry?.groups?.[name]) && delete registry.groups[name]);
 }
 
+export async function deleteCanonicalGroupTree(name: string, at = new Date().toISOString()): Promise<string[]> {
+  const names = (await listCanonicalGroups())
+    .map((group) => group.name)
+    .filter((candidate) => candidate === name || candidate.startsWith(`${name}/`));
+  if (names.length === 0) return [];
+  const store = await catalogStoreOrCompatibility();
+  if (store) return await store.deleteGroups(names, at);
+  return await updateRegistry((registry: any) => {
+    const deleted: string[] = [];
+    for (const candidate of names) {
+      if (!registry?.groups?.[candidate]) continue;
+      delete registry.groups[candidate];
+      deleted.push(candidate);
+    }
+    return deleted;
+  });
+}
+
 export async function renameCanonicalGroupTree(oldName: string, newName: string, at = new Date().toISOString()): Promise<number> {
   if (newName === oldName || newName.startsWith(`${oldName}/`)) {
     throw new Error('cannot move a group into itself or its own subtree');

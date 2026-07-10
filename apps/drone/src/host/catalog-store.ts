@@ -417,6 +417,21 @@ export class CatalogStore {
     });
   }
 
+  deleteGroups(names: string[], at = new Date().toISOString()): Promise<string[]> {
+    return this.database.writeTransaction('delete group hierarchy', (connection) => {
+      const deleted: string[] = [];
+      for (const name of [...new Set(names)]) {
+        const info = connection.prepare(`UPDATE catalog_groups SET deleted_at=?,updated_at=?,version=version+1
+          WHERE name=? AND deleted_at IS NULL`).run(at, at, name);
+        if (Number(info.changes ?? 0) !== 1) continue;
+        appendHubOutboxEvent(connection, { topic: 'catalog.groups', eventType: 'group.deleted',
+          aggregateType: 'group', aggregateId: name, payload: { name, deletedAt: at } });
+        deleted.push(name);
+      }
+      return deleted;
+    });
+  }
+
   renameGroups(rewrites: Array<{ from: string; to: string }>, at = new Date().toISOString()): Promise<number> {
     return this.database.writeTransaction('rename group hierarchy', (connection) => {
       const sources = new Set(rewrites.map((item) => item.from));
