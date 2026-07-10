@@ -34,6 +34,7 @@ function useDataDir(dataDir) {
 function state(title = 'first') {
   return {
     activeThreadId: 'thread-1',
+    defaultModel: { provider: 'openai', model: 'gpt-5.6-sol' },
     webSearchToolMigrationApplied: true,
     fetchContentToolMigrationApplied: true,
     systemPrompt: 'default prompt',

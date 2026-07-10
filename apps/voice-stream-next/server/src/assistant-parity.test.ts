@@ -112,12 +112,19 @@ describe('assistant parity runtime', () => {
     const snapshot = assistantSnapshot(db, user.id);
 
     expect(thread.provider).toBe('openai');
-    expect(thread.model).toBe('chat-latest');
-    expect(snapshot.assistantSettings.defaultModel).toBe('chat-latest');
-    expect(snapshot.models).toContainEqual({ provider: 'openai', id: 'chat-latest', name: 'Chat Latest Instant', thinkingLevel: 'off' });
-    expect(snapshot.models).toContainEqual({ provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 None', thinkingLevel: 'off' });
-    expect(db.createThread(user.id, { title: 'Codex default', provider: 'codex' }).model).toBe('gpt-5.5');
-    expect(db.updateAssistantSettings(user.id, { defaultProvider: 'codex' }).defaultModel).toBe('gpt-5.5');
+    expect(thread.model).toBe('gpt-5.6-luna');
+    expect(thread.thinkingLevel).toBe('medium');
+    expect(snapshot.assistantSettings.defaultModel).toBe('gpt-5.6-luna');
+    expect(snapshot.assistantSettings.defaultThinkingLevel).toBe('medium');
+    expect(snapshot.models).toContainEqual({ provider: 'openai', id: 'chat-latest', name: 'Chat Latest', thinkingLevel: 'off' });
+    expect(snapshot.models).toContainEqual({ provider: 'openai', id: 'gpt-5.6-sol', name: 'GPT-5.6 Sol', thinkingLevel: 'off' });
+    expect(snapshot.models).toContainEqual({ provider: 'openai', id: 'gpt-5.6-terra', name: 'GPT-5.6 Terra', thinkingLevel: 'medium' });
+    expect(snapshot.models).toContainEqual({ provider: 'openai', id: 'gpt-5.6-luna', name: 'GPT-5.6 Luna', thinkingLevel: 'high' });
+    expect(db.createThread(user.id, { title: 'Codex default', provider: 'codex' }).model).toBe('gpt-5.6-luna');
+    expect(db.updateAssistantSettings(user.id, { defaultProvider: 'codex' }).defaultModel).toBe('gpt-5.6-luna');
+    const starredSettings = db.updateAssistantSettings(user.id, { defaultProvider: 'codex', defaultModel: 'gpt-5.6-terra' });
+    expect(starredSettings.defaultModel).toBe('gpt-5.6-terra');
+    expect(starredSettings.defaultThinkingLevel).toBe('medium');
 
     const updated = db.updateThread(user.id, thread.id, {
       provider: 'codex',

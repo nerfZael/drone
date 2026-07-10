@@ -33,6 +33,14 @@ async function capturePayload(model: Model<"openai-codex-responses">): Promise<a
 }
 
 describe("openai codex responses", () => {
+	test.each(["gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna"])("registers %s for ChatGPT authentication", (modelId) => {
+		const model = getModel("openai-codex", modelId) as Model<"openai-codex-responses">;
+
+		expect(model?.name).toContain("GPT-5.6");
+		expect(model?.thinkingLevelMap?.off).toBe("none");
+		expect(model?.cost.cacheWrite).toBe(0);
+	});
+
 	test("shortens prompt cache keys to the provider limit", () => {
 		const sessionId = "vsn-usr_7685a53fc3a6461b9257b775ad0db9b6-thr_d25719c89846407d8888a0bce6dd1539";
 		const key = codexPromptCacheKey(sessionId);

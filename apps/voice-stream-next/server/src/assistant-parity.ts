@@ -210,17 +210,23 @@ const ASSISTANT_TOOLS: AssistantToolSummary[] = [
   },
 ];
 
+const ASSISTANT_REASONING_LEVELS = ['off', 'low', 'medium', 'high'] as const;
+
+function reasoningModelOptions(provider: AssistantProviderId, id: string, name: string): AssistantModelOption[] {
+  return ASSISTANT_REASONING_LEVELS.map((thinkingLevel) => ({ provider, id, name, thinkingLevel }));
+}
+
 const MODEL_OPTIONS: AssistantModelOption[] = [
-  { provider: 'openai', id: 'chat-latest', name: 'Chat Latest Instant', thinkingLevel: 'off' },
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 None', thinkingLevel: 'off' },
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 Low', thinkingLevel: 'low' },
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 Medium', thinkingLevel: 'medium' },
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 High', thinkingLevel: 'high' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 None', thinkingLevel: 'off' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 Low', thinkingLevel: 'low' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 Medium', thinkingLevel: 'medium' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 High', thinkingLevel: 'high' },
-  { provider: 'codex', id: 'gpt-5.3-codex-spark', name: 'Codex Spark', thinkingLevel: 'off' },
+  ...reasoningModelOptions('openai', 'gpt-5.6-sol', 'GPT-5.6 Sol'),
+  ...reasoningModelOptions('openai', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
+  ...reasoningModelOptions('openai', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
+  ...reasoningModelOptions('openai', 'gpt-5.5', 'GPT-5.5'),
+  { provider: 'openai', id: 'chat-latest', name: 'Chat Latest', thinkingLevel: 'off' },
+  ...reasoningModelOptions('codex', 'gpt-5.6-sol', 'GPT-5.6 Sol'),
+  ...reasoningModelOptions('codex', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
+  ...reasoningModelOptions('codex', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
+  ...reasoningModelOptions('codex', 'gpt-5.5', 'GPT-5.5'),
+  { provider: 'codex', id: 'gpt-5.3-codex-spark', name: 'GPT-5.3 Spark', thinkingLevel: 'off' },
 ];
 
 const ARTIFACT_MAX_BYTES = 256 * 1024;
@@ -565,11 +571,11 @@ export async function promptAssistantThread(
   if (!prompt) throw Object.assign(new Error('prompt is required'), { statusCode: 400 });
   const activeRun = db.activeRun(userId, threadId);
   let provider = cleanProvider(input.provider ?? thread.provider);
-  let model = cleanModel(input.model ?? thread.model, provider);
+  let model = cleanModel(input.model ?? thread.model);
   const thinkingLevel = cleanThinkingLevel(input.thinkingLevel ?? thread.thinkingLevel);
   if (input.provider === undefined && provider === 'openai' && db.codexConnection(userId)) {
     provider = 'codex';
-    model = cleanModel(input.model ?? 'gpt-5.5', provider);
+    model = cleanModel(input.model ?? 'gpt-5.6-luna');
     db.updateThread(userId, threadId, { provider, model, thinkingLevel, error: null });
   }
   if (activeRun) {
@@ -897,7 +903,7 @@ function shortStableHash(value: string): string {
 
 function resolveAgentModel(provider: string, modelId: string): Model<any> {
   const piProvider = provider === 'codex' ? 'openai-codex' : provider;
-  const model = getModel(piProvider as any, modelId as any) ?? getModel(piProvider as any, 'gpt-5.5' as any);
+  const model = getModel(piProvider as any, modelId as any) ?? getModel(piProvider as any, 'gpt-5.6-luna' as any);
   if (!model) throw new Error(`Unknown assistant model: ${provider}/${modelId}`);
   return model;
 }
@@ -1726,10 +1732,9 @@ function cleanProvider(raw: unknown): string {
   return value === 'codex' ? 'codex' : 'openai';
 }
 
-function cleanModel(raw: unknown, provider: string): string {
+function cleanModel(raw: unknown): string {
   const value = String(raw ?? '').trim();
-  if (provider === 'codex') return value || 'gpt-5.5';
-  return value || 'chat-latest';
+  return value || 'gpt-5.6-luna';
 }
 
 function cleanThinkingLevel(raw: unknown): string {
