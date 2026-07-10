@@ -172,7 +172,10 @@ test('skill and MCP server modules backfill once then stop rewriting registry st
   } });
   assert.equal((await listSkills())[0].description, 'legacy description');
   await updateSkillRecord('legacy', { description: 'canonical update' });
-  await updateRegistry((registry) => { registry.skills.legacy.description = 'stale rewrite'; });
+  await assert.rejects(
+    updateRegistry((registry) => { registry.skills.legacy.description = 'stale rewrite'; }),
+    /cannot mutate canonical-owned state: skills/,
+  );
   assert.equal((await listSkills())[0].description, 'canonical update');
   assert.equal(await deleteSkillRecord('legacy'), true);
   assert.equal((await listSkills()).some((record) => record.id === 'legacy'), false, 'legacy row must not resurrect after canonical delete');
@@ -187,7 +190,7 @@ test('skill and MCP server modules backfill once then stop rewriting registry st
 
 test('MCP token create/authenticate/revoke lifecycle is canonical and leaves legacy registry untouched', async () => {
   useDataDir('tokens');
-  await updateRegistry((registry) => { registry.mcpTokens = {}; });
+  await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {}, mcpTokens: {} });
   const signingSecret = 'test-signing-secret';
   const created = await createMcpAccessToken({ name: 'host', signingSecret });
   assert.equal((await loadRegistryRawSnapshot()).mcpTokens?.[created.token.id], undefined);

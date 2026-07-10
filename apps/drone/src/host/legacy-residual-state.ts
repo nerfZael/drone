@@ -20,6 +20,16 @@ const CANONICAL_SETTINGS = new Set([
   'nonRepoEnvironment', 'syncSets',
 ]);
 
+export class CanonicalRegistryMutationError extends Error {
+  readonly paths: string[];
+
+  constructor(paths: string[]) {
+    super(`updateRegistry cannot mutate canonical-owned state: ${paths.join(', ')}`);
+    this.name = 'CanonicalRegistryMutationError';
+    this.paths = paths;
+  }
+}
+
 function objectRecord(value: unknown): Record<string, any> {
   return value && typeof value === 'object' && !Array.isArray(value)
     ? value as Record<string, any>
@@ -28,6 +38,24 @@ function objectRecord(value: unknown): Record<string, any> {
 
 function clone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value));
+}
+
+function changedCanonicalPaths(beforeRaw: unknown, afterRaw: unknown): string[] {
+  const before = objectRecord(beforeRaw);
+  const after = objectRecord(afterRaw);
+  const changed: string[] = [];
+  for (const key of CANONICAL_TOP_LEVEL) {
+    if (JSON.stringify(before[key]) !== JSON.stringify(after[key])) changed.push(key);
+  }
+  const beforeSettings = objectRecord(before.settings);
+  const afterSettings = objectRecord(after.settings);
+  for (const key of CANONICAL_SETTINGS) {
+    if (JSON.stringify(beforeSettings[key]) !== JSON.stringify(afterSettings[key])) changed.push(`settings.${key}`);
+  }
+  if (JSON.stringify(objectRecord(before.fleet).audit) !== JSON.stringify(objectRecord(after.fleet).audit)) {
+    changed.push('fleet.audit');
+  }
+  return changed;
 }
 
 /** Removes every namespace now owned by a canonical repository. */
@@ -146,10 +174,13 @@ export class LegacyResidualStateRepository {
       ).get() as ResidualRow;
       const current = parseState(row)!;
       const state = mergeRegistryResidualState(compatibilityBase, current);
+      const canonicalBefore = clone(state);
       const result = mutator(state);
       if (result && (typeof result === 'object' || typeof result === 'function') && typeof (result as any).then === 'function') {
         throw new TypeError('legacy residual state mutators must be synchronous');
       }
+      const changedPaths = changedCanonicalPaths(canonicalBefore, state);
+      if (changedPaths.length > 0) throw new CanonicalRegistryMutationError(changedPaths);
       connection.prepare(`
         UPDATE legacy_residual_state
         SET state_json=?,version=version+1,updated_at=?

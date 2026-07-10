@@ -13,6 +13,7 @@ const { buildHubStateProjection } = require('../../dist/host/hub-state-projectio
 const { getHubSettingsRepository } = require('../../dist/host/hub-settings-repository.js');
 const { getCatalogStore } = require('../../dist/host/catalog-store.js');
 const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle-repository.js');
+const { CanonicalRegistryMutationError } = require('../../dist/host/legacy-residual-state.js');
 const { loadRegistry, saveRegistry, updateRegistry } = require('../../dist/host/registry.js');
 const { readRegistryJsonFromSqlite } = require('../../dist/host/sqlite-registry-store.js');
 
@@ -166,74 +167,67 @@ test('manual backup exports canonical projection state', async () => {
   assert.equal(exported.settings.openai.apiKey, 'canonical-key');
 });
 
-test('compatibility create, import, rename, and chat mutations reach canonical owners', async () => {
-  useRoot('compatibility-lifecycle');
-  await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {} });
-  await updateRegistry((registry) => {
-    registry.drones.created = {
-      id: 'created', name: 'created-drone', containerName: 'drone-created', runtime: 'container',
-      token: 'one', containerPort: 7777, createdAt: '2026-01-01T00:00:00.000Z',
-    };
-  });
-  await updateRegistry((registry) => {
-    registry.drones.imported = {
-      id: 'imported', name: 'imported-drone', containerName: 'existing-container', runtime: 'container',
-      token: 'two', hostPort: 4000, containerPort: 7777, createdAt: '2026-01-01T00:00:00.000Z',
-    };
-  });
-  await updateRegistry((registry) => {
-    registry.drones.created.name = 'renamed-drone';
-    registry.drones.created.chats = {
-      default: { createdAt: '2026-01-01T00:00:00.000Z', turns: [{ at: '2026-01-01T00:00:00.000Z', prompt: 'hello', ok: true, output: 'world' }] },
-    };
-  });
+test('Node updateRegistry rejects canonical-owned mutations without changing canonical state', async () => {
+  useRoot('ownership-guard');
+  await saveRegistry(seedRegistry());
+  const before = await loadRegistry();
 
-  const projected = await loadRegistry();
-  assert.equal(projected.drones.created.name, 'renamed-drone');
-  assert.equal(projected.drones.imported.containerName, 'existing-container');
-  assert.equal(projected.drones.created.chats.default.turns[0].output, 'world');
+  await assert.rejects(
+    updateRegistry((registry) => {
+      registry.drones.alpha.name = 'forbidden';
+      registry.settings.openai = { apiKey: 'forbidden' };
+    }),
+    (error) => {
+      assert.ok(error instanceof CanonicalRegistryMutationError);
+      assert.ok(error.paths.includes('drones'));
+      assert.ok(error.paths.includes('settings.openai'));
+      return true;
+    },
+  );
+
+  const after = await loadRegistry();
+  assert.equal(after.drones.alpha.name, before.drones.alpha.name);
+  assert.equal(after.settings.openai.apiKey, before.settings.openai.apiKey);
 });
 
-test('independent Node processes preserve distinct compatibility creates', async () => {
+test('independent Node processes preserve distinct canonical lifecycle creates', async () => {
   useRoot('cross-process');
   await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {} });
-  const registryModule = path.join(__dirname, '../../dist/host/registry.js');
+  const lifecycleModule = path.join(__dirname, '../../dist/host/drone-lifecycle-repository.js');
   const script = `
-    const { updateRegistry } = require(process.argv[1]);
+    const { getDroneLifecycleRepository } = require(process.argv[1]);
     const id = process.argv[2];
-    updateRegistry((registry) => {
-      registry.drones[id] = {
+    getDroneLifecycleRepository().then((repository) => repository.commitUpsert('real', id, {
         id, name: id, containerName: 'drone-' + id, runtime: 'container',
         token: id, containerPort: 7777, createdAt: '2026-01-01T00:00:00.000Z'
-      };
-    }).then(() => process.exit(0), (error) => { console.error(error); process.exit(1); });
+      }, { topic: 'drone.lifecycle.changes', eventType: 'test.created' }))
+      .then(() => process.exit(0), (error) => { console.error(error); process.exit(1); });
   `;
   await Promise.all([
-    execFileAsync(process.execPath, ['-e', script, registryModule, 'process-a'], { env: process.env }),
-    execFileAsync(process.execPath, ['-e', script, registryModule, 'process-b'], { env: process.env }),
+    execFileAsync(process.execPath, ['-e', script, lifecycleModule, 'process-a'], { env: process.env }),
+    execFileAsync(process.execPath, ['-e', script, lifecycleModule, 'process-b'], { env: process.env }),
   ]);
   const projected = await loadRegistry();
   assert.equal(projected.drones['process-a'].name, 'process-a');
   assert.equal(projected.drones['process-b'].name, 'process-b');
 });
 
-test('independent Node processes cannot create the same active display name', async () => {
+test('independent Node processes enforce canonical active display-name uniqueness', async () => {
   useRoot('cross-process-name');
   await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {} });
-  const registryModule = path.join(__dirname, '../../dist/host/registry.js');
+  const lifecycleModule = path.join(__dirname, '../../dist/host/drone-lifecycle-repository.js');
   const script = `
-    const { updateRegistry } = require(process.argv[1]);
+    const { getDroneLifecycleRepository } = require(process.argv[1]);
     const id = process.argv[2];
-    updateRegistry((registry) => {
-      registry.drones[id] = {
+    getDroneLifecycleRepository().then((repository) => repository.commitUpsert('real', id, {
         id, name: 'shared-name', containerName: 'drone-' + id, runtime: 'container',
         token: id, containerPort: 7777, createdAt: '2026-01-01T00:00:00.000Z'
-      };
-    }).then(() => process.exit(0), (error) => { console.error(error.message); process.exit(2); });
+      }, { topic: 'drone.lifecycle.changes', eventType: 'test.created' }))
+      .then(() => process.exit(0), (error) => { console.error(error.message); process.exit(2); });
   `;
   const attempts = await Promise.allSettled([
-    execFileAsync(process.execPath, ['-e', script, registryModule, 'same-a'], { env: process.env }),
-    execFileAsync(process.execPath, ['-e', script, registryModule, 'same-b'], { env: process.env }),
+    execFileAsync(process.execPath, ['-e', script, lifecycleModule, 'same-a'], { env: process.env }),
+    execFileAsync(process.execPath, ['-e', script, lifecycleModule, 'same-b'], { env: process.env }),
   ]);
   assert.equal(attempts.filter((attempt) => attempt.status === 'fulfilled').length, 1);
   assert.equal(attempts.filter((attempt) => attempt.status === 'rejected').length, 1);

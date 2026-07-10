@@ -8,7 +8,6 @@ import {
   getLegacyResidualStateRepository,
   mergeRegistryResidualState,
 } from './legacy-residual-state';
-import { applyRegistryCompatibilityMutation } from './registry-compatibility-writes';
 import { normalizeDroneRuntime, type DroneRuntime } from './runtime';
 import {
   getSqliteRegistryStoreUnavailableReason,
@@ -1456,8 +1455,8 @@ export async function withRegistryLock<T>(fn: () => Promise<T>, opts?: { timeout
 }
 
 /**
- * Updates stripped compatibility state through SQLite on Node and translates
- * remaining registry-first lifecycle/chat changes into canonical commands.
+ * Updates stripped compatibility state through SQLite on Node. Canonical-owned
+ * namespaces are rejected by LegacyResidualStateRepository.
  * Bun retains the registry.json lock fallback when native SQLite is unavailable.
  */
 export async function updateRegistry<T>(
@@ -1473,7 +1472,6 @@ export async function updateRegistry<T>(
     try {
       const compatibility = await loadRegistry();
       const updated = await residual.update(compatibility, mutator as (reg: DroneRegistry) => T);
-      await applyRegistryCompatibilityMutation(compatibility, updated.state);
       return updated.result;
     } finally {
       resolveCurrent();

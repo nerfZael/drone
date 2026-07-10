@@ -174,19 +174,11 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
   assert.equal(afterFileEdit.drones.fileOnly, undefined);
   assert.equal(fs.existsSync(registryPath), false);
 
-  await updateRegistry((reg) => {
+  await assert.rejects(() => updateRegistry((reg) => {
     reg.settings = reg.settings ?? {};
     reg.settings.openai = { apiKey: 'new-key', updatedAt: '2026-06-07T00:01:00.000Z' };
-    reg.drones.drone2 = {
-      id: 'drone2',
-      name: 'drone two',
-      containerName: 'drone-drone2',
-      containerPort: 7778,
-      token: 'token-2',
-      repoPath: '/repo',
-      createdAt: '2026-06-07T00:01:00.000Z',
-    };
-  });
+    reg.drones.drone2 = { id: 'drone2', name: 'drone two' };
+  }), /cannot mutate canonical-owned state: drones, settings\.openai/);
 
   assert.equal(fs.existsSync(registryPath), false);
   const jsonRemovalBackups = fs.readdirSync(droneDataDir).filter((name) => /^registry\.backup-before-json-removal-.*\.json$/.test(name));
@@ -197,7 +189,7 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
   const dbAfter = new Database(sqlitePath, { readonly: true });
   try {
     assert.equal(dbAfter.prepare('SELECT COUNT(*) AS count FROM hub_drones').get().count, 1);
-    assert.equal(dbAfter.prepare('SELECT COUNT(*) AS count FROM hub_canonical_drones').get().count, 2);
+    assert.equal(dbAfter.prepare('SELECT COUNT(*) AS count FROM hub_canonical_drones').get().count, 1);
     const state = JSON.parse(dbAfter.prepare("SELECT registry_json FROM hub_registry_state WHERE id = 'current'").get().registry_json);
     assert.equal(state.settings.openai.apiKey, 'old-key');
     assert.equal(state.drones.drone2, undefined);

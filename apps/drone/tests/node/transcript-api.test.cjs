@@ -5,13 +5,16 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { resetDroneRootDirForTests } = require('../../dist/host/paths');
-const { loadRegistry, updateRegistry } = require('../../dist/host/registry');
+const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle-repository');
+const { getPromptQueueRepository } = require('../../dist/host/prompt-queue-repository');
+const { loadRegistry } = require('../../dist/host/registry');
 const { startDroneHubApiServer } = require('../../dist/hub/server');
 const {
   getTranscriptStoreUnavailableReason,
   importDroneChatsFromRegistry,
   readChatFromStore,
   readTranscriptTurnsFromStore,
+  upsertChatInStore,
   upsertTranscriptTurnInStore,
 } = require('../../dist/hub/transcript-store');
 
@@ -37,26 +40,38 @@ async function apiFetch(baseUrl, token, pathname, init = {}) {
 
 async function seedDrone(droneId) {
   const now = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.drones = reg.drones ?? {};
-    reg.drones[droneId] = {
-      id: droneId,
-      name: droneId,
-      hostPort: 1,
-      token: 'mock-token',
-      containerPort: 7777,
-      repoPath: '',
+  const entry = {
+    id: droneId,
+    name: droneId,
+    hostPort: 1,
+    token: 'mock-token',
+    containerPort: 7777,
+    repoPath: '',
+    createdAt: now,
+  };
+  const repository = await getDroneLifecycleRepository();
+  await repository.upsert('real', droneId, entry);
+  await upsertChatInStore({
+    droneId,
+    chatName: 'default',
+    chatEntry: {
       createdAt: now,
-      chats: {
-        default: {
-          createdAt: now,
-          agent: { kind: 'builtin', id: 'cursor' },
-          turns: [],
-          pendingPrompts: [],
-          agentSuggestionEnabled: true,
-        },
-      },
-    };
+      agent: { kind: 'builtin', id: 'cursor' },
+      turns: [],
+      pendingPrompts: [],
+      agentSuggestionEnabled: true,
+    },
+  });
+  await getPromptQueueRepository().enqueue({
+    droneId,
+    chatName: 'default',
+    prompt: {
+      id: 'pending-1',
+      at: '2026-01-01T00:04:00.000Z',
+      updatedAt: '2026-01-01T00:04:01.000Z',
+      prompt: 'third',
+      state: 'queued',
+    },
   });
 }
 
@@ -85,10 +100,14 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
 
   const older = '2026-01-01T00:01:00.000Z';
   const newer = '2026-01-01T00:02:00.000Z';
-  await updateRegistry((reg) => {
-    const entry = reg.drones?.[droneId]?.chats?.default;
-    assert.ok(entry, 'missing seeded chat entry');
-    entry.turns = [
+  await upsertChatInStore({
+    droneId,
+    chatName: 'default',
+    chatEntry: {
+      createdAt: older,
+      agent: { kind: 'builtin', id: 'cursor' },
+      agentSuggestionEnabled: true,
+      turns: [
       {
         id: 'newer',
         at: newer,
@@ -115,8 +134,8 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
         ok: true,
         output: 'one',
       },
-    ];
-    entry.pendingPrompts = [
+      ],
+      pendingPrompts: [
       {
         id: 'pending-1',
         at: '2026-01-01T00:04:00.000Z',
@@ -124,7 +143,8 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
         prompt: 'third',
         state: 'queued',
       },
-    ];
+      ],
+    },
   });
 
   const first = await apiFetch(
