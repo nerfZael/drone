@@ -38,6 +38,8 @@ export type CanonicalActiveDroneReadModel = {
   pending: Record<string, any>;
 };
 
+const RECENT_TURNS_PER_CHAT = 60;
+
 function parseObject(raw: string): Record<string, any> {
   try {
     const value = JSON.parse(raw);
@@ -69,30 +71,45 @@ function chatKey(droneId: string, chatName: string): string {
   return `${droneId}\u0000${chatName}`;
 }
 
+function readCanonicalLifecycleWithConnection(
+  connection: HubDatabaseConnection,
+): CanonicalActiveDroneReadModel | null {
+  if (!hasTable(connection, 'hub_canonical_drones') || !hasTable(connection, 'hub_canonical_pending_drones')) {
+    return null;
+  }
+  const realRows = connection.prepare('SELECT * FROM hub_canonical_drones ORDER BY name, drone_id').all() as LifecycleRow[];
+  const pendingRows = connection.prepare('SELECT * FROM hub_canonical_pending_drones ORDER BY name, drone_id').all() as LifecycleRow[];
+  return {
+    drones: Object.fromEntries(realRows.map((row) => [row.drone_id, lifecycleEntry(row)])),
+    pending: Object.fromEntries(pendingRows.map((row) => [row.drone_id, lifecycleEntry(row)])),
+  };
+}
+
+/** Lifecycle-only read model for workers that do not inspect chat state. */
+export function readCanonicalDroneLifecycleModel(): CanonicalActiveDroneReadModel | null {
+  const database = getHubDatabase();
+  if (!database) return null;
+  return database.read(readCanonicalLifecycleWithConnection);
+}
+
 /**
  * Builds the small active-drone view used by Hub summaries and SSE detection.
  *
  * This is deliberately a read model, not the registry compatibility projection:
- * it performs four bounded SQL queries, never runs migration backfills, and never
- * writes. Callers that require catalogs, settings, archives, or export fidelity
+ * it performs targeted queries with bounded chat-history results, never runs
+ * migration backfills, and never writes. Callers that require catalogs, settings, archives, or export fidelity
  * must continue to use their canonical owner or the compatibility projection.
  */
 export function readCanonicalActiveDroneModel(): CanonicalActiveDroneReadModel | null {
   const database = getHubDatabase();
   if (!database) return null;
   return database.read((connection) => {
-    if (!hasTable(connection, 'hub_canonical_drones') || !hasTable(connection, 'hub_canonical_pending_drones')) {
-      return null;
-    }
-
-    const realRows = connection.prepare('SELECT * FROM hub_canonical_drones ORDER BY name, drone_id').all() as LifecycleRow[];
-    const pendingRows = connection.prepare('SELECT * FROM hub_canonical_pending_drones ORDER BY name, drone_id').all() as LifecycleRow[];
-    const drones: Record<string, any> = Object.fromEntries(
-      realRows.map((row) => [row.drone_id, { ...lifecycleEntry(row), chats: {} }]),
+    const lifecycle = readCanonicalLifecycleWithConnection(connection);
+    if (!lifecycle) return null;
+    const drones = Object.fromEntries(
+      Object.entries(lifecycle.drones).map(([droneId, entry]) => [droneId, { ...entry, chats: {} }]),
     );
-    const pending: Record<string, any> = Object.fromEntries(
-      pendingRows.map((row) => [row.drone_id, lifecycleEntry(row)]),
-    );
+    const { pending } = lifecycle;
 
     if (!hasTable(connection, 'canonical_chats')) return { drones, pending };
     const chatRows = connection.prepare(`SELECT drone_id,chat_name,metadata_json
@@ -107,9 +124,37 @@ export function readCanonicalActiveDroneModel(): CanonicalActiveDroneReadModel |
     }
 
     if (hasTable(connection, 'canonical_chat_turns')) {
-      const turnRows = connection.prepare(`SELECT drone_id,chat_name,turn_json
-        FROM canonical_chat_turns
-        ORDER BY drone_id,chat_name,COALESCE(prompt_at,at),completed_at,ordinal,turn_id`).all() as TurnRow[];
+      const turnRows = connection.prepare(`WITH ranked AS (
+          SELECT drone_id,chat_name,turn_id,
+            ROW_NUMBER() OVER (
+              PARTITION BY drone_id,chat_name
+              ORDER BY COALESCE(prompt_at,at) DESC,completed_at DESC,ordinal DESC,turn_id DESC
+            ) AS recent_rank
+          FROM canonical_chat_turns
+        ), selected_ids AS (
+          SELECT drone_id,chat_name,turn_id
+          FROM ranked WHERE recent_rank <= ?
+          UNION
+          SELECT turns.drone_id,turns.chat_name,turns.turn_id
+          FROM canonical_chat_turns AS turns
+          JOIN hub_canonical_drones AS drones ON drones.drone_id = turns.drone_id
+          JOIN json_each(json_extract(drones.lifecycle_json,'$.playbookQueueGate.initialPromptIds')) AS prompt_ids
+            ON turns.turn_id = prompt_ids.value
+          WHERE json_extract(drones.lifecycle_json,'$.playbookQueueGate.releasedAt') IS NULL
+            AND turns.chat_name = COALESCE(
+              json_extract(drones.lifecycle_json,'$.playbookQueueGate.chatName'),
+              'default'
+            )
+        )
+        SELECT turns.drone_id,turns.chat_name,turns.turn_json
+        FROM selected_ids
+        JOIN canonical_chat_turns AS turns
+          ON turns.drone_id = selected_ids.drone_id
+          AND turns.chat_name = selected_ids.chat_name
+          AND turns.turn_id = selected_ids.turn_id
+        ORDER BY turns.drone_id,turns.chat_name,COALESCE(turns.prompt_at,turns.at),
+          turns.completed_at,turns.ordinal,turns.turn_id`)
+        .all(RECENT_TURNS_PER_CHAT) as TurnRow[];
       for (const row of turnRows) {
         const chat = chats.get(chatKey(row.drone_id, row.chat_name));
         if (chat) chat.turns.push(parseObject(row.turn_json));

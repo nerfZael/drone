@@ -11,7 +11,7 @@ describe('fleet reconciler canonical model', () => {
     let compatibilityReads = 0;
     const snapshot = await loadFleetReconcilerSnapshot({
       bunRuntime: false,
-      readCanonicalActiveModel: () => {
+      readCanonicalLifecycleModel: () => {
         canonicalReads += 1;
         return { drones: { alpha: { id: 'alpha' } }, pending: {} };
       },
@@ -36,7 +36,7 @@ describe('fleet reconciler canonical model', () => {
     const legacy = { drones: { bun: { id: 'bun' } }, pending: {}, settings: {} };
     const snapshot = await loadFleetReconcilerSnapshot({
       bunRuntime: true,
-      readCanonicalActiveModel: () => { throw new Error('canonical read should not run'); },
+      readCanonicalLifecycleModel: () => { throw new Error('canonical read should not run'); },
       loadKanbanBoard: async () => { throw new Error('canonical board should not run'); },
       loadCompatibilityRegistry: async () => {
         compatibilityReads += 1;

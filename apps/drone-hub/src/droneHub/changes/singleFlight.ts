@@ -22,7 +22,7 @@ export function createSingleFlightPoller(opts: {
     if (timer) clearTimer(timer);
     timer = setTimer(() => {
       timer = null;
-      void pollNow();
+      void pollNow().catch(() => {});
     }, opts.intervalMs);
   };
 
@@ -33,7 +33,13 @@ export function createSingleFlightPoller(opts: {
       schedule();
       return Promise.resolve();
     }
-    inFlight = opts.poll().finally(() => {
+    let result: Promise<void>;
+    try {
+      result = opts.poll();
+    } catch (error) {
+      result = Promise.reject(error);
+    }
+    inFlight = result.finally(() => {
       inFlight = null;
       schedule();
     });
@@ -43,7 +49,7 @@ export function createSingleFlightPoller(opts: {
   return {
     start() {
       stopped = false;
-      void pollNow();
+      void pollNow().catch(() => {});
     },
     stop() {
       stopped = true;

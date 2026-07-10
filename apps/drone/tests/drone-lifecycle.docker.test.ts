@@ -3,8 +3,6 @@ import os from 'node:os';
 import path from 'node:path';
 import cp from 'node:child_process';
 import { describe, expect, test } from 'bun:test';
-import { startDroneHubApiServer } from '../src/hub/server';
-import { resetDroneRootDirForTests } from '../src/host/paths';
 
 function run(
   cmd: string,
@@ -47,6 +45,91 @@ function runOrThrow(
 
 function runNoThrow(cmd: string, args: string[], opts?: { cwd?: string; env?: NodeJS.ProcessEnv; timeoutMs?: number }): void {
   run(cmd, args, opts);
+}
+
+async function startNodeHub(opts: {
+  appRoot: string;
+  env: NodeJS.ProcessEnv;
+  apiToken: string;
+}): Promise<{ port: number; close: () => Promise<void> }> {
+  const marker = 'DRONE_TEST_HUB_PORT=';
+  const script = `
+    const { startDroneHubApiServer } = require(process.env.DRONE_TEST_SERVER_MODULE);
+    startDroneHubApiServer({ port: 0, host: '127.0.0.1', apiToken: process.env.DRONE_TEST_API_TOKEN })
+      .then((hub) => {
+        process.stdout.write('${marker}' + hub.port + '\\n');
+        let closing = false;
+        const close = async () => {
+          if (closing) return;
+          closing = true;
+          await hub.close();
+          process.exit(0);
+        };
+        process.on('SIGTERM', () => { void close(); });
+        process.on('SIGINT', () => { void close(); });
+      })
+      .catch((error) => {
+        console.error(error);
+        process.exit(1);
+      });
+  `;
+  const child = cp.spawn('node', ['-e', script], {
+    cwd: opts.appRoot,
+    env: {
+      ...opts.env,
+      DRONE_TEST_SERVER_MODULE: path.join(opts.appRoot, 'dist', 'hub', 'server.js'),
+      DRONE_TEST_API_TOKEN: opts.apiToken,
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  return await new Promise((resolve, reject) => {
+    let settled = false;
+    const timeout = setTimeout(() => {
+      child.kill('SIGKILL');
+      if (!settled) reject(new Error(`Timed out starting Node Hub.\n${stdout}\n${stderr}`));
+    }, 30_000);
+    const fail = (error: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      reject(error);
+    };
+    child.stdout.on('data', (chunk) => {
+      stdout += String(chunk ?? '');
+      const match = stdout.match(new RegExp(`${marker}(\\d+)`));
+      if (!match || settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      const port = Number(match[1]);
+      resolve({
+        port,
+        close: async () => {
+          if (child.exitCode != null) return;
+          await new Promise<void>((done) => {
+            let closed = false;
+            const finish = () => {
+              if (closed) return;
+              closed = true;
+              done();
+            };
+            child.once('exit', finish);
+            child.kill('SIGTERM');
+            setTimeout(() => {
+              if (child.exitCode == null) child.kill('SIGKILL');
+              finish();
+            }, 5_000).unref();
+          });
+        },
+      });
+    });
+    child.stderr.on('data', (chunk) => { stderr += String(chunk ?? ''); });
+    child.once('error', fail);
+    child.once('exit', (code) => {
+      if (!settled) fail(new Error(`Node Hub exited before startup (${String(code)}).\n${stdout}\n${stderr}`));
+    });
+  });
 }
 
 function dockerUsable(): { ok: boolean; detail: string } {
@@ -330,10 +413,6 @@ describe('drone docker lifecycle regression', () => {
         NO_COLOR: '1',
       };
 
-      const prevXdgDataHome = process.env.XDG_DATA_HOME;
-      const prevDroneDataDir = process.env.DRONE_DATA_DIR;
-      const prevDvmDataDir = process.env.DVM_DATA_DIR;
-      const prevNoColor = process.env.NO_COLOR;
       let hub: { port: number; close: () => Promise<void> } | null = null;
       const apiToken = `test-token-${testId}`;
 
@@ -344,26 +423,11 @@ describe('drone docker lifecycle regression', () => {
           { cwd: appRoot, env, timeoutMs: 240_000 }
         );
 
-        // Simulate a drifted registry key where entry.name remains correct
-        // but the object key no longer matches.
-        const registryPath = path.join(droneDataDir, 'registry.json');
-        const registryRaw = fs.readFileSync(registryPath, 'utf8');
-        const registry = JSON.parse(registryRaw) as any;
-        const byName = Object.entries(registry?.drones ?? {}).find(
-          ([, value]) => String((value as any)?.name ?? '').trim() === droneName
-        ) as [string, any] | undefined;
-        if (!byName) throw new Error(`Expected registry entry for ${droneName}`);
-        const [entryKey, entry] = byName;
-        delete registry.drones[entryKey];
-        registry.drones[`legacy-key-${droneName}`] = entry;
-        fs.writeFileSync(registryPath, JSON.stringify(registry, null, 2), 'utf8');
+        // Canonical lifecycle rows are keyed by stable ids, so resolving this
+        // request by its display name already covers the former key/name drift
+        // case without reaching into the retired registry.json file.
 
-        process.env.XDG_DATA_HOME = xdgDataHome;
-        process.env.DRONE_DATA_DIR = droneDataDir;
-        process.env.DVM_DATA_DIR = dvmDataDir;
-        process.env.NO_COLOR = '1';
-        resetDroneRootDirForTests();
-        hub = await startDroneHubApiServer({ port: 0, host: '127.0.0.1', apiToken });
+        hub = await startNodeHub({ appRoot, env, apiToken });
 
         const base = `http://127.0.0.1:${hub.port}`;
         const success = await fetch(`${base}/api/drones/${encodeURIComponent(droneName)}/rename`, {
@@ -400,16 +464,6 @@ describe('drone docker lifecycle regression', () => {
             // ignore
           }
         }
-        if (prevXdgDataHome == null) delete process.env.XDG_DATA_HOME;
-        else process.env.XDG_DATA_HOME = prevXdgDataHome;
-        if (prevDroneDataDir == null) delete process.env.DRONE_DATA_DIR;
-        else process.env.DRONE_DATA_DIR = prevDroneDataDir;
-        if (prevDvmDataDir == null) delete process.env.DVM_DATA_DIR;
-        else process.env.DVM_DATA_DIR = prevDvmDataDir;
-        if (prevNoColor == null) delete process.env.NO_COLOR;
-        else process.env.NO_COLOR = prevNoColor;
-        resetDroneRootDirForTests();
-
         runNoThrow('node', [droneCli, 'rm', renamedDroneName, '--keep-volume'], { cwd: appRoot, env, timeoutMs: 30_000 });
         runNoThrow('node', [droneCli, 'rm', droneName, '--keep-volume'], { cwd: appRoot, env, timeoutMs: 30_000 });
         runNoThrow('node', [dvmCli, 'rm', renamedDroneName, '--keep-volume'], { cwd: dvmRoot, env, timeoutMs: 30_000 });

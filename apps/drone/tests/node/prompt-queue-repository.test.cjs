@@ -324,6 +324,11 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
     chatName: 'default',
     pending: prompt('canonical', now),
   });
+  await store.pushPendingPrompt({
+    droneId: 'alpha',
+    chatName: 'default',
+    pending: { ...prompt('failed-canonical', now), state: 'failed', error: 'delivery failed' },
+  });
   await upsertChatInStore({
     droneId: 'alpha',
     chatName: 'default',
@@ -345,8 +350,12 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
     (await store.readPendingPrompts({ droneId: 'alpha', chatName: 'default' })).map((item) => ({
       id: item.id,
       state: item.state,
+      error: item.error,
     })),
-    [{ id: 'canonical', state: 'queued' }],
+    [
+      { id: 'canonical', state: 'queued', error: undefined },
+      { id: 'failed-canonical', state: 'failed', error: 'delivery failed' },
+    ],
   );
   assert.deepEqual(canonicalCounts(), beforePendingRead, 'pending reads must not project or backfill compatibility state');
   assert.equal(canonicalCounts().backfillMarkers, 0);

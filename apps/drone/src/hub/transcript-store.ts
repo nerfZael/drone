@@ -1460,7 +1460,7 @@ export class ChatTranscriptRepository {
   private promptRows(connection: HubDatabaseConnection, droneId: string, chatName: string): any[] {
     const hasPrompts = connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompts'").get();
     if (!hasPrompts) return [];
-    return connection.prepare(`SELECT prompt_id, created_at, updated_at, state, prompt, payload_json
+    return connection.prepare(`SELECT prompt_id, created_at, updated_at, state, prompt, payload_json, last_error
       FROM prompts WHERE drone_id = ? AND chat_name = ? AND state != 'cancelled'
       ORDER BY sequence DESC LIMIT 60`).all(droneId, chatName).reverse() as any[];
   }
@@ -1473,12 +1473,13 @@ export class ChatTranscriptRepository {
       prompt: row.prompt,
       state: row.state,
       updatedAt: row.updated_at,
+      ...(row.last_error ? { error: row.last_error } : { error: undefined }),
     }));
   }
 
   private pendingVersion(connection: HubDatabaseConnection, droneId: string, chatName: string): string {
     return crypto.createHash('sha256').update(stableJson(this.promptRows(connection, droneId, chatName).map((row) => [
-      row.prompt_id, row.updated_at, row.state, row.payload_json,
+      row.prompt_id, row.updated_at, row.state, row.prompt, row.payload_json, row.last_error,
     ]))).digest('base64url');
   }
 

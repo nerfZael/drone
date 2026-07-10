@@ -1,5 +1,5 @@
 import { loadRegistry } from '../host/registry';
-import { readCanonicalActiveDroneModel } from './canonical-drone-read-model';
+import { readCanonicalDroneLifecycleModel } from './canonical-drone-read-model';
 import { resolveKanbanBoardSettingsResponse } from './hub-settings';
 
 export type FleetReconcilerSnapshot = {
@@ -9,7 +9,7 @@ export type FleetReconcilerSnapshot = {
 };
 
 type SnapshotDependencies = {
-  readCanonicalActiveModel: () => FleetReconcilerSnapshot | null;
+  readCanonicalLifecycleModel: () => FleetReconcilerSnapshot | null;
   loadCompatibilityRegistry: () => Promise<any>;
   loadKanbanBoard: () => Promise<{ kanbanBoard: any }>;
   bunRuntime: boolean;
@@ -23,14 +23,14 @@ export async function loadFleetReconcilerSnapshot(
   overrides: Partial<SnapshotDependencies> = {},
 ): Promise<FleetReconcilerSnapshot> {
   const dependencies: SnapshotDependencies = {
-    readCanonicalActiveModel: readCanonicalActiveDroneModel,
+    readCanonicalLifecycleModel: readCanonicalDroneLifecycleModel,
     loadCompatibilityRegistry: loadRegistry,
     loadKanbanBoard: loadCanonicalKanbanBoard,
     bunRuntime: Boolean((globalThis as any).Bun),
     ...overrides,
   };
   if (dependencies.bunRuntime) return await dependencies.loadCompatibilityRegistry();
-  const active = dependencies.readCanonicalActiveModel();
+  const active = dependencies.readCanonicalLifecycleModel();
   if (!active) return await dependencies.loadCompatibilityRegistry();
   const board = await dependencies.loadKanbanBoard();
   return {

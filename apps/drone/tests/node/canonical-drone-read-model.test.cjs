@@ -8,7 +8,10 @@ const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle
 const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const { getPromptQueueRepository } = require('../../dist/host/prompt-queue-repository.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
-const { readCanonicalActiveDroneModel } = require('../../dist/hub/canonical-drone-read-model.js');
+const {
+  readCanonicalActiveDroneModel,
+  readCanonicalDroneLifecycleModel,
+} = require('../../dist/hub/canonical-drone-read-model.js');
 const { upsertChatInStore, upsertTranscriptTurnInStore } = require('../../dist/hub/transcript-store.js');
 
 const originalDataDir = process.env.DRONE_DATA_DIR;
@@ -73,4 +76,46 @@ test('canonical active drone read model assembles summaries without writes or co
   assert.equal(model.drones['drone-a'].chats.default.turns[0].output, 'world');
   assert.equal(model.drones['drone-a'].chats.default.pendingPrompts[0].id, 'prompt-1');
   assert.equal(model.pending['drone-b'].phase, 'starting');
+  assert.equal(readCanonicalDroneLifecycleModel().drones['drone-a'].chats, undefined);
+});
+
+test('canonical active drone read model bounds history while retaining active playbook gate turns', async () => {
+  useTempDataDir();
+  const lifecycle = await getDroneLifecycleRepository();
+  await lifecycle.upsert('real', 'drone-a', {
+    id: 'drone-a',
+    name: 'alpha',
+    runtime: 'container',
+    createdAt: '2026-07-10T10:00:00.000Z',
+    playbookQueueGate: {
+      queueItemId: 'queue-1',
+      playbookId: 'playbook-1',
+      chatName: 'default',
+      initialPromptIds: ['turn-0'],
+    },
+  });
+  await upsertChatInStore({
+    droneId: 'drone-a',
+    chatName: 'default',
+    chatEntry: { createdAt: '2026-07-10T10:00:00.000Z' },
+  });
+  for (let index = 0; index < 65; index += 1) {
+    await upsertTranscriptTurnInStore({
+      droneId: 'drone-a',
+      chatName: 'default',
+      turn: {
+        id: `turn-${index}`,
+        at: new Date(Date.parse('2026-07-10T10:00:00.000Z') + index * 1_000).toISOString(),
+        prompt: `prompt ${index}`,
+        ok: true,
+        output: `output ${index}`,
+      },
+    });
+  }
+
+  const turns = readCanonicalActiveDroneModel().drones['drone-a'].chats.default.turns;
+  assert.equal(turns.length, 61);
+  assert.equal(turns[0].id, 'turn-0');
+  assert.equal(turns.some((turn) => turn.id === 'turn-1'), false);
+  assert.equal(turns.at(-1).id, 'turn-64');
 });

@@ -33,8 +33,13 @@ export class ShortLivedSingleFlightCache<T> {
     this.generation += 1;
     if (key === undefined) {
       this.cached.clear();
+      this.inFlight.clear();
       return;
     }
     this.cached.delete(key);
+    // A request that starts after a mutation must not join a scan that began
+    // before the mutation. Existing callers may finish with their old result,
+    // but the next caller starts a fresh generation immediately.
+    this.inFlight.delete(key);
   }
 }

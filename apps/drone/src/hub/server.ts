@@ -1868,7 +1868,6 @@ async function runFleetReconcilerCycle(): Promise<void> {
     const actorIds = new Set(Object.keys(regAny.drones ?? {}));
     FLEET_SNAPSHOT_DELIVERY_CACHE.prune(actorIds);
     const pollTasks = Date.now() - FLEET_TASK_POLL_LAST_STARTED_AT >= FLEET_TASK_POLL_INTERVAL_MS;
-    if (pollTasks) FLEET_TASK_POLL_LAST_STARTED_AT = Date.now();
     for (const [actorId, actorEntry] of Object.entries(regAny?.drones ?? {})) {
       const fleetEnabled = fleetActorConfig(actorEntry).enabled;
       let daemon: Awaited<ReturnType<typeof resolveDroneDaemonClientForEntry>> | null = null;
@@ -1918,6 +1917,10 @@ async function runFleetReconcilerCycle(): Promise<void> {
         }
       }
     }
+    // Measure the interval from completion. Large fleets can take longer than
+    // the nominal interval to scan; measuring from start would make every
+    // subsequent reconciler cycle immediately launch another full task scan.
+    if (pollTasks) FLEET_TASK_POLL_LAST_STARTED_AT = Date.now();
   } finally {
     FLEET_RECONCILE_BUSY = false;
   }

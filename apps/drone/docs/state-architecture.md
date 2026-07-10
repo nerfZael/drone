@@ -70,8 +70,9 @@ recurring workers must not use it for bounded reads.
 
 - `hub/canonical-drone-read-model.ts` builds the active/pending Drone Hub summary with a
   fixed set of targeted SQL queries. It reads only active lifecycle rows, chat metadata,
-  turn summaries, and the bounded prompt data required by the UI. The model is read-only
-  and may be shared briefly across simultaneous summary, status, SSE, and assistant-idle
+  the latest 60 turns per chat (plus active queue-gate turns), and the bounded prompt
+  data required by the UI. The model is read-only and may be shared briefly across
+  simultaneous summary, status, SSE, and assistant-idle
   consumers.
 - Chat state reads resolve lifecycle identity directly, read the transcript version first,
   and honor `If-None-Match` before loading transcript rows. A normal chat load requests one

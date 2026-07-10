@@ -45,4 +45,21 @@ describe('changes polling single flight', () => {
     expect([left, right]).toEqual([42, 42]);
     expect(calls).toBe(1);
   });
+
+  test('continues scheduling after a synchronous poll failure', async () => {
+    const timers: Array<() => void> = [];
+    const poller = createSingleFlightPoller({
+      intervalMs: 5_000,
+      poll: (() => { throw new Error('sync failure'); }) as () => Promise<void>,
+      setTimer: (callback) => {
+        timers.push(callback);
+        return timers.length as unknown as ReturnType<typeof setTimeout>;
+      },
+      clearTimer: () => {},
+    });
+    poller.start();
+    await expect(poller.pollNow()).rejects.toThrow('sync failure');
+    expect(timers).toHaveLength(1);
+    poller.stop();
+  });
 });

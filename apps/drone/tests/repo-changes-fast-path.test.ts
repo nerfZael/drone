@@ -36,6 +36,21 @@ describe('repository changes fast path', () => {
     expect(scans).toBe(3);
   });
 
+  test('does not let a post-mutation request join a stale in-flight scan', async () => {
+    const cache = new ShortLivedSingleFlightCache<string>();
+    let resolveStale: ((value: string) => void) | null = null;
+    const stale = cache.getOrLoad('repo', () => new Promise<string>((resolve) => {
+      resolveStale = resolve;
+    }));
+
+    cache.invalidate('repo');
+    const fresh = cache.getOrLoad('repo', async () => 'fresh');
+    expect(await fresh).toBe('fresh');
+    resolveStale?.('stale');
+    expect(await stale).toBe('stale');
+    expect(await cache.getOrLoad('repo', async () => 'unexpected')).toBe('fresh');
+  });
+
   test('hashes all changed container files in one git execution', async () => {
     const calls: any[] = [];
     const hashes = await hashDroneFileContentsBatch({

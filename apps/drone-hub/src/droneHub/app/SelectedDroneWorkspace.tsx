@@ -1063,7 +1063,7 @@ export function SelectedDroneWorkspace({
     } finally {
       setExportingTranscript(false);
     }
-  }, [activeChatName, currentDrone.id]);
+  }, [activeChatName, currentDrone.id, requestJson]);
 
   const copyTranscriptMarkdown = React.useCallback(async () => {
     if (transcriptExportDisabled) return;
