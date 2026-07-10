@@ -5,6 +5,7 @@ import path from 'node:path';
 
 import type { DroneRegistry } from '../host/registry';
 import { loadRegistry, updateRegistry } from '../host/registry';
+import { getCatalogStore, type CatalogStore } from '../host/catalog-store';
 import { bashQuote } from './hub-format';
 
 const MANAGED_SKILLS_MANIFEST = '.drone-managed-skills.json';
@@ -261,7 +262,26 @@ export function listSkillsFromRegistry(reg: DroneRegistry | Record<string, unkno
   return out;
 }
 
+async function canonicalSkillStore(): Promise<CatalogStore | null> {
+  try {
+    return await getCatalogStore();
+  } catch (error) {
+    if ((globalThis as any).Bun) return null;
+    throw error;
+  }
+}
+
+async function backfillLegacySkills(store: CatalogStore): Promise<void> {
+  if (store.isBackfillComplete('skills')) return;
+  await store.backfillSkills(listSkillsFromRegistry(await loadRegistry()));
+}
+
 export async function listSkills(): Promise<SkillRecord[]> {
+  const store = await canonicalSkillStore();
+  if (store) {
+    await backfillLegacySkills(store);
+    return store.listSkills<SkillRecord>();
+  }
   const reg = await loadRegistry();
   return listSkillsFromRegistry(reg);
 }
@@ -269,8 +289,12 @@ export async function listSkills(): Promise<SkillRecord[]> {
 export async function getSkillById(idRaw: string): Promise<SkillRecord | null> {
   const id = String(idRaw ?? '').trim();
   if (!id) return null;
-  const reg = await loadRegistry();
-  return listSkillsFromRegistry(reg).find((skill) => skill.id === id) ?? null;
+  const store = await canonicalSkillStore();
+  if (store) {
+    await backfillLegacySkills(store);
+    return store.getSkill<SkillRecord>(id);
+  }
+  return listSkillsFromRegistry(await loadRegistry()).find((skill) => skill.id === id) ?? null;
 }
 
 function assertSkillSlugAvailable(skills: SkillRecord[], slug: string, selfId?: string): void {
@@ -325,6 +349,8 @@ export async function createSkill(input: any): Promise<SkillRecord> {
   const current = await listSkills();
   const record = normalizeIncomingSkillInput(input);
   assertSkillSlugAvailable(current, record.slug);
+  const store = await canonicalSkillStore();
+  if (store) return await store.putSkill(record);
   await updateRegistry((reg: any) => {
     reg.skills = reg.skills ?? {};
     reg.skills[record.id] = record;
@@ -340,6 +366,8 @@ export async function updateSkillRecord(idRaw: string, input: any): Promise<Skil
   if (!existing) throw new Error(`unknown skill: ${id}`);
   const record = normalizeIncomingSkillInput(input, existing);
   assertSkillSlugAvailable(current, record.slug, id);
+  const store = await canonicalSkillStore();
+  if (store) return await store.putSkill(record);
   await updateRegistry((reg: any) => {
     reg.skills = reg.skills ?? {};
     reg.skills[id] = record;
@@ -350,6 +378,11 @@ export async function updateSkillRecord(idRaw: string, input: any): Promise<Skil
 export async function deleteSkillRecord(idRaw: string): Promise<boolean> {
   const id = String(idRaw ?? '').trim();
   if (!id) return false;
+  const store = await canonicalSkillStore();
+  if (store) {
+    await backfillLegacySkills(store);
+    return await store.deleteSkill(id);
+  }
   return await updateRegistry((reg: any) => {
     if (!reg?.skills?.[id]) return false;
     delete reg.skills[id];

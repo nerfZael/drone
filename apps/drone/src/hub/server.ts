@@ -26,6 +26,7 @@ import {
   useProfile as useManagedProfile,
 } from '../host/profile-manager';
 import { loadRegistry, updateRegistry as updateHostRegistry } from '../host/registry';
+import { getCatalogStore, type CatalogPlaybookRecord } from '../host/catalog-store';
 import {
   createRegistryBackup,
   resolveRegistryBackupStatusResponse,
@@ -4891,6 +4892,31 @@ function normalizePlaybookDefinitions(regAny: any): PlaybookDefinition[] {
   });
 }
 
+function catalogPlaybookRecord(playbook: PlaybookDefinition): CatalogPlaybookRecord {
+  return {
+    ...playbook,
+    model: playbook.model ?? undefined,
+    updatedAt: playbook.updatedAt ?? playbook.createdAt,
+  };
+}
+
+async function listCanonicalPlaybookDefinitions(): Promise<PlaybookDefinition[]> {
+  try {
+    const store = await getCatalogStore();
+    if (!store.isBackfillComplete('playbooks')) {
+      const legacy = normalizePlaybookDefinitions(await loadRegistry());
+      await store.backfillPlaybooks(legacy.map(catalogPlaybookRecord));
+    }
+    const rows = store.listPlaybooks();
+    return normalizePlaybookDefinitions({
+      playbooks: Object.fromEntries(rows.map((playbook) => [playbook.id, playbook])),
+    });
+  } catch (error) {
+    if ((globalThis as any).Bun) return normalizePlaybookDefinitions(await loadRegistry());
+    throw error;
+  }
+}
+
 function lastTranscriptTurnFromEntry(entry: any): any | null {
   const turns = Array.isArray(entry?.turns) ? entry.turns : [];
   return turns.length > 0 ? turns[turns.length - 1] ?? null : null;
@@ -5257,7 +5283,7 @@ async function startPlaybookRunLaunch(opts: {
   const droneCli = resolveDroneCliPath();
   if (!(await fileExists(droneCli))) throw new Error(`drone CLI not found at ${droneCli}`);
   const regAny: any = await loadRegistry();
-  const playbook = normalizePlaybookDefinitions(regAny).find((item) => item.id === playbookId) ?? null;
+  const playbook = (await listCanonicalPlaybookDefinitions()).find((item) => item.id === playbookId) ?? null;
   if (!playbook) throw new Error(`unknown playbook: ${playbookId}`);
   const playbookMessages = Array.isArray(opts.renderedMessages) ? opts.renderedMessages : playbook.messages;
   const playbookActions = Array.isArray(opts.renderedActions) ? opts.renderedActions : playbook.actions;
@@ -19102,7 +19128,7 @@ export async function startDroneHubApiServer(opts: {
           json(res, 409, { ok: false, error: `button "${button.label}" is not available for task type "${task.typeId}"` });
           return;
         }
-        const playbook = normalizePlaybookDefinitions(regAny).find((item) => item.id === button.playbookId) ?? null;
+        const playbook = (await listCanonicalPlaybookDefinitions()).find((item) => item.id === button.playbookId) ?? null;
         if (!playbook) {
           json(res, 404, { ok: false, error: `unknown playbook: ${button.playbookId}` });
           return;
@@ -19796,8 +19822,7 @@ export async function startDroneHubApiServer(opts: {
 
       // GET /api/playbooks
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'playbooks') {
-        const regAny: any = await loadRegistry();
-        json(res, 200, { ok: true, playbooks: normalizePlaybookDefinitions(regAny) });
+        json(res, 200, { ok: true, playbooks: await listCanonicalPlaybookDefinitions() });
         return;
       }
 
@@ -19832,9 +19857,8 @@ export async function startDroneHubApiServer(opts: {
         }
         const id = crypto.randomUUID();
         const at = nowIso();
-        await updateRegistry((regAny: any) => {
-          regAny.playbooks = regAny.playbooks ?? {};
-          regAny.playbooks[id] = {
+        await listCanonicalPlaybookDefinitions();
+        const playbook = {
             id,
             label,
             agent,
@@ -19845,17 +19869,31 @@ export async function startDroneHubApiServer(opts: {
             createdAt: at,
             updatedAt: at,
           };
+        try {
+          await (await getCatalogStore()).putPlaybook(catalogPlaybookRecord(playbook));
+        } catch (error) {
+          if (!(globalThis as any).Bun) throw error;
+          await updateRegistry((regAny: any) => {
+            regAny.playbooks = regAny.playbooks ?? {};
+            regAny.playbooks[id] = playbook;
+          });
+        }
+        json(res, 201, {
+          ok: true,
+          playbook: normalizePlaybookDefinitions({ playbooks: { [id]: playbook } })[0] ?? null,
         });
-        const regAny: any = await loadRegistry();
-        json(res, 201, { ok: true, playbook: normalizePlaybookDefinitions(regAny).find((item) => item.id === id) ?? null });
         return;
       }
 
       // DELETE /api/playbooks
       if (method === 'DELETE' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'playbooks') {
-        await updateRegistry((regAny: any) => {
-          regAny.playbooks = {};
-        });
+        try {
+          await listCanonicalPlaybookDefinitions();
+          await (await getCatalogStore()).clearPlaybooks();
+        } catch (error) {
+          if (!(globalThis as any).Bun) throw error;
+          await updateRegistry((regAny: any) => { regAny.playbooks = {}; });
+        }
         json(res, 200, { ok: true });
         return;
       }
@@ -19894,12 +19932,12 @@ export async function startDroneHubApiServer(opts: {
           json(res, 400, { ok: false, error: 'add at least one message' });
           return;
         }
-        const result = await updateRegistry((regAny: any) => {
-          const current = regAny?.playbooks?.[playbookId] ?? null;
-          if (!current) return { ok: false as const, status: 404 as const, error: `unknown playbook: ${playbookId}` };
-          const createdAt = typeof current.createdAt === 'string' && current.createdAt.trim() ? String(current.createdAt) : nowIso();
-          regAny.playbooks = regAny.playbooks ?? {};
-          regAny.playbooks[playbookId] = {
+        const current = (await listCanonicalPlaybookDefinitions()).find((item) => item.id === playbookId) ?? null;
+        if (!current) {
+          json(res, 404, { ok: false, error: `unknown playbook: ${playbookId}` });
+          return;
+        }
+        const playbook = {
             id: playbookId,
             label,
             agent,
@@ -19907,17 +19945,22 @@ export async function startDroneHubApiServer(opts: {
             messages,
             artifacts,
             actions,
-            createdAt,
+            createdAt: current.createdAt,
             updatedAt: nowIso(),
           };
-          return { ok: true as const };
-        });
-        if (!result.ok) {
-          json(res, result.status ?? 500, { ok: false, error: result.error ?? 'failed updating playbook' });
-          return;
+        try {
+          await (await getCatalogStore()).putPlaybook(catalogPlaybookRecord(playbook));
+        } catch (error) {
+          if (!(globalThis as any).Bun) throw error;
+          await updateRegistry((regAny: any) => {
+            regAny.playbooks = regAny.playbooks ?? {};
+            regAny.playbooks[playbookId] = playbook;
+          });
         }
-        const regAny: any = await loadRegistry();
-        json(res, 200, { ok: true, playbook: normalizePlaybookDefinitions(regAny).find((item) => item.id === playbookId) ?? null });
+        json(res, 200, {
+          ok: true,
+          playbook: normalizePlaybookDefinitions({ playbooks: { [playbookId]: playbook } })[0] ?? null,
+        });
         return;
       }
 
@@ -19928,11 +19971,19 @@ export async function startDroneHubApiServer(opts: {
           json(res, 400, { ok: false, error: 'missing playbook id' });
           return;
         }
-        const removed = await updateRegistry((regAny: any) => {
-          if (!regAny?.playbooks?.[playbookId]) return false;
-          delete regAny.playbooks[playbookId];
-          return true;
-        });
+        let removed = false;
+        try {
+          await listCanonicalPlaybookDefinitions();
+          const store = await getCatalogStore();
+          removed = await store.deletePlaybook(playbookId);
+        } catch (error) {
+          if (!(globalThis as any).Bun) throw error;
+          removed = await updateRegistry((regAny: any) => {
+            if (!regAny?.playbooks?.[playbookId]) return false;
+            delete regAny.playbooks[playbookId];
+            return true;
+          });
+        }
         if (!removed) {
           json(res, 404, { ok: false, error: `unknown playbook: ${playbookId}` });
           return;
@@ -19970,8 +20021,7 @@ export async function startDroneHubApiServer(opts: {
           Math.min(PLAYBOOK_RUN_QUEUE_BATCH_MAX, Math.floor(Number(body?.count ?? 1) || 1)),
         );
         const serializeFirstMessageGroup = body?.serializeFirstMessageGroup === true;
-        const regAny: any = await loadRegistry();
-        const playbook = normalizePlaybookDefinitions(regAny).find((item) => item.id === playbookId) ?? null;
+        const playbook = (await listCanonicalPlaybookDefinitions()).find((item) => item.id === playbookId) ?? null;
         if (!playbook) {
           json(res, 404, { ok: false, error: `unknown playbook: ${playbookId}` });
           return;
