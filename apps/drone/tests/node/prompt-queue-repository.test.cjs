@@ -10,9 +10,7 @@ const {
   getPromptQueueRepository,
   resetPromptQueueRepositoryForTests,
 } = require('../../dist/host/prompt-queue-repository.js');
-const {
-  looksLikeTransientPromptEnqueueError,
-} = require('../../dist/hub/pendingPromptEnqueue.js');
+const { looksLikeTransientPromptEnqueueError } = require('../../dist/hub/pendingPromptEnqueue.js');
 const { createDronePendingPromptStore } = require('../../dist/hub/drone-pending-prompts.js');
 const { createPendingDroneStateHelpers } = require('../../dist/hub/drone-pending-state.js');
 const { resetTranscriptStoreForTests } = require('../../dist/hub/transcript-store.js');
@@ -136,7 +134,10 @@ test('a conditional update permits only one competing claimant', async () => {
     ),
   );
   assert.equal(claims.filter(Boolean).length, 1);
-  assert.equal(queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'race' }).attemptCount, 1);
+  assert.equal(
+    queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'race' }).attemptCount,
+    1,
+  );
 });
 
 test('expired leases recover to queued and can be claimed again', async () => {
@@ -152,13 +153,13 @@ test('expired leases recover to queued and can be claimed again', async () => {
     now: at,
   });
 
-  assert.equal(
-    await queue.recoverExpiredLeases({ now: '2026-07-10T09:00:02.000Z' }),
-    1,
-  );
+  assert.equal(await queue.recoverExpiredLeases({ now: '2026-07-10T09:00:02.000Z' }), 1);
   const recovered = queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'leased' });
   assert.equal(recovered.state, 'queued');
   assert.equal(recovered.leaseOwner, undefined);
+  assert.deepEqual(queue.listQueuedChats({ now: '2026-07-10T09:00:02.000Z' }), [
+    { droneId: 'alpha', chatName: 'default' },
+  ]);
   assert.ok(
     await queue.claim({
       droneId: 'alpha',
@@ -225,7 +226,10 @@ test('retry scheduling uses bounded backoff and becomes terminal at max attempts
     }),
     { disposition: 'terminal' },
   );
-  assert.equal(queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'retry' }).state, 'failed');
+  assert.equal(
+    queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'retry' }).state,
+    'failed',
+  );
 });
 
 test('legacy backfill seeds missing rows but never overwrites canonical state', async () => {
@@ -256,6 +260,24 @@ test('legacy backfill seeds missing rows but never overwrites canonical state', 
   const stored = queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'legacy' });
   assert.equal(stored.state, 'sent');
   assert.equal(stored.prompt, 'from registry');
+});
+
+test('cancellation leaves a tombstone that stale legacy backfill cannot resurrect', async () => {
+  const queue = repository('cancel-tombstone');
+  const queued = prompt('cancel-me', '2026-07-10T09:00:00.000Z');
+  await queue.enqueue({ droneId: 'drone', chatName: 'chat', prompt: queued });
+  assert.deepEqual(
+    await queue.cancelQueued({ droneId: 'drone', chatName: 'chat', promptId: queued.id }),
+    { cancelled: true, state: 'queued' },
+  );
+
+  await queue.backfillLegacy({ droneId: 'drone', chatName: 'chat', prompts: [queued] });
+
+  assert.deepEqual(queue.list({ droneId: 'drone', chatName: 'chat' }), []);
+  assert.equal(
+    queue.get({ droneId: 'drone', chatName: 'chat', promptId: queued.id })?.state,
+    'cancelled',
+  );
 });
 
 test('the exact registry lock timeout is classified as transient', () => {

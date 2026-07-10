@@ -118,9 +118,14 @@ type MemoryChatRow = {
 const memoryChats = new Map<string, MemoryChatRow>();
 const memoryPrompts = new Map<string, Map<string, StoredPendingPrompt>>();
 const memoryTurns = new Map<string, Map<string, StoredTranscriptTurn>>();
+const memoryCancelledPrompts = new Set<string>();
 
 function chatStoreKey(droneId: string, chatName: string): string {
   return `${droneId}\u0000${chatName}`;
+}
+
+function memoryPromptKey(droneId: string, chatName: string, promptId: string): string {
+  return `${chatStoreKey(droneId, chatName)}\u0000${promptId}`;
 }
 
 function memoryPromptMap(droneId: string, chatName: string): Map<string, StoredPendingPrompt> {
@@ -1015,7 +1020,7 @@ function memoryImportTurn(droneId: string, chatName: string, turnRaw: unknown) {
   if (!id) return;
   memoryTurnMap(droneId, chatName).set(id, turn);
   const prompts = memoryPromptMap(droneId, chatName);
-  if (!prompts.has(id)) {
+  if (!prompts.has(id) && !memoryCancelledPrompts.has(memoryPromptKey(droneId, chatName, id))) {
     const pending = normalizePendingPrompt({
       id,
       at: turn.promptAt ?? turn.at,
@@ -1049,7 +1054,9 @@ function memoryImportChat(opts: { droneId: string; chatName: string; chatEntry: 
   const pending = Array.isArray((chatEntry as any)?.pendingPrompts) ? (chatEntry as any).pendingPrompts : [];
   for (const item of pending) {
     const p = normalizePendingPrompt(item);
-    if (p) memoryPromptMap(opts.droneId, opts.chatName).set(p.id, p);
+    if (p && !memoryCancelledPrompts.has(memoryPromptKey(opts.droneId, opts.chatName, p.id))) {
+      memoryPromptMap(opts.droneId, opts.chatName).set(p.id, p);
+    }
   }
   const turns = Array.isArray((chatEntry as any)?.turns) ? (chatEntry as any).turns : [];
   for (const turn of turns) memoryImportTurn(opts.droneId, opts.chatName, turn);
@@ -1103,6 +1110,7 @@ function memoryResetForTests(): void {
   memoryChats.clear();
   memoryPrompts.clear();
   memoryTurns.clear();
+  memoryCancelledPrompts.clear();
 }
 
 export function importTranscriptTurnsFromRegistry(opts: {
@@ -1209,7 +1217,10 @@ export function upsertPendingPromptInStore(opts: {
   const store = getTranscriptStore();
   if (!store) {
     const pending = normalizePendingPrompt(opts.pending);
-    if (pending) memoryPromptMap(opts.droneId, opts.chatName).set(pending.id, pending);
+    if (pending) {
+      memoryCancelledPrompts.delete(memoryPromptKey(opts.droneId, opts.chatName, pending.id));
+      memoryPromptMap(opts.droneId, opts.chatName).set(pending.id, pending);
+    }
     return { available: true, sourceHash: '' };
   }
   return store.upsertPendingPrompt(opts);
@@ -1264,6 +1275,7 @@ export function cancelQueuedPendingPromptInStore(opts: {
     const current = map.get(opts.id);
     if (!current) return { available: true, cancelled: false, state: null };
     if (current.state !== 'queued') return { available: true, cancelled: false, state: current.state };
+    memoryCancelledPrompts.add(memoryPromptKey(opts.droneId, opts.chatName, opts.id));
     map.delete(opts.id);
     return { available: true, cancelled: true, state: 'queued' };
   }

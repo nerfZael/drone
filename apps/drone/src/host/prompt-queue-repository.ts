@@ -1,11 +1,7 @@
 import { applyHubDatabaseMigrations, getHubDatabase } from './hub-database';
-import type {
-  HubDatabase,
-  HubDatabaseConnection,
-  HubDatabaseMigration,
-} from './hub-database';
+import type { HubDatabase, HubDatabaseConnection, HubDatabaseMigration } from './hub-database';
 
-export type PromptQueueState = 'queued' | 'sending' | 'sent' | 'failed';
+export type PromptQueueState = 'queued' | 'sending' | 'sent' | 'failed' | 'cancelled';
 
 export type PromptQueueItem = {
   id: string;
@@ -48,7 +44,7 @@ export const PROMPT_QUEUE_MIGRATIONS: readonly HubDatabaseMigration[] = [
           idempotency_key TEXT NOT NULL,
           created_at TEXT NOT NULL,
           updated_at TEXT NOT NULL,
-          state TEXT NOT NULL CHECK (state IN ('queued', 'sending', 'sent', 'failed')),
+          state TEXT NOT NULL CHECK (state IN ('queued', 'sending', 'sent', 'failed', 'cancelled')),
           prompt TEXT NOT NULL,
           payload_json TEXT NOT NULL,
           attempt_count INTEGER NOT NULL DEFAULT 0 CHECK (attempt_count >= 0),
@@ -143,7 +139,11 @@ function normalizeIso(raw: unknown, fallback: string): string {
 }
 
 function normalizeState(raw: unknown): PromptQueueState {
-  return raw === 'queued' || raw === 'sending' || raw === 'sent' || raw === 'failed'
+  return raw === 'queued' ||
+    raw === 'sending' ||
+    raw === 'sent' ||
+    raw === 'failed' ||
+    raw === 'cancelled'
     ? raw
     : 'failed';
 }
@@ -205,9 +205,7 @@ function rowForPrompt(
   promptId: string,
 ): PromptQueueRecord | null {
   const row = connection
-    .prepare(
-      'SELECT * FROM prompts WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?',
-    )
+    .prepare('SELECT * FROM prompts WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?')
     .get(droneId, chatName, promptId) as PromptRow | undefined;
   return recordFromRow(row);
 }
@@ -324,20 +322,39 @@ export class PromptQueueRepository {
           `
             SELECT * FROM (
               SELECT * FROM prompts
-              WHERE drone_id = ? AND chat_name = ?
+              WHERE drone_id = ? AND chat_name = ? AND state != 'cancelled'
               ORDER BY sequence DESC
               LIMIT ?
             ) ORDER BY sequence ASC
           `,
         )
         .all(opts.droneId, opts.chatName, limit) as PromptRow[];
-      return rows.map((row) => recordFromRow(row)).filter((row): row is PromptQueueRecord => Boolean(row));
+      return rows
+        .map((row) => recordFromRow(row))
+        .filter((row): row is PromptQueueRecord => Boolean(row));
     });
   }
 
   get(opts: { droneId: string; chatName: string; promptId: string }): PromptQueueRecord | null {
     return this.database.read((connection) =>
       rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId),
+    );
+  }
+
+  listQueuedChats(opts?: { now?: string }): Array<{ droneId: string; chatName: string }> {
+    const now = normalizeIso(opts?.now, new Date().toISOString());
+    return this.database.read((connection) =>
+      (
+        connection
+          .prepare(
+            `SELECT drone_id, chat_name
+             FROM prompts
+             WHERE state = 'queued' AND next_attempt_at <= ?
+             GROUP BY drone_id, chat_name
+             ORDER BY MIN(sequence)`,
+          )
+          .all(now) as Array<{ drone_id: string; chat_name: string }>
+      ).map((row) => ({ droneId: row.drone_id, chatName: row.chat_name })),
     );
   }
 
@@ -379,15 +396,9 @@ export class PromptQueueRepository {
             RETURNING *
           `,
         )
-        .get(
-          now,
-          leaseOwner,
-          leaseExpiresAt,
-          opts.droneId,
-          opts.chatName,
-          opts.promptId,
-          now,
-        ) as PromptRow | undefined;
+        .get(now, leaseOwner, leaseExpiresAt, opts.droneId, opts.chatName, opts.promptId, now) as
+        | PromptRow
+        | undefined;
       return recordFromRow(claimed);
     });
   }
@@ -471,35 +482,31 @@ export class PromptQueueRepository {
       }
       if (current.attemptCount >= maxAttempts) {
         connection
-          .prepare(`
+          .prepare(
+            `
             UPDATE prompts
             SET state = 'failed', updated_at = ?, last_error = ?,
                 lease_owner = NULL, lease_expires_at = NULL,
                 payload_json = json_set(payload_json, '$.state', 'failed', '$.error', ?, '$.updatedAt', ?)
             WHERE drone_id = ? AND chat_name = ? AND prompt_id = ? AND state = 'sending'
-          `)
-          .run(
-            now,
-            opts.error,
-            opts.error,
-            now,
-            opts.droneId,
-            opts.chatName,
-            opts.promptId,
-          );
+          `,
+          )
+          .run(now, opts.error, opts.error, now, opts.droneId, opts.chatName, opts.promptId);
         return { disposition: 'terminal' as const };
       }
       const exponent = Math.max(0, current.attemptCount - 1);
       const delayMs = Math.min(maxDelayMs, baseDelayMs * 2 ** exponent);
       const nextAttemptAt = addMs(now, delayMs);
       connection
-        .prepare(`
+        .prepare(
+          `
           UPDATE prompts
           SET state = 'queued', updated_at = ?, next_attempt_at = ?, last_error = ?,
               lease_owner = NULL, lease_expires_at = NULL,
               payload_json = json_set(payload_json, '$.state', 'queued', '$.error', ?, '$.updatedAt', ?)
           WHERE drone_id = ? AND chat_name = ? AND prompt_id = ? AND state = 'sending'
-        `)
+        `,
+        )
         .run(
           now,
           nextAttemptAt,
@@ -519,14 +526,16 @@ export class PromptQueueRepository {
     const error = String(opts?.error ?? 'Prompt delivery lease expired; retrying.');
     return await this.database.writeTransaction('recover expired prompt leases', (connection) => {
       const info = connection
-        .prepare(`
+        .prepare(
+          `
           UPDATE prompts
           SET state = 'queued', updated_at = ?, next_attempt_at = ?, last_error = ?,
               lease_owner = NULL, lease_expires_at = NULL,
               payload_json = json_set(payload_json, '$.state', 'queued', '$.error', ?, '$.updatedAt', ?)
           WHERE state = 'sending'
             AND (lease_expires_at IS NULL OR lease_expires_at <= ?)
-        `)
+        `,
+        )
         .run(now, now, error, error, now, now);
       return Number(info.changes ?? 0);
     });
@@ -541,12 +550,16 @@ export class PromptQueueRepository {
       const current = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
       if (!current) return { cancelled: false, state: null };
       if (current.state !== 'queued') return { cancelled: false, state: current.state };
+      const cancelledAt = new Date().toISOString();
       const info = connection
         .prepare(
-          `DELETE FROM prompts
+          `UPDATE prompts
+           SET state = 'cancelled', updated_at = ?, lease_owner = NULL,
+               lease_expires_at = NULL,
+               payload_json = json_set(payload_json, '$.state', 'cancelled', '$.updatedAt', ?)
            WHERE drone_id = ? AND chat_name = ? AND prompt_id = ? AND state = 'queued'`,
         )
-        .run(opts.droneId, opts.chatName, opts.promptId);
+        .run(cancelledAt, cancelledAt, opts.droneId, opts.chatName, opts.promptId);
       return {
         cancelled: Number(info.changes ?? 0) === 1,
         state: 'queued' as const,
@@ -564,10 +577,6 @@ export function getPromptQueueRepository(): PromptQueueRepository | null {
   if (cachedRepository?.database === database) return cachedRepository.repository;
   const repository = new PromptQueueRepository(database);
   cachedRepository = { database, repository };
-  void repository.recoverExpiredLeases().catch(() => {
-    // Startup recovery is best-effort; the next startup or explicit recovery
-    // can safely repeat it because the transition is conditional.
-  });
   return repository;
 }
 

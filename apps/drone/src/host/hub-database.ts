@@ -351,6 +351,19 @@ export function getHubDatabase(): HubDatabase | null {
   try {
     connection = new Database(dbPath);
   } catch (error) {
+    if (isNewFile) {
+      // Native binding failures can happen after SQLite has created an empty
+      // file. Leaving that file behind falsely signals to legacy/Bun paths
+      // that a canonical database exists, so remove only artifacts created by
+      // this failed first-open attempt.
+      for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+        try {
+          fs.rmSync(candidate, { force: true });
+        } catch {
+          // Preserve the original open error; cleanup is best-effort.
+        }
+      }
+    }
     unavailable = {
       path: dbPath,
       kind: looksLikeNativeBindingFailure(error) ? 'native-binding' : 'open',

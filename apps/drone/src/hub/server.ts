@@ -6730,6 +6730,7 @@ const {
   pruneCompletedPendingPrompts,
   readPendingPrompts,
   readPendingStartupPrompts,
+  resumePendingPromptChats,
   retryPendingPrompt,
   transcriptTurnIdsFromEntry,
   pushPendingPrompt,
@@ -12639,9 +12640,9 @@ function scheduleChatStateReadMaintenance(opts: {
   CHAT_STATE_READ_MAINTENANCE_TIMERS.set(key, timer);
 }
 
-function buildPendingRowsForChat(opts: { droneId: string; chatName: string; chatEntry: any }): PendingPrompt[] {
+async function buildPendingRowsForChat(opts: { droneId: string; chatName: string }): Promise<PendingPrompt[]> {
   return appendPromptAutomationHistoryRows(
-    pendingPromptsFromChatEntry(opts.chatEntry, { keepRecentlyCompleted: true }).slice(-50),
+    (await readPendingPrompts({ droneId: opts.droneId, chatName: opts.chatName })).slice(-50),
     getPromptAutomationLane(opts.droneId, opts.chatName),
   );
 }
@@ -12842,7 +12843,9 @@ async function readChatSnapshot(opts: {
   }
 
   const agent = transcriptResult?.agent ?? inferChatAgent(entry as any, context.droneEntry);
-  const pending = opts.includePending ? buildPendingRowsForChat({ droneId, chatName: opts.chatName, chatEntry: entry }) : [];
+  const pending = opts.includePending
+    ? await buildPendingRowsForChat({ droneId, chatName: opts.chatName })
+    : [];
   return {
     ok: true,
     id: droneId,
@@ -13984,11 +13987,20 @@ export async function startDroneHubApiServer(opts: {
     // (e.g. Codex/OpenCode follow-ups waiting for session ids to be discovered).
     try {
       const drones = regAny?.drones && typeof regAny.drones === 'object' ? Object.entries(regAny.drones) : [];
+      const activeDroneIds = new Set(drones.map(([droneId]) => String(droneId)));
+      for (const pendingChat of await resumePendingPromptChats()) {
+        if (activeDroneIds.has(pendingChat.droneId)) {
+          enqueuePendingPromptPump(pendingChat.droneId, pendingChat.chatName);
+        }
+      }
       for (const [droneName, d] of drones as any[]) {
         const chats = d?.chats && typeof d.chats === 'object' ? Object.entries(d.chats) : [];
         for (const [chatName, entry] of chats as any[]) {
           if (isDraftChatEntry(entry)) continue;
-          const pending = Array.isArray((entry as any)?.pendingPrompts) ? (entry as any).pendingPrompts : [];
+          const pending = await readPendingPrompts({
+            droneId: String(droneName),
+            chatName: String(chatName),
+          });
           if (pending.some((p: any) => String(p?.state ?? '') === 'queued')) {
             enqueuePendingPromptPump(String(droneName), String(chatName));
           }

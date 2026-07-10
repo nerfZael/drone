@@ -18,6 +18,7 @@ test('hub database diagnostics and reset remain safe when the native binding is 
     if (!diagnostics.available) {
       expect(diagnostics.failureKind).toBe('native-binding');
       expect(diagnostics.unavailableReason).toBeTruthy();
+      expect(fs.existsSync(path.join(root, 'data', 'hub.sqlite'))).toBe(false);
     }
     await resetHubDatabaseForTests();
     await resetHubDatabaseForTests();

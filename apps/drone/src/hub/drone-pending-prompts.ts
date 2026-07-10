@@ -414,6 +414,13 @@ export function createDronePendingPromptStore(deps: {
     return { disposition: 'retry', nextAttemptAt: deps.nowIso() };
   }
 
+  async function resumePendingPromptChats(): Promise<Array<{ droneId: string; chatName: string }>> {
+    const queue = promptQueueForActiveDrone();
+    if (!queue) return [];
+    await queue.recoverExpiredLeases();
+    return queue.listQueuedChats();
+  }
+
   async function claimQueuedPendingPromptForSending(opts: { droneId: string; chatName: string; id: string }): Promise<boolean> {
     const droneIdForStore = normalizeDroneIdentity(opts.droneId);
     const chatNameForStore = opts.chatName || 'default';
@@ -474,8 +481,9 @@ export function createDronePendingPromptStore(deps: {
     if (queue) {
       const cancelled = await queue.cancelQueued({ droneId, chatName, promptId });
       if (cancelled.cancelled) return { status: 'cancelled', pendingState: 'queued' };
+      if (cancelled.state === 'cancelled') return { status: 'not-found', pendingState: null };
       if (cancelled.state) {
-        return { status: 'already-submitted', pendingState: cancelled.state };
+        return { status: 'already-submitted', pendingState: cancelled.state as PendingPromptState };
       }
       const registry: any = await loadRegistry();
       const turns = Array.isArray(registry?.drones?.[droneId]?.chats?.[chatName]?.turns)
@@ -551,6 +559,7 @@ export function createDronePendingPromptStore(deps: {
     pruneCompletedPendingPrompts,
     readPendingPrompts,
     readPendingStartupPrompts,
+    resumePendingPromptChats,
     retryPendingPrompt,
     transcriptTurnIdsFromEntry,
     pushPendingPrompt,
