@@ -430,6 +430,7 @@ import {
   type ResolvedDrone,
   type ResolvedOrPendingDrone,
 } from './drone-lifecycle-service';
+import { permanentlyDeleteCanonicalDrone } from './drone-deletion-service';
 import {
   commitDroneMetadataPatch,
   renameDroneDisplayName,
@@ -11434,7 +11435,7 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
   // Otherwise we can strand a drone in an "offline but still present" state that is harder to delete by group.
   if (hadEntry && opts.forget && containerGone) {
     const snapshotImageRefs = collectDockerSnapshotImageRefsFromDroneEntry(droneEntry);
-    removedRegistry = Boolean(await deleteCanonicalDroneLifecycle(droneId, 'real'));
+    removedRegistry = (await permanentlyDeleteCanonicalDrone({ droneId, lifecycleState: 'real' })).removedLifecycle;
     if (removedRegistry) {
       await transformStoredKanbanBoardSettings((board) => removeTasksForScope(board, 'drone', droneId).board);
       await revokeMcpAccessTokensForDrone(droneId);
@@ -12038,7 +12039,7 @@ async function removeArchivedDroneById(opts: { id: string; keepVolume: boolean }
   let removedArchive = false;
   if (containerGone) {
     const snapshotImageRefs = collectDockerSnapshotImageRefsFromDroneEntry(archivedEntry);
-    removedArchive = Boolean(await deleteCanonicalDroneLifecycle(droneId, 'archived'));
+    removedArchive = (await permanentlyDeleteCanonicalDrone({ droneId, lifecycleState: 'archived' })).removedLifecycle;
     if (removedArchive) {
       await revokeMcpAccessTokensForDrone(droneId);
       await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, { droneId, reason: 'delete-archived-drone' });

@@ -115,6 +115,19 @@ export const PROMPT_QUEUE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       }
     },
   },
+  {
+    version: 2,
+    name: 'permanently deleted drone prompt tombstones',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE IF NOT EXISTS canonical_drone_chat_tombstones (
+          drone_id TEXT NOT NULL PRIMARY KEY,
+          deleted_at TEXT NOT NULL,
+          reason TEXT NOT NULL CHECK (reason = 'drone-deleted')
+        );
+      `);
+    },
+  },
 ];
 
 type PromptRow = {
@@ -231,6 +244,9 @@ export class PromptQueueRepository {
     const idempotencyKey = String(opts.idempotencyKey ?? prompt.id).trim();
     if (!idempotencyKey) throw new Error('Prompt idempotency key cannot be empty');
     return await this.database.writeTransaction('enqueue prompt', (connection) => {
+      const deletedDrone = connection.prepare(`SELECT 1 FROM canonical_drone_chat_tombstones
+        WHERE drone_id = ?`).get(opts.droneId);
+      if (deletedDrone) throw new Error(`cannot enqueue prompt for permanently deleted drone: ${opts.droneId}`);
       const info = connection
         .prepare(
           `
@@ -286,6 +302,9 @@ export class PromptQueueRepository {
     }
     if (normalized.length === 0) return 0;
     return await this.database.writeTransaction('backfill legacy prompts', (connection) => {
+      const deletedDrone = connection.prepare(`SELECT 1 FROM canonical_drone_chat_tombstones
+        WHERE drone_id = ?`).get(opts.droneId);
+      if (deletedDrone) return 0;
       const insert = connection.prepare(`
         INSERT OR IGNORE INTO prompts (
           drone_id, chat_name, prompt_id, idempotency_key,

@@ -58,9 +58,9 @@ import { ensureHubSetupState } from './host/setup-state';
 import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
 import { readRawBody } from './hub/hub-http';
 import {
-  deleteCanonicalDroneLifecycle,
   upsertCanonicalDroneLifecycle,
 } from './hub/drone-lifecycle-service';
+import { permanentlyDeleteCanonicalDrone } from './hub/drone-deletion-service';
 import { renameDroneDisplayName, setDroneGroupMetadata } from './hub/drone-metadata-commands';
 import { parseHubRunnerProcessesFromPsOutput, parseHubUiServerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import {
@@ -1999,18 +1999,10 @@ program
 
     let removedRegistry = false;
     if (options.forget) {
-      const removed = resolvedKey ? await deleteCanonicalDroneLifecycle(resolvedKey, 'real') : null;
-      removedRegistry = Boolean(removed);
-      if (!removed && (globalThis as any).Bun) {
-        removedRegistry = await updateRegistry((reg) => {
-          const key = resolvedKey ? String(resolvedKey) : '';
-          if (key && (reg as any)?.drones?.[key]) {
-            delete (reg as any).drones[key];
-            return true;
-          }
-          return false;
-        });
-      }
+      const removed = resolvedKey
+        ? await permanentlyDeleteCanonicalDrone({ droneId: resolvedKey, lifecycleState: 'real' })
+        : null;
+      removedRegistry = Boolean(removed?.removedLifecycle);
     }
 
     if (removeErr) throw new Error(removeErr);
@@ -2147,20 +2139,8 @@ program
       }
       for (const droneId of lifecycleIdsByContainer.get(t) ?? []) {
         // eslint-disable-next-line no-await-in-loop
-        await deleteCanonicalDroneLifecycle(droneId, 'real');
+        await permanentlyDeleteCanonicalDrone({ droneId, lifecycleState: 'real' });
       }
-    }
-    if ((globalThis as any).Bun) {
-      await updateRegistry((regLatest) => {
-        for (const t of targets) {
-          for (const [key, d] of Object.entries((regLatest as any)?.drones ?? {})) {
-            const c = String((d as any)?.containerName ?? (d as any)?.name ?? key).trim();
-            if (c && c === t) {
-              delete (regLatest as any).drones[key];
-            }
-          }
-        }
-      });
     }
 
     // eslint-disable-next-line no-console
