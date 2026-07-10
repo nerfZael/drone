@@ -85,8 +85,11 @@ recurring workers must not use it for bounded reads.
   batch changed-file hashing into one Git invocation, and are invalidated by repository
   mutation commands. The browser schedules the next poll only after the current request
   completes and only while the relevant view is visible.
-- Local development uses the Vite same-origin proxy unless a direct API origin is explicitly
-  configured, avoiding unnecessary CORS preflight requests.
+- Local development sends ordinary authenticated fetches directly to the API port while
+  EventSource streams remain on the Vite proxy. This deliberately gives short requests a
+  separate browser connection pool; the API caches CORS preflight authorization for ten
+  minutes, while sharing the Vite HTTP/1.1 pool can queue every fetch behind persistent SSE
+  connections.
 
 Read-path tests should assert both the returned projection and that SQLite `total_changes`
 does not increase. Performance-sensitive handlers expose phase-level `Server-Timing` values
