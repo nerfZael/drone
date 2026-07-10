@@ -49,8 +49,13 @@ afterEach(async () => {
 describe('drone metadata application commands', () => {
   test('serializes independent patches, preserves canonical precedence, and retains chat projections', async () => {
     useTempDataDir('concurrency');
-    await updateRegistry((registry) => {
-      registry.drones['drone-1'] = entry({ chats: { default: { createdAt: '2026-07-01T00:00:00.000Z' } } });
+    await saveRegistry({
+      version: 2,
+      drones: {
+        'drone-1': entry({ chats: { default: { createdAt: '2026-07-01T00:00:00.000Z' } } }),
+      },
+      pending: {},
+      archived: {},
     });
     const repository = await getDroneLifecycleRepository();
     await repository.backfillLegacyInsertOnly(await loadRegistry());

@@ -160,14 +160,17 @@ describe('remaining canonical Hub settings', () => {
     );
     assert.equal(readRegistryJsonFromSqlite(), registryBefore, 'Node command must not mirror into registry_json');
 
-    await updateRegistry((registry) => {
-      registry.settings ??= {};
-      registry.settings.kanbanBoard = {
-        taskTypes: [{ id: 'task', label: 'Task', active: true }],
-        lanes: [{ id: 'todo', title: 'Todo', cards: [] }],
-        updatedAt: '2027-01-01T00:00:00.000Z',
-      };
-    });
+    await assert.rejects(
+      updateRegistry((registry) => {
+        registry.settings ??= {};
+        registry.settings.kanbanBoard = {
+          taskTypes: [{ id: 'task', label: 'Task', active: true }],
+          lanes: [{ id: 'todo', title: 'Todo', cards: [] }],
+          updatedAt: '2027-01-01T00:00:00.000Z',
+        };
+      }),
+      /cannot mutate canonical-owned state: settings\.kanbanBoard/,
+    );
     const afterStaleWrite = await resolveKanbanBoardSettingsResponse();
     assert.deepEqual(
       afterStaleWrite.kanbanBoard.lanes.flatMap((lane) => lane.cards.map((card) => card.id)).sort(),
@@ -180,24 +183,27 @@ describe('remaining canonical Hub settings', () => {
     await transformStoredKanbanBoardSettings((board) => board);
     assert.equal((await getHubSettingsRepository()).get('kanban-board').version, 1);
 
-    await updateRegistry((registry) => {
-      registry.settings ??= {};
-      registry.settings.kanbanBoard = {
-        taskTypes: [{ id: 'task', label: 'Task', active: true }],
-        lanes: [{
-          id: 'todo',
-          title: 'Todo',
-          cards: [{
-            id: 'stale',
-            title: 'Must not resurrect',
-            description: '',
-            typeId: 'task',
-            createdAt: '2027-01-01T00:00:00.000Z',
-            updatedAt: '2027-01-01T00:00:00.000Z',
+    await assert.rejects(
+      updateRegistry((registry) => {
+        registry.settings ??= {};
+        registry.settings.kanbanBoard = {
+          taskTypes: [{ id: 'task', label: 'Task', active: true }],
+          lanes: [{
+            id: 'todo',
+            title: 'Todo',
+            cards: [{
+              id: 'stale',
+              title: 'Must not resurrect',
+              description: '',
+              typeId: 'task',
+              createdAt: '2027-01-01T00:00:00.000Z',
+              updatedAt: '2027-01-01T00:00:00.000Z',
+            }],
           }],
-        }],
-      };
-    });
+        };
+      }),
+      /cannot mutate canonical-owned state: settings\.kanbanBoard/,
+    );
 
     const resolved = await resolveKanbanBoardSettingsResponse();
     assert.equal(resolved.kanbanBoard.lanes.flatMap((lane) => lane.cards).some((card) => card.id === 'stale'), false);
@@ -219,12 +225,15 @@ describe('remaining canonical Hub settings', () => {
     const repository = await getHubSettingsRepository();
     assert.equal(repository.get('api-key.openai').version, 1);
 
-    await updateRegistry((registry) => {
-      registry.settings.openai = {
-        apiKey: 'newer-legacy-value-must-not-win',
-        updatedAt: '2027-01-02T03:04:05.000Z',
-      };
-    });
+    await assert.rejects(
+      updateRegistry((registry) => {
+        registry.settings.openai = {
+          apiKey: 'newer-legacy-value-must-not-win',
+          updatedAt: '2027-01-02T03:04:05.000Z',
+        };
+      }),
+      /cannot mutate canonical-owned state: settings\.openai/,
+    );
     assert.equal((await resolveEffectiveProviderApiKeySettings('openai')).apiKey, 'legacy-openai-key');
     assert.equal(repository.get('api-key.openai').version, 1);
 
@@ -334,13 +343,16 @@ describe('canonical UI preferences settings', () => {
     assert.equal(backfilled.updatedAt, '2026-01-02T03:04:05.000Z');
     assert.equal(backfilled.version, 1);
 
-    await updateRegistry((registry) => {
-      registry.settings.uiPreferences = {
-        autoDelete: false,
-        spawnAgentKey: 'builtin:cursor',
-        updatedAt: '2027-01-02T03:04:05.000Z',
-      };
-    });
+    await assert.rejects(
+      updateRegistry((registry) => {
+        registry.settings.uiPreferences = {
+          autoDelete: false,
+          spawnAgentKey: 'builtin:cursor',
+          updatedAt: '2027-01-02T03:04:05.000Z',
+        };
+      }),
+      /cannot mutate canonical-owned state: settings\.uiPreferences/,
+    );
 
     const canonical = await resolveUiPreferencesSettingsResponse();
     assert.equal(canonical.uiPreferences.autoDelete, true);
@@ -351,13 +363,12 @@ describe('canonical UI preferences settings', () => {
 
   test('round-trips sanitized preferences without rewriting the legacy registry snapshot', async () => {
     useTempDroneDataDir('round-trip');
-    await updateRegistry((registry) => {
-      registry.settings ??= {};
-      registry.settings.nonRepoEnvironment = {
+    await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {}, settings: {
+      nonRepoEnvironment: {
         vars: { PRESERVE: 'registry snapshot' },
         updatedAt: '2026-01-01T00:00:00.000Z',
-      };
-    });
+      },
+    } });
     const registryBefore = readRegistryJsonFromSqlite();
 
     await upsertStoredUiPreferencesSettings({

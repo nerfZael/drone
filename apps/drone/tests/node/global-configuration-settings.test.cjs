@@ -65,17 +65,20 @@ test('default AGENTS and non-repository environment backfill once, then remain c
     updatedAt: '2026-01-02T00:00:00.000Z',
   });
 
-  await updateRegistry((registry) => {
-    registry.settings.agents = {
-      content: 'stale replacement',
-      updatedAt: '2027-01-01T00:00:00.000Z',
-    };
-    registry.settings.nonRepoEnvironment = {
-      vars: { STALE: 'two' },
-      autoApplyToNewContainerDrones: false,
-      updatedAt: '2027-01-02T00:00:00.000Z',
-    };
-  });
+  await assert.rejects(
+    updateRegistry((registry) => {
+      registry.settings.agents = {
+        content: 'stale replacement',
+        updatedAt: '2027-01-01T00:00:00.000Z',
+      };
+      registry.settings.nonRepoEnvironment = {
+        vars: { STALE: 'two' },
+        autoApplyToNewContainerDrones: false,
+        updatedAt: '2027-01-02T00:00:00.000Z',
+      };
+    }),
+    /cannot mutate canonical-owned state: settings\.agents, settings\.nonRepoEnvironment/,
+  );
 
   assert.equal((await resolveCanonicalDefaultAgentsConfig()).content, 'legacy instructions\n');
   assert.deepEqual((await resolveCanonicalNonRepoEnvironmentConfig()).vars, { LEGACY: 'one' });
@@ -83,15 +86,14 @@ test('default AGENTS and non-repository environment backfill once, then remain c
 
 test('canonical writes and clears do not rewrite or resurrect the registry snapshot', async () => {
   useRoot('writes');
-  await updateRegistry((registry) => {
-    registry.settings ??= {};
-    registry.settings.agents = { content: 'stale', updatedAt: '2026-01-01T00:00:00.000Z' };
-    registry.settings.nonRepoEnvironment = {
+  await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {}, settings: {
+    agents: { content: 'stale', updatedAt: '2026-01-01T00:00:00.000Z' },
+    nonRepoEnvironment: {
       vars: { STALE: 'value' },
       autoApplyToNewContainerDrones: true,
       updatedAt: '2026-01-01T00:00:00.000Z',
-    };
-  });
+    },
+  } });
   const registryBefore = readRegistryJsonFromSqlite();
 
   await upsertCanonicalDefaultAgentsConfig('canonical\r\ncontent');

@@ -14,7 +14,7 @@ const { looksLikeTransientPromptEnqueueError } = require('../../dist/hub/pending
 const { createDronePendingPromptStore } = require('../../dist/hub/drone-pending-prompts.js');
 const { createPendingDroneStateHelpers } = require('../../dist/hub/drone-pending-state.js');
 const { resetTranscriptStoreForTests } = require('../../dist/hub/transcript-store.js');
-const { loadRegistryRawSnapshot, updateRegistry } = require('../../dist/host/registry.js');
+const { loadRegistryRawSnapshot, saveRegistry } = require('../../dist/host/registry.js');
 
 const originalDroneDataDir = process.env.DRONE_DATA_DIR;
 const roots = [];
@@ -304,14 +304,17 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
     nowIso: () => now,
     startupPromptToPendingPrompt: helpers.startupPromptToPendingPrompt,
   });
-  await updateRegistry((registry) => {
-    registry.drones = {
+  await saveRegistry({
+    version: 2,
+    drones: {
       alpha: {
         id: 'alpha',
         name: 'alpha',
         chats: { default: { createdAt: now, pendingPrompts: [], turns: [] } },
       },
-    };
+    },
+    pending: {},
+    archived: {},
   });
   const rawBeforeEnqueue = await loadRegistryRawSnapshot();
 
