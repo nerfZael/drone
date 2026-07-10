@@ -3,6 +3,7 @@ import {
   getDroneLifecycleRepository,
   type CanonicalDroneLifecycleRecord,
   type CanonicalDroneLifecycleState,
+  type CanonicalDroneLifecycleUpsert,
   type DroneLifecycleRepository,
 } from '../host/drone-lifecycle-repository';
 import { findDroneEntryByIdentity, findDroneIdByRef } from './drone-lifecycle-registry';
@@ -49,6 +50,34 @@ function hydrateCanonicalLifecycle(record: CanonicalDroneLifecycleRecord, regist
   };
 }
 
+function lifecycleBucketName(state: CanonicalDroneLifecycleState): 'drones' | 'pending' | 'archived' {
+  return state === 'real' ? 'drones' : state === 'pending' ? 'pending' : 'archived';
+}
+
+function compatibilityLifecycleRecord(
+  state: CanonicalDroneLifecycleState,
+  droneId: string,
+  entryRaw: any,
+): CanonicalDroneLifecycleRecord {
+  const entry = entryRaw && typeof entryRaw === 'object' ? entryRaw : {};
+  const runtimeRaw = entry.runtime;
+  return {
+    state,
+    id: droneId,
+    name: String(entry.name ?? droneId).trim() || droneId,
+    containerName: String(entry.containerName ?? '').trim() || null,
+    runtimeKind: String(runtimeRaw && typeof runtimeRaw === 'object' ? runtimeRaw.kind : runtimeRaw ?? 'container'),
+    phase: String(entry.phase ?? entry.hub?.phase ?? '').trim() || null,
+    archivedAt: state === 'archived' ? String(entry.archivedAt ?? '').trim() || null : null,
+    deleteAt: state === 'archived' ? String(entry.deleteAt ?? '').trim() || null : null,
+    archiveRetention: state === 'archived' ? String(entry.archiveRetention ?? '').trim() || null : null,
+    archiveRuntimePolicy: state === 'archived' ? String(entry.archiveRuntimePolicy ?? '').trim() || null : null,
+    lifecycle: entry,
+    version: 1,
+    updatedAt: new Date().toISOString(),
+  };
+}
+
 export async function upsertCanonicalDroneLifecycle(
   state: CanonicalDroneLifecycleState,
   droneId: string,
@@ -57,12 +86,53 @@ export async function upsertCanonicalDroneLifecycle(
   const repository = await canonicalRepositoryWithLegacyBackfill();
   if (!repository) {
     requireRepository(repository);
-    return null;
+    return await updateRegistry((registry: any) => {
+      const bucketName = lifecycleBucketName(state);
+      for (const otherBucket of ['drones', 'pending', 'archived'] as const) {
+        if (otherBucket === bucketName) continue;
+        const found = findDroneEntryByIdentity({ drones: registry?.[otherBucket] }, droneId);
+        if (found) delete registry[otherBucket][found.key];
+      }
+      registry[bucketName] = registry[bucketName] ?? {};
+      registry[bucketName][droneId] = entry;
+      return compatibilityLifecycleRecord(state, droneId, entry);
+    });
   }
   return await repository.commitUpsert(state, droneId, entry, {
     topic: 'drone.lifecycle.changes',
     eventType: `drone.lifecycle.${state}.upserted`,
   });
+}
+
+export async function upsertCanonicalDroneLifecycleBatch(
+  entries: Array<{ state: CanonicalDroneLifecycleState; droneId: string; entry: unknown }>,
+): Promise<CanonicalDroneLifecycleRecord[]> {
+  if (entries.length === 0) return [];
+  const repository = await canonicalRepositoryWithLegacyBackfill();
+  if (!repository) {
+    requireRepository(repository);
+    return await updateRegistry((registry: any) => entries.map(({ state, droneId, entry }) => {
+      const bucketName = lifecycleBucketName(state);
+      for (const otherBucket of ['drones', 'pending', 'archived'] as const) {
+        if (otherBucket === bucketName) continue;
+        const found = findDroneEntryByIdentity({ drones: registry?.[otherBucket] }, droneId);
+        if (found) delete registry[otherBucket][found.key];
+      }
+      registry[bucketName] = registry[bucketName] ?? {};
+      registry[bucketName][droneId] = entry;
+      return compatibilityLifecycleRecord(state, droneId, entry);
+    }));
+  }
+  const items: CanonicalDroneLifecycleUpsert[] = entries.map(({ state, droneId, entry }) => ({
+    state,
+    id: droneId,
+    entry,
+    event: {
+      topic: 'drone.lifecycle.changes',
+      eventType: `drone.lifecycle.${state}.upserted`,
+    },
+  }));
+  return await repository.commitUpsertBatch(items);
 }
 
 export async function deleteCanonicalDroneLifecycle(
@@ -72,7 +142,18 @@ export async function deleteCanonicalDroneLifecycle(
   const repository = await canonicalRepositoryWithLegacyBackfill();
   if (!repository) {
     requireRepository(repository);
-    return null;
+    return await updateRegistry((registry: any) => {
+      const states = state ? [state] : (['real', 'pending', 'archived'] as CanonicalDroneLifecycleState[]);
+      for (const candidate of states) {
+        const bucketName = lifecycleBucketName(candidate);
+        const found = findDroneEntryByIdentity({ drones: registry?.[bucketName] }, droneId);
+        if (!found) continue;
+        const current = found.entry;
+        delete registry[bucketName][found.key];
+        return compatibilityLifecycleRecord(candidate, droneId, current);
+      }
+      return null;
+    });
   }
   return await repository.commitDelete(droneId, state, {
     topic: 'drone.lifecycle.changes',
@@ -88,7 +169,14 @@ export async function patchCanonicalDroneLifecycle(
   const repository = await canonicalRepositoryWithLegacyBackfill();
   if (!repository) {
     requireRepository(repository);
-    return null;
+    return await updateRegistry((registry: any) => {
+      const bucketName = lifecycleBucketName(state);
+      const found = findDroneEntryByIdentity({ drones: registry?.[bucketName] }, droneId);
+      if (!found) return null;
+      const next = transform({ ...found.entry });
+      registry[bucketName][found.key] = next;
+      return compatibilityLifecycleRecord(state, droneId, next);
+    });
   }
   return await repository.commitPatch(state, droneId, transform, {
     topic: 'drone.lifecycle.changes',
