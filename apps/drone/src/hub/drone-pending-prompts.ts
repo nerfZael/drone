@@ -1,6 +1,7 @@
 import { loadRegistry, updateRegistry } from '../host/registry';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
-import { normalizeDroneIdentity } from './drone-lifecycle-registry';
+import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
+import { commitDroneMetadataPatch } from './drone-metadata-commands';
 import type { PendingPromptState, PendingStartupPrompt } from './drone-pending-state';
 import type { ChatImageAttachmentRef } from './chat-attachments';
 import {
@@ -300,44 +301,53 @@ export function createDronePendingPromptStore(deps: {
   async function pushPendingStartupPrompt(
     opts: { droneId: string; chatName: string; pending: PendingPrompt },
   ): Promise<'queued' | 'active' | 'missing'> {
-    return await updateRegistry((regAny: any) => {
-      const droneId = normalizeDroneIdentity(opts.droneId);
-      const pendingDrone = droneId ? regAny?.pending?.[droneId] : null;
-      if (!pendingDrone) return regAny?.drones?.[droneId] ? 'active' : 'missing';
-      if (regAny?.drones?.[droneId]) return 'active';
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const id = String(opts.pending?.id ?? '').trim();
+    const prompt = String(opts.pending?.prompt ?? '');
+    if (!droneId || !id || !prompt.trim()) return 'missing';
 
-      const chatName = deps.normalizeChatName(opts.chatName);
-      const list = deps.normalizePendingStartupPrompts((pendingDrone as any)?.startupQueuedPrompts);
-      const id = String(opts.pending?.id ?? '').trim();
-      if (!id) return 'missing';
+    const registry: any = await loadRegistry();
+    if (findDroneEntryByIdentity({ drones: registry?.drones }, droneId)) return 'active';
+    if (!findDroneEntryByIdentity({ drones: registry?.pending }, droneId)) return 'missing';
 
-      const next: PendingStartupPrompt = {
-        id,
-        chatName,
-        at: String(opts.pending?.at ?? deps.nowIso()),
-        prompt: String(opts.pending?.prompt ?? ''),
-        ...(typeof opts.pending?.messageId === 'string' && opts.pending.messageId.trim() ? { messageId: opts.pending.messageId.trim() } : {}),
-        ...(typeof opts.pending?.cwd === 'string' || opts.pending?.cwd === null ? { cwd: opts.pending.cwd } : {}),
-        state: deps.normalizePendingPromptState(opts.pending?.state),
-        ...(typeof opts.pending?.error === 'string' ? { error: opts.pending.error } : {}),
-        updatedAt: String(opts.pending?.updatedAt ?? deps.nowIso()),
-      };
-      if (!next.prompt.trim()) return 'missing';
+    const chatName = deps.normalizeChatName(opts.chatName);
+    const next: PendingStartupPrompt = {
+      id,
+      chatName,
+      at: String(opts.pending?.at ?? deps.nowIso()),
+      prompt,
+      ...(typeof opts.pending?.messageId === 'string' && opts.pending.messageId.trim() ? { messageId: opts.pending.messageId.trim() } : {}),
+      ...(typeof opts.pending?.cwd === 'string' || opts.pending?.cwd === null ? { cwd: opts.pending.cwd } : {}),
+      state: deps.normalizePendingPromptState(opts.pending?.state),
+      ...(typeof opts.pending?.error === 'string' ? { error: opts.pending.error } : {}),
+      updatedAt: String(opts.pending?.updatedAt ?? deps.nowIso()),
+    };
 
-      const existingIdx = list.findIndex((entry) => entry.id === id);
-      if (existingIdx === -1) {
-        list.push(next);
-      } else {
-        const current = list[existingIdx] ?? next;
-        list[existingIdx] = { ...current, ...next, updatedAt: next.updatedAt ?? deps.nowIso() };
-      }
-
-      (pendingDrone as any).startupQueuedPrompts = list.slice(-80);
-      pendingDrone.updatedAt = deps.nowIso();
-      regAny.pending = regAny.pending ?? {};
-      regAny.pending[droneId] = pendingDrone;
+    try {
+      await commitDroneMetadataPatch({
+        droneId,
+        state: 'pending',
+        eventType: 'drone.startup-prompt.queued',
+        payload: { promptId: id, chatName },
+        transform: (pendingDrone) => {
+          const list = deps.normalizePendingStartupPrompts(pendingDrone.startupQueuedPrompts);
+          const existingIdx = list.findIndex((entry) => entry.id === id);
+          if (existingIdx === -1) list.push(next);
+          else list[existingIdx] = { ...(list[existingIdx] ?? next), ...next };
+          return {
+            ...pendingDrone,
+            startupQueuedPrompts: list.slice(-80),
+            updatedAt: deps.nowIso(),
+          };
+        },
+      });
       return 'queued';
-    });
+    } catch (error) {
+      const latest: any = await loadRegistry();
+      if (findDroneEntryByIdentity({ drones: latest?.drones }, droneId)) return 'active';
+      if (!findDroneEntryByIdentity({ drones: latest?.pending }, droneId)) return 'missing';
+      throw error;
+    }
   }
 
   async function updatePendingPrompt(opts: {
