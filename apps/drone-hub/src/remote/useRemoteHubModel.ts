@@ -66,6 +66,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     loading: false,
     error: null,
   });
+  const [fullTranscriptKey, setFullTranscriptKey] = React.useState<string | null>(null);
   const [sending, setSending] = React.useState(false);
   const [publishing, setPublishing] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
@@ -130,6 +131,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setPending([]);
     setChatStateLoading(false);
     setChatRuntime({ key: null, agent: null, configuredModel: null, loading: false, error: null });
+    setFullTranscriptKey(null);
     setChatEventsConnected(false);
     activeChatStateKeyRef.current = null;
     loadedChatStateKeyRef.current = null;
@@ -263,6 +265,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setTranscripts(next);
     setPending((current) => normalizeRemotePendingPrompts(current, next));
     loadedFullTranscriptKeyRef.current = key;
+    setFullTranscriptKey(key);
     setChatStateLoading(false);
     return true;
   }, []);
@@ -329,6 +332,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setChatEventsConnected(false);
     loadedChatStateKeyRef.current = null;
     loadedFullTranscriptKeyRef.current = null;
+    setFullTranscriptKey(null);
   }, [authenticated, effectiveDroneId]);
 
   React.useEffect(() => {
@@ -363,6 +367,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     if (loadedChatStateKeyRef.current !== key) {
       setChatStateLoading(true);
     }
+    if (loadedFullTranscriptKeyRef.current !== key) setFullTranscriptKey(null);
     const tick = async () => {
       try {
         const next = await fetchChatState(droneId, chatName, controller.signal);
@@ -568,6 +573,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     setDraft,
     loading,
     chatStateLoading,
+    fullTranscriptKey,
     chatRuntime: selectedChatRuntime,
     sending,
     publishing,

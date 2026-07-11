@@ -80,6 +80,27 @@ export function RemoteDroneHubApp() {
   assistantNavigationDronesRef.current = model.drones;
   const selectedDroneHomePath = React.useMemo(() => droneHomePath(model.selectedDrone), [model.selectedDrone]);
   const mobileSidebarSwipeStartRef = React.useRef<TouchPoint | null>(null);
+  const remoteChatEndRef = React.useRef<HTMLDivElement | null>(null);
+  const pendingOpenScrollKeyRef = React.useRef<string | null>(null);
+  const selectedChatKey = model.selectedDrone?.id
+    ? `${model.selectedDrone.id}\u0000${model.selectedChat}`
+    : null;
+  const scrollRemoteChatToBottom = React.useCallback(() => {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        remoteChatEndRef.current?.scrollIntoView({ behavior: 'auto', block: 'end' });
+      });
+    });
+  }, []);
+  React.useEffect(() => {
+    pendingOpenScrollKeyRef.current = selectedChatKey;
+  }, [selectedChatKey]);
+  React.useEffect(() => {
+    if (!selectedChatKey || model.fullTranscriptKey !== selectedChatKey) return;
+    if (pendingOpenScrollKeyRef.current !== selectedChatKey) return;
+    pendingOpenScrollKeyRef.current = null;
+    scrollRemoteChatToBottom();
+  }, [model.fullTranscriptKey, model.chatTimeline.length, scrollRemoteChatToBottom, selectedChatKey]);
   const setRemoteMobileSidebarOpen = React.useCallback(
     (open: boolean) => {
       if (open) {
@@ -108,8 +129,18 @@ export function RemoteDroneHubApp() {
     return true;
   }, []);
   const sendPrompt = React.useCallback(async (payload: ChatSendPayload) => {
-    return Boolean(await model.sendPrompt(payload));
-  }, [model]);
+    scrollRemoteChatToBottom();
+    const sent = Boolean(await model.sendPrompt(payload));
+    if (sent) scrollRemoteChatToBottom();
+    return sent;
+  }, [model, scrollRemoteChatToBottom]);
+  const selectRemoteChat = React.useCallback(
+    (chatName: string) => {
+      model.setSelectedChat(chatName);
+      scrollRemoteChatToBottom();
+    },
+    [model, scrollRemoteChatToBottom],
+  );
   const selectedChatIsDraft =
     model.draftChats?.[model.selectedChat] === true || model.selectedDrone?.draftChats?.[model.selectedChat] === true;
   const selectedIsDraft = model.selectedDrone?.draft === true || model.selectedDrone?.hubPhase === 'draft' || selectedChatIsDraft;
@@ -292,6 +323,7 @@ export function RemoteDroneHubApp() {
               />
             ),
           )}
+          <div ref={remoteChatEndRef} />
         </ChatTranscriptFrame>
       </div>
 
@@ -342,7 +374,7 @@ export function RemoteDroneHubApp() {
         unreadAgentMessageByChatNodeId={model.unreadAgentMessageByChatNodeId}
         onOpenChange={setRemoteMobileSidebarOpen}
         onSelectDrone={model.setSelectedDroneId}
-        onSelectChat={model.setSelectedChat}
+        onSelectChat={selectRemoteChat}
         onOpenCreateDrone={openCreateDrone}
       />
       <RemoteMobileToolDrawer
@@ -358,7 +390,7 @@ export function RemoteDroneHubApp() {
           activeChatName={model.selectedChat}
           unreadAgentMessageByChatNodeId={model.unreadAgentMessageByChatNodeId}
           onSelectDrone={model.setSelectedDroneId}
-          onSelectChat={model.setSelectedChat}
+          onSelectChat={selectRemoteChat}
           onOpenCreateDrone={openCreateDrone}
         />
       </div>
