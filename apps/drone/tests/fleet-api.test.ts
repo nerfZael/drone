@@ -39,6 +39,8 @@ async function startStubDaemon(token: string, opts?: { failClaims?: boolean }) {
   const order: string[] = [];
   const promptEnqueues: any[] = [];
   const promptCancels: string[] = [];
+  const pendingTaskCreates: any[] = [];
+  const pendingTaskDeletes: any[] = [];
   let policy: any = null;
 
   const server = http.createServer(async (req, res) => {
@@ -75,6 +77,34 @@ async function startStubDaemon(token: string, opts?: { failClaims?: boolean }) {
     if (method === 'POST' && pathname === '/v1/fleet/policy') {
       policy = await readJson(req);
       json(res, 200, { ok: true, snapshot: policy });
+      return;
+    }
+    if (method === 'POST' && pathname === '/v1/tasks/state') {
+      json(res, 200, { ok: true });
+      return;
+    }
+    if (method === 'GET' && pathname === '/v1/tasks/pending-creates') {
+      json(res, 200, { ok: true, requests: pendingTaskCreates });
+      return;
+    }
+    const pendingCreateAckMatch = pathname.match(/^\/v1\/tasks\/pending-creates\/([^/]+)\/ack$/);
+    if (method === 'POST' && pendingCreateAckMatch) {
+      const id = decodeURIComponent(pendingCreateAckMatch[1] ?? '');
+      const index = pendingTaskCreates.findIndex((request) => request.id === id);
+      if (index >= 0) pendingTaskCreates.splice(index, 1);
+      json(res, 200, { ok: true, id });
+      return;
+    }
+    if (method === 'GET' && pathname === '/v1/tasks/pending-deletes') {
+      json(res, 200, { ok: true, requests: pendingTaskDeletes });
+      return;
+    }
+    const pendingDeleteAckMatch = pathname.match(/^\/v1\/tasks\/pending-deletes\/([^/]+)\/ack$/);
+    if (method === 'POST' && pendingDeleteAckMatch) {
+      const id = decodeURIComponent(pendingDeleteAckMatch[1] ?? '');
+      const index = pendingTaskDeletes.findIndex((request) => request.id === id);
+      if (index >= 0) pendingTaskDeletes.splice(index, 1);
+      json(res, 200, { ok: true, id });
       return;
     }
     if (method === 'GET' && pathname === '/v1/fleet/requests') {
@@ -167,6 +197,12 @@ async function startStubDaemon(token: string, opts?: { failClaims?: boolean }) {
     },
     get promptCancels() {
       return promptCancels;
+    },
+    queuePendingTaskCreate(request: any) {
+      pendingTaskCreates.push(request);
+    },
+    queuePendingTaskDelete(request: any) {
+      pendingTaskDeletes.push(request);
     },
   };
 }
@@ -359,6 +395,77 @@ describeSocketSuite('fleet api', () => {
     } finally {
       await parentDaemon.close();
       await childDaemon.close();
+    }
+  });
+
+  test('daemon task create and delete requests persist through the canonical Kanban command', async () => {
+    const daemon = await startStubDaemon('task-drone-token');
+    const at = '2026-06-01T00:00:00.000Z';
+    const readCards = async () => {
+      const response = await apiFetch('/api/settings/kanban-board');
+      return response.data?.kanbanBoard?.lanes?.flatMap((lane: any) => lane.cards ?? []) ?? [];
+    };
+    const waitForCards = async (predicate: (cards: any[]) => boolean) => {
+      const deadline = Date.now() + 10_000;
+      while (Date.now() < deadline) {
+        const cards = await readCards();
+        if (predicate(cards)) return cards;
+        await Bun.sleep(100);
+      }
+      throw new Error('timed out waiting for canonical Kanban board');
+    };
+
+    try {
+      const boardResponse = await apiFetch('/api/settings/kanban-board', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          kanbanBoard: {
+            taskTypes: [{ id: 'task', label: 'Task', active: true }],
+            lanes: [{
+              id: 'todo',
+              title: 'Todo',
+              cards: [{ id: 'keep', title: 'Keep', description: '', typeId: 'task', createdAt: at, updatedAt: at }],
+            }],
+          },
+        }),
+      });
+      expect(boardResponse.r.status).toBe(200);
+      await updateRegistry((reg: any) => {
+        reg.drones ??= {};
+        reg.drones['task-drone'] = {
+          id: 'task-drone',
+          name: 'task-drone',
+          runtime: 'host',
+          hostPort: daemon.port,
+          token: 'task-drone-token',
+          containerPort: 7777,
+          repoPath: '',
+          createdAt: at,
+          chats: {},
+        };
+      });
+
+      daemon.queuePendingTaskCreate({
+        id: 'create-request',
+        title: 'Created by daemon',
+        description: 'Canonical task',
+        typeId: 'task',
+        createdAt: at,
+      });
+      const afterCreate = await waitForCards((cards) => cards.some((card) => card.title === 'Created by daemon'));
+      const created = afterCreate.find((card) => card.title === 'Created by daemon');
+      expect(created?.droneId).toBe('task-drone');
+      expect(afterCreate.some((card) => card.id === 'keep')).toBe(true);
+
+      daemon.queuePendingTaskDelete({ id: 'delete-request', taskId: created.id });
+      const afterDelete = await waitForCards((cards) => !cards.some((card) => card.id === created.id));
+      expect(afterDelete.map((card) => card.id)).toEqual(['keep']);
+    } finally {
+      await updateRegistry((reg: any) => {
+        if (reg?.drones?.['task-drone']) delete reg.drones['task-drone'];
+      });
+      await daemon.close();
     }
   });
 

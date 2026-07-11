@@ -1,9 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
 
+import { loadAssistantState } from '../src/host/assistant-store';
 import { HubAssistantService } from '../src/hub/assistant';
-import { HubAssistantStateStore } from '../src/hub/assistant/hub-assistant-state-store';
 import { withTempDroneDataDir } from './test-helpers';
 
 function makeAssistantService(): HubAssistantService {
@@ -11,8 +9,8 @@ function makeAssistantService(): HubAssistantService {
 }
 
 describe('assistant system prompt settings', () => {
-  test('persists normal and voice defaults in SQLite and applies them to new threads', async () => {
-    await withTempDroneDataDir('assistant-system-prompts-', async (droneDataDir) => {
+  test('persists normal and voice defaults in the canonical assistant store and applies them to new threads', async () => {
+    await withTempDroneDataDir('assistant-system-prompts-', async () => {
       const service = makeAssistantService();
       await service.updateSystemPrompt({ prompt: 'Normal assistant prompt.' });
       const settings = await service.updateSystemPrompt({ promptType: 'voice', prompt: 'Voice assistant prompt.' });
@@ -25,12 +23,9 @@ describe('assistant system prompt settings', () => {
       const voice = await service.ensureLatestVoiceThread({ title: 'voice' });
       expect(voice.thread.systemPrompt).toBe('Voice assistant prompt.');
 
-      const store = new HubAssistantStateStore(path.join(droneDataDir, 'assistant-blip.sqlite'));
-      const stored = store.read<any>();
-      expect(stored.systemPrompt).toBe('Normal assistant prompt.');
-      expect(stored.voiceSystemPrompt).toBe('Voice assistant prompt.');
-      store.close();
-      expect(fs.existsSync(path.join(droneDataDir, 'assistant.json'))).toBe(false);
+      const stored = await loadAssistantState();
+      expect(stored?.systemPrompt).toBe('Normal assistant prompt.');
+      expect(stored?.voiceSystemPrompt).toBe('Voice assistant prompt.');
 
       const reloaded = await makeAssistantService().systemPromptSettings();
       expect(reloaded.assistantSystemPrompt.prompt).toBe('Normal assistant prompt.');
@@ -70,6 +65,19 @@ describe('assistant system prompt settings', () => {
       expect(thread.enabledTools).toEqual(['get_system_prompt', 'set_thinking_level']);
       expect(thread.thinkingLevel).toBe('high');
       expect(updated.availableTools.some((tool) => tool.name === 'set_thinking_level')).toBe(true);
+    });
+  });
+
+  test('persists the default model used by new threads', async () => {
+    await withTempDroneDataDir('assistant-default-model-', async () => {
+      const service = makeAssistantService();
+      await service.updateDefaultModel({ provider: 'codex', model: 'gpt-5.5' });
+
+      const reloaded = makeAssistantService();
+      const snapshot = await reloaded.createThread({ title: 'default model thread' });
+      const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
+      expect(thread.provider).toBe('codex');
+      expect(thread.model).toBe('gpt-5.5');
     });
   });
 });

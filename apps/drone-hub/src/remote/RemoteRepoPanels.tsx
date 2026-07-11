@@ -104,7 +104,6 @@ function RemoteFilesPanel({ DroneFilesDock, drone }: { DroneFilesDock: DroneFile
   const [loading, setLoading] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [refreshNonce, setRefreshNonce] = React.useState(0);
-  const [viewMode, setViewMode] = React.useState<'list' | 'thumb'>('list');
   const disabled = isDroneStartingOrSeeding(drone.hubPhase ?? null);
 
   React.useEffect(() => {
@@ -174,8 +173,6 @@ function RemoteFilesPanel({ DroneFilesDock, drone }: { DroneFilesDock: DroneFile
         hubPhase: drone.hubPhase,
         hubMessage: drone.hubMessage,
       }}
-      viewMode={viewMode}
-      onSetViewMode={setViewMode}
       onOpenPath={(nextPath) => setPath(normalizeRemoteFilesPath(nextPath))}
       onOpenFile={openFile}
       onOpenFileInPanel={() => false}

@@ -681,8 +681,8 @@ function isUniqueConstraintError(error: unknown): boolean {
 }
 
 const ASSISTANT_DEFAULT_PROVIDER = 'openai';
-const ASSISTANT_DEFAULT_MODEL = 'chat-latest';
-const ASSISTANT_DEFAULT_THINKING_LEVEL = 'off';
+const ASSISTANT_DEFAULT_MODEL = 'gpt-5.6-luna';
+const ASSISTANT_DEFAULT_THINKING_LEVEL = 'medium';
 const ASSISTANT_DEFAULT_ENABLED_TOOLS = [
   'assistant_artifacts',
   'load_skill',
@@ -703,10 +703,6 @@ const ASSISTANT_DEFAULT_CAPABILITIES: AssistantThreadCapabilities = {
   externalCalls: true,
   futureIntegrations: false,
 };
-
-function assistantDefaultModelForProvider(provider: string): string {
-  return provider === 'codex' ? 'gpt-5.5' : ASSISTANT_DEFAULT_MODEL;
-}
 
 const ASSISTANT_NORMAL_SYSTEM_PROMPT_DEFAULT = 'You are VoiceStream, a concise standalone assistant. Answer directly and keep useful context in the thread.';
 const ASSISTANT_VOICE_SYSTEM_PROMPT_DEFAULT = 'You are VoiceStream, a concise voice assistant. Keep spoken replies short and practical.';
@@ -3166,7 +3162,7 @@ export class VoiceStreamNextDb {
     const current = this.ensureAssistantSettings(userId);
     const defaultProvider = input.defaultProvider ?? current.defaultProvider;
     const defaultModel = input.defaultModel
-      ?? (input.defaultProvider !== undefined ? assistantDefaultModelForProvider(defaultProvider) : current.defaultModel);
+      ?? (input.defaultProvider !== undefined ? ASSISTANT_DEFAULT_MODEL : current.defaultModel);
     const at = nowIso();
     this.db
       .query(
@@ -4345,7 +4341,7 @@ export class VoiceStreamNextDb {
     if (!profile) throw Object.assign(new Error('unknown or disabled assistant profile'), { statusCode: 404 });
     const enabledTools = input.enabledTools ?? this.resolvedAssistantProfileEnabledTools(userId, profile.id) ?? settings.defaultEnabledTools;
     const provider = input.provider?.trim() || settings.defaultProvider;
-    const modelFallback = assistantDefaultModelForProvider(provider);
+    const modelFallback = ASSISTANT_DEFAULT_MODEL;
     const model = input.model?.trim() || (provider === settings.defaultProvider ? settings.defaultModel : '') || modelFallback;
     this.db
       .query(

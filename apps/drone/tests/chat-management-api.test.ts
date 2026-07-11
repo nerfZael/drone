@@ -613,6 +613,7 @@ describeSocketSuite('chat management api', () => {
     await updateRegistry((reg: any) => {
       const entry = reg?.drones?.[droneId]?.chats?.default;
       if (!entry) throw new Error('missing seeded chat entry');
+      entry.model = 'configured-model';
       entry.turns = [
         {
           id: 'prompt-1',
@@ -629,6 +630,8 @@ describeSocketSuite('chat management api', () => {
           promptAt: secondAt,
           completedAt: secondAt,
           prompt: 'second',
+          model: 'actual-turn-model',
+          reasoning: 'high',
           ok: true,
           output: 'second done',
         },
@@ -665,7 +668,10 @@ describeSocketSuite('chat management api', () => {
     expect(state.data?.transcripts).toEqual(transcript.data?.transcripts);
     expect(state.data?.pending).toEqual(pending.data?.pending);
     expect(state.data?.agent).toEqual(transcript.data?.agent);
+    expect(state.data?.model).toBe('configured-model');
     expect(state.data?.transcripts?.map((row: any) => row.id)).toEqual(['prompt-2']);
+    expect(state.data?.transcripts?.[0]?.model).toBe('actual-turn-model');
+    expect(state.data?.transcripts?.[0]?.reasoning).toBe('high');
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('queued-1');
     expect((state.data?.pending ?? []).map((row: any) => row.id)).toContain('prompt-2');
 
@@ -937,6 +943,15 @@ describeSocketSuite('chat management api', () => {
       body: JSON.stringify({ name: 'review' }),
     });
     expect(created.r.status).toBe(201);
+    await updateRegistry((reg: any) => {
+      reg.drones[droneId].chats.review.turns = [{
+        id: 'archived-turn',
+        at: '2026-01-01T00:01:00.000Z',
+        prompt: 'Review this',
+        ok: true,
+        output: 'Reviewed',
+      }];
+    });
 
     const archived = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review`, {
       method: 'DELETE',
@@ -965,6 +980,8 @@ describeSocketSuite('chat management api', () => {
     const listedAfterRestore = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
     expect(listedAfterRestore.r.status).toBe(200);
     expect((listedAfterRestore.data?.chats ?? []).includes('review')).toBe(true);
+    const registryAfterRestore: any = await loadRegistry();
+    expect(registryAfterRestore?.drones?.[droneId]?.chats?.review?.turns?.[0]?.id).toBe('archived-turn');
 
     const archivedAgain = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review`, {
       method: 'DELETE',
@@ -984,6 +1001,8 @@ describeSocketSuite('chat management api', () => {
         (row: any) => row?.droneId === droneId && row?.chatName === 'review',
       ),
     ).toBe(false);
+    const registryAfterDelete: any = await loadRegistry();
+    expect(registryAfterDelete?.drones?.[droneId]?.archivedChats?.review).toBeUndefined();
 
     await apiFetch('/api/settings/delete-action', {
       method: 'POST',

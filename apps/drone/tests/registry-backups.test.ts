@@ -116,7 +116,7 @@ describe('registry backups', () => {
     });
   });
 
-  test('persists backup settings through registry storage', async () => {
+  test('persists backup policy through canonical settings storage', async () => {
     await withTempDroneDataDir('drone-registry-backup-settings-', async () => {
       await upsertStoredRegistryBackupSettings({
         enabled: false,

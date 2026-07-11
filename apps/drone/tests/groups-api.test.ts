@@ -112,6 +112,80 @@ describeSocketSuite('groups api (decoupled from drone count)', () => {
     expect(names.includes('new')).toBe(true);
   });
 
+  test('group and drone cleanup transform the canonical Kanban board', async () => {
+    const at = '2026-06-01T00:00:00.000Z';
+    await apiFetch('/api/groups', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'cleanup-source' }),
+    });
+    await apiFetch('/api/groups', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'cleanup-source/api' }),
+    });
+    await updateRegistry((reg: any) => {
+      reg.drones ??= {};
+      reg.drones['cleanup-drone'] = {
+        id: 'cleanup-drone',
+        name: 'cleanup-drone',
+        runtime: 'host',
+        hostPort: null,
+        token: 'cleanup-token',
+        containerPort: 7777,
+        repoPath: '',
+        group: 'cleanup-source',
+        createdAt: at,
+        chats: {},
+      };
+    });
+    const stored = await apiFetch('/api/settings/kanban-board', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        kanbanBoard: {
+          taskTypes: [{ id: 'task', label: 'Task', active: true }],
+          lanes: [{
+            id: 'todo',
+            title: 'Todo',
+            cards: [
+              { id: 'group-task', title: 'Group task', description: '', typeId: 'task', scopeType: 'group', scopeValue: 'cleanup-source', createdAt: at, updatedAt: at },
+              { id: 'group-child-task', title: 'Child group task', description: '', typeId: 'task', scopeType: 'group', scopeValue: 'cleanup-source/api', createdAt: at, updatedAt: at },
+              { id: 'drone-task', title: 'Drone task', description: '', typeId: 'task', scopeType: 'drone', scopeValue: 'cleanup-drone', droneId: 'cleanup-drone', createdAt: at, updatedAt: at },
+              { id: 'keep-task', title: 'Keep task', description: '', typeId: 'task', scopeType: 'global', createdAt: at, updatedAt: at },
+            ],
+          }],
+        },
+      }),
+    });
+    expect(stored.r.status).toBe(200);
+
+    const renamed = await apiFetch('/api/groups/cleanup-source/rename', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ newName: 'cleanup-target' }),
+    });
+    expect(renamed.r.status).toBe(200);
+    let board = (await apiFetch('/api/settings/kanban-board')).data?.kanbanBoard;
+    let cards = board?.lanes?.flatMap((lane: any) => lane.cards ?? []) ?? [];
+    expect(cards.find((card: any) => card.id === 'group-task')?.scopeValue).toBe('cleanup-target');
+    expect(cards.find((card: any) => card.id === 'group-child-task')?.scopeValue).toBe('cleanup-target/api');
+
+    const archived = await apiFetch('/api/drones/cleanup-drone/archive', { method: 'POST' });
+    expect(archived.r.status).toBe(200);
+    board = (await apiFetch('/api/settings/kanban-board')).data?.kanbanBoard;
+    cards = board?.lanes?.flatMap((lane: any) => lane.cards ?? []) ?? [];
+    expect(cards.some((card: any) => card.id === 'drone-task')).toBe(false);
+    expect(cards.some((card: any) => card.id === 'group-task')).toBe(true);
+    expect(cards.some((card: any) => card.id === 'group-child-task')).toBe(true);
+
+    const deleted = await apiFetch('/api/groups/cleanup-target', { method: 'DELETE' });
+    expect(deleted.r.status).toBe(200);
+    board = (await apiFetch('/api/settings/kanban-board')).data?.kanbanBoard;
+    cards = board?.lanes?.flatMap((lane: any) => lane.cards ?? []) ?? [];
+    expect(cards.map((card: any) => card.id)).toEqual(['keep-task']);
+  });
+
   test('groups are not auto-deleted when the last drone is removed', async () => {
     // Seed a group and a fake drone in the registry (no container needed for this behavior).
     await updateRegistry((reg: any) => {

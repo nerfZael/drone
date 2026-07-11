@@ -1,5 +1,7 @@
 import { loadRegistry, updateRegistry } from '../host/registry';
-import { normalizeDroneIdentity } from './drone-lifecycle-registry';
+import { getPromptQueueRepository } from '../host/prompt-queue-repository';
+import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecycle-registry';
+import { commitDroneMetadataPatch } from './drone-metadata-commands';
 import type { PendingPromptState, PendingStartupPrompt } from './drone-pending-state';
 import type { ChatImageAttachmentRef } from './chat-attachments';
 import {
@@ -7,14 +9,17 @@ import {
   claimQueuedPendingPromptInStore,
   importChatFromRegistry,
   readChatFromStore,
+  readChatRowsFromStore,
   updatePendingPromptInStore,
   upsertPendingPromptInStore,
 } from './transcript-store';
+import { resolveCanonicalDroneOrPendingForReadRef } from './drone-lifecycle-service';
 
 export type PendingPrompt = {
   id: string;
   at: string;
   prompt: string;
+  model?: string;
   messageId?: string;
   cwd?: string | null;
   attachments?: ChatImageAttachmentRef[];
@@ -28,6 +33,7 @@ export type PendingPrompt = {
     lastCheckedAt: string;
     lastError?: string;
   };
+  blipClones?: unknown;
   updatedAt?: string;
 };
 
@@ -36,6 +42,11 @@ export type CancelQueuedPendingPromptStatus = 'cancelled' | 'already-submitted' 
 export type CancelQueuedPendingPromptResult = {
   status: CancelQueuedPendingPromptStatus;
   pendingState?: PendingPromptState | null;
+};
+
+export type RetryPendingPromptResult = {
+  disposition: 'retry' | 'terminal' | 'not-claimed';
+  nextAttemptAt?: string;
 };
 
 const RECENT_COMPLETED_PENDING_PROMPT_GRACE_MS = 2 * 60_000;
@@ -50,6 +61,16 @@ export function createDronePendingPromptStore(deps: {
   nowIso: () => string;
   startupPromptToPendingPrompt: (prompt: PendingStartupPrompt) => PendingPrompt;
 }) {
+  function promptQueueForActiveDrone() {
+    const queue = getPromptQueueRepository();
+    if (queue) return queue;
+    // Bun cannot load the Node ABI build of better-sqlite3 in the legacy test
+    // harness, so retain the old in-memory projection there only. A real Hub
+    // must fail loudly rather than silently create a second source of truth.
+    if ((globalThis as any).Bun) return null;
+    throw new Error('canonical prompt queue is unavailable');
+  }
+
   function parseRecentPendingPromptIsoMs(raw: unknown): number {
     const text = typeof raw === 'string' ? raw.trim() : '';
     if (!text) return 0;
@@ -105,6 +126,7 @@ export function createDronePendingPromptStore(deps: {
           id: String(p?.id ?? '').trim(),
           at: String(p?.at ?? '').trim(),
           prompt: deps.normalizePendingPromptText(p?.prompt),
+          ...(typeof p?.model === 'string' && String(p.model).trim() ? { model: String(p.model).trim() } : {}),
           ...(typeof p?.messageId === 'string' && String(p.messageId).trim() ? { messageId: String(p.messageId).trim() } : {}),
           cwd: typeof p?.cwd === 'string' ? String(p.cwd) : p?.cwd === null ? null : undefined,
           attachments: deps.normalizeChatImageAttachmentRefs(p?.attachments),
@@ -177,6 +199,26 @@ export function createDronePendingPromptStore(deps: {
   }
 
   async function readPendingPrompts(opts: { droneId: string; chatName: string }): Promise<PendingPrompt[]> {
+    if (!(globalThis as any).Bun) {
+      const ref = normalizeDroneIdentity(opts.droneId);
+      const resolved = ref ? await resolveCanonicalDroneOrPendingForReadRef(ref) : null;
+      if (!resolved) throw new Error(`unknown drone: ${opts.droneId}`);
+      if (resolved.kind === 'pending') throw new Error(`drone "${resolved.id}" is still starting`);
+      // Fail loudly if canonical prompt persistence is unavailable. The row
+      // query below then reads only this chat's prompt rows and matching turns;
+      // it does not build or backfill the compatibility registry projection.
+      promptQueueForActiveDrone();
+      const rows = readChatRowsFromStore({
+        droneId: resolved.id,
+        chatName: opts.chatName || 'default',
+        indexes: [],
+        includePending: true,
+      });
+      return pruneCompletedPendingPrompts(rows.pending as PendingPrompt[], rows.pendingTurns, {
+        keepRecentlyCompleted: true,
+      }).slice(-50);
+    }
+
     const regAny: any = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);
     const drone = droneId ? regAny?.drones?.[droneId] : null;
@@ -186,8 +228,24 @@ export function createDronePendingPromptStore(deps: {
     }
     const chatName = opts.chatName || 'default';
     const entry = drone?.chats?.[chatName];
+    const queue = promptQueueForActiveDrone();
+    if (queue) {
+      // Registry data is import-only compatibility state. INSERT OR IGNORE is
+      // essential here: a stale snapshot must never move canonical state back.
+      if (entry) {
+        await queue.backfillLegacy({
+          droneId,
+          chatName,
+          prompts: pendingPromptsFromChatEntry(entry, { keepRecentlyCompleted: true }),
+        });
+      }
+      const stored = queue.list({ droneId, chatName, limit: 60 }) as PendingPrompt[];
+      const projected = readChatFromStore({ droneId, chatName });
+      const turns = projected.available && projected.chat ? projected.chat.turns : entry?.turns;
+      return pruneCompletedPendingPrompts(stored, turns, { keepRecentlyCompleted: true }).slice(-50);
+    }
     if (entry) {
-      importChatFromRegistry({ droneId, chatName, chatEntry: entry });
+      await importChatFromRegistry({ droneId, chatName, chatEntry: entry });
       const read = readChatFromStore({ droneId, chatName });
       if (read.available && read.chat) {
         return pendingPromptsFromChatEntry(read.chat, { keepRecentlyCompleted: true }).slice(-50);
@@ -197,6 +255,16 @@ export function createDronePendingPromptStore(deps: {
   }
 
   async function readPendingStartupPrompts(opts: { droneId: string; chatName: string }): Promise<PendingPrompt[]> {
+    if (!(globalThis as any).Bun) {
+      const ref = normalizeDroneIdentity(opts.droneId);
+      const resolved = ref ? await resolveCanonicalDroneOrPendingForReadRef(ref) : null;
+      if (!resolved || resolved.kind !== 'pending') return [];
+      return deps.normalizePendingStartupPrompts(
+        (resolved.pending as any)?.startupQueuedPrompts,
+        opts.chatName,
+      ).map(deps.startupPromptToPendingPrompt);
+    }
+
     const regAny: any = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);
     const pending = droneId ? regAny?.pending?.[droneId] : null;
@@ -207,6 +275,17 @@ export function createDronePendingPromptStore(deps: {
   async function pushPendingPrompt(opts: { droneId: string; chatName: string; pending: PendingPrompt }): Promise<void> {
     const droneIdForStore = normalizeDroneIdentity(opts.droneId);
     const chatNameForStore = opts.chatName || 'default';
+    const queue = promptQueueForActiveDrone();
+    if (queue && droneIdForStore) {
+      const registry: any = await loadRegistry();
+      if (!registry?.drones?.[droneIdForStore]) throw new Error(`unknown drone: ${opts.droneId}`);
+      await queue.enqueue({
+        droneId: droneIdForStore,
+        chatName: chatNameForStore,
+        prompt: opts.pending,
+      });
+      return;
+    }
     if (droneIdForStore) {
       upsertPendingPromptInStore({ droneId: droneIdForStore, chatName: chatNameForStore, pending: opts.pending });
     }
@@ -237,54 +316,73 @@ export function createDronePendingPromptStore(deps: {
   async function pushPendingStartupPrompt(
     opts: { droneId: string; chatName: string; pending: PendingPrompt },
   ): Promise<'queued' | 'active' | 'missing'> {
-    return await updateRegistry((regAny: any) => {
-      const droneId = normalizeDroneIdentity(opts.droneId);
-      const pendingDrone = droneId ? regAny?.pending?.[droneId] : null;
-      if (!pendingDrone) return regAny?.drones?.[droneId] ? 'active' : 'missing';
-      if (regAny?.drones?.[droneId]) return 'active';
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const id = String(opts.pending?.id ?? '').trim();
+    const prompt = String(opts.pending?.prompt ?? '');
+    if (!droneId || !id || !prompt.trim()) return 'missing';
 
-      const chatName = deps.normalizeChatName(opts.chatName);
-      const list = deps.normalizePendingStartupPrompts((pendingDrone as any)?.startupQueuedPrompts);
-      const id = String(opts.pending?.id ?? '').trim();
-      if (!id) return 'missing';
+    const registry: any = await loadRegistry();
+    if (findDroneEntryByIdentity({ drones: registry?.drones }, droneId)) return 'active';
+    if (!findDroneEntryByIdentity({ drones: registry?.pending }, droneId)) return 'missing';
 
-      const next: PendingStartupPrompt = {
-        id,
-        chatName,
-        at: String(opts.pending?.at ?? deps.nowIso()),
-        prompt: String(opts.pending?.prompt ?? ''),
-        ...(typeof opts.pending?.messageId === 'string' && opts.pending.messageId.trim() ? { messageId: opts.pending.messageId.trim() } : {}),
-        ...(typeof opts.pending?.cwd === 'string' || opts.pending?.cwd === null ? { cwd: opts.pending.cwd } : {}),
-        state: deps.normalizePendingPromptState(opts.pending?.state),
-        ...(typeof opts.pending?.error === 'string' ? { error: opts.pending.error } : {}),
-        updatedAt: String(opts.pending?.updatedAt ?? deps.nowIso()),
-      };
-      if (!next.prompt.trim()) return 'missing';
+    const chatName = deps.normalizeChatName(opts.chatName);
+    const next: PendingStartupPrompt = {
+      id,
+      chatName,
+      at: String(opts.pending?.at ?? deps.nowIso()),
+      prompt,
+      ...(typeof opts.pending?.messageId === 'string' && opts.pending.messageId.trim() ? { messageId: opts.pending.messageId.trim() } : {}),
+      ...(typeof opts.pending?.cwd === 'string' || opts.pending?.cwd === null ? { cwd: opts.pending.cwd } : {}),
+      state: deps.normalizePendingPromptState(opts.pending?.state),
+      ...(typeof opts.pending?.error === 'string' ? { error: opts.pending.error } : {}),
+      updatedAt: String(opts.pending?.updatedAt ?? deps.nowIso()),
+    };
 
-      const existingIdx = list.findIndex((entry) => entry.id === id);
-      if (existingIdx === -1) {
-        list.push(next);
-      } else {
-        const current = list[existingIdx] ?? next;
-        list[existingIdx] = { ...current, ...next, updatedAt: next.updatedAt ?? deps.nowIso() };
-      }
-
-      (pendingDrone as any).startupQueuedPrompts = list.slice(-80);
-      pendingDrone.updatedAt = deps.nowIso();
-      regAny.pending = regAny.pending ?? {};
-      regAny.pending[droneId] = pendingDrone;
+    try {
+      await commitDroneMetadataPatch({
+        droneId,
+        state: 'pending',
+        eventType: 'drone.startup-prompt.queued',
+        payload: { promptId: id, chatName },
+        transform: (pendingDrone) => {
+          const list = deps.normalizePendingStartupPrompts(pendingDrone.startupQueuedPrompts);
+          const existingIdx = list.findIndex((entry) => entry.id === id);
+          if (existingIdx === -1) list.push(next);
+          else list[existingIdx] = { ...(list[existingIdx] ?? next), ...next };
+          return {
+            ...pendingDrone,
+            startupQueuedPrompts: list.slice(-80),
+            updatedAt: deps.nowIso(),
+          };
+        },
+      });
       return 'queued';
-    });
+    } catch (error) {
+      const latest: any = await loadRegistry();
+      if (findDroneEntryByIdentity({ drones: latest?.drones }, droneId)) return 'active';
+      if (!findDroneEntryByIdentity({ drones: latest?.pending }, droneId)) return 'missing';
+      throw error;
+    }
   }
 
   async function updatePendingPrompt(opts: {
     droneId: string;
     chatName: string;
     id: string;
-    patch: Partial<Pick<PendingPrompt, 'state' | 'error' | 'observability' | 'updatedAt'>>;
+    patch: Partial<Pick<PendingPrompt, 'state' | 'error' | 'observability' | 'blipClones' | 'updatedAt'>>;
   }): Promise<void> {
     const droneIdForStore = normalizeDroneIdentity(opts.droneId);
     const chatNameForStore = opts.chatName || 'default';
+    const queue = promptQueueForActiveDrone();
+    if (queue && droneIdForStore) {
+      await queue.update({
+        droneId: droneIdForStore,
+        chatName: chatNameForStore,
+        promptId: opts.id,
+        patch: opts.patch,
+      });
+      return;
+    }
     if (droneIdForStore) {
       updatePendingPromptInStore({
         droneId: droneIdForStore,
@@ -312,9 +410,55 @@ export function createDronePendingPromptStore(deps: {
     });
   }
 
+  async function retryPendingPrompt(opts: {
+    droneId: string;
+    chatName: string;
+    id: string;
+    error: string;
+  }): Promise<RetryPendingPromptResult> {
+    const droneId = normalizeDroneIdentity(opts.droneId);
+    const chatName = opts.chatName || 'default';
+    const queue = promptQueueForActiveDrone();
+    if (queue && droneId) {
+      const current = queue.get({ droneId, chatName, promptId: opts.id });
+      return await queue.scheduleRetry({
+        droneId,
+        chatName,
+        promptId: opts.id,
+        error: opts.error,
+        ...(current?.leaseOwner ? { leaseOwner: current.leaseOwner } : {}),
+      });
+    }
+    // Compatibility-only fallback retains the previous immediate retry state.
+    await updatePendingPrompt({
+      droneId: opts.droneId,
+      chatName,
+      id: opts.id,
+      patch: { state: 'queued', error: opts.error },
+    });
+    return { disposition: 'retry', nextAttemptAt: deps.nowIso() };
+  }
+
+  async function resumePendingPromptChats(): Promise<Array<{ droneId: string; chatName: string }>> {
+    const queue = promptQueueForActiveDrone();
+    if (!queue) return [];
+    await queue.recoverExpiredLeases();
+    return queue.listQueuedChats();
+  }
+
   async function claimQueuedPendingPromptForSending(opts: { droneId: string; chatName: string; id: string }): Promise<boolean> {
     const droneIdForStore = normalizeDroneIdentity(opts.droneId);
     const chatNameForStore = opts.chatName || 'default';
+    const queue = promptQueueForActiveDrone();
+    if (queue && droneIdForStore) {
+      const claimed = await queue.claim({
+        droneId: droneIdForStore,
+        chatName: chatNameForStore,
+        promptId: opts.id,
+        leaseOwner: `hub:${process.pid}`,
+      });
+      return Boolean(claimed);
+    }
     let storeClaimed = false;
     if (droneIdForStore) {
       const storeClaim = claimQueuedPendingPromptInStore({ droneId: droneIdForStore, chatName: chatNameForStore, id: opts.id });
@@ -357,6 +501,23 @@ export function createDronePendingPromptStore(deps: {
     const chatName = deps.normalizeChatName(opts.chatName);
     const promptId = String(opts.promptId ?? '').trim();
     if (!droneId || !chatName || !promptId) return { status: 'not-found', pendingState: null };
+
+    const queue = promptQueueForActiveDrone();
+    if (queue) {
+      const cancelled = await queue.cancelQueued({ droneId, chatName, promptId });
+      if (cancelled.cancelled) return { status: 'cancelled', pendingState: 'queued' };
+      if (cancelled.state === 'cancelled') return { status: 'not-found', pendingState: null };
+      if (cancelled.state) {
+        return { status: 'already-submitted', pendingState: cancelled.state as PendingPromptState };
+      }
+      const registry: any = await loadRegistry();
+      const turns = Array.isArray(registry?.drones?.[droneId]?.chats?.[chatName]?.turns)
+        ? registry.drones[droneId].chats[chatName].turns
+        : [];
+      return turns.some((turn: any) => String(turn?.id ?? '').trim() === promptId)
+        ? { status: 'already-submitted', pendingState: 'sent' }
+        : { status: 'not-found', pendingState: null };
+    }
 
     const storeCancel = cancelQueuedPendingPromptInStore({ droneId, chatName, id: promptId });
     if (storeCancel.available) {
@@ -427,6 +588,8 @@ export function createDronePendingPromptStore(deps: {
     pruneCompletedPendingPrompts,
     readPendingPrompts,
     readPendingStartupPrompts,
+    resumePendingPromptChats,
+    retryPendingPrompt,
     transcriptTurnIdsFromEntry,
     pushPendingPrompt,
     pushPendingStartupPrompt,

@@ -214,7 +214,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     clearingDroneError,
     headerOverflowOpen,
     outputView,
-    fsExplorerView,
     spawnContextRepoPath,
     spawnContextByRepoKey,
     spawnAgentKey,
@@ -255,7 +254,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDroneErrorModal,
     setClearingDroneError,
     setHeaderOverflowOpen,
-    setFsExplorerView,
     setSpawnContextRepoPath,
     updateSpawnContextForRepo,
     setSpawnAgentKey,
@@ -287,6 +285,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     registeredRepoPaths,
     registeredRepoPathSet,
     registryGroupNames,
+    registryGroupCreatedAtByName,
     dronesFilteredByRepo,
     dronesFilteredByRepoIdSet,
     droneCountByRepoPath,
@@ -419,6 +418,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     activeRepoPath,
     showRecentDronesOnly,
     registryGroupNames,
+    registryGroupCreatedAtByName,
     registeredRepoPaths,
   });
   const draftSidebarPlaceholder = React.useMemo(() => {
@@ -3443,8 +3443,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           fsError={fsError}
           fsErrorUi={fsErrorUi}
           filesPane={filesPane}
-          fsExplorerView={fsExplorerView}
-          setFsExplorerView={setFsExplorerView}
           setCurrentFsPath={setCurrentFsPath}
           refreshFsList={refreshFsList}
           selectedPreviewPort={previewSelectedPort}
@@ -3576,7 +3574,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       fsEntries,
       fsError,
       fsErrorUi,
-      fsExplorerView,
       fsLoading,
       lockedPreviewByDrone,
       terminalSessionsByPane,
@@ -3614,7 +3611,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       spawnAgentMenuEntries,
       spawnModel,
       setCurrentFsPath,
-      setFsExplorerView,
       setRightPanelBottomTab,
       setRightPanelOpen,
       setRightPanelTab,
@@ -3738,6 +3734,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     settingBaseImages,
     movingDroneGroups,
     sidebarGroups,
+    sidebarGroupCreatedAtByName: registryGroupCreatedAtByName,
     sidebarHiddenGroupCount,
     collapsedGroups,
     deletingGroups,

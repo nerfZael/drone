@@ -1,12 +1,15 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs';
-import { createRequire } from 'node:module';
-import path from 'node:path';
 
-import { hubSqlitePath } from '../host/sqlite-registry-store';
-
-type DatabaseConstructor = typeof import('better-sqlite3');
-type DatabaseInstance = import('better-sqlite3').Database;
+import {
+  applyHubDatabaseMigrations,
+  getHubDatabase,
+  requireHubDatabase,
+  type HubDatabase,
+  type HubDatabaseConnection,
+  type HubDatabaseMigration,
+} from '../host/hub-database';
+import { appendHubOutboxEvent, initializeHubOutbox } from '../host/hub-outbox';
+import { getPromptQueueRepository } from '../host/prompt-queue-repository';
 
 export type StoredTranscriptTurn = {
   at: string;
@@ -17,6 +20,8 @@ export type StoredTranscriptTurn = {
   error?: string;
   promptAt?: string;
   completedAt?: string;
+  model?: string;
+  reasoning?: string;
   attachments?: unknown;
   automation?: unknown;
   inheritedFromClone?: boolean;
@@ -25,56 +30,11 @@ export type StoredTranscriptTurn = {
   dockerSnapshot?: unknown;
 };
 
-type TranscriptStoreRow = {
-  ordinal: number;
-  turn_json: string;
-};
-
-type TranscriptMetaRow = {
-  transcript_version: number;
-  source_hash: string;
-};
-
-type ChatStoreRow = {
-  chat_name: string;
-  chat_json: string;
-  source_hash: string;
-};
-
-export type TranscriptImportResult = {
-  available: boolean;
-  transcriptVersion: number;
-  sourceHash: string;
-};
-
-export type TranscriptStoreReadResult = {
-  available: boolean;
-  count: number;
-  transcriptVersion: number;
-  sourceHash: string;
-  turns: Array<{ index: number; turn: StoredTranscriptTurn }>;
-};
-
-export type ChatStoreImportResult = {
-  available: boolean;
-  sourceHash: string;
-};
-
-export type ChatStoreReadResult = {
-  available: boolean;
-  chat: any | null;
-  sourceHash: string;
-};
-
-export type ChatStoreListResult = {
-  available: boolean;
-  chats: string[];
-};
-
 export type StoredPendingPrompt = {
   id: string;
   at: string;
   prompt: string;
+  model?: string;
   messageId?: string;
   cwd?: string | null;
   attachments?: unknown;
@@ -82,103 +42,286 @@ export type StoredPendingPrompt = {
   blockedByAutomation?: boolean;
   state: string;
   error?: string;
-  observability?: {
-    state: 'status-unavailable';
-    message: string;
-    lastCheckedAt: string;
-    lastError?: string;
-  };
+  observability?: unknown;
+  blipClones?: unknown;
   updatedAt?: string;
 };
 
-let cached:
-  | {
-      dbPath: string;
-      db: DatabaseInstance;
-      store: TranscriptStore;
-    }
-  | null = null;
-
-let unavailableReason: string | null = null;
-const requireForTranscriptStore = createRequire(__filename);
-
-type MemoryChatRow = {
-  chatName: string;
-  chatEntry: any;
+export type TranscriptImportResult = { available: boolean; transcriptVersion: number; sourceHash: string };
+export type TranscriptStoreReadResult = {
+  available: boolean;
+  count: number;
+  transcriptVersion: number;
   sourceHash: string;
+  turns: Array<{ index: number; turn: StoredTranscriptTurn }>;
+};
+export type ChatReadVersion = {
+  available: boolean;
+  chat: Record<string, unknown> | null;
+  chatSourceHash: string;
+  turnCount: number;
+  transcriptVersion: number;
+  transcriptSourceHash: string;
+  pendingVersion: string;
+};
+export type ChatReadRows = {
+  available: boolean;
+  turns: Array<{ index: number; turn: StoredTranscriptTurn }>;
+  pending: StoredPendingPrompt[];
+  pendingTurns: StoredTranscriptTurn[];
+};
+export type ChatStoreImportResult = { available: boolean; sourceHash: string };
+export type ChatStoreReadResult = { available: boolean; chat: any | null; sourceHash: string };
+export type ChatStoreListResult = { available: boolean; chats: string[] };
+export type CreateChatStoreResult = { available: boolean; chat: any; chats: string[] };
+export type UpdateChatStoreResult = { available: boolean; chat: any; chats: string[] };
+export type DeleteActiveChatStoreResult = { available: boolean; deletedChat: any; chats: string[] };
+export type ArchivedChatRecord = {
+  droneId: string;
+  chatName: string;
+  chat: any;
+  archivedAt: string;
+  deleteAt: string;
+  archiveRetention: string;
+};
+export type ArchivedChatStoreListResult = { available: boolean; archivedChats: ArchivedChatRecord[] };
+export type ArchiveChatStoreResult = {
+  available: boolean;
+  archived: boolean;
+  archivedChat: ArchivedChatRecord | null;
+  chats: string[];
+};
+export type RestoreArchivedChatStoreResult = {
+  available: boolean;
+  restored: boolean;
+  chatName: string;
+  renamed: boolean;
+  chat: any | null;
+  chats: string[];
+};
+export type DeleteArchivedChatStoreResult = {
+  available: boolean;
+  deleted: boolean;
+  archivedChat: ArchivedChatRecord | null;
+};
+export type ChatMetadataPatch = {
+  set?: Record<string, unknown>;
+  setIfMissing?: Record<string, unknown>;
+  unset?: string[];
+};
+export type ChatMetadataPatchResult = {
+  available: boolean;
+  changed: boolean;
+  metadata: Record<string, unknown> | null;
+};
+export type TranscriptTurnUpdateResult = {
+  available: boolean;
+  changed: boolean;
+  turn: StoredTranscriptTurn | null;
+};
+export type TranscriptRollbackResult = {
+  available: boolean;
+  changed: boolean;
+  removedTurns: StoredTranscriptTurn[];
+  turn: StoredTranscriptTurn | null;
+};
+export type PermanentDroneChatCleanupResult = {
+  available: boolean;
+  removedLifecycle: boolean;
+  alreadyDeleted: boolean;
+  activeChatsDeleted: number;
+  turnsDeleted: number;
+  archivedChatsDeleted: number;
+  chatTombstonesDeleted: number;
+  archivedChatTombstonesDeleted: number;
+  promptsDeleted: number;
 };
 
-const memoryChats = new Map<string, MemoryChatRow>();
-const memoryPrompts = new Map<string, Map<string, StoredPendingPrompt>>();
+export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
+  {
+    version: 1,
+    name: 'canonical chats and transcript turns',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE canonical_chats (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          created_at TEXT,
+          updated_at TEXT NOT NULL,
+          metadata_json TEXT NOT NULL,
+          source_hash TEXT NOT NULL,
+          transcript_version INTEGER NOT NULL DEFAULT 0 CHECK (transcript_version >= 0),
+          turns_source_hash TEXT NOT NULL DEFAULT '',
+          PRIMARY KEY (drone_id, chat_name)
+        );
+
+        CREATE INDEX idx_canonical_chats_drone_name
+          ON canonical_chats (drone_id, chat_name);
+
+        CREATE TABLE canonical_chat_turns (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          turn_id TEXT NOT NULL,
+          ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
+          at TEXT NOT NULL,
+          prompt_at TEXT,
+          completed_at TEXT,
+          turn_json TEXT NOT NULL,
+          PRIMARY KEY (drone_id, chat_name, turn_id),
+          FOREIGN KEY (drone_id, chat_name)
+            REFERENCES canonical_chats(drone_id, chat_name)
+            ON UPDATE CASCADE ON DELETE CASCADE
+        );
+
+        CREATE INDEX idx_canonical_chat_turns_order
+          ON canonical_chat_turns (drone_id, chat_name, prompt_at, at, completed_at, ordinal);
+
+        CREATE TABLE canonical_chat_tombstones (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          reason TEXT NOT NULL CHECK (reason IN ('deleted', 'renamed')),
+          replacement_chat_name TEXT,
+          deleted_at TEXT NOT NULL,
+          PRIMARY KEY (drone_id, chat_name)
+        );
+      `);
+
+      const oldChats = connection
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'hub_chats'")
+        .get();
+      if (oldChats) {
+        connection.exec(`
+          INSERT OR IGNORE INTO canonical_chats (
+            drone_id, chat_name, created_at, updated_at, metadata_json,
+            source_hash, transcript_version, turns_source_hash
+          )
+          SELECT drone_id, chat_name, created_at, imported_at, chat_json,
+                 source_hash, 0, ''
+          FROM hub_chats;
+        `);
+      }
+
+      const oldTurns = connection
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'chat_turns'")
+        .get();
+      if (oldTurns) {
+        connection.exec(`
+          INSERT OR IGNORE INTO canonical_chat_turns (
+            drone_id, chat_name, turn_id, ordinal, at, prompt_at, completed_at, turn_json
+          )
+          SELECT t.drone_id, t.chat_name, t.prompt_id,
+                 ROW_NUMBER() OVER (
+                   PARTITION BY t.drone_id, t.chat_name
+                   ORDER BY COALESCE(t.prompt_at, t.at), t.completed_at, t.prompt_id
+                 ) - 1,
+                 t.at, t.prompt_at, t.completed_at, t.turn_json
+          FROM chat_turns t
+          INNER JOIN canonical_chats c
+            ON c.drone_id = t.drone_id AND c.chat_name = t.chat_name;
+        `);
+      }
+
+      const oldTranscriptTurns = connection
+        .prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'transcript_turns'")
+        .get();
+      if (oldTranscriptTurns) {
+        connection.exec(`
+          INSERT OR IGNORE INTO canonical_chat_turns (
+            drone_id, chat_name, turn_id, ordinal, at, prompt_at, completed_at, turn_json
+          )
+          SELECT t.drone_id, t.chat_name,
+                 COALESCE(NULLIF(json_extract(t.turn_json, '$.id'), ''), t.turn_key),
+                 t.ordinal,
+                 t.at, t.prompt_at, t.completed_at, t.turn_json
+          FROM transcript_turns t
+          INNER JOIN canonical_chats c
+            ON c.drone_id = t.drone_id AND c.chat_name = t.chat_name;
+        `);
+      }
+    },
+  },
+  {
+    version: 2,
+    name: 'canonical archived chats',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE canonical_archived_chats (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          archived_at TEXT NOT NULL,
+          delete_at TEXT NOT NULL,
+          archive_retention TEXT NOT NULL,
+          chat_json TEXT NOT NULL,
+          source_hash TEXT NOT NULL,
+          PRIMARY KEY (drone_id, chat_name)
+        );
+
+        CREATE INDEX idx_canonical_archived_chats_expiry
+          ON canonical_archived_chats (delete_at, drone_id, chat_name);
+
+        CREATE TABLE canonical_archived_chat_tombstones (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          reason TEXT NOT NULL CHECK (reason IN ('restored', 'deleted')),
+          deleted_at TEXT NOT NULL,
+          PRIMARY KEY (drone_id, chat_name)
+        );
+      `);
+    },
+  },
+  {
+    version: 3,
+    name: 'permanently deleted drone chat tombstones',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE IF NOT EXISTS canonical_drone_chat_tombstones (
+          drone_id TEXT NOT NULL PRIMARY KEY,
+          deleted_at TEXT NOT NULL,
+          reason TEXT NOT NULL CHECK (reason = 'drone-deleted')
+        );
+      `);
+    },
+  },
+];
+
+type ChatRow = {
+  chat_name: string;
+  metadata_json: string;
+  source_hash: string;
+  transcript_version: number;
+  turns_source_hash: string;
+};
+type TurnRow = { turn_json: string };
+type ArchivedChatRow = {
+  drone_id: string;
+  chat_name: string;
+  archived_at: string;
+  delete_at: string;
+  archive_retention: string;
+  chat_json: string;
+  source_hash: string;
+};
+
+const memoryChats = new Map<string, { metadata: any; sourceHash: string; version: number }>();
 const memoryTurns = new Map<string, Map<string, StoredTranscriptTurn>>();
+const memoryPrompts = new Map<string, Map<string, StoredPendingPrompt>>();
+const memoryCancelledPrompts = new Set<string>();
+const memoryChatTombstones = new Set<string>();
+const memoryArchivedChats = new Map<string, ArchivedChatRecord>();
+const memoryArchivedChatTombstones = new Set<string>();
+const memoryDroneChatTombstones = new Set<string>();
+let cachedRepository: { database: HubDatabase; repository: ChatTranscriptRepository } | null = null;
+let unavailableReason: string | null = null;
 
-function chatStoreKey(droneId: string, chatName: string): string {
+function key(droneId: string, chatName: string): string {
   return `${droneId}\u0000${chatName}`;
-}
-
-function memoryPromptMap(droneId: string, chatName: string): Map<string, StoredPendingPrompt> {
-  const key = chatStoreKey(droneId, chatName);
-  let map = memoryPrompts.get(key);
-  if (!map) {
-    map = new Map<string, StoredPendingPrompt>();
-    memoryPrompts.set(key, map);
-  }
-  return map;
-}
-
-function memoryTurnMap(droneId: string, chatName: string): Map<string, StoredTranscriptTurn> {
-  const key = chatStoreKey(droneId, chatName);
-  let map = memoryTurns.get(key);
-  if (!map) {
-    map = new Map<string, StoredTranscriptTurn>();
-    memoryTurns.set(key, map);
-  }
-  return map;
-}
-
-function loadDatabaseConstructor(): DatabaseConstructor | null {
-  try {
-    // Keep this dynamic so Bun-based tests can import the server even when the
-    // native Node binding was compiled for Node's ABI.
-    return requireForTranscriptStore('better-sqlite3') as DatabaseConstructor;
-  } catch (error: any) {
-    unavailableReason = error?.message ?? String(error);
-    return null;
-  }
-}
-
-function transcriptStorePath(): string {
-  return hubSqlitePath();
 }
 
 function stableJson(value: unknown): string {
   return JSON.stringify(value ?? null);
 }
 
-function jsonOrNull(value: unknown): string | null {
-  if (value === undefined) return null;
-  return stableJson(value);
-}
-
-export function transcriptTurnsSourceHash(turnsRaw: unknown): string {
-  const turns = Array.isArray(turnsRaw) ? turnsRaw : [];
-  return crypto.createHash('sha256').update(stableJson(turns), 'utf8').digest('base64url');
-}
-
-export function chatEntrySourceHash(chatEntryRaw: unknown): string {
-  return crypto.createHash('sha256').update(stableJson(chatEntryRaw), 'utf8').digest('base64url');
-}
-
-function jsonParseObject(raw: string): StoredTranscriptTurn {
-  try {
-    const parsed = JSON.parse(raw);
-    return parsed && typeof parsed === 'object' ? (parsed as StoredTranscriptTurn) : ({ at: '', prompt: '', ok: false, output: '' });
-  } catch {
-    return { at: '', prompt: '', ok: false, output: '' };
-  }
-}
-
-function jsonParseAny(raw: string): any {
+function parseJson(raw: string): any {
   try {
     return JSON.parse(raw);
   } catch {
@@ -186,33 +329,25 @@ function jsonParseAny(raw: string): any {
   }
 }
 
-function jsonParseNullable(raw: string | null | undefined): any {
-  if (typeof raw !== 'string') return undefined;
-  return jsonParseAny(raw);
-}
-
 function parseIsoMs(raw: unknown): number {
-  const text = typeof raw === 'string' ? raw.trim() : '';
-  if (!text) return 0;
-  const ms = new Date(text).getTime();
+  const ms = Date.parse(typeof raw === 'string' ? raw : '');
   return Number.isFinite(ms) ? ms : 0;
 }
 
 function normalizeTurn(raw: any): StoredTranscriptTurn {
   const at = String(raw?.at ?? new Date().toISOString());
-  const id = typeof raw?.id === 'string' && raw.id.trim() ? String(raw.id).trim() : undefined;
-  const promptAt = typeof raw?.promptAt === 'string' && raw.promptAt.trim() ? String(raw.promptAt).trim() : undefined;
-  const completedAt = typeof raw?.completedAt === 'string' && raw.completedAt.trim() ? String(raw.completedAt).trim() : undefined;
-  const error = raw?.ok ? undefined : String(raw?.error ?? 'failed');
+  const id = typeof raw?.id === 'string' && raw.id.trim() ? raw.id.trim() : undefined;
   return {
     at,
     ...(id ? { id } : {}),
     prompt: String(raw?.prompt ?? ''),
     ok: Boolean(raw?.ok),
     output: raw?.ok ? String(raw?.output ?? '') : '',
-    ...(error ? { error } : {}),
-    ...(promptAt ? { promptAt } : {}),
-    ...(completedAt ? { completedAt } : {}),
+    ...(!raw?.ok ? { error: String(raw?.error ?? 'failed') } : {}),
+    ...(typeof raw?.promptAt === 'string' && raw.promptAt.trim() ? { promptAt: raw.promptAt.trim() } : {}),
+    ...(typeof raw?.completedAt === 'string' && raw.completedAt.trim() ? { completedAt: raw.completedAt.trim() } : {}),
+    ...(typeof raw?.model === 'string' && raw.model.trim() ? { model: raw.model.trim() } : {}),
+    ...(typeof raw?.reasoning === 'string' && raw.reasoning.trim() ? { reasoning: raw.reasoning.trim() } : {}),
     ...(Array.isArray(raw?.attachments) ? { attachments: raw.attachments } : {}),
     ...(raw?.automation && typeof raw.automation === 'object' ? { automation: raw.automation } : {}),
     ...(raw?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
@@ -224,1049 +359,1735 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
   };
 }
 
-function sortTranscriptTurns(turnsRaw: unknown): StoredTranscriptTurn[] {
-  const rawList = Array.isArray(turnsRaw) ? turnsRaw : [];
-  return rawList
-    .map((t, idx) => ({ t: normalizeTurn(t), idx }))
+function sortedTurns(turns: Iterable<StoredTranscriptTurn>): StoredTranscriptTurn[] {
+  return [...turns]
+    .map((turn, ordinal) => ({ turn: normalizeTurn(turn), ordinal }))
     .sort((a, b) => {
-      const aa = parseIsoMs((a.t as any).promptAt ?? (a.t as any).at);
-      const bb = parseIsoMs((b.t as any).promptAt ?? (b.t as any).at);
-      if (aa !== bb) return aa - bb;
-      return a.idx - b.idx;
+      const delta = parseIsoMs(a.turn.promptAt ?? a.turn.at) - parseIsoMs(b.turn.promptAt ?? b.turn.at);
+      if (delta !== 0) return delta;
+      const completedDelta = parseIsoMs(a.turn.completedAt) - parseIsoMs(b.turn.completedAt);
+      return completedDelta || a.ordinal - b.ordinal;
     })
-    .map((item) => item.t);
+    .map((item) => item.turn);
 }
 
-function metadataHashForTurn(turn: StoredTranscriptTurn, ordinal: number): string {
-  return crypto
-    .createHash('sha256')
-    .update(`${ordinal}\n${turn.id ?? ''}\n${turn.at}\n${turn.promptAt ?? ''}\n${turn.completedAt ?? ''}\n${turn.prompt}`, 'utf8')
-    .digest('hex')
-    .slice(0, 24);
+function turnId(turn: StoredTranscriptTurn): string {
+  if (turn.id) return turn.id;
+  return `legacy:${crypto.createHash('sha256').update(stableJson(turn)).digest('hex').slice(0, 32)}`;
 }
 
-function turnKey(turn: StoredTranscriptTurn, ordinal: number): string {
-  return turn.id ? `id:${turn.id}` : `ordinal:${ordinal}:${metadataHashForTurn(turn, ordinal)}`;
+function metadata(chatEntry: any): any {
+  const value = chatEntry && typeof chatEntry === 'object' ? { ...chatEntry } : {};
+  delete value.turns;
+  delete value.pendingPrompts;
+  return value;
 }
 
-function normalizePendingPrompt(raw: any): StoredPendingPrompt | null {
-  const id = typeof raw?.id === 'string' && raw.id.trim() ? String(raw.id).trim() : '';
-  const prompt = String(raw?.prompt ?? '');
-  if (!id || !prompt.trim()) return null;
-  const at = typeof raw?.at === 'string' && raw.at.trim() ? String(raw.at).trim() : new Date().toISOString();
-  const updatedAt = typeof raw?.updatedAt === 'string' && raw.updatedAt.trim() ? String(raw.updatedAt).trim() : at;
-  const stateRaw = String(raw?.state ?? '').trim();
-  const state = stateRaw === 'queued' || stateRaw === 'sending' || stateRaw === 'sent' || stateRaw === 'failed' ? stateRaw : 'sending';
-  const observability = normalizeStoredObservability(raw?.observability);
-  return {
-    id,
-    at,
-    prompt,
-    ...(typeof raw?.messageId === 'string' && raw.messageId.trim() ? { messageId: String(raw.messageId).trim() } : {}),
-    ...(typeof raw?.cwd === 'string' ? { cwd: String(raw.cwd) } : raw?.cwd === null ? { cwd: null } : {}),
-    ...(Array.isArray(raw?.attachments) ? { attachments: raw.attachments } : {}),
-    ...(raw?.automation && typeof raw.automation === 'object' ? { automation: raw.automation } : {}),
-    ...(raw?.blockedByAutomation === true ? { blockedByAutomation: true } : {}),
-    state,
-    ...(typeof raw?.error === 'string' ? { error: raw.error } : {}),
-    ...(observability ? { observability } : {}),
-    updatedAt,
-  };
+function archivedChatValue(raw: unknown): {
+  chat: any;
+  archivedAt: string;
+  deleteAt: string;
+  archiveRetention: string;
+} | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const value = { ...(raw as Record<string, any>) };
+  const archivedAtRaw = String(value.archivedAt ?? '').trim();
+  const archivedAt = Number.isFinite(Date.parse(archivedAtRaw)) ? archivedAtRaw : new Date().toISOString();
+  const archiveRetentionRaw = String(value.archiveRetention ?? '').trim();
+  const archiveRetention = ['1h', '8h', '1d', '1w'].includes(archiveRetentionRaw) ? archiveRetentionRaw : '1d';
+  const retentionMs = archiveRetention === '1h'
+    ? 60 * 60 * 1000
+    : archiveRetention === '8h'
+      ? 8 * 60 * 60 * 1000
+      : archiveRetention === '1w'
+        ? 7 * 24 * 60 * 60 * 1000
+        : 24 * 60 * 60 * 1000;
+  const deleteAtRaw = String(value.deleteAt ?? '').trim();
+  const deleteAt = Number.isFinite(Date.parse(deleteAtRaw))
+    ? deleteAtRaw
+    : new Date(Date.parse(archivedAt) + retentionMs).toISOString();
+  delete value.archivedAt;
+  delete value.deleteAt;
+  delete value.archiveRetention;
+  return { chat: value, archivedAt, deleteAt, archiveRetention };
 }
 
-function normalizeStoredObservability(raw: any): StoredPendingPrompt['observability'] | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  if (String(raw.state ?? '').trim() !== 'status-unavailable') return undefined;
-  const lastCheckedAt = String(raw.lastCheckedAt ?? '').trim();
-  const message = String(raw.message ?? '').trim() || 'Prompt status is temporarily unavailable.';
-  return {
-    state: 'status-unavailable',
-    message,
-    lastCheckedAt: lastCheckedAt || new Date().toISOString(),
-    ...(typeof raw.lastError === 'string' && String(raw.lastError).trim() ? { lastError: String(raw.lastError).trim() } : {}),
-  };
-}
-
-function promptFromRow(row: any): StoredPendingPrompt | null {
+function archivedChatRecord(row: ArchivedChatRow | undefined): ArchivedChatRecord | null {
   if (!row) return null;
-  const parsed = jsonParseNullable(row.prompt_json);
-  const base = parsed && typeof parsed === 'object' ? parsed : {};
-  return normalizePendingPrompt({
-    ...base,
-    id: row.prompt_id,
-    at: row.created_at,
-    prompt: row.prompt,
-    messageId: row.message_id ?? base.messageId,
-    cwd: row.cwd ?? base.cwd,
-    attachments: jsonParseNullable(row.attachments_json) ?? base.attachments,
-    automation: jsonParseNullable(row.automation_json) ?? base.automation,
-    blockedByAutomation: Number(row.blocked_by_automation ?? 0) === 1,
-    state: row.state,
-    error: row.error ?? base.error,
-    observability: base.observability,
-    updatedAt: row.updated_at,
+  return {
+    droneId: row.drone_id,
+    chatName: row.chat_name,
+    chat: parseJson(row.chat_json),
+    archivedAt: row.archived_at,
+    deleteAt: row.delete_at,
+    archiveRetention: row.archive_retention,
+  };
+}
+
+function safeMetadataField(raw: unknown): string | null {
+  const field = String(raw ?? '').trim();
+  if (!field || field === 'turns' || field === 'pendingPrompts' || field === '__proto__' || field === 'constructor' || field === 'prototype') {
+    return null;
+  }
+  return field;
+}
+
+function applyMetadataPatch(currentRaw: unknown, patch?: ChatMetadataPatch): { metadata: Record<string, unknown>; changed: boolean; fields: string[] } {
+  const current = currentRaw && typeof currentRaw === 'object' && !Array.isArray(currentRaw)
+    ? { ...(currentRaw as Record<string, unknown>) }
+    : {};
+  const fields = new Set<string>();
+  for (const [rawField, value] of Object.entries(patch?.setIfMissing ?? {})) {
+    const field = safeMetadataField(rawField);
+    if (!field || (typeof current[field] === 'string' ? String(current[field]).trim() : current[field] != null)) continue;
+    current[field] = value;
+    fields.add(field);
+  }
+  for (const [rawField, value] of Object.entries(patch?.set ?? {})) {
+    const field = safeMetadataField(rawField);
+    if (!field || stableJson(current[field]) === stableJson(value)) continue;
+    current[field] = value;
+    fields.add(field);
+  }
+  for (const rawField of patch?.unset ?? []) {
+    const field = safeMetadataField(rawField);
+    if (!field || !Object.prototype.hasOwnProperty.call(current, field)) continue;
+    delete current[field];
+    fields.add(field);
+  }
+  return { metadata: current, changed: fields.size > 0, fields: [...fields].sort() };
+}
+
+function turnsWithLegacySubmissionTimes(chatEntry: any): StoredTranscriptTurn[] {
+  const submittedAtById = new Map<string, string>();
+  for (const prompt of Array.isArray(chatEntry?.pendingPrompts) ? chatEntry.pendingPrompts : []) {
+    const id = String(prompt?.id ?? '').trim();
+    const at = String(prompt?.at ?? '').trim();
+    if (id && at) submittedAtById.set(id, at);
+  }
+  return (Array.isArray(chatEntry?.turns) ? chatEntry.turns : []).map((raw: any) => {
+    const turn = normalizeTurn(raw);
+    const submittedAt = turn.id ? submittedAtById.get(turn.id) : null;
+    return submittedAt ? { ...turn, at: submittedAt, promptAt: submittedAt } : turn;
   });
 }
 
-function normalizeChatEntryForStorage(raw: unknown): any {
-  return raw && typeof raw === 'object' ? raw : {};
+export function transcriptTurnsSourceHash(turnsRaw: unknown): string {
+  return crypto
+    .createHash('sha256')
+    .update(stableJson(Array.isArray(turnsRaw) ? turnsRaw : []))
+    .digest('base64url');
 }
 
-function chatMetadataForStorage(chatEntryRaw: unknown): any {
-  const chatEntry = normalizeChatEntryForStorage(chatEntryRaw);
-  const out = { ...chatEntry };
-  delete out.turns;
-  delete out.pendingPrompts;
-  return out;
+export function chatEntrySourceHash(chatEntryRaw: unknown): string {
+  return crypto.createHash('sha256').update(stableJson(chatEntryRaw)).digest('base64url');
 }
 
-function sortPendingPrompts(prompts: StoredPendingPrompt[]): StoredPendingPrompt[] {
-  return prompts
-    .map((p, idx) => ({ p, idx }))
-    .sort((a, b) => {
-      const aa = parseIsoMs(a.p.at);
-      const bb = parseIsoMs(b.p.at);
-      if (aa !== bb) return aa - bb;
-      return a.idx - b.idx;
-    })
-    .map((item) => item.p);
+function refreshTranscriptMetadata(connection: HubDatabaseConnection, droneId: string, chatName: string): TranscriptImportResult {
+  const rows = connection
+    .prepare(`SELECT turn_json FROM canonical_chat_turns
+              WHERE drone_id = ? AND chat_name = ?
+              ORDER BY COALESCE(prompt_at, at), completed_at, ordinal, turn_id`)
+    .all(droneId, chatName) as TurnRow[];
+  const sourceHash = transcriptTurnsSourceHash(rows.map((row) => normalizeTurn(parseJson(row.turn_json))));
+  const current = connection
+    .prepare(`SELECT transcript_version, turns_source_hash FROM canonical_chats
+              WHERE drone_id = ? AND chat_name = ?`)
+    .get(droneId, chatName) as { transcript_version: number; turns_source_hash: string } | undefined;
+  if (!current) return { available: true, transcriptVersion: 0, sourceHash };
+  const version = current.turns_source_hash === sourceHash
+    ? Number(current.transcript_version)
+    : Number(current.transcript_version) + 1;
+  connection
+    .prepare(`UPDATE canonical_chats SET transcript_version = ?, turns_source_hash = ?, updated_at = ?
+              WHERE drone_id = ? AND chat_name = ?`)
+    .run(version, sourceHash, new Date().toISOString(), droneId, chatName);
+  return { available: true, transcriptVersion: version, sourceHash };
 }
 
-class TranscriptStore {
-  private replaceChatTx: (droneId: string, chatName: string, sourceHash: string, importedAt: string, turns: StoredTranscriptTurn[]) => void;
-  private replaceDroneChatsTx: (droneId: string, chatEntries: Array<{ chatName: string; chatEntry: any; sourceHash: string; importedAt: string }>) => void;
-  private upsertPromptStmt!: import('better-sqlite3').Statement;
-  private updatePromptStmt!: import('better-sqlite3').Statement;
-  private claimPromptStmt!: import('better-sqlite3').Statement;
-  private deleteQueuedPromptStmt!: import('better-sqlite3').Statement;
-  private upsertTurnStmt!: import('better-sqlite3').Statement;
+function appendChatEvent(
+  connection: HubDatabaseConnection,
+  eventType: string,
+  droneId: string,
+  chatName: string,
+  payload: unknown,
+): void {
+  appendHubOutboxEvent(connection, {
+    topic: 'chat.changes',
+    eventType,
+    aggregateType: 'chat',
+    aggregateId: key(droneId, chatName),
+    payload: { droneId, chatName, ...(payload && typeof payload === 'object' ? payload : {}) },
+  });
+}
 
-  constructor(private readonly db: DatabaseInstance) {
-    this.db.pragma('journal_mode = WAL');
-    this.db.pragma('synchronous = NORMAL');
-    this.db.exec(`
-      CREATE TABLE IF NOT EXISTS transcript_chats (
-        drone_id TEXT NOT NULL,
-        chat_name TEXT NOT NULL,
-        transcript_version INTEGER NOT NULL DEFAULT 0,
-        source_hash TEXT NOT NULL DEFAULT '',
-        imported_at TEXT NOT NULL,
-        PRIMARY KEY (drone_id, chat_name)
-      );
-
-      CREATE TABLE IF NOT EXISTS transcript_turns (
-        drone_id TEXT NOT NULL,
-        chat_name TEXT NOT NULL,
-        turn_key TEXT NOT NULL,
-        ordinal INTEGER NOT NULL,
-        at TEXT NOT NULL,
-        prompt_at TEXT,
-        completed_at TEXT,
-        prompt TEXT NOT NULL,
-        ok INTEGER NOT NULL,
-        output TEXT NOT NULL,
-        error TEXT,
-        inherited_from_clone INTEGER NOT NULL DEFAULT 0,
-        turn_json TEXT NOT NULL,
-        PRIMARY KEY (drone_id, chat_name, turn_key)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_transcript_turns_chat_ordinal
-        ON transcript_turns (drone_id, chat_name, ordinal);
-
-      CREATE TABLE IF NOT EXISTS hub_chats (
-        drone_id TEXT NOT NULL,
-        chat_name TEXT NOT NULL,
-        source_hash TEXT NOT NULL DEFAULT '',
-        imported_at TEXT NOT NULL,
-        created_at TEXT,
-        chat_json TEXT NOT NULL,
-        PRIMARY KEY (drone_id, chat_name)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_hub_chats_drone_name
-        ON hub_chats (drone_id, chat_name);
-
-      CREATE TABLE IF NOT EXISTS chat_prompts (
-        drone_id TEXT NOT NULL,
-        chat_name TEXT NOT NULL,
-        prompt_id TEXT NOT NULL,
-        created_at TEXT NOT NULL,
-        updated_at TEXT NOT NULL,
-        state TEXT NOT NULL,
-        prompt TEXT NOT NULL,
-        message_id TEXT,
-        cwd TEXT,
-        attachments_json TEXT,
-        automation_json TEXT,
-        blocked_by_automation INTEGER NOT NULL DEFAULT 0,
-        error TEXT,
-        prompt_json TEXT NOT NULL,
-        PRIMARY KEY (drone_id, chat_name, prompt_id)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_chat_prompts_chat_created
-        ON chat_prompts (drone_id, chat_name, created_at);
-
-      CREATE INDEX IF NOT EXISTS idx_chat_prompts_chat_state
-        ON chat_prompts (drone_id, chat_name, state, updated_at);
-
-      CREATE TABLE IF NOT EXISTS chat_turns (
-        drone_id TEXT NOT NULL,
-        chat_name TEXT NOT NULL,
-        prompt_id TEXT NOT NULL,
-        at TEXT NOT NULL,
-        prompt_at TEXT,
-        completed_at TEXT,
-        prompt TEXT NOT NULL,
-        ok INTEGER NOT NULL,
-        output TEXT NOT NULL,
-        error TEXT,
-        turn_json TEXT NOT NULL,
-        PRIMARY KEY (drone_id, chat_name, prompt_id)
-      );
-
-      CREATE INDEX IF NOT EXISTS idx_chat_turns_chat_prompt_at
-        ON chat_turns (drone_id, chat_name, prompt_at, at);
-    `);
-
-    this.upsertPromptStmt = this.db.prepare(`
-      INSERT INTO chat_prompts (
-        drone_id,
-        chat_name,
-        prompt_id,
-        created_at,
-        updated_at,
-        state,
-        prompt,
-        message_id,
-        cwd,
-        attachments_json,
-        automation_json,
-        blocked_by_automation,
-        error,
-        prompt_json
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(drone_id, chat_name, prompt_id) DO UPDATE SET
-        created_at = CASE
-          WHEN chat_prompts.created_at IS NULL OR chat_prompts.created_at = '' THEN excluded.created_at
-          ELSE chat_prompts.created_at
-        END,
-        updated_at = excluded.updated_at,
-        state = excluded.state,
-        prompt = CASE WHEN excluded.prompt != '' THEN excluded.prompt ELSE chat_prompts.prompt END,
-        message_id = COALESCE(excluded.message_id, chat_prompts.message_id),
-        cwd = COALESCE(excluded.cwd, chat_prompts.cwd),
-        attachments_json = COALESCE(excluded.attachments_json, chat_prompts.attachments_json),
-        automation_json = COALESCE(excluded.automation_json, chat_prompts.automation_json),
-        blocked_by_automation = CASE
-          WHEN excluded.blocked_by_automation = 1 THEN 1
-          ELSE chat_prompts.blocked_by_automation
-        END,
-        error = excluded.error,
-        prompt_json = excluded.prompt_json
-    `);
-
-    this.updatePromptStmt = this.db.prepare(`
-      UPDATE chat_prompts
-      SET
-        updated_at = ?,
-        state = COALESCE(?, state),
-        error = ?,
-        prompt_json = ?
-      WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?
-    `);
-
-    this.claimPromptStmt = this.db.prepare(`
-      UPDATE chat_prompts
-      SET
-        state = 'sending',
-        error = NULL,
-        updated_at = ?,
-        prompt_json = ?
-      WHERE drone_id = ? AND chat_name = ? AND prompt_id = ? AND state = 'queued'
-    `);
-
-    this.deleteQueuedPromptStmt = this.db.prepare(`
-      DELETE FROM chat_prompts
-      WHERE drone_id = ? AND chat_name = ? AND prompt_id = ? AND state = 'queued'
-    `);
-
-    this.upsertTurnStmt = this.db.prepare(`
-      INSERT INTO chat_turns (
-        drone_id,
-        chat_name,
-        prompt_id,
-        at,
-        prompt_at,
-        completed_at,
-        prompt,
-        ok,
-        output,
-        error,
-        turn_json
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      ON CONFLICT(drone_id, chat_name, prompt_id) DO UPDATE SET
-        at = excluded.at,
-        prompt_at = excluded.prompt_at,
-        completed_at = excluded.completed_at,
-        prompt = excluded.prompt,
-        ok = excluded.ok,
-        output = excluded.output,
-        error = excluded.error,
-        turn_json = excluded.turn_json
-    `);
-
-    const deleteTurns = this.db.prepare('DELETE FROM transcript_turns WHERE drone_id = ? AND chat_name = ?');
-    const upsertChat = this.db.prepare(`
-      INSERT INTO transcript_chats (drone_id, chat_name, transcript_version, source_hash, imported_at)
-      VALUES (?, ?, 1, ?, ?)
-      ON CONFLICT(drone_id, chat_name) DO UPDATE SET
-        transcript_version = CASE
-          WHEN transcript_chats.source_hash = excluded.source_hash THEN transcript_chats.transcript_version
-          ELSE transcript_chats.transcript_version + 1
-        END,
-        source_hash = excluded.source_hash,
-        imported_at = excluded.imported_at
-    `);
-    const insertTurn = this.db.prepare(`
-      INSERT INTO transcript_turns (
-        drone_id,
-        chat_name,
-        turn_key,
-        ordinal,
-        at,
-        prompt_at,
-        completed_at,
-        prompt,
-        ok,
-        output,
-        error,
-        inherited_from_clone,
-        turn_json
-      )
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-
-    this.replaceChatTx = this.db.transaction(
-      (droneId: string, chatName: string, sourceHash: string, importedAt: string, turns: StoredTranscriptTurn[]) => {
-        upsertChat.run(droneId, chatName, sourceHash, importedAt);
-        for (const turn of turns) this.upsertTurn(droneId, chatName, turn);
-        const projectedTurns = this.projectTurns(droneId, chatName);
-        deleteTurns.run(droneId, chatName);
-        projectedTurns.forEach((turn, idx) => {
-          const ordinal = idx + 1;
-          insertTurn.run(
-            droneId,
-            chatName,
-            turnKey(turn, ordinal),
-            ordinal,
-            turn.at,
-            turn.promptAt ?? null,
-            turn.completedAt ?? null,
-            turn.prompt,
-            turn.ok ? 1 : 0,
-            turn.output,
-            turn.error ?? null,
-            turn.inheritedFromClone === true ? 1 : 0,
-            stableJson(turn),
-          );
-        });
-      },
-    ) as any;
-
-    const listDroneChats = this.db.prepare('SELECT chat_name FROM hub_chats WHERE drone_id = ?');
-    const deleteDroneChats = this.db.prepare('DELETE FROM hub_chats WHERE drone_id = ?');
-    const deleteChatPrompts = this.db.prepare('DELETE FROM chat_prompts WHERE drone_id = ? AND chat_name = ?');
-    const deleteChatTurns = this.db.prepare('DELETE FROM chat_turns WHERE drone_id = ? AND chat_name = ?');
-    const deleteTranscriptChat = this.db.prepare('DELETE FROM transcript_chats WHERE drone_id = ? AND chat_name = ?');
-    const upsertHubChat = this.db.prepare(`
-      INSERT INTO hub_chats (drone_id, chat_name, source_hash, imported_at, created_at, chat_json)
-      VALUES (?, ?, ?, ?, ?, ?)
-      ON CONFLICT(drone_id, chat_name) DO UPDATE SET
-        source_hash = excluded.source_hash,
-        imported_at = excluded.imported_at,
-        created_at = excluded.created_at,
-        chat_json = excluded.chat_json
-    `);
-    this.replaceDroneChatsTx = this.db.transaction(
-      (droneId: string, chatEntries: Array<{ chatName: string; chatEntry: any; sourceHash: string; importedAt: string }>) => {
-        const incomingChatNames = new Set(chatEntries.map((entry) => entry.chatName));
-        const existingRows = listDroneChats.all(droneId) as Array<{ chat_name?: string }>;
-        for (const row of existingRows) {
-          const existingChatName = String(row.chat_name ?? '').trim();
-          if (!existingChatName || incomingChatNames.has(existingChatName)) continue;
-          deleteChatPrompts.run(droneId, existingChatName);
-          deleteChatTurns.run(droneId, existingChatName);
-          deleteTurns.run(droneId, existingChatName);
-          deleteTranscriptChat.run(droneId, existingChatName);
-        }
-        deleteDroneChats.run(droneId);
-        for (const item of chatEntries) {
-          upsertHubChat.run(
-            droneId,
-            item.chatName,
-            item.sourceHash,
-            item.importedAt,
-            typeof item.chatEntry?.createdAt === 'string' ? item.chatEntry.createdAt : null,
-            stableJson(chatMetadataForStorage(item.chatEntry)),
-          );
-          this.importPromptRows(item.chatName, droneId, item.chatEntry);
-          this.importTurnRows(item.chatName, droneId, item.chatEntry);
-        }
-      },
-    ) as any;
-
-    this.migrateHubChatJsonRowsToNormalizedTables();
+export class ChatTranscriptRepository {
+  constructor(private readonly database: HubDatabase) {
+    database.read((connection) => applyHubDatabaseMigrations(connection, CHAT_STORE_MIGRATIONS, 'chats'));
+    initializeHubOutbox(database);
   }
 
-  importDroneChatsFromRegistry(opts: { droneId: string; chats: unknown }): ChatStoreListResult {
-    const chats = opts.chats && typeof opts.chats === 'object' && !Array.isArray(opts.chats) ? (opts.chats as Record<string, any>) : {};
-    const importedAt = new Date().toISOString();
-    const entries = Object.entries(chats).map(([chatName, chatEntry]) => ({
-      chatName,
-      chatEntry,
-      sourceHash: chatEntrySourceHash(chatEntry),
-      importedAt,
-    }));
-    this.replaceDroneChatsTx(opts.droneId, entries);
-    return { available: true, chats: entries.map((entry) => entry.chatName) };
+  async backfillDroneChats(opts: { droneId: string; chats: unknown }): Promise<ChatStoreListResult> {
+    const chats = opts.chats && typeof opts.chats === 'object' && !Array.isArray(opts.chats)
+      ? (opts.chats as Record<string, any>)
+      : {};
+    return await this.database.writeTransaction('backfill legacy drone chats', (connection) => {
+      for (const [chatName, entry] of Object.entries(chats)) this.insertMissingChat(connection, opts.droneId, chatName, entry);
+      return this.listChatsWithConnection(connection, opts.droneId);
+    });
   }
 
-  importChatFromRegistry(opts: { droneId: string; chatName: string; chatEntry: unknown; sourceHash?: string }): ChatStoreImportResult {
-    const sourceHash = opts.sourceHash ?? chatEntrySourceHash(opts.chatEntry);
-    const chatEntry = opts.chatEntry && typeof opts.chatEntry === 'object' ? opts.chatEntry : {};
-    this.db
-      .prepare(
-        `
-          INSERT INTO hub_chats (drone_id, chat_name, source_hash, imported_at, created_at, chat_json)
-          VALUES (?, ?, ?, ?, ?, ?)
-          ON CONFLICT(drone_id, chat_name) DO UPDATE SET
-            source_hash = excluded.source_hash,
-            imported_at = excluded.imported_at,
-            created_at = excluded.created_at,
-            chat_json = excluded.chat_json
-        `,
-      )
-      .run(
+  async backfillChat(opts: { droneId: string; chatName: string; chatEntry: unknown; sourceHash?: string }): Promise<ChatStoreImportResult> {
+    return await this.database.writeTransaction('backfill legacy chat', (connection) => {
+      this.insertMissingChat(connection, opts.droneId, opts.chatName, opts.chatEntry, opts.sourceHash);
+      const row = this.chatRow(connection, opts.droneId, opts.chatName);
+      return { available: true, sourceHash: row?.source_hash ?? '' };
+    });
+  }
+
+  async createChat(opts: {
+    droneId: string;
+    chatName: string;
+    copyFromChatName?: string;
+    implicitDefaultEntry?: unknown;
+    createEntry: (source: any | null) => unknown;
+  }): Promise<CreateChatStoreResult> {
+    return await this.database.writeTransaction('create canonical chat', (connection) => {
+      if (this.chatRow(connection, opts.droneId, opts.chatName)) throw new Error(`chat already exists: ${opts.chatName}`);
+      let source: any | null = null;
+      if (opts.copyFromChatName) {
+        source = this.projectChatWithConnection(connection, opts.droneId, opts.copyFromChatName);
+        if (!source && opts.copyFromChatName === 'default' && this.listChatsWithConnection(connection, opts.droneId).chats.length === 0) {
+          this.writeChatWithConnection(connection, opts.droneId, 'default', opts.implicitDefaultEntry ?? {});
+          source = this.projectChatWithConnection(connection, opts.droneId, 'default');
+        }
+        if (!source) throw new Error(`unknown chat: ${opts.copyFromChatName}`);
+      }
+      const entry = opts.createEntry(source);
+      this.writeChatWithConnection(connection, opts.droneId, opts.chatName, entry);
+      appendChatEvent(connection, 'chat.created', opts.droneId, opts.chatName, {
+        ...(opts.copyFromChatName ? { copiedFromChatName: opts.copyFromChatName } : {}),
+      });
+      return {
+        available: true,
+        chat: this.projectChatWithConnection(connection, opts.droneId, opts.chatName),
+        chats: this.listChatsWithConnection(connection, opts.droneId).chats,
+      };
+    });
+  }
+
+  async updateChat(opts: {
+    droneId: string;
+    chatName: string;
+    update: (chat: any) => unknown;
+  }): Promise<UpdateChatStoreResult> {
+    return await this.database.writeTransaction('update canonical chat', (connection) => {
+      const current = this.projectChatWithConnection(connection, opts.droneId, opts.chatName);
+      if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
+      const next = opts.update(current);
+      this.writeChatWithConnection(connection, opts.droneId, opts.chatName, next);
+      appendChatEvent(connection, 'chat.updated', opts.droneId, opts.chatName, {});
+      return {
+        available: true,
+        chat: this.projectChatWithConnection(connection, opts.droneId, opts.chatName),
+        chats: this.listChatsWithConnection(connection, opts.droneId).chats,
+      };
+    });
+  }
+
+  async deleteActiveChat(opts: {
+    droneId: string;
+    chatName: string;
+    fallbackChat?: { chatName: string; chatEntry: unknown };
+  }): Promise<DeleteActiveChatStoreResult> {
+    return await this.database.writeTransaction('delete active canonical chat', (connection) => {
+      if (opts.chatName === 'default') throw new Error('cannot delete default chat');
+      const current = this.projectChatWithConnection(connection, opts.droneId, opts.chatName);
+      if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
+      connection.prepare('DELETE FROM canonical_chats WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.chatName);
+      connection.prepare(`INSERT OR REPLACE INTO canonical_chat_tombstones (
+        drone_id, chat_name, reason, replacement_chat_name, deleted_at
+      ) VALUES (?, ?, 'deleted', NULL, ?)`).run(opts.droneId, opts.chatName, new Date().toISOString());
+      if (this.listChatsWithConnection(connection, opts.droneId).chats.length === 0 && opts.fallbackChat) {
+        this.writeChatWithConnection(connection, opts.droneId, opts.fallbackChat.chatName, opts.fallbackChat.chatEntry);
+      }
+      appendChatEvent(connection, 'chat.deleted', opts.droneId, opts.chatName, {});
+      return {
+        available: true,
+        deletedChat: current,
+        chats: this.listChatsWithConnection(connection, opts.droneId).chats,
+      };
+    });
+  }
+
+  async backfillArchivedChats(opts: { droneId: string; archivedChats: unknown }): Promise<ArchivedChatStoreListResult> {
+    const archivedChats = opts.archivedChats && typeof opts.archivedChats === 'object' && !Array.isArray(opts.archivedChats)
+      ? opts.archivedChats as Record<string, unknown>
+      : {};
+    return await this.database.writeTransaction('backfill legacy archived chats', (connection) => {
+      if (this.droneChatTombstoned(connection, opts.droneId)) {
+        return this.listArchivedChatsWithConnection(connection, opts.droneId);
+      }
+      for (const [chatName, raw] of Object.entries(archivedChats)) {
+        const value = archivedChatValue(raw);
+        if (!value) continue;
+        const tombstone = connection.prepare(`SELECT 1 FROM canonical_archived_chat_tombstones
+          WHERE drone_id = ? AND chat_name = ?`).get(opts.droneId, chatName);
+        if (tombstone) continue;
+        connection.prepare(`INSERT OR IGNORE INTO canonical_archived_chats (
+          drone_id, chat_name, archived_at, delete_at, archive_retention, chat_json, source_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)`).run(
+          opts.droneId,
+          chatName,
+          value.archivedAt,
+          value.deleteAt,
+          value.archiveRetention,
+          stableJson(value.chat),
+          chatEntrySourceHash(value.chat),
+        );
+      }
+      return this.listArchivedChatsWithConnection(connection, opts.droneId);
+    });
+  }
+
+  async archiveChat(opts: {
+    droneId: string;
+    chatName: string;
+    archivedAt: string;
+    deleteAt: string;
+    archiveRetention: string;
+    fallbackChat?: { chatName: string; chatEntry: unknown };
+  }): Promise<ArchiveChatStoreResult> {
+    return await this.database.writeTransaction('archive canonical chat', (connection) => {
+      const chat = this.projectChatWithConnection(connection, opts.droneId, opts.chatName);
+      if (!chat) {
+        return { available: true, archived: false, archivedChat: null, chats: this.listChatsWithConnection(connection, opts.droneId).chats };
+      }
+      const record: ArchivedChatRecord = {
+        droneId: opts.droneId,
+        chatName: opts.chatName,
+        chat,
+        archivedAt: opts.archivedAt,
+        deleteAt: opts.deleteAt,
+        archiveRetention: opts.archiveRetention,
+      };
+      connection.prepare(`INSERT INTO canonical_archived_chats (
+        drone_id, chat_name, archived_at, delete_at, archive_retention, chat_json, source_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(drone_id, chat_name) DO UPDATE SET
+        archived_at = excluded.archived_at,
+        delete_at = excluded.delete_at,
+        archive_retention = excluded.archive_retention,
+        chat_json = excluded.chat_json,
+        source_hash = excluded.source_hash`).run(
+          opts.droneId,
+          opts.chatName,
+          opts.archivedAt,
+          opts.deleteAt,
+          opts.archiveRetention,
+          stableJson(chat),
+          chatEntrySourceHash(chat),
+        );
+      connection.prepare('DELETE FROM canonical_archived_chat_tombstones WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.chatName);
+      connection.prepare('DELETE FROM canonical_chats WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.chatName);
+      connection.prepare(`INSERT OR REPLACE INTO canonical_chat_tombstones (
+        drone_id, chat_name, reason, replacement_chat_name, deleted_at
+      ) VALUES (?, ?, 'deleted', NULL, ?)`).run(opts.droneId, opts.chatName, opts.archivedAt);
+      if (this.listChatsWithConnection(connection, opts.droneId).chats.length === 0 && opts.fallbackChat) {
+        this.writeChatWithConnection(connection, opts.droneId, opts.fallbackChat.chatName, opts.fallbackChat.chatEntry);
+      }
+      appendChatEvent(connection, 'chat.archived', opts.droneId, opts.chatName, {
+        archivedAt: opts.archivedAt,
+        deleteAt: opts.deleteAt,
+        archiveRetention: opts.archiveRetention,
+      });
+      return {
+        available: true,
+        archived: true,
+        archivedChat: record,
+        chats: this.listChatsWithConnection(connection, opts.droneId).chats,
+      };
+    });
+  }
+
+  async restoreArchivedChat(opts: {
+    droneId: string;
+    archivedChatName: string;
+    maxChatNameLength?: number;
+  }): Promise<RestoreArchivedChatStoreResult> {
+    return await this.database.writeTransaction('restore canonical archived chat', (connection) => {
+      const archived = this.archivedChatRow(connection, opts.droneId, opts.archivedChatName);
+      const record = archivedChatRecord(archived ?? undefined);
+      if (!record) {
+        return {
+          available: true,
+          restored: false,
+          chatName: opts.archivedChatName,
+          renamed: false,
+          chat: null,
+          chats: this.listChatsWithConnection(connection, opts.droneId).chats,
+        };
+      }
+      const chatName = this.allocateRestoredChatNameWithConnection(
+        connection,
+        opts.droneId,
+        opts.archivedChatName,
+        opts.maxChatNameLength ?? 64,
+      );
+      this.writeChatWithConnection(connection, opts.droneId, chatName, record.chat);
+      connection.prepare('DELETE FROM canonical_archived_chats WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.archivedChatName);
+      connection.prepare(`INSERT OR REPLACE INTO canonical_archived_chat_tombstones (
+        drone_id, chat_name, reason, deleted_at
+      ) VALUES (?, ?, 'restored', ?)`).run(opts.droneId, opts.archivedChatName, new Date().toISOString());
+      appendChatEvent(connection, 'chat.restored', opts.droneId, chatName, {
+        archivedChatName: opts.archivedChatName,
+      });
+      return {
+        available: true,
+        restored: true,
+        chatName,
+        renamed: chatName !== opts.archivedChatName,
+        chat: record.chat,
+        chats: this.listChatsWithConnection(connection, opts.droneId).chats,
+      };
+    });
+  }
+
+  async deleteArchivedChat(opts: { droneId: string; archivedChatName: string }): Promise<DeleteArchivedChatStoreResult> {
+    return await this.database.writeTransaction('delete canonical archived chat', (connection) => {
+      const record = archivedChatRecord(this.archivedChatRow(connection, opts.droneId, opts.archivedChatName) ?? undefined);
+      if (!record) return { available: true, deleted: false, archivedChat: null };
+      connection.prepare('DELETE FROM canonical_archived_chats WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.archivedChatName);
+      connection.prepare(`INSERT OR REPLACE INTO canonical_archived_chat_tombstones (
+        drone_id, chat_name, reason, deleted_at
+      ) VALUES (?, ?, 'deleted', ?)`).run(opts.droneId, opts.archivedChatName, new Date().toISOString());
+      appendChatEvent(connection, 'chat.archive.deleted', opts.droneId, opts.archivedChatName, {});
+      return { available: true, deleted: true, archivedChat: record };
+    });
+  }
+
+  listArchivedChats(opts: { droneId?: string } = {}): ArchivedChatStoreListResult {
+    return this.database.read((connection) => this.listArchivedChatsWithConnection(connection, opts.droneId));
+  }
+
+  readArchivedChat(opts: { droneId: string; chatName: string }): ArchivedChatRecord | null {
+    return this.database.read((connection) => archivedChatRecord(
+      this.archivedChatRow(connection, opts.droneId, opts.chatName) ?? undefined,
+    ));
+  }
+
+  async upsertChat(opts: { droneId: string; chatName: string; chatEntry: unknown }): Promise<ChatStoreImportResult> {
+    return await this.database.writeTransaction('upsert canonical chat', (connection) => {
+      if (this.droneChatTombstoned(connection, opts.droneId)) {
+        throw new Error(`cannot write chat for permanently deleted drone: ${opts.droneId}`);
+      }
+      const now = new Date().toISOString();
+      const value = opts.chatEntry && typeof opts.chatEntry === 'object' ? opts.chatEntry : {};
+      const sourceHash = chatEntrySourceHash(value);
+      const current = this.chatRow(connection, opts.droneId, opts.chatName);
+      connection.prepare(`
+        INSERT INTO canonical_chats (
+          drone_id, chat_name, created_at, updated_at, metadata_json, source_hash,
+          transcript_version, turns_source_hash
+        ) VALUES (?, ?, ?, ?, ?, ?, 0, '')
+        ON CONFLICT(drone_id, chat_name) DO UPDATE SET
+          updated_at = excluded.updated_at,
+          metadata_json = excluded.metadata_json,
+          source_hash = excluded.source_hash
+      `).run(
         opts.droneId,
         opts.chatName,
+        typeof (value as any).createdAt === 'string' ? (value as any).createdAt : null,
+        now,
+        stableJson(metadata(value)),
         sourceHash,
-        new Date().toISOString(),
-        typeof (chatEntry as any)?.createdAt === 'string' ? (chatEntry as any).createdAt : null,
-        stableJson(chatMetadataForStorage(chatEntry)),
       );
-    this.importPromptRows(opts.chatName, opts.droneId, chatEntry);
-    this.importTurnRows(opts.chatName, opts.droneId, chatEntry);
-    return { available: true, sourceHash };
+      connection.prepare('DELETE FROM canonical_chat_tombstones WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.chatName);
+      this.reconcileTurns(connection, opts.droneId, opts.chatName, turnsWithLegacySubmissionTimes(value), false);
+      appendChatEvent(connection, current ? 'chat.updated' : 'chat.created', opts.droneId, opts.chatName, {});
+      return { available: true, sourceHash };
+    });
+  }
+
+  async patchMetadata(opts: { droneId: string; chatName: string; patch: ChatMetadataPatch }): Promise<ChatMetadataPatchResult> {
+    return await this.database.writeTransaction('patch canonical chat metadata', (connection) => {
+      const row = this.chatRow(connection, opts.droneId, opts.chatName);
+      if (!row) throw new Error(`unknown chat: ${opts.chatName}`);
+      const result = this.patchMetadataWithConnection(connection, opts.droneId, opts.chatName, opts.patch);
+      if (result.changed) {
+        appendChatEvent(connection, 'chat.metadata.changed', opts.droneId, opts.chatName, { fields: result.fields });
+      }
+      return { available: true, changed: result.changed, metadata: result.metadata };
+    });
+  }
+
+  async applyReconciliation(opts: {
+    droneId: string;
+    chatName: string;
+    metadataPatch?: ChatMetadataPatch;
+    turns?: StoredTranscriptTurn[];
+  }): Promise<ChatStoreImportResult> {
+    return await this.database.writeTransaction('apply canonical chat reconciliation', (connection) => {
+      if (!this.chatRow(connection, opts.droneId, opts.chatName)) throw new Error(`unknown chat: ${opts.chatName}`);
+      const metadataResult = this.patchMetadataWithConnection(connection, opts.droneId, opts.chatName, opts.metadataPatch ?? {});
+      const changedTurnIds: string[] = [];
+      for (const raw of opts.turns ?? []) {
+        const turn = normalizeTurn(raw);
+        const id = turnId(turn);
+        if (this.upsertTurnWithConnection(connection, opts.droneId, opts.chatName, id, turn)) changedTurnIds.push(id);
+      }
+      const refreshed = changedTurnIds.length > 0
+        ? refreshTranscriptMetadata(connection, opts.droneId, opts.chatName)
+        : this.transcriptMetadata(connection, opts.droneId, opts.chatName);
+      if (metadataResult.changed || changedTurnIds.length > 0) {
+        appendChatEvent(connection, 'chat.reconciled', opts.droneId, opts.chatName, {
+          metadataFields: metadataResult.fields,
+          turnIds: changedTurnIds,
+        });
+      }
+      return { available: true, sourceHash: refreshed.sourceHash };
+    });
+  }
+
+  async renameChat(opts: { droneId: string; chatName: string; newChatName: string }): Promise<boolean> {
+    return await this.database.writeTransaction('rename canonical chat', (connection) => {
+      if (opts.chatName === 'default') throw new Error('cannot rename default chat');
+      if (opts.chatName === opts.newChatName) {
+        if (!this.chatRow(connection, opts.droneId, opts.chatName)) throw new Error(`unknown chat: ${opts.chatName}`);
+        return false;
+      }
+      if (this.chatRow(connection, opts.droneId, opts.newChatName)) throw new Error(`chat already exists: ${opts.newChatName}`);
+      const info = connection
+        .prepare(`UPDATE canonical_chats SET chat_name = ?, updated_at = ? WHERE drone_id = ? AND chat_name = ?`)
+        .run(opts.newChatName, new Date().toISOString(), opts.droneId, opts.chatName);
+      if (Number(info.changes) === 1) {
+        connection.prepare(`INSERT OR REPLACE INTO canonical_chat_tombstones (
+          drone_id, chat_name, reason, replacement_chat_name, deleted_at
+        ) VALUES (?, ?, 'renamed', ?, ?)`).run(
+          opts.droneId,
+          opts.chatName,
+          opts.newChatName,
+          new Date().toISOString(),
+        );
+        connection.prepare('DELETE FROM canonical_chat_tombstones WHERE drone_id = ? AND chat_name = ?')
+          .run(opts.droneId, opts.newChatName);
+        appendChatEvent(connection, 'chat.renamed', opts.droneId, opts.newChatName, { previousChatName: opts.chatName });
+        return true;
+      }
+      throw new Error(`unknown chat: ${opts.chatName}`);
+    });
+  }
+
+  async deleteChat(opts: { droneId: string; chatName: string }): Promise<boolean> {
+    return await this.database.writeTransaction('delete canonical chat', (connection) => {
+      const info = connection
+        .prepare('DELETE FROM canonical_chats WHERE drone_id = ? AND chat_name = ?')
+        .run(opts.droneId, opts.chatName);
+      connection.prepare(`INSERT OR REPLACE INTO canonical_chat_tombstones (
+        drone_id, chat_name, reason, replacement_chat_name, deleted_at
+      ) VALUES (?, ?, 'deleted', NULL, ?)`).run(opts.droneId, opts.chatName, new Date().toISOString());
+      if (Number(info.changes) === 1) {
+        appendChatEvent(connection, 'chat.deleted', opts.droneId, opts.chatName, {});
+      }
+      return Number(info.changes) === 1;
+    });
+  }
+
+  async commitPermanentDroneDeletion(opts: {
+    droneId: string;
+    lifecycleState: 'real' | 'archived';
+  }): Promise<PermanentDroneChatCleanupResult> {
+    const lifecycleTable = opts.lifecycleState === 'real' ? 'hub_canonical_drones' : 'hub_canonical_archived_drones';
+    const otherLifecycleTables = opts.lifecycleState === 'real'
+      ? ['hub_canonical_pending_drones', 'hub_canonical_archived_drones']
+      : ['hub_canonical_drones', 'hub_canonical_pending_drones'];
+    return await this.database.writeTransaction('permanently delete drone lifecycle and chats', (connection) => {
+      const lifecycle = connection.prepare(`SELECT version FROM ${lifecycleTable} WHERE drone_id = ?`)
+        .get(opts.droneId) as { version: number } | undefined;
+      if (!lifecycle) {
+        const conflictingState = otherLifecycleTables.some((table) =>
+          Boolean(connection.prepare(`SELECT 1 FROM ${table} WHERE drone_id = ?`).get(opts.droneId)));
+        if (conflictingState) {
+          return {
+            available: true,
+            removedLifecycle: false,
+            alreadyDeleted: false,
+            activeChatsDeleted: 0,
+            turnsDeleted: 0,
+            archivedChatsDeleted: 0,
+            chatTombstonesDeleted: 0,
+            archivedChatTombstonesDeleted: 0,
+            promptsDeleted: 0,
+          };
+        }
+      }
+
+      const count = (table: string): number => Number((connection.prepare(
+        `SELECT COUNT(*) AS count FROM ${table} WHERE drone_id = ?`,
+      ).get(opts.droneId) as { count: number }).count);
+      const activeChatsDeleted = count('canonical_chats');
+      const turnsDeleted = count('canonical_chat_turns');
+      const archivedChatsDeleted = count('canonical_archived_chats');
+      const chatTombstonesDeleted = count('canonical_chat_tombstones');
+      const archivedChatTombstonesDeleted = count('canonical_archived_chat_tombstones');
+      const promptsDeleted = count('prompts');
+      const alreadyDeleted = Boolean(connection.prepare(`SELECT 1 FROM canonical_drone_chat_tombstones
+        WHERE drone_id = ?`).get(opts.droneId));
+
+      connection.prepare(`INSERT OR IGNORE INTO canonical_drone_chat_tombstones (
+        drone_id, deleted_at, reason
+      ) VALUES (?, ?, 'drone-deleted')`).run(opts.droneId, new Date().toISOString());
+      connection.prepare('DELETE FROM prompts WHERE drone_id = ?').run(opts.droneId);
+      connection.prepare('DELETE FROM canonical_chats WHERE drone_id = ?').run(opts.droneId);
+      connection.prepare('DELETE FROM canonical_archived_chats WHERE drone_id = ?').run(opts.droneId);
+      connection.prepare('DELETE FROM canonical_chat_tombstones WHERE drone_id = ?').run(opts.droneId);
+      connection.prepare('DELETE FROM canonical_archived_chat_tombstones WHERE drone_id = ?').run(opts.droneId);
+      const lifecycleDelete = connection.prepare(`DELETE FROM ${lifecycleTable} WHERE drone_id = ?`).run(opts.droneId);
+      const removedLifecycle = Number(lifecycleDelete.changes ?? 0) === 1;
+      const changed = !alreadyDeleted || removedLifecycle || activeChatsDeleted > 0 || archivedChatsDeleted > 0 ||
+        chatTombstonesDeleted > 0 || archivedChatTombstonesDeleted > 0 || promptsDeleted > 0;
+      if (changed) {
+        appendHubOutboxEvent(connection, {
+          topic: 'chat.changes',
+          eventType: 'drone.chats.deleted',
+          aggregateType: 'drone',
+          aggregateId: opts.droneId,
+          payload: {
+            droneId: opts.droneId,
+            activeChatsDeleted,
+            turnsDeleted,
+            archivedChatsDeleted,
+            chatTombstonesDeleted,
+            archivedChatTombstonesDeleted,
+            promptsDeleted,
+          },
+        });
+      }
+      if (removedLifecycle) {
+        appendHubOutboxEvent(connection, {
+          topic: 'drone.lifecycle.changes',
+          eventType: 'drone.lifecycle.deleted',
+          aggregateType: 'drone',
+          aggregateId: opts.droneId,
+          payload: { id: opts.droneId, priorState: opts.lifecycleState, version: Number(lifecycle?.version ?? 0) },
+        });
+      }
+      return {
+        available: true,
+        removedLifecycle,
+        alreadyDeleted,
+        activeChatsDeleted,
+        turnsDeleted,
+        archivedChatsDeleted,
+        chatTombstonesDeleted,
+        archivedChatTombstonesDeleted,
+        promptsDeleted,
+      };
+    });
+  }
+
+  async importTurns(opts: { droneId: string; chatName: string; turns: unknown }): Promise<TranscriptImportResult> {
+    return await this.database.writeTransaction('backfill legacy transcript turns', (connection) => {
+      if (!this.ensureChat(connection, opts.droneId, opts.chatName, false)) {
+        return { available: true, transcriptVersion: 0, sourceHash: transcriptTurnsSourceHash([]) };
+      }
+      const importedTurnCount = this.reconcileTurns(connection, opts.droneId, opts.chatName, opts.turns, true, false);
+      const refreshed = refreshTranscriptMetadata(connection, opts.droneId, opts.chatName);
+      if (importedTurnCount > 0) {
+        appendChatEvent(connection, 'chat.turns.imported', opts.droneId, opts.chatName, {
+          source: 'legacy-import',
+          importedTurnCount,
+        });
+      }
+      return refreshed;
+    });
+  }
+
+  async upsertTurn(opts: { droneId: string; chatName: string; turn: StoredTranscriptTurn }): Promise<ChatStoreImportResult> {
+    return await this.database.writeTransaction('upsert canonical transcript turn', (connection) => {
+      if (!this.ensureChat(connection, opts.droneId, opts.chatName, false)) {
+        throw new Error(`cannot write turn for deleted chat: ${opts.chatName}`);
+      }
+      const turn = normalizeTurn(opts.turn);
+      const id = turnId(turn);
+      const changed = this.upsertTurnWithConnection(connection, opts.droneId, opts.chatName, id, turn);
+      const refreshed = refreshTranscriptMetadata(connection, opts.droneId, opts.chatName);
+      if (changed) appendChatEvent(connection, 'chat.turn.changed', opts.droneId, opts.chatName, { turnId: id });
+      return { available: true, sourceHash: refreshed.sourceHash };
+    });
+  }
+
+  async updateTurn(opts: {
+    droneId: string;
+    chatName: string;
+    turnId: string;
+    update: (turn: StoredTranscriptTurn) => StoredTranscriptTurn;
+  }): Promise<TranscriptTurnUpdateResult> {
+    return await this.database.writeTransaction('update canonical transcript turn', (connection) => {
+      const row = connection.prepare(`SELECT turn_json FROM canonical_chat_turns
+        WHERE drone_id = ? AND chat_name = ? AND turn_id = ?`).get(opts.droneId, opts.chatName, opts.turnId) as TurnRow | undefined;
+      if (!row) return { available: true, changed: false, turn: null };
+      const current = normalizeTurn(parseJson(row.turn_json));
+      const next = normalizeTurn(opts.update(current));
+      if (turnId(next) !== opts.turnId) throw new Error('targeted transcript update cannot change turn id');
+      if (stableJson(current) === stableJson(next)) return { available: true, changed: false, turn: current };
+      this.upsertTurnWithConnection(connection, opts.droneId, opts.chatName, opts.turnId, next);
+      refreshTranscriptMetadata(connection, opts.droneId, opts.chatName);
+      appendChatEvent(connection, 'chat.turn.changed', opts.droneId, opts.chatName, { turnId: opts.turnId, source: 'targeted-update' });
+      return { available: true, changed: true, turn: next };
+    });
+  }
+
+  async rollbackToTurn(opts: {
+    droneId: string;
+    chatName: string;
+    turnId: string;
+    update: (turn: StoredTranscriptTurn) => StoredTranscriptTurn;
+  }): Promise<TranscriptRollbackResult> {
+    return await this.database.writeTransaction('rollback canonical transcript turns', (connection) => {
+      const rows = connection.prepare(`SELECT turn_id, turn_json FROM canonical_chat_turns
+        WHERE drone_id = ? AND chat_name = ?
+        ORDER BY COALESCE(prompt_at, at), completed_at, ordinal, turn_id`).all(opts.droneId, opts.chatName) as Array<TurnRow & { turn_id: string }>;
+      const index = rows.findIndex((row) => row.turn_id === opts.turnId);
+      if (index < 0) return { available: true, changed: false, removedTurns: [], turn: null };
+      const current = normalizeTurn(parseJson(rows[index].turn_json));
+      const next = normalizeTurn(opts.update(current));
+      if (turnId(next) !== opts.turnId) throw new Error('transcript rollback cannot change turn id');
+      const removedRows = rows.slice(index + 1);
+      const remove = connection.prepare(`DELETE FROM canonical_chat_turns
+        WHERE drone_id = ? AND chat_name = ? AND turn_id = ?`);
+      for (const row of removedRows) remove.run(opts.droneId, opts.chatName, row.turn_id);
+      const targetChanged = stableJson(current) !== stableJson(next);
+      if (targetChanged) this.upsertTurnWithConnection(connection, opts.droneId, opts.chatName, opts.turnId, next);
+      const changed = targetChanged || removedRows.length > 0;
+      if (changed) {
+        refreshTranscriptMetadata(connection, opts.droneId, opts.chatName);
+        appendChatEvent(connection, 'chat.turns.rolled-back', opts.droneId, opts.chatName, {
+          turnId: opts.turnId,
+          removedTurnIds: removedRows.map((row) => row.turn_id),
+        });
+      }
+      return {
+        available: true,
+        changed,
+        removedTurns: removedRows.map((row) => normalizeTurn(parseJson(row.turn_json))),
+        turn: next,
+      };
+    });
   }
 
   listChats(opts: { droneId: string }): ChatStoreListResult {
-    const rows = this.db
-      .prepare('SELECT chat_name FROM hub_chats WHERE drone_id = ? ORDER BY chat_name ASC')
-      .all(opts.droneId) as Array<{ chat_name?: string }>;
-    return { available: true, chats: rows.map((row) => String(row.chat_name ?? '')).filter(Boolean) };
+    return this.database.read((connection) => this.listChatsWithConnection(connection, opts.droneId));
   }
 
   readChat(opts: { droneId: string; chatName: string }): ChatStoreReadResult {
-    const row = this.db
-      .prepare('SELECT chat_name, chat_json, source_hash FROM hub_chats WHERE drone_id = ? AND chat_name = ?')
-      .get(opts.droneId, opts.chatName) as ChatStoreRow | undefined;
-    if (!row) return { available: true, chat: null, sourceHash: '' };
-    const chat = jsonParseAny(row.chat_json);
-    const base = chat && typeof chat === 'object' ? chat : {};
-    return {
-      available: true,
-      chat: {
-        ...base,
-        turns: this.projectTurns(opts.droneId, opts.chatName),
-        pendingPrompts: this.projectPendingPrompts(opts.droneId, opts.chatName),
-      },
-      sourceHash: row.source_hash,
-    };
-  }
-
-  importFromRegistry(opts: { droneId: string; chatName: string; turns: unknown; sourceHash?: string }): TranscriptImportResult {
-    for (const turn of sortTranscriptTurns(opts.turns)) this.upsertTurn(opts.droneId, opts.chatName, turn);
-    return this.refreshTranscriptProjection(opts.droneId, opts.chatName);
-  }
-
-  private refreshTranscriptProjection(droneId: string, chatName: string): TranscriptImportResult {
-    const projectedTurns = this.projectTurns(droneId, chatName);
-    const sourceHash = transcriptTurnsSourceHash(projectedTurns);
-    const current = this.meta(droneId, chatName);
-    if (current?.source_hash === sourceHash) {
-      return { available: true, transcriptVersion: current.transcript_version, sourceHash };
-    }
-    this.replaceChatTx(droneId, chatName, sourceHash, new Date().toISOString(), projectedTurns);
-    const next = this.meta(droneId, chatName);
-    return { available: true, transcriptVersion: next?.transcript_version ?? 1, sourceHash };
+    return this.database.read((connection) => {
+      const row = this.chatRow(connection, opts.droneId, opts.chatName);
+      if (!row) return { available: true, chat: null, sourceHash: '' };
+      const base = parseJson(row.metadata_json);
+      return {
+        available: true,
+        chat: {
+          ...(base && typeof base === 'object' ? base : {}),
+          turns: this.projectTurns(connection, opts.droneId, opts.chatName),
+          pendingPrompts: getPromptQueueRepository()?.list({ droneId: opts.droneId, chatName: opts.chatName, limit: 60 }) ?? [],
+        },
+        sourceHash: row.source_hash,
+      };
+    });
   }
 
   read(opts: { droneId: string; chatName: string; indexes: number[] }): TranscriptStoreReadResult {
-    const meta = this.meta(opts.droneId, opts.chatName);
-    const projectedTurns = this.projectTurns(opts.droneId, opts.chatName);
-    const count = projectedTurns.length;
-    if (opts.indexes.length === 0) {
+    return this.database.read((connection) => {
+      const row = this.chatRow(connection, opts.droneId, opts.chatName);
+      const turns = this.projectTurns(connection, opts.droneId, opts.chatName);
       return {
         available: true,
-        count,
-        transcriptVersion: meta?.transcript_version ?? 0,
-        sourceHash: meta?.source_hash ?? transcriptTurnsSourceHash(projectedTurns),
-        turns: [],
+        count: turns.length,
+        transcriptVersion: Number(row?.transcript_version ?? 0),
+        sourceHash: row?.turns_source_hash || transcriptTurnsSourceHash(turns),
+        turns: opts.indexes
+          .map((index) => turns[index] ? { index, turn: turns[index] } : null)
+          .filter((item): item is { index: number; turn: StoredTranscriptTurn } => Boolean(item)),
       };
+    });
+  }
+
+  readVersion(opts: { droneId: string; chatName: string; includePending: boolean }): ChatReadVersion {
+    return this.database.read((connection) => {
+      const row = this.chatRow(connection, opts.droneId, opts.chatName);
+      if (!row) {
+        return {
+          available: true, chat: null, chatSourceHash: '', turnCount: 0,
+          transcriptVersion: 0, transcriptSourceHash: '', pendingVersion: '',
+        };
+      }
+      const countRow = connection.prepare(`SELECT COUNT(*) AS count FROM canonical_chat_turns
+        WHERE drone_id = ? AND chat_name = ?`).get(opts.droneId, opts.chatName) as { count: number };
+      const pendingVersion = opts.includePending ? this.pendingVersion(connection, opts.droneId, opts.chatName) : '';
+      const parsed = parseJson(row.metadata_json);
+      return {
+        available: true,
+        chat: parsed && typeof parsed === 'object' ? parsed : {},
+        chatSourceHash: row.source_hash,
+        turnCount: Number(countRow?.count ?? 0),
+        transcriptVersion: Number(row.transcript_version ?? 0),
+        transcriptSourceHash: row.turns_source_hash || transcriptTurnsSourceHash([]),
+        pendingVersion,
+      };
+    });
+  }
+
+  readRows(opts: { droneId: string; chatName: string; indexes: number[]; includePending: boolean }): ChatReadRows {
+    return this.database.read((connection) => {
+      const indexes = [...new Set(opts.indexes.filter((value) => Number.isSafeInteger(value) && value >= 0))].sort((a, b) => a - b);
+      let turns: Array<{ index: number; turn: StoredTranscriptTurn }> = [];
+      if (indexes.length > 0) {
+        for (let offset = 0; offset < indexes.length; offset += 400) {
+          const batch = indexes.slice(offset, offset + 400);
+          const placeholders = batch.map(() => '?').join(', ');
+          const rows = connection.prepare(`WITH ordered AS (
+            SELECT ROW_NUMBER() OVER (
+              ORDER BY COALESCE(prompt_at, at), completed_at, ordinal, turn_id
+            ) - 1 AS turn_index, turn_json
+            FROM canonical_chat_turns WHERE drone_id = ? AND chat_name = ?
+          ) SELECT turn_index, turn_json FROM ordered WHERE turn_index IN (${placeholders}) ORDER BY turn_index`)
+            .all(opts.droneId, opts.chatName, ...batch) as Array<{ turn_index: number; turn_json: string }>;
+          turns.push(...rows.map((row) => ({ index: Number(row.turn_index), turn: normalizeTurn(parseJson(row.turn_json)) })));
+        }
+      }
+      const pending = opts.includePending ? this.projectPending(connection, opts.droneId, opts.chatName) : [];
+      const pendingIds = pending.map((item) => String(item.id ?? '').trim()).filter(Boolean);
+      const pendingTurns = pendingIds.length > 0
+        ? (connection.prepare(`SELECT turn_json FROM canonical_chat_turns
+            WHERE drone_id = ? AND chat_name = ? AND turn_id IN (${pendingIds.map(() => '?').join(', ')})`)
+          .all(opts.droneId, opts.chatName, ...pendingIds) as TurnRow[])
+          .map((row) => normalizeTurn(parseJson(row.turn_json)))
+        : [];
+      return {
+        available: true,
+        turns: turns.sort((a, b) => a.index - b.index),
+        pending,
+        pendingTurns,
+      };
+    });
+  }
+
+  async clearAllForTests(): Promise<void> {
+    await this.database.writeTransaction('clear canonical chats for tests', (connection) => {
+      connection.exec(`
+        DELETE FROM canonical_chat_turns;
+        DELETE FROM canonical_chats;
+        DELETE FROM canonical_chat_tombstones;
+        DELETE FROM canonical_archived_chats;
+        DELETE FROM canonical_archived_chat_tombstones;
+        DELETE FROM canonical_drone_chat_tombstones;
+      `);
+    });
+  }
+
+  private writeChatWithConnection(
+    connection: HubDatabaseConnection,
+    droneId: string,
+    chatName: string,
+    raw: unknown,
+  ): void {
+    if (this.droneChatTombstoned(connection, droneId)) {
+      throw new Error(`cannot write chat for permanently deleted drone: ${droneId}`);
     }
-    const turns = opts.indexes
-      .map((index) => {
-        const turn = projectedTurns[index];
-        return turn ? { index, turn } : null;
-      })
-      .filter((item): item is { index: number; turn: StoredTranscriptTurn } => Boolean(item));
+    const value = raw && typeof raw === 'object' ? raw : {};
+    const now = new Date().toISOString();
+    connection.prepare(`
+      INSERT INTO canonical_chats (
+        drone_id, chat_name, created_at, updated_at, metadata_json, source_hash,
+        transcript_version, turns_source_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, 0, '')
+      ON CONFLICT(drone_id, chat_name) DO UPDATE SET
+        updated_at = excluded.updated_at,
+        metadata_json = excluded.metadata_json,
+        source_hash = excluded.source_hash
+    `).run(
+      droneId,
+      chatName,
+      typeof (value as any).createdAt === 'string' ? (value as any).createdAt : null,
+      now,
+      stableJson(metadata(value)),
+      chatEntrySourceHash(value),
+    );
+    connection.prepare('DELETE FROM canonical_chat_tombstones WHERE drone_id = ? AND chat_name = ?')
+      .run(droneId, chatName);
+    connection.prepare('DELETE FROM canonical_chat_turns WHERE drone_id = ? AND chat_name = ?')
+      .run(droneId, chatName);
+    this.reconcileTurns(connection, droneId, chatName, turnsWithLegacySubmissionTimes(value), false, false);
+  }
+
+  private projectChatWithConnection(connection: HubDatabaseConnection, droneId: string, chatName: string): any | null {
+    const row = this.chatRow(connection, droneId, chatName);
+    if (!row) return null;
+    const base = parseJson(row.metadata_json);
+    let pendingPrompts: any[] = [];
+    const hasPrompts = connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompts'").get();
+    if (hasPrompts) {
+      const rows = connection.prepare(`SELECT prompt_id, created_at, updated_at, state, prompt, payload_json
+        FROM prompts WHERE drone_id = ? AND chat_name = ? AND state != 'cancelled' ORDER BY sequence`).all(droneId, chatName) as any[];
+      pendingPrompts = rows.map((promptRow) => ({
+        ...(parseJson(promptRow.payload_json) ?? {}),
+        id: promptRow.prompt_id,
+        at: promptRow.created_at,
+        prompt: promptRow.prompt,
+        state: promptRow.state,
+        updatedAt: promptRow.updated_at,
+      }));
+    }
+    return {
+      ...(base && typeof base === 'object' ? base : {}),
+      turns: this.projectTurns(connection, droneId, chatName),
+      pendingPrompts,
+    };
+  }
+
+  private archivedChatRow(connection: HubDatabaseConnection, droneId: string, chatName: string): ArchivedChatRow | null {
+    return (connection.prepare(`SELECT drone_id, chat_name, archived_at, delete_at,
+      archive_retention, chat_json, source_hash FROM canonical_archived_chats
+      WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName) as ArchivedChatRow | undefined) ?? null;
+  }
+
+  private listArchivedChatsWithConnection(
+    connection: HubDatabaseConnection,
+    droneId?: string,
+  ): ArchivedChatStoreListResult {
+    const rows = (droneId
+      ? connection.prepare(`SELECT drone_id, chat_name, archived_at, delete_at,
+          archive_retention, chat_json, source_hash FROM canonical_archived_chats
+          WHERE drone_id = ? ORDER BY archived_at DESC, chat_name`).all(droneId)
+      : connection.prepare(`SELECT drone_id, chat_name, archived_at, delete_at,
+          archive_retention, chat_json, source_hash FROM canonical_archived_chats
+          ORDER BY archived_at DESC, drone_id, chat_name`).all()) as ArchivedChatRow[];
     return {
       available: true,
-      count,
-      transcriptVersion: meta?.transcript_version ?? 0,
-      sourceHash: meta?.source_hash ?? transcriptTurnsSourceHash(projectedTurns),
-      turns,
+      archivedChats: rows.map((row) => archivedChatRecord(row)).filter((row): row is ArchivedChatRecord => Boolean(row)),
     };
   }
 
-  count(opts: { droneId: string; chatName: string }): { count: number; transcriptVersion: number; sourceHash: string } {
-    const meta = this.meta(opts.droneId, opts.chatName);
-    const turns = this.projectTurns(opts.droneId, opts.chatName);
-    return {
-      count: turns.length,
-      transcriptVersion: meta?.transcript_version ?? 0,
-      sourceHash: meta?.source_hash ?? transcriptTurnsSourceHash(turns),
-    };
+  private allocateRestoredChatNameWithConnection(
+    connection: HubDatabaseConnection,
+    droneId: string,
+    preferredRaw: unknown,
+    maxLength: number,
+  ): string {
+    const preferred = String(preferredRaw ?? '').trim();
+    const fallback = preferred || 'chat';
+    if (!this.chatRow(connection, droneId, fallback)) return fallback;
+    const maxBaseLength = Math.max(8, maxLength - 8);
+    const base = fallback.length > maxBaseLength ? fallback.slice(0, maxBaseLength).trim() : fallback;
+    for (let index = 2; index <= 999; index += 1) {
+      const candidate = `${base} (${index})`;
+      if (candidate.length <= maxLength && !this.chatRow(connection, droneId, candidate)) return candidate;
+    }
+    return fallback.slice(0, maxLength).trim() || 'chat';
   }
 
-  upsertPendingPrompt(opts: { droneId: string; chatName: string; pending: StoredPendingPrompt }): ChatStoreImportResult {
-    const pending = normalizePendingPrompt(opts.pending);
-    if (!pending) return { available: true, sourceHash: '' };
-    this.upsertPrompt(opts.droneId, opts.chatName, pending);
-    return { available: true, sourceHash: '' };
-  }
-
-  updatePendingPrompt(opts: {
-    droneId: string;
-    chatName: string;
-    id: string;
-    patch: Partial<Pick<StoredPendingPrompt, 'state' | 'error' | 'observability' | 'updatedAt'>>;
-  }): { updated: boolean } {
-    const current = this.readPendingPrompt(opts.droneId, opts.chatName, opts.id);
-    if (!current) return { updated: false };
-    const next = normalizePendingPrompt({
-      ...current,
-      ...opts.patch,
-      updatedAt: opts.patch.updatedAt ?? new Date().toISOString(),
-    });
-    if (!next) return { updated: false };
-    const info = this.updatePromptStmt.run(
-      next.updatedAt ?? new Date().toISOString(),
-      next.state,
-      next.error ?? null,
-      stableJson(next),
-      opts.droneId,
-      opts.chatName,
-      opts.id,
+  private insertMissingChat(connection: HubDatabaseConnection, droneId: string, chatName: string, raw: unknown, sourceHash?: string): void {
+    if (this.droneChatTombstoned(connection, droneId)) return;
+    const tombstone = connection.prepare(`SELECT 1 FROM canonical_chat_tombstones
+      WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName);
+    if (tombstone) return;
+    const value = raw && typeof raw === 'object' ? raw : {};
+    const now = new Date().toISOString();
+    const info = connection.prepare(`
+      INSERT OR IGNORE INTO canonical_chats (
+        drone_id, chat_name, created_at, updated_at, metadata_json, source_hash,
+        transcript_version, turns_source_hash
+      ) VALUES (?, ?, ?, ?, ?, ?, 0, '')
+    `).run(
+      droneId,
+      chatName,
+      typeof (value as any).createdAt === 'string' ? (value as any).createdAt : null,
+      now,
+      stableJson(metadata(value)),
+      sourceHash ?? chatEntrySourceHash(value),
     );
-    return { updated: Number(info.changes ?? 0) > 0 };
-  }
-
-  claimQueuedPendingPrompt(opts: { droneId: string; chatName: string; id: string }): { claimed: boolean; state: string | null } {
-    const current = this.readPendingPrompt(opts.droneId, opts.chatName, opts.id);
-    if (!current) return { claimed: false, state: null };
-    if (current.state !== 'queued') return { claimed: false, state: current.state };
-    const next = normalizePendingPrompt({ ...current, state: 'sending', error: undefined, updatedAt: new Date().toISOString() });
-    if (!next) return { claimed: false, state: current.state };
-    const info = this.claimPromptStmt.run(
-      next.updatedAt ?? new Date().toISOString(),
-      stableJson(next),
-      opts.droneId,
-      opts.chatName,
-      opts.id,
+    const importedTurnCount = this.reconcileTurns(
+      connection,
+      droneId,
+      chatName,
+      turnsWithLegacySubmissionTimes(value),
+      true,
+      false,
     );
-    return { claimed: Number(info.changes ?? 0) > 0, state: Number(info.changes ?? 0) > 0 ? 'sending' : current.state };
+    if (Number(info.changes) === 1) {
+      appendChatEvent(connection, 'chat.imported', droneId, chatName, { source: 'legacy-import', importedTurnCount });
+    } else if (importedTurnCount > 0) {
+      appendChatEvent(connection, 'chat.turns.imported', droneId, chatName, { source: 'legacy-import', importedTurnCount });
+    }
   }
 
-  cancelQueuedPendingPrompt(opts: { droneId: string; chatName: string; id: string }): { cancelled: boolean; state: string | null } {
-    const current = this.readPendingPrompt(opts.droneId, opts.chatName, opts.id);
-    if (!current) return { cancelled: false, state: null };
-    if (current.state !== 'queued') return { cancelled: false, state: current.state };
-    const info = this.deleteQueuedPromptStmt.run(opts.droneId, opts.chatName, opts.id);
-    return { cancelled: Number(info.changes ?? 0) > 0, state: 'queued' };
-  }
-
-  upsertTranscriptTurn(opts: { droneId: string; chatName: string; turn: StoredTranscriptTurn }): ChatStoreImportResult {
-    this.upsertTurn(opts.droneId, opts.chatName, normalizeTurn(opts.turn));
-    const refreshed = this.refreshTranscriptProjection(opts.droneId, opts.chatName);
-    return { available: true, sourceHash: refreshed.sourceHash };
-  }
-
-  clearAllForTests(): void {
-    this.db.exec(`
-      DELETE FROM chat_prompts;
-      DELETE FROM chat_turns;
-      DELETE FROM transcript_turns;
-      DELETE FROM transcript_chats;
-      DELETE FROM hub_chats;
+  private reconcileTurns(
+    connection: HubDatabaseConnection,
+    droneId: string,
+    chatName: string,
+    raw: unknown,
+    missingOnly: boolean,
+    emitEvents = true,
+  ): number {
+    const turns = sortedTurns(Array.isArray(raw) ? raw.map(normalizeTurn) : []);
+    let changed = 0;
+    const insert = connection.prepare(`
+      INSERT OR IGNORE INTO canonical_chat_turns (
+        drone_id, chat_name, turn_id, ordinal, at, prompt_at, completed_at, turn_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
     `);
-  }
-
-  private importPromptRows(chatName: string, droneId: string, chatEntry: any) {
-    const pending = Array.isArray(chatEntry?.pendingPrompts) ? chatEntry.pendingPrompts : [];
-    for (const item of pending) {
-      const p = normalizePendingPrompt(item);
-      if (p) this.upsertPrompt(droneId, chatName, p);
+    const upsert = connection.prepare(`
+      INSERT INTO canonical_chat_turns (
+        drone_id, chat_name, turn_id, ordinal, at, prompt_at, completed_at, turn_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(drone_id, chat_name, turn_id) DO UPDATE SET
+        at = excluded.at, prompt_at = excluded.prompt_at,
+        completed_at = excluded.completed_at, turn_json = excluded.turn_json
+    `);
+    for (const [ordinal, turn] of turns.entries()) {
+      const id = turnId(turn);
+      const info = (missingOnly ? insert : upsert).run(
+        droneId, chatName, id, ordinal, turn.at, turn.promptAt ?? null,
+        turn.completedAt ?? null, stableJson(turn),
+      );
+      changed += Number(info.changes);
+      if (emitEvents && Number(info.changes) > 0) {
+        appendChatEvent(connection, 'chat.turn.changed', droneId, chatName, {
+          turnId: id,
+          source: missingOnly ? 'legacy-import' : 'reconcile',
+        });
+      }
     }
-    const turns = Array.isArray(chatEntry?.turns) ? chatEntry.turns : [];
-    for (const item of turns) {
-      const turn = normalizeTurn(item);
-      if (!turn.id) continue;
-      const existing = this.readPendingPrompt(droneId, chatName, turn.id);
-      if (existing) continue;
-      const p = normalizePendingPrompt({
-        id: turn.id,
-        at: turn.promptAt ?? turn.at,
-        prompt: turn.prompt,
-        attachments: turn.attachments,
-        automation: turn.automation,
-        state: 'sent',
-        updatedAt: turn.completedAt ?? turn.at,
-      });
-      if (p) this.upsertPrompt(droneId, chatName, p);
+    refreshTranscriptMetadata(connection, droneId, chatName);
+    return changed;
+  }
+
+  private ensureChat(connection: HubDatabaseConnection, droneId: string, chatName: string, clearTombstone: boolean): boolean {
+    if (this.droneChatTombstoned(connection, droneId)) return false;
+    if (this.chatRow(connection, droneId, chatName)) return true;
+    const tombstone = connection.prepare(`SELECT 1 FROM canonical_chat_tombstones
+      WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName);
+    if (tombstone && !clearTombstone) return false;
+    if (clearTombstone) {
+      connection.prepare('DELETE FROM canonical_chat_tombstones WHERE drone_id = ? AND chat_name = ?')
+        .run(droneId, chatName);
     }
+    const now = new Date().toISOString();
+    connection.prepare(`INSERT INTO canonical_chats (
+      drone_id, chat_name, created_at, updated_at, metadata_json, source_hash,
+      transcript_version, turns_source_hash
+    ) VALUES (?, ?, ?, ?, '{}', '', 0, '')`).run(droneId, chatName, now, now);
+    appendChatEvent(connection, 'chat.created', droneId, chatName, { source: 'turn-reconciliation' });
+    return true;
   }
 
-  private importTurnRows(chatName: string, droneId: string, chatEntry: any) {
-    const turns = Array.isArray(chatEntry?.turns) ? chatEntry.turns : [];
-    for (const item of sortTranscriptTurns(turns)) this.upsertTurn(droneId, chatName, item);
+  private droneChatTombstoned(connection: HubDatabaseConnection, droneId: string): boolean {
+    return Boolean(connection.prepare(`SELECT 1 FROM canonical_drone_chat_tombstones
+      WHERE drone_id = ?`).get(droneId));
   }
 
-  private upsertPrompt(droneId: string, chatName: string, pending: StoredPendingPrompt) {
-    this.upsertPromptStmt.run(
-      droneId,
-      chatName,
-      pending.id,
-      pending.at,
-      pending.updatedAt ?? pending.at,
-      pending.state,
-      pending.prompt,
-      pending.messageId ?? null,
-      pending.cwd ?? null,
-      jsonOrNull(pending.attachments),
-      jsonOrNull(pending.automation),
-      pending.blockedByAutomation === true ? 1 : 0,
-      pending.error ?? null,
-      stableJson(pending),
-    );
-  }
-
-  private upsertTurn(droneId: string, chatName: string, turn: StoredTranscriptTurn) {
-    const id = turn.id ? String(turn.id).trim() : '';
-    if (!id) return;
-    const existing = this.readPendingPrompt(droneId, chatName, id);
-    const submittedAt = typeof existing?.at === 'string' && existing.at.trim() ? existing.at.trim() : '';
-    const storedTurn = submittedAt ? { ...turn, at: submittedAt, promptAt: submittedAt } : turn;
-    this.upsertTurnStmt.run(
-      droneId,
-      chatName,
-      id,
-      storedTurn.at,
-      storedTurn.promptAt ?? null,
-      storedTurn.completedAt ?? null,
-      storedTurn.prompt,
-      storedTurn.ok ? 1 : 0,
-      storedTurn.output,
-      storedTurn.error ?? null,
-      stableJson(storedTurn),
-    );
-    if (!existing) {
-      const p = normalizePendingPrompt({
-        id,
-        at: storedTurn.promptAt ?? storedTurn.at,
-        prompt: storedTurn.prompt,
-        attachments: storedTurn.attachments,
-        automation: storedTurn.automation,
-        state: storedTurn.ok ? 'sent' : 'failed',
-        error: storedTurn.ok ? undefined : storedTurn.error,
-        updatedAt: storedTurn.completedAt ?? storedTurn.at,
-      });
-      if (p) this.upsertPrompt(droneId, chatName, p);
-    } else if (existing.state !== 'sent' && storedTurn.ok) {
-      this.updatePendingPrompt({
+  private patchMetadataWithConnection(
+    connection: HubDatabaseConnection,
+    droneId: string,
+    chatName: string,
+    patch: ChatMetadataPatch,
+  ): { metadata: Record<string, unknown>; changed: boolean; fields: string[] } {
+    const row = this.chatRow(connection, droneId, chatName);
+    if (!row) throw new Error(`unknown chat: ${chatName}`);
+    const result = applyMetadataPatch(parseJson(row.metadata_json), patch);
+    if (result.changed) {
+      connection.prepare(`UPDATE canonical_chats
+        SET metadata_json = ?, source_hash = ?, updated_at = ?
+        WHERE drone_id = ? AND chat_name = ?`).run(
+        stableJson(result.metadata),
+        chatEntrySourceHash(result.metadata),
+        new Date().toISOString(),
         droneId,
         chatName,
-        id,
-        patch: { state: 'sent', error: undefined, updatedAt: storedTurn.completedAt ?? storedTurn.at },
+      );
+    }
+    return result;
+  }
+
+  private upsertTurnWithConnection(
+    connection: HubDatabaseConnection,
+    droneId: string,
+    chatName: string,
+    id: string,
+    turn: StoredTranscriptTurn,
+  ): boolean {
+    const current = connection.prepare(`SELECT turn_json FROM canonical_chat_turns
+      WHERE drone_id = ? AND chat_name = ? AND turn_id = ?`).get(droneId, chatName, id) as TurnRow | undefined;
+    if (current && stableJson(normalizeTurn(parseJson(current.turn_json))) === stableJson(turn)) return false;
+    const ordinal = this.nextOrdinal(connection, droneId, chatName);
+    connection.prepare(`
+      INSERT INTO canonical_chat_turns (
+        drone_id, chat_name, turn_id, ordinal, at, prompt_at, completed_at, turn_json
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(drone_id, chat_name, turn_id) DO UPDATE SET
+        at = excluded.at, prompt_at = excluded.prompt_at,
+        completed_at = excluded.completed_at, turn_json = excluded.turn_json
+    `).run(droneId, chatName, id, ordinal, turn.at, turn.promptAt ?? null, turn.completedAt ?? null, stableJson(turn));
+    return true;
+  }
+
+  private transcriptMetadata(connection: HubDatabaseConnection, droneId: string, chatName: string): TranscriptImportResult {
+    const row = this.chatRow(connection, droneId, chatName);
+    return {
+      available: true,
+      transcriptVersion: Number(row?.transcript_version ?? 0),
+      sourceHash: row?.turns_source_hash || transcriptTurnsSourceHash([]),
+    };
+  }
+
+  private nextOrdinal(connection: HubDatabaseConnection, droneId: string, chatName: string): number {
+    const row = connection.prepare(`SELECT COALESCE(MAX(ordinal), -1) + 1 AS ordinal
+      FROM canonical_chat_turns WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName) as { ordinal: number };
+    return Number(row.ordinal);
+  }
+
+  private chatRow(connection: HubDatabaseConnection, droneId: string, chatName: string): ChatRow | null {
+    return (connection.prepare(`SELECT chat_name, metadata_json, source_hash,
+      transcript_version, turns_source_hash FROM canonical_chats
+      WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName) as ChatRow | undefined) ?? null;
+  }
+
+  private promptRows(connection: HubDatabaseConnection, droneId: string, chatName: string): any[] {
+    const hasPrompts = connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompts'").get();
+    if (!hasPrompts) return [];
+    return connection.prepare(`SELECT prompt_id, created_at, updated_at, state, prompt, payload_json, last_error
+      FROM prompts WHERE drone_id = ? AND chat_name = ? AND state != 'cancelled'
+      ORDER BY sequence DESC LIMIT 60`).all(droneId, chatName).reverse() as any[];
+  }
+
+  private projectPending(connection: HubDatabaseConnection, droneId: string, chatName: string): StoredPendingPrompt[] {
+    return this.promptRows(connection, droneId, chatName).map((row) => ({
+      ...(parseJson(row.payload_json) ?? {}),
+      id: row.prompt_id,
+      at: row.created_at,
+      prompt: row.prompt,
+      state: row.state,
+      updatedAt: row.updated_at,
+      ...(row.last_error ? { error: row.last_error } : { error: undefined }),
+    }));
+  }
+
+  private pendingVersion(connection: HubDatabaseConnection, droneId: string, chatName: string): string {
+    return crypto.createHash('sha256').update(stableJson(this.promptRows(connection, droneId, chatName).map((row) => [
+      row.prompt_id, row.updated_at, row.state, row.prompt, row.payload_json, row.last_error,
+    ]))).digest('base64url');
+  }
+
+  private listChatsWithConnection(connection: HubDatabaseConnection, droneId: string): ChatStoreListResult {
+    const rows = connection.prepare('SELECT chat_name FROM canonical_chats WHERE drone_id = ? ORDER BY chat_name').all(droneId) as Array<{ chat_name: string }>;
+    return { available: true, chats: rows.map((row) => row.chat_name) };
+  }
+
+  private projectTurns(connection: HubDatabaseConnection, droneId: string, chatName: string): StoredTranscriptTurn[] {
+    const rows = connection.prepare(`SELECT turn_json FROM canonical_chat_turns
+      WHERE drone_id = ? AND chat_name = ?
+      ORDER BY COALESCE(prompt_at, at), completed_at, ordinal, turn_id`).all(droneId, chatName) as TurnRow[];
+    return rows.map((row) => normalizeTurn(parseJson(row.turn_json)));
+  }
+}
+
+function repository(): ChatTranscriptRepository | null {
+  let database = getHubDatabase();
+  if (!database) {
+    unavailableReason = 'Hub database is unavailable';
+    if ((globalThis as any).Bun) return null;
+    database = requireHubDatabase();
+  }
+  if (cachedRepository?.database === database) return cachedRepository.repository;
+  const value = new ChatTranscriptRepository(database);
+  cachedRepository = { database, repository: value };
+  unavailableReason = null;
+  return value;
+}
+
+function memoryTurnMap(droneId: string, chatName: string): Map<string, StoredTranscriptTurn> {
+  const k = key(droneId, chatName);
+  let value = memoryTurns.get(k);
+  if (!value) memoryTurns.set(k, (value = new Map()));
+  return value;
+}
+
+function memoryPromptMap(droneId: string, chatName: string): Map<string, StoredPendingPrompt> {
+  const k = key(droneId, chatName);
+  let value = memoryPrompts.get(k);
+  if (!value) memoryPrompts.set(k, (value = new Map()));
+  return value;
+}
+
+function memoryReadChat(droneId: string, chatName: string): ChatStoreReadResult {
+  const row = memoryChats.get(key(droneId, chatName));
+  if (!row) return { available: true, chat: null, sourceHash: '' };
+  return { available: true, chat: { ...row.metadata, turns: sortedTurns(memoryTurnMap(droneId, chatName).values()), pendingPrompts: [...memoryPromptMap(droneId, chatName).values()] }, sourceHash: row.sourceHash };
+}
+
+async function memoryBackfillChat(droneId: string, chatName: string, raw: unknown): Promise<ChatStoreImportResult> {
+  const k = key(droneId, chatName);
+  if (memoryDroneChatTombstones.has(droneId)) return { available: true, sourceHash: '' };
+  const value = raw && typeof raw === 'object' ? raw : {};
+  if (memoryChatTombstones.has(k)) return { available: true, sourceHash: '' };
+  if (!memoryChats.has(k)) {
+    memoryChats.set(k, { metadata: metadata(value), sourceHash: chatEntrySourceHash(value), version: 0 });
+  }
+  const turns = memoryTurnMap(droneId, chatName);
+  for (const turn of sortedTurns(turnsWithLegacySubmissionTimes(value))) {
+    const id = turnId(turn);
+    if (!turns.has(id)) turns.set(id, turn);
+  }
+  const prompts = memoryPromptMap(droneId, chatName);
+  for (const prompt of Array.isArray((value as any).pendingPrompts) ? (value as any).pendingPrompts : []) {
+    const id = String(prompt?.id ?? '').trim();
+    const cancelledKey = `${k}\u0000${id}`;
+    if (id && !memoryCancelledPrompts.has(cancelledKey) && !prompts.has(id)) prompts.set(id, prompt);
+  }
+  return { available: true, sourceHash: memoryChats.get(k)?.sourceHash ?? '' };
+}
+
+async function memoryBackfillArchivedChats(droneId: string, raw: unknown): Promise<ArchivedChatStoreListResult> {
+  if (memoryDroneChatTombstones.has(droneId)) return listArchivedChatsFromStore({ droneId });
+  const archivedChats = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw as Record<string, unknown> : {};
+  for (const [chatName, entry] of Object.entries(archivedChats)) {
+    const k = key(droneId, chatName);
+    if (memoryArchivedChatTombstones.has(k) || memoryArchivedChats.has(k)) continue;
+    const value = archivedChatValue(entry);
+    if (!value) continue;
+    memoryArchivedChats.set(k, {
+      droneId,
+      chatName,
+      chat: value.chat,
+      archivedAt: value.archivedAt,
+      deleteAt: value.deleteAt,
+      archiveRetention: value.archiveRetention,
+    });
+  }
+  return listArchivedChatsFromStore({ droneId });
+}
+
+export function getTranscriptStoreUnavailableReason(): string | null { return unavailableReason; }
+export function getTranscriptStore(): ChatTranscriptRepository | null { return repository(); }
+
+export async function importDroneChatsFromRegistry(opts: { droneId: string; chats: unknown }): Promise<ChatStoreListResult> {
+  const store = repository();
+  if (store) return await store.backfillDroneChats(opts);
+  const chats = opts.chats && typeof opts.chats === 'object' && !Array.isArray(opts.chats) ? opts.chats as Record<string, unknown> : {};
+  for (const [chatName, chatEntry] of Object.entries(chats)) await memoryBackfillChat(opts.droneId, chatName, chatEntry);
+  return listChatsFromStore({ droneId: opts.droneId });
+}
+
+export async function importChatFromRegistry(opts: { droneId: string; chatName: string; chatEntry: unknown; sourceHash?: string }): Promise<ChatStoreImportResult> {
+  const store = repository();
+  return store ? await store.backfillChat(opts) : await memoryBackfillChat(opts.droneId, opts.chatName, opts.chatEntry);
+}
+
+export async function createChatInStore(opts: {
+  droneId: string;
+  chatName: string;
+  copyFromChatName?: string;
+  implicitDefaultEntry?: unknown;
+  createEntry: (source: any | null) => unknown;
+}): Promise<CreateChatStoreResult> {
+  const store = repository();
+  if (store) return await store.createChat(opts);
+  if (memoryReadChat(opts.droneId, opts.chatName).chat) throw new Error(`chat already exists: ${opts.chatName}`);
+  let source: any | null = null;
+  if (opts.copyFromChatName) {
+    source = memoryReadChat(opts.droneId, opts.copyFromChatName).chat;
+    if (!source && opts.copyFromChatName === 'default' && listChatsFromStore({ droneId: opts.droneId }).chats.length === 0) {
+      await upsertChatInStore({ droneId: opts.droneId, chatName: 'default', chatEntry: opts.implicitDefaultEntry ?? {} });
+      source = memoryReadChat(opts.droneId, 'default').chat;
+    }
+    if (!source) throw new Error(`unknown chat: ${opts.copyFromChatName}`);
+  }
+  await upsertChatInStore({ droneId: opts.droneId, chatName: opts.chatName, chatEntry: opts.createEntry(source) });
+  return {
+    available: true,
+    chat: memoryReadChat(opts.droneId, opts.chatName).chat,
+    chats: listChatsFromStore({ droneId: opts.droneId }).chats,
+  };
+}
+
+export async function updateChatInStore(opts: {
+  droneId: string;
+  chatName: string;
+  update: (chat: any) => unknown;
+}): Promise<UpdateChatStoreResult> {
+  const store = repository();
+  if (store) return await store.updateChat(opts);
+  const current = memoryReadChat(opts.droneId, opts.chatName).chat;
+  if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
+  await upsertChatInStore({ droneId: opts.droneId, chatName: opts.chatName, chatEntry: opts.update(current) });
+  return {
+    available: true,
+    chat: memoryReadChat(opts.droneId, opts.chatName).chat,
+    chats: listChatsFromStore({ droneId: opts.droneId }).chats,
+  };
+}
+
+export async function deleteActiveChatFromStore(opts: {
+  droneId: string;
+  chatName: string;
+  fallbackChat?: { chatName: string; chatEntry: unknown };
+}): Promise<DeleteActiveChatStoreResult> {
+  const store = repository();
+  let result: DeleteActiveChatStoreResult;
+  if (store) {
+    result = await store.deleteActiveChat(opts);
+  } else {
+    if (opts.chatName === 'default') throw new Error('cannot delete default chat');
+    const current = memoryReadChat(opts.droneId, opts.chatName).chat;
+    if (!current) throw new Error(`unknown chat: ${opts.chatName}`);
+    await deleteChatFromStore({ droneId: opts.droneId, chatName: opts.chatName });
+    if (listChatsFromStore({ droneId: opts.droneId }).chats.length === 0 && opts.fallbackChat) {
+      await upsertChatInStore({
+        droneId: opts.droneId,
+        chatName: opts.fallbackChat.chatName,
+        chatEntry: opts.fallbackChat.chatEntry,
       });
     }
+    result = {
+      available: true,
+      deletedChat: current,
+      chats: listChatsFromStore({ droneId: opts.droneId }).chats,
+    };
   }
-
-  private readPendingPrompt(droneId: string, chatName: string, promptId: string): StoredPendingPrompt | null {
-    const row = this.db
-      .prepare('SELECT * FROM chat_prompts WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?')
-      .get(droneId, chatName, promptId);
-    return promptFromRow(row);
-  }
-
-  private projectPendingPrompts(droneId: string, chatName: string): StoredPendingPrompt[] {
-    const rows = this.db
-      .prepare('SELECT * FROM chat_prompts WHERE drone_id = ? AND chat_name = ? ORDER BY created_at ASC')
-      .all(droneId, chatName);
-    return sortPendingPrompts(rows.map((row) => promptFromRow(row)).filter((p): p is StoredPendingPrompt => Boolean(p))).slice(-60);
-  }
-
-  private projectTurns(droneId: string, chatName: string): StoredTranscriptTurn[] {
-    const rows = this.db
-      .prepare(
-        `
-          SELECT turn_json
-          FROM chat_turns
-          WHERE drone_id = ? AND chat_name = ?
-          ORDER BY COALESCE(prompt_at, at) ASC, completed_at ASC, prompt_id ASC
-        `,
-      )
-      .all(droneId, chatName) as Array<{ turn_json: string }>;
-    return rows.map((row) => jsonParseObject(row.turn_json));
-  }
-
-  private migrateHubChatJsonRowsToNormalizedTables() {
-    const rows = this.db
-      .prepare('SELECT drone_id, chat_name, chat_json FROM hub_chats')
-      .all() as Array<{ drone_id?: string; chat_name?: string; chat_json?: string }>;
-    for (const row of rows) {
-      const droneId = String(row.drone_id ?? '').trim();
-      const chatName = String(row.chat_name ?? '').trim();
-      if (!droneId || !chatName) continue;
-      const chatEntry = jsonParseAny(String(row.chat_json ?? '{}'));
-      if (!chatEntry || typeof chatEntry !== 'object') continue;
-      this.importPromptRows(chatName, droneId, chatEntry);
-      this.importTurnRows(chatName, droneId, chatEntry);
-    }
-  }
-
-  private meta(droneId: string, chatName: string): TranscriptMetaRow | null {
-    const row = this.db
-      .prepare('SELECT transcript_version, source_hash FROM transcript_chats WHERE drone_id = ? AND chat_name = ?')
-      .get(droneId, chatName) as TranscriptMetaRow | undefined;
-    return row ?? null;
-  }
+  await getPromptQueueRepository()?.deleteChat({ droneId: opts.droneId, chatName: opts.chatName });
+  return result;
 }
 
-export function getTranscriptStoreUnavailableReason(): string | null {
-  return unavailableReason;
+export async function importArchivedChatsFromRegistry(opts: {
+  droneId: string;
+  archivedChats: unknown;
+}): Promise<ArchivedChatStoreListResult> {
+  const store = repository();
+  return store
+    ? await store.backfillArchivedChats(opts)
+    : await memoryBackfillArchivedChats(opts.droneId, opts.archivedChats);
 }
 
-export function getTranscriptStore(): TranscriptStore | null {
-  const Database = loadDatabaseConstructor();
-  if (!Database) return null;
-  const dbPath = transcriptStorePath();
-  if (cached?.dbPath === dbPath) return cached.store;
-  if (cached) {
-    try {
-      cached.db.close();
-    } catch {
-      // ignore stale close errors
-    }
-    cached = null;
+export async function archiveChatInStore(opts: {
+  droneId: string;
+  chatName: string;
+  archivedAt: string;
+  deleteAt: string;
+  archiveRetention: string;
+  fallbackChat?: { chatName: string; chatEntry: unknown };
+}): Promise<ArchiveChatStoreResult> {
+  const store = repository();
+  if (store) return await store.archiveChat(opts);
+  const read = memoryReadChat(opts.droneId, opts.chatName);
+  if (!read.chat) {
+    return { available: true, archived: false, archivedChat: null, chats: listChatsFromStore({ droneId: opts.droneId }).chats };
   }
-  fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
-  try {
-    const db = new Database(dbPath);
-    const store = new TranscriptStore(db);
-    cached = { dbPath, db, store };
-    unavailableReason = null;
-    return store;
-  } catch (error: any) {
-    unavailableReason = error?.message ?? String(error);
-    return null;
-  }
-}
-
-function memoryImportTurn(droneId: string, chatName: string, turnRaw: unknown) {
-  const turn = normalizeTurn(turnRaw);
-  const id = turn.id ? String(turn.id).trim() : '';
-  if (!id) return;
-  memoryTurnMap(droneId, chatName).set(id, turn);
-  const prompts = memoryPromptMap(droneId, chatName);
-  if (!prompts.has(id)) {
-    const pending = normalizePendingPrompt({
-      id,
-      at: turn.promptAt ?? turn.at,
-      prompt: turn.prompt,
-      attachments: turn.attachments,
-      automation: turn.automation,
-      state: turn.ok ? 'sent' : 'failed',
-      error: turn.ok ? undefined : turn.error,
-      updatedAt: turn.completedAt ?? turn.at,
-    });
-    if (pending) prompts.set(id, pending);
-  }
-}
-
-function memoryProjectTurns(droneId: string, chatName: string): StoredTranscriptTurn[] {
-  return sortTranscriptTurns([...memoryTurnMap(droneId, chatName).values()]);
-}
-
-function memoryProjectPending(droneId: string, chatName: string): StoredPendingPrompt[] {
-  return sortPendingPrompts([...memoryPromptMap(droneId, chatName).values()]).slice(-60);
-}
-
-function memoryImportChat(opts: { droneId: string; chatName: string; chatEntry: unknown; sourceHash?: string }): ChatStoreImportResult {
-  const chatEntry = normalizeChatEntryForStorage(opts.chatEntry);
-  const sourceHash = opts.sourceHash ?? chatEntrySourceHash(opts.chatEntry);
-  memoryChats.set(chatStoreKey(opts.droneId, opts.chatName), {
+  const record: ArchivedChatRecord = {
+    droneId: opts.droneId,
     chatName: opts.chatName,
-    chatEntry: chatMetadataForStorage(chatEntry),
-    sourceHash,
-  });
-  const pending = Array.isArray((chatEntry as any)?.pendingPrompts) ? (chatEntry as any).pendingPrompts : [];
-  for (const item of pending) {
-    const p = normalizePendingPrompt(item);
-    if (p) memoryPromptMap(opts.droneId, opts.chatName).set(p.id, p);
+    chat: read.chat,
+    archivedAt: opts.archivedAt,
+    deleteAt: opts.deleteAt,
+    archiveRetention: opts.archiveRetention,
+  };
+  const k = key(opts.droneId, opts.chatName);
+  memoryArchivedChats.set(k, record);
+  memoryArchivedChatTombstones.delete(k);
+  await deleteChatFromStore({ droneId: opts.droneId, chatName: opts.chatName });
+  if (listChatsFromStore({ droneId: opts.droneId }).chats.length === 0 && opts.fallbackChat) {
+    await upsertChatInStore({
+      droneId: opts.droneId,
+      chatName: opts.fallbackChat.chatName,
+      chatEntry: opts.fallbackChat.chatEntry,
+    });
   }
-  const turns = Array.isArray((chatEntry as any)?.turns) ? (chatEntry as any).turns : [];
-  for (const turn of turns) memoryImportTurn(opts.droneId, opts.chatName, turn);
-  return { available: true, sourceHash };
-}
-
-function memoryReadChat(opts: { droneId: string; chatName: string }): ChatStoreReadResult {
-  const row = memoryChats.get(chatStoreKey(opts.droneId, opts.chatName));
-  if (!row) return { available: true, chat: null, sourceHash: '' };
   return {
     available: true,
-    chat: {
-      ...row.chatEntry,
-      turns: memoryProjectTurns(opts.droneId, opts.chatName),
-      pendingPrompts: memoryProjectPending(opts.droneId, opts.chatName),
-    },
-    sourceHash: row.sourceHash,
+    archived: true,
+    archivedChat: record,
+    chats: listChatsFromStore({ droneId: opts.droneId }).chats,
   };
 }
 
-function memoryImportTranscript(opts: {
+export async function restoreArchivedChatInStore(opts: {
   droneId: string;
-  chatName: string;
-  turns: unknown;
-  sourceHash?: string;
-}): TranscriptImportResult {
-  const turns = sortTranscriptTurns(opts.turns);
-  for (const turn of turns) memoryImportTurn(opts.droneId, opts.chatName, turn);
-  const projected = memoryProjectTurns(opts.droneId, opts.chatName);
-  const sourceHash = transcriptTurnsSourceHash(projected);
-  return { available: true, transcriptVersion: projected.length, sourceHash };
-}
-
-function memoryReadTranscript(opts: { droneId: string; chatName: string; indexes: number[] }): TranscriptStoreReadResult {
-  const turns = memoryProjectTurns(opts.droneId, opts.chatName);
+  archivedChatName: string;
+  maxChatNameLength?: number;
+}): Promise<RestoreArchivedChatStoreResult> {
+  const store = repository();
+  if (store) return await store.restoreArchivedChat(opts);
+  const k = key(opts.droneId, opts.archivedChatName);
+  const record = memoryArchivedChats.get(k) ?? null;
+  if (!record) {
+    return {
+      available: true,
+      restored: false,
+      chatName: opts.archivedChatName,
+      renamed: false,
+      chat: null,
+      chats: listChatsFromStore({ droneId: opts.droneId }).chats,
+    };
+  }
+  const maxLength = opts.maxChatNameLength ?? 64;
+  const activeNames = new Set(listChatsFromStore({ droneId: opts.droneId }).chats);
+  const preferred = opts.archivedChatName || 'chat';
+  let chatName = preferred;
+  if (activeNames.has(chatName)) {
+    const maxBaseLength = Math.max(8, maxLength - 8);
+    const base = preferred.length > maxBaseLength ? preferred.slice(0, maxBaseLength).trim() : preferred;
+    for (let index = 2; index <= 999; index += 1) {
+      const candidate = `${base} (${index})`;
+      if (candidate.length <= maxLength && !activeNames.has(candidate)) {
+        chatName = candidate;
+        break;
+      }
+    }
+  }
+  await upsertChatInStore({ droneId: opts.droneId, chatName, chatEntry: record.chat });
+  memoryArchivedChats.delete(k);
+  memoryArchivedChatTombstones.add(k);
   return {
     available: true,
-    count: turns.length,
+    restored: true,
+    chatName,
+    renamed: chatName !== opts.archivedChatName,
+    chat: record.chat,
+    chats: listChatsFromStore({ droneId: opts.droneId }).chats,
+  };
+}
+
+export async function deleteArchivedChatFromStore(opts: {
+  droneId: string;
+  archivedChatName: string;
+}): Promise<DeleteArchivedChatStoreResult> {
+  const store = repository();
+  if (store) return await store.deleteArchivedChat(opts);
+  const k = key(opts.droneId, opts.archivedChatName);
+  const archivedChat = memoryArchivedChats.get(k) ?? null;
+  if (!archivedChat) return { available: true, deleted: false, archivedChat: null };
+  memoryArchivedChats.delete(k);
+  memoryArchivedChatTombstones.add(k);
+  return { available: true, deleted: true, archivedChat };
+}
+
+export function listArchivedChatsFromStore(opts: { droneId?: string } = {}): ArchivedChatStoreListResult {
+  const store = repository();
+  if (store) return store.listArchivedChats(opts);
+  return {
+    available: true,
+    archivedChats: [...memoryArchivedChats.values()]
+      .filter((record) => !opts.droneId || record.droneId === opts.droneId)
+      .sort((left, right) => right.archivedAt.localeCompare(left.archivedAt) || left.chatName.localeCompare(right.chatName)),
+  };
+}
+
+export function readArchivedChatFromStore(opts: { droneId: string; chatName: string }): ArchivedChatRecord | null {
+  const store = repository();
+  return store ? store.readArchivedChat(opts) : memoryArchivedChats.get(key(opts.droneId, opts.chatName)) ?? null;
+}
+
+export async function upsertChatInStore(opts: { droneId: string; chatName: string; chatEntry: unknown }): Promise<ChatStoreImportResult> {
+  const store = repository();
+  if (store) return await store.upsertChat(opts);
+  if (memoryDroneChatTombstones.has(opts.droneId)) {
+    throw new Error(`cannot write chat for permanently deleted drone: ${opts.droneId}`);
+  }
+  const value = opts.chatEntry && typeof opts.chatEntry === 'object' ? opts.chatEntry : {};
+  const k = key(opts.droneId, opts.chatName);
+  memoryChatTombstones.delete(k);
+  memoryChats.set(k, { metadata: metadata(value), sourceHash: chatEntrySourceHash(value), version: 0 });
+  const turns = memoryTurnMap(opts.droneId, opts.chatName);
+  turns.clear();
+  for (const turn of sortedTurns(turnsWithLegacySubmissionTimes(value))) turns.set(turnId(turn), turn);
+  const prompts = memoryPromptMap(opts.droneId, opts.chatName);
+  prompts.clear();
+  for (const prompt of Array.isArray((value as any).pendingPrompts) ? (value as any).pendingPrompts : []) {
+    const id = String(prompt?.id ?? '').trim();
+    if (id) prompts.set(id, prompt);
+  }
+  return { available: true, sourceHash: chatEntrySourceHash(value) };
+}
+
+export async function patchChatMetadataInStore(opts: {
+  droneId: string;
+  chatName: string;
+  patch: ChatMetadataPatch;
+}): Promise<ChatMetadataPatchResult> {
+  const store = repository();
+  if (store) return await store.patchMetadata(opts);
+  const row = memoryChats.get(key(opts.droneId, opts.chatName));
+  if (!row) throw new Error(`unknown chat: ${opts.chatName}`);
+  const result = applyMetadataPatch(row.metadata, opts.patch);
+  if (result.changed) {
+    row.metadata = result.metadata;
+    row.sourceHash = chatEntrySourceHash(result.metadata);
+  }
+  return { available: true, changed: result.changed, metadata: result.metadata };
+}
+
+export async function applyChatReconciliationInStore(opts: {
+  droneId: string;
+  chatName: string;
+  metadataPatch?: ChatMetadataPatch;
+  turns?: StoredTranscriptTurn[];
+}): Promise<ChatStoreImportResult> {
+  const store = repository();
+  if (store) return await store.applyReconciliation(opts);
+  const row = memoryChats.get(key(opts.droneId, opts.chatName));
+  if (!row) throw new Error(`unknown chat: ${opts.chatName}`);
+  const metadataResult = applyMetadataPatch(row.metadata, opts.metadataPatch);
+  if (metadataResult.changed) {
+    row.metadata = metadataResult.metadata;
+    row.sourceHash = chatEntrySourceHash(metadataResult.metadata);
+  }
+  const turns = memoryTurnMap(opts.droneId, opts.chatName);
+  for (const raw of opts.turns ?? []) {
+    const turn = normalizeTurn(raw);
+    turns.set(turnId(turn), turn);
+  }
+  return { available: true, sourceHash: transcriptTurnsSourceHash(sortedTurns(turns.values())) };
+}
+
+export async function renameChatInStore(opts: { droneId: string; chatName: string; newChatName: string }): Promise<boolean> {
+  const store = repository();
+  if (store) {
+    const renamed = await store.renameChat(opts);
+    if (renamed) await getPromptQueueRepository()?.renameChat(opts);
+    return renamed;
+  }
+  if (opts.chatName === 'default') throw new Error('cannot rename default chat');
+  if (opts.chatName === opts.newChatName) {
+    if (!memoryReadChat(opts.droneId, opts.chatName).chat) throw new Error(`unknown chat: ${opts.chatName}`);
+    return false;
+  }
+  const oldKey = key(opts.droneId, opts.chatName);
+  const nextKey = key(opts.droneId, opts.newChatName);
+  if (memoryChats.has(nextKey)) throw new Error(`chat already exists: ${opts.newChatName}`);
+  const row = memoryChats.get(oldKey);
+  if (!row) throw new Error(`unknown chat: ${opts.chatName}`);
+  memoryChats.set(nextKey, row); memoryChats.delete(oldKey);
+  const turns = memoryTurns.get(oldKey); if (turns) { memoryTurns.set(nextKey, turns); memoryTurns.delete(oldKey); }
+  const prompts = memoryPrompts.get(oldKey); if (prompts) { memoryPrompts.set(nextKey, prompts); memoryPrompts.delete(oldKey); }
+  memoryChatTombstones.add(oldKey); memoryChatTombstones.delete(nextKey);
+  return true;
+}
+
+export async function deleteChatFromStore(opts: { droneId: string; chatName: string }): Promise<boolean> {
+  const store = repository();
+  if (store) return await store.deleteChat(opts);
+  memoryTurns.delete(key(opts.droneId, opts.chatName));
+  memoryPrompts.delete(key(opts.droneId, opts.chatName));
+  const deleted = memoryChats.delete(key(opts.droneId, opts.chatName));
+  memoryChatTombstones.add(key(opts.droneId, opts.chatName));
+  return deleted;
+}
+
+export async function commitPermanentDroneDeletionInStore(opts: {
+  droneId: string;
+  lifecycleState: 'real' | 'archived';
+}): Promise<PermanentDroneChatCleanupResult> {
+  const store = repository();
+  if (store) return await store.commitPermanentDroneDeletion(opts);
+  const prefix = `${opts.droneId}\u0000`;
+  const activeChatKeys = [...memoryChats.keys()].filter((item) => item.startsWith(prefix));
+  const archivedChatKeys = [...memoryArchivedChats.keys()].filter((item) => item.startsWith(prefix));
+  const chatTombstoneKeys = [...memoryChatTombstones].filter((item) => item.startsWith(prefix));
+  const archivedTombstoneKeys = [...memoryArchivedChatTombstones].filter((item) => item.startsWith(prefix));
+  const turnsDeleted = [...memoryTurns.entries()]
+    .filter(([item]) => item.startsWith(prefix))
+    .reduce((total, [, turns]) => total + turns.size, 0);
+  const promptsDeleted = [...memoryPrompts.entries()]
+    .filter(([item]) => item.startsWith(prefix))
+    .reduce((total, [, prompts]) => total + prompts.size, 0);
+  const alreadyDeleted = memoryDroneChatTombstones.has(opts.droneId);
+  for (const item of activeChatKeys) memoryChats.delete(item);
+  for (const item of [...memoryTurns.keys()].filter((keyValue) => keyValue.startsWith(prefix))) memoryTurns.delete(item);
+  for (const item of [...memoryPrompts.keys()].filter((keyValue) => keyValue.startsWith(prefix))) memoryPrompts.delete(item);
+  for (const item of archivedChatKeys) memoryArchivedChats.delete(item);
+  for (const item of chatTombstoneKeys) memoryChatTombstones.delete(item);
+  for (const item of archivedTombstoneKeys) memoryArchivedChatTombstones.delete(item);
+  for (const item of [...memoryCancelledPrompts].filter((keyValue) => keyValue.startsWith(prefix))) memoryCancelledPrompts.delete(item);
+  memoryDroneChatTombstones.add(opts.droneId);
+  return {
+    available: true,
+    removedLifecycle: false,
+    alreadyDeleted,
+    activeChatsDeleted: activeChatKeys.length,
+    turnsDeleted,
+    archivedChatsDeleted: archivedChatKeys.length,
+    chatTombstonesDeleted: chatTombstoneKeys.length,
+    archivedChatTombstonesDeleted: archivedTombstoneKeys.length,
+    promptsDeleted,
+  };
+}
+
+export function listChatsFromStore(opts: { droneId: string }): ChatStoreListResult {
+  const store = repository();
+  if (store) return store.listChats(opts);
+  const prefix = `${opts.droneId}\u0000`;
+  return { available: true, chats: [...memoryChats.keys()].filter((item) => item.startsWith(prefix)).map((item) => item.slice(prefix.length)).sort() };
+}
+
+export function readChatFromStore(opts: { droneId: string; chatName: string }): ChatStoreReadResult {
+  const store = repository();
+  return store ? store.readChat(opts) : memoryReadChat(opts.droneId, opts.chatName);
+}
+
+export function readChatVersionFromStore(opts: { droneId: string; chatName: string; includePending: boolean }): ChatReadVersion {
+  const store = repository();
+  if (store) return store.readVersion(opts);
+  const read = memoryReadChat(opts.droneId, opts.chatName);
+  const turns = Array.isArray(read.chat?.turns) ? read.chat.turns : [];
+  const pending = opts.includePending && Array.isArray(read.chat?.pendingPrompts) ? read.chat.pendingPrompts : [];
+  const chat = read.chat ? metadata(read.chat) : null;
+  return {
+    available: true,
+    chat,
+    chatSourceHash: read.sourceHash,
+    turnCount: turns.length,
     transcriptVersion: turns.length,
-    sourceHash: transcriptTurnsSourceHash(turns),
-    turns: opts.indexes
-      .map((index) => {
-        const turn = turns[index];
-        return turn ? { index, turn } : null;
-      })
-      .filter((item): item is { index: number; turn: StoredTranscriptTurn } => Boolean(item)),
+    transcriptSourceHash: transcriptTurnsSourceHash(turns),
+    pendingVersion: opts.includePending ? chatEntrySourceHash(pending) : '',
   };
 }
 
-function memoryResetForTests(): void {
-  memoryChats.clear();
-  memoryPrompts.clear();
-  memoryTurns.clear();
-}
-
-export function importTranscriptTurnsFromRegistry(opts: {
-  droneId: string;
-  chatName: string;
-  turns: unknown;
-  sourceHash?: string;
-}): TranscriptImportResult {
-  const store = getTranscriptStore();
-  if (!store) return memoryImportTranscript(opts);
-  return store.importFromRegistry(opts);
-}
-
-export function readTranscriptTurnsFromStore(opts: {
+export function readChatRowsFromStore(opts: {
   droneId: string;
   chatName: string;
   indexes: number[];
-}): TranscriptStoreReadResult {
-  const store = getTranscriptStore();
-  if (!store) {
-    return memoryReadTranscript(opts);
-  }
-  return store.read(opts);
+  includePending: boolean;
+}): ChatReadRows {
+  const store = repository();
+  if (store) return store.readRows(opts);
+  const read = memoryReadChat(opts.droneId, opts.chatName);
+  const turns = Array.isArray(read.chat?.turns) ? read.chat.turns : [];
+  return {
+    available: true,
+    turns: opts.indexes.flatMap((index) => turns[index] ? [{ index, turn: turns[index] }] : []),
+    pending: opts.includePending && Array.isArray(read.chat?.pendingPrompts) ? read.chat.pendingPrompts : [],
+    pendingTurns: turns,
+  };
 }
 
-export function countTranscriptTurnsFromStore(opts: {
+export async function importTranscriptTurnsFromRegistry(opts: { droneId: string; chatName: string; turns: unknown; sourceHash?: string }): Promise<TranscriptImportResult> {
+  const store = repository();
+  if (store) return await store.importTurns(opts);
+  if (memoryDroneChatTombstones.has(opts.droneId)) {
+    return { available: true, transcriptVersion: 0, sourceHash: transcriptTurnsSourceHash([]) };
+  }
+  await memoryBackfillChat(opts.droneId, opts.chatName, {});
+  for (const turn of sortedTurns(Array.isArray(opts.turns) ? opts.turns : [])) if (!memoryTurnMap(opts.droneId, opts.chatName).has(turnId(turn))) memoryTurnMap(opts.droneId, opts.chatName).set(turnId(turn), turn);
+  const turns = sortedTurns(memoryTurnMap(opts.droneId, opts.chatName).values());
+  return { available: true, transcriptVersion: turns.length, sourceHash: transcriptTurnsSourceHash(turns) };
+}
+
+export function readTranscriptTurnsFromStore(opts: { droneId: string; chatName: string; indexes: number[] }): TranscriptStoreReadResult {
+  const store = repository();
+  if (store) return store.read(opts);
+  const turns = sortedTurns(memoryTurnMap(opts.droneId, opts.chatName).values());
+  return { available: true, count: turns.length, transcriptVersion: turns.length, sourceHash: transcriptTurnsSourceHash(turns), turns: opts.indexes.map((index) => turns[index] ? { index, turn: turns[index] } : null).filter((item): item is { index: number; turn: StoredTranscriptTurn } => Boolean(item)) };
+}
+
+export function countTranscriptTurnsFromStore(opts: { droneId: string; chatName: string }): { available: boolean; count: number; transcriptVersion: number; sourceHash: string } {
+  const read = readTranscriptTurnsFromStore({ ...opts, indexes: [] });
+  return { available: true, count: read.count, transcriptVersion: read.transcriptVersion, sourceHash: read.sourceHash };
+}
+
+export async function upsertTranscriptTurnInStore(opts: { droneId: string; chatName: string; turn: StoredTranscriptTurn }): Promise<ChatStoreImportResult> {
+  const store = repository();
+  if (store) return await store.upsertTurn(opts);
+  if (memoryDroneChatTombstones.has(opts.droneId)) {
+    throw new Error(`cannot write turn for permanently deleted drone: ${opts.droneId}`);
+  }
+  await memoryBackfillChat(opts.droneId, opts.chatName, {});
+  const turn = normalizeTurn(opts.turn); memoryTurnMap(opts.droneId, opts.chatName).set(turnId(turn), turn);
+  return { available: true, sourceHash: transcriptTurnsSourceHash(sortedTurns(memoryTurnMap(opts.droneId, opts.chatName).values())) };
+}
+
+export async function updateTranscriptTurnInStore(opts: {
   droneId: string;
   chatName: string;
-}): { available: boolean; count: number; transcriptVersion: number; sourceHash: string } {
-  const store = getTranscriptStore();
-  if (!store) {
-    const turns = memoryProjectTurns(opts.droneId, opts.chatName);
-    return { available: true, count: turns.length, transcriptVersion: turns.length, sourceHash: transcriptTurnsSourceHash(turns) };
-  }
-  return { available: true, ...store.count(opts) };
+  turnId: string;
+  update: (turn: StoredTranscriptTurn) => StoredTranscriptTurn;
+}): Promise<TranscriptTurnUpdateResult> {
+  const store = repository();
+  if (store) return await store.updateTurn(opts);
+  const turns = memoryTurnMap(opts.droneId, opts.chatName);
+  const current = turns.get(opts.turnId);
+  if (!current) return { available: true, changed: false, turn: null };
+  const next = normalizeTurn(opts.update(current));
+  if (turnId(next) !== opts.turnId) throw new Error('targeted transcript update cannot change turn id');
+  const changed = stableJson(current) !== stableJson(next);
+  if (changed) turns.set(opts.turnId, next);
+  return { available: true, changed, turn: next };
 }
 
-export function importDroneChatsFromRegistry(opts: {
-  droneId: string;
-  chats: unknown;
-}): ChatStoreListResult {
-  const store = getTranscriptStore();
-  if (!store) {
-    const chats = opts.chats && typeof opts.chats === 'object' && !Array.isArray(opts.chats) ? (opts.chats as Record<string, any>) : {};
-    const prefix = `${opts.droneId}\u0000`;
-    for (const key of [...memoryChats.keys()]) {
-      if (!key.startsWith(prefix)) continue;
-      const chatName = key.slice(prefix.length);
-      if (Object.prototype.hasOwnProperty.call(chats, chatName)) continue;
-      memoryChats.delete(key);
-      memoryPrompts.delete(key);
-      memoryTurns.delete(key);
-    }
-    for (const [chatName, chatEntry] of Object.entries(chats)) {
-      memoryImportChat({ droneId: opts.droneId, chatName, chatEntry });
-    }
-    return { available: true, chats: Object.keys(chats) };
-  }
-  return store.importDroneChatsFromRegistry(opts);
-}
-
-export function importChatFromRegistry(opts: {
+export async function rollbackTranscriptToTurnInStore(opts: {
   droneId: string;
   chatName: string;
-  chatEntry: unknown;
-  sourceHash?: string;
-}): ChatStoreImportResult {
-  const store = getTranscriptStore();
-  if (!store) return memoryImportChat(opts);
-  return store.importChatFromRegistry(opts);
+  turnId: string;
+  update: (turn: StoredTranscriptTurn) => StoredTranscriptTurn;
+}): Promise<TranscriptRollbackResult> {
+  const store = repository();
+  if (store) return await store.rollbackToTurn(opts);
+  const turns = memoryTurnMap(opts.droneId, opts.chatName);
+  const ordered = sortedTurns(turns.values());
+  const index = ordered.findIndex((turn) => turnId(turn) === opts.turnId);
+  if (index < 0) return { available: true, changed: false, removedTurns: [], turn: null };
+  const current = ordered[index];
+  const next = normalizeTurn(opts.update(current));
+  if (turnId(next) !== opts.turnId) throw new Error('transcript rollback cannot change turn id');
+  const removedTurns = ordered.slice(index + 1);
+  for (const removed of removedTurns) turns.delete(turnId(removed));
+  const targetChanged = stableJson(current) !== stableJson(next);
+  if (targetChanged) turns.set(opts.turnId, next);
+  return { available: true, changed: targetChanged || removedTurns.length > 0, removedTurns, turn: next };
 }
 
-export function listChatsFromStore(opts: {
-  droneId: string;
-}): ChatStoreListResult {
-  const store = getTranscriptStore();
-  if (!store) {
-    const prefix = `${opts.droneId}\u0000`;
-    return {
-      available: true,
-      chats: [...memoryChats.keys()]
-        .filter((key) => key.startsWith(prefix))
-        .map((key) => key.slice(prefix.length))
-        .sort(),
-    };
+// Prompt compatibility exists only for Bun tests. Production callers use PromptQueueRepository.
+export function upsertPendingPromptInStore(opts: { droneId: string; chatName: string; pending: StoredPendingPrompt }): ChatStoreImportResult {
+  if (!(globalThis as any).Bun) throw new Error('pending prompts are owned by PromptQueueRepository');
+  if (memoryDroneChatTombstones.has(opts.droneId)) {
+    throw new Error(`cannot enqueue prompt for permanently deleted drone: ${opts.droneId}`);
   }
-  return store.listChats(opts);
+  memoryCancelledPrompts.delete(`${key(opts.droneId, opts.chatName)}\u0000${opts.pending.id}`);
+  memoryPromptMap(opts.droneId, opts.chatName).set(opts.pending.id, opts.pending);
+  return { available: true, sourceHash: '' };
+}
+export function updatePendingPromptInStore(opts: { droneId: string; chatName: string; id: string; patch: Partial<StoredPendingPrompt> }): { available: boolean; updated: boolean } {
+  if (!(globalThis as any).Bun) throw new Error('pending prompts are owned by PromptQueueRepository');
+  const map = memoryPromptMap(opts.droneId, opts.chatName); const current = map.get(opts.id);
+  if (!current) return { available: true, updated: false };
+  map.set(opts.id, { ...current, ...opts.patch, updatedAt: opts.patch.updatedAt ?? new Date().toISOString() });
+  return { available: true, updated: true };
+}
+export function claimQueuedPendingPromptInStore(opts: { droneId: string; chatName: string; id: string }): { available: boolean; claimed: boolean; state: string | null } {
+  const map = memoryPromptMap(opts.droneId, opts.chatName); const current = map.get(opts.id);
+  if (!current) return { available: true, claimed: false, state: null };
+  if (current.state !== 'queued') return { available: true, claimed: false, state: current.state };
+  map.set(opts.id, { ...current, state: 'sending', updatedAt: new Date().toISOString() });
+  return { available: true, claimed: true, state: 'sending' };
+}
+export function cancelQueuedPendingPromptInStore(opts: { droneId: string; chatName: string; id: string }): { available: boolean; cancelled: boolean; state: string | null } {
+  const map = memoryPromptMap(opts.droneId, opts.chatName); const current = map.get(opts.id);
+  if (!current) return { available: true, cancelled: false, state: null };
+  if (current.state !== 'queued') return { available: true, cancelled: false, state: current.state };
+  map.delete(opts.id);
+  memoryCancelledPrompts.add(`${key(opts.droneId, opts.chatName)}\u0000${opts.id}`);
+  return { available: true, cancelled: true, state: 'queued' };
 }
 
-export function readChatFromStore(opts: {
-  droneId: string;
-  chatName: string;
-}): ChatStoreReadResult {
-  const store = getTranscriptStore();
-  if (!store) return memoryReadChat(opts);
-  return store.readChat(opts);
-}
-
-export function upsertPendingPromptInStore(opts: {
-  droneId: string;
-  chatName: string;
-  pending: StoredPendingPrompt;
-}): ChatStoreImportResult {
-  const store = getTranscriptStore();
-  if (!store) {
-    const pending = normalizePendingPrompt(opts.pending);
-    if (pending) memoryPromptMap(opts.droneId, opts.chatName).set(pending.id, pending);
-    return { available: true, sourceHash: '' };
-  }
-  return store.upsertPendingPrompt(opts);
-}
-
-export function updatePendingPromptInStore(opts: {
-  droneId: string;
-  chatName: string;
-  id: string;
-  patch: Partial<Pick<StoredPendingPrompt, 'state' | 'error' | 'observability' | 'updatedAt'>>;
-}): { available: boolean; updated: boolean } {
-  const store = getTranscriptStore();
-  if (!store) {
-    const map = memoryPromptMap(opts.droneId, opts.chatName);
-    const current = map.get(opts.id);
-    if (!current) return { available: true, updated: false };
-    const next = normalizePendingPrompt({ ...current, ...opts.patch, updatedAt: opts.patch.updatedAt ?? new Date().toISOString() });
-    if (!next) return { available: true, updated: false };
-    map.set(opts.id, next);
-    return { available: true, updated: true };
-  }
-  return { available: true, ...store.updatePendingPrompt(opts) };
-}
-
-export function claimQueuedPendingPromptInStore(opts: {
-  droneId: string;
-  chatName: string;
-  id: string;
-}): { available: boolean; claimed: boolean; state: string | null } {
-  const store = getTranscriptStore();
-  if (!store) {
-    const map = memoryPromptMap(opts.droneId, opts.chatName);
-    const current = map.get(opts.id);
-    if (!current) return { available: true, claimed: false, state: null };
-    if (current.state !== 'queued') return { available: true, claimed: false, state: current.state };
-    const next = normalizePendingPrompt({ ...current, state: 'sending', error: undefined, updatedAt: new Date().toISOString() });
-    if (!next) return { available: true, claimed: false, state: current.state };
-    map.set(opts.id, next);
-    return { available: true, claimed: true, state: 'sending' };
-  }
-  return { available: true, ...store.claimQueuedPendingPrompt(opts) };
-}
-
-export function cancelQueuedPendingPromptInStore(opts: {
-  droneId: string;
-  chatName: string;
-  id: string;
-}): { available: boolean; cancelled: boolean; state: string | null } {
-  const store = getTranscriptStore();
-  if (!store) {
-    const map = memoryPromptMap(opts.droneId, opts.chatName);
-    const current = map.get(opts.id);
-    if (!current) return { available: true, cancelled: false, state: null };
-    if (current.state !== 'queued') return { available: true, cancelled: false, state: current.state };
-    map.delete(opts.id);
-    return { available: true, cancelled: true, state: 'queued' };
-  }
-  return { available: true, ...store.cancelQueuedPendingPrompt(opts) };
-}
-
-export function upsertTranscriptTurnInStore(opts: {
-  droneId: string;
-  chatName: string;
-  turn: StoredTranscriptTurn;
-}): ChatStoreImportResult {
-  const store = getTranscriptStore();
-  if (!store) {
-    memoryImportTurn(opts.droneId, opts.chatName, opts.turn);
-    return { available: true, sourceHash: '' };
-  }
-  return store.upsertTranscriptTurn(opts);
-}
-
-export function resetTranscriptStoreForTests(): void {
-  const store = getTranscriptStore();
-  if (!store) {
-    memoryResetForTests();
-    return;
-  }
-  store.clearAllForTests();
-  memoryResetForTests();
+export async function resetTranscriptStoreForTests(): Promise<void> {
+  const store = repository();
+  if (store) await store.clearAllForTests();
+  memoryChats.clear(); memoryTurns.clear(); memoryPrompts.clear(); memoryCancelledPrompts.clear();
+  memoryChatTombstones.clear(); memoryArchivedChats.clear(); memoryArchivedChatTombstones.clear();
+  memoryDroneChatTombstones.clear();
 }

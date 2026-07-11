@@ -1,11 +1,12 @@
 import React from 'react';
 import type { ChatAgentConfig } from '../domain';
 import { BUILTIN_AGENT_OPTIONS } from '../droneHub/app/app-config';
-import type { ChatModelOption } from '../droneHub/app/app-types';
+import type { TranscriptItem } from '../droneHub/types';
 import { repoPathLabel } from '../droneHub/app/repo-path-label';
 import {
   displayedChatModelTitle,
   formatAgentModelMetadata,
+  latestTranscriptRuntime,
   resolveDisplayedChatModel,
 } from '../droneHub/app/selected-drone-workspace-utils';
 
@@ -14,7 +15,7 @@ type RemoteRuntimeMetadataProps = {
   repoPath: string;
   agent: ChatAgentConfig | null;
   configuredModel: string | null;
-  models: ChatModelOption[];
+  transcripts: TranscriptItem[];
   loading: boolean;
   error: string | null;
   draft: boolean;
@@ -31,7 +32,7 @@ export function RemoteRuntimeMetadata({
   repoPath,
   agent,
   configuredModel,
-  models,
+  transcripts,
   loading,
   error,
   draft,
@@ -39,13 +40,15 @@ export function RemoteRuntimeMetadata({
   const normalizedRepoPath = String(repoPath ?? '').trim();
   const runtimeUnavailable = Boolean(error && !agent);
   const agentLabel = remoteAgentLabel(agent);
+  const transcriptRuntime = latestTranscriptRuntime(transcripts);
   const displayedModel = resolveDisplayedChatModel(
     configuredModel,
-    models,
-    loading,
+    [],
+    false,
     agent?.kind === 'builtin',
+    transcriptRuntime.model,
   );
-  const agentModelLabel = formatAgentModelMetadata(agentLabel, displayedModel);
+  const agentModelLabel = formatAgentModelMetadata(agentLabel, displayedModel, transcriptRuntime.reasoning);
 
   return (
     <div
@@ -59,14 +62,14 @@ export function RemoteRuntimeMetadata({
       ) : null}
       {normalizedRepoPath && hasDrone ? <span className="opacity-45" aria-hidden="true">·</span> : null}
       {hasDrone ? (
-        loading ? (
+        loading && !agent ? (
           <span className="truncate font-mono">Detecting runtime…</span>
         ) : runtimeUnavailable ? (
           <span className="truncate font-mono">Runtime not reported</span>
         ) : (
           <span
             className="min-w-0 max-w-[240px] truncate font-mono"
-            title={`${agentLabel} · ${displayedChatModelTitle(displayedModel)}`}
+            title={`${agentLabel} · ${displayedChatModelTitle(displayedModel, transcriptRuntime.reasoning)}`}
           >
             {agentModelLabel}
           </span>

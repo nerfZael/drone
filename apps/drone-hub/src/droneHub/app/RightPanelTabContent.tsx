@@ -206,8 +206,6 @@ type RightPanelTabContentProps = {
   fsError: string | null;
   fsErrorUi: string | null;
   filesPane: PaneReadinessState;
-  fsExplorerView: 'list' | 'thumb';
-  setFsExplorerView: React.Dispatch<React.SetStateAction<'list' | 'thumb'>>;
   setCurrentFsPath: (nextPath: string) => void;
   refreshFsList: () => void;
   onRefreshOpenedEditorFile: () => void;
@@ -308,8 +306,6 @@ export function RightPanelTabContent({
   fsError,
   fsErrorUi,
   filesPane,
-  fsExplorerView,
-  setFsExplorerView,
   setCurrentFsPath,
   refreshFsList,
   onRefreshOpenedEditorFile,
@@ -480,8 +476,6 @@ export function RightPanelTabContent({
                 }
               : null
           }
-          viewMode={fsExplorerView}
-          onSetViewMode={setFsExplorerView}
           onOpenPath={setCurrentFsPath}
           onRefresh={refreshFsList}
           onRefreshOpenedFile={onRefreshOpenedEditorFile}

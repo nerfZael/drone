@@ -484,6 +484,8 @@ describe('assistant API parity', () => {
       expect(completed.codexConnection.connected).toBe(true);
       expect(completed.codexConnection.accountId).toBe('acct_test_123');
       expect(completed.snapshot.assistantSettings.defaultProvider).toBe('codex');
+      expect(completed.snapshot.assistantSettings.defaultModel).toBe('gpt-5.6-luna');
+      expect(completed.snapshot.assistantSettings.defaultThinkingLevel).toBe('medium');
 
       const codexThread = await built.app.inject({
         method: 'POST',
@@ -492,6 +494,8 @@ describe('assistant API parity', () => {
         payload: JSON.stringify({ title: 'Codex default thread' }),
       }).then((response) => response.json());
       expect(codexThread.thread.provider).toBe('codex');
+      expect(codexThread.thread.model).toBe('gpt-5.6-luna');
+      expect(codexThread.thread.thinkingLevel).toBe('medium');
 
       const disconnected = await built.app.inject({
         method: 'DELETE',

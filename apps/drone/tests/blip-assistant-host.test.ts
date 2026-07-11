@@ -3,14 +3,14 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fauxAssistantMessage, registerFauxProvider } from '@mariozechner/pi-ai';
 
+import { loadAssistantState } from '../src/host/assistant-store';
 import { BlipAssistantHost } from '../src/hub/assistant/blip-assistant-host';
 import { HubSessionRepository } from '../src/hub/assistant/hub-session-repository';
 import { HubAssistantService } from '../src/hub/assistant';
-import { HubAssistantStateStore } from '../src/hub/assistant/hub-assistant-state-store';
 import { withTempDroneDataDir } from './test-helpers';
 
 describe('Blip assistant host', () => {
-  test('stores Hub thread metadata in SQLite and removes the legacy assistant file', async () => {
+  test('migrates legacy Hub thread metadata into the canonical assistant store', async () => {
     await withTempDroneDataDir('blip-assistant-state-', async (dataDir) => {
       const legacyPath = path.join(dataDir, 'assistant.json');
       fs.writeFileSync(legacyPath, JSON.stringify({ threads: [{ id: 'legacy-thread' }] }));
@@ -18,13 +18,10 @@ describe('Blip assistant host', () => {
         listDrones: async () => [],
       });
       const snapshot = await service.createThread({ title: 'SQLite thread' });
-      expect(snapshot.threads.some((thread) => thread.id === 'legacy-thread')).toBe(false);
-      expect(fs.existsSync(legacyPath)).toBe(false);
+      expect(snapshot.threads.some((thread) => thread.id === 'legacy-thread')).toBe(true);
 
-      const store = new HubAssistantStateStore(path.join(dataDir, 'assistant-blip.sqlite'));
-      const stored = store.read<any>();
+      const stored = await loadAssistantState();
       expect(stored?.threads.some((thread: any) => thread.title === 'SQLite thread')).toBe(true);
-      store.close();
     });
   });
 

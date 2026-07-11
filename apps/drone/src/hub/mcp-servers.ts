@@ -4,7 +4,9 @@ import os from 'node:os';
 import path from 'node:path';
 
 import type { DroneRegistry } from '../host/registry';
-import { loadRegistry, updateRegistry } from '../host/registry';
+import { loadRegistry, loadRegistryRawSnapshot, updateRegistry } from '../host/registry';
+import { getHubDatabase } from '../host/hub-database';
+import { getCatalogStore, type CatalogStore } from '../host/catalog-store';
 import { bashQuote } from './hub-format';
 
 const MCP_MANIFEST = '.drone-managed-mcp.json';
@@ -40,8 +42,18 @@ type ManifestShape = {
 };
 
 async function loadDvmHelpers(): Promise<{
-  dvmCopyToContainer: (container: string, srcPath: string, destPath: string, opts?: { clean?: boolean; timeoutMs?: number }) => Promise<void>;
-  dvmExec: (container: string, cmd: string, args?: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout?: string; stderr?: string }>;
+  dvmCopyToContainer: (
+    container: string,
+    srcPath: string,
+    destPath: string,
+    opts?: { clean?: boolean; timeoutMs?: number },
+  ) => Promise<void>;
+  dvmExec: (
+    container: string,
+    cmd: string,
+    args?: string[],
+    opts?: { timeoutMs?: number },
+  ) => Promise<{ stdout?: string; stderr?: string }>;
 }> {
   const mod = await import('../host/dvm');
   return {
@@ -70,16 +82,20 @@ export function normalizeMcpServerName(raw: unknown): string {
 }
 
 function normalizeTransport(raw: unknown, fallback?: McpTransport): McpTransport {
-  const value = String(raw ?? '').trim().toLowerCase();
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (value === 'stdio' || value === 'http') return value;
   return fallback ?? 'stdio';
 }
 
 function normalizeAgents(raw: unknown, fallback?: McpAgentId[]): McpAgentId[] {
-  const values = Array.isArray(raw) ? raw : fallback ?? ['codex', 'cursor', 'claude', 'opencode'];
+  const values = Array.isArray(raw) ? raw : (fallback ?? ['codex', 'cursor', 'claude', 'opencode']);
   const out: McpAgentId[] = [];
   for (const value of values) {
-    const agent = String(value ?? '').trim().toLowerCase();
+    const agent = String(value ?? '')
+      .trim()
+      .toLowerCase();
     if (agent === 'codex' || agent === 'cursor' || agent === 'claude' || agent === 'opencode') {
       if (!out.includes(agent)) out.push(agent);
     }
@@ -109,24 +125,34 @@ function normalizeStringMap(raw: unknown): Record<string, string> | undefined {
 function normalizeStoredMcpServer(raw: unknown, fallbackId?: string): McpServerRecord | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const record = raw as any;
-  const id = normalizeOptionalString(record.id) || normalizeOptionalString(fallbackId) || crypto.randomUUID();
+  const id =
+    normalizeOptionalString(record.id) ||
+    normalizeOptionalString(fallbackId) ||
+    crypto.randomUUID();
   const name = normalizeOptionalString(record.name);
   if (!name) return null;
   const transport = normalizeTransport(record.transport);
   return {
     id,
     name: normalizeMcpServerName(name),
-    ...(normalizeOptionalString(record.description) ? { description: normalizeOptionalString(record.description) } : {}),
+    ...(normalizeOptionalString(record.description)
+      ? { description: normalizeOptionalString(record.description) }
+      : {}),
     enabled: record.enabled !== false,
     transport,
-    ...(normalizeOptionalString(record.command) ? { command: normalizeOptionalString(record.command) } : {}),
+    ...(normalizeOptionalString(record.command)
+      ? { command: normalizeOptionalString(record.command) }
+      : {}),
     ...(normalizeStringArray(record.args) ? { args: normalizeStringArray(record.args) } : {}),
     ...(normalizeOptionalString(record.url) ? { url: normalizeOptionalString(record.url) } : {}),
     ...(normalizeStringMap(record.env) ? { env: normalizeStringMap(record.env) } : {}),
     ...(normalizeStringMap(record.headers) ? { headers: normalizeStringMap(record.headers) } : {}),
     agents: normalizeAgents(record.agents),
     createdAt: normalizeOptionalString(record.createdAt) || new Date().toISOString(),
-    updatedAt: normalizeOptionalString(record.updatedAt) || normalizeOptionalString(record.createdAt) || new Date().toISOString(),
+    updatedAt:
+      normalizeOptionalString(record.updatedAt) ||
+      normalizeOptionalString(record.createdAt) ||
+      new Date().toISOString(),
   };
 }
 
@@ -141,9 +167,11 @@ function normalizeIncomingMcpServer(input: any, existing?: McpServerRecord): Mcp
     enabled:
       input && Object.prototype.hasOwnProperty.call(input, 'enabled')
         ? input.enabled !== false
-        : existing?.enabled ?? true,
+        : (existing?.enabled ?? true),
     transport,
-    ...(normalizeOptionalString(input?.command ?? existing?.command) ? { command: normalizeOptionalString(input?.command ?? existing?.command) } : {}),
+    ...(normalizeOptionalString(input?.command ?? existing?.command)
+      ? { command: normalizeOptionalString(input?.command ?? existing?.command) }
+      : {}),
     ...(input && Object.prototype.hasOwnProperty.call(input, 'args')
       ? normalizeStringArray(input.args)
         ? { args: normalizeStringArray(input.args) }
@@ -151,7 +179,9 @@ function normalizeIncomingMcpServer(input: any, existing?: McpServerRecord): Mcp
       : existing?.args
         ? { args: existing.args }
         : {}),
-    ...(normalizeOptionalString(input?.url ?? existing?.url) ? { url: normalizeOptionalString(input?.url ?? existing?.url) } : {}),
+    ...(normalizeOptionalString(input?.url ?? existing?.url)
+      ? { url: normalizeOptionalString(input?.url ?? existing?.url) }
+      : {}),
     ...(input && Object.prototype.hasOwnProperty.call(input, 'env')
       ? normalizeStringMap(input.env)
         ? { env: normalizeStringMap(input.env) }
@@ -170,7 +200,8 @@ function normalizeIncomingMcpServer(input: any, existing?: McpServerRecord): Mcp
     createdAt: existing?.createdAt ?? new Date().toISOString(),
     updatedAt: new Date().toISOString(),
   };
-  if (transport === 'stdio' && !record.command) throw new Error('missing command for stdio MCP server');
+  if (transport === 'stdio' && !record.command)
+    throw new Error('missing command for stdio MCP server');
   if (transport === 'http' && !record.url) throw new Error('missing url for HTTP MCP server');
   if (transport === 'stdio') {
     delete record.url;
@@ -188,7 +219,9 @@ function assertMcpNameAvailable(servers: McpServerRecord[], name: string, selfId
   if (conflict) throw new Error(`MCP server name already exists: ${name}`);
 }
 
-export function listMcpServersFromRegistry(reg: DroneRegistry | Record<string, unknown>): McpServerRecord[] {
+export function listMcpServersFromRegistry(
+  reg: DroneRegistry | Record<string, unknown>,
+): McpServerRecord[] {
   const rawServers = (reg as any)?.mcpServers;
   if (!rawServers || typeof rawServers !== 'object' || Array.isArray(rawServers)) return [];
   const out: McpServerRecord[] = [];
@@ -204,7 +237,26 @@ export function listMcpServersFromRegistry(reg: DroneRegistry | Record<string, u
   return out;
 }
 
+async function canonicalMcpServerStore(): Promise<CatalogStore | null> {
+  try {
+    return await getCatalogStore();
+  } catch (error) {
+    if ((globalThis as any).Bun && getHubDatabase() === null) return null;
+    throw error;
+  }
+}
+
+async function backfillLegacyMcpServers(store: CatalogStore): Promise<void> {
+  if (store.isBackfillComplete('mcp-servers')) return;
+  await store.backfillMcpServers(listMcpServersFromRegistry(await loadRegistryRawSnapshot()));
+}
+
 export async function listMcpServers(): Promise<McpServerRecord[]> {
+  const store = await canonicalMcpServerStore();
+  if (store) {
+    await backfillLegacyMcpServers(store);
+    return store.listMcpServers<McpServerRecord>();
+  }
   const reg = await loadRegistry();
   return listMcpServersFromRegistry(reg);
 }
@@ -212,14 +264,20 @@ export async function listMcpServers(): Promise<McpServerRecord[]> {
 export async function getMcpServerById(idRaw: string): Promise<McpServerRecord | null> {
   const id = String(idRaw ?? '').trim();
   if (!id) return null;
-  const reg = await loadRegistry();
-  return listMcpServersFromRegistry(reg).find((server) => server.id === id) ?? null;
+  const store = await canonicalMcpServerStore();
+  if (store) {
+    await backfillLegacyMcpServers(store);
+    return store.getMcpServer<McpServerRecord>(id);
+  }
+  return listMcpServersFromRegistry(await loadRegistry()).find((server) => server.id === id) ?? null;
 }
 
 export async function createMcpServer(input: any): Promise<McpServerRecord> {
   const current = await listMcpServers();
   const record = normalizeIncomingMcpServer(input);
   assertMcpNameAvailable(current, record.name);
+  const store = await canonicalMcpServerStore();
+  if (store) return await store.putMcpServer(record);
   await updateRegistry((reg: any) => {
     reg.mcpServers = reg.mcpServers ?? {};
     reg.mcpServers[record.id] = record;
@@ -235,6 +293,8 @@ export async function updateMcpServerRecord(idRaw: string, input: any): Promise<
   if (!existing) throw new Error(`unknown MCP server: ${id}`);
   const record = normalizeIncomingMcpServer(input, existing);
   assertMcpNameAvailable(current, record.name, id);
+  const store = await canonicalMcpServerStore();
+  if (store) return await store.putMcpServer(record);
   await updateRegistry((reg: any) => {
     reg.mcpServers = reg.mcpServers ?? {};
     reg.mcpServers[id] = record;
@@ -245,6 +305,11 @@ export async function updateMcpServerRecord(idRaw: string, input: any): Promise<
 export async function deleteMcpServerRecord(idRaw: string): Promise<boolean> {
   const id = String(idRaw ?? '').trim();
   if (!id) return false;
+  const store = await canonicalMcpServerStore();
+  if (store) {
+    await backfillLegacyMcpServers(store);
+    return await store.deleteMcpServer(id);
+  }
   return await updateRegistry((reg: any) => {
     if (!reg?.mcpServers?.[id]) return false;
     delete reg.mcpServers[id];
@@ -277,7 +342,9 @@ async function readJsonFile(filePath: string): Promise<any> {
 
 async function readManifestFromHost(configPath: string): Promise<ManifestShape> {
   const parsed = await readJsonFile(manifestPath(configPath));
-  const managedNames = Array.isArray(parsed?.managedNames) ? parsed.managedNames.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [];
+  const managedNames = Array.isArray(parsed?.managedNames)
+    ? parsed.managedNames.map((value: unknown) => String(value ?? '').trim()).filter(Boolean)
+    : [];
   return { managedNames };
 }
 
@@ -311,6 +378,40 @@ function stripManagedTomlBlock(raw: string): string {
   return out.join('\n').replace(/\s+$/g, '');
 }
 
+function regexEscape(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+function stripManagedCodexMcpTables(raw: string, managedNames: string[]): string {
+  const names = Array.from(
+    new Set(managedNames.map((name) => String(name ?? '').trim()).filter(Boolean)),
+  );
+  const withoutManagedBlock = stripManagedTomlBlock(raw);
+  if (names.length === 0) return withoutManagedBlock;
+
+  const managedTablePatterns = names.map((name) => {
+    const escaped = regexEscape(name);
+    return new RegExp(
+      `^(?:mcp_servers|"mcp_servers"|'mcp_servers')\\s*\\.\\s*(?:${escaped}|"${escaped}"|'${escaped}')(?:\\s*\\.|$)`,
+    );
+  });
+  const lines = withoutManagedBlock.split(/\r?\n/);
+  const out: string[] = [];
+  let skipTable = false;
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const tableHeader =
+      trimmed.match(/^\[([^\[\]]+)\](?:\s*#.*)?$/) ??
+      trimmed.match(/^\[\[([^\[\]]+)\]\](?:\s*#.*)?$/);
+    if (tableHeader) {
+      const tablePath = String(tableHeader[1] ?? '').trim();
+      skipTable = managedTablePatterns.some((pattern) => pattern.test(tablePath));
+    }
+    if (!skipTable) out.push(line);
+  }
+  return out.join('\n').replace(/\s+$/g, '');
+}
+
 function tomlString(value: string): string {
   return JSON.stringify(value);
 }
@@ -320,12 +421,16 @@ function tomlStringArray(values: string[]): string {
 }
 
 function tomlInlineTable(values: Record<string, string>): string {
-  const entries = Object.entries(values).map(([key, value]) => `${tomlString(key)} = ${tomlString(value)}`);
+  const entries = Object.entries(values).map(
+    ([key, value]) => `${tomlString(key)} = ${tomlString(value)}`,
+  );
   return `{ ${entries.join(', ')} }`;
 }
 
 function envPlaceholderName(value: string): string | null {
-  const match = String(value ?? '').trim().match(/^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/);
+  const match = String(value ?? '')
+    .trim()
+    .match(/^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/);
   return match?.[1] ?? null;
 }
 
@@ -345,17 +450,23 @@ function splitHeaderValues(headers: Record<string, string> | undefined): {
 
 function renderCodexMcpBlock(servers: McpServerRecord[]): string {
   if (servers.length === 0) return '';
-  const lines = [CODEX_MANAGED_START, '# Managed by Drone Hub. Edit MCP servers in Drone Hub settings.'];
+  const lines = [
+    CODEX_MANAGED_START,
+    '# Managed by Drone Hub. Edit MCP servers in Drone Hub settings.',
+  ];
   for (const server of servers) {
     lines.push('', `[mcp_servers.${server.name}]`);
     if (server.transport === 'http') {
       lines.push(`url = ${tomlString(server.url ?? '')}`);
       const { staticHeaders, envHeaders } = splitHeaderValues(server.headers);
-      if (Object.keys(staticHeaders).length > 0) lines.push(`http_headers = ${tomlInlineTable(staticHeaders)}`);
-      if (Object.keys(envHeaders).length > 0) lines.push(`env_http_headers = ${tomlInlineTable(envHeaders)}`);
+      if (Object.keys(staticHeaders).length > 0)
+        lines.push(`http_headers = ${tomlInlineTable(staticHeaders)}`);
+      if (Object.keys(envHeaders).length > 0)
+        lines.push(`env_http_headers = ${tomlInlineTable(envHeaders)}`);
     } else {
       lines.push(`command = ${tomlString(server.command ?? '')}`);
-      if (server.args && server.args.length > 0) lines.push(`args = ${tomlStringArray(server.args)}`);
+      if (server.args && server.args.length > 0)
+        lines.push(`args = ${tomlStringArray(server.args)}`);
     }
     if (server.env && Object.keys(server.env).length > 0) {
       lines.push(`env = ${tomlInlineTable(server.env)}`);
@@ -372,7 +483,9 @@ function renderJsonMcpServer(agent: McpAgentId, server: McpServerRecord): any {
         type: 'remote',
         url: server.url ?? '',
         enabled: true,
-        ...(server.headers && Object.keys(server.headers).length > 0 ? { headers: server.headers } : {}),
+        ...(server.headers && Object.keys(server.headers).length > 0
+          ? { headers: server.headers }
+          : {}),
       };
     }
     return {
@@ -386,7 +499,9 @@ function renderJsonMcpServer(agent: McpAgentId, server: McpServerRecord): any {
     return {
       ...(agent === 'claude' ? { type: 'http' } : {}),
       url: server.url ?? '',
-      ...(server.headers && Object.keys(server.headers).length > 0 ? { headers: server.headers } : {}),
+      ...(server.headers && Object.keys(server.headers).length > 0
+        ? { headers: server.headers }
+        : {}),
     };
   }
   return {
@@ -401,37 +516,61 @@ function jsonRootKey(agent: McpAgentId): 'mcpServers' | 'mcp' {
   return agent === 'opencode' ? 'mcp' : 'mcpServers';
 }
 
-function mergeJsonMcpConfig(agent: McpAgentId, existing: any, manifest: ManifestShape, servers: McpServerRecord[]): any {
-  const config = existing && typeof existing === 'object' && !Array.isArray(existing) ? { ...existing } : {};
+function mergeJsonMcpConfig(
+  agent: McpAgentId,
+  existing: any,
+  manifest: ManifestShape,
+  servers: McpServerRecord[],
+): any {
+  const config =
+    existing && typeof existing === 'object' && !Array.isArray(existing) ? { ...existing } : {};
   if (agent === 'opencode' && !config.$schema) config.$schema = 'https://opencode.ai/config.json';
   const rootKey = jsonRootKey(agent);
-  const root = config[rootKey] && typeof config[rootKey] === 'object' && !Array.isArray(config[rootKey]) ? { ...config[rootKey] } : {};
+  const root =
+    config[rootKey] && typeof config[rootKey] === 'object' && !Array.isArray(config[rootKey])
+      ? { ...config[rootKey] }
+      : {};
   for (const name of manifest.managedNames) delete root[name];
   for (const server of servers) root[server.name] = renderJsonMcpServer(agent, server);
   config[rootKey] = root;
   return config;
 }
 
-async function writeCodexTargetToHost(target: McpProjectionTarget, servers: McpServerRecord[]): Promise<void> {
+async function writeCodexTargetToHost(
+  target: McpProjectionTarget,
+  servers: McpServerRecord[],
+): Promise<void> {
   await fs.mkdir(path.dirname(target.configPath), { recursive: true });
   const existing = await readTextFromHost(target.configPath);
-  const base = stripManagedTomlBlock(existing);
+  const manifest = await readManifestFromHost(target.configPath);
+  const managedNames = [...manifest.managedNames, ...servers.map((server) => server.name)];
+  const base = stripManagedCodexMcpTables(existing, managedNames);
   const block = renderCodexMcpBlock(servers);
   const next = `${[base, block].filter(Boolean).join('\n\n')}\n`;
   await fs.writeFile(target.configPath, next, 'utf8');
-  await writeManifestToHost(target.configPath, { managedNames: servers.map((server) => server.name).sort() });
+  await writeManifestToHost(target.configPath, {
+    managedNames: servers.map((server) => server.name).sort(),
+  });
 }
 
-async function writeJsonTargetToHost(target: McpProjectionTarget, servers: McpServerRecord[]): Promise<void> {
+async function writeJsonTargetToHost(
+  target: McpProjectionTarget,
+  servers: McpServerRecord[],
+): Promise<void> {
   await fs.mkdir(path.dirname(target.configPath), { recursive: true });
   const existing = await readJsonFile(target.configPath);
   const manifest = await readManifestFromHost(target.configPath);
   const next = mergeJsonMcpConfig(target.agent, existing, manifest, servers);
   await fs.writeFile(target.configPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-  await writeManifestToHost(target.configPath, { managedNames: servers.map((server) => server.name).sort() });
+  await writeManifestToHost(target.configPath, {
+    managedNames: servers.map((server) => server.name).sort(),
+  });
 }
 
-async function writeTargetToHost(target: McpProjectionTarget, servers: McpServerRecord[]): Promise<void> {
+async function writeTargetToHost(
+  target: McpProjectionTarget,
+  servers: McpServerRecord[],
+): Promise<void> {
   if (target.agent === 'codex') {
     await writeCodexTargetToHost(target, servers);
     return;
@@ -439,7 +578,10 @@ async function writeTargetToHost(target: McpProjectionTarget, servers: McpServer
   await writeJsonTargetToHost(target, servers);
 }
 
-export async function syncMcpServersToHostTargets(opts: { targets: McpProjectionTarget[]; servers?: McpServerRecord[] }): Promise<void> {
+export async function syncMcpServersToHostTargets(opts: {
+  targets: McpProjectionTarget[];
+  servers?: McpServerRecord[];
+}): Promise<void> {
   const servers = Array.isArray(opts.servers) ? opts.servers : await listMcpServers();
   for (const target of opts.targets) {
     const configPath = String(target.configPath ?? '').trim();
@@ -450,7 +592,10 @@ export async function syncMcpServersToHostTargets(opts: { targets: McpProjection
 
 async function readTextFromContainer(containerName: string, filePath: string): Promise<string> {
   const { dvmExec } = await loadDvmHelpers();
-  const read = await dvmExec(containerName, 'bash', ['-lc', `cat ${bashQuote(filePath)} 2>/dev/null || true`]);
+  const read = await dvmExec(containerName, 'bash', [
+    '-lc',
+    `cat ${bashQuote(filePath)} 2>/dev/null || true`,
+  ]);
   return String(read.stdout ?? '');
 }
 
@@ -459,43 +604,77 @@ async function readJsonFromContainer(containerName: string, filePath: string): P
   return raw.trim() ? JSON.parse(raw) : {};
 }
 
-async function readManifestFromContainer(containerName: string, configPath: string): Promise<ManifestShape> {
+async function readManifestFromContainer(
+  containerName: string,
+  configPath: string,
+): Promise<ManifestShape> {
   const parsed = await readJsonFromContainer(containerName, manifestPathPosix(configPath));
-  const managedNames = Array.isArray(parsed?.managedNames) ? parsed.managedNames.map((value: unknown) => String(value ?? '').trim()).filter(Boolean) : [];
+  const managedNames = Array.isArray(parsed?.managedNames)
+    ? parsed.managedNames.map((value: unknown) => String(value ?? '').trim()).filter(Boolean)
+    : [];
   return { managedNames };
 }
 
-async function copyTextToContainer(containerName: string, destPath: string, content: string): Promise<void> {
+async function copyTextToContainer(
+  containerName: string,
+  destPath: string,
+  content: string,
+): Promise<void> {
   const { dvmCopyToContainer, dvmExec } = await loadDvmHelpers();
   const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-mcp-sync-'));
   try {
     const localPath = path.join(tempRoot, path.basename(destPath));
     await fs.writeFile(localPath, content, 'utf8');
-    await dvmExec(containerName, 'bash', ['-lc', `mkdir -p ${bashQuote(path.posix.dirname(destPath))}`]);
+    await dvmExec(containerName, 'bash', [
+      '-lc',
+      `mkdir -p ${bashQuote(path.posix.dirname(destPath))}`,
+    ]);
     await dvmCopyToContainer(containerName, localPath, destPath, { clean: false });
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function writeCodexTargetToContainer(containerName: string, target: McpProjectionTarget, servers: McpServerRecord[]): Promise<void> {
+async function writeCodexTargetToContainer(
+  containerName: string,
+  target: McpProjectionTarget,
+  servers: McpServerRecord[],
+): Promise<void> {
   const existing = await readTextFromContainer(containerName, target.configPath);
-  const base = stripManagedTomlBlock(existing);
+  const manifest = await readManifestFromContainer(containerName, target.configPath);
+  const managedNames = [...manifest.managedNames, ...servers.map((server) => server.name)];
+  const base = stripManagedCodexMcpTables(existing, managedNames);
   const block = renderCodexMcpBlock(servers);
   const next = `${[base, block].filter(Boolean).join('\n\n')}\n`;
   await copyTextToContainer(containerName, target.configPath, next);
-  await copyTextToContainer(containerName, manifestPathPosix(target.configPath), `${JSON.stringify({ managedNames: servers.map((server) => server.name).sort() }, null, 2)}\n`);
+  await copyTextToContainer(
+    containerName,
+    manifestPathPosix(target.configPath),
+    `${JSON.stringify({ managedNames: servers.map((server) => server.name).sort() }, null, 2)}\n`,
+  );
 }
 
-async function writeJsonTargetToContainer(containerName: string, target: McpProjectionTarget, servers: McpServerRecord[]): Promise<void> {
+async function writeJsonTargetToContainer(
+  containerName: string,
+  target: McpProjectionTarget,
+  servers: McpServerRecord[],
+): Promise<void> {
   const existing = await readJsonFromContainer(containerName, target.configPath);
   const manifest = await readManifestFromContainer(containerName, target.configPath);
   const next = mergeJsonMcpConfig(target.agent, existing, manifest, servers);
   await copyTextToContainer(containerName, target.configPath, `${JSON.stringify(next, null, 2)}\n`);
-  await copyTextToContainer(containerName, manifestPathPosix(target.configPath), `${JSON.stringify({ managedNames: servers.map((server) => server.name).sort() }, null, 2)}\n`);
+  await copyTextToContainer(
+    containerName,
+    manifestPathPosix(target.configPath),
+    `${JSON.stringify({ managedNames: servers.map((server) => server.name).sort() }, null, 2)}\n`,
+  );
 }
 
-async function writeTargetToContainer(containerName: string, target: McpProjectionTarget, servers: McpServerRecord[]): Promise<void> {
+async function writeTargetToContainer(
+  containerName: string,
+  target: McpProjectionTarget,
+  servers: McpServerRecord[],
+): Promise<void> {
   if (target.agent === 'codex') {
     await writeCodexTargetToContainer(containerName, target, servers);
     return;
@@ -514,6 +693,10 @@ export async function syncMcpServersToContainerTargets(opts: {
   for (const target of opts.targets) {
     const configPath = String(target.configPath ?? '').trim();
     if (!configPath) continue;
-    await writeTargetToContainer(containerName, target, activeServersForAgent(servers, target.agent));
+    await writeTargetToContainer(
+      containerName,
+      target,
+      activeServersForAgent(servers, target.agent),
+    );
   }
 }

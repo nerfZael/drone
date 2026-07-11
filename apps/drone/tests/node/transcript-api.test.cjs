@@ -5,13 +5,17 @@ const path = require('node:path');
 const test = require('node:test');
 
 const { resetDroneRootDirForTests } = require('../../dist/host/paths');
-const { loadRegistry, updateRegistry } = require('../../dist/host/registry');
+const { getDroneLifecycleRepository } = require('../../dist/host/drone-lifecycle-repository');
+const { getPromptQueueRepository } = require('../../dist/host/prompt-queue-repository');
+const { getHubDatabase } = require('../../dist/host/hub-database');
+const { loadRegistry } = require('../../dist/host/registry');
 const { startDroneHubApiServer } = require('../../dist/hub/server');
 const {
   getTranscriptStoreUnavailableReason,
   importDroneChatsFromRegistry,
   readChatFromStore,
   readTranscriptTurnsFromStore,
+  upsertChatInStore,
   upsertTranscriptTurnInStore,
 } = require('../../dist/hub/transcript-store');
 
@@ -37,26 +41,38 @@ async function apiFetch(baseUrl, token, pathname, init = {}) {
 
 async function seedDrone(droneId) {
   const now = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.drones = reg.drones ?? {};
-    reg.drones[droneId] = {
-      id: droneId,
-      name: droneId,
-      hostPort: 1,
-      token: 'mock-token',
-      containerPort: 7777,
-      repoPath: '',
+  const entry = {
+    id: droneId,
+    name: droneId,
+    hostPort: 1,
+    token: 'mock-token',
+    containerPort: 7777,
+    repoPath: '',
+    createdAt: now,
+  };
+  const repository = await getDroneLifecycleRepository();
+  await repository.upsert('real', droneId, entry);
+  await upsertChatInStore({
+    droneId,
+    chatName: 'default',
+    chatEntry: {
       createdAt: now,
-      chats: {
-        default: {
-          createdAt: now,
-          agent: { kind: 'builtin', id: 'cursor' },
-          turns: [],
-          pendingPrompts: [],
-          agentSuggestionEnabled: true,
-        },
-      },
-    };
+      agent: { kind: 'builtin', id: 'cursor' },
+      turns: [],
+      pendingPrompts: [],
+      agentSuggestionEnabled: true,
+    },
+  });
+  await getPromptQueueRepository().enqueue({
+    droneId,
+    chatName: 'default',
+    prompt: {
+      id: 'pending-1',
+      at: '2026-01-01T00:04:00.000Z',
+      updatedAt: '2026-01-01T00:04:01.000Z',
+      prompt: 'third',
+      state: 'queued',
+    },
   });
 }
 
@@ -85,10 +101,14 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
 
   const older = '2026-01-01T00:01:00.000Z';
   const newer = '2026-01-01T00:02:00.000Z';
-  await updateRegistry((reg) => {
-    const entry = reg.drones?.[droneId]?.chats?.default;
-    assert.ok(entry, 'missing seeded chat entry');
-    entry.turns = [
+  await upsertChatInStore({
+    droneId,
+    chatName: 'default',
+    chatEntry: {
+      createdAt: older,
+      agent: { kind: 'builtin', id: 'cursor' },
+      agentSuggestionEnabled: true,
+      turns: [
       {
         id: 'newer',
         at: newer,
@@ -115,8 +135,8 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
         ok: true,
         output: 'one',
       },
-    ];
-    entry.pendingPrompts = [
+      ],
+      pendingPrompts: [
       {
         id: 'pending-1',
         at: '2026-01-01T00:04:00.000Z',
@@ -124,7 +144,8 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
         prompt: 'third',
         state: 'queued',
       },
-    ];
+      ],
+    },
   });
 
   const first = await apiFetch(
@@ -141,13 +162,44 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
     ['first', 'second'],
   );
   const etag = first.response.headers.get('etag');
-  assert.match(etag ?? '', /^"transcript-/);
+  assert.match(etag ?? '', /^"sha256-/);
+  assert.match(first.response.headers.get('server-timing') ?? '', /lifecycle;dur=/);
+  assert.match(first.response.headers.get('server-timing') ?? '', /version;dur=/);
+  assert.match(first.response.headers.get('server-timing') ?? '', /rows;dur=/);
+
+  const readCounts = () => getHubDatabase().read((connection) => ({
+    lifecycleBackfills: connection.prepare('SELECT COUNT(*) AS count FROM hub_drone_lifecycle_backfill').get().count,
+    chats: connection.prepare('SELECT COUNT(*) AS count FROM canonical_chats').get().count,
+    turns: connection.prepare('SELECT COUNT(*) AS count FROM canonical_chat_turns').get().count,
+    prompts: connection.prepare('SELECT COUNT(*) AS count FROM prompts').get().count,
+  }));
+  const beforeCanonicalRead = readCounts();
+  const stateRead = await apiFetch(
+    baseUrl,
+    token,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`,
+  );
+  assert.equal(stateRead.response.status, 200, stateRead.text);
+  assert.deepEqual(readCounts(), beforeCanonicalRead, 'canonical hot reads must not backfill or mutate storage');
+  assert.equal(stateRead.data.transcripts.length, 1);
+  assert.equal(stateRead.data.pending[0].id, 'pending-1');
+  const stateEtag = stateRead.response.headers.get('etag');
+  const unchangedState = await apiFetch(
+    baseUrl,
+    token,
+    `/api/drones/${encodeURIComponent(droneId)}/chats/default/state?turn=all&tail=1`,
+    { headers: { 'if-none-match': stateEtag ?? '' } },
+  );
+  assert.equal(unchangedState.response.status, 304);
+  assert.equal(unchangedState.text, '');
+  assert.match(unchangedState.response.headers.get('server-timing') ?? '', /conditional;dur=/);
+  assert.doesNotMatch(unchangedState.response.headers.get('server-timing') ?? '', /rows;dur=/);
 
   const sqlitePath = path.join(droneDataDir, 'hub.sqlite');
   assert.equal(fs.existsSync(sqlitePath), true);
   assert.equal(getTranscriptStoreUnavailableReason(), null);
 
-  const orderedImport = importDroneChatsFromRegistry({
+  const orderedImport = await importDroneChatsFromRegistry({
     droneId: 'ordering-drone',
     chats: {
       default: {
@@ -210,8 +262,10 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   );
   assert.equal(second.response.status, 304);
   assert.equal(second.text, '');
+  assert.match(second.response.headers.get('server-timing') ?? '', /conditional;dur=/);
+  assert.doesNotMatch(second.response.headers.get('server-timing') ?? '', /rows;dur=/);
 
-  const orphanWrite = upsertTranscriptTurnInStore({
+  const orphanWrite = await upsertTranscriptTurnInStore({
     droneId,
     chatName: 'default',
     turn: {
@@ -239,13 +293,13 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
     ['first', 'second', 'create a markdown document'],
   );
 
-  const deletedChats = importDroneChatsFromRegistry({ droneId, chats: {} });
+  const deletedChats = await importDroneChatsFromRegistry({ droneId, chats: {} });
   assert.equal(deletedChats.available, true);
   const deletedChatRead = readChatFromStore({ droneId, chatName: 'default' });
   assert.equal(deletedChatRead.available, true);
-  assert.equal(deletedChatRead.chat, null);
+  assert.notEqual(deletedChatRead.chat, null);
 
-  const recreatedChats = importDroneChatsFromRegistry({
+  const recreatedChats = await importDroneChatsFromRegistry({
     droneId,
     chats: {
       default: {
@@ -258,8 +312,7 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
   assert.equal(recreatedChats.available, true);
   const recreatedChatRead = readChatFromStore({ droneId, chatName: 'default' });
   assert.equal(recreatedChatRead.available, true);
-  assert.equal(recreatedChatRead.chat.turns.length, 0);
-  assert.equal(recreatedChatRead.chat.pendingPrompts.length, 0);
+  assert.equal(recreatedChatRead.chat.turns.length, 3);
 
   const missing = await apiFetch(
     baseUrl,

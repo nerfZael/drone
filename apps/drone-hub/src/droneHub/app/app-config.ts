@@ -15,7 +15,6 @@ export const BUILTIN_AGENT_OPTIONS: Array<{ key: string; label: string; agent: C
 
 export const PORT_PREVIEW_STORAGE_KEY = profileStorageKey('droneHub.portPreviewByDrone');
 export const PREVIEW_URL_STORAGE_KEY = profileStorageKey('droneHub.previewUrlByDrone');
-export const FS_EXPLORER_VIEW_STORAGE_KEY = profileStorageKey('droneHub.fsExplorerView');
 export const PORT_STATUS_POLL_INTERVAL_MS = 15_000;
 export const PORT_STATUS_TIMEOUT_MS = 1_800;
 export const DRONE_DND_MIME = 'application/x-drone-ids+json';

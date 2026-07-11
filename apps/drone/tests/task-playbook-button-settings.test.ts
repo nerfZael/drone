@@ -14,7 +14,7 @@ describe('task playbook button settings persistence', () => {
     });
   });
 
-  test('round-trips task playbook button settings through registry storage', async () => {
+  test('round-trips task playbook button settings through canonical storage', async () => {
     await withTempDroneDataDir('drone-task-playbook-buttons-', async () => {
       await upsertStoredTaskPlaybookButtonSettings([
         {

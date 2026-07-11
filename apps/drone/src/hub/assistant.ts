@@ -1,8 +1,7 @@
 import crypto from 'node:crypto';
-import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { droneRootPath } from '../host/paths';
+import { loadAssistantState, saveAssistantState } from '../host/assistant-store';
 import { loadRegistry } from '../host/registry';
 import { hubLog, resolveEffectiveProviderApiKeySettings, type LlmProviderId } from './hub-settings';
 import {
@@ -13,7 +12,6 @@ import {
   saveAssistantArtifactUploads,
   type AssistantArtifactActionInput,
 } from './assistant-artifacts';
-import { HubAssistantStateStore } from './assistant/hub-assistant-state-store';
 import {
   ASSISTANT_THREAD_MESSAGE_LIMIT,
   ASSISTANT_REGISTRY_MAX_THREADS,
@@ -195,6 +193,11 @@ type AssistantRunModel = {
   startedAt: string;
 };
 
+type AssistantDefaultModel = {
+  provider: LlmProviderId;
+  model: string;
+};
+
 type AssistantApproval = {
   id: string;
   threadId: string;
@@ -208,6 +211,7 @@ type AssistantApproval = {
 
 type StoredAssistantState = {
   activeThreadId?: string | null;
+  defaultModel?: { provider?: string; model?: string };
   threads?: AssistantThread[];
   chatIdleSubscriptions?: AssistantChatIdleSubscription[];
   webSearchToolMigrationApplied?: boolean;
@@ -1344,6 +1348,7 @@ function normalizeThread(
 
 function serializeState(input: {
   activeThreadId: string;
+  defaultModel: AssistantDefaultModel;
   threads: AssistantThread[];
   chatIdleSubscriptions: AssistantChatIdleSubscription[];
   systemPrompt: string;
@@ -1361,6 +1366,7 @@ function serializeState(input: {
     .map(sanitizeChatIdleSubscription);
   return {
     activeThreadId: input.activeThreadId,
+    defaultModel: input.defaultModel,
     threads: input.threads.slice(0, ASSISTANT_REGISTRY_MAX_THREADS).map(sanitizeThread),
     ...(chatIdleSubscriptions.length > 0 ? { chatIdleSubscriptions } : {}),
     webSearchToolMigrationApplied: true,
@@ -1407,6 +1413,7 @@ export class HubAssistantService {
   private defaultVoiceSystemPromptUpdatedAt: string | null = null;
   private defaultOverviewPrompt = ASSISTANT_OVERVIEW_PROMPT_DEFAULT;
   private defaultOverviewPromptUpdatedAt: string | null = null;
+  private defaultModelSelection: AssistantDefaultModel = { provider: 'openai', model: DEFAULT_OPENAI_MODEL };
   private overviewCache = new Map<string, AssistantThreadOverviewCacheEntry>();
   private overviewInFlight = new Map<string, Promise<AssistantThreadOverviewResult>>();
   private changeSequence = 0;
@@ -1424,8 +1431,6 @@ export class HubAssistantService {
       resolve: (approved: boolean) => void;
     }
   >();
-  private readonly stateStore = new HubAssistantStateStore();
-  private stateWriteQueue: Promise<void> = Promise.resolve();
   private textPromptDelegate: ((threadId: string, prompt: string, source: AssistantVoiceSource | null) => Promise<void>) | null = null;
   private realtimeToolCatalogDelegate: ((threadId: string) => Promise<any[]>) | null = null;
   private realtimeToolExecuteDelegate: ((threadId: string, callId: string, toolName: string, args: any, signal?: AbortSignal) => Promise<any>) | null = null;
@@ -1795,11 +1800,11 @@ export class HubAssistantService {
   async createThread(input?: { title?: unknown; model?: unknown; provider?: unknown; activeDroneId?: unknown; activeChatName?: unknown; voiceEnabled?: unknown }): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const explicitProvider = String(input?.provider ?? '').trim();
-    const provider = explicitProvider ? normalizeProvider(explicitProvider) : await defaultAssistantProvider();
+    const provider = explicitProvider ? normalizeProvider(explicitProvider) : this.defaultModelSelection.provider;
     const voiceEnabled = normalizeAssistantVoiceEnabled(input?.voiceEnabled);
     const thread = this.makeThread({
       provider,
-      model: String(input?.model ?? '').trim() || defaultModelForProvider(provider),
+      model: String(input?.model ?? '').trim() || (explicitProvider ? defaultModelForProvider(provider) : this.defaultModelSelection.model),
       title: String(input?.title ?? '').trim() || DEFAULT_THREAD_TITLE,
       accessScope: this.defaultAccessScopeForNewThread({ ...input, voiceEnabled }),
       voiceEnabled,
@@ -1819,10 +1824,10 @@ export class HubAssistantService {
       return { ok: true, threadId: existing.id, created: false, thread: sanitizeThread(existing) };
     }
 
-    const provider = await defaultAssistantProvider();
+    const provider = this.defaultModelSelection.provider;
     const thread = this.makeThread({
       provider,
-      model: defaultModelForProvider(provider),
+      model: this.defaultModelSelection.model,
       title: String(input?.title ?? '').trim() || 'Realtime thread',
       voiceEnabled: true,
       accessScope: this.defaultAccessScopeForNewThread({ voiceEnabled: true }),
@@ -2065,6 +2070,20 @@ export class HubAssistantService {
     return await this.threadSnapshot(thread.id);
   }
 
+  async updateDefaultModel(input?: { provider?: unknown; model?: unknown }): Promise<AssistantSnapshot> {
+    await this.ensureLoaded();
+    const provider = normalizeProvider(input?.provider);
+    const model = String(input?.model ?? '').trim();
+    if (!ASSISTANT_MODEL_OPTIONS.some((option) => option.provider === provider && option.id === model)) {
+      throw new Error(`unknown assistant model: ${provider}/${model}`);
+    }
+    if (this.defaultModelSelection.provider !== provider || this.defaultModelSelection.model !== model) {
+      this.defaultModelSelection = { provider, model };
+      await this.persist();
+    }
+    return await this.threadSnapshot(this.activeThreadId);
+  }
+
   async deleteThread(threadId: string): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     this.clearThreadStreamingMessages(threadId);
@@ -2075,8 +2094,7 @@ export class HubAssistantService {
     await deleteAssistantArtifactsForThread(threadId);
     this.threads = this.threads.filter((thread) => thread.id !== threadId);
     if (this.threads.length === 0) {
-      const provider = await defaultAssistantProvider();
-      this.threads = [this.makeThread({ provider, model: defaultModelForProvider(provider) })];
+      this.threads = [this.makeThread(this.defaultModelSelection)];
     }
     if (!this.threads.some((thread) => thread.id === this.activeThreadId)) {
       this.activeThreadId = this.threads[0].id;
@@ -2281,8 +2299,7 @@ export class HubAssistantService {
   }
   private async ensureLoaded(): Promise<void> {
     if (this.loaded) return;
-    const stored = this.stateStore.read<StoredAssistantState>() ?? undefined;
-    await fs.rm(droneRootPath('assistant.json'), { force: true }).catch(() => {});
+    const stored = (await loadAssistantState()) ?? undefined;
     const storedSystemPrompt = migrateAssistantSystemPrompt(stored?.systemPrompt);
     const storedVoiceSystemPrompt = migrateAssistantSystemPrompt(stored?.voiceSystemPrompt);
     const storedOverviewPrompt = normalizeAssistantOverviewPrompt(stored?.overviewPrompt);
@@ -2305,6 +2322,12 @@ export class HubAssistantService {
       storedOverviewPrompt && typeof stored?.overviewPromptUpdatedAt === 'string' && stored.overviewPromptUpdatedAt.trim()
         ? stored.overviewPromptUpdatedAt.trim()
         : null;
+    const fallbackDefaultProvider = await defaultAssistantProvider();
+    const storedDefaultProvider = normalizeProvider(stored?.defaultModel?.provider ?? fallbackDefaultProvider);
+    this.defaultModelSelection = {
+      provider: storedDefaultProvider,
+      model: allowedModelForProvider(storedDefaultProvider, stored?.defaultModel?.model),
+    };
     const storedThreads = Array.isArray(stored?.threads) ? stored.threads : [];
     const storedFallbackProvider = normalizeProvider(storedThreads.find((thread: any) => thread && typeof thread === 'object')?.provider);
     const storedFallback = {
@@ -2320,8 +2343,12 @@ export class HubAssistantService {
     if (threads.length > 0) {
       this.threads = threads;
     } else {
-      const provider = await defaultAssistantProvider();
-      this.threads = [this.makeThread({ provider, model: defaultModelForProvider(provider), systemPrompt: this.defaultSystemPrompt })];
+      this.threads = [
+        this.makeThread({
+          ...this.defaultModelSelection,
+          systemPrompt: this.defaultSystemPrompt,
+        }),
+      ];
     }
     const activeThreadId = String(stored?.activeThreadId ?? '').trim();
     this.activeThreadId = this.threads.some((thread) => thread.id === activeThreadId) ? activeThreadId : this.threads[0].id;
@@ -2400,6 +2427,7 @@ export class HubAssistantService {
     const activeThread = firstThread(this.threads, this.activeThreadId);
     const state = serializeState({
       activeThreadId: activeThread.id,
+      defaultModel: this.defaultModelSelection,
       threads: this.threads,
       chatIdleSubscriptions: [],
       systemPrompt: this.defaultSystemPrompt,
@@ -2409,9 +2437,7 @@ export class HubAssistantService {
       overviewPrompt: this.defaultOverviewPrompt,
       overviewPromptUpdatedAt: this.defaultOverviewPromptUpdatedAt,
     });
-    const write = this.stateWriteQueue.catch(() => {}).then(() => this.stateStore.write(state));
-    this.stateWriteQueue = write;
-    await write;
+    await saveAssistantState(state);
     this.emitChange('persisted', activeThread.id);
   }
 

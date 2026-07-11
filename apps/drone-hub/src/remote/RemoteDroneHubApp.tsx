@@ -169,9 +169,9 @@ export function RemoteDroneHubApp() {
                 <RemoteRuntimeMetadata
                   hasDrone={Boolean(model.selectedDrone)}
                   repoPath={model.selectedDrone?.repoPath ?? ''}
-                  agent={model.chatRuntime.info?.agent ?? null}
-                  configuredModel={model.chatRuntime.info?.model ?? null}
-                  models={model.chatRuntime.models}
+                  agent={model.chatRuntime.agent}
+                  configuredModel={model.chatRuntime.configuredModel}
+                  transcripts={model.transcripts}
                   loading={model.chatRuntime.loading}
                   error={model.chatRuntime.error}
                   draft={selectedChatIsDraft}
@@ -195,7 +195,7 @@ export function RemoteDroneHubApp() {
         <ChatTranscriptFrame
           loading={model.chatStateLoading}
           loadingMessage={`Loading ${model.selectedDrone?.name ?? 'remote drone'} / ${model.selectedChat}...`}
-          hasContent={model.transcripts.length > 0 || model.pending.length > 0}
+          hasContent={model.chatTimeline.length > 0}
           emptyState={
             <EmptyState
               icon={<IconBot className="h-8 w-8 text-[var(--muted)]" />}
@@ -204,37 +204,36 @@ export function RemoteDroneHubApp() {
             />
           }
         >
-          {model.transcripts.map((turn) => (
-            <TranscriptTurn
-              key={turn.id ?? `${turn.turn}-${turn.at}`}
-              item={turn}
-              parsingJobs={false}
-              onCreateJobs={noopCreateJobs}
-              onSpawnDroneHubTask={noopSpawnTask}
-              messageId={transcriptMessageId(turn)}
-              tldr={null}
-              showTldr={false}
-              onToggleTldr={noopToggleTldr}
-              onHoverAgentMessage={noopHoverAgentMessage}
-              onOpenLink={openExternalLink}
-              droneId={model.selectedDrone?.id}
-              droneHomePath={selectedDroneHomePath}
-              showRoleIcons={false}
-              actionsEnabled={REMOTE_HUB_CAPABILITIES.transcriptActions}
-            />
-          ))}
-          {model.pending.length > 0 ? (
-            model.pending.map((item) => (
+          {model.chatTimeline.map((entry) =>
+            entry.kind === 'transcript' ? (
+              <TranscriptTurn
+                key={entry.key}
+                item={entry.item}
+                parsingJobs={false}
+                onCreateJobs={noopCreateJobs}
+                onSpawnDroneHubTask={noopSpawnTask}
+                messageId={transcriptMessageId(entry.item)}
+                tldr={null}
+                showTldr={false}
+                onToggleTldr={noopToggleTldr}
+                onHoverAgentMessage={noopHoverAgentMessage}
+                onOpenLink={openExternalLink}
+                droneId={model.selectedDrone?.id}
+                droneHomePath={selectedDroneHomePath}
+                showRoleIcons={false}
+                actionsEnabled={REMOTE_HUB_CAPABILITIES.transcriptActions}
+              />
+            ) : (
               <PendingTranscriptTurn
-                key={item.id}
-                item={item}
+                key={entry.key}
+                item={entry.item}
                 showRoleIcons={false}
                 droneId={model.selectedDrone?.id}
                 droneHomePath={selectedDroneHomePath}
                 onOpenLink={openExternalLink}
               />
-            ))
-          ) : null}
+            ),
+          )}
         </ChatTranscriptFrame>
       </div>
 
@@ -282,6 +281,7 @@ export function RemoteDroneHubApp() {
         drones={model.drones}
         selectedDroneId={model.selectedDrone?.id ?? null}
         activeChatName={model.selectedChat}
+        unreadAgentMessageByChatNodeId={model.unreadAgentMessageByChatNodeId}
         onOpenChange={setRemoteMobileSidebarOpen}
         onSelectDrone={model.setSelectedDroneId}
         onSelectChat={model.setSelectedChat}
@@ -298,6 +298,7 @@ export function RemoteDroneHubApp() {
           drones={model.drones}
           selectedDroneId={model.selectedDrone?.id ?? null}
           activeChatName={model.selectedChat}
+          unreadAgentMessageByChatNodeId={model.unreadAgentMessageByChatNodeId}
           onSelectDrone={model.setSelectedDroneId}
           onSelectChat={model.setSelectedChat}
           onOpenCreateDrone={openCreateDrone}

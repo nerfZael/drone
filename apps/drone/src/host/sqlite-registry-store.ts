@@ -581,6 +581,7 @@ export function getSqliteRegistryStore(): SqliteRegistryStore | null {
     cached = null;
   }
   fs.mkdirSync(path.dirname(dbPath), { recursive: true, mode: 0o700 });
+  const isNewFile = !fs.existsSync(dbPath);
   try {
     const db = new Database(dbPath);
     const store = new SqliteRegistryStore(db);
@@ -588,6 +589,19 @@ export function getSqliteRegistryStore(): SqliteRegistryStore | null {
     unavailableReason = null;
     return store;
   } catch (error: any) {
+    if (isNewFile) {
+      // A native binding can fail only after SQLite has created the database
+      // file. Do not leave that empty artifact behind: compatibility readers
+      // treat an existing hub.sqlite as canonical state that must not be
+      // silently bypassed.
+      for (const candidate of [dbPath, `${dbPath}-wal`, `${dbPath}-shm`]) {
+        try {
+          fs.rmSync(candidate, { force: true });
+        } catch {
+          // Preserve the binding error; cleanup is best-effort.
+        }
+      }
+    }
     unavailableReason = error?.message ?? String(error);
     return null;
   }

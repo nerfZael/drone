@@ -5,11 +5,16 @@ import path from 'node:path';
 
 import dotenv from 'dotenv';
 
-import { loadRegistry, updateRegistry } from '../host/registry';
+import {
+  getHubSettingsRepository,
+  HubSettingVersionConflictError,
+  type HubSettingRecord,
+} from '../host/hub-settings-repository';
+import { loadRegistry, updateRegistry, type DroneRegistry } from '../host/registry';
 import { readActiveProfileName } from '../host/profiles';
 import {
-  persistTaskBoardState,
   normalizeTaskTypeId,
+  persistTaskBoardState,
   sanitizeTaskBoardState,
   type TaskBoardCard as KanbanBoardCard,
   type TaskBoardLane as KanbanBoardLane,
@@ -775,6 +780,46 @@ function apiKeyHint(apiKey: string | null): string | null {
   return `${key.slice(0, 4)}...${key.slice(-4)}`;
 }
 
+const SETTING_KEYS = {
+  providerApiKey: (provider: StoredApiKeyProviderId) => `api-key.${provider}`,
+  voiceStreamPairingPassword: 'voice-stream.pairing-password',
+  llmProvider: 'llm.provider',
+  deleteAction: 'delete-action',
+  filesystem: 'filesystem',
+  voiceApproval: 'voice-approval',
+  voiceTranscription: 'voice-transcription',
+  voiceActivation: 'voice-activation',
+  voiceRealtime: 'voice-realtime',
+  agentMessageAutoContinue: 'agent-message-auto-continue',
+  agentSuggestion: 'agent-suggestion',
+  kanbanBoard: 'kanban-board',
+  taskPlaybookButtons: 'task-playbook-buttons',
+} as const;
+
+type LegacySetting<T> = { value: T; updatedAt: string | null };
+
+function legacyUpdatedAt(raw: any): string | null {
+  return typeof raw?.updatedAt === 'string' && raw.updatedAt.trim() ? raw.updatedAt.trim() : null;
+}
+
+async function getCanonicalSetting<T>(
+  key: string,
+  legacy: (registry: DroneRegistry) => LegacySetting<T> | null,
+): Promise<HubSettingRecord<T | null> | null> {
+  const repository = await getHubSettingsRepository();
+  const canonical = repository.get<T | null>(key);
+  if (canonical) return canonical;
+  const candidate = legacy(await loadRegistry());
+  if (candidate) {
+    return await repository.backfillIfAbsent<T | null>(key, candidate.value, candidate.updatedAt);
+  }
+  return repository.get<T | null>(key);
+}
+
+async function putCanonicalSetting<T>(key: string, value: T | null): Promise<void> {
+  await (await getHubSettingsRepository()).put<T | null>(key, value);
+}
+
 function providerApiKeyEnvVar(provider: LlmProviderId): 'OPENAI_API_KEY' | 'GEMINI_API_KEY' | 'DRONE_HUB_CODEX_AUTH_FILE' {
   if (provider === 'codex') return 'DRONE_HUB_CODEX_AUTH_FILE';
   return provider === 'openai' ? 'OPENAI_API_KEY' : 'GEMINI_API_KEY';
@@ -786,81 +831,51 @@ export function providerDisplayName(provider: LlmProviderId): string {
 }
 
 async function getStoredProviderApiKey(provider: StoredApiKeyProviderId): Promise<{ apiKey: string; updatedAt: string | null } | null> {
-  const reg = await loadRegistry();
-  const block = provider === 'openai'
-    ? reg.settings?.openai
-    : provider === 'gemini'
-      ? reg.settings?.gemini
-      : provider === 'groq'
-        ? reg.settings?.groq
-        : reg.settings?.exa;
-  const apiKey = normalizeApiKey(block?.apiKey);
+  const record = await getCanonicalSetting<{ apiKey: string }>(SETTING_KEYS.providerApiKey(provider), (reg) => {
+    const block = provider === 'openai'
+      ? reg.settings?.openai
+      : provider === 'gemini'
+        ? reg.settings?.gemini
+        : provider === 'groq'
+          ? reg.settings?.groq
+          : reg.settings?.exa;
+    const apiKey = normalizeApiKey(block?.apiKey);
+    return apiKey ? { value: { apiKey }, updatedAt: legacyUpdatedAt(block) } : null;
+  });
+  const apiKey = normalizeApiKey(record?.value?.apiKey);
   if (!apiKey) return null;
-  const updatedAtRaw = block?.updatedAt;
-  const updatedAt = typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw : null;
-  return { apiKey, updatedAt };
+  return { apiKey, updatedAt: record?.updatedAt ?? null };
 }
 
 export async function upsertStoredProviderApiKey(provider: StoredApiKeyProviderId, apiKeyRaw: string): Promise<void> {
   const apiKey = normalizeApiKey(apiKeyRaw);
   if (!apiKey) throw new Error('API key is required.');
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    if (provider === 'openai') reg.settings.openai = { apiKey, updatedAt };
-    else if (provider === 'gemini') reg.settings.gemini = { apiKey, updatedAt };
-    else if (provider === 'groq') reg.settings.groq = { apiKey, updatedAt };
-    else reg.settings.exa = { apiKey, updatedAt };
-  });
+  await putCanonicalSetting(SETTING_KEYS.providerApiKey(provider), { apiKey });
 }
 
 export async function clearStoredProviderApiKey(provider: StoredApiKeyProviderId): Promise<void> {
-  await updateRegistry((reg) => {
-    if (!reg.settings) return;
-    if (provider === 'openai') {
-      if (!reg.settings.openai) return;
-      delete reg.settings.openai;
-    } else if (provider === 'gemini') {
-      if (!reg.settings.gemini) return;
-      delete reg.settings.gemini;
-    } else {
-      if (provider === 'groq') {
-        if (!reg.settings.groq) return;
-        delete reg.settings.groq;
-      } else {
-        if (!reg.settings.exa) return;
-        delete reg.settings.exa;
-      }
-    }
-    if (Object.keys(reg.settings).length === 0) delete reg.settings;
-  });
+  await putCanonicalSetting(SETTING_KEYS.providerApiKey(provider), null);
 }
 
 async function getStoredVoiceStreamPairingPassword(): Promise<{ password: string; updatedAt: string | null } | null> {
-  const reg = await loadRegistry();
-  const password = normalizeApiKey(reg.settings?.voiceStream?.pairingPassword);
+  const record = await getCanonicalSetting<{ password: string }>(SETTING_KEYS.voiceStreamPairingPassword, (reg) => {
+    const raw = reg.settings?.voiceStream;
+    const password = normalizeApiKey(raw?.pairingPassword);
+    return password ? { value: { password }, updatedAt: legacyUpdatedAt(raw) } : null;
+  });
+  const password = normalizeApiKey(record?.value?.password);
   if (!password) return null;
-  const updatedAtRaw = reg.settings?.voiceStream?.updatedAt;
-  const updatedAt = typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw : null;
-  return { password, updatedAt };
+  return { password, updatedAt: record?.updatedAt ?? null };
 }
 
 export async function upsertVoiceStreamPairingPassword(passwordRaw: string): Promise<void> {
   const pairingPassword = normalizeApiKey(passwordRaw);
   if (!pairingPassword) throw new Error('Pairing password is required.');
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    reg.settings.voiceStream = { pairingPassword, updatedAt };
-  });
+  await putCanonicalSetting(SETTING_KEYS.voiceStreamPairingPassword, { password: pairingPassword });
 }
 
 export async function clearVoiceStreamPairingPassword(): Promise<void> {
-  await updateRegistry((reg) => {
-    if (!reg.settings?.voiceStream) return;
-    delete reg.settings.voiceStream;
-    if (Object.keys(reg.settings).length === 0) delete reg.settings;
-  });
+  await putCanonicalSetting(SETTING_KEYS.voiceStreamPairingPassword, null);
 }
 
 function codexAuthFilePath(): string {
@@ -1048,16 +1063,16 @@ export async function collectProviderApiKeyDiagnostics(provider: LlmProviderId):
 }
 
 async function getStoredLlmProvider(): Promise<LlmProviderId | null> {
-  const reg = await loadRegistry();
-  return parseLlmProvider(reg.settings?.llm?.provider);
+  const record = await getCanonicalSetting<{ provider: LlmProviderId }>(SETTING_KEYS.llmProvider, (reg) => {
+    const raw = reg.settings?.llm;
+    const provider = parseLlmProvider(raw?.provider);
+    return provider ? { value: { provider }, updatedAt: legacyUpdatedAt(raw) } : null;
+  });
+  return parseLlmProvider(record?.value?.provider);
 }
 
 export async function upsertStoredLlmProvider(provider: LlmProviderId): Promise<void> {
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    reg.settings.llm = { provider, updatedAt };
-  });
+  await putCanonicalSetting(SETTING_KEYS.llmProvider, { provider });
 }
 
 export async function resolveEffectiveLlmProvider(): Promise<EffectiveLlmProvider> {
@@ -1139,11 +1154,27 @@ async function getStoredDeleteActionSettings(): Promise<{
   archiveRetention: ArchiveRetentionId | null;
   archiveRuntimePolicy: ArchiveRuntimePolicy | null;
 }> {
-  const reg = await loadRegistry();
-  const mode = parseDroneDeleteMode(reg.settings?.deleteAction?.mode);
-  const archiveRetention = parseArchiveRetentionId(reg.settings?.deleteAction?.archiveRetention);
-  const archiveRuntimePolicy = parseArchiveRuntimePolicy(reg.settings?.deleteAction?.archiveRuntimePolicy);
-  return { mode, archiveRetention, archiveRuntimePolicy };
+  const record = await getCanonicalSetting<{
+    mode: DroneDeleteMode | null;
+    archiveRetention: ArchiveRetentionId | null;
+    archiveRuntimePolicy: ArchiveRuntimePolicy | null;
+  }>(SETTING_KEYS.deleteAction, (reg) => {
+    const raw = reg.settings?.deleteAction;
+    if (raw === undefined) return null;
+    return {
+      value: {
+        mode: parseDroneDeleteMode(raw.mode),
+        archiveRetention: parseArchiveRetentionId(raw.archiveRetention),
+        archiveRuntimePolicy: parseArchiveRuntimePolicy(raw.archiveRuntimePolicy),
+      },
+      updatedAt: legacyUpdatedAt(raw),
+    };
+  });
+  return {
+    mode: parseDroneDeleteMode(record?.value?.mode),
+    archiveRetention: parseArchiveRetentionId(record?.value?.archiveRetention),
+    archiveRuntimePolicy: parseArchiveRuntimePolicy(record?.value?.archiveRuntimePolicy),
+  };
 }
 
 export async function upsertStoredDeleteActionSettings(opts: {
@@ -1158,18 +1189,20 @@ export async function upsertStoredDeleteActionSettings(opts: {
   if (opts.archiveRetention != null && !archiveRetention) throw new Error('invalid archive retention');
   if (opts.archiveRuntimePolicy != null && !archiveRuntimePolicy) throw new Error('invalid archive runtime policy');
 
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    const prev = reg.settings.deleteAction ?? {};
-    reg.settings.deleteAction = {
-      mode: mode ?? parseDroneDeleteMode(prev.mode) ?? DEFAULT_DRONE_DELETE_MODE,
-      archiveRetention: archiveRetention ?? parseArchiveRetentionId(prev.archiveRetention) ?? DEFAULT_ARCHIVE_RETENTION,
-      archiveRuntimePolicy:
-        archiveRuntimePolicy ?? parseArchiveRuntimePolicy(prev.archiveRuntimePolicy) ?? DEFAULT_ARCHIVE_RUNTIME_POLICY,
-      updatedAt,
-    };
-  });
+  await getStoredDeleteActionSettings();
+  await (await getHubSettingsRepository()).update<{
+    mode: DroneDeleteMode;
+    archiveRetention: ArchiveRetentionId;
+    archiveRuntimePolicy: ArchiveRuntimePolicy;
+  }>(SETTING_KEYS.deleteAction, (current) => ({
+    mode: mode ?? parseDroneDeleteMode(current?.value?.mode) ?? DEFAULT_DRONE_DELETE_MODE,
+    archiveRetention:
+      archiveRetention ?? parseArchiveRetentionId(current?.value?.archiveRetention) ?? DEFAULT_ARCHIVE_RETENTION,
+    archiveRuntimePolicy:
+      archiveRuntimePolicy ??
+      parseArchiveRuntimePolicy(current?.value?.archiveRuntimePolicy) ??
+      DEFAULT_ARCHIVE_RUNTIME_POLICY,
+  }));
 }
 
 export async function resolveEffectiveDeleteActionSettings(): Promise<EffectiveDeleteActionSettings> {
@@ -1212,9 +1245,13 @@ export async function resolveDeleteActionSettingsResponse(): Promise<{
 }
 
 async function getStoredFilesystemSettings(): Promise<{ uploadMaxBytes: number | null }> {
-  const reg = await loadRegistry();
-  const uploadMaxBytes = parseFilesystemUploadMaxBytes(reg.settings?.filesystem?.uploadMaxBytes);
-  return { uploadMaxBytes };
+  const record = await getCanonicalSetting<{ uploadMaxBytes: number } | null>(SETTING_KEYS.filesystem, (reg) => {
+    const raw = reg.settings?.filesystem;
+    if (raw === undefined) return null;
+    const uploadMaxBytes = parseFilesystemUploadMaxBytes(raw.uploadMaxBytes);
+    return { value: uploadMaxBytes ? { uploadMaxBytes } : null, updatedAt: legacyUpdatedAt(raw) };
+  });
+  return { uploadMaxBytes: parseFilesystemUploadMaxBytes(record?.value?.uploadMaxBytes) };
 }
 
 export async function upsertStoredFilesystemSettings(opts: {
@@ -1226,24 +1263,19 @@ export async function upsertStoredFilesystemSettings(opts: {
       `uploadMaxBytes must be between ${FILESYSTEM_UPLOAD_MAX_BYTES_MIN} and ${FILESYSTEM_UPLOAD_MAX_BYTES_MAX}`,
     );
   }
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    const prev = reg.settings.filesystem ?? {};
-    const nextUploadMaxBytes =
-      uploadMaxBytes ??
-      parseFilesystemUploadMaxBytes(prev.uploadMaxBytes) ??
-      FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT;
-    if (nextUploadMaxBytes === FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT) {
-      delete reg.settings.filesystem;
-      if (Object.keys(reg.settings).length === 0) delete reg.settings;
-      return;
-    }
-    reg.settings.filesystem = {
-      uploadMaxBytes: nextUploadMaxBytes,
-      updatedAt,
-    };
-  });
+  const repository = await getHubSettingsRepository();
+  await getStoredFilesystemSettings();
+  const current = repository.get<{ uploadMaxBytes: number } | null>(SETTING_KEYS.filesystem);
+  const nextUploadMaxBytes =
+    uploadMaxBytes ??
+    parseFilesystemUploadMaxBytes(current?.value?.uploadMaxBytes) ??
+    FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT;
+  await repository.put(
+    SETTING_KEYS.filesystem,
+    nextUploadMaxBytes === FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT
+      ? null
+      : { uploadMaxBytes: nextUploadMaxBytes },
+  );
 }
 
 export async function resolveEffectiveFilesystemSettings(): Promise<EffectiveFilesystemSettings> {
@@ -1281,13 +1313,16 @@ async function getStoredVoiceApprovalSettings(): Promise<{
   settings: VoiceApprovalSettings | null;
   updatedAt: string | null;
 }> {
-  const reg = await loadRegistry();
-  const raw = reg.settings?.voiceApproval;
-  const settings = parseVoiceApprovalSettings(raw);
-  const updatedAtRaw = raw?.updatedAt;
+  const record = await getCanonicalSetting<VoiceApprovalSettings | null>(SETTING_KEYS.voiceApproval, (reg) => {
+    const raw = reg.settings?.voiceApproval;
+    return raw === undefined
+      ? null
+      : { value: parseVoiceApprovalSettings(raw), updatedAt: legacyUpdatedAt(raw) };
+  });
+  const settings = parseVoiceApprovalSettings(record?.value);
   return {
     settings,
-    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+    updatedAt: settings ? record?.updatedAt ?? null : null,
   };
 }
 
@@ -1296,19 +1331,10 @@ export async function upsertStoredVoiceApprovalSettings(settingsRaw: unknown): P
   if (!settings) {
     throw new Error('Invalid voice approval settings.');
   }
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    if (voiceApprovalSettingsEqual(settings, VOICE_APPROVAL_SETTINGS_DEFAULT)) {
-      delete reg.settings.voiceApproval;
-      if (Object.keys(reg.settings).length === 0) delete reg.settings;
-      return;
-    }
-    reg.settings.voiceApproval = {
-      ...settings,
-      updatedAt,
-    };
-  });
+  await putCanonicalSetting(
+    SETTING_KEYS.voiceApproval,
+    voiceApprovalSettingsEqual(settings, VOICE_APPROVAL_SETTINGS_DEFAULT) ? null : settings,
+  );
 }
 
 export async function resolveEffectiveVoiceApprovalSettings(): Promise<EffectiveVoiceApprovalSettings> {
@@ -1358,13 +1384,16 @@ async function getStoredVoiceTranscriptionSettings(): Promise<{
   settings: VoiceTranscriptionSettings | null;
   updatedAt: string | null;
 }> {
-  const reg = await loadRegistry();
-  const raw = reg.settings?.voiceTranscription;
-  const settings = parseVoiceTranscriptionSettings(raw);
-  const updatedAtRaw = raw?.updatedAt;
+  const record = await getCanonicalSetting<VoiceTranscriptionSettings | null>(SETTING_KEYS.voiceTranscription, (reg) => {
+    const raw = reg.settings?.voiceTranscription;
+    return raw === undefined
+      ? null
+      : { value: parseVoiceTranscriptionSettings(raw), updatedAt: legacyUpdatedAt(raw) };
+  });
+  const settings = parseVoiceTranscriptionSettings(record?.value);
   return {
     settings,
-    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+    updatedAt: settings ? record?.updatedAt ?? null : null,
   };
 }
 
@@ -1373,19 +1402,10 @@ export async function upsertStoredVoiceTranscriptionSettings(settingsRaw: unknow
   if (!settings) {
     throw new Error('Invalid voice transcription settings.');
   }
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    if (voiceTranscriptionSettingsEqual(settings, VOICE_TRANSCRIPTION_SETTINGS_DEFAULT)) {
-      delete reg.settings.voiceTranscription;
-      if (Object.keys(reg.settings).length === 0) delete reg.settings;
-      return;
-    }
-    reg.settings.voiceTranscription = {
-      ...settings,
-      updatedAt,
-    };
-  });
+  await putCanonicalSetting(
+    SETTING_KEYS.voiceTranscription,
+    voiceTranscriptionSettingsEqual(settings, VOICE_TRANSCRIPTION_SETTINGS_DEFAULT) ? null : settings,
+  );
 }
 
 export async function resolveEffectiveVoiceTranscriptionSettings(): Promise<EffectiveVoiceTranscriptionSettings> {
@@ -1401,13 +1421,16 @@ async function getStoredVoiceActivationSettings(): Promise<{
   settings: VoiceActivationSettings | null;
   updatedAt: string | null;
 }> {
-  const reg = await loadRegistry();
-  const raw = reg.settings?.voiceActivation;
-  const settings = parseVoiceActivationSettings(raw);
-  const updatedAtRaw = raw?.updatedAt;
+  const record = await getCanonicalSetting<VoiceActivationSettings | null>(SETTING_KEYS.voiceActivation, (reg) => {
+    const raw = reg.settings?.voiceActivation;
+    return raw === undefined
+      ? null
+      : { value: parseVoiceActivationSettings(raw), updatedAt: legacyUpdatedAt(raw) };
+  });
+  const settings = parseVoiceActivationSettings(record?.value);
   return {
     settings,
-    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+    updatedAt: settings ? record?.updatedAt ?? null : null,
   };
 }
 
@@ -1416,19 +1439,10 @@ export async function upsertStoredVoiceActivationSettings(settingsRaw: unknown):
   if (!settings) {
     throw new Error('Voice activation settings require at least one normal alias and one real-time alias.');
   }
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    if (voiceActivationSettingsEqual(settings, VOICE_ACTIVATION_SETTINGS_DEFAULT)) {
-      delete reg.settings.voiceActivation;
-      if (Object.keys(reg.settings).length === 0) delete reg.settings;
-      return;
-    }
-    reg.settings.voiceActivation = {
-      ...settings,
-      updatedAt,
-    };
-  });
+  await putCanonicalSetting(
+    SETTING_KEYS.voiceActivation,
+    voiceActivationSettingsEqual(settings, VOICE_ACTIVATION_SETTINGS_DEFAULT) ? null : settings,
+  );
 }
 
 export async function resolveEffectiveVoiceActivationSettings(): Promise<EffectiveVoiceActivationSettings> {
@@ -1444,13 +1458,16 @@ async function getStoredVoiceRealtimeSettings(): Promise<{
   settings: VoiceRealtimeSettings | null;
   updatedAt: string | null;
 }> {
-  const reg = await loadRegistry();
-  const raw = reg.settings?.voiceRealtime;
-  const settings = parseVoiceRealtimeSettings(raw);
-  const updatedAtRaw = raw?.updatedAt;
+  const record = await getCanonicalSetting<VoiceRealtimeSettings | null>(SETTING_KEYS.voiceRealtime, (reg) => {
+    const raw = reg.settings?.voiceRealtime;
+    return raw === undefined
+      ? null
+      : { value: parseVoiceRealtimeSettings(raw), updatedAt: legacyUpdatedAt(raw) };
+  });
+  const settings = parseVoiceRealtimeSettings(record?.value);
   return {
     settings,
-    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+    updatedAt: settings ? record?.updatedAt ?? null : null,
   };
 }
 
@@ -1459,19 +1476,10 @@ export async function upsertStoredVoiceRealtimeSettings(settingsRaw: unknown): P
   if (!settings) {
     throw new Error('Invalid voice realtime settings.');
   }
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    if (voiceRealtimeSettingsEqual(settings, VOICE_REALTIME_SETTINGS_DEFAULT)) {
-      delete reg.settings.voiceRealtime;
-      if (Object.keys(reg.settings).length === 0) delete reg.settings;
-      return;
-    }
-    reg.settings.voiceRealtime = {
-      ...settings,
-      updatedAt,
-    };
-  });
+  await putCanonicalSetting(
+    SETTING_KEYS.voiceRealtime,
+    voiceRealtimeSettingsEqual(settings, VOICE_REALTIME_SETTINGS_DEFAULT) ? null : settings,
+  );
 }
 
 export async function resolveEffectiveVoiceRealtimeSettings(): Promise<EffectiveVoiceRealtimeSettings> {
@@ -1488,15 +1496,32 @@ async function getStoredAgentMessageAutoContinueSettings(): Promise<{
   enabledByDefault: boolean | null;
   updatedAt: string | null;
 }> {
-  const reg = await loadRegistry();
-  const raw = reg.settings?.agentMessageAutoContinue;
-  const prompt = normalizeAgentMessageAutoContinuePrompt(raw?.prompt);
-  const updatedAtRaw = raw?.updatedAt;
-  const enabledByDefault = raw?.enabledByDefault === true ? true : raw?.enabledByDefault === false ? false : null;
+  const record = await getCanonicalSetting<{
+    prompt?: string;
+    enabledByDefault?: boolean;
+  } | null>(SETTING_KEYS.agentMessageAutoContinue, (reg) => {
+    const raw = reg.settings?.agentMessageAutoContinue;
+    if (raw === undefined) return null;
+    const prompt = normalizeAgentMessageAutoContinuePrompt(raw.prompt);
+    return {
+      value: {
+        ...(prompt ? { prompt } : {}),
+        ...(typeof raw.enabledByDefault === 'boolean' ? { enabledByDefault: raw.enabledByDefault } : {}),
+      },
+      updatedAt: legacyUpdatedAt(raw),
+    };
+  });
+  const prompt = normalizeAgentMessageAutoContinuePrompt(record?.value?.prompt);
+  const enabledByDefault =
+    record?.value?.enabledByDefault === true
+      ? true
+      : record?.value?.enabledByDefault === false
+        ? false
+        : null;
   return {
     prompt: prompt || null,
     enabledByDefault,
-    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+    updatedAt: record?.value ? record.updatedAt : null,
   };
 }
 
@@ -1507,22 +1532,22 @@ export async function upsertStoredAgentMessageAutoContinueSettings(opts: {
   const nextPrompt =
     opts.prompt === undefined ? undefined : normalizeAgentMessageAutoContinuePrompt(opts.prompt);
   const enabledByDefault = opts.enabledByDefault === true;
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    const current = reg.settings?.agentMessageAutoContinue;
-    const prompt = nextPrompt === undefined ? normalizeAgentMessageAutoContinuePrompt(current?.prompt) : nextPrompt;
+  await getStoredAgentMessageAutoContinueSettings();
+  await (await getHubSettingsRepository()).update<{
+    prompt?: string;
+    enabledByDefault?: boolean;
+  } | null>(SETTING_KEYS.agentMessageAutoContinue, (current) => {
+    const prompt = nextPrompt === undefined
+      ? normalizeAgentMessageAutoContinuePrompt(current?.value?.prompt)
+      : nextPrompt;
     const effectiveEnabledByDefault =
-      opts.enabledByDefault === undefined ? current?.enabledByDefault === true : enabledByDefault;
+      opts.enabledByDefault === undefined ? current?.value?.enabledByDefault === true : enabledByDefault;
     if ((!prompt || prompt === AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_DEFAULT) && !effectiveEnabledByDefault) {
-      delete reg.settings.agentMessageAutoContinue;
-      if (Object.keys(reg.settings).length === 0) delete reg.settings;
-      return;
+      return null;
     }
-    reg.settings.agentMessageAutoContinue = {
+    return {
       ...(prompt && prompt !== AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_DEFAULT ? { prompt } : {}),
       ...(effectiveEnabledByDefault ? { enabledByDefault: true } : {}),
-      updatedAt,
     };
   });
 }
@@ -1572,15 +1597,32 @@ async function getStoredAgentSuggestionSettings(): Promise<{
   enabledByDefault: boolean | null;
   updatedAt: string | null;
 }> {
-  const reg = await loadRegistry();
-  const raw = reg.settings?.agentSuggestion;
-  const policyMarkdown = normalizeAgentSuggestionPolicyMarkdown(raw?.policyMarkdown);
-  const updatedAtRaw = raw?.updatedAt;
-  const enabledByDefault = raw?.enabledByDefault === true ? true : raw?.enabledByDefault === false ? false : null;
+  const record = await getCanonicalSetting<{
+    policyMarkdown?: string;
+    enabledByDefault?: boolean;
+  } | null>(SETTING_KEYS.agentSuggestion, (reg) => {
+    const raw = reg.settings?.agentSuggestion;
+    if (raw === undefined) return null;
+    const policyMarkdown = normalizeAgentSuggestionPolicyMarkdown(raw.policyMarkdown);
+    return {
+      value: {
+        ...(policyMarkdown ? { policyMarkdown } : {}),
+        ...(typeof raw.enabledByDefault === 'boolean' ? { enabledByDefault: raw.enabledByDefault } : {}),
+      },
+      updatedAt: legacyUpdatedAt(raw),
+    };
+  });
+  const policyMarkdown = normalizeAgentSuggestionPolicyMarkdown(record?.value?.policyMarkdown);
+  const enabledByDefault =
+    record?.value?.enabledByDefault === true
+      ? true
+      : record?.value?.enabledByDefault === false
+        ? false
+        : null;
   return {
     policyMarkdown: policyMarkdown || null,
     enabledByDefault,
-    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null,
+    updatedAt: record?.value ? record.updatedAt : null,
   };
 }
 
@@ -1591,23 +1633,23 @@ export async function upsertStoredAgentSuggestionSettings(opts: {
   const nextPolicyMarkdown =
     opts.policyMarkdown === undefined ? undefined : normalizeAgentSuggestionPolicyMarkdown(opts.policyMarkdown);
   const enabledByDefault = opts.enabledByDefault === true;
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    const current = reg.settings?.agentSuggestion;
+  await getStoredAgentSuggestionSettings();
+  await (await getHubSettingsRepository()).update<{
+    policyMarkdown?: string;
+    enabledByDefault?: boolean;
+  } | null>(SETTING_KEYS.agentSuggestion, (current) => {
     const policyMarkdown =
-      nextPolicyMarkdown === undefined ? normalizeAgentSuggestionPolicyMarkdown(current?.policyMarkdown) : nextPolicyMarkdown;
+      nextPolicyMarkdown === undefined
+        ? normalizeAgentSuggestionPolicyMarkdown(current?.value?.policyMarkdown)
+        : nextPolicyMarkdown;
     const effectiveEnabledByDefault =
-      opts.enabledByDefault === undefined ? current?.enabledByDefault === true : enabledByDefault;
+      opts.enabledByDefault === undefined ? current?.value?.enabledByDefault === true : enabledByDefault;
     if ((!policyMarkdown || policyMarkdown === AGENT_SUGGESTION_POLICY_DEFAULT) && !effectiveEnabledByDefault) {
-      delete reg.settings.agentSuggestion;
-      if (Object.keys(reg.settings).length === 0) delete reg.settings;
-      return;
+      return null;
     }
-    reg.settings.agentSuggestion = {
+    return {
       ...(policyMarkdown && policyMarkdown !== AGENT_SUGGESTION_POLICY_DEFAULT ? { policyMarkdown } : {}),
       ...(effectiveEnabledByDefault ? { enabledByDefault: true } : {}),
-      updatedAt,
     };
   });
 }
@@ -1657,12 +1699,43 @@ export async function resolveAgentSuggestionSettingsResponse(): Promise<{
 }
 
 async function getStoredKanbanBoardSettings(): Promise<{ board: KanbanBoardSettings; updatedAt: string | null }> {
-  const reg = await loadRegistry();
-  const raw = reg.settings?.kanbanBoard;
-  const updatedAtRaw = raw?.updatedAt;
+  const record = await getCanonicalSetting<KanbanBoardSettings>(SETTING_KEYS.kanbanBoard, (reg) => {
+    const raw = reg.settings?.kanbanBoard;
+    return raw === undefined
+      ? null
+      : { value: sanitizeTaskBoardState(raw), updatedAt: legacyUpdatedAt(raw) };
+  });
   return {
-    board: sanitizeTaskBoardState(raw),
-    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw : null,
+    board: sanitizeTaskBoardState(record?.value),
+    updatedAt: record?.updatedAt ?? null,
+  };
+}
+
+/**
+ * Atomically transforms the canonical Kanban board.
+ *
+ * Reading first completes the one-time legacy registry backfill. The repository
+ * update then creates a canonical row even when no legacy value exists, so a
+ * later stale registry projection cannot resurrect old board state.
+ */
+export async function transformStoredKanbanBoardSettings(
+  transform: (board: KanbanBoardSettings) => KanbanBoardSettings,
+): Promise<{ board: KanbanBoardSettings; updatedAt: string | null }> {
+  await getStoredKanbanBoardSettings();
+  const record = await (await getHubSettingsRepository()).update<KanbanBoardSettings>(SETTING_KEYS.kanbanBoard, (current) => {
+    const board = sanitizeTaskBoardState(current?.value);
+    return sanitizeTaskBoardState(transform(board));
+  });
+  // Bun does not have the native SQLite projection yet. Keep its legacy read
+  // model synchronized explicitly; production Node writes only the canonical row.
+  if ((globalThis as any).Bun) {
+    await updateRegistry((registry) => {
+      persistTaskBoardState(registry, record.value);
+    });
+  }
+  return {
+    board: sanitizeTaskBoardState(record.value),
+    updatedAt: record.updatedAt,
   };
 }
 
@@ -1682,16 +1755,19 @@ export async function upsertStoredKanbanBoardSettings(boardRaw: unknown, expecte
   const board = sanitizeTaskBoardState(boardRaw);
   const updatedAt = new Date().toISOString();
   const expectedUpdatedAt =
-    typeof expectedUpdatedAtRaw === 'string' && expectedUpdatedAtRaw.trim() ? expectedUpdatedAtRaw.trim() : null;
-  await updateRegistry((reg) => {
-    const currentRaw = reg.settings?.kanbanBoard;
-    const currentUpdatedAt =
-      typeof currentRaw?.updatedAt === 'string' && currentRaw.updatedAt.trim() ? currentRaw.updatedAt.trim() : null;
+    expectedUpdatedAtRaw === undefined
+      ? undefined
+      : typeof expectedUpdatedAtRaw === 'string' && expectedUpdatedAtRaw.trim()
+        ? expectedUpdatedAtRaw.trim()
+        : null;
+  await getStoredKanbanBoardSettings();
+  await (await getHubSettingsRepository()).update<KanbanBoardSettings>(SETTING_KEYS.kanbanBoard, (current) => {
+    const currentUpdatedAt = current?.updatedAt ?? null;
     if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== currentUpdatedAt) {
-      throw new KanbanBoardSettingsConflictError(sanitizeTaskBoardState(currentRaw), currentUpdatedAt);
+      throw new KanbanBoardSettingsConflictError(sanitizeTaskBoardState(current?.value), currentUpdatedAt);
     }
-    persistTaskBoardState(reg, board, updatedAt);
-  });
+    return board;
+  }, { updatedAt });
 }
 
 export async function resolveKanbanBoardSettingsResponse(): Promise<{
@@ -1708,30 +1784,29 @@ export async function resolveKanbanBoardSettingsResponse(): Promise<{
 }
 
 async function getStoredTaskPlaybookButtonSettings(): Promise<{ taskPlaybookButtons: TaskPlaybookButtonSettings; updatedAt: string | null }> {
-  const reg = await loadRegistry();
-  const raw = reg.settings?.taskPlaybookButtons;
-  const updatedAtRaw = raw?.updatedAt;
+  const record = await getCanonicalSetting<TaskPlaybookButtonSettings>(SETTING_KEYS.taskPlaybookButtons, (reg) => {
+    const raw = reg.settings?.taskPlaybookButtons;
+    return raw === undefined
+      ? null
+      : { value: sanitizeTaskPlaybookButtonSettings(raw.items), updatedAt: legacyUpdatedAt(raw) };
+  });
   return {
-    taskPlaybookButtons: sanitizeTaskPlaybookButtonSettings(raw?.items),
-    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw : null,
+    taskPlaybookButtons: sanitizeTaskPlaybookButtonSettings(record?.value),
+    updatedAt: record?.updatedAt ?? null,
   };
 }
 
 export async function upsertStoredTaskPlaybookButtonSettings(valueRaw: unknown): Promise<void> {
   const taskPlaybookButtons = sanitizeTaskPlaybookButtonSettings(valueRaw);
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    reg.settings.taskPlaybookButtons = {
-      items: taskPlaybookButtons.map((item) => ({
-        id: item.id,
-        label: item.label,
-        playbookId: item.playbookId,
-        taskTypeIds: item.taskTypeIds.slice(),
-      })),
-      updatedAt,
-    };
-  });
+  await putCanonicalSetting(
+    SETTING_KEYS.taskPlaybookButtons,
+    taskPlaybookButtons.map((item) => ({
+      id: item.id,
+      label: item.label,
+      playbookId: item.playbookId,
+      taskTypeIds: item.taskTypeIds.slice(),
+    })),
+  );
 }
 
 export async function resolveTaskPlaybookButtonSettingsResponse(): Promise<{
@@ -1747,66 +1822,108 @@ export async function resolveTaskPlaybookButtonSettingsResponse(): Promise<{
   };
 }
 
-async function getStoredUiPreferencesSettings(): Promise<{ uiPreferences: UiPreferencesSettings; updatedAt: string | null }> {
-  const reg = await loadRegistry();
-  const raw = reg.settings?.uiPreferences;
-  const updatedAtRaw = raw?.updatedAt;
+const UI_PREFERENCES_SETTING_KEY = 'ui-preferences';
+
+type StoredUiPreferencesSettings = {
+  uiPreferences: UiPreferencesSettings;
+  updatedAt: string | null;
+  version: number | null;
+};
+
+function storedUiPreferencesFromRecord(record: HubSettingRecord<unknown>): StoredUiPreferencesSettings {
   return {
-    uiPreferences: sanitizeUiPreferencesSettings(raw),
-    updatedAt: typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw : null,
+    uiPreferences: sanitizeUiPreferencesSettings(record.value),
+    updatedAt: record.updatedAt,
+    version: record.version,
   };
 }
 
-export async function upsertStoredUiPreferencesSettings(valueRaw: unknown): Promise<void> {
-  const uiPreferences = sanitizeUiPreferencesSettings(valueRaw);
-  const updatedAt = new Date().toISOString();
-  await updateRegistry((reg) => {
-    reg.settings ??= {};
-    reg.settings.uiPreferences = {
-      sidebarGroupingMode: uiPreferences.sidebarGroupingMode,
-      sidebarDensityMode: uiPreferences.sidebarDensityMode,
-      sidebarGroupOrder: uiPreferences.sidebarGroupOrder.slice(),
-      sidebarDroneOrderByGroup: Object.fromEntries(
-        Object.entries(uiPreferences.sidebarDroneOrderByGroup).map(([key, value]) => [key, value.slice()]),
-      ),
-      sidebarNodeOrderByParent: Object.fromEntries(
-        Object.entries(uiPreferences.sidebarNodeOrderByParent).map(([key, value]) => [key, value.slice()]),
-      ),
-      sidebarChatOrderByDrone: Object.fromEntries(
-        Object.entries(uiPreferences.sidebarChatOrderByDrone).map(([key, value]) => [key, value.slice()]),
-      ),
-      hiddenSidebarGroups: uiPreferences.hiddenSidebarGroups.slice(),
-      autoDelete: uiPreferences.autoDelete,
-      automations: uiPreferences.automations.map((automation) => ({
-        id: automation.id,
-        label: automation.label,
-        prompt: automation.prompt,
-        onFailurePrompt: automation.onFailurePrompt,
-        runs: automation.runs,
-        sleepAmount: automation.sleepAmount,
-        sleepUnit: automation.sleepUnit,
-        stopPhrase: automation.stopPhrase,
-        stopPhraseCaseSensitive: automation.stopPhraseCaseSensitive,
-      })),
-      spawnAgentKey: uiPreferences.spawnAgentKey,
-      spawnModel: uiPreferences.spawnModel,
-      repoBranchSource: uiPreferences.repoBranchSource,
-      repoCreateRemoteBranch: uiPreferences.repoCreateRemoteBranch,
-      pullHostBranchBeforeCreate: uiPreferences.pullHostBranchBeforeCreate,
+async function getStoredUiPreferencesSettings(): Promise<StoredUiPreferencesSettings> {
+  const repository = await getHubSettingsRepository();
+  const canonical = repository.get<unknown>(UI_PREFERENCES_SETTING_KEY);
+  if (canonical) return storedUiPreferencesFromRecord(canonical);
+
+  const reg = await loadRegistry();
+  const legacyRaw = reg.settings?.uiPreferences;
+  if (legacyRaw !== undefined) {
+    const updatedAtRaw = legacyRaw?.updatedAt;
+    const updatedAt = typeof updatedAtRaw === 'string' && updatedAtRaw.trim() ? updatedAtRaw.trim() : null;
+    const winner = await repository.backfillIfAbsent(
+      UI_PREFERENCES_SETTING_KEY,
+      sanitizeUiPreferencesSettings(legacyRaw),
       updatedAt,
-    };
-  });
+    );
+    return storedUiPreferencesFromRecord(winner);
+  }
+
+  // A concurrent writer may have inserted the row while the registry was read.
+  const concurrent = repository.get<unknown>(UI_PREFERENCES_SETTING_KEY);
+  if (concurrent) return storedUiPreferencesFromRecord(concurrent);
+  return {
+    uiPreferences: sanitizeUiPreferencesSettings(undefined),
+    updatedAt: null,
+    version: null,
+  };
+}
+
+export class UiPreferencesSettingsConflictError extends Error {
+  readonly uiPreferences: UiPreferencesSettings;
+  readonly updatedAt: string | null;
+  readonly version: number | null;
+
+  constructor(current: HubSettingRecord<unknown> | null) {
+    super('UI preferences changed on the server');
+    this.name = 'UiPreferencesSettingsConflictError';
+    this.uiPreferences = sanitizeUiPreferencesSettings(current?.value);
+    this.updatedAt = current?.updatedAt ?? null;
+    this.version = current?.version ?? null;
+  }
+}
+
+export class UiPreferencesSettingsValidationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'UiPreferencesSettingsValidationError';
+  }
+}
+
+function parseExpectedUiPreferencesVersion(raw: unknown): number | null | undefined {
+  if (raw === undefined || raw === null) return raw;
+  const value = Number(raw);
+  if (!Number.isSafeInteger(value) || value <= 0) {
+    throw new UiPreferencesSettingsValidationError('expectedVersion must be a positive integer or null');
+  }
+  return value;
+}
+
+export async function upsertStoredUiPreferencesSettings(
+  valueRaw: unknown,
+  expectedVersionRaw?: unknown,
+): Promise<void> {
+  const uiPreferences = sanitizeUiPreferencesSettings(valueRaw);
+  const expectedVersion = parseExpectedUiPreferencesVersion(expectedVersionRaw);
+  const repository = await getHubSettingsRepository();
+  try {
+    await repository.put(UI_PREFERENCES_SETTING_KEY, uiPreferences, { expectedVersion });
+  } catch (error) {
+    if (error instanceof HubSettingVersionConflictError) {
+      throw new UiPreferencesSettingsConflictError(error.current);
+    }
+    throw error;
+  }
 }
 
 export async function resolveUiPreferencesSettingsResponse(): Promise<{
   ok: true;
   uiPreferences: UiPreferencesSettings;
   updatedAt: string | null;
+  version: number | null;
 }> {
   const stored = await getStoredUiPreferencesSettings();
   return {
     ok: true,
     uiPreferences: stored.uiPreferences,
     updatedAt: stored.updatedAt,
+    version: stored.version,
   };
 }

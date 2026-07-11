@@ -95,14 +95,15 @@ function supportsOpenAiXhigh(modelId: string): boolean {
 		modelId.includes("gpt-5.2") ||
 		modelId.includes("gpt-5.3") ||
 		modelId.includes("gpt-5.4") ||
-		modelId.includes("gpt-5.5")
+		modelId.includes("gpt-5.5") ||
+		modelId.includes("gpt-5.6")
 	);
 }
 
 function supportsOpenAiReasoningNone(model: Model<any>): boolean {
 	return (
 		(model.api === "openai-responses" || model.api === "azure-openai-responses" || model.api === "openai-codex-responses") &&
-		(model.id === "gpt-5.5" || model.id === "gpt-5.5-pro")
+		(model.id === "gpt-5.5" || model.id === "gpt-5.5-pro" || model.id.startsWith("gpt-5.6-"))
 	);
 }
 
@@ -1167,6 +1168,25 @@ async function generateModels() {
 	}
 
 	// Add missing gpt models
+	const gpt56Models = [
+		{ id: "gpt-5.6-sol", name: "GPT-5.6 Sol", cost: { input: 5, output: 30, cacheRead: 0.5, cacheWrite: 6.25 } },
+		{ id: "gpt-5.6-terra", name: "GPT-5.6 Terra", cost: { input: 2.5, output: 15, cacheRead: 0.25, cacheWrite: 3.125 } },
+		{ id: "gpt-5.6-luna", name: "GPT-5.6 Luna", cost: { input: 1, output: 6, cacheRead: 0.1, cacheWrite: 1.25 } },
+	] as const;
+	for (const model of gpt56Models) {
+		if (allModels.some((candidate) => candidate.provider === "openai" && candidate.id === model.id)) continue;
+		allModels.push({
+			...model,
+			api: "openai-responses",
+			baseUrl: "https://api.openai.com/v1",
+			provider: "openai",
+			reasoning: true,
+			input: ["text", "image"],
+			contextWindow: 1050000,
+			maxTokens: 128000,
+		});
+	}
+
 	if (!allModels.some(m => m.provider === "openai" && m.id === "chat-latest")) {
 		allModels.push({
 			id: "chat-latest",
@@ -1486,6 +1506,17 @@ async function generateModels() {
 			contextWindow: CODEX_CONTEXT,
 			maxTokens: CODEX_MAX_TOKENS,
 		},
+		...gpt56Models.map((model) => ({
+			...model,
+			cost: { ...model.cost, cacheWrite: 0 },
+			api: "openai-codex-responses" as const,
+			provider: "openai-codex" as const,
+			baseUrl: CODEX_BASE_URL,
+			reasoning: true,
+			input: ["text", "image"] as ("text" | "image")[],
+			contextWindow: CODEX_CONTEXT,
+			maxTokens: CODEX_MAX_TOKENS,
+		})),
 		{
 			id: "gpt-5.4-mini",
 			name: "GPT-5.4 Mini",

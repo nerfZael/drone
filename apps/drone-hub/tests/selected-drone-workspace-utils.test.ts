@@ -2,6 +2,8 @@ import { describe, expect, test } from 'bun:test';
 import {
   displayedChatModelTitle,
   formatAgentModelMetadata,
+  latestTranscriptModel,
+  latestTranscriptRuntime,
   resolveDisplayedChatModel,
 } from '../src/droneHub/app/selected-drone-workspace-utils';
 
@@ -66,6 +68,25 @@ describe('selected drone workspace model display', () => {
 
   test('formats agent and model metadata without field labels', () => {
     expect(formatAgentModelMetadata('Codex', { label: 'gpt-test', source: 'default' })).toBe('Codex (gpt-test)');
+    expect(formatAgentModelMetadata('Codex', { label: 'gpt-test', source: 'transcript' }, 'high')).toBe('Codex (gpt-test high)');
     expect(formatAgentModelMetadata('', { label: 'Default model', source: 'unknown' })).toBe('Not reported (Default model)');
+  });
+
+  test('prefers the model recorded on the last agent message', () => {
+    const lastModel = latestTranscriptModel([
+      { ok: true, model: 'gpt-5.1' },
+      { ok: false, model: 'ignored' },
+      { ok: true, model: 'gpt-5.2', reasoning: 'xhigh' },
+    ]);
+    expect(lastModel).toBe('gpt-5.2');
+    expect(latestTranscriptRuntime([{ ok: true, model: 'gpt-5.2', reasoning: 'xhigh' }])).toEqual({
+      model: 'gpt-5.2',
+      reasoning: 'xhigh',
+    });
+    expect(resolveDisplayedChatModel(null, [], false, true, lastModel)).toEqual({
+      label: 'gpt-5.2',
+      source: 'transcript',
+    });
+    expect(displayedChatModelTitle({ label: 'gpt-5.2', source: 'transcript' }, 'xhigh')).toContain('reasoning: xhigh');
   });
 });

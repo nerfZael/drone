@@ -4,7 +4,7 @@ export { editorLanguageForPath } from '../code-languages';
 
 export type DisplayedChatModel = {
   label: string;
-  source: 'configured' | 'current' | 'default' | 'loading' | 'unknown' | 'unsupported';
+  source: 'transcript' | 'configured' | 'current' | 'default' | 'loading' | 'unknown' | 'unsupported';
 };
 
 export function resolveDisplayedChatModel(
@@ -12,7 +12,10 @@ export function resolveDisplayedChatModel(
   discoveredModels: ChatModelOption[],
   discoveryLoading: boolean,
   discoverySupported = true,
+  lastAgentModelRaw?: string | null,
 ): DisplayedChatModel {
+  const lastAgentModel = String(lastAgentModelRaw ?? '').trim();
+  if (lastAgentModel) return { label: lastAgentModel, source: 'transcript' };
   const configuredModel = String(configuredModelRaw ?? '').trim();
   if (configuredModel) return { label: configuredModel, source: 'configured' };
   if (!discoverySupported) return { label: 'Not reported', source: 'unsupported' };
@@ -27,7 +30,11 @@ export function resolveDisplayedChatModel(
   return { label: 'Default model', source: 'unknown' };
 }
 
-export function displayedChatModelTitle(model: DisplayedChatModel): string {
+export function displayedChatModelTitle(model: DisplayedChatModel, reasoningRaw?: string | null): string {
+  const reasoning = String(reasoningRaw ?? '').trim();
+  if (model.source === 'transcript') {
+    return `Model: ${model.label}${reasoning ? `; reasoning: ${reasoning}` : ''} (used for the last agent message)`;
+  }
   if (model.source === 'configured') return `Model: ${model.label} (configured for this chat)`;
   if (model.source === 'current') return `Model: ${model.label} (reported as current by the agent CLI)`;
   if (model.source === 'default') return `Model: ${model.label} (reported as default by the agent CLI)`;
@@ -36,9 +43,37 @@ export function displayedChatModelTitle(model: DisplayedChatModel): string {
   return 'Model: agent CLI default (the CLI did not report a specific model)';
 }
 
-export function formatAgentModelMetadata(agentLabelRaw: string, model: DisplayedChatModel): string {
+export function latestTranscriptModel(
+  transcripts: ReadonlyArray<{ model?: string | null; reasoning?: string | null; ok?: boolean }> | null | undefined,
+): string | null {
+  return latestTranscriptRuntime(transcripts).model;
+}
+
+export type TranscriptRuntimeMetadata = { model: string | null; reasoning: string | null };
+
+export function latestTranscriptRuntime(
+  transcripts: ReadonlyArray<{ model?: string | null; reasoning?: string | null; ok?: boolean }> | null | undefined,
+): TranscriptRuntimeMetadata {
+  const list = Array.isArray(transcripts) ? transcripts : [];
+  for (let index = list.length - 1; index >= 0; index -= 1) {
+    const item = list[index];
+    if (!item || item.ok === false) continue;
+    const model = String(item.model ?? '').trim();
+    if (!model) continue;
+    const reasoning = String(item.reasoning ?? '').trim();
+    return { model, reasoning: reasoning || null };
+  }
+  return { model: null, reasoning: null };
+}
+
+export function formatAgentModelMetadata(
+  agentLabelRaw: string,
+  model: DisplayedChatModel,
+  reasoningRaw?: string | null,
+): string {
   const agentLabel = String(agentLabelRaw ?? '').trim() || 'Not reported';
-  return `${agentLabel} (${model.label})`;
+  const reasoning = String(reasoningRaw ?? '').trim();
+  return `${agentLabel} (${model.label}${reasoning ? ` ${reasoning}` : ''})`;
 }
 
 export function formatEditorMtime(mtimeMs: number | null): string {

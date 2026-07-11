@@ -6,6 +6,9 @@ import {
   parseBlipJsonl,
   parseCodexJobTranscript,
   parseCodexJsonl,
+  parseCodexRolloutModel,
+  parseCodexRolloutRuntime,
+  parsePiJsonl,
 } from '../src/hub/builtin-transcript-sessions';
 
 describe('parseCodexJsonl', () => {
@@ -60,6 +63,14 @@ describe('parseCodexJsonl', () => {
     });
   });
 
+  test('records the model attached to the completed assistant response', () => {
+    expect(
+      parseCodexJsonl(
+        '{"type":"response.completed","response":{"model":"gpt-5.2-codex","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Done."}]}]}}',
+      ),
+    ).toMatchObject({ message: 'Done.', model: 'gpt-5.2-codex' });
+  });
+
   test('parses root-level Codex agent message events', () => {
     expect(parseCodexJsonl('{"type":"agent_message","text":"Root event answer."}')).toEqual({
       threadId: null,
@@ -96,6 +107,22 @@ describe('parseCodexJsonl', () => {
       threadId: null,
       message: 'Output without role.',
     });
+  });
+});
+
+describe('parseCodexRolloutModel', () => {
+  test('uses the latest turn context runtime from a persisted Codex rollout', () => {
+    const raw = [
+      '{"type":"turn_context","payload":{"model":"gpt-5.1-codex","reasoning_effort":"low"}}',
+      '{"type":"event_msg","payload":{"type":"agent_message","message":"Done."}}',
+      '{"type":"turn_context","payload":{"model":"gpt-5.2-codex","reasoning_effort":"xhigh"}}',
+    ].join('\n');
+    expect(
+      parseCodexRolloutRuntime(raw),
+    ).toEqual({ model: 'gpt-5.2-codex', reasoning: 'xhigh' });
+    expect(
+      parseCodexRolloutModel(raw),
+    ).toBe('gpt-5.2-codex');
   });
 });
 
@@ -145,6 +172,20 @@ describe('parseBlipJsonl', () => {
         assistant_delta: 2,
       },
     });
+  });
+
+  test('records the model attached to the assistant message', () => {
+    expect(
+      parseBlipJsonl('{"type":"assistant_message","sessionId":"sess_blip","model":"claude-sonnet-4-5","reasoning_effort":"high","text":"Done."}'),
+    ).toMatchObject({ message: 'Done.', model: 'claude-sonnet-4-5', reasoning: 'high' });
+  });
+});
+
+describe('parsePiJsonl', () => {
+  test('records the model attached to the assistant message', () => {
+    expect(
+      parsePiJsonl('{"message":{"role":"assistant","model":"anthropic/claude-sonnet-4-5","thinkingLevel":"high","content":"Done."}}'),
+    ).toMatchObject({ message: 'Done.', model: 'anthropic/claude-sonnet-4-5', reasoning: 'high' });
   });
 });
 

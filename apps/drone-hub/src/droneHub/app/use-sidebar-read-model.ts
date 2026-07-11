@@ -37,6 +37,7 @@ type UseSidebarReadModelArgs = {
   showHiddenSidebarGroups: boolean;
   sidebarGroupOrder: string[];
   sidebarGroupingMode: 'groups' | 'repos';
+  sidebarGroupCreatedAtByName: Record<string, string | null>;
 };
 
 export function useSidebarReadModel({
@@ -49,6 +50,7 @@ export function useSidebarReadModel({
   showHiddenSidebarGroups,
   sidebarGroupOrder,
   sidebarGroupingMode,
+  sidebarGroupCreatedAtByName,
 }: UseSidebarReadModelArgs) {
   const renderSidebarGroups = React.useMemo(() => {
     if (!draftSidebarPlaceholderDrone) return optimisticSidebarGroups;
@@ -97,8 +99,8 @@ export function useSidebarReadModel({
   ]);
 
   const sidebarFolderTree = React.useMemo(
-    () => buildSidebarFolderTree(renderSidebarGroups, sidebarGroupOrder),
-    [renderSidebarGroups, sidebarGroupOrder],
+    () => buildSidebarFolderTree(renderSidebarGroups, sidebarGroupOrder, sidebarGroupCreatedAtByName),
+    [renderSidebarGroups, sidebarGroupCreatedAtByName, sidebarGroupOrder],
   );
 
   const flatSidebarFolderNodes = React.useMemo(

@@ -6,6 +6,7 @@ import { sidebarFolderDisplayLabel, type SidebarFolderNode } from './sidebar-fol
 import { buildSidebarDroneTree } from './sidebar-drone-tree';
 import type { SidebarGroup } from './use-sidebar-view-model';
 import { splitSidebarGroupPath } from './sidebar-group-paths';
+import { parseIsoTimestampMs } from './helpers';
 
 export type SidebarTreeFolderNode = {
   id: string;
@@ -47,6 +48,7 @@ type BuildSidebarNodeTreeArgs = {
   repoScopedGroupPathsByRepoGroup?: Record<string, string[]>;
   sidebarDroneOrderByGroup: Record<string, string[]>;
   sidebarNodeOrderByParent: Record<string, string[]>;
+  sidebarGroupCreatedAtByName?: Record<string, string | null>;
 };
 
 function appendDroneTreeNodes(args: {
@@ -136,6 +138,7 @@ function ensureRepoScopedGroupFolders(args: {
   repoRootNode: SidebarTreeFolderNode;
   groupedItems: Map<string, DroneSummary[]>;
   groupOrderIndex: Map<string, number>;
+  groupCreatedAtByName: Record<string, string | null>;
   nodesById: Record<string, SidebarTreeNode>;
   childIdsByParentDraft: Record<string, string[]>;
 }): Map<string, SidebarTreeFolderNode> {
@@ -146,6 +149,11 @@ function ensureRepoScopedGroupFolders(args: {
       const aOrder = args.groupOrderIndex.get(sidebarGroupOrderToken({ group: a, kind: 'group' })) ?? Number.POSITIVE_INFINITY;
       const bOrder = args.groupOrderIndex.get(sidebarGroupOrderToken({ group: b, kind: 'group' })) ?? Number.POSITIVE_INFINITY;
       if (aOrder !== bOrder) return aOrder - bOrder;
+      const aMs = parseIsoTimestampMs(args.groupCreatedAtByName[a]);
+      const bMs = parseIsoTimestampMs(args.groupCreatedAtByName[b]);
+      if (aMs != null && bMs == null) return -1;
+      if (aMs == null && bMs != null) return 1;
+      if (aMs != null && bMs != null && aMs !== bMs) return bMs - aMs;
       return a.localeCompare(b);
     });
 
@@ -211,6 +219,7 @@ export function buildSidebarNodeTree({
   repoScopedGroupPathsByRepoGroup = {},
   sidebarDroneOrderByGroup,
   sidebarNodeOrderByParent,
+  sidebarGroupCreatedAtByName = {},
 }: BuildSidebarNodeTreeArgs): SidebarNodeTreeModel {
   const nodesById: Record<string, SidebarTreeNode> = {};
   const folderNodeByPath: Record<string, SidebarTreeFolderNode> = {};
@@ -296,6 +305,7 @@ export function buildSidebarNodeTree({
         repoRootNode,
         groupedItems: itemsByActualGroup,
         groupOrderIndex,
+        groupCreatedAtByName: sidebarGroupCreatedAtByName,
         nodesById,
         childIdsByParentDraft,
       });

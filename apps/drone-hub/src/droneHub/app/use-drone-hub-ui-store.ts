@@ -45,7 +45,6 @@ type NameSuggestToast = null | {
 type ViewMode = 'grouped' | 'flat';
 type SidebarGroupingMode = 'groups' | 'repos';
 export type SidebarDockSide = 'left' | 'right';
-type FsExplorerView = 'list' | 'thumb';
 type OutputView = 'screen' | 'log';
 type KanbanBoardViewMode = 'board' | 'table';
 type KanbanBoardScopeType = KanbanTaskScopeType;
@@ -118,7 +117,6 @@ type DroneHubUiState = {
   clearingDroneError: boolean;
   headerOverflowOpen: boolean;
   outputView: OutputView;
-  fsExplorerView: FsExplorerView;
   transcriptInlineImages: boolean;
   showCanvasLastMessagePreviews: boolean;
   automations: AutomationConfig[];
@@ -188,7 +186,6 @@ type DroneHubUiState = {
   setClearingDroneError: (next: Updater<boolean>) => void;
   setHeaderOverflowOpen: (next: Updater<boolean>) => void;
   setOutputView: (next: Updater<OutputView>) => void;
-  setFsExplorerView: (next: Updater<FsExplorerView>) => void;
   setTranscriptInlineImages: (next: Updater<boolean>) => void;
   setShowCanvasLastMessagePreviews: (next: Updater<boolean>) => void;
   setAutomations: (next: Updater<AutomationConfig[]>) => void;
@@ -340,7 +337,6 @@ type DroneHubUiPersistedState = Pick<
   | 'groupMultiChatColumnWidth'
   | 'groupMultiChatStatusSort'
   | 'outputView'
-  | 'fsExplorerView'
   | 'transcriptInlineImages'
   | 'showCanvasLastMessagePreviews'
   | 'automations'
@@ -360,7 +356,10 @@ export function migrateDroneHubUiPersistedState(
   _version?: number,
 ): Partial<DroneHubUiPersistedState> {
   if (!persistedState || typeof persistedState !== 'object' || Array.isArray(persistedState)) return {};
-  const migrated = { ...(persistedState as Partial<DroneHubUiPersistedState>) };
+  const { fsExplorerView: _ignoredFsExplorerView, ...persisted } = persistedState as Partial<DroneHubUiPersistedState> & {
+    fsExplorerView?: unknown;
+  };
+  const migrated = { ...persisted };
   if (Object.prototype.hasOwnProperty.call(migrated, 'sidebarDockSide')) {
     migrated.sidebarDockSide = normalizeSidebarDockSide(migrated.sidebarDockSide);
   }
@@ -449,10 +448,6 @@ function normalizeSidebarDockSide(value: unknown): SidebarDockSide {
 
 function normalizeOutputView(value: unknown): OutputView {
   return value === 'log' ? 'log' : 'screen';
-}
-
-function normalizeFsExplorerView(value: unknown): FsExplorerView {
-  return value === 'thumb' ? 'thumb' : 'list';
 }
 
 function normalizeKanbanBoardViewMode(value: unknown): KanbanBoardViewMode {
@@ -717,7 +712,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       clearingDroneError: false,
       headerOverflowOpen: false,
       outputView: 'screen',
-      fsExplorerView: 'list',
       transcriptInlineImages: true,
       showCanvasLastMessagePreviews: false,
       automations: [],
@@ -847,7 +841,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setClearingDroneError: (next) => set((s) => ({ clearingDroneError: resolveNext(s.clearingDroneError, next) })),
       setHeaderOverflowOpen: (next) => set((s) => ({ headerOverflowOpen: resolveNext(s.headerOverflowOpen, next) })),
       setOutputView: (next) => set((s) => ({ outputView: resolveNext(s.outputView, next) })),
-      setFsExplorerView: (next) => set((s) => ({ fsExplorerView: resolveNext(s.fsExplorerView, next) })),
       setTranscriptInlineImages: (next) =>
         set((s) => ({ transcriptInlineImages: resolveNext(s.transcriptInlineImages, next) })),
       setShowCanvasLastMessagePreviews: (next) =>
@@ -1064,7 +1057,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         groupMultiChatColumnWidth: state.groupMultiChatColumnWidth,
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
-        fsExplorerView: state.fsExplorerView,
         transcriptInlineImages: state.transcriptInlineImages,
         showCanvasLastMessagePreviews: state.showCanvasLastMessagePreviews,
         automations: state.automations,
@@ -1080,9 +1072,11 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       }),
       merge: (persistedState, currentState) => {
         const persisted = (persistedState as Partial<DroneHubUiPersistedState>) ?? {};
-        const { kanbanBoard: _ignoredKanbanBoard, ...persistedRest } = persisted as Partial<
-          DroneHubUiPersistedState & { kanbanBoard?: unknown }
-        >;
+        const {
+          kanbanBoard: _ignoredKanbanBoard,
+          fsExplorerView: _ignoredFsExplorerView,
+          ...persistedRest
+        } = persisted as Partial<DroneHubUiPersistedState & { kanbanBoard?: unknown; fsExplorerView?: unknown }>;
         const migratedShortcutBindings = migrateLegacyShortcutBindings(persisted.shortcutBindings);
         return {
           ...currentState,
@@ -1170,7 +1164,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             persisted.groupMultiChatStatusSort ?? currentState.groupMultiChatStatusSort,
           ),
           outputView: normalizeOutputView(persisted.outputView ?? currentState.outputView),
-          fsExplorerView: normalizeFsExplorerView(persisted.fsExplorerView ?? currentState.fsExplorerView),
           transcriptInlineImages: normalizeBoolean(
             persisted.transcriptInlineImages ?? currentState.transcriptInlineImages,
           ),
@@ -1248,7 +1241,6 @@ export function useDroneHubAppModelUiState() {
       clearingDroneError: s.clearingDroneError,
       headerOverflowOpen: s.headerOverflowOpen,
       outputView: s.outputView,
-      fsExplorerView: s.fsExplorerView,
       showCanvasLastMessagePreviews: s.showCanvasLastMessagePreviews,
       spawnContextRepoPath: s.spawnContextRepoPath,
       spawnContextByRepoKey: s.spawnContextByRepoKey,
@@ -1305,7 +1297,6 @@ export function useDroneHubAppModelUiState() {
       setClearingDroneError: s.setClearingDroneError,
       setHeaderOverflowOpen: s.setHeaderOverflowOpen,
       setOutputView: s.setOutputView,
-      setFsExplorerView: s.setFsExplorerView,
       setShowCanvasLastMessagePreviews: s.setShowCanvasLastMessagePreviews,
       setSpawnContextRepoPath: s.setSpawnContextRepoPath,
       updateSpawnContextForRepo: s.updateSpawnContextForRepo,

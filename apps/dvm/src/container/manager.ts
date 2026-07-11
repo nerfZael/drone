@@ -261,6 +261,7 @@ export class ContainerManager {
     const startAtCreate = copyPersistenceVolume ? false : start;
     let clonedPersistenceVolumeName: string | null = null;
     let containerCreated = false;
+    let containerStarted = startAtCreate;
     try {
       // Create a "pure" clone: no in-container installs/provisioning.
       await this.createContainer(config, startAtCreate, { skipProvisioning: true });
@@ -290,9 +291,11 @@ export class ContainerManager {
               await this.docker.importVolumeFromTarGz(clonedPersistenceVolumeName, archivePath);
             } else if (copyToContainerFilesystem) {
               await this.docker.startContainer(newName);
+              containerStarted = true;
               await this.docker.importTarGzToContainerPath(newName, archivePath, persistencePath);
               if (!start) {
                 await this.docker.stopContainer(newName);
+                containerStarted = false;
               }
             }
           } finally {
@@ -301,7 +304,9 @@ export class ContainerManager {
         }
       }
 
-      if (copyToDestPersistenceVolume && start) {
+      // Persistence-copy clones begin stopped. Some storage modes have no
+      // copy work to trigger startup, so honor the requested final state here.
+      if (start && !containerStarted) {
         await this.docker.startContainer(newName);
       }
 

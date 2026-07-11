@@ -15,7 +15,7 @@ import {
   TranscriptTurn,
 } from '../chat';
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
-import { GroupBadge, StatusBadge } from '../overview';
+import { StatusBadge } from '../overview';
 import { TypingDots } from '../overview/icons';
 import { requestJson } from '../http';
 import type { AgentPermissionMode } from '../../domain';
@@ -49,6 +49,7 @@ import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss }
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { createDraftChatAutomationLaunch } from './chat-draft-automation';
 import { currentPromptAutomationDisplayStatus } from './prompt-automation-display-status';
+import { fetchDroneChatTranscript } from './chat-api';
 import { repoPathLabel } from './repo-path-label';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { usePromptAutomationState } from './use-prompt-automation-state';
@@ -68,6 +69,7 @@ import {
   displayedChatModelTitle,
   formatAgentModelMetadata,
   formatBytes,
+  latestTranscriptRuntime,
   parseGithubPullRequestHref,
   resolveDisplayedChatModel,
 } from './selected-drone-workspace-utils';
@@ -630,14 +632,16 @@ export function SelectedDroneWorkspace({
   });
   const compactRepoPath = String(currentDrone.repoPath ?? '').trim();
   const compactRepoLabel = compactRepoPath ? repoPathLabel(compactRepoPath) : '';
+  const compactTranscriptRuntime = latestTranscriptRuntime(transcripts);
   const compactModel = resolveDisplayedChatModel(
     currentModel,
     availableChatModels,
     loadingChatModels,
     modelControlEnabled,
+    compactTranscriptRuntime.model,
   );
-  const compactModelTitle = displayedChatModelTitle(compactModel);
-  const compactAgentModelLabel = formatAgentModelMetadata(agentLabel, compactModel);
+  const compactModelTitle = displayedChatModelTitle(compactModel, compactTranscriptRuntime.reasoning);
+  const compactAgentModelLabel = formatAgentModelMetadata(agentLabel, compactModel, compactTranscriptRuntime.reasoning);
   const showCompactRuntimeMetadata = hasChats && chatRuntimeMetadataAvailable;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
@@ -972,6 +976,30 @@ export function SelectedDroneWorkspace({
   const [workspaceLayoutScope, setWorkspaceLayoutScopeState] = React.useState<WorkspaceLayoutScope>(() => readWorkspaceLayoutScope());
   const [workspacePaneHeaderMode, setWorkspacePaneHeaderModeState] = React.useState<WorkspacePaneHeaderMode>(() => readWorkspacePaneHeaderMode());
   const [droneControlsExpanded, setDroneControlsExpanded] = React.useState(false);
+  React.useEffect(() => {
+    if (
+      !droneControlsExpanded ||
+      !modelControlEnabled ||
+      availableChatModels.length > 0 ||
+      loadingChatModels ||
+      chatModelsError ||
+      chatModelsDiscoveredAt
+    ) {
+      return;
+    }
+    setChatModelsRefreshNonce((nonce) => nonce + 1);
+  }, [
+    activeChatName,
+    availableChatModels.length,
+    chatModelsDiscoveredAt,
+    chatModelsError,
+    currentAgentKey,
+    currentDrone.id,
+    droneControlsExpanded,
+    loadingChatModels,
+    modelControlEnabled,
+    setChatModelsRefreshNonce,
+  ]);
 
   const openPullRequestsTab = React.useCallback(() => {
     requestRightPanelTab('prs');
@@ -980,6 +1008,7 @@ export function SelectedDroneWorkspace({
   const quickOpenTabDisabled = isDroneStartingOrSeeding(currentDrone.hubPhase) || !quickOpenTabUrl;
   const [fileOpenToast, setFileOpenToast] = React.useState<{ id: number; message: string } | null>(null);
   const [transcriptExportToast, setTranscriptExportToast] = React.useState<string | null>(null);
+  const [exportingTranscript, setExportingTranscript] = React.useState(false);
   const transcriptExportToastTimerRef = React.useRef<number | null>(null);
   const repoIdentityRef = React.useRef<{ owner: string; repo: string } | null>(null);
   const pullRequestSummary = useHeaderRepoPullRequestSummary({
@@ -993,7 +1022,8 @@ export function SelectedDroneWorkspace({
     return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
   }, [pullRequestSummary.pullRequestsData]);
   const availableTranscriptItems = React.useMemo(() => (Array.isArray(transcripts) ? transcripts : []), [transcripts]);
-  const transcriptExportDisabled = chatUiMode !== 'transcript' || loadingTranscript || availableTranscriptItems.length === 0;
+  const transcriptExportDisabled =
+    chatUiMode !== 'transcript' || loadingTranscript || exportingTranscript || availableTranscriptItems.length === 0;
 
   const showTranscriptExportToast = React.useCallback((message: string) => {
     setTranscriptExportToast(message);
@@ -1007,47 +1037,70 @@ export function SelectedDroneWorkspace({
   }, []);
 
   const buildTranscriptExportArgs = React.useCallback(
-    (exportedAt: string) => ({
+    (exportedAt: string, exportTranscripts: TranscriptItem[] = availableTranscriptItems) => ({
       droneId: currentDrone.id,
       droneName: currentDrone.name,
       droneLabel: currentDroneLabel,
       chatName: activeChatName,
       exportedAt,
-      transcripts: availableTranscriptItems,
+      transcripts: exportTranscripts,
     }),
     [activeChatName, availableTranscriptItems, currentDrone.id, currentDrone.name, currentDroneLabel],
   );
 
-  const copyTranscriptMarkdown = React.useCallback(() => {
-    if (transcriptExportDisabled) return;
-    const exportedAt = new Date().toISOString();
-    const markdown = formatTranscriptMarkdown(buildTranscriptExportArgs(exportedAt));
-    void copyText(markdown).then(() => {
-      showTranscriptExportToast('Transcript copied as Markdown.');
-    });
-  }, [buildTranscriptExportArgs, showTranscriptExportToast, transcriptExportDisabled]);
-
-  const downloadTranscriptJson = React.useCallback(() => {
-    if (transcriptExportDisabled) return;
-    const exportedAt = new Date().toISOString();
-    const json = formatTranscriptJson(buildTranscriptExportArgs(exportedAt));
-    downloadTextFile({
-      filename: buildTranscriptExportFilename({
-        droneLabel: currentDroneLabel,
-        droneName: currentDrone.name,
+  const loadTranscriptForExport = React.useCallback(async (): Promise<TranscriptItem[]> => {
+    setExportingTranscript(true);
+    try {
+      return await fetchDroneChatTranscript(requestJson, {
+        droneId: currentDrone.id,
         chatName: activeChatName,
-        exportedAt,
-        extension: 'json',
-      }),
-      text: json,
-      mimeType: 'application/json;charset=utf-8',
-    });
-    showTranscriptExportToast('Transcript downloaded as JSON.');
+        turn: 'all',
+      });
+    } finally {
+      setExportingTranscript(false);
+    }
+  }, [activeChatName, currentDrone.id, requestJson]);
+
+  const copyTranscriptMarkdown = React.useCallback(async () => {
+    if (transcriptExportDisabled) return;
+    try {
+      const fullTranscript = await loadTranscriptForExport();
+      const exportedAt = new Date().toISOString();
+      const markdown = formatTranscriptMarkdown(buildTranscriptExportArgs(exportedAt, fullTranscript));
+      await copyText(markdown);
+      showTranscriptExportToast('Transcript copied as Markdown.');
+    } catch (error: any) {
+      showTranscriptExportToast(error?.message ?? 'Unable to load the full transcript.');
+    }
+  }, [buildTranscriptExportArgs, loadTranscriptForExport, showTranscriptExportToast, transcriptExportDisabled]);
+
+  const downloadTranscriptJson = React.useCallback(async () => {
+    if (transcriptExportDisabled) return;
+    try {
+      const fullTranscript = await loadTranscriptForExport();
+      const exportedAt = new Date().toISOString();
+      const json = formatTranscriptJson(buildTranscriptExportArgs(exportedAt, fullTranscript));
+      downloadTextFile({
+        filename: buildTranscriptExportFilename({
+          droneLabel: currentDroneLabel,
+          droneName: currentDrone.name,
+          chatName: activeChatName,
+          exportedAt,
+          extension: 'json',
+        }),
+        text: json,
+        mimeType: 'application/json;charset=utf-8',
+      });
+      showTranscriptExportToast('Transcript downloaded as JSON.');
+    } catch (error: any) {
+      showTranscriptExportToast(error?.message ?? 'Unable to load the full transcript.');
+    }
   }, [
     activeChatName,
     buildTranscriptExportArgs,
     currentDrone.name,
     currentDroneLabel,
+    loadTranscriptForExport,
     showTranscriptExportToast,
     transcriptExportDisabled,
   ]);
@@ -1168,7 +1221,6 @@ export function SelectedDroneWorkspace({
                       hubMessage={currentDrone.hubMessage}
                     />
                   )}
-                  {currentDrone.group && <GroupBadge group={currentDrone.group} />}
                   {showFleetBadge ? (
                     <button
                       type="button"

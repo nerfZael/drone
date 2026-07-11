@@ -57,6 +57,11 @@ import {
 import { ensureHubSetupState } from './host/setup-state';
 import { resolveDetachedCliLaunchSpec } from './hub/hub-launch';
 import { readRawBody } from './hub/hub-http';
+import {
+  upsertCanonicalDroneLifecycle,
+} from './hub/drone-lifecycle-service';
+import { permanentlyDeleteCanonicalDrone } from './hub/drone-deletion-service';
+import { renameDroneDisplayName, setDroneGroupMetadata } from './hub/drone-metadata-commands';
 import { parseHubRunnerProcessesFromPsOutput, parseHubUiServerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import {
   normalizeRemotePublicUrl,
@@ -69,15 +74,34 @@ import {
 import { startRemoteHubServer } from './hub/remote-server';
 import { createRemoteHubPairing, ensureDesiredRemoteHubDetached, redactRemoteHubState, startRemoteHubDetached, stopRemoteHubDetached } from './hub/remote-control';
 import { startDroneHubApiServer } from './hub/server';
-import { importTranscriptTurnsFromRegistry } from './hub/transcript-store';
+import {
+  deleteChatFromStore,
+  importChatFromRegistry,
+  patchChatMetadataInStore,
+  readChatFromStore,
+  upsertChatInStore,
+  upsertTranscriptTurnInStore,
+} from './hub/transcript-store';
 import {
   resolveEffectiveVoiceTranscriptionSettings,
   resolveGroqApiKeySettings,
   resolveVoiceStreamPairingPasswordSettings,
 } from './hub/hub-settings';
 import { buildVoiceStreamProcessEnv } from './hub/voice-stream-launch';
+import { ensureCanonicalGroup, listCanonicalGroups, listCanonicalRepositories, registerCanonicalRepository } from './hub/groups-repositories';
 
 const requireFromCli = createRequire(__filename);
+
+async function persistRealDroneEntry(droneId: string, entry: any): Promise<void> {
+  const canonical = await upsertCanonicalDroneLifecycle('real', droneId, entry);
+  if (canonical) return;
+  // Bun/native-binding compatibility only. Production Node must commit the
+  // lifecycle row before any legacy projection exists.
+  await updateRegistry((registry: any) => {
+    registry.drones = registry.drones ?? {};
+    registry.drones[droneId] = entry;
+  });
+}
 
 function sleep(ms: number) {
   return new Promise((r) => setTimeout(r, ms));
@@ -291,12 +315,43 @@ async function createCursorAgentChatId(containerName: string): Promise<string> {
 async function ensureChatId(opts: { droneName: string; chatName: string; model?: string; reset?: boolean }): Promise<string> {
   const reg = await loadRegistry();
   const { key, drone: d, containerName } = resolveDroneFromRegistry(reg, opts.droneName);
+  const droneId = String((d as any)?.id ?? key).trim() || key;
 
   d.chats = d.chats ?? {};
   const existing = d.chats[opts.chatName];
   if (existing && !opts.reset && typeof existing.chatId === 'string' && existing.chatId.trim()) return existing.chatId;
 
   const createdId = await createCursorAgentChatId(containerName);
+  if (!(globalThis as any).Bun) {
+    if (existing) await importChatFromRegistry({ droneId, chatName: opts.chatName, chatEntry: existing });
+    const stored = readChatFromStore({ droneId, chatName: opts.chatName }).chat;
+    const storedId = !opts.reset && typeof stored?.chatId === 'string' ? String(stored.chatId).trim() : '';
+    if (storedId) return storedId;
+    if (!stored) {
+      await upsertChatInStore({
+        droneId,
+        chatName: opts.chatName,
+        chatEntry: {
+          chatId: createdId,
+          createdAt: new Date().toISOString(),
+          ...(opts.model ? { model: opts.model } : {}),
+        },
+      });
+    } else {
+      await patchChatMetadataInStore({
+        droneId,
+        chatName: opts.chatName,
+        patch: {
+          set: {
+            chatId: createdId,
+            createdAt: String(stored.createdAt ?? '').trim() || new Date().toISOString(),
+            ...(opts.model ? { model: opts.model } : {}),
+          },
+        },
+      });
+    }
+    return createdId;
+  }
   return await updateRegistry((reg2) => {
     const { key: key2, drone: d2 } = resolveDroneFromRegistry(reg2 as any, key);
     d2.chats = d2.chats ?? {};
@@ -324,11 +379,37 @@ async function recordChatTurn(opts: {
   promptAt?: string;
   completedAt?: string;
 }): Promise<void> {
-  let syncedDroneId = '';
-  let syncedTurns: any[] | null = null;
+  if (!(globalThis as any).Bun) {
+    const registry = await loadRegistry();
+    const { key, drone } = resolveDroneFromRegistry(registry as any, opts.droneName);
+    const droneId = String((drone as any)?.id ?? key ?? opts.droneName).trim() || opts.droneName;
+    const legacyChat = (drone as any)?.chats?.[opts.chatName];
+    if (legacyChat) await importChatFromRegistry({ droneId, chatName: opts.chatName, chatEntry: legacyChat });
+    else {
+      await upsertChatInStore({
+        droneId,
+        chatName: opts.chatName,
+        chatEntry: { createdAt: new Date().toISOString() },
+      });
+    }
+    const completedAt = String(opts.completedAt ?? new Date().toISOString());
+    await upsertTranscriptTurnInStore({
+      droneId,
+      chatName: opts.chatName,
+      turn: {
+        at: completedAt,
+        prompt: opts.prompt,
+        ok: Boolean(opts.ok),
+        output: String(opts.output ?? ''),
+        ...(opts.error ? { error: String(opts.error) } : {}),
+        ...(opts.promptAt ? { promptAt: String(opts.promptAt) } : {}),
+        ...(opts.completedAt ? { completedAt: String(opts.completedAt) } : {}),
+      },
+    });
+    return;
+  }
   await updateRegistry((reg) => {
     const { key, drone: d } = resolveDroneFromRegistry(reg as any, opts.droneName);
-    syncedDroneId = String((d as any)?.id ?? key ?? opts.droneName).trim() || opts.droneName;
     d.chats = d.chats ?? {};
     d.chats[opts.chatName] = d.chats[opts.chatName] ?? { chatId: '', createdAt: new Date().toISOString() };
     const entry: any = d.chats[opts.chatName];
@@ -345,11 +426,7 @@ async function recordChatTurn(opts: {
     });
     d.chats[opts.chatName] = entry;
     (reg as any).drones[key] = d;
-    syncedTurns = entry.turns;
   });
-  if (syncedDroneId && syncedTurns) {
-    importTranscriptTurnsFromRegistry({ droneId: syncedDroneId, chatName: opts.chatName, turns: syncedTurns });
-  }
 }
 
 async function followOutput(opts: {
@@ -1605,14 +1682,11 @@ createCommand
       }
 
       try {
-        await updateRegistry((reg) => {
-          const at = new Date().toISOString();
-          if (registryHasDisplayName(reg, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
-          if (group) {
-            (reg as any).groups = (reg as any).groups ?? {};
-            if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
-          }
-          reg.drones[stableId] = {
+        if (group) await ensureCanonicalGroup(group);
+        const registry = await loadRegistry();
+        if (registryHasDisplayName(registry, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
+        const at = new Date().toISOString();
+        const createdEntry = {
             id: stableId,
             runtime: 'host',
             name: displayName,
@@ -1633,7 +1707,7 @@ createCommand
               tokenPath: hostDroneDaemonTokenPath(stableId),
             },
           } as any;
-        });
+        await persistRealDroneEntry(stableId, createdEntry);
       } catch (error) {
         await stopHostDaemonByPid(hostPid);
         throw error;
@@ -1771,16 +1845,13 @@ createCommand
 
     await waitForHealth(hostPort, token);
 
-    await updateRegistry((reg) => {
-      const at = new Date().toISOString();
-      if (registryHasDisplayName(reg, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
-      if (group) {
-        (reg as any).groups = (reg as any).groups ?? {};
-        if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
-      }
-      reg.drones[stableId] = {
+    if (group) await ensureCanonicalGroup(group);
+    const registry = await loadRegistry();
+    if (registryHasDisplayName(registry, displayName, { excludeId: stableId })) throw new Error(`drone already exists: ${displayName}`);
+    const at = new Date().toISOString();
+    const createdEntry = {
         id: stableId,
-        runtime: 'container',
+        runtime: 'container' as const,
         name: displayName,
         containerName,
         group,
@@ -1792,7 +1863,7 @@ createCommand
         ...(persistVolume === false ? { persistVolume: false } : {}),
         createdAt: at,
       };
-    });
+    await persistRealDroneEntry(stableId, createdEntry);
 
     // eslint-disable-next-line no-console
     console.log(
@@ -1847,21 +1918,18 @@ importCommand
       }
     }
 
-    await updateRegistry((reg) => {
-      const at = new Date().toISOString();
-      // Enforce unique display names (unless this is updating the same id).
-      for (const [k, v] of Object.entries((reg as any)?.drones ?? {})) {
+    if (group) await ensureCanonicalGroup(group);
+    const registry = await loadRegistry();
+    // Enforce unique display names (unless this is updating the same id).
+    for (const [k, v] of Object.entries((registry as any)?.drones ?? {})) {
         if (String((v as any)?.name ?? '').trim() === displayName && String(k) !== String(stableId)) {
           throw new Error(`drone already exists: ${displayName}`);
         }
-      }
-      if (group) {
-        (reg as any).groups = (reg as any).groups ?? {};
-        if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
-      }
-      reg.drones[stableId] = {
+    }
+    const at = new Date().toISOString();
+    const importedEntry = {
         id: stableId,
-        runtime: 'container',
+        runtime: 'container' as const,
         name: displayName,
         containerName,
         group,
@@ -1873,7 +1941,7 @@ importCommand
         ...(persistVolume === false ? { persistVolume: false } : {}),
         createdAt: at,
       };
-    });
+    await persistRealDroneEntry(stableId, importedEntry);
 
     // eslint-disable-next-line no-console
     console.log(
@@ -1931,14 +1999,10 @@ program
 
     let removedRegistry = false;
     if (options.forget) {
-      removedRegistry = await updateRegistry((reg) => {
-        const key = resolvedKey ? String(resolvedKey) : '';
-        if (key && (reg as any)?.drones?.[key]) {
-          delete (reg as any).drones[key];
-          return true;
-        }
-        return false;
-      });
+      const removed = resolvedKey
+        ? await permanentlyDeleteCanonicalDrone({ droneId: resolvedKey, lifecycleState: 'real' })
+        : null;
+      removedRegistry = Boolean(removed?.removedLifecycle);
     }
 
     if (removeErr) throw new Error(removeErr);
@@ -1982,15 +2046,7 @@ program
       }
     }
 
-    await updateRegistry((reg2: any) => {
-      const cur = reg2?.drones?.[oldKey] ?? null;
-      if (!cur) throw new Error(`drone disappeared from registry during rename: ${oldName}`);
-      const curId = normalizeDroneIdentity(cur?.id) ?? crypto.randomUUID();
-      cur.id = curId;
-      cur.name = newName;
-      cur.containerName = String(cur?.containerName ?? containerName).trim() || containerName;
-      reg2.drones[oldKey] = cur;
-    });
+    await renameDroneDisplayName({ droneId: oldKey, state: 'real', name: newName });
 
     // eslint-disable-next-line no-console
     console.log(
@@ -2067,30 +2123,25 @@ program
     }
 
     const errors: Array<{ name: string; error: string }> = [];
+    const lifecycleIdsByContainer = new Map<string, string[]>();
+    for (const [key, drone] of Object.entries((reg as any)?.drones ?? {})) {
+      const container = String((drone as any)?.containerName ?? (drone as any)?.name ?? key).trim();
+      if (!container) continue;
+      const ids = lifecycleIdsByContainer.get(container) ?? [];
+      ids.push(String((drone as any)?.id ?? key).trim() || String(key));
+      lifecycleIdsByContainer.set(container, ids);
+    }
     for (const t of targets) {
       try {
         await dvmRemove(t, { keepVolume: Boolean(options.keepVolume) });
       } catch (err: any) {
         errors.push({ name: t, error: err?.message ?? String(err) });
       }
-      // Remove any registry entries that reference this container.
-      for (const [key, d] of Object.entries((reg as any)?.drones ?? {})) {
-        const c = String((d as any)?.containerName ?? (d as any)?.name ?? key).trim();
-        if (c && c === t) {
-          delete (reg as any).drones[key];
-        }
+      for (const droneId of lifecycleIdsByContainer.get(t) ?? []) {
+        // eslint-disable-next-line no-await-in-loop
+        await permanentlyDeleteCanonicalDrone({ droneId, lifecycleState: 'real' });
       }
     }
-    await updateRegistry((regLatest) => {
-      for (const t of targets) {
-        for (const [key, d] of Object.entries((regLatest as any)?.drones ?? {})) {
-          const c = String((d as any)?.containerName ?? (d as any)?.name ?? key).trim();
-          if (c && c === t) {
-            delete (regLatest as any).drones[key];
-          }
-        }
-      }
-    });
 
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ ok: errors.length === 0, removed: targets.length - errors.length, errors }, null, 2));
@@ -2154,8 +2205,8 @@ program
   .action(async () => {
     const reg = await loadRegistry();
     const byGroup = new Map<string, string[]>();
-    for (const g of Object.keys((reg as any).groups ?? {})) {
-      const name = String(g ?? '').trim();
+    for (const entry of await listCanonicalGroups()) {
+      const name = String(entry.name ?? '').trim();
       if (!name) continue;
       if (!byGroup.has(name)) byGroup.set(name, []);
     }
@@ -2202,16 +2253,11 @@ program
     const group = String(groupRaw ?? '').trim();
     if (!group) throw new Error('invalid group (must be non-empty)');
 
-    const prev = await updateRegistry((reg) => {
-      const at = new Date().toISOString();
-      (reg as any).groups = (reg as any).groups ?? {};
-      if (!(reg as any).groups[group]) (reg as any).groups[group] = { name: group, createdAt: at, updatedAt: at };
-      const { key, drone: d } = resolveDroneFromRegistry(reg as any, String(name));
-      const prev = String(d.group ?? '').trim() || null;
-      d.group = group;
-      (reg as any).drones[key] = d;
-      return prev;
-    });
+    await ensureCanonicalGroup(group);
+    const reg = await loadRegistry();
+    const { key, drone } = resolveDroneFromRegistry(reg as any, String(name));
+    const prev = String(drone.group ?? '').trim() || null;
+    await setDroneGroupMetadata({ droneId: key, state: 'real', group });
 
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ ok: true, name: String(name), previousGroup: prev, group }, null, 2));
@@ -2223,13 +2269,10 @@ program
   .description('Clear a drone group assignment')
   .argument('<name>', 'Drone display name')
   .action(async (name) => {
-    const prev = await updateRegistry((reg) => {
-      const { key, drone: d } = resolveDroneFromRegistry(reg as any, String(name));
-      const prev = String(d.group ?? '').trim() || null;
-      delete (d as any).group;
-      (reg as any).drones[key] = d;
-      return prev;
-    });
+    const reg = await loadRegistry();
+    const { key, drone } = resolveDroneFromRegistry(reg as any, String(name));
+    const prev = String(drone.group ?? '').trim() || null;
+    await setDroneGroupMetadata({ droneId: key, state: 'real', group: null });
 
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ ok: true, name: String(name), previousGroup: prev, group: null }, null, 2));
@@ -2246,24 +2289,14 @@ program
     const github = parseGithubSlug(remoteUrl);
     const addedAt = new Date().toISOString();
 
-    await updateRegistry((reg: any) => {
-      const cur = reg?.repos;
-      const next: Record<string, any> =
-        cur && typeof cur === 'object' && !Array.isArray(cur)
-          ? (cur as any)
-          : {};
-      next[repoRoot] = {
+    await registerCanonicalRepository({
         path: repoRoot,
         addedAt,
         ...(remoteUrl ? { remoteUrl } : {}),
         ...(github ? { github } : {}),
-      };
-      reg.repos = next;
     });
 
-    const regAny: any = await loadRegistry();
-    const reposObj = regAny?.repos && typeof regAny.repos === 'object' && !Array.isArray(regAny.repos) ? regAny.repos : {};
-    const repos = Object.values(reposObj)
+    const repos = (await listCanonicalRepositories())
       .map((r: any) => ({
         path: typeof r?.path === 'string' ? String(r.path) : '',
         addedAt: typeof r?.addedAt === 'string' ? String(r.addedAt) : null,
@@ -2451,6 +2484,9 @@ async function hubRun(options: any) {
           ...process.env,
           DRONE_HUB_API_PORT: String(api.port),
           DRONE_HUB_API_TOKEN: apiToken,
+          // Keep short API fetches off the Vite origin used by long-lived SSE
+          // streams. Otherwise HTTP/1.1 browser connection limits can queue
+          // unrelated Hub requests behind EventSource connections.
           VITE_DRONE_HUB_DIRECT_API_BASE: `http://127.0.0.1:${api.port}`,
           VITE_DRONE_HUB_DIRECT_API_TOKEN: apiToken,
           ...(activeProfile ? { VITE_DRONE_PROFILE_ID: activeProfile } : {}),
@@ -3368,13 +3404,16 @@ program
   .option('--chat <name>', 'Chat name to reset', 'default')
   .action(async (name, options) => {
     const chatName = String(options.chat || 'default');
-    const had = await updateRegistry((reg) => {
+    const registry = await loadRegistry();
+    const { key, drone } = resolveDroneFromRegistry(registry as any, String(name));
+    const droneId = String((drone as any)?.id ?? key ?? name).trim() || String(name);
+    const had = Boolean((drone as any)?.chats?.[chatName]);
+    if ((globalThis as any).Bun) await updateRegistry((reg) => {
       const { key, drone: d } = resolveDroneFromRegistry(reg as any, String(name));
-      const had = Boolean(d.chats?.[chatName]);
       if (d.chats) delete d.chats[chatName];
       (reg as any).drones[key] = d;
-      return had;
     });
+    else await deleteChatFromStore({ droneId, chatName });
     // eslint-disable-next-line no-console
     console.log(JSON.stringify({ ok: true, name: String(name), chat: chatName, removed: had }, null, 2));
   });
