@@ -12,11 +12,14 @@ import {
   AGENT_SUGGESTION_ENABLED_BY_DEFAULT,
   AGENT_SUGGESTION_POLICY_MAX_CHARS,
   VOICE_APPROVAL_SETTINGS_DEFAULT,
+  VOICE_REALTIME_SETTINGS_DEFAULT,
   resolveAgentSuggestionSettingsResponse,
   resolveEffectiveVoiceApprovalSettings,
+  resolveEffectiveVoiceRealtimeSettings,
   upsertStoredProviderApiKey,
   upsertStoredAgentSuggestionSettings,
   upsertStoredVoiceApprovalSettings,
+  upsertStoredVoiceRealtimeSettings,
 } from '../src/hub/hub-settings';
 import { getSocketListenSupport } from './socket-listen-support';
 
@@ -190,6 +193,17 @@ describe('voice approval settings', () => {
       expect(settings.unlockCode).toBe('123');
       expect(settings.minDigits).toBe(3);
       expect(settings.maxDigits).toBe(4);
+    });
+  });
+});
+
+describe('voice realtime settings', () => {
+  test('persists the native provider and rejects unknown providers', async () => {
+    await withTempDroneDataDirAndEnv({}, async () => {
+      expect(await resolveEffectiveVoiceRealtimeSettings()).toMatchObject(VOICE_REALTIME_SETTINGS_DEFAULT);
+      await upsertStoredVoiceRealtimeSettings({ enabled: true, provider: 'native' });
+      expect(await resolveEffectiveVoiceRealtimeSettings()).toMatchObject({ enabled: true, provider: 'native', source: 'settings' });
+      await expect(upsertStoredVoiceRealtimeSettings({ enabled: true, provider: 'typo' })).rejects.toThrow('Invalid voice realtime settings');
     });
   });
 });

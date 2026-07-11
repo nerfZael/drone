@@ -20,13 +20,14 @@ export function buildGroqTtsConfig(opts: { apiKey: string; env?: NodeJS.ProcessE
   };
 }
 
-export async function synthesizeTextWavWithGroq(text: string, config: GroqTtsConfig): Promise<Buffer> {
+export async function synthesizeTextWavWithGroq(text: string, config: GroqTtsConfig, signal?: AbortSignal): Promise<Buffer> {
   const input = String(text ?? '').trim();
   if (!input) throw new Error('missing TTS text');
   if (!config.apiKey) throw new Error('Groq TTS disabled: set GROQ_API_KEY or GROQ_TTS_API_KEY');
 
   const response = await fetch(config.endpoint, {
     method: 'POST',
+    signal,
     headers: {
       authorization: `Bearer ${config.apiKey}`,
       'content-type': 'application/json',

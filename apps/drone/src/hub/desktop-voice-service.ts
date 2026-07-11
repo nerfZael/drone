@@ -13,6 +13,7 @@ import {
   VOICE_APPROVAL_SETTINGS_DEFAULT,
   VOICE_TRANSCRIPTION_SETTINGS_DEFAULT,
   type VoiceApprovalSettings,
+  type VoiceRealtimeProvider,
   type VoiceTranscriptionFinalMode,
   type VoiceTranscriptionSettings,
 } from './hub-settings';
@@ -69,6 +70,7 @@ export type DesktopVoiceRealtimeSession = {
   appendPcm: (pcm: Buffer) => void | Promise<void>;
   stop: () => Promise<void>;
   cancel: () => Promise<void>;
+  sendText?: (text: string) => void | Promise<void>;
 };
 
 export type DesktopVoiceRealtimeCallbacks = {
@@ -123,6 +125,8 @@ type DesktopVoiceStatus = {
   realtime: {
     available: boolean;
     enabled: boolean;
+    provider: VoiceRealtimeProvider;
+    ready: boolean;
     webRtcSessionId: string | null;
   };
   capture: {
@@ -167,7 +171,8 @@ type DesktopVoiceServiceOptions = {
   transcribeWav: (wav: Buffer) => Promise<{ text: string; model: string }>;
   submitAssistantPrompt: (prompt: string) => Promise<void>;
   startRealtimeAssistant?: (callbacks: DesktopVoiceRealtimeCallbacks) => Promise<DesktopVoiceRealtimeSession>;
-  realtimeWebRtcAvailable?: boolean;
+  realtimeWebRtcAvailable?: boolean | (() => boolean);
+  realtimeProvider?: () => VoiceRealtimeProvider;
   cancelRealtimeWebRtcAssistant?: () => Promise<void>;
   realtimeWebRtcStartTimeoutMs?: number;
   startChatPatch?: () => Promise<void>;
@@ -1171,8 +1176,10 @@ export class DesktopVoiceService {
       },
       ...(this.lastApprovalCode ? { lastApprovalCode: this.lastApprovalCode } : {}),
       realtime: {
-        available: Boolean(this.opts.startRealtimeAssistant || this.opts.realtimeWebRtcAvailable),
+        available: Boolean(this.opts.startRealtimeAssistant || this.realtimeWebRtcAvailable()),
         enabled: this.realtimeAssistantEnabled,
+        provider: this.realtimeProvider(),
+        ready: Boolean(this.realtimeSession?.sendText),
         webRtcSessionId:
           this.mode === 'recording' &&
           this.promptCaptureTarget === 'assistant' &&
@@ -1209,11 +1216,29 @@ export class DesktopVoiceService {
   }
 
   setRealtimeAssistantEnabled(enabled: boolean): DesktopVoiceStatus {
-    this.realtimeAssistantEnabled = enabled === true && Boolean(this.opts.startRealtimeAssistant || this.opts.realtimeWebRtcAvailable);
+    this.realtimeAssistantEnabled = enabled === true && Boolean(this.opts.startRealtimeAssistant || this.realtimeWebRtcAvailable());
     if (!this.realtimeAssistantEnabled) void this.cancelRealtimeSession();
     this.touch();
     this.emitChange();
     return this.snapshot();
+  }
+
+  async sendRealtimeText(textRaw: string): Promise<boolean> {
+    const text = String(textRaw ?? '').trim();
+    const session = this.realtimeSession;
+    if (!text || !session?.sendText) return false;
+    await session.sendText(text);
+    return true;
+  }
+
+  async stopRealtimeAssistantSession(): Promise<void> {
+    const active = Boolean(this.realtimeSession || this.realtimeStarting);
+    if (!active) return;
+    if (this.mode === 'recording' && this.promptCaptureTarget === 'assistant') {
+      await this.stopRealtimeRecordingFromTranscript();
+      return;
+    }
+    await this.cancelRealtimeSession();
   }
 
   createRealtimeAssistantCallbacks(): DesktopVoiceRealtimeCallbacks {
@@ -1664,7 +1689,7 @@ export class DesktopVoiceService {
   }
 
   private async startPromptRecording(target: DesktopVoiceCaptureTarget): Promise<void> {
-    if (target === 'assistant' && this.realtimeAssistantEnabled && this.opts.realtimeWebRtcAvailable) {
+    if (target === 'assistant' && this.realtimeAssistantEnabled && this.realtimeWebRtcAvailable()) {
       await this.startRealtimeWebRtcAssistantRecording();
       return;
     }
@@ -1696,6 +1721,15 @@ export class DesktopVoiceService {
     this.emitLocalCue('wake');
     this.touch();
     this.emitChange();
+  }
+
+  private realtimeProvider(): VoiceRealtimeProvider {
+    return this.opts.realtimeProvider?.() === 'native' ? 'native' : 'openai';
+  }
+
+  private realtimeWebRtcAvailable(): boolean {
+    const available = this.opts.realtimeWebRtcAvailable;
+    return typeof available === 'function' ? available() : available === true;
   }
 
   private async startRealtimeAssistantRecording(): Promise<void> {

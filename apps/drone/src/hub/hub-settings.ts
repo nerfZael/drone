@@ -148,6 +148,7 @@ export type VoiceTranscriptionFinalMode = 'full-recording' | 'segments';
 export type VoiceTranscriptionSettingsSource = 'settings' | 'default';
 export type VoiceActivationSettingsSource = 'settings' | 'default';
 export type VoiceRealtimeSettingsSource = 'settings' | 'default';
+export type VoiceRealtimeProvider = 'openai' | 'native';
 export type VoiceApprovalSettings = {
   triggerPhrase: string;
   unlockCode: string;
@@ -182,6 +183,7 @@ export type EffectiveVoiceActivationSettings = VoiceActivationSettings & {
 };
 export type VoiceRealtimeSettings = {
   enabled: boolean;
+  provider: VoiceRealtimeProvider;
 };
 export type EffectiveVoiceRealtimeSettings = VoiceRealtimeSettings & {
   source: VoiceRealtimeSettingsSource;
@@ -266,6 +268,7 @@ export const VOICE_ACTIVATION_SETTINGS_DEFAULT: VoiceActivationSettings = {
 };
 export const VOICE_REALTIME_SETTINGS_DEFAULT: VoiceRealtimeSettings = {
   enabled: false,
+  provider: 'openai',
 };
 export const VOICE_APPROVAL_SETTINGS_LIMITS = {
   triggerPhraseMaxChars: 64,
@@ -544,7 +547,9 @@ function parseVoiceRealtimeSettings(raw: unknown): VoiceRealtimeSettings | null 
   if (!raw || typeof raw !== 'object') return null;
   const value = raw as Record<string, unknown>;
   if (typeof value.enabled !== 'boolean') return null;
-  return { enabled: value.enabled };
+  if (value.provider != null && value.provider !== 'openai' && value.provider !== 'native') return null;
+  const provider: VoiceRealtimeProvider = value.provider === 'native' ? 'native' : 'openai';
+  return { enabled: value.enabled, provider };
 }
 
 function voiceApprovalSettingsEqual(a: VoiceApprovalSettings, b: VoiceApprovalSettings): boolean {
@@ -576,7 +581,7 @@ function voiceActivationSettingsEqual(a: VoiceActivationSettings, b: VoiceActiva
 }
 
 function voiceRealtimeSettingsEqual(a: VoiceRealtimeSettings, b: VoiceRealtimeSettings): boolean {
-  return a.enabled === b.enabled;
+  return a.enabled === b.enabled && a.provider === b.provider;
 }
 
 export function normalizeAgentMessageAutoContinuePrompt(raw: unknown): string {
