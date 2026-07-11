@@ -4,6 +4,7 @@ import { findDroneEntryByIdentity, normalizeDroneIdentity } from './drone-lifecy
 import { commitDroneMetadataPatch } from './drone-metadata-commands';
 import type { PendingPromptState, PendingStartupPrompt } from './drone-pending-state';
 import type { ChatImageAttachmentRef } from './chat-attachments';
+import { normalizeAgentPlan, type AgentPlan } from './agent-plan';
 import {
   cancelQueuedPendingPromptInStore,
   claimQueuedPendingPromptInStore,
@@ -34,6 +35,7 @@ export type PendingPrompt = {
     lastError?: string;
   };
   blipClones?: unknown;
+  agentPlan?: AgentPlan;
   updatedAt?: string;
 };
 
@@ -138,6 +140,7 @@ export function createDronePendingPromptStore(deps: {
               : 'sending',
           error: typeof p?.error === 'string' ? p.error : undefined,
           observability: normalizeObservability((p as any)?.observability),
+          agentPlan: normalizePendingAgentPlan((p as any)?.agentPlan),
           updatedAt: typeof p?.updatedAt === 'string' ? p.updatedAt : undefined,
         }))
         .filter((p: PendingPrompt) => p.id && p.prompt.trim())
@@ -189,6 +192,13 @@ export function createDronePendingPromptStore(deps: {
         ? { lastError: String((raw as any).lastError).trim() }
         : {}),
     };
+  }
+
+  function normalizePendingAgentPlan(raw: unknown): PendingPrompt['agentPlan'] | undefined {
+    if (!raw || typeof raw !== 'object') return undefined;
+    const source = String((raw as any).source ?? '').trim();
+    if (source !== 'cursor' && source !== 'codex' && source !== 'claude' && source !== 'opencode') return undefined;
+    return normalizeAgentPlan(raw, source, String((raw as any).updatedAt ?? ''));
   }
 
   function isSafePromptId(raw: string): boolean {
@@ -369,7 +379,7 @@ export function createDronePendingPromptStore(deps: {
     droneId: string;
     chatName: string;
     id: string;
-    patch: Partial<Pick<PendingPrompt, 'state' | 'error' | 'observability' | 'blipClones' | 'updatedAt'>>;
+    patch: Partial<Pick<PendingPrompt, 'state' | 'error' | 'observability' | 'blipClones' | 'agentPlan' | 'updatedAt'>>;
   }): Promise<void> {
     const droneIdForStore = normalizeDroneIdentity(opts.droneId);
     const chatNameForStore = opts.chatName || 'default';

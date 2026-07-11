@@ -15,6 +15,7 @@ import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
 import { collectInlineAgentMedia, type InlineAgentMedia } from './inline-agent-media';
 import { IconAlert, IconBot, IconCheck, IconCopy, IconImage, IconJobs, IconOpen, IconSnapshot, IconSpinner, IconTldr, IconUser } from './icons';
 import { VideoPreview } from '../media/VideoPreview';
+import { AgentPlanList } from './AgentPlanList';
 
 type TldrState =
   | { status: 'idle' }
@@ -353,6 +354,7 @@ export const TranscriptTurn = React.memo(
                   onOpenLink={onOpenLink}
                 />
               ) : null}
+              <AgentPlanList plan={item.agentPlan} />
               {actionsEnabled && item.ok && droneHubTasks.length > 0 ? (
                 <DroneHubTaskList tasks={droneHubTasks} onSpawnTask={onSpawnDroneHubTask} />
               ) : null}
@@ -552,6 +554,8 @@ export const TranscriptTurn = React.memo(
     a.item.session === b.item.session &&
     a.item.logPath === b.item.logPath &&
     a.item.output === b.item.output &&
+    JSON.stringify(a.item.agentPlan?.items ?? []) === JSON.stringify(b.item.agentPlan?.items ?? []) &&
+    (a.item.agentPlan?.source ?? '') === (b.item.agentPlan?.source ?? '') &&
     (a.item.agentMessageAutoContinue?.status ?? '') === (b.item.agentMessageAutoContinue?.status ?? '') &&
     (a.item.agentMessageAutoContinue?.bucket ?? '') === (b.item.agentMessageAutoContinue?.bucket ?? '') &&
     (a.item.agentMessageAutoContinue?.source ?? '') === (b.item.agentMessageAutoContinue?.source ?? '') &&

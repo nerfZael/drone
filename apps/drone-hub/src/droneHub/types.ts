@@ -547,6 +547,7 @@ export type TranscriptItem = {
   ok: boolean;
   error?: string;
   output: string;
+  agentPlan?: AgentPlan;
   agentMessageAutoContinue?: {
     status?: 'pending' | 'classified' | 'failed';
     bucket?: 'user-turn' | 'continue';
@@ -629,7 +630,18 @@ export type PendingPrompt = {
     lastCheckedAt: string;
     lastError?: string;
   };
+  agentPlan?: AgentPlan;
   updatedAt?: string;
+};
+
+export type AgentPlan = {
+  items: Array<{
+    id?: string;
+    text: string;
+    status: 'pending' | 'in_progress' | 'completed' | 'cancelled';
+  }>;
+  updatedAt: string;
+  source: 'cursor' | 'codex' | 'claude' | 'opencode';
 };
 
 export type CustomAgentProfile = { id: string; label: string; command: string };

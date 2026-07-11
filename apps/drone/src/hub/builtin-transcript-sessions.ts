@@ -1,4 +1,5 @@
 import type { BuiltinTranscriptAgentId } from './pendingPromptEnqueue';
+import { normalizeAgentPlan, type AgentPlan } from './agent-plan';
 
 export function readBuiltinTranscriptSessionId(
   chatEntry: any,
@@ -105,6 +106,16 @@ type CodexJsonlParseResult = {
   model?: string;
   reasoning?: string;
   terminalEvent?: CodexTerminalEvent;
+  agentPlan?: AgentPlan;
+};
+type StructuredAgentJsonlParseResult = {
+  sessionId: string | null;
+  message: string | null;
+  model?: string;
+  reasoning?: string;
+  agentPlan?: AgentPlan;
+  terminalStatus?: 'completed' | 'failed';
+  error?: string;
 };
 type PiJsonlParseResult = { sessionId: string | null; message: string | null; model?: string; reasoning?: string };
 export type BlipCloneActivity = {
@@ -153,6 +164,7 @@ function createCodexJsonlParser(): {
   let lastReasoning: string | null = null;
   let streamedMsg = '';
   let terminalEvent: CodexTerminalEvent | null = null;
+  let agentPlan: AgentPlan | undefined;
 
   function extractItemText(item: any): string | null {
     if (!item || typeof item !== 'object') return null;
@@ -225,10 +237,14 @@ function createCodexJsonlParser(): {
         return;
       }
       if (
-        (obj.type === 'item.completed' || obj.type === 'item.started') &&
+        (obj.type === 'item.completed' || obj.type === 'item.started' || obj.type === 'item.updated') &&
         obj.item &&
         typeof obj.item === 'object'
       ) {
+        if (String(obj.item.type ?? '').trim() === 'todo_list') {
+          agentPlan = normalizeAgentPlan(obj.item.items, 'codex', new Date().toISOString());
+          return;
+        }
         considerAssistantItem(obj.item);
         return;
       }
@@ -260,10 +276,129 @@ function createCodexJsonlParser(): {
         ...(lastModel ? { model: lastModel } : {}),
         ...(lastReasoning ? { reasoning: lastReasoning } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
+        ...(agentPlan ? { agentPlan } : {}),
       };
     },
   };
 }
+
+function findTodoList(raw: unknown): unknown[] | null {
+  if (!raw || typeof raw !== 'object') return null;
+  if (Array.isArray(raw)) {
+    for (const value of raw) {
+      const found = findTodoList(value);
+      if (found) return found;
+    }
+    return null;
+  }
+  const value = raw as any;
+  if (Array.isArray(value.todos)) return value.todos;
+  if (Array.isArray(value.items) && /todo|plan/i.test(String(value.name ?? value.tool ?? value.type ?? ''))) return value.items;
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'content' || key === 'text') continue;
+    const found = findTodoList(child);
+    if (found) return found;
+  }
+  return null;
+}
+
+function createStructuredAgentJsonlParser(
+  source: Extract<AgentPlan['source'], 'cursor' | 'claude' | 'opencode'>,
+): { pushLine: (line: string) => void; result: () => StructuredAgentJsonlParseResult } {
+  let sessionId: string | null = null;
+  let message: string | null = null;
+  let model: string | null = null;
+  let reasoning: string | null = null;
+  let agentPlan: AgentPlan | undefined;
+  let cursorAssistantText = '';
+  let terminalStatus: StructuredAgentJsonlParseResult['terminalStatus'];
+  let error: string | null = null;
+
+  const considerText = (raw: any) => {
+    if (typeof raw === 'string' && raw.trim()) message = raw.trimEnd();
+  };
+
+  return {
+    pushLine(lineRaw: string) {
+      const line = String(lineRaw ?? '').trim();
+      if (!line) return;
+      let obj: any;
+      try {
+        obj = JSON.parse(line);
+      } catch {
+        return;
+      }
+      if (!obj || typeof obj !== 'object') return;
+      sessionId = optionalString(obj.session_id ?? obj.sessionId ?? obj.sessionID) ?? sessionId;
+      model = extractModelId(obj) ?? model;
+      reasoning = extractReasoningEffort(obj) ?? reasoning;
+
+      const eventType = String(obj.type ?? '').trim();
+      if (eventType === 'error' || eventType === 'session.error') {
+        terminalStatus = 'failed';
+        error =
+          optionalString(obj.error?.data?.message) ??
+          optionalString(obj.error?.message) ??
+          optionalString(obj.message) ??
+          optionalString(obj.error) ??
+          error;
+      }
+      if (eventType === 'result') {
+        const failed = obj.is_error === true || String(obj.subtype ?? '').trim().toLowerCase() === 'error';
+        terminalStatus = failed ? 'failed' : 'completed';
+        if (failed) error = optionalString(obj.result) ?? optionalString(obj.error) ?? error;
+      }
+      const isToolEvent = eventType === 'tool_call' || eventType === 'tool_use' || eventType === 'assistant';
+      if (isToolEvent) {
+        const todos = findTodoList(obj.tool_call ?? obj.part ?? obj.message?.content ?? obj);
+        if (todos) agentPlan = normalizeAgentPlan(todos, source, new Date().toISOString());
+      }
+
+      if (source === 'claude') {
+        const content = Array.isArray(obj.message?.content) ? obj.message.content : [];
+        const text = content.filter((item: any) => item?.type === 'text').map((item: any) => String(item.text ?? '')).join('\n');
+        if (eventType === 'assistant') considerText(text);
+        if (eventType === 'result') considerText(obj.result);
+      } else if (source === 'opencode') {
+        if (eventType === 'text') considerText(obj.part?.text);
+      } else {
+        if (eventType === 'assistant') {
+          const content = obj.message?.content;
+          const text = typeof content === 'string' ? content : extractContentText(content);
+          if (text) {
+            cursorAssistantText += text;
+            considerText(cursorAssistantText);
+          }
+        }
+        if (eventType === 'result') considerText(obj.result);
+      }
+    },
+    result() {
+      return {
+        sessionId,
+        message,
+        ...(model ? { model } : {}),
+        ...(reasoning ? { reasoning } : {}),
+        ...(agentPlan ? { agentPlan } : {}),
+        ...(terminalStatus ? { terminalStatus } : {}),
+        ...(error ? { error } : {}),
+      };
+    },
+  };
+}
+
+function parseStructuredAgentJsonl(
+  source: Extract<AgentPlan['source'], 'cursor' | 'claude' | 'opencode'>,
+  stdout: string,
+): StructuredAgentJsonlParseResult {
+  const parser = createStructuredAgentJsonlParser(source);
+  for (const line of String(stdout ?? '').split('\n')) parser.pushLine(line);
+  return parser.result();
+}
+
+export const parseCursorJsonl = (stdout: string) => parseStructuredAgentJsonl('cursor', stdout);
+export const parseClaudeJsonl = (stdout: string) => parseStructuredAgentJsonl('claude', stdout);
+export const parseOpenCodeJsonl = (stdout: string) => parseStructuredAgentJsonl('opencode', stdout);
 
 function createPiJsonlParser(): {
   pushLine: (line: string) => void;
@@ -553,6 +688,15 @@ export async function parseCodexJsonlLines(
   return parser.result();
 }
 
+async function parseStructuredAgentJsonlLines(
+  source: Extract<AgentPlan['source'], 'cursor' | 'claude' | 'opencode'>,
+  lines: AsyncIterable<string> | Iterable<string>,
+): Promise<StructuredAgentJsonlParseResult> {
+  const parser = createStructuredAgentJsonlParser(source);
+  for await (const line of lines) parser.pushLine(line);
+  return parser.result();
+}
+
 export function parsePiJsonl(stdout: string): PiJsonlParseResult {
   const parser = createPiJsonlParser();
   for (const line of String(stdout || '').split('\n')) parser.pushLine(line);
@@ -583,12 +727,26 @@ export async function parseBlipJsonlLines(
 
 export type BuiltinPromptJobTranscript =
   | {
+      kind: 'cursor' | 'claude' | 'opencode';
+      message: string | null;
+      sessionId: string | null;
+      model?: string;
+      reasoning?: string;
+      agentPlan?: AgentPlan;
+      terminalStatus?: 'completed' | 'failed';
+      error?: string;
+      stdoutBytes?: number;
+      stdoutTruncated?: boolean;
+      parsedAt?: string;
+    }
+  | {
       kind: 'codex';
       message: string | null;
       threadId: string | null;
       model?: string;
       reasoning?: string;
       terminalEvent?: CodexTerminalEvent;
+      agentPlan?: AgentPlan;
       stdoutBytes?: number;
       stdoutTruncated?: boolean;
       parsedAt?: string;
@@ -687,6 +845,21 @@ export function parseBuiltinPromptJobTranscript(
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
+      ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+      ...promptJobTranscriptMeta(opts),
+    };
+  }
+  if (kind === 'cursor' || kind === 'claude' || kind === 'opencode') {
+    const parsed = parseStructuredAgentJsonl(kind, stdout);
+    return {
+      kind,
+      message: parsed.message,
+      sessionId: parsed.sessionId,
+      ...(parsed.model ? { model: parsed.model } : {}),
+      ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
+      ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+      ...(parsed.terminalStatus ? { terminalStatus: parsed.terminalStatus } : {}),
+      ...(parsed.error ? { error: parsed.error } : {}),
       ...promptJobTranscriptMeta(opts),
     };
   }
@@ -732,6 +905,21 @@ export async function parseBuiltinPromptJobTranscriptLines(
       ...(parsed.model ? { model: parsed.model } : {}),
       ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
       ...(parsed.terminalEvent ? { terminalEvent: parsed.terminalEvent } : {}),
+      ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+      ...promptJobTranscriptMeta(opts),
+    };
+  }
+  if (kind === 'cursor' || kind === 'claude' || kind === 'opencode') {
+    const parsed = await parseStructuredAgentJsonlLines(kind, lines);
+    return {
+      kind,
+      message: parsed.message,
+      sessionId: parsed.sessionId,
+      ...(parsed.model ? { model: parsed.model } : {}),
+      ...(parsed.reasoning ? { reasoning: parsed.reasoning } : {}),
+      ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+      ...(parsed.terminalStatus ? { terminalStatus: parsed.terminalStatus } : {}),
+      ...(parsed.error ? { error: parsed.error } : {}),
       ...promptJobTranscriptMeta(opts),
     };
   }
@@ -768,6 +956,7 @@ export function parseCodexJobTranscript(job: any): {
   model?: string;
   reasoning?: string;
   terminalEvent?: CodexTerminalEvent;
+  agentPlan?: AgentPlan;
 } {
   const transcript = job?.transcript;
   if (
@@ -786,16 +975,46 @@ export function parseCodexJobTranscript(job: any): {
         terminalEventRaw === 'error'
           ? terminalEventRaw
           : undefined;
+      const agentPlan = normalizeAgentPlan(transcript.agentPlan, 'codex', transcript.agentPlan?.updatedAt);
       return {
         threadId: optionalString(transcript.threadId),
         message: optionalString(transcript.message),
         ...(model ? { model } : {}),
         ...(reasoning ? { reasoning } : {}),
         ...(terminalEvent ? { terminalEvent } : {}),
+        ...(agentPlan ? { agentPlan } : {}),
       };
     }
   }
   return parseCodexJsonl(String(job?.stdout ?? ''));
+}
+
+export function parseStructuredAgentJobTranscript(
+  kind: Extract<AgentPlan['source'], 'cursor' | 'claude' | 'opencode'>,
+  job: any,
+): StructuredAgentJsonlParseResult {
+  const transcript = job?.transcript;
+  if (
+    transcript &&
+    typeof transcript === 'object' &&
+    String(transcript.kind ?? '').trim() === kind &&
+    Object.prototype.hasOwnProperty.call(transcript, 'message')
+  ) {
+    const agentPlan = normalizeAgentPlan(transcript.agentPlan, kind, transcript.agentPlan?.updatedAt);
+    const terminalStatus = transcript.terminalStatus === 'completed' || transcript.terminalStatus === 'failed'
+      ? transcript.terminalStatus
+      : undefined;
+    return {
+      sessionId: optionalString(transcript.sessionId),
+      message: optionalString(transcript.message),
+      ...(optionalString(transcript.model) ? { model: optionalString(transcript.model)! } : {}),
+      ...(optionalString(transcript.reasoning) ? { reasoning: optionalString(transcript.reasoning)! } : {}),
+      ...(agentPlan ? { agentPlan } : {}),
+      ...(terminalStatus ? { terminalStatus } : {}),
+      ...(optionalString(transcript.error) ? { error: optionalString(transcript.error)! } : {}),
+    };
+  }
+  return parseStructuredAgentJsonl(kind, String(job?.stdout ?? ''));
 }
 
 export function parsePiJobTranscript(job: any): {

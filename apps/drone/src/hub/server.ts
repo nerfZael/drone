@@ -153,9 +153,11 @@ import {
   parseCodexJobTranscript,
   parseCodexRolloutRuntime,
   parsePiJobTranscript,
+  parseStructuredAgentJobTranscript,
   readBuiltinTranscriptSessionId,
   type AgentTurnRuntimeMetadata,
 } from './builtin-transcript-sessions';
+import { normalizeAgentPlan, sameAgentPlan, type AgentPlan } from './agent-plan';
 import {
   appendTaskToBoard,
   fallbackTaskTypeId,
@@ -6548,7 +6550,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print ${bashQuote(promptWithHistory)}`,
+        `agent${modelArg} --resume ${bashQuote(chatId)} -f --approve-mcps --print --output-format stream-json ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'cursor', script, prompt: effectivePrompt });
       return { ok: true as const, agent, mode: 'transcript' as const, chat: normalizedChat, turnOk: true as const };
@@ -6600,7 +6602,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `claude --print --dangerously-skip-permissions --output-format text${modelArg} --session-id ${bashQuote(claudeSessionId)} ${bashQuote(promptWithHistory)}`,
+        `claude --print --dangerously-skip-permissions --output-format stream-json --verbose${modelArg} --session-id ${bashQuote(claudeSessionId)} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'claude', script, prompt: effectivePrompt });
       return {
@@ -6625,7 +6627,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `opencode run --format default --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(promptWithHistory)}`,
+        `opencode run --format json --title ${bashQuote(title)}${modelArg}${resumeArg} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'opencode', script, prompt: effectivePrompt });
       return {
@@ -9735,6 +9737,13 @@ function chatHasReconcilablePendingPrompts(entry: any): boolean {
   return false;
 }
 
+function parseLiveAgentPlan(jobKind: string, job: any): AgentPlan | undefined {
+  if (jobKind === 'codex') return parseCodexJobTranscript(job).agentPlan;
+  if (jobKind === 'cursor' || jobKind === 'claude' || jobKind === 'opencode') {
+    return parseStructuredAgentJobTranscript(jobKind, job).agentPlan;
+  }
+  return undefined;
+}
 async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string }): Promise<void> {
   const droneId = normalizeDroneIdentity(opts.droneId);
   const chatName = normalizeChatName(opts.chatName);
@@ -9892,13 +9901,21 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
     let jobKind = normalizeBuiltinAgentId(job?.kind) ?? agent.id;
     if (jobState === 'queued' || jobState === 'running') {
       const parsedBlip = jobKind === 'blip' && jobState === 'running' ? parseBlipJobTranscript(job) : null;
+      const nextAgentPlan = jobState === 'running' ? parseLiveAgentPlan(jobKind, job) : (p as any).agentPlan;
       if (parsedBlip?.sessionId && String(parsedBlip.sessionId).trim() && String(entry?.blipSessionId ?? '').trim() !== parsedBlip.sessionId) {
         entry.blipSessionId = parsedBlip.sessionId;
         changed = true;
       }
+      const agentPlanChanged = !sameAgentPlan((p as any).agentPlan, nextAgentPlan);
       const observabilityChanged = Boolean((p as any).observability);
-      if (state !== 'sent' || observabilityChanged) {
-        pendingList[i] = { ...p, state: 'sent', observability: undefined, updatedAt: nowIso() };
+      if (state !== 'sent' || agentPlanChanged || observabilityChanged) {
+        pendingList[i] = {
+          ...p,
+          state: 'sent',
+          observability: undefined,
+          agentPlan: nextAgentPlan,
+          updatedAt: nowIso(),
+        };
         changed = true;
         continue;
       }
@@ -9983,6 +10000,59 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           prompt: String(p?.prompt ?? ''),
           ...(turnRuntime.model ? { model: turnRuntime.model } : {}),
           ...(turnRuntime.reasoning ? { reasoning: turnRuntime.reasoning } : {}),
+          ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+          ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+          ...(promptAutomation ? { automation: promptAutomation } : {}),
+          ok: true,
+          output,
+        });
+        transcriptIds.add(id);
+        completedTurnIdsForSnapshot.push(id);
+        pendingList[i] = { ...p, state: 'sent', observability: undefined, updatedAt: nowIso() };
+        changed = true;
+        continue;
+      }
+
+      if (jobKind === 'cursor' || jobKind === 'claude' || jobKind === 'opencode') {
+        const parsed = parseStructuredAgentJobTranscript(jobKind, job);
+        const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
+        const turnReasoning = normalizeChatReasoning(parsed.reasoning);
+        const output = String(parsed.message ?? '').trimEnd();
+        if (!output) {
+          const error = formatTranscriptJobFailure({
+            agentId: jobKind,
+            stdoutRaw: stdout,
+            stderrRaw: stderr,
+            fallbackRaw: `${jobKind} finished but no assistant message was parsed`,
+            exitCode: 0,
+          });
+          pendingList[i] = { ...p, state: 'failed', error, observability: undefined, updatedAt: nowIso() };
+          changed = true;
+          continue;
+        }
+        if (jobKind === 'opencode') {
+          const openCodeSessionId =
+            parsed.sessionId ??
+            (await ensureOpenCodeSessionId({
+              droneId,
+              droneLabel: String(d?.name ?? '').trim() || droneId,
+              containerName: String(d?.containerName ?? d?.name ?? droneId).trim() || droneId,
+              chatName: opts.chatName,
+            }).catch(() => null));
+          if (openCodeSessionId) {
+            entry.openCodeSessionId = openCodeSessionId;
+            changed = true;
+          }
+        }
+        turns.push({
+          at: promptAt,
+          promptAt,
+          completedAt: finishedAt,
+          id,
+          prompt: String(p?.prompt ?? ''),
+          ...(turnModel ? { model: turnModel } : {}),
+          ...(turnReasoning ? { reasoning: turnReasoning } : {}),
+          ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
           ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
           ...(promptAutomation ? { automation: promptAutomation } : {}),
           ok: true,
@@ -10138,6 +10208,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             prompt: String(p?.prompt ?? ''),
             ...(turnRuntime.model ? { model: turnRuntime.model } : {}),
             ...(turnRuntime.reasoning ? { reasoning: turnRuntime.reasoning } : {}),
+            ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
             ...(promptAutomation ? { automation: promptAutomation } : {}),
             ok: true,
@@ -10149,6 +10220,60 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           changed = true;
           continue;
         }
+      }
+      if (jobKind === 'cursor' || jobKind === 'claude' || jobKind === 'opencode') {
+        const parsed = parseStructuredAgentJobTranscript(jobKind, job);
+        const output = String(parsed.message ?? '').trimEnd();
+        const finishedAt = typeof job?.finishedAt === 'string' ? job.finishedAt : nowIso();
+        const promptAt = resolveTranscriptPromptAt({
+          pendingAt: p?.at,
+          jobStartedAt: job?.startedAt,
+          finishedAt,
+        });
+        if (output && parsed.terminalStatus === 'completed') {
+          const turnModel = normalizeChatModel(parsed.model) ?? pendingModel;
+          const turnReasoning = normalizeChatReasoning(parsed.reasoning);
+          turns.push({
+            at: promptAt,
+            promptAt,
+            completedAt: finishedAt,
+            id,
+            prompt: String(p?.prompt ?? ''),
+            ...(turnModel ? { model: turnModel } : {}),
+            ...(turnReasoning ? { reasoning: turnReasoning } : {}),
+            ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
+            ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+            ...(promptAutomation ? { automation: promptAutomation } : {}),
+            ok: true,
+            output,
+          });
+          transcriptIds.add(id);
+          completedTurnIdsForSnapshot.push(id);
+          pendingList[i] = { ...p, state: 'sent', error: undefined, observability: undefined, updatedAt: nowIso() };
+          changed = true;
+          continue;
+        }
+        const exitCode =
+          typeof job?.exitCode === 'number' && Number.isFinite(job.exitCode)
+            ? Math.floor(job.exitCode)
+            : null;
+        const error = formatTranscriptJobFailure({
+          agentId: jobKind,
+          stdoutRaw: '',
+          stderrRaw: String(job?.stderr ?? ''),
+          fallbackRaw: parsed.error || `${jobKind} agent failed`,
+          exitCode,
+        });
+        pendingList[i] = {
+          ...p,
+          state: 'failed',
+          error,
+          observability: undefined,
+          agentPlan: parsed.agentPlan ?? (p as any).agentPlan,
+          updatedAt: nowIso(),
+        };
+        changed = true;
+        continue;
       }
       if (jobKind === 'pi') {
         const stdout = String(job?.stdout ?? '');
@@ -10295,6 +10420,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           error: pending.error,
           observability: pending.observability,
           blipClones: pending.blipClones,
+          agentPlan: pending.agentPlan,
           updatedAt: pending.updatedAt,
         },
       });
@@ -12998,6 +13124,12 @@ function formatTranscriptRow(turnIndex: number, turn: any): any {
   const agentMessageAutoContinue = normalizeAgentMessageAutoContinueTurnState((turn as any)?.agentMessageAutoContinue);
   const agentSuggestion = normalizeAgentSuggestionTurnState((turn as any)?.agentSuggestion);
   const dockerSnapshot = normalizeDockerSnapshot((turn as any)?.dockerSnapshot);
+  const agentPlanRaw = (turn as any)?.agentPlan;
+  const agentPlanSource = String(agentPlanRaw?.source ?? '').trim();
+  const agentPlan =
+    agentPlanSource === 'cursor' || agentPlanSource === 'codex' || agentPlanSource === 'claude' || agentPlanSource === 'opencode'
+      ? normalizeAgentPlan(agentPlanRaw, agentPlanSource, String(agentPlanRaw?.updatedAt ?? ''))
+      : undefined;
   const ok = Boolean(turn?.ok);
   const output = ok ? String(turn?.output ?? '') : '';
   const error = ok ? undefined : String(turn?.error ?? 'failed');
@@ -13014,6 +13146,7 @@ function formatTranscriptRow(turnIndex: number, turn: any): any {
     ...(automation ? { automation } : {}),
     ...(agentMessageAutoContinue ? { agentMessageAutoContinue } : {}),
     ...(agentSuggestion ? { agentSuggestion } : {}),
+    ...(agentPlan ? { agentPlan } : {}),
     ...(dockerSnapshot
       ? {
           dockerSnapshot: {
@@ -16227,12 +16360,14 @@ export async function startDroneHubApiServer(opts: {
             ok: lastTurn?.ok === true,
             outputLength: String(lastTurn?.output ?? '').length,
             outputTail: String(lastTurn?.output ?? '').slice(-256),
+            agentPlan: lastTurn?.agentPlan ?? null,
           }
         : null,
       pendingPrompts: pendingPrompts.map((item: any) => ({
         id: String(item?.id ?? ''),
         state: String(item?.state ?? ''),
         error: String(item?.error ?? ''),
+        agentPlan: item?.agentPlan ?? null,
         updatedAt: String(item?.updatedAt ?? ''),
       })),
     });

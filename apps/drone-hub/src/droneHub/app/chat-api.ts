@@ -143,6 +143,12 @@ function sameDockerSnapshot(
   );
 }
 
+function sameAgentPlan(left: TranscriptItem['agentPlan'], right: TranscriptItem['agentPlan']): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return left.source === right.source && JSON.stringify(left.items) === JSON.stringify(right.items);
+}
+
 export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem): boolean {
   return (
     left.turn === right.turn &&
@@ -163,6 +169,7 @@ export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem):
     sameAutomation(left.automation, right.automation) &&
     sameAgentMessageAutoContinue(left.agentMessageAutoContinue, right.agentMessageAutoContinue) &&
     sameAgentSuggestion(left.agentSuggestion, right.agentSuggestion) &&
+    sameAgentPlan(left.agentPlan, right.agentPlan) &&
     sameDockerSnapshot(left.dockerSnapshot, right.dockerSnapshot)
   );
 }
