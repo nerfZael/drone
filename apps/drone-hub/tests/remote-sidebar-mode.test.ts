@@ -66,4 +66,12 @@ describe('RemoteHubSidebar', () => {
     );
     expect(remoteHubAppSource).toContain('model.chatTimeline.map((entry) =>');
   });
+
+  test('scrolls Agent Chat to the bottom when opening a chat or sending a message', () => {
+    expect(remoteHubAppSource).toContain('remoteChatEndRef.current?.scrollIntoView');
+    expect(remoteHubAppSource).toContain('model.fullTranscriptKey !== selectedChatKey');
+    expect(remoteHubAppSource).toContain('if (sent) scrollRemoteChatToBottom();');
+    expect(remoteHubAppSource.match(/onSelectChat=\{selectRemoteChat\}/g)).toHaveLength(2);
+    expect(remoteHubAppSource).toContain('<div ref={remoteChatEndRef} />');
+  });
 });
