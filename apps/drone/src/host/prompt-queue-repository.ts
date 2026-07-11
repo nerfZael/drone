@@ -17,6 +17,7 @@ export type PromptQueueItem = {
   error?: string;
   observability?: unknown;
   blipClones?: unknown;
+  agentPlan?: unknown;
   updatedAt?: string;
 };
 
@@ -445,7 +446,7 @@ export class PromptQueueRepository {
     chatName: string;
     promptId: string;
     patch: Partial<
-      Pick<PromptQueueItem, 'state' | 'error' | 'observability' | 'blipClones' | 'updatedAt'>
+      Pick<PromptQueueItem, 'state' | 'error' | 'observability' | 'blipClones' | 'agentPlan' | 'updatedAt'>
     >;
     now?: string;
   }): Promise<boolean> {

@@ -67,6 +67,32 @@ test('enqueue is idempotent by request key and keeps the original payload', asyn
   assert.equal(queue.list({ droneId: 'alpha', chatName: 'default' }).length, 1);
 });
 
+test('pending prompt updates preserve live agent plans', async () => {
+  const queue = repository('agent-plan');
+  const at = '2026-07-10T09:00:00.000Z';
+  await queue.enqueue({ droneId: 'alpha', chatName: 'default', prompt: prompt('p-plan', at) });
+  const agentPlan = {
+    source: 'codex',
+    updatedAt: '2026-07-10T09:00:01.000Z',
+    items: [
+      { text: 'Inspect code', status: 'completed' },
+      { text: 'Run tests', status: 'in_progress' },
+    ],
+  };
+
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'p-plan',
+    patch: { state: 'sent', agentPlan, updatedAt: agentPlan.updatedAt },
+  });
+
+  assert.deepEqual(
+    queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'p-plan' }).agentPlan,
+    agentPlan,
+  );
+});
+
 test('claims preserve FIFO within a chat while allowing another chat to proceed', async () => {
   const queue = repository('fifo');
   const at = '2026-07-10T09:00:00.000Z';

@@ -10,6 +10,7 @@ import {
 } from '../host/hub-database';
 import { appendHubOutboxEvent, initializeHubOutbox } from '../host/hub-outbox';
 import { getPromptQueueRepository } from '../host/prompt-queue-repository';
+import type { AgentPlan } from './agent-plan';
 
 export type StoredTranscriptTurn = {
   at: string;
@@ -28,6 +29,7 @@ export type StoredTranscriptTurn = {
   agentMessageAutoContinue?: unknown;
   agentSuggestion?: unknown;
   dockerSnapshot?: unknown;
+  agentPlan?: AgentPlan;
 };
 
 export type StoredPendingPrompt = {
@@ -44,6 +46,7 @@ export type StoredPendingPrompt = {
   error?: string;
   observability?: unknown;
   blipClones?: unknown;
+  agentPlan?: AgentPlan;
   updatedAt?: string;
 };
 
@@ -356,6 +359,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
       : {}),
     ...(raw?.agentSuggestion && typeof raw.agentSuggestion === 'object' ? { agentSuggestion: raw.agentSuggestion } : {}),
     ...(raw?.dockerSnapshot && typeof raw.dockerSnapshot === 'object' ? { dockerSnapshot: raw.dockerSnapshot } : {}),
+    ...(raw?.agentPlan && typeof raw.agentPlan === 'object' ? { agentPlan: raw.agentPlan } : {}),
   };
 }
 

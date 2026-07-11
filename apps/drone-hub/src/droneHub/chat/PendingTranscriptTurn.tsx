@@ -7,6 +7,7 @@ import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentR
 import type { MarkdownFileReference } from './MarkdownMessage';
 import { RelativeTimeText } from './RelativeTimeText';
 import { IconBot, IconCopy, IconUser, TypingDots } from './icons';
+import { AgentPlanList } from './AgentPlanList';
 
 const MANUAL_UNSTICK_STALE_MS = 2 * 60_000;
 
@@ -278,6 +279,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                       ) : null}
                     </div>
                   ) : null}
+                  <AgentPlanList plan={item.agentPlan} running />
                   {canRequestUnstick ? (
                     <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
                       <span className="text-[10px] text-[var(--muted-dim)]">Still waiting for agent completion.</span>

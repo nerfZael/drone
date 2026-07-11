@@ -37,6 +37,25 @@ describe('chat api transcript equality', () => {
 
     expect(sameTranscriptItem(creating, ready)).toBe(false);
   });
+
+  test('detects agent plan progress changes', () => {
+    const pending = transcriptItem({
+      agentPlan: {
+        source: 'codex',
+        updatedAt: '2026-06-16T18:34:45.000Z',
+        items: [{ text: 'Run tests', status: 'pending' }],
+      },
+    });
+    const completed = transcriptItem({
+      agentPlan: {
+        source: 'codex',
+        updatedAt: '2026-06-16T18:34:46.000Z',
+        items: [{ text: 'Run tests', status: 'completed' }],
+      },
+    });
+
+    expect(sameTranscriptItem(pending, completed)).toBe(false);
+  });
 });
 
 describe('chat api request scopes', () => {

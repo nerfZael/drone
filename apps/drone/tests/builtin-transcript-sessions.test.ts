@@ -6,12 +6,30 @@ import {
   parseBlipJsonl,
   parseCodexJobTranscript,
   parseCodexJsonl,
+  parseClaudeJsonl,
+  parseCursorJsonl,
+  parseOpenCodeJsonl,
   parseCodexRolloutModel,
   parseCodexRolloutRuntime,
   parsePiJsonl,
 } from '../src/hub/builtin-transcript-sessions';
 
 describe('parseCodexJsonl', () => {
+  test('keeps the latest Codex todo-list snapshot', () => {
+    const parsed = parseCodexJsonl([
+      '{"type":"item.started","item":{"id":"plan","type":"todo_list","items":[{"text":"Inspect code","completed":false},{"text":"Add tests","completed":false}]}}',
+      '{"type":"item.updated","item":{"id":"plan","type":"todo_list","items":[{"text":"Inspect code","completed":true},{"text":"Add tests","completed":false}]}}',
+    ].join('\n'));
+
+    expect(parsed.agentPlan).toMatchObject({
+      source: 'codex',
+      items: [
+        { text: 'Inspect code', status: 'completed' },
+        { text: 'Add tests', status: 'pending' },
+      ],
+    });
+  });
+
   test('parses legacy Codex agent_message items', () => {
     expect(
       parseCodexJsonl(
@@ -106,6 +124,100 @@ describe('parseCodexJsonl', () => {
     ).toEqual({
       threadId: null,
       message: 'Output without role.',
+    });
+  });
+});
+
+describe('structured agent plan parsers', () => {
+  test('parses Claude TodoWrite tool calls and the final result', () => {
+    const parsed = parseClaudeJsonl([
+      JSON.stringify({
+        type: 'assistant',
+        session_id: 'claude-session',
+        message: { content: [{ type: 'tool_use', name: 'TodoWrite', input: { todos: [
+          { content: 'Read the code', status: 'completed' },
+          { content: 'Implement the change', status: 'in_progress' },
+        ] } }] },
+      }),
+      JSON.stringify({ type: 'result', session_id: 'claude-session', result: 'Claude finished.' }),
+    ].join('\n'));
+
+    expect(parsed).toMatchObject({
+      sessionId: 'claude-session',
+      message: 'Claude finished.',
+      agentPlan: {
+        source: 'claude',
+        items: [
+          { text: 'Read the code', status: 'completed' },
+          { text: 'Implement the change', status: 'in_progress' },
+        ],
+      },
+    });
+  });
+
+  test('parses OpenCode todowrite metadata and completed text', () => {
+    const parsed = parseOpenCodeJsonl([
+      JSON.stringify({
+        type: 'tool_use',
+        sessionID: 'oc-session',
+        part: { type: 'tool', tool: 'todowrite', state: { status: 'completed', metadata: { todos: [
+          { id: '1', content: 'Update API', status: 'completed' },
+          { id: '2', content: 'Verify UI', status: 'pending' },
+        ] } } },
+      }),
+      JSON.stringify({ type: 'text', sessionID: 'oc-session', part: { text: 'OpenCode finished.' } }),
+    ].join('\n'));
+
+    expect(parsed).toMatchObject({
+      sessionId: 'oc-session',
+      message: 'OpenCode finished.',
+      agentPlan: { source: 'opencode', items: [
+        { id: '1', text: 'Update API', status: 'completed' },
+        { id: '2', text: 'Verify UI', status: 'pending' },
+      ] },
+    });
+  });
+
+  test('parses Cursor todo tool payloads while preserving its final result', () => {
+    const parsed = parseCursorJsonl([
+      JSON.stringify({
+        type: 'tool_call',
+        session_id: 'cursor-session',
+        tool_call: { todoWriteToolCall: { args: { todos: [
+          { id: 'a', text: 'Inspect', status: 'completed' },
+          { id: 'b', text: 'Patch', status: 'in-progress' },
+        ] } } },
+      }),
+      JSON.stringify({ type: 'result', session_id: 'cursor-session', result: 'Cursor finished.' }),
+    ].join('\n'));
+
+    expect(parsed).toMatchObject({
+      sessionId: 'cursor-session',
+      message: 'Cursor finished.',
+      agentPlan: { source: 'cursor', items: [
+        { id: 'a', text: 'Inspect', status: 'completed' },
+        { id: 'b', text: 'Patch', status: 'in_progress' },
+      ] },
+    });
+  });
+
+  test('extracts readable structured-agent failures', () => {
+    expect(parseClaudeJsonl(JSON.stringify({
+      type: 'result',
+      subtype: 'error',
+      is_error: true,
+      result: 'Claude ran out of context.',
+    }))).toMatchObject({
+      terminalStatus: 'failed',
+      error: 'Claude ran out of context.',
+    });
+
+    expect(parseOpenCodeJsonl(JSON.stringify({
+      type: 'error',
+      error: { data: { message: 'OpenCode provider unavailable.' } },
+    }))).toMatchObject({
+      terminalStatus: 'failed',
+      error: 'OpenCode provider unavailable.',
     });
   });
 });
