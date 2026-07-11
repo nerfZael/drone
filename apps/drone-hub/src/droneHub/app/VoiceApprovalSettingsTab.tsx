@@ -1,5 +1,5 @@
 import React from 'react';
-import type { VoiceActivationSettings, VoiceApprovalSettings, VoiceTranscriptionSettings } from './settings-types';
+import type { VoiceActivationSettings, VoiceApprovalSettings, VoiceRealtimeSettings, VoiceTranscriptionSettings } from './settings-types';
 import type { UseVoiceApprovalSettingsResult } from './use-voice-approval-settings';
 import { formatProfileDisplayName } from './profile-display';
 
@@ -41,6 +41,11 @@ function sameActivationSettings(a: VoiceActivationSettings | null, b: VoiceActiv
   return JSON.stringify(a) === JSON.stringify(b);
 }
 
+function sameRealtimeSettings(a: VoiceRealtimeSettings | null, b: VoiceRealtimeSettings | null): boolean {
+  if (!a || !b) return false;
+  return a.enabled === b.enabled && a.provider === b.provider;
+}
+
 function savedSettings(input: UseVoiceApprovalSettingsResult): VoiceApprovalSettings | null {
   const value = input.voiceApprovalSettings?.voiceApproval;
   if (!value) return null;
@@ -74,6 +79,12 @@ function savedActivationSettings(input: UseVoiceApprovalSettingsResult): VoiceAc
     normalAliases: value.normalAliases,
     realTimeAliases: value.realTimeAliases,
   };
+}
+
+function savedRealtimeSettings(input: UseVoiceApprovalSettingsResult): VoiceRealtimeSettings | null {
+  const value = input.voiceApprovalSettings?.voiceRealtime;
+  if (!value) return null;
+  return { enabled: value.enabled, provider: value.provider };
 }
 
 function codeOnly(value: string, maxDigits: number): string {
@@ -121,23 +132,28 @@ export function VoiceApprovalSettingsTab({ voiceApproval }: VoiceApprovalSetting
     voiceApprovalDraft,
     voiceTranscriptionDraft,
     voiceActivationDraft,
+    voiceRealtimeDraft,
     savingVoiceApprovalSettings,
     setVoiceApprovalDraft,
     setVoiceTranscriptionDraft,
     setVoiceActivationDraft,
+    setVoiceRealtimeDraft,
     saveVoiceApprovalSettings,
   } = voiceApproval;
   const limits = voiceApprovalSettings?.limits;
   const defaults = voiceApprovalSettings?.defaults;
   const transcriptionDefaults = voiceApprovalSettings?.transcriptionDefaults;
   const activationDefaults = voiceApprovalSettings?.activationDefaults;
+  const realtimeDefaults = voiceApprovalSettings?.realtimeDefaults;
   const saved = savedSettings(voiceApproval);
   const savedTranscription = savedTranscriptionSettings(voiceApproval);
   const savedActivation = savedActivationSettings(voiceApproval);
+  const savedRealtime = savedRealtimeSettings(voiceApproval);
   const dirty =
     !sameSettings(voiceApprovalDraft, saved) ||
     !sameTranscriptionSettings(voiceTranscriptionDraft, savedTranscription) ||
-    !sameActivationSettings(voiceActivationDraft, savedActivation);
+    !sameActivationSettings(voiceActivationDraft, savedActivation) ||
+    !sameRealtimeSettings(voiceRealtimeDraft, savedRealtime);
   const activationError = !voiceActivationDraft
     ? ''
     : voiceActivationDraft.normalAliases.length === 0
@@ -166,7 +182,7 @@ export function VoiceApprovalSettingsTab({ voiceApproval }: VoiceApprovalSetting
     return <div className="text-[12px] text-[var(--muted-dim)]">Loading voice approval settings...</div>;
   }
 
-  if (!voiceApprovalDraft || !voiceTranscriptionDraft || !voiceActivationDraft || !limits || !defaults || !transcriptionDefaults || !activationDefaults) {
+  if (!voiceApprovalDraft || !voiceTranscriptionDraft || !voiceActivationDraft || !voiceRealtimeDraft || !limits || !defaults || !transcriptionDefaults || !activationDefaults || !realtimeDefaults) {
     return (
       <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
         {voiceApprovalSettingsError ?? 'Voice approval settings are unavailable.'}
@@ -262,6 +278,62 @@ export function VoiceApprovalSettingsTab({ voiceApproval }: VoiceApprovalSetting
           {voiceApprovalSettingsNotice}
         </div>
       )}
+
+      <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              Realtime engine
+            </div>
+            <div className="mt-1 text-[11px] leading-relaxed text-[var(--muted-dim)]">
+              Choose who owns live turn detection, reasoning, tools, and speech.
+            </div>
+          </div>
+          <span className={`rounded-full border px-2 py-1 text-[9px] font-semibold uppercase tracking-[0.08em] ${
+            voiceRealtimeDraft.provider === 'native'
+              ? 'border-[rgba(52,211,153,.28)] bg-[rgba(16,185,129,.08)] text-[#34d399]'
+              : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+          }`}>
+            {voiceRealtimeDraft.provider === 'native' ? 'Hub native' : 'OpenAI'}
+          </span>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+          {([
+            {
+              provider: 'native' as const,
+              label: 'Native collaboration',
+              eyebrow: 'Silero · Groq · Assistant',
+              description: 'Keeps listening while the selected Assistant reasons and uses Drone Hub tools. Speech is queued and interruptible.',
+            },
+            {
+              provider: 'openai' as const,
+              label: 'OpenAI Realtime',
+              eyebrow: 'WebRTC · native audio',
+              description: 'Uses the existing low-latency OpenAI audio session and sideband tool bridge.',
+            },
+          ]).map((option) => {
+            const active = voiceRealtimeDraft.provider === option.provider;
+            return (
+              <button
+                key={option.provider}
+                type="button"
+                onClick={() => setVoiceRealtimeDraft((current) => current ? { ...current, provider: option.provider } : current)}
+                disabled={savingVoiceApprovalSettings}
+                className={`group relative overflow-hidden rounded border px-3 py-3 text-left transition-all ${
+                  active
+                    ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] shadow-[var(--glow-accent)]'
+                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] hover:bg-[var(--hover)]'
+                } ${savingVoiceApprovalSettings ? 'opacity-40 cursor-not-allowed' : ''}`}
+              >
+                <span className="block text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-dim)]">{option.eyebrow}</span>
+                <span className="mt-1 block text-[12px] font-semibold text-[var(--fg-secondary)]">{option.label}</span>
+                <span className="mt-1 block text-[11px] leading-relaxed text-[var(--muted-dim)]">{option.description}</span>
+                <span className={`absolute right-3 top-3 h-2 w-2 rounded-full border transition-colors ${active ? 'border-[var(--accent)] bg-[var(--accent)]' : 'border-[var(--muted-dim)] bg-transparent'}`} />
+              </button>
+            );
+          })}
+        </div>
+      </div>
 
       <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
         <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
@@ -409,6 +481,7 @@ export function VoiceApprovalSettingsTab({ voiceApproval }: VoiceApprovalSetting
             setVoiceApprovalDraft(defaults);
             setVoiceTranscriptionDraft(transcriptionDefaults);
             setVoiceActivationDraft(activationDefaults);
+            setVoiceRealtimeDraft(realtimeDefaults);
           }}
           disabled={savingVoiceApprovalSettings}
           className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed"

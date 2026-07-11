@@ -61,7 +61,8 @@
     "turbo": "^2.0.0"
   },
   "trustedDependencies": [
-    "better-sqlite3"
+    "better-sqlite3",
+    "onnxruntime-node"
   ],
   "packageManager": "bun@1.2.23"
 }

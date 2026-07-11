@@ -33,6 +33,7 @@ export async function transcribeAudioWithGroq(opts: {
   audio: Buffer;
   apiKey: string;
   mimeType?: string | null;
+  signal?: AbortSignal;
 }): Promise<{ text: string; model: string }> {
   const audio = opts.audio;
   if (!Buffer.isBuffer(audio) || audio.length === 0) {
@@ -55,6 +56,7 @@ export async function transcribeAudioWithGroq(opts: {
 
   const response = await fetch(GROQ_TRANSCRIPTION_URL, {
     method: 'POST',
+    signal: opts.signal,
     headers: {
       authorization: `Bearer ${apiKey}`,
     },

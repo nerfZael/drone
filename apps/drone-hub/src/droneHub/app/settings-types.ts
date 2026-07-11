@@ -99,6 +99,12 @@ export type VoiceActivationSettings = {
   realTimeAliases: string[];
 };
 
+export type VoiceRealtimeProvider = 'openai' | 'native';
+export type VoiceRealtimeSettings = {
+  enabled: boolean;
+  provider: VoiceRealtimeProvider;
+};
+
 export type VoiceApprovalSettingsResponse = {
   ok: true;
   profile: {
@@ -117,9 +123,14 @@ export type VoiceApprovalSettingsResponse = {
     source: 'settings' | 'default';
     updatedAt: string | null;
   };
+  voiceRealtime: VoiceRealtimeSettings & {
+    source: 'settings' | 'default';
+    updatedAt: string | null;
+  };
   defaults: VoiceApprovalSettings;
   transcriptionDefaults: VoiceTranscriptionSettings;
   activationDefaults: VoiceActivationSettings;
+  realtimeDefaults: VoiceRealtimeSettings;
   limits: {
     triggerPhraseMaxChars: number;
     codeMaxDigits: number;

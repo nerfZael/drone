@@ -245,6 +245,7 @@ import { createRemoteHubPairing, ensureDesiredRemoteHubDetached, getRemoteHubPai
 import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from './groq-transcription';
 import { buildGroqTtsConfig, synthesizeTextWavWithGroq } from './groq-tts';
 import { DesktopVoiceService } from './desktop-voice-service';
+import { createNativeRealtimeVoiceSession } from './native-realtime-voice';
 import { desktopVoiceModelStatus, removeDesktopVoiceModel, startDesktopVoiceModelInstall } from './desktop-voice-models';
 import { createOpenAiRealtimeAssistantSession, createOpenAiRealtimeWebRtcAssistantSession, type OpenAiRealtimeWebRtcAssistantSession } from './openai-realtime-assistant';
 import { realtimeStopTranscript, realtimeStreamingTranscript } from './realtime-transcript';
@@ -358,6 +359,7 @@ import {
   type LlmProviderId,
   type StoredApiKeyProviderId,
   type UiPreferencesSettings,
+  type VoiceRealtimeProvider,
   voiceStreamPairingPasswordSettingsResponse,
 } from './hub-settings';
 import {
@@ -14887,6 +14889,7 @@ export async function startDroneHubApiServer(opts: {
     runDroneBash: async ({ droneId, command, cwd, timeoutMs }) => await assistantRunDroneBash({ droneId, command, cwd, timeoutMs }),
     listDroneChangedFiles: async ({ droneId }) => await assistantListDroneChangedFiles({ droneId }),
   });
+  const nativeVoiceThreadIds = new Set<string>();
   const blipAssistantHost = new BlipAssistantHost(async (threadId) => {
         const snapshot = await assistantService.threadSnapshot(threadId);
         const thread = snapshot.threads.find((candidate) => candidate.id === threadId);
@@ -14933,6 +14936,7 @@ export async function startDroneHubApiServer(opts: {
         const activeTargetId = droneTargets.find((target: DroneWorkspaceTarget) => target.droneId === preferredDroneId)?.descriptor.id ?? targets[0]?.descriptor.id;
         const targetCatalog = new blipTools.WorkspaceTargetCatalog(targets, activeTargetId);
         const enabledTools = new Set(Array.isArray(thread.enabledTools) ? thread.enabledTools : []);
+        if (nativeVoiceThreadIds.has(threadId)) enabledTools.delete('speak');
         const workspaceTools = blipTools.createWorkspaceTargetTools({
           profile: 'no-shell-workspace-write',
           resolveTarget: (targetId?: string) => targetCatalog.resolve(targetId),
@@ -15014,8 +15018,13 @@ export async function startDroneHubApiServer(opts: {
           provider: thread.provider,
           model: thread.model,
           thinkingLevel: thread.thinkingLevel,
-          promptDeliveryMode: thread.promptDeliveryMode,
-          systemPrompt: assistantService.resolvedSystemPrompt(threadId),
+          promptDeliveryMode: nativeVoiceThreadIds.has(threadId) ? 'asap' : thread.promptDeliveryMode,
+          systemPrompt: [
+            assistantService.resolvedSystemPrompt(threadId),
+            nativeVoiceThreadIds.has(threadId)
+              ? 'You are in native realtime voice mode. Your response text is spoken automatically. Keep spoken updates concise and do not call the speak tool.'
+              : '',
+          ].filter(Boolean).join('\n\n'),
           tools,
           toolProviders: [enabledMcpProvider],
           permissionPreflight: async (request) => {
@@ -15051,6 +15060,7 @@ export async function startDroneHubApiServer(opts: {
     execute: (threadId, callId, toolName, args, signal) => blipAssistantHost.executeTool(threadId, callId, toolName, args, signal),
   });
   let desktopVoicePatchSessionId: string | null = null;
+  let desktopVoiceRealtimeProvider: VoiceRealtimeProvider = 'openai';
   let desktopRealtimeWebRtcSession: OpenAiRealtimeWebRtcAssistantSession | null = null;
   let desktopRealtimeWebRtcSessionGeneration = 0;
   const cancelDesktopRealtimeWebRtcSession = async (): Promise<void> => {
@@ -15070,6 +15080,48 @@ export async function startDroneHubApiServer(opts: {
       await assistantService.submitVoicePrompt({ prompt, title: 'Desktop voice thread', source: 'desktop' });
     },
     startRealtimeAssistant: async (callbacks) => {
+      if (desktopVoiceRealtimeProvider === 'native') {
+        const voiceThread = await assistantService.ensureLatestVoiceThread({ title: 'Desktop realtime thread' });
+        const threadId = voiceThread.threadId;
+        nativeVoiceThreadIds.add(threadId);
+        blipAssistantHost.invalidateThread(threadId);
+        hubLog('info', 'desktop native realtime assistant session starting', { threadId, vad: 'silero-v5', stt: 'groq', tts: 'groq' });
+        try {
+          const session = await createNativeRealtimeVoiceSession({
+            callbacks,
+            transcribePcm: async (wav, signal) => {
+              const groqSettings = await resolveGroqApiKeySettings();
+              if (!groqSettings.apiKey) throw new Error('GROQ API key is not configured. Add it in Drone Hub settings.');
+              return (await transcribeAudioWithGroq({ audio: wav, apiKey: groqSettings.apiKey, mimeType: 'audio/wav', signal })).text;
+            },
+            synthesizeSpeech: async (text, signal) => {
+              const groqSettings = await resolveGroqApiKeySettings();
+              const apiKey = String(process.env.GROQ_TTS_API_KEY ?? '').trim() || groqSettings.apiKey;
+              if (!apiKey) throw new Error('GROQ API key is not configured. Add it in Drone Hub settings.');
+              return await synthesizeTextWavWithGroq(text, buildGroqTtsConfig({ apiKey }), signal);
+            },
+            isAssistantRunning: () => blipAssistantHost.isThreadRunning(threadId),
+            submitPrompt: async (prompt) => await blipAssistantHost.promptThread(threadId, prompt),
+            steerPrompt: (prompt) => blipAssistantHost.steerThread(threadId, prompt),
+            subscribeAssistantEvents: (listener) => blipAssistantHost.subscribeEvents(threadId, listener),
+          });
+          return {
+            ...session,
+            cancel: async () => {
+              try {
+                await session.cancel();
+              } finally {
+                nativeVoiceThreadIds.delete(threadId);
+                blipAssistantHost.invalidateThread(threadId);
+              }
+            },
+          };
+        } catch (error) {
+          nativeVoiceThreadIds.delete(threadId);
+          blipAssistantHost.invalidateThread(threadId);
+          throw error;
+        }
+      }
       const openaiSettings = await resolveEffectiveProviderApiKeySettings('openai');
       if (!openaiSettings.apiKey) throw new Error('OpenAI API key is not configured. Add it in Drone Hub settings.');
       const realtimeConfig = await assistantService.realtimeSessionConfig({ source: 'desktop' });
@@ -15139,7 +15191,8 @@ export async function startDroneHubApiServer(opts: {
         },
       });
     },
-    realtimeWebRtcAvailable: true,
+    realtimeProvider: () => desktopVoiceRealtimeProvider,
+    realtimeWebRtcAvailable: () => desktopVoiceRealtimeProvider === 'openai',
     cancelRealtimeWebRtcAssistant: cancelDesktopRealtimeWebRtcSession,
     startChatPatch: async () => {
       desktopVoicePatchSessionId = beginVoicePatchSession('desktop').sessionId;
@@ -15168,7 +15221,14 @@ export async function startDroneHubApiServer(opts: {
     desktopVoiceService.setVoiceTranscriptionSettings(await resolveEffectiveVoiceTranscriptionSettings());
   };
   const reloadDesktopVoiceRealtimeSettings = async () => {
-    desktopVoiceService.setRealtimeAssistantEnabled((await resolveEffectiveVoiceRealtimeSettings()).enabled);
+    const settings = await resolveEffectiveVoiceRealtimeSettings();
+    const previous = desktopVoiceService.snapshot().realtime;
+    const providerChanged = desktopVoiceRealtimeProvider !== settings.provider;
+    if (providerChanged || (previous.enabled && !settings.enabled)) {
+      await desktopVoiceService.stopRealtimeAssistantSession();
+    }
+    desktopVoiceRealtimeProvider = settings.provider;
+    desktopVoiceService.setRealtimeAssistantEnabled(settings.enabled);
   };
   const desktopVoiceRequestMeta = (req: http.IncomingMessage): Record<string, unknown> => ({
     mode: desktopVoiceService.snapshot().mode,
@@ -16941,9 +17001,22 @@ export async function startDroneHubApiServer(opts: {
         try {
           const body = await readJsonBody(req);
           logDesktopVoiceControl(req, 'realtime-toggle', { enabled: body?.enabled === true });
-          await upsertStoredVoiceRealtimeSettings({ enabled: body?.enabled === true });
+          const current = await resolveEffectiveVoiceRealtimeSettings();
+          await upsertStoredVoiceRealtimeSettings({ enabled: body?.enabled === true, provider: current.provider });
           await reloadDesktopVoiceRealtimeSettings();
           json(res, 200, desktopVoiceService.snapshot());
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/desktop-voice/realtime/text' && method === 'POST') {
+        try {
+          const body = await readJsonBody(req);
+          const accepted = await desktopVoiceService.sendRealtimeText(body?.text);
+          if (!accepted) throw new Error('Native realtime voice is not currently listening.');
+          json(res, 202, { ok: true });
         } catch (e: any) {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
         }

@@ -60,6 +60,8 @@ export type DesktopAssistantVoiceStatus = {
   realtime?: {
     available: boolean;
     enabled: boolean;
+    provider?: 'openai' | 'native';
+    ready?: boolean;
     webRtcSessionId?: string | null;
   };
 };
@@ -108,6 +110,7 @@ let realtimeWebRtcStartGeneration = 0;
 let realtimeWebRtcBrowserSessionId = '';
 let lastToggleAt = 0;
 let currentSpeechAudio: HTMLAudioElement | null = null;
+let queuedSpeechAudio: Array<{ audioBase64: string; contentType: string }> = [];
 let currentRealtimeWebRtc: {
   pc: RTCPeerConnection;
   stream: MediaStream;
@@ -196,6 +199,7 @@ function shouldPlayServerDesktopVoiceAudio(): boolean {
 
 function stopDesktopVoiceSpeech(): void {
   if (typeof window === 'undefined') return;
+  queuedSpeechAudio = [];
   currentSpeechAudio?.pause();
   if (currentSpeechAudio) {
     currentSpeechAudio.currentTime = 0;
@@ -385,10 +389,28 @@ function speakDesktopVoiceText(text: string): void {
   if (!trimmed) return;
   currentSpeechAudio?.pause();
   currentSpeechAudio = null;
+  queuedSpeechAudio = [];
   window.speechSynthesis.cancel();
   const utterance = new SpeechSynthesisUtterance(trimmed);
   utterance.lang = 'en-US';
   window.speechSynthesis.speak(utterance);
+}
+
+function playNextDesktopVoiceAudio(): void {
+  if (typeof Audio === 'undefined' || currentSpeechAudio || queuedSpeechAudio.length === 0) return;
+  const next = queuedSpeechAudio.shift()!;
+  const audio = new Audio(`data:${next.contentType};base64,${next.audioBase64}`);
+  currentSpeechAudio = audio;
+  let finished = false;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    if (currentSpeechAudio === audio) currentSpeechAudio = null;
+    playNextDesktopVoiceAudio();
+  };
+  audio.addEventListener('ended', finish, { once: true });
+  audio.addEventListener('error', finish, { once: true });
+  audio.play().catch(finish);
 }
 
 function speakDesktopVoiceAudio(audioBase64: string, contentType = 'audio/wav'): void {
@@ -396,15 +418,8 @@ function speakDesktopVoiceAudio(audioBase64: string, contentType = 'audio/wav'):
   const trimmed = audioBase64.trim();
   if (!trimmed) return;
   if ('speechSynthesis' in window) window.speechSynthesis.cancel();
-  currentSpeechAudio?.pause();
-  const audio = new Audio(`data:${contentType};base64,${trimmed}`);
-  currentSpeechAudio = audio;
-  audio.addEventListener('ended', () => {
-    if (currentSpeechAudio === audio) currentSpeechAudio = null;
-  });
-  audio.play().catch(() => {
-    if (currentSpeechAudio === audio) currentSpeechAudio = null;
-  });
+  queuedSpeechAudio.push({ audioBase64: trimmed, contentType });
+  playNextDesktopVoiceAudio();
 }
 
 async function requestDesktopVoiceToggle(): Promise<void> {
@@ -600,12 +615,35 @@ export function dispatchAssistantDesktopVoiceRealtimeToggle(): void {
 }
 
 export function canSendAssistantDesktopVoiceRealtimeText(): boolean {
-  return currentRealtimeWebRtc?.dataChannel.readyState === 'open';
+  return currentRealtimeWebRtc?.dataChannel.readyState === 'open' || (
+    latestStatus?.realtime?.provider === 'native' &&
+    latestStatus.realtime.enabled === true &&
+    latestStatus.realtime.ready === true &&
+    latestStatus.mode === 'recording'
+  );
 }
 
 export function sendAssistantDesktopVoiceRealtimeText(textRaw: string): boolean {
   const text = String(textRaw ?? '').trim();
   if (!text || !canSendAssistantDesktopVoiceRealtimeText()) return false;
+  if (latestStatus?.realtime?.provider === 'native') {
+    void fetch('/api/assistant/desktop-voice/realtime/text', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ text }),
+    }).then(async (response) => {
+      if (response.ok) return;
+      const body = await response.json().catch(() => null);
+      const message = String(body?.error ?? `Native realtime text failed (${response.status})`);
+      reportDesktopVoiceBrowserEvent('native-realtime-text-failed', message);
+      if (latestStatus) dispatchAssistantDesktopVoiceStatus({ ...latestStatus, message });
+    }).catch((error: any) => {
+      const message = error?.message ?? String(error);
+      reportDesktopVoiceBrowserEvent('native-realtime-text-failed', message);
+      if (latestStatus) dispatchAssistantDesktopVoiceStatus({ ...latestStatus, message });
+    });
+    return true;
+  }
   sendRealtimeDataChannelEvent({
     type: 'conversation.item.create',
     item: {

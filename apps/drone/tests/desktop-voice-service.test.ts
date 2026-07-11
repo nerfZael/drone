@@ -578,6 +578,7 @@ describe('DesktopVoiceService', () => {
 
   test('starts realtime assistant capture and forwards transcripts and audio events', async () => {
     const appended: Buffer[] = [];
+    const realtimeTexts: string[] = [];
     const submitted: string[] = [];
     let callbacks: any = null;
     const service = new DesktopVoiceService({
@@ -586,6 +587,8 @@ describe('DesktopVoiceService', () => {
         submitted.push(prompt);
       },
       realtimeAssistantEnabled: true,
+      realtimeProvider: () => 'native',
+      realtimeWebRtcAvailable: () => false,
       startRealtimeAssistant: async (cb) => {
         callbacks = cb;
         return {
@@ -594,6 +597,7 @@ describe('DesktopVoiceService', () => {
           },
           stop: async () => {},
           cancel: async () => {},
+          sendText: (text: string) => { realtimeTexts.push(text); },
         };
       },
     });
@@ -609,12 +613,16 @@ describe('DesktopVoiceService', () => {
     await callbacks.onUserTranscript('check the build');
     await callbacks.onAssistantAudio({ wav: Buffer.from('assistant-wav'), text: 'On it.' });
     await callbacks.onUserSpeechStarted();
+    expect(await service.sendRealtimeText('focus on alpha')).toBe(true);
     unsubscribe();
 
     expect(service.snapshot().mode).toBe('recording');
     expect(service.snapshot().transcript.target).toBe('assistant');
+    expect(service.snapshot().realtime.provider).toBe('native');
+    expect(service.snapshot().realtime.ready).toBe(true);
     expect(appended).toEqual([preRoll, liveAudio]);
     expect(submitted).toEqual([]);
+    expect(realtimeTexts).toEqual(['focus on alpha']);
     expect(events.some((event) => event.type === 'desktop_voice_transcript_segment' && event.text === 'check the build')).toBe(true);
     const audioEvent = events.find((event) => event.type === 'desktop_voice_speak_audio');
     expect(audioEvent?.audioBase64).toBe(Buffer.from('assistant-wav').toString('base64'));
@@ -814,7 +822,7 @@ describe('DesktopVoiceService', () => {
 
     expect(realtimeStarts).toBe(0);
     expect(service.snapshot().mode).toBe('recording');
-    expect(service.snapshot().realtime).toEqual({ available: true, enabled: false, webRtcSessionId: null });
+    expect(service.snapshot().realtime).toEqual({ available: true, enabled: false, provider: 'openai', ready: false, webRtcSessionId: null });
   });
 
   test('turning realtime assistant off cancels an active WebRTC session', async () => {
@@ -835,7 +843,7 @@ describe('DesktopVoiceService', () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     expect(webrtcCancels).toBe(1);
-    expect(service.snapshot().realtime).toEqual({ available: true, enabled: false, webRtcSessionId: null });
+    expect(service.snapshot().realtime).toEqual({ available: true, enabled: false, provider: 'openai', ready: false, webRtcSessionId: null });
   });
 
   test('can suppress normal assistant prompt submit for direct realtime tools', async () => {
