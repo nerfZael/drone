@@ -32,6 +32,7 @@ type RemoteHubServer = {
 const JSON_HEADERS = { 'content-type': 'application/json; charset=utf-8' };
 const DRONE_VALIDATION_CACHE_TTL_MS = 5_000;
 const REMOTE_SLOW_REQUEST_MS = 250;
+const REMOTE_ASSISTANT_PROMPT_MAX_BYTES = 32 * 1024 * 1024;
 const HOP_BY_HOP_HEADERS = new Set([
   'connection',
   'keep-alive',
@@ -339,6 +340,55 @@ function whiteboardRouteAllowed(method: string, parts: string[]): boolean {
   return false;
 }
 
+function assistantRouteAllowed(method: string, parts: string[]): boolean {
+  if (parts[0] !== 'api' || parts[1] !== 'assistant') return false;
+
+  if (parts.length === 3) {
+    const route = parts[2];
+    if ((route === 'system-prompt' || route === 'overview-prompt') && (method === 'GET' || method === 'POST')) return true;
+    if (route === 'threads' && (method === 'GET' || method === 'POST')) return true;
+    if (route === 'events' && method === 'GET') return true;
+    if ((route === 'default-model' || route === 'context' || route === 'scope') && method === 'POST') return true;
+    return false;
+  }
+
+  if (parts[2] === 'desktop-voice') {
+    if (parts.length === 4 && (parts[3] === 'status' || parts[3] === 'events') && method === 'GET') return true;
+    if (
+      parts.length === 4 &&
+      ['toggle', 'start-recording', 'off', 'stop', 'cancel-recording', 'client-event', 'realtime'].includes(parts[3] ?? '') &&
+      method === 'POST'
+    ) {
+      return true;
+    }
+    return parts.length === 5 && parts[3] === 'realtime' && parts[4] === 'webrtc-session' && method === 'POST';
+  }
+
+  if (parts[2] === 'voice') {
+    if (parts.length === 4 && parts[3] === 'pairing-url' && method === 'GET') return true;
+    if (parts.length === 5 && parts[3] === 'transcript' && parts[4] === 'events' && method === 'GET') return true;
+    return false;
+  }
+
+  if (parts[2] !== 'threads' || parts.length < 4) return false;
+  if (parts.length === 4 && (method === 'GET' || method === 'PATCH' || method === 'DELETE')) return true;
+  if (parts.length === 5) {
+    const action = parts[4];
+    if ((action === 'activate' || action === 'stop' || action === 'promote-system-prompt' || action === 'overview' || action === 'prompt') && method === 'POST') return true;
+    if (action === 'system-prompt' && (method === 'GET' || method === 'POST')) return true;
+    return action === 'artifacts' && method === 'GET';
+  }
+  if (parts.length === 6) {
+    if (parts[4] === 'artifacts' && parts[5] === 'file' && method === 'GET') return true;
+    return parts[4] === 'queued' && method === 'DELETE';
+  }
+  return parts.length === 7 && parts[4] === 'approvals' && (parts[6] === 'approve' || parts[6] === 'deny') && method === 'POST';
+}
+
+function assistantPromptRoute(parts: string[]): boolean {
+  return parts.length === 5 && parts[0] === 'api' && parts[1] === 'assistant' && parts[2] === 'threads' && parts[4] === 'prompt';
+}
+
 function contentTypeFor(filePath: string): string {
   const ext = path.extname(filePath).toLowerCase();
   if (ext === '.html') return 'text/html; charset=utf-8';
@@ -408,6 +458,7 @@ export async function resolveContainerDroneForRemoteRequest(opts: { hubBaseUrl: 
 export function routeAllowed(method: string, pathname: string): boolean {
   const parts = splitPathname(pathname);
   if (whiteboardRouteAllowed(method, parts)) return true;
+  if (assistantRouteAllowed(method, parts)) return true;
   if (method === 'POST' && pathname === '/api/audio/transcriptions') return true;
   if (method === 'GET' && pathname === '/api/drones') return true;
   if (method === 'POST' && pathname === '/api/drones') return true;
@@ -492,7 +543,11 @@ async function proxyAllowedRequest(
       ? undefined
       : await readRawBody(
           req,
-          pathname === '/api/audio/transcriptions' ? GROQ_TRANSCRIPTION_MAX_BYTES : 1024 * 1024,
+          pathname === '/api/audio/transcriptions'
+            ? GROQ_TRANSCRIPTION_MAX_BYTES
+            : assistantPromptRoute(parts)
+              ? REMOTE_ASSISTANT_PROMPT_MAX_BYTES
+              : 1024 * 1024,
         );
   if (body) timer.mark('body');
   const target = new URL(`${pathname}${new URL(req.url ?? '/', 'http://remote.local').search}`, opts.hubBaseUrl);

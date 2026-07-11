@@ -89,7 +89,7 @@ function RemoteMobileToolDrawerComponent({ open, drone, onOpenChange }: RemoteMo
               <UiMenuSelect
                 value={activePanel}
                 onValueChange={(next) => {
-                  if (next === 'files' || next === 'changes' || next === 'prs') setActivePanel(next);
+                  if (next === 'files' || next === 'changes' || next === 'prs' || next === 'assistant') setActivePanel(next);
                 }}
                 entries={REMOTE_REPO_PANEL_ENTRIES}
                 variant="toolbar"

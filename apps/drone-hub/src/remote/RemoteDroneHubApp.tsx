@@ -8,14 +8,16 @@ import { useDroneHubUiStore } from '../droneHub/app/use-drone-hub-ui-store';
 import { useMobileViewport } from '../droneHub/app/use-mobile-viewport';
 import { ChatInput, ChatTranscriptFrame, EmptyState, PendingTranscriptTurn, TranscriptTurn, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode } from '../droneHub/chat';
 import { IconBot } from '../droneHub/chat/icons';
+import { ASSISTANT_OPEN_DRONE_CHAT_EVENT, type AssistantOpenDroneChatEventDetail } from '../droneHub/assistant/open-drone-chat-event';
 import { RemoteMobileSidebarDrawer } from './RemoteMobileSidebarDrawer';
 import { RemoteMobileToolDrawer } from './RemoteMobileToolDrawer';
 import { RemoteCreateDroneModal } from './RemoteCreateDroneModal';
 import { RemoteHeaderActions } from './RemoteHeaderActions';
 import { RemoteHubSidebar } from './RemoteHubSidebar';
-import { RemoteRepoPanels } from './RemoteRepoPanels';
+import { RemoteRepoPanel, RemoteRepoPanels } from './RemoteRepoPanels';
 import { RemoteRuntimeMetadata } from './RemoteRuntimeMetadata';
 import { REMOTE_HUB_CAPABILITIES } from './remote-capabilities';
+import { canOpenRemoteAssistantDrone } from './remote-assistant-navigation';
 import { useRemoteHubModel } from './useRemoteHubModel';
 
 type TouchPoint = {
@@ -74,6 +76,8 @@ export function RemoteDroneHubApp() {
   const [mobileToolOpen, setMobileToolOpen] = React.useState(false);
   const [createDroneOpen, setCreateDroneOpen] = React.useState(false);
   const model = useRemoteHubModel({ pauseChatPolling: isMobileViewport && (mobileSidebarOpen || mobileToolOpen) });
+  const assistantNavigationDronesRef = React.useRef(model.drones);
+  assistantNavigationDronesRef.current = model.drones;
   const selectedDroneHomePath = React.useMemo(() => droneHomePath(model.selectedDrone), [model.selectedDrone]);
   const mobileSidebarSwipeStartRef = React.useRef<TouchPoint | null>(null);
   const setRemoteMobileSidebarOpen = React.useCallback(
@@ -109,9 +113,63 @@ export function RemoteDroneHubApp() {
   const selectedChatIsDraft =
     model.draftChats?.[model.selectedChat] === true || model.selectedDrone?.draftChats?.[model.selectedChat] === true;
   const selectedIsDraft = model.selectedDrone?.draft === true || model.selectedDrone?.hubPhase === 'draft' || selectedChatIsDraft;
+
+  React.useEffect(() => {
+    const openAssistantDroneChat = (event: Event) => {
+      const detail = (event as CustomEvent<AssistantOpenDroneChatEventDetail>).detail;
+      const droneId = String(detail?.droneId ?? '').trim();
+      if (!canOpenRemoteAssistantDrone(assistantNavigationDronesRef.current, droneId)) return;
+      model.setSelectedDroneId(droneId);
+      model.setSelectedChat(String(detail?.chatName ?? '').trim() || 'default');
+    };
+    window.addEventListener(ASSISTANT_OPEN_DRONE_CHAT_EVENT, openAssistantDroneChat);
+    return () => window.removeEventListener(ASSISTANT_OPEN_DRONE_CHAT_EVENT, openAssistantDroneChat);
+  }, [model.setSelectedChat, model.setSelectedDroneId]);
+
+  React.useEffect(() => {
+    if (!model.authenticated) return;
+    void fetch('/api/assistant/context', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        activeDroneId: model.selectedDrone?.id ?? null,
+        activeDroneName: model.selectedDrone?.name ?? null,
+        activeChatName: model.selectedDrone ? model.selectedChat || 'default' : null,
+        appView: 'workspace',
+      }),
+    }).catch(() => {
+      // Context reporting is best effort; Assistant threads still work without it.
+    });
+  }, [model.authenticated, model.selectedChat, model.selectedDrone?.id, model.selectedDrone?.name]);
+
+  React.useEffect(() => {
+    if (!model.authenticated || typeof window.EventSource === 'undefined') return;
+    const source = new window.EventSource('/api/assistant/events');
+    const handleAssistantChange = (event: MessageEvent) => {
+      try {
+        const data = JSON.parse(event.data);
+        const action = data?.uiAction;
+        const droneId = String(action?.droneId ?? action?.droneIds?.[0] ?? '').trim();
+        if (
+          action?.type !== 'open_drone_chat' ||
+          !canOpenRemoteAssistantDrone(assistantNavigationDronesRef.current, droneId)
+        ) {
+          return;
+        }
+        model.setSelectedDroneId(droneId);
+        model.setSelectedChat(String(action?.chatName ?? '').trim() || 'default');
+      } catch {
+        // Ignore malformed Assistant events.
+      }
+    };
+    source.addEventListener('assistant_change', handleAssistantChange);
+    return () => source.close();
+  }, [model.authenticated, model.setSelectedChat, model.setSelectedDroneId]);
+
   const renderRemoteToolPane = React.useCallback(
     (tab: RightPanelTab) => {
-      if (!model.selectedDrone || (tab !== 'files' && tab !== 'changes' && tab !== 'prs')) return null;
+      if (!model.selectedDrone || (tab !== 'files' && tab !== 'changes' && tab !== 'prs' && tab !== 'assistant')) return null;
+      if (tab === 'assistant') return <RemoteRepoPanel drone={model.selectedDrone} panel="assistant" />;
       return <RemoteRepoPanels drone={model.selectedDrone} />;
     },
     [model.selectedDrone],
