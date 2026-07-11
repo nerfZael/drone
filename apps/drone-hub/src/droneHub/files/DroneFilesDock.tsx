@@ -152,6 +152,7 @@ export function DroneFilesDock({
   onCloseOpenedFilesForPaths,
   onRemapOpenedFilesForPathChange,
   openedFile,
+  readOnly = false,
 }: {
   droneId: string;
   droneName: string;
@@ -172,6 +173,7 @@ export function DroneFilesDock({
   onCloseOpenedFilesForPaths?: (paths: string[]) => void;
   onRemapOpenedFilesForPathChange?: (sourcePath: string, targetPath: string) => void;
   openedFile: DroneOpenedFileState;
+  readOnly?: boolean;
 }) {
   const normalizedPath = normalizeContainerPathInput(path);
   const activeOpenedFilePath = String(openedFile.path ?? '').trim();
@@ -887,22 +889,22 @@ export function DroneFilesDock({
       setSelectedPaths((previous) => setAllVisibleSelected(visibleEntries, previous, true));
       return;
     }
-    if (commandKey && event.key.toLowerCase() === 'c' && selectedCount > 0) {
+    if (!readOnly && commandKey && event.key.toLowerCase() === 'c' && selectedCount > 0) {
       event.preventDefault();
       copySelected();
       return;
     }
-    if (commandKey && event.key.toLowerCase() === 'v' && clipboard) {
+    if (!readOnly && commandKey && event.key.toLowerCase() === 'v' && clipboard) {
       event.preventDefault();
       pasteClipboard();
       return;
     }
-    if (event.key === 'F2' && selectedOne) {
+    if (!readOnly && event.key === 'F2' && selectedOne) {
       event.preventDefault();
       beginRename();
       return;
     }
-    if (event.key === 'Delete' && selectedCount > 0) {
+    if (!readOnly && event.key === 'Delete' && selectedCount > 0) {
       event.preventDefault();
       deleteEntries(actionEntries);
       return;
@@ -925,10 +927,10 @@ export function DroneFilesDock({
       className={`w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative ${
         dragActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''
       }`}
-      onDragEnter={onPanelDragEnter}
-      onDragOver={onPanelDragOver}
-      onDragLeave={onPanelDragLeave}
-      onDrop={onPanelDrop}
+      onDragEnter={readOnly ? undefined : onPanelDragEnter}
+      onDragOver={readOnly ? undefined : onPanelDragOver}
+      onDragLeave={readOnly ? undefined : onPanelDragLeave}
+      onDrop={readOnly ? undefined : onPanelDrop}
       onKeyDown={handleExplorerKeyDown}
     >
       {uploadStatus ? (
@@ -990,7 +992,7 @@ export function DroneFilesDock({
               </div>
             ) : !error && !loading && entries.length === 0 ? (
               <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[12px] text-[var(--muted)]">
-                Directory is empty. Right-click to create a file or folder.
+                {readOnly ? 'Directory is empty.' : 'Directory is empty. Right-click to create a file or folder.'}
               </div>
             ) : (
               renderExplorer(explorerTree, 0)
@@ -1008,6 +1010,7 @@ export function DroneFilesDock({
           actionMode={actionMode}
           actionInput={actionInput}
           actionLoading={actionLoading}
+          readOnly={readOnly}
           onOpen={() => {
             const entry = contextMenu.entry;
             if (entry?.kind === 'directory') toggleDirectory(entry.path);

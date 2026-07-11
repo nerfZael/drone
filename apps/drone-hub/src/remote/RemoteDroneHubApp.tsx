@@ -3,7 +3,11 @@ import { FrontendUpdatePrompt } from '../FrontendUpdatePrompt';
 import { type RightPanelTab } from '../droneHub/app/app-config';
 import { DockableDroneWorkspace } from '../droneHub/app/DockableDroneWorkspace';
 import { DroneWorkspaceHeaderFrame } from '../droneHub/app/DroneWorkspaceHeaderFrame';
-import { droneHomePath } from '../droneHub/app/helpers';
+import { droneHomePath, resolveDroneFileOpenPath } from '../droneHub/app/helpers';
+import { useFileEditorState } from '../droneHub/app/use-file-editor-state';
+import { requestJson } from '../droneHub/http';
+import { OpenedDroneFilePanel } from '../droneHub/files/OpenedDroneFilePanel';
+import type { MarkdownFileReference } from '../droneHub/chat/MarkdownMessage';
 import { useDroneHubUiStore } from '../droneHub/app/use-drone-hub-ui-store';
 import { useMobileViewport } from '../droneHub/app/use-mobile-viewport';
 import { ChatInput, ChatTranscriptFrame, EmptyState, PendingTranscriptTurn, TranscriptTurn, type ChatSendPayload, type DroneHubTask, type DroneHubTaskSpawnMode } from '../droneHub/chat';
@@ -75,10 +79,41 @@ export function RemoteDroneHubApp() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = React.useState(false);
   const [mobileToolOpen, setMobileToolOpen] = React.useState(false);
   const [createDroneOpen, setCreateDroneOpen] = React.useState(false);
+  const [activeToolTab, setActiveToolTab] = React.useState<RightPanelTab>('changes');
+  const [toolOpenRequestNonce, setToolOpenRequestNonce] = React.useState(0);
   const model = useRemoteHubModel({ pauseChatPolling: isMobileViewport && (mobileSidebarOpen || mobileToolOpen) });
   const assistantNavigationDronesRef = React.useRef(model.drones);
   assistantNavigationDronesRef.current = model.drones;
   const selectedDroneHomePath = React.useMemo(() => droneHomePath(model.selectedDrone), [model.selectedDrone]);
+  const selectedDroneId = model.selectedDrone?.id ?? null;
+  const fileEditor = useFileEditorState({
+    currentDrone: model.selectedDrone,
+    requestJson,
+    onRefreshFsList: () => {},
+  });
+  const openedFile = React.useMemo(() => ({
+    path: fileEditor.openedFile?.droneId === selectedDroneId ? fileEditor.openedFile.path : null,
+    name: fileEditor.openedFile?.droneId === selectedDroneId ? fileEditor.openedFile.name : null,
+    loading: fileEditor.loading,
+    saving: false,
+    error: fileEditor.error,
+    kind: fileEditor.kind,
+    mime: fileEditor.mime,
+    size: fileEditor.size,
+    content: fileEditor.content,
+    dirty: false,
+    mtimeMs: fileEditor.mtimeMs,
+    targetLine: fileEditor.openedFile?.droneId === selectedDroneId ? fileEditor.openedFile.targetLine : null,
+    targetColumn: fileEditor.openedFile?.droneId === selectedDroneId ? fileEditor.openedFile.targetColumn : null,
+    navigationSeq: fileEditor.openedFile?.droneId === selectedDroneId ? fileEditor.openedFile.navigationSeq : 0,
+  }), [fileEditor, selectedDroneId]);
+  const openedFileTabs = React.useMemo(
+    () => fileEditor.openedFileTabs.filter((tab) => tab.droneId === selectedDroneId),
+    [fileEditor.openedFileTabs, selectedDroneId],
+  );
+  const activeOpenedFileTabId = openedFileTabs.some((tab) => tab.tabId === fileEditor.activeOpenedFileTabId)
+    ? fileEditor.activeOpenedFileTabId
+    : null;
   const mobileSidebarSwipeStartRef = React.useRef<TouchPoint | null>(null);
   const remoteChatEndRef = React.useRef<HTMLDivElement | null>(null);
   const pendingOpenScrollKeyRef = React.useRef<string | null>(null);
@@ -128,6 +163,49 @@ export function RemoteDroneHubApp() {
     window.open(url, '_blank', 'noopener,noreferrer');
     return true;
   }, []);
+  const openRemoteFile = React.useCallback((target: { path: string; name: string; line?: number | null; column?: number | null }) => {
+    const path = resolveDroneFileOpenPath(model.selectedDrone, target.path);
+    if (!path) return;
+    fileEditor.openEditorFile({
+      ...target,
+      path,
+      name: String(target.name ?? '').trim() || path.split('/').filter(Boolean).pop() || path,
+    });
+    setActiveToolTab('editor');
+    setToolOpenRequestNonce((value) => value + 1);
+    if (isMobileViewport) setRemoteMobileToolOpen(true);
+  }, [fileEditor.openEditorFile, isMobileViewport, model.selectedDrone, setRemoteMobileToolOpen]);
+  const openRemoteMarkdownFile = React.useCallback((ref: MarkdownFileReference) => {
+    const path = resolveDroneFileOpenPath(model.selectedDrone, ref.path);
+    if (!path) return;
+    openRemoteFile({
+      path,
+      name: path.split('/').filter(Boolean).pop() || path,
+      line: ref.line,
+      column: ref.column,
+    });
+  }, [model.selectedDrone, openRemoteFile]);
+  const editorContent = model.selectedDrone ? (
+    <OpenedDroneFilePanel
+      droneId={model.selectedDrone.id}
+      file={openedFile}
+      fileTabs={openedFileTabs}
+      activeTabId={activeOpenedFileTabId}
+      onCloseFile={fileEditor.closeEditorFile}
+      onActivateFileTab={fileEditor.setActiveOpenedFileTab}
+      onReorderFileTabs={fileEditor.reorderOpenedFileTabs}
+      onOpenResolvedFile={openRemoteFile}
+      canGoBack={fileEditor.canGoBackLocation}
+      canGoForward={fileEditor.canGoForwardLocation}
+      onGoBack={() => {
+        fileEditor.goBackLocation();
+      }}
+      onGoForward={() => {
+        fileEditor.goForwardLocation();
+      }}
+      readOnly
+    />
+  ) : null;
   const sendPrompt = React.useCallback(async (payload: ChatSendPayload) => {
     scrollRemoteChatToBottom();
     const sent = Boolean(await model.sendPrompt(payload));
@@ -199,11 +277,19 @@ export function RemoteDroneHubApp() {
 
   const renderRemoteToolPane = React.useCallback(
     (tab: RightPanelTab) => {
-      if (!model.selectedDrone || (tab !== 'files' && tab !== 'changes' && tab !== 'prs' && tab !== 'assistant')) return null;
+      if (!model.selectedDrone) return null;
       if (tab === 'assistant') return <RemoteRepoPanel drone={model.selectedDrone} panel="assistant" />;
-      return <RemoteRepoPanels drone={model.selectedDrone} />;
+      if (tab === 'editor') return editorContent;
+      if (tab !== 'files' && tab !== 'changes' && tab !== 'prs') return null;
+      return (
+        <RemoteRepoPanels
+          drone={model.selectedDrone}
+          onOpenFile={openRemoteFile}
+          openedFilePath={openedFile.path}
+        />
+      );
     },
-    [model.selectedDrone],
+    [editorContent, model.selectedDrone, openRemoteFile, openedFile.path],
   );
   const openCreateDrone = React.useCallback(() => {
     setCreateDroneOpen(true);
@@ -306,6 +392,7 @@ export function RemoteDroneHubApp() {
                 showTldr={false}
                 onToggleTldr={noopToggleTldr}
                 onHoverAgentMessage={noopHoverAgentMessage}
+                onOpenFileReference={openRemoteMarkdownFile}
                 onOpenLink={openExternalLink}
                 droneId={model.selectedDrone?.id}
                 droneHomePath={selectedDroneHomePath}
@@ -319,6 +406,7 @@ export function RemoteDroneHubApp() {
                 showRoleIcons={false}
                 droneId={model.selectedDrone?.id}
                 droneHomePath={selectedDroneHomePath}
+                onOpenFileReference={openRemoteMarkdownFile}
                 onOpenLink={openExternalLink}
               />
             ),
@@ -381,6 +469,10 @@ export function RemoteDroneHubApp() {
         open={mobileToolOpen}
         drone={model.selectedDrone}
         onOpenChange={setRemoteMobileToolOpen}
+        onOpenFile={openRemoteFile}
+        openedFilePath={openedFile.path}
+        editorOpenNonce={toolOpenRequestNonce}
+        editor={editorContent}
       />
 
       <div className="hidden md:contents">
@@ -403,12 +495,13 @@ export function RemoteDroneHubApp() {
             layoutScope="chat"
             paneHeaderMode="compact"
             toolPaneOpen={REMOTE_HUB_CAPABILITIES.toolPanesEnabled && !isMobileViewport}
-            activeToolTab="changes"
-            openRequestNonce={0}
+            activeToolTab={activeToolTab}
+            openRequestNonce={toolOpenRequestNonce}
             resetLayoutNonce={0}
             chatContent={chatContent}
             renderToolPane={renderRemoteToolPane}
             previewTab="preview"
+            onActiveToolTabChange={setActiveToolTab}
           />
         ) : (
           chatContent

@@ -331,6 +331,11 @@ function repoReadRouteAllowed(parts: string[]): boolean {
   return false;
 }
 
+function filesystemReadRouteAllowed(parts: string[]): boolean {
+  if (parts.length !== 5 || parts[0] !== 'api' || parts[1] !== 'drones' || parts[3] !== 'fs') return false;
+  return ['list', 'file', 'text-chunk', 'media', 'thumb', 'download'].includes(parts[4] ?? '');
+}
+
 function whiteboardRouteAllowed(method: string, parts: string[]): boolean {
   if (parts[0] !== 'api' || parts[1] !== 'whiteboards') return false;
   if (method === 'GET' && parts.length === 3 && parts[2] === 'events') return true;
@@ -479,6 +484,7 @@ export function routeAllowed(method: string, pathname: string): boolean {
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'state') return true;
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'pending') return true;
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'transcript') return true;
+  if (method === 'GET' && filesystemReadRouteAllowed(parts)) return true;
   if (method === 'GET' && repoReadRouteAllowed(parts)) return true;
   return false;
 }

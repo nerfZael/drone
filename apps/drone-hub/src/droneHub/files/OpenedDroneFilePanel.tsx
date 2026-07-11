@@ -39,11 +39,13 @@ const MonacoEditor = React.lazy(async (): Promise<{ default: MonacoEditorCompone
 function PlainTextEditorFallback({
   value,
   saving,
+  readOnly,
   onChange,
   onSave,
 }: {
   value: string;
   saving: boolean;
+  readOnly?: boolean;
   onChange?: (next: string) => void;
   onSave?: (contentOverride?: string) => Promise<boolean>;
 }) {
@@ -67,7 +69,7 @@ function PlainTextEditorFallback({
           void onSave?.(localValue);
         }
       }}
-      readOnly={saving}
+      readOnly={saving || readOnly}
       spellCheck={false}
       className="h-full w-full resize-none border-0 bg-[var(--panel-alt)] p-3 font-mono text-[12px] leading-5 text-[var(--fg-secondary)] outline-none"
       aria-label="Plain text editor"
@@ -198,6 +200,7 @@ type OpenedDroneFilePanelProps = {
   canGoForward?: boolean;
   onGoBack?: () => void;
   onGoForward?: () => void;
+  readOnly?: boolean;
 };
 
 export function OpenedDroneFilePanel({
@@ -215,6 +218,7 @@ export function OpenedDroneFilePanel({
   canGoForward = false,
   onGoBack,
   onGoForward,
+  readOnly = false,
 }: OpenedDroneFilePanelProps) {
   const {
     path: filePath,
@@ -323,6 +327,7 @@ export function OpenedDroneFilePanel({
       return `Read-only • ${formatBytes(fileSize)}`;
     }
     if (openedEditorIsText) {
+      if (readOnly) return 'Read-only';
       if (fileSaving) return 'Saving...';
       if (fileDirty) return 'Unsaved changes';
       const savedText = formatEditorMtime(fileMtimeMs ?? null);
@@ -332,7 +337,7 @@ export function OpenedDroneFilePanel({
       Boolean,
     );
     return details.length > 0 ? details.join(' • ') : 'Preview';
-  }, [fileDirty, fileMime, fileMtimeMs, fileSaving, fileSize, openedEditorIsText, openedFileIsLargeText]);
+  }, [fileDirty, fileMime, fileMtimeMs, fileSaving, fileSize, openedEditorIsText, openedFileIsLargeText, readOnly]);
   const openedFileMediaSrc = React.useMemo(() => {
     if (!activeFilePath) return '';
     if (fileKind !== 'image' && fileKind !== 'video') return '';
@@ -435,7 +440,8 @@ export function OpenedDroneFilePanel({
     Boolean(fileLoading) ||
     Boolean(fileSaving) ||
     Boolean(fileDirty) ||
-    !onOpenResolvedFile;
+    !onOpenResolvedFile ||
+    readOnly;
 
   const activeLanguagePosition = React.useCallback(() => {
     if (languageCommandsDisabled) return null;
@@ -584,7 +590,7 @@ export function OpenedDroneFilePanel({
             >
               {'>'}
             </button>
-            {openedEditorIsText ? (
+            {openedEditorIsText && !readOnly ? (
               <>
                 {languageStatus ? (
                   <div className="max-w-[220px] truncate text-[10px] text-[var(--muted)]">
@@ -644,11 +650,11 @@ export function OpenedDroneFilePanel({
                   className={modeButtonClassName(openedTextMode === 'edit', Boolean(fileLoading))}
                   title="Edit markdown source"
                 >
-                  Edit
+                  {readOnly ? 'Source' : 'Edit'}
                 </button>
               </div>
             ) : null}
-            {openedEditorIsText ? (
+            {openedEditorIsText && !readOnly ? (
               <button
                 type="button"
                 onClick={() => {
@@ -769,6 +775,7 @@ export function OpenedDroneFilePanel({
                   <PlainTextEditorFallback
                     value={fileContent ?? ''}
                     saving={Boolean(fileSaving)}
+                    readOnly={readOnly}
                     onChange={onFileContentChange}
                     onSave={onSaveFile}
                   />
@@ -779,6 +786,7 @@ export function OpenedDroneFilePanel({
                     <PlainTextEditorFallback
                       value={fileContent ?? ''}
                       saving={Boolean(fileSaving)}
+                      readOnly={readOnly}
                       onChange={onFileContentChange}
                       onSave={onSaveFile}
                     />
@@ -804,7 +812,7 @@ export function OpenedDroneFilePanel({
                     }}
                     theme="vs-dark"
                     options={{
-                      readOnly: Boolean(fileSaving),
+                      readOnly: Boolean(fileSaving) || readOnly,
                       fontSize: 12,
                       minimap: { enabled: false },
                       wordWrap: 'on',

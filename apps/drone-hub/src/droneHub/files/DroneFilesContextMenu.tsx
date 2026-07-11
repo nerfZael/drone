@@ -17,6 +17,7 @@ type DroneFilesContextMenuProps = {
   actionMode: DroneFilesActionMode | null;
   actionInput: string;
   actionLoading: boolean;
+  readOnly?: boolean;
   onOpen: () => void;
   onCreate: (mode: 'create-file' | 'create-directory') => void;
   onRename: () => void;
@@ -60,6 +61,7 @@ export function DroneFilesContextMenu({
   actionMode,
   actionInput,
   actionLoading,
+  readOnly = false,
   onOpen,
   onCreate,
   onRename,
@@ -156,38 +158,34 @@ export function DroneFilesContextMenu({
                 {menu.entry.kind === 'directory' ? 'Expand / Collapse' : 'Open'}
               </button>
               <MenuDivider />
-              <button type="button" role="menuitem" disabled={busy || !entrySelected} onClick={onCopy} className={itemClassName}>
-                Copy{selectedCount > 1 ? ` ${selectedCount} Items` : ''}
-              </button>
-              <button type="button" role="menuitem" disabled={busy || !entrySelected} onClick={onMove} className={itemClassName}>
-                Move{selectedCount > 1 ? ` ${selectedCount} Items…` : '…'}
-              </button>
-              <button type="button" role="menuitem" disabled={busy || selectedCount !== 1} onClick={onRename} className={itemClassName}>
-                Rename…
-              </button>
+              {!readOnly ? (
+                <>
+                  <button type="button" role="menuitem" disabled={busy || !entrySelected} onClick={onCopy} className={itemClassName}>
+                    Copy{selectedCount > 1 ? ` ${selectedCount} Items` : ''}
+                  </button>
+                  <button type="button" role="menuitem" disabled={busy || !entrySelected} onClick={onMove} className={itemClassName}>
+                    Move{selectedCount > 1 ? ` ${selectedCount} Items…` : '…'}
+                  </button>
+                  <button type="button" role="menuitem" disabled={busy || selectedCount !== 1} onClick={onRename} className={itemClassName}>
+                    Rename…
+                  </button>
+                </>
+              ) : null}
               <button type="button" role="menuitem" disabled={busy} onClick={onDownload} className={itemClassName}>
                 Download
               </button>
-              <MenuDivider />
-              <button
-                type="button"
-                role="menuitem"
-                disabled={busy || !entrySelected}
-                onClick={onDelete}
-                className={`${itemClassName} text-[var(--red)] hover:text-[var(--red)]`}
-              >
-                Delete{selectedCount > 1 ? ` ${selectedCount} Items` : ''}
-              </button>
-              <MenuDivider />
-              <button type="button" role="menuitem" disabled={busy} onClick={() => onCreate('create-file')} className={itemClassName}>
-                New File…
-              </button>
-              <button type="button" role="menuitem" disabled={busy} onClick={() => onCreate('create-directory')} className={itemClassName}>
-                New Folder…
-              </button>
-              <button type="button" role="menuitem" disabled={busy || clipboardCount === 0} onClick={onPaste} className={itemClassName}>
-                Paste{clipboardCount > 1 ? ` ${clipboardCount} Items` : ''}
-              </button>
+              {!readOnly ? (
+                <>
+                  <MenuDivider />
+                  <button type="button" role="menuitem" disabled={busy || !entrySelected} onClick={onDelete} className={`${itemClassName} text-[var(--red)] hover:text-[var(--red)]`}>
+                    Delete{selectedCount > 1 ? ` ${selectedCount} Items` : ''}
+                  </button>
+                  <MenuDivider />
+                  <button type="button" role="menuitem" disabled={busy} onClick={() => onCreate('create-file')} className={itemClassName}>New File…</button>
+                  <button type="button" role="menuitem" disabled={busy} onClick={() => onCreate('create-directory')} className={itemClassName}>New Folder…</button>
+                  <button type="button" role="menuitem" disabled={busy || clipboardCount === 0} onClick={onPaste} className={itemClassName}>Paste{clipboardCount > 1 ? ` ${clipboardCount} Items` : ''}</button>
+                </>
+              ) : null}
               <MenuDivider />
               <button type="button" role="menuitem" disabled={busy} onClick={onRefresh} className={itemClassName}>
                 Refresh
@@ -198,16 +196,14 @@ export function DroneFilesContextMenu({
             </>
           ) : (
             <>
-              <button type="button" role="menuitem" disabled={busy} onClick={() => onCreate('create-file')} className={itemClassName}>
-                New File…
-              </button>
-              <button type="button" role="menuitem" disabled={busy} onClick={() => onCreate('create-directory')} className={itemClassName}>
-                New Folder…
-              </button>
-              <button type="button" role="menuitem" disabled={busy || clipboardCount === 0} onClick={onPaste} className={itemClassName}>
-                Paste{clipboardCount > 1 ? ` ${clipboardCount} Items` : ''}
-              </button>
-              <MenuDivider />
+              {!readOnly ? (
+                <>
+                  <button type="button" role="menuitem" disabled={busy} onClick={() => onCreate('create-file')} className={itemClassName}>New File…</button>
+                  <button type="button" role="menuitem" disabled={busy} onClick={() => onCreate('create-directory')} className={itemClassName}>New Folder…</button>
+                  <button type="button" role="menuitem" disabled={busy || clipboardCount === 0} onClick={onPaste} className={itemClassName}>Paste{clipboardCount > 1 ? ` ${clipboardCount} Items` : ''}</button>
+                  <MenuDivider />
+                </>
+              ) : null}
               <button type="button" role="menuitem" disabled={busy} onClick={onRefresh} className={itemClassName}>
                 Refresh
               </button>

@@ -188,6 +188,16 @@ describe('remote Hub server', () => {
     expect(routeAllowed('POST', '/api/assistant/desktop-voice/clipboard-toggle')).toBe(false);
   });
 
+  test('allows read-only remote filesystem access', () => {
+    for (const route of ['list', 'file', 'text-chunk', 'media', 'thumb', 'download']) {
+      expect(routeAllowed('GET', `/api/drones/drone-a/fs/${route}`)).toBe(true);
+    }
+    expect(routeAllowed('GET', '/api/drones/drone-a/fs/search')).toBe(false);
+    expect(routeAllowed('POST', '/api/drones/drone-a/fs/file')).toBe(false);
+    expect(routeAllowed('POST', '/api/drones/drone-a/fs/upload')).toBe(false);
+    expect(routeAllowed('POST', '/api/drones/drone-a/fs/action')).toBe(false);
+  });
+
   test('allows remote whiteboard routes', () => {
     expect(routeAllowed('GET', '/api/whiteboards')).toBe(true);
     expect(routeAllowed('POST', '/api/whiteboards')).toBe(true);

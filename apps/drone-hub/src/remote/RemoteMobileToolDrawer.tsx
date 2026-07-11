@@ -3,13 +3,27 @@ import { IconChevron, IconSidebarExpand } from '../droneHub/app/icons';
 import type { DroneSummary } from '../droneHub/types';
 import { UiMenuSelect } from '../ui/menuSelect';
 import { RemoteRepoPanel } from './RemoteRepoPanels';
-import { REMOTE_REPO_PANEL_ENTRIES, type RemoteRepoPanelKey } from './remote-repo-panel-config';
+import type { RemoteRepoPanelKey } from './remote-repo-panel-config';
 
 type RemoteMobileToolDrawerProps = {
   open: boolean;
   drone: DroneSummary | null;
   onOpenChange: (open: boolean) => void;
+  onOpenFile: (target: { path: string; name: string }) => void;
+  openedFilePath?: string | null;
+  editorOpenNonce: number;
+  editor: React.ReactNode;
 };
+
+type RemoteMobilePanelKey = RemoteRepoPanelKey | 'editor';
+
+const REMOTE_MOBILE_PANEL_ENTRIES: Array<{ value: RemoteMobilePanelKey; label: string }> = [
+  { value: 'files', label: 'Files' },
+  { value: 'editor', label: 'Editor' },
+  { value: 'changes', label: 'Changes' },
+  { value: 'prs', label: 'PRs' },
+  { value: 'assistant', label: 'Assistant' },
+];
 
 type TouchPoint = {
   x: number;
@@ -30,8 +44,8 @@ function isSwipeRight(start: TouchPoint | null, end: TouchPoint): boolean {
   return deltaX >= SWIPE_DISTANCE_PX && deltaY <= SWIPE_VERTICAL_TOLERANCE_PX;
 }
 
-function RemoteMobileToolDrawerComponent({ open, drone, onOpenChange }: RemoteMobileToolDrawerProps) {
-  const [activePanel, setActivePanel] = React.useState<RemoteRepoPanelKey>('changes');
+function RemoteMobileToolDrawerComponent({ open, drone, onOpenChange, onOpenFile, openedFilePath, editorOpenNonce, editor }: RemoteMobileToolDrawerProps) {
+  const [activePanel, setActivePanel] = React.useState<RemoteMobilePanelKey>('changes');
   const drawerSwipeStartRef = React.useRef<TouchPoint | null>(null);
 
   const beginDrawerPointerSwipe = React.useCallback((event: React.PointerEvent) => {
@@ -55,6 +69,10 @@ function RemoteMobileToolDrawerComponent({ open, drone, onOpenChange }: RemoteMo
   React.useEffect(() => {
     if (open && !drone) onOpenChange(false);
   }, [drone, onOpenChange, open]);
+
+  React.useEffect(() => {
+    if (editorOpenNonce > 0) setActivePanel('editor');
+  }, [editorOpenNonce]);
 
   return (
     <div className="md:hidden">
@@ -89,9 +107,11 @@ function RemoteMobileToolDrawerComponent({ open, drone, onOpenChange }: RemoteMo
               <UiMenuSelect
                 value={activePanel}
                 onValueChange={(next) => {
-                  if (next === 'files' || next === 'changes' || next === 'prs' || next === 'assistant') setActivePanel(next);
+                  if (next === 'files' || next === 'editor' || next === 'changes' || next === 'prs' || next === 'assistant') {
+                    setActivePanel(next);
+                  }
                 }}
-                entries={REMOTE_REPO_PANEL_ENTRIES}
+                entries={REMOTE_MOBILE_PANEL_ENTRIES}
                 variant="toolbar"
                 triggerClassName="h-8 w-full justify-between bg-[rgba(255,255,255,.03)] text-[12px] text-[var(--fg-secondary)]"
                 panelClassName="left-0 right-0"
@@ -117,7 +137,15 @@ function RemoteMobileToolDrawerComponent({ open, drone, onOpenChange }: RemoteMo
                   </div>
                 }
               >
-                <RemoteRepoPanel drone={drone} panel={activePanel} compactChanges />
+                {activePanel === 'editor' ? editor : (
+                  <RemoteRepoPanel
+                    drone={drone}
+                    panel={activePanel}
+                    compactChanges
+                    onOpenFile={onOpenFile}
+                    openedFilePath={openedFilePath}
+                  />
+                )}
               </React.Suspense>
             ) : null}
           </div>
