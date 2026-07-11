@@ -23,10 +23,10 @@ import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import {
   IconChatThread,
   IconEye,
-  IconList,
   IconPencil,
   IconPlus,
   IconSettings,
+  IconShieldCheck,
   IconSidebarCollapse,
   IconSidebarExpand,
   IconSpinner,
@@ -137,20 +137,11 @@ import {
 const ASSISTANT_THREAD_SIDEBAR_OPEN_STORAGE_KEY = 'droneHub.assistant.threadSidebarOpen';
 const ASSISTANT_THREAD_MODE_STORAGE_KEY = 'droneHub.assistant.threadMode';
 const ASSISTANT_FILES_OPEN_STORAGE_KEY = 'droneHub.assistant.filesOpen';
-const ASSISTANT_OVERVIEW_AUTO_STORAGE_KEY = 'droneHub.assistant.overviewAuto';
-const ASSISTANT_OVERVIEW_INTERVAL_STORAGE_KEY = 'droneHub.assistant.overviewIntervalMs';
 /** Distance from bottom (px) below which we treat the assistant transcript as "pinned" for auto-scroll. */
 const ASSISTANT_SCROLL_BOTTOM_THRESHOLD_PX = 48;
 const ASSISTANT_IDLE_REFRESH_INTERVAL_MS = 2_500;
 const ASSISTANT_ACTIVE_REFRESH_INTERVAL_MS = 1_000;
 const ASSISTANT_EVENT_REFRESH_DEBOUNCE_MS = 150;
-const ASSISTANT_OVERVIEW_INTERVAL_OPTIONS = [
-  { value: '10000', label: '10s' },
-  { value: '30000', label: '30s' },
-  { value: '60000', label: '1m' },
-  { value: '120000', label: '2m' },
-  { value: '300000', label: '5m' },
-];
 
 function snapshotWithPreferredActiveThread(snapshot: AssistantSnapshot, preferredThreadId: string | null | undefined): AssistantSnapshot {
   const threadId = String(preferredThreadId ?? '').trim();
@@ -181,21 +172,6 @@ function readInitialAssistantPanelMode(): AssistantPanelMode {
 function readInitialFilesOpen(): boolean {
   if (typeof window === 'undefined') return false;
   return window.localStorage.getItem(ASSISTANT_FILES_OPEN_STORAGE_KEY) === '1';
-}
-
-function readInitialOverviewAutoEnabled(): boolean {
-  if (typeof window === 'undefined') return false;
-  return window.localStorage.getItem(ASSISTANT_OVERVIEW_AUTO_STORAGE_KEY) === '1';
-}
-
-function normalizeOverviewIntervalMs(raw: unknown): number {
-  const value = String(raw ?? '').trim();
-  return ASSISTANT_OVERVIEW_INTERVAL_OPTIONS.some((option) => option.value === value) ? Number(value) : 30_000;
-}
-
-function readInitialOverviewIntervalMs(): number {
-  if (typeof window === 'undefined') return 30_000;
-  return normalizeOverviewIntervalMs(window.localStorage.getItem(ASSISTANT_OVERVIEW_INTERVAL_STORAGE_KEY));
 }
 
 function assistantScopeSyncKey(readMode: AssistantScopeMode, writeMode: AssistantScopeMode, droneIds: string[]): string {
@@ -326,23 +302,44 @@ async function encodeAssistantAttachment(attachment: AssistantDraftAttachment): 
 }
 
 function modelSelectionKey(selection: Pick<AssistantRunModel, 'provider' | 'model' | 'thinkingLevel'>): string {
-  return `${selection.provider}:${selection.model}:${selection.thinkingLevel}`;
+  return `${selection.provider}:${selection.model}`;
 }
 
 function modelSelectionLabel(
   selection: Pick<AssistantRunModel, 'provider' | 'model' | 'thinkingLevel'>,
   options: AssistantModelOption[],
 ): string {
-  const match = options.find(
-    (option) =>
-      modelSelectionKey({ provider: option.provider, model: option.id, thinkingLevel: option.thinkingLevel }) === modelSelectionKey(selection),
-  );
+  const match = options.find((option) => option.provider === selection.provider && option.id === selection.model);
   if (match) return match.name;
-  return `${selection.provider}/${selection.model}${selection.thinkingLevel !== 'off' ? ` ${selection.thinkingLevel}` : ''}`;
+  return selection.model;
 }
 
 function compactModelSelectionLabel(label: string): string {
   return label.replace(/^GPT-/, '').replace(/\bMedium\b/, 'Med');
+}
+
+function uniqueAssistantModels(options: AssistantModelOption[]): AssistantModelOption[] {
+  const seen = new Set<string>();
+  return options.filter((option) => {
+    const key = `${option.provider}:${option.id}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+function assistantReasoningLabel(level: string): string {
+  if (level === 'off') return 'None';
+  if (level === 'xhigh') return 'X-high';
+  return level.charAt(0).toUpperCase() + level.slice(1);
+}
+
+function DefaultModelStar({ selected }: { selected: boolean }) {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill={selected ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8">
+      <path strokeLinecap="round" strokeLinejoin="round" d="m12 3.2 2.65 5.37 5.93.86-4.29 4.18 1.01 5.91L12 16.73l-5.3 2.79 1.01-5.91-4.29-4.18 5.93-.86L12 3.2Z" />
+    </svg>
+  );
 }
 
 async function readNdjson(response: Response, onEvent: (event: any) => void): Promise<void> {
@@ -398,6 +395,7 @@ export function AssistantDock() {
   const [droneNameById, setDroneNameById] = React.useState<AssistantDroneNameMap>({});
   const [approvalBusyId, setApprovalBusyId] = React.useState<string | null>(null);
   const [assistantStopBusy, setAssistantStopBusy] = React.useState(false);
+  const [defaultModelBusy, setDefaultModelBusy] = React.useState(false);
   const [toolsPanelOpen, setToolsPanelOpen] = React.useState(false);
   const [enabledToolDraftNames, setEnabledToolDraftNames] = React.useState<string[]>([]);
   const [systemPromptOpen, setSystemPromptOpen] = React.useState(false);
@@ -415,8 +413,6 @@ export function AssistantDock() {
   const [systemPromptError, setSystemPromptError] = React.useState<string | null>(null);
   const [systemPromptNotice, setSystemPromptNotice] = React.useState<string | null>(null);
   const [overviewOpen, setOverviewOpen] = React.useState(false);
-  const [overviewAutoEnabled, setOverviewAutoEnabled] = React.useState(readInitialOverviewAutoEnabled);
-  const [overviewIntervalMs, setOverviewIntervalMs] = React.useState(readInitialOverviewIntervalMs);
   const [overview, setOverview] = React.useState<AssistantThreadOverviewResult | null>(null);
   const [overviewLoading, setOverviewLoading] = React.useState(false);
   const [overviewError, setOverviewError] = React.useState<string | null>(null);
@@ -525,7 +521,17 @@ export function AssistantDock() {
   const autoApprove = Boolean(activeThread?.autoApprove);
   const voiceEnabled = Boolean(activeThread?.voiceEnabled);
   voiceEnabledRef.current = voiceEnabled;
-  const blipSession = useBlipThreadSession(activeThreadId, Boolean(activeThread) && !voiceEnabled);
+  const blipSession = useBlipThreadSession(activeThreadId, Boolean(activeThread));
+  React.useEffect(() => {
+    if (activeThreadId) void blipSession.refreshHistory({ quiet: true });
+  }, [activeThread?.updatedAt, activeThreadId, blipSession.refreshHistory]);
+  React.useEffect(() => {
+    if (!voiceEnabled || desktopVoiceStatus.mode !== 'recording' || !activeThreadId || typeof window === 'undefined') return;
+    const refreshHistory = () => void blipSession.refreshHistory({ quiet: true });
+    refreshHistory();
+    const timer = window.setInterval(refreshHistory, 750);
+    return () => window.clearInterval(timer);
+  }, [activeThreadId, blipSession.refreshHistory, desktopVoiceStatus.mode, voiceEnabled]);
   const loadOlderMessages = React.useCallback(async () => {
     const node = scrollRef.current;
     const previousHeight = node?.scrollHeight ?? 0;
@@ -589,20 +595,20 @@ export function AssistantDock() {
   });
   const droneReferenceDropActive = droneReferenceDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
   const visibleMessages = React.useMemo(() => {
-    const messages = voiceEnabled ? activeThread?.messages ?? [] : blipSession.messages as AssistantMessage[];
-    const streamingMessages = voiceEnabled
-      ? Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
-        ? snapshot.streamingMessages
-        : snapshot?.streamingMessage
-          ? [snapshot.streamingMessage]
-          : []
-      : blipSession.streamingMessage
-        ? [blipSession.streamingMessage as AssistantMessage]
+    const messages = blipSession.messages as AssistantMessage[];
+    const snapshotStreamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
+      ? snapshot.streamingMessages
+      : snapshot?.streamingMessage
+        ? [snapshot.streamingMessage]
         : [];
+    const streamingMessages = [
+      ...snapshotStreamingMessages,
+      ...(blipSession.streamingMessage ? [blipSession.streamingMessage as AssistantMessage] : []),
+    ];
     const visibleStreaming = streamingMessages.filter((streaming) => streaming.role === 'assistant' || streaming.role === 'user');
     if (visibleStreaming.length === 0) return messages;
     return [...messages, ...visibleStreaming];
-  }, [activeThread?.messages, blipSession.messages, blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages, voiceEnabled]);
+  }, [blipSession.messages, blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages]);
   const visibleItems = React.useMemo(() => {
     return renderItemsFromMessages(visibleMessages);
   }, [visibleMessages]);
@@ -610,31 +616,31 @@ export function AssistantDock() {
     return visibleItems[visibleItems.length - 1]?.key ?? '';
   }, [visibleItems]);
   const streamingAssistantSourceIndex = React.useMemo(() => {
-    const streamingMessages = voiceEnabled
-      ? Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
-        ? snapshot.streamingMessages
-        : snapshot?.streamingMessage
-          ? [snapshot.streamingMessage]
-          : []
-      : blipSession.streamingMessage
-        ? [blipSession.streamingMessage as AssistantMessage]
+    const snapshotStreamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
+      ? snapshot.streamingMessages
+      : snapshot?.streamingMessage
+        ? [snapshot.streamingMessage]
         : [];
+    const streamingMessages = [
+      ...snapshotStreamingMessages,
+      ...(blipSession.streamingMessage ? [blipSession.streamingMessage as AssistantMessage] : []),
+    ];
     const assistantStreamingOffset = streamingMessages.findIndex((streaming) => streaming.role === 'assistant');
     if (assistantStreamingOffset < 0) return -1;
-    return (voiceEnabled ? activeThread?.messages?.length ?? 0 : blipSession.messages.length) + assistantStreamingOffset;
-  }, [activeThread?.messages?.length, blipSession.messages.length, blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages, voiceEnabled]);
+    return blipSession.messages.length + assistantStreamingOffset;
+  }, [blipSession.messages.length, blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages]);
   const streamingAssistantMessage = React.useMemo(() => {
-    const streamingMessages = voiceEnabled
-      ? Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
-        ? snapshot.streamingMessages
-        : snapshot?.streamingMessage
-          ? [snapshot.streamingMessage]
-          : []
-      : blipSession.streamingMessage
-        ? [blipSession.streamingMessage as AssistantMessage]
+    const snapshotStreamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
+      ? snapshot.streamingMessages
+      : snapshot?.streamingMessage
+        ? [snapshot.streamingMessage]
         : [];
+    const streamingMessages = [
+      ...snapshotStreamingMessages,
+      ...(blipSession.streamingMessage ? [blipSession.streamingMessage as AssistantMessage] : []),
+    ];
     return streamingMessages.find((streaming) => streaming.role === 'assistant') ?? null;
-  }, [blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages, voiceEnabled]);
+  }, [blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages]);
   const latestActivityShowsReasoning = React.useMemo(() => {
     if (!running || !latestActivityItemKey) return false;
     const item = visibleItems.find((candidate) => candidate.key === latestActivityItemKey);
@@ -1040,7 +1046,7 @@ export function AssistantDock() {
     const voiceText = voiceDraftTextRef.current.trim();
     if (!voiceText) return;
     const normalizedVoiceText = voiceText.replace(/\s+/g, ' ').trim().toLowerCase();
-    const delivered = (activeThread?.messages ?? []).some((message) => {
+    const delivered = (blipSession.messages as AssistantMessage[]).some((message) => {
       if (message.role !== 'user') return false;
       const normalizedMessageText = messageText(message).replace(/\s+/g, ' ').trim().toLowerCase();
       return normalizedMessageText === normalizedVoiceText || normalizedMessageText.includes(normalizedVoiceText);
@@ -1050,7 +1056,7 @@ export function AssistantDock() {
     voiceDraftTextRef.current = '';
     voiceDraftActiveRef.current = false;
     setVoiceDraftActive(false);
-  }, [activeThread?.messages, voiceDraftActive]);
+  }, [blipSession.messages, voiceDraftActive]);
 
   const hasAssistantBackgroundActivity =
     Object.keys(snapshot?.runningModels ?? {}).length > 0 ||
@@ -1099,16 +1105,6 @@ export function AssistantDock() {
   }, [assistantPanelMode]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(ASSISTANT_OVERVIEW_AUTO_STORAGE_KEY, overviewAutoEnabled ? '1' : '0');
-  }, [overviewAutoEnabled]);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(ASSISTANT_OVERVIEW_INTERVAL_STORAGE_KEY, String(overviewIntervalMs));
-  }, [overviewIntervalMs]);
-
-  React.useEffect(() => {
     setOverview(null);
     setOverviewError(null);
     setOverviewLoading(false);
@@ -1118,15 +1114,6 @@ export function AssistantDock() {
     if (!systemPromptOpen) return;
     void loadSystemPromptSettings();
   }, [activeThreadId, loadSystemPromptSettings, systemPromptOpen]);
-
-  React.useEffect(() => {
-    if (!overviewAutoEnabled || !activeThreadId) return;
-    void requestOverview();
-    const timer = window.setInterval(() => {
-      void requestOverview({ silent: true });
-    }, overviewIntervalMs);
-    return () => window.clearInterval(timer);
-  }, [activeThreadId, overviewAutoEnabled, overviewIntervalMs, requestOverview]);
 
   const resolveScopeDroneNames = React.useCallback(async (ids: string[], fallbackLabel?: string): Promise<AssistantScopeDrone[]> => {
     const cleanIds = Array.from(new Set(ids.map((id) => String(id ?? '').trim()).filter(Boolean)));
@@ -1738,12 +1725,31 @@ export function AssistantDock() {
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
+  const setActiveModelAsDefault = React.useCallback(async () => {
+    if (!activeThread) return;
+    if (snapshot?.defaultModel.provider === activeThread.provider && snapshot.defaultModel.model === activeThread.model) return;
+    const requestSeq = beginSnapshotMutation();
+    setDefaultModelBusy(true);
+    try {
+      const next = await requestJson<AssistantSnapshot>('/api/assistant/default-model', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ provider: activeThread.provider, model: activeThread.model }),
+      });
+      if (snapshotMutationCurrent(requestSeq)) applySnapshot(next, activeThread.id);
+    } catch (err: any) {
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
+    } finally {
+      setDefaultModelBusy(false);
+    }
+  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshot?.defaultModel, snapshotMutationCurrent]);
+
   const modelOptions = snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS;
   const activeProvider = activeThread?.provider ?? modelOptions[0]?.provider ?? 'openai';
   const providerOptions = React.useMemo(
     () => ASSISTANT_PROVIDERS.map((provider) => ({
       ...provider,
-      models: modelOptions.filter((model) => model.provider === provider.id),
+      models: uniqueAssistantModels(modelOptions.filter((model) => model.provider === provider.id)),
     })),
     [modelOptions],
   );
@@ -1753,8 +1759,8 @@ export function AssistantDock() {
   );
   const displayedModelOptions = React.useMemo(() => {
     if (!activeThread) return activeProviderOptions;
-    const selectedKey = `${activeThread.provider}:${activeThread.model}:${activeThread.thinkingLevel}`;
-    const hasSelected = activeProviderOptions.some((model) => `${model.provider}:${model.id}:${model.thinkingLevel}` === selectedKey);
+    const selectedKey = `${activeThread.provider}:${activeThread.model}`;
+    const hasSelected = activeProviderOptions.some((model) => `${model.provider}:${model.id}` === selectedKey);
     if (hasSelected) return activeProviderOptions;
     return [
       {
@@ -1771,17 +1777,30 @@ export function AssistantDock() {
   const modelMenuEntries = React.useMemo<UiMenuSelectEntry[]>(
     () =>
       displayedModelOptions.map((model) => ({
-        value: `${model.provider}:${model.id}:${model.thinkingLevel}`,
+        value: `${model.provider}:${model.id}`,
         label: model.name,
-        title: `${model.provider}/${model.id}${model.thinkingLevel !== 'off' ? ` ${model.thinkingLevel}` : ''}`,
-        searchText: `${model.name} ${model.id} ${model.thinkingLevel}`,
+        title: model.id,
+        searchText: `${model.name} ${model.id}`,
       })),
     [displayedModelOptions],
   );
+  const reasoningMenuEntries = React.useMemo<UiMenuSelectEntry[]>(() => {
+    if (!activeThread) return [];
+    const levels = new Set(
+      modelOptions
+        .filter((option) => option.provider === activeThread.provider && option.id === activeThread.model)
+        .map((option) => option.thinkingLevel),
+    );
+    if (levels.size === 0) levels.add(activeThread.thinkingLevel);
+    return [...levels].map((level) => ({ value: level, label: assistantReasoningLabel(level) }));
+  }, [activeThread, modelOptions]);
   const selectedModelLabel = React.useMemo(() => {
     if (!activeThread) return '';
     return modelSelectionLabel({ provider: activeThread.provider, model: activeThread.model, thinkingLevel: activeThread.thinkingLevel }, modelOptions);
   }, [activeThread, modelOptions]);
+  const activeModelIsDefault = Boolean(
+    activeThread && snapshot?.defaultModel.provider === activeThread.provider && snapshot.defaultModel.model === activeThread.model,
+  );
   const activeProviderMeta = providerOptions.find((provider) => provider.id === activeProvider) ?? ASSISTANT_PROVIDERS[0];
   const activeRunningModelLabel = activeRunningModel ? modelSelectionLabel(activeRunningModel, modelOptions) : '';
   const availableTools = snapshot?.availableTools ?? EMPTY_ASSISTANT_TOOL_SUMMARIES;
@@ -2134,17 +2153,7 @@ export function AssistantDock() {
                 : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
             }`}
           >
-            <svg viewBox="0 0 24 24" aria-hidden="true" className="mx-auto h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M12 3v4" />
-              <path d="M12 17v4" />
-              <path d="M5.64 5.64l2.83 2.83" />
-              <path d="M15.53 15.53l2.83 2.83" />
-              <path d="M3 12h4" />
-              <path d="M17 12h4" />
-              <path d="M5.64 18.36l2.83-2.83" />
-              <path d="M15.53 8.47l2.83-2.83" />
-              <path d="M10 12.4l1.4 1.4 3-3.6" />
-            </svg>
+            <IconShieldCheck className="mx-auto h-4 w-4" />
           </button>
           {toolsPanelOpen ? (
             <AssistantToolsPanel
@@ -2233,7 +2242,7 @@ export function AssistantDock() {
                 ref={scrollContentRef}
                 className={showEmptyAssistantThread ? 'flex min-h-full items-center justify-center px-3 py-3' : 'space-y-2 py-3'}
               >
-                {!voiceEnabled && blipSession.hasOlder ? (
+                {blipSession.hasOlder ? (
                   <div className="px-3 text-center">
                     <button
                       type="button"
@@ -2247,7 +2256,7 @@ export function AssistantDock() {
                 ) : null}
                 {loading && !snapshot ? (
                   <div className="px-3 text-[12px] text-[var(--muted)]">Loading assistant...</div>
-                ) : blipSession.historyLoading && !voiceEnabled && visibleItems.length === 0 ? (
+                ) : blipSession.historyLoading && visibleItems.length === 0 ? (
                   <div className="px-3 text-[12px] text-[var(--muted)]">Loading conversation...</div>
                 ) : showEmptyAssistantThread ? (
                   <div className="w-full rounded border border-dashed border-[var(--border)] px-3 py-5 text-center">
@@ -2293,7 +2302,6 @@ export function AssistantDock() {
                 overview={overview}
                 loading={overviewLoading}
                 error={overviewError}
-                autoEnabled={overviewAutoEnabled}
                 canRerun={Boolean(overview)}
                 onClose={() => setOverviewOpen(false)}
                 onRerun={() => void requestOverview({ force: true, reuseLastInput: true })}
@@ -2308,48 +2316,41 @@ export function AssistantDock() {
 
       <div className="flex-shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)] p-2">
         <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
-          <div
-            className="mr-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            Provider
-          </div>
-          <div className="flex min-w-0 items-center gap-1 overflow-x-auto no-scrollbar">
-            {providerOptions.map((provider) => {
-              const selected = provider.id === activeProvider;
-              const disabled = !activeThread || provider.models.length === 0;
-              return (
-                <button
-                  key={provider.id}
-                  type="button"
-                  disabled={disabled}
-                  aria-pressed={selected}
-                  title={provider.title}
-                  onClick={() => {
-                    const nextModel = provider.models[0];
-                    void updateThread({
-                      provider: provider.id,
-                      ...(nextModel ? { model: nextModel.id, thinkingLevel: nextModel.thinkingLevel } : {}),
-                    });
-                  }}
-                  className={`inline-flex h-7 min-w-[72px] flex-shrink-0 items-center justify-center rounded border px-2 text-[10px] font-semibold uppercase tracking-wide disabled:cursor-not-allowed disabled:opacity-45 ${
-                    selected
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  {provider.label}
-                </button>
-              );
-            })}
-          </div>
+          <UiMenuSelect
+            value={activeProvider}
+            disabled={!activeThread || defaultModelBusy}
+            onValueChange={(value) => {
+              const provider = providerOptions.find((option) => option.id === value);
+              if (!provider) return;
+              const nextModel = provider.models[0];
+              void updateThread({
+                provider: provider.id,
+                ...(nextModel ? { model: nextModel.id } : {}),
+              });
+            }}
+            entries={providerOptions.map((provider) => ({
+              value: provider.id,
+              label: provider.label,
+              title: provider.title,
+              searchText: `${provider.label} ${provider.authLabel}`,
+              disabled: provider.models.length === 0,
+            }))}
+            variant="toolbar"
+            role="listbox"
+            itemRole="option"
+            title="Assistant provider"
+            triggerLabel={activeProviderMeta.label}
+            triggerClassName="h-7 w-[88px] justify-between border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+            triggerLabelClassName="font-semibold"
+            panelClassName="bottom-full mb-1.5 w-[140px]"
+            header="Provider"
+          />
           <UiMenuSelect
             value={selectedModelKey}
-            disabled={!activeThread}
+            disabled={!activeThread || defaultModelBusy}
             onValueChange={(value) => {
-              const [provider, model, thinkingLevel] = value.split(':');
-              void updateThread({ provider: provider as AssistantThread['provider'], model, thinkingLevel });
+              const [provider, model] = value.split(':');
+              void updateThread({ provider: provider as AssistantThread['provider'], model });
             }}
             entries={modelMenuEntries}
             variant="toolbar"
@@ -2364,6 +2365,37 @@ export function AssistantDock() {
             header="Model"
             searchable
             searchPlaceholder="Search models"
+          />
+          <button
+            type="button"
+            disabled={!activeThread || defaultModelBusy}
+            aria-pressed={activeModelIsDefault}
+            aria-label={activeModelIsDefault ? 'Current default model' : 'Set current model as default'}
+            title={activeModelIsDefault ? 'Default model for new threads' : 'Make this the default model for new threads'}
+            onClick={() => void setActiveModelAsDefault()}
+            className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+              activeModelIsDefault
+                ? 'bg-[rgba(250,204,21,.10)] text-[var(--yellow)]'
+                : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--yellow)]'
+            }`}
+          >
+            <DefaultModelStar selected={activeModelIsDefault} />
+          </button>
+          <UiMenuSelect
+            value={activeThread?.thinkingLevel ?? ''}
+            disabled={!activeThread || defaultModelBusy || reasoningMenuEntries.length === 0}
+            onValueChange={(thinkingLevel) => void updateThread({ thinkingLevel })}
+            entries={reasoningMenuEntries}
+            variant="toolbar"
+            role="listbox"
+            itemRole="option"
+            title={`Reasoning: ${assistantReasoningLabel(activeThread?.thinkingLevel ?? 'off')}`}
+            triggerLabel={assistantReasoningLabel(activeThread?.thinkingLevel ?? 'off')}
+            triggerClassName="h-7 w-[82px] justify-between border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+            triggerLabelClassName="font-semibold"
+            panelClassName="bottom-full mb-1.5 w-[140px]"
+            menuClassName="max-h-56 overflow-y-auto"
+            header="Reasoning"
           />
           <div
             className="grid h-7 flex-shrink-0 grid-cols-2 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"
@@ -2397,27 +2429,6 @@ export function AssistantDock() {
             <span className="truncate">{activeProviderMeta.authLabel}</span>
           </div>
           <div className="ml-auto flex flex-shrink-0 items-center gap-1.5">
-            <UiMenuSelect
-              value={String(overviewIntervalMs)}
-              disabled={!activeThread}
-              onValueChange={(value) => setOverviewIntervalMs(normalizeOverviewIntervalMs(value))}
-              entries={ASSISTANT_OVERVIEW_INTERVAL_OPTIONS.map((option) => ({
-                value: option.value,
-                label: option.label,
-                title: `Refresh overview every ${option.label}`,
-                searchText: option.label,
-              }))}
-              variant="toolbar"
-              role="listbox"
-              itemRole="option"
-              title="Overview refresh interval"
-              triggerLabel={ASSISTANT_OVERVIEW_INTERVAL_OPTIONS.find((option) => option.value === String(overviewIntervalMs))?.label ?? '30s'}
-              triggerClassName="h-7 w-[56px] justify-between border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
-              triggerLabelClassName="font-semibold"
-              panelClassName="bottom-full right-0 mb-1.5 w-[120px]"
-              menuClassName="max-h-48 overflow-y-auto"
-              header="Overview"
-            />
             <button
               type="button"
               onClick={() => {
@@ -2436,25 +2447,6 @@ export function AssistantDock() {
               aria-label={overviewOpen ? 'Hide thread overview' : 'Show thread overview'}
             >
               {overviewLoading ? <IconSpinner className="h-3.5 w-3.5" /> : <IconEye className="h-3.5 w-3.5" />}
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                const next = !overviewAutoEnabled;
-                setOverviewAutoEnabled(next);
-                if (next) setOverviewOpen(true);
-              }}
-              disabled={!activeThread}
-              aria-pressed={overviewAutoEnabled}
-              aria-label="Toggle automatic thread overview"
-              title={overviewAutoEnabled ? 'Automatic overview is on' : 'Automatic overview is off'}
-              className={`flex h-7 w-7 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
-                overviewAutoEnabled
-                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
-              }`}
-            >
-              <IconList className="h-3.5 w-3.5" />
             </button>
           </div>
         </div>

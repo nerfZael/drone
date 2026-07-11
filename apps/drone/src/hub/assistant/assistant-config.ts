@@ -23,9 +23,9 @@ export const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30_000;
 export const ASSISTANT_BASH_MAX_TIMEOUT_MS = 120_000;
 export const ASSISTANT_SEARCH_MAX_CONTEXT_LINES = 10;
 export const ASSISTANT_CHANGED_FILES_LIMIT = 200;
-export const DEFAULT_OPENAI_MODEL = 'gpt-5.5';
+export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
-export const DEFAULT_CODEX_MODEL = 'gpt-5.5';
+export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_THREAD_TITLE = 'New thread';
 export const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
   'Current access scope is appended at run time. The assistant must not claim read or write access outside that scope.';
@@ -416,20 +416,28 @@ export const ASSISTANT_OVERVIEW_PROMPT_DEFAULT = [
   'Prefer compact sections and bullets. Keep it useful at a glance.',
   'Use present tense for current work and past tense for completed actions.',
 ].join('\n');
-export const ASSISTANT_MODEL_OPTIONS: Array<{
+type AssistantModelOptionDefinition = {
   provider: LlmProviderId;
   id: string;
   name: string;
   thinkingLevel: AssistantThinkingLevel;
-}> = [
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 Instant', thinkingLevel: 'off' },
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 Low', thinkingLevel: 'low' },
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 Medium', thinkingLevel: 'medium' },
-  { provider: 'openai', id: 'gpt-5.5', name: 'GPT-5.5 High', thinkingLevel: 'high' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 Instant', thinkingLevel: 'off' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 Low', thinkingLevel: 'low' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 Medium', thinkingLevel: 'medium' },
-  { provider: 'codex', id: 'gpt-5.5', name: 'GPT-5.5 High', thinkingLevel: 'high' },
+};
+
+const ASSISTANT_REASONING_LEVELS: AssistantThinkingLevel[] = ['off', 'low', 'medium', 'high'];
+
+function reasoningModelOptions(provider: LlmProviderId, id: string, name: string): AssistantModelOptionDefinition[] {
+  return ASSISTANT_REASONING_LEVELS.map((thinkingLevel) => ({ provider, id, name, thinkingLevel }));
+}
+
+export const ASSISTANT_MODEL_OPTIONS: AssistantModelOptionDefinition[] = [
+  ...reasoningModelOptions('openai', 'gpt-5.6-sol', 'GPT-5.6 Sol'),
+  ...reasoningModelOptions('openai', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
+  ...reasoningModelOptions('openai', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
+  ...reasoningModelOptions('openai', 'gpt-5.5', 'GPT-5.5'),
+  ...reasoningModelOptions('codex', 'gpt-5.6-sol', 'GPT-5.6 Sol'),
+  ...reasoningModelOptions('codex', 'gpt-5.6-terra', 'GPT-5.6 Terra'),
+  ...reasoningModelOptions('codex', 'gpt-5.6-luna', 'GPT-5.6 Luna'),
+  ...reasoningModelOptions('codex', 'gpt-5.5', 'GPT-5.5'),
   {
     provider: 'gemini',
     id: 'gemini-3-flash-preview',

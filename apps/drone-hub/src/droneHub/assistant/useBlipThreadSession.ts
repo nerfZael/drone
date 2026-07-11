@@ -108,7 +108,11 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
       setRunError(event.error);
       return;
     }
-    if (event.type === 'assistant_message' || event.type === 'transcript_changed' || event.type === 'tool_call_started' || event.type === 'tool_call_completed' || event.type === 'tool_call_failed') {
+    if (event.type === 'transcript_changed') {
+      void refreshHistory({ quiet: true });
+      return;
+    }
+    if (event.type === 'assistant_message' || event.type === 'tool_call_started' || event.type === 'tool_call_completed' || event.type === 'tool_call_failed') {
       setRunning(true);
       void refreshHistory({ quiet: true });
       return;

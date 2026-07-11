@@ -5,8 +5,7 @@ import { realtimeStopTranscript } from './realtime-transcript';
 import { SileroVadStream } from './silero-vad-stream';
 import { pcm16leToWav } from './voice-transcription-segmenter';
 
-const MAX_TTS_CHARS = 180;
-const TOOL_STATUS_COOLDOWN_MS = 1_200;
+const MAX_TTS_CHARS = 1_200;
 
 type SpeechDetector = {
   appendPcm: (pcm: Buffer) => Promise<void>;
@@ -20,6 +19,8 @@ export type NativeRealtimeVoiceOptions = {
   synthesizeSpeech: (text: string, signal: AbortSignal) => Promise<Buffer>;
   isAssistantRunning: () => boolean;
   submitPrompt: (prompt: string) => void | Promise<void>;
+  interruptAssistant?: () => void;
+  interruptWithPrompt?: (prompt: string) => void | Promise<void>;
   steerPrompt: (prompt: string) => void;
   subscribeAssistantEvents: (listener: (event: BlipRuntimeEvent) => void | Promise<void>) => () => void;
   createSpeechDetector?: (callbacks: {
@@ -157,23 +158,24 @@ export async function createNativeRealtimeVoiceSession(options: NativeRealtimeVo
   const callbacks = options.callbacks ?? {};
   const speechQueue = new NativeSpeechQueue(options.synthesizeSpeech, callbacks);
   const assistantBuffers = new Map<string, string>();
-  const streamingAssistantTurns = new Set<string>();
   const interruptedAssistantTurns = new Set<string>();
   let utteranceQueue = Promise.resolve();
   let transcriptionController: AbortController | null = null;
   let pendingUserUtterances = 0;
+  const utteranceInterruptions: boolean[] = [];
   let closed = false;
-  let lastAssistantSpeechAt = 0;
-  let lastToolStatusAt = 0;
 
   const queueAssistantSpeech = (text: string): void => {
     const cleaned = speechText(text);
     if (!cleaned || closed) return;
-    lastAssistantSpeechAt = Date.now();
     speechQueue.enqueue(cleaned);
   };
 
-  const dispatchPrompt = (text: string): boolean => {
+  const dispatchPrompt = async (text: string, interrupted: boolean): Promise<boolean> => {
+    if (interrupted && options.interruptWithPrompt) {
+      await options.interruptWithPrompt(text);
+      return true;
+    }
     if (options.isAssistantRunning()) {
       try {
         options.steerPrompt(text);
@@ -196,41 +198,26 @@ export async function createNativeRealtimeVoiceSession(options: NativeRealtimeVo
       if (pendingUserUtterances > 0) {
         interruptedAssistantTurns.add(turnId);
         assistantBuffers.delete(turnId);
-        streamingAssistantTurns.delete(turnId);
         return;
       }
-      interruptedAssistantTurns.delete(turnId);
-      streamingAssistantTurns.add(turnId);
-      const buffered = `${assistantBuffers.get(turnId) ?? ''}${event.text}`;
-      const next = takeSpeechChunks(buffered);
-      assistantBuffers.set(turnId, next.remainder);
-      for (const chunk of next.chunks) queueAssistantSpeech(chunk);
+      if (interruptedAssistantTurns.has(turnId)) return;
+      assistantBuffers.set(turnId, `${assistantBuffers.get(turnId) ?? ''}${event.text}`);
       return;
     }
     if (event.type === 'assistant_message') {
       if (pendingUserUtterances > 0) {
         assistantBuffers.delete(turnId);
-        streamingAssistantTurns.delete(turnId);
         interruptedAssistantTurns.delete(turnId);
         return;
       }
       void callbacks.onAssistantTranscript?.(event.text);
-      const buffered = assistantBuffers.get(turnId) ?? '';
       assistantBuffers.delete(turnId);
-      const streamed = streamingAssistantTurns.delete(turnId);
-      if (interruptedAssistantTurns.delete(turnId) && !streamed) return;
-      const next = takeSpeechChunks(streamed ? buffered : event.text, true);
-      for (const chunk of next.chunks) queueAssistantSpeech(chunk);
+      if (interruptedAssistantTurns.delete(turnId)) return;
+      for (const chunk of splitLongChunk(speechText(event.text))) queueAssistantSpeech(chunk);
       return;
     }
     if (event.type === 'tool_call_started') {
       if (pendingUserUtterances > 0) return;
-      const status = nativeToolStatus(event.tool);
-      const now = Date.now();
-      if (status && now - lastAssistantSpeechAt >= TOOL_STATUS_COOLDOWN_MS && now - lastToolStatusAt >= TOOL_STATUS_COOLDOWN_MS) {
-        lastToolStatusAt = now;
-        speechQueue.enqueue(status);
-      }
       void callbacks.onStatus?.(`Native realtime assistant is using ${event.tool}.`);
       return;
     }
@@ -239,7 +226,7 @@ export async function createNativeRealtimeVoiceSession(options: NativeRealtimeVo
     }
   });
 
-  const handleUtterance = async (pcm: Buffer): Promise<void> => {
+  const handleUtterance = async (pcm: Buffer, interrupted: boolean): Promise<void> => {
     if (closed || pcm.byteLength === 0) return;
     const controller = new AbortController();
     transcriptionController = controller;
@@ -250,8 +237,7 @@ export async function createNativeRealtimeVoiceSession(options: NativeRealtimeVo
       await callbacks.onUserTranscript?.(transcript);
       const stop = realtimeStopTranscript(transcript);
       if (stop.stop || closed) return;
-      const steered = dispatchPrompt(transcript);
-      speechQueue.enqueue(steered ? 'Got it. I’ll adjust.' : 'Got it. I’m on it.');
+      const steered = await dispatchPrompt(transcript, interrupted);
       await callbacks.onStatus?.(steered ? 'Native realtime assistant updated the active work.' : 'Native realtime assistant is working.');
     } catch (error: any) {
       if (!closed && !controller.signal.aborted) {
@@ -269,21 +255,24 @@ export async function createNativeRealtimeVoiceSession(options: NativeRealtimeVo
     detector = await createSpeechDetector({
       onSpeechStart: () => {
         if (closed) return;
+        const interrupted = options.isAssistantRunning();
+        utteranceInterruptions.push(interrupted);
+        if (interrupted) options.interruptAssistant?.();
         pendingUserUtterances += 1;
         speechQueue.interrupt();
         for (const turnId of assistantBuffers.keys()) interruptedAssistantTurns.add(turnId);
         assistantBuffers.clear();
-        streamingAssistantTurns.clear();
         void callbacks.onUserSpeechStarted?.();
         void callbacks.onStatus?.('Native realtime assistant is listening.');
       },
       onSpeechEnd: (pcm) => {
         if (closed) return;
+        const interrupted = utteranceInterruptions.shift() === true;
         if (pcm.byteLength === 0) {
           pendingUserUtterances = Math.max(0, pendingUserUtterances - 1);
           return;
         }
-        utteranceQueue = utteranceQueue.catch(() => {}).then(async () => await handleUtterance(pcm));
+        utteranceQueue = utteranceQueue.catch(() => {}).then(async () => await handleUtterance(pcm, interrupted));
       },
       onError: (error) => {
         if (!closed) void callbacks.onError?.(`Silero voice detection failed: ${cleanText(error.message)}`);
@@ -300,7 +289,7 @@ export async function createNativeRealtimeVoiceSession(options: NativeRealtimeVo
     const text = cleanText(textRaw);
     if (!text || closed) return;
     speechQueue.interrupt();
-    const steered = dispatchPrompt(text);
+    const steered = await dispatchPrompt(text, false);
     await callbacks.onStatus?.(steered ? 'Native realtime assistant updated the active work.' : 'Native realtime assistant is working.');
   };
 

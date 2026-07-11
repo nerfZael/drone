@@ -54,7 +54,7 @@ describe('native realtime voice', () => {
     await session.cancel();
   });
 
-  test('speaks streamed assistant sentences once and flushes the final remainder', async () => {
+  test('speaks one smooth clip after the assistant message is finalized', async () => {
     let assistantEvent: ((event: any) => void) | undefined;
     const spoken: string[] = [];
     const session = await createNativeRealtimeVoiceSession({
@@ -70,8 +70,8 @@ describe('native realtime voice', () => {
     assistantEvent?.({ type: 'assistant_delta', turnId: 'turn-1', text: 'I checked it. ' });
     assistantEvent?.({ type: 'assistant_delta', turnId: 'turn-1', text: 'Everything is ready' });
     assistantEvent?.({ type: 'assistant_message', turnId: 'turn-1', text: 'I checked it. Everything is ready' });
-    await until(() => spoken.length === 2);
-    expect(spoken).toEqual(['I checked it.', 'Everything is ready']);
+    await until(() => spoken.length === 1);
+    expect(spoken).toEqual(['I checked it. Everything is ready']);
     await session.cancel();
   });
 
@@ -184,16 +184,46 @@ describe('native realtime voice', () => {
     await session.cancel();
   });
 
+  test('hard-interrupts the active assistant turn before submitting barge-in speech', async () => {
+    let detectorCallbacks: any;
+    let interrupts = 0;
+    const interruptedPrompts: string[] = [];
+    const steered: string[] = [];
+    const session = await createNativeRealtimeVoiceSession({
+      transcribePcm: async () => 'stop and check beta instead',
+      synthesizeSpeech: async () => Buffer.from('wav'),
+      isAssistantRunning: () => true,
+      submitPrompt: async () => {},
+      interruptAssistant: () => { interrupts += 1; },
+      interruptWithPrompt: async (prompt) => { interruptedPrompts.push(prompt); },
+      steerPrompt: (prompt) => { steered.push(prompt); },
+      subscribeAssistantEvents: () => () => {},
+      createSpeechDetector: async (callbacks) => {
+        detectorCallbacks = callbacks;
+        return { appendPcm: async () => {}, flush: async () => {}, close: async () => {} };
+      },
+    });
+
+    detectorCallbacks.onSpeechStart();
+    expect(interrupts).toBe(1);
+    detectorCallbacks.onSpeechEnd(Buffer.alloc(1_024));
+    await until(() => interruptedPrompts.length === 1);
+    expect(interruptedPrompts).toEqual(['stop and check beta instead']);
+    expect(steered).toEqual([]);
+    await session.cancel();
+  });
+
   test('does not resume stale assistant speech while a user interruption is being transcribed', async () => {
     let detectorCallbacks: any;
     let assistantEvent: ((event: any) => void) | undefined;
     const spoken: string[] = [];
+    const steered: string[] = [];
     const session = await createNativeRealtimeVoiceSession({
       transcribePcm: async () => 'change direction',
       synthesizeSpeech: async (text) => { spoken.push(text); return Buffer.from('wav'); },
       isAssistantRunning: () => true,
       submitPrompt: async () => {},
-      steerPrompt: () => {},
+      steerPrompt: (text) => { steered.push(text); },
       subscribeAssistantEvents: (listener) => { assistantEvent = listener; return () => {}; },
       createSpeechDetector: async (callbacks) => {
         detectorCallbacks = callbacks;
@@ -204,9 +234,9 @@ describe('native realtime voice', () => {
     detectorCallbacks.onSpeechStart();
     assistantEvent?.({ type: 'assistant_message', turnId: 'old-turn', text: 'This response is stale.' });
     detectorCallbacks.onSpeechEnd(Buffer.alloc(1_024));
-    await until(() => spoken.length > 0);
+    await until(() => steered.length > 0);
     expect(spoken).not.toContain('This response is stale.');
-    expect(spoken).toContain('Got it. I’ll adjust.');
+    expect(steered).toEqual(['change direction']);
     await session.cancel();
   });
 });

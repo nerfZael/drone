@@ -165,6 +165,10 @@ type DesktopVoiceEvent = {
   sessionId: string;
 } | {
   type: 'desktop_voice_webrtc_stop';
+} | {
+  type: 'desktop_voice_native_mic_start';
+} | {
+  type: 'desktop_voice_native_mic_stop';
 };
 
 type DesktopVoiceServiceOptions = {
@@ -1231,6 +1235,20 @@ export class DesktopVoiceService {
     return true;
   }
 
+  async appendRealtimePcm(pcm: Buffer): Promise<boolean> {
+    const session = this.realtimeSession;
+    if (
+      pcm.byteLength < 2 ||
+      !session ||
+      this.realtimeTransport !== 'websocket' ||
+      this.realtimeProvider() !== 'native' ||
+      this.mode !== 'recording' ||
+      this.promptCaptureTarget !== 'assistant'
+    ) return false;
+    await session.appendPcm(pcm);
+    return true;
+  }
+
   async stopRealtimeAssistantSession(): Promise<void> {
     const active = Boolean(this.realtimeSession || this.realtimeStarting);
     if (!active) return;
@@ -1328,9 +1346,12 @@ export class DesktopVoiceService {
     if (this.mode === 'recording' || this.mode === 'transcribing') return this.snapshot();
     if (this.mode === 'off' || this.mode === 'error') {
       this.start();
+      // Realtime providers own browser microphone capture. Only the legacy prompt
+      // recorder needs the host capture process armed synchronously here.
+      if (!this.realtimeAssistantEnabled) this.ensureRecognitionActive();
     } else if (this.mode === 'sleeping') {
       this.enterAwake();
-    } else {
+    } else if (!this.realtimeAssistantEnabled) {
       this.ensureRecognitionActive();
     }
     await this.startPromptRecording('assistant');
@@ -1735,11 +1756,13 @@ export class DesktopVoiceService {
   private async startRealtimeAssistantRecording(): Promise<void> {
     const startRealtimeAssistant = this.opts.startRealtimeAssistant;
     if (!startRealtimeAssistant || this.realtimeSession || this.realtimeStarting) return;
+    this.capture.stop();
+    this.recognizer.stop();
     this.realtimeTransport = 'websocket';
     this.mode = 'recording';
     this.message = 'Awake: starting realtime assistant.';
     this.promptChunks = [];
-    this.promptChunks.push(...this.promptPreRollBuffer.drain());
+    this.promptPreRollBuffer.drain();
     this.resetPromptTranscription();
     this.promptCaptureTarget = 'assistant';
     this.realtimeStarting = true;
@@ -1760,6 +1783,7 @@ export class DesktopVoiceService {
       for (const chunk of buffered) {
         await Promise.resolve(session.appendPcm(chunk));
       }
+      this.emitDesktopVoiceEvent({ type: 'desktop_voice_native_mic_start' } satisfies DesktopVoiceEvent);
       this.message = 'Awake: realtime assistant is listening.';
       this.touch();
       this.emitChange();
@@ -1881,6 +1905,7 @@ export class DesktopVoiceService {
     this.promptCaptureTarget = null;
     this.mode = 'awake';
     this.message = 'Awake: realtime assistant stopped.';
+    this.ensureRecognitionActive();
     this.suppressPromptCommandsBriefly();
     this.touch();
     this.emitChange();
@@ -1917,6 +1942,7 @@ export class DesktopVoiceService {
     const message = normalizeTranscriptWhitespace(messageRaw) || 'OpenAI Realtime failed.';
     this.clearRealtimeWebRtcStartupTimer();
     if (this.realtimeTransport === 'webrtc') this.emitDesktopVoiceEvent({ type: 'desktop_voice_webrtc_stop' } satisfies DesktopVoiceEvent);
+    if (this.realtimeTransport === 'websocket') this.emitDesktopVoiceEvent({ type: 'desktop_voice_native_mic_stop' } satisfies DesktopVoiceEvent);
     this.realtimeSession = null;
     this.realtimeStarting = false;
     this.realtimeTransport = null;
@@ -1925,6 +1951,7 @@ export class DesktopVoiceService {
     this.promptCaptureTarget = null;
     this.mode = 'awake';
     this.message = `Realtime assistant failed: ${message}`;
+    this.ensureRecognitionActive();
     desktopVoiceWarn('realtime assistant error', { error: message });
     this.suppressPromptCommandsBriefly(REALTIME_ASSISTANT_RETRY_SUPPRESSION_MS);
     this.touch();
@@ -1934,6 +1961,7 @@ export class DesktopVoiceService {
   private handleRealtimeClosed(): void {
     this.clearRealtimeWebRtcStartupTimer();
     if (this.realtimeTransport === 'webrtc') this.emitDesktopVoiceEvent({ type: 'desktop_voice_webrtc_stop' } satisfies DesktopVoiceEvent);
+    if (this.realtimeTransport === 'websocket') this.emitDesktopVoiceEvent({ type: 'desktop_voice_native_mic_stop' } satisfies DesktopVoiceEvent);
     this.realtimeSession = null;
     this.realtimeStarting = false;
     this.realtimeTransport = null;
@@ -1943,6 +1971,7 @@ export class DesktopVoiceService {
       desktopVoiceWarn('realtime assistant closed while recording');
       this.mode = 'awake';
       this.message = 'Awake: realtime assistant ended.';
+      this.ensureRecognitionActive();
       this.promptCaptureTarget = null;
       this.suppressPromptCommandsBriefly(REALTIME_ASSISTANT_RETRY_SUPPRESSION_MS);
       this.touch();
@@ -2067,6 +2096,7 @@ export class DesktopVoiceService {
     this.promptTranscriptText = '';
     this.promptCaptureTarget = null;
     this.suppressPromptCommandsBriefly();
+    if (target === 'assistant') this.ensureRecognitionActive();
     if (cancelledRealtime) {
       this.touch();
       this.emitChange();
@@ -2097,6 +2127,9 @@ export class DesktopVoiceService {
       } catch (error: any) {
         desktopVoiceWarn('realtime assistant WebRTC cancel failed', { error: error?.message ?? String(error) });
       }
+    }
+    if (transport === 'websocket') {
+      this.emitDesktopVoiceEvent({ type: 'desktop_voice_native_mic_stop' } satisfies DesktopVoiceEvent);
     }
     if (session) {
       try {
@@ -2385,7 +2418,9 @@ export class DesktopVoiceService {
       event.type !== 'desktop_voice_speak_audio' &&
       event.type !== 'desktop_voice_stop_audio' &&
       event.type !== 'desktop_voice_webrtc_start' &&
-      event.type !== 'desktop_voice_webrtc_stop'
+      event.type !== 'desktop_voice_webrtc_stop' &&
+      event.type !== 'desktop_voice_native_mic_start' &&
+      event.type !== 'desktop_voice_native_mic_stop'
     ) {
       this.bufferEventForReplay(event);
     }

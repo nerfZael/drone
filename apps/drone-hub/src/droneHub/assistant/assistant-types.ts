@@ -127,6 +127,7 @@ export type AssistantSnapshot = {
   pendingApprovals: AssistantApproval[];
   chatIdleSubscriptions?: AssistantChatIdleSubscription[];
   models: AssistantModelOption[];
+  defaultModel: { provider: AssistantProviderId; model: string };
   availableTools?: AssistantToolSummary[];
   accessScope?: AssistantAccessScope;
   runningModels?: Record<string, AssistantRunModel>;

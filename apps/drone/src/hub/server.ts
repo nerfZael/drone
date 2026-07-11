@@ -15051,9 +15051,14 @@ export async function startDroneHubApiServer(opts: {
           },
           dispose: () => mcpClient.close(),
         };
+      }, async (threadId, event) => {
+        if (event.type === 'transcript_changed') await assistantService.notifyCanonicalHistoryChanged(threadId);
       });
   assistantService.setTextPromptDelegate(async (threadId, prompt) => {
     await blipAssistantHost.promptThread(threadId, prompt);
+  });
+  assistantService.setRealtimeHistoryDelegate(async (threadId, message) => {
+    await blipAssistantHost.appendExternalMessage(threadId, message);
   });
   assistantService.setRealtimeToolDelegate({
     catalog: (threadId) => blipAssistantHost.toolCatalog(threadId),
@@ -15102,6 +15107,8 @@ export async function startDroneHubApiServer(opts: {
             },
             isAssistantRunning: () => blipAssistantHost.isThreadRunning(threadId),
             submitPrompt: async (prompt) => await blipAssistantHost.promptThread(threadId, prompt),
+            interruptAssistant: () => blipAssistantHost.abortThread(threadId),
+            interruptWithPrompt: async (prompt) => await blipAssistantHost.interruptThreadWithPrompt(threadId, prompt),
             steerPrompt: (prompt) => blipAssistantHost.steerThread(threadId, prompt),
             subscribeAssistantEvents: (listener) => blipAssistantHost.subscribeEvents(threadId, listener),
           });
@@ -17023,6 +17030,18 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
+      if (pathname === '/api/assistant/desktop-voice/realtime/pcm' && method === 'POST') {
+        try {
+          const pcm = await readRawBody(req, { maxBytes: 256 * 1024 });
+          const accepted = await desktopVoiceService.appendRealtimePcm(pcm);
+          if (!accepted) throw new Error('Native realtime voice is not currently accepting microphone audio.');
+          json(res, 202, { ok: true });
+        } catch (e: any) {
+          json(res, 409, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
       if (pathname === '/api/assistant/desktop-voice/toggle' && method === 'POST') {
         try {
           logDesktopVoiceControl(req, 'toggle');
@@ -17192,6 +17211,8 @@ export async function startDroneHubApiServer(opts: {
           } else if (event.type === 'desktop_voice_webrtc_start') {
             writeAssistantSseEvent(res, event.type, { sessionId: event.sessionId });
           } else if (event.type === 'desktop_voice_webrtc_stop') {
+            writeAssistantSseEvent(res, event.type, {});
+          } else if (event.type === 'desktop_voice_native_mic_start' || event.type === 'desktop_voice_native_mic_stop') {
             writeAssistantSseEvent(res, event.type, {});
           } else {
             writeAssistantSseEvent(res, event.type, event.status);

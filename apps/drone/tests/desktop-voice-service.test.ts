@@ -580,6 +580,8 @@ describe('DesktopVoiceService', () => {
     const appended: Buffer[] = [];
     const realtimeTexts: string[] = [];
     const submitted: string[] = [];
+    let captureStarts = 0;
+    let recognizerStarts = 0;
     let callbacks: any = null;
     const service = new DesktopVoiceService({
       transcribeWav: async () => ({ text: '', model: 'test' }),
@@ -603,13 +605,15 @@ describe('DesktopVoiceService', () => {
     });
     const events: any[] = [];
     const unsubscribe = service.subscribe((event) => events.push(event));
-    const preRoll = Buffer.alloc(320, 3);
     const liveAudio = Buffer.alloc(320, 4);
-    (service as any).promptPreRollBuffer.push(preRoll);
-    (service as any).mode = 'awake';
-
-    await (service as any).startPromptRecording('assistant');
-    (service as any).handleAudio(liveAudio);
+    (service as any).capture.start = () => {
+      captureStarts += 1;
+    };
+    (service as any).recognizer.start = () => {
+      recognizerStarts += 1;
+    };
+    await service.startAssistantRecordingNow();
+    expect(await service.appendRealtimePcm(liveAudio)).toBe(true);
     await callbacks.onUserTranscript('check the build');
     await callbacks.onAssistantAudio({ wav: Buffer.from('assistant-wav'), text: 'On it.' });
     await callbacks.onUserSpeechStarted();
@@ -620,13 +624,16 @@ describe('DesktopVoiceService', () => {
     expect(service.snapshot().transcript.target).toBe('assistant');
     expect(service.snapshot().realtime.provider).toBe('native');
     expect(service.snapshot().realtime.ready).toBe(true);
-    expect(appended).toEqual([preRoll, liveAudio]);
+    expect(captureStarts).toBe(0);
+    expect(recognizerStarts).toBe(0);
+    expect(appended).toEqual([liveAudio]);
     expect(submitted).toEqual([]);
     expect(realtimeTexts).toEqual(['focus on alpha']);
     expect(events.some((event) => event.type === 'desktop_voice_transcript_segment' && event.text === 'check the build')).toBe(true);
     const audioEvent = events.find((event) => event.type === 'desktop_voice_speak_audio');
     expect(audioEvent?.audioBase64).toBe(Buffer.from('assistant-wav').toString('base64'));
     expect(events.some((event) => event.type === 'desktop_voice_stop_audio')).toBe(true);
+    expect(events.some((event) => event.type === 'desktop_voice_native_mic_start')).toBe(true);
   });
 
   test('starts browser WebRTC realtime capture when available', async () => {

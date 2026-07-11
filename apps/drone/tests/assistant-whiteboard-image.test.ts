@@ -56,6 +56,10 @@ describe('assistant whiteboard images', () => {
         }),
       });
       installFakeRuntime(service);
+      const history: any[] = [];
+      service.setRealtimeHistoryDelegate(async (_threadId, message) => {
+        history.push(message);
+      });
       service.setRealtimeToolDelegate({
         catalog: async () => [{
           name: 'drone_hub__capture_whiteboard',
@@ -84,9 +88,7 @@ describe('assistant whiteboard images', () => {
       expect(result.output).toContain('whiteboardId');
       expect((result.result as any).whiteboardId).toBe('main');
 
-      const snapshot = await service.threadSnapshot(config.threadId);
-      const thread = snapshot.threads.find((item) => item.id === config.threadId) as any;
-      const toolResult = thread.messages.find((message: any) => message.role === 'toolResult' && message.toolCallId === 'call_capture_whiteboard');
+      const toolResult = history.find((message: any) => message.role === 'toolResult' && message.toolCallId === 'call_capture_whiteboard');
       expect(toolResult.content.some((part: any) => part.type === 'image' && part.mimeType === 'image/png' && part.data === pngData)).toBe(true);
     });
   });

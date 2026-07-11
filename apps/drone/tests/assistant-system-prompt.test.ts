@@ -76,6 +76,7 @@ describe('assistant system prompt settings', () => {
       const reloaded = makeAssistantService();
       const snapshot = await reloaded.createThread({ title: 'default model thread' });
       const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
+      expect(snapshot.defaultModel).toEqual({ provider: 'codex', model: 'gpt-5.5' });
       expect(thread.provider).toBe('codex');
       expect(thread.model).toBe('gpt-5.5');
     });

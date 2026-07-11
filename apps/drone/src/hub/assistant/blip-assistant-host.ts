@@ -1,4 +1,5 @@
-import type { AgentTool } from '@mariozechner/pi-agent-core';
+import crypto from 'node:crypto';
+import type { AgentMessage, AgentTool } from '@mariozechner/pi-agent-core';
 import type { BlipPromptInput, BlipRuntimeEvent, BlipSessionHandle, BlipToolPreflight, BlipToolProvider } from '@blip/core';
 import type { BlipHistoryPage } from '@blip/protocol';
 
@@ -27,7 +28,10 @@ export class BlipAssistantHost {
   private readonly loadedTools = new Map<string, AgentTool<any>[]>();
   private readonly loadedConfigurations = new Map<string, BlipAssistantThreadConfiguration>();
 
-  constructor(private readonly configuration: (threadId: string) => Promise<BlipAssistantThreadConfiguration>) {}
+  constructor(
+    private readonly configuration: (threadId: string) => Promise<BlipAssistantThreadConfiguration>,
+    private readonly eventObserver?: (threadId: string, event: BlipRuntimeEvent) => Promise<void> | void,
+  ) {}
 
   subscribeEvents(threadId: string, sink: (event: BlipRuntimeEvent) => Promise<void> | void): () => void {
     const sinks = this.eventSinks.get(threadId) ?? new Set();
@@ -65,6 +69,32 @@ export class BlipAssistantHost {
         void this.disposeConfiguration(threadId);
       }
     }
+  }
+
+  async appendExternalMessage(threadId: string, message: AgentMessage): Promise<void> {
+    const handle = await this.handle(threadId);
+    await this.repository.appendMessage(handle.state, message);
+    await this.publishEvent(threadId, {
+      version: 1,
+      eventId: crypto.randomUUID(),
+      type: 'transcript_changed',
+      sessionId: handle.state.id,
+      timestamp: new Date().toISOString(),
+      role: message.role,
+    });
+  }
+
+  async interruptThreadWithPrompt(threadId: string, prompt: BlipPromptInput): Promise<void> {
+    const handle = await this.handle(threadId);
+    if (handle.running) {
+      handle.abort();
+      await handle.waitForIdle().catch(() => {});
+    }
+    await this.promptThread(threadId, prompt);
+  }
+
+  abortThread(threadId: string): void {
+    this.handles.get(threadId)?.abort();
   }
 
   historyPage(threadId: string, input?: { before?: number; limit?: number }): Promise<BlipHistoryPage> {
@@ -140,6 +170,11 @@ export class BlipAssistantHost {
   }
 
   private async publishEvent(threadId: string, event: BlipRuntimeEvent): Promise<void> {
+    try {
+      await this.eventObserver?.(threadId, event);
+    } catch {
+      // Observability and UI refreshes must not fail or interrupt the agent run.
+    }
     for (const sink of this.eventSinks.get(threadId) ?? []) {
       try {
         await sink(event);

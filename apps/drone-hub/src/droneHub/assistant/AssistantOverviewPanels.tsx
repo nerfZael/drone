@@ -128,7 +128,6 @@ export function AssistantOverviewOverlay({
   overview,
   loading,
   error,
-  autoEnabled,
   canRerun,
   onClose,
   onRerun,
@@ -137,7 +136,6 @@ export function AssistantOverviewOverlay({
   overview: AssistantThreadOverviewResult | null;
   loading: boolean;
   error: string | null;
-  autoEnabled: boolean;
   canRerun: boolean;
   onClose: () => void;
   onRerun: () => void;
@@ -164,9 +162,7 @@ export function AssistantOverviewOverlay({
             <div className="mt-0.5 truncate text-[10px] text-[var(--muted-dim)]">
               {generatedAt
                 ? `${overview?.cached ? 'Cached' : overview?.inputReused ? 'Rerun' : 'Generated'} ${generatedAt}`
-                : autoEnabled
-                  ? 'Auto overview is on'
-                  : 'No overview generated yet'}
+                : 'No overview generated yet'}
             </div>
           </div>
           <div className="flex flex-shrink-0 items-center gap-1.5">

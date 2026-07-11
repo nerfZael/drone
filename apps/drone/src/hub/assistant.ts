@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import type { AgentMessage } from '@mariozechner/pi-agent-core';
 
 import { loadAssistantState, saveAssistantState } from '../host/assistant-store';
 import { loadRegistry } from '../host/registry';
@@ -294,6 +295,7 @@ export type AssistantSnapshot = {
   chatIdleSubscriptions: AssistantChatIdleSubscription[];
   pendingApprovals: AssistantApproval[];
   models: AssistantModelOption[];
+  defaultModel: AssistantDefaultModel;
   availableTools: AssistantToolSummary[];
   accessScope: AssistantAccessScope;
   runningModels: Record<string, AssistantRunModel>;
@@ -1434,6 +1436,7 @@ export class HubAssistantService {
   private textPromptDelegate: ((threadId: string, prompt: string, source: AssistantVoiceSource | null) => Promise<void>) | null = null;
   private realtimeToolCatalogDelegate: ((threadId: string) => Promise<any[]>) | null = null;
   private realtimeToolExecuteDelegate: ((threadId: string, callId: string, toolName: string, args: any, signal?: AbortSignal) => Promise<any>) | null = null;
+  private realtimeHistoryAppendDelegate: ((threadId: string, message: AgentMessage) => Promise<void>) | null = null;
 
   constructor(private readonly tools: AssistantToolCallbacks) {}
 
@@ -1447,6 +1450,17 @@ export class HubAssistantService {
   }): void {
     this.realtimeToolCatalogDelegate = input.catalog;
     this.realtimeToolExecuteDelegate = input.execute;
+  }
+
+  setRealtimeHistoryDelegate(delegate: (threadId: string, message: AgentMessage) => Promise<void>): void {
+    this.realtimeHistoryAppendDelegate = delegate;
+  }
+
+  async notifyCanonicalHistoryChanged(threadId: string): Promise<void> {
+    await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    thread.updatedAt = nowIso();
+    this.emitChange('canonical_history_changed', thread.id);
   }
 
   subscribeChanges(listener: (event: AssistantChangeEvent) => void): () => void {
@@ -1758,6 +1772,7 @@ export class HubAssistantService {
       chatIdleSubscriptions: [],
       pendingApprovals: this.pendingApprovals(),
       models: await this.modelOptions(),
+      defaultModel: { ...this.defaultModelSelection },
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(this.activeAccessScope()),
       runningModels: {},
@@ -1782,6 +1797,7 @@ export class HubAssistantService {
       chatIdleSubscriptions: [],
       pendingApprovals: this.pendingApprovals(),
       models: await this.modelOptions(),
+      defaultModel: { ...this.defaultModelSelection },
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       runningModels: {},
@@ -2511,13 +2527,12 @@ export class HubAssistantService {
     const role: AssistantRealtimeMessageRole = roleRaw === 'assistant' ? 'assistant' : 'user';
     const text = cleanOptionalString(input.text);
     if (!text) return { ok: true, threadId: thread.id, accepted: false };
+    if (!this.realtimeHistoryAppendDelegate) throw new Error('Blip assistant history is not ready');
 
     this.clearThreadStreamingMessages(thread.id, role);
-    thread.messages.push(sanitizeMessage(makeAssistantTextMessage(role, text)));
-    thread.messages = thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
+    await this.realtimeHistoryAppendDelegate(thread.id, makeAssistantTextMessage(role, text));
     if (thread.title === DEFAULT_THREAD_TITLE || thread.title === 'Voice thread' || thread.title === 'Realtime thread' || thread.title === 'Desktop realtime voice thread' || thread.title === 'Desktop realtime thread') {
-      const firstUser = thread.messages.find((message) => message?.role === 'user');
-      if (firstUser) thread.title = titleFromPrompt(textFromMessage(firstUser));
+      if (role === 'user') thread.title = titleFromPrompt(text);
     }
     thread.updatedAt = nowIso();
     this.activeThreadId = thread.id;
@@ -2572,22 +2587,12 @@ export class HubAssistantService {
 
     const toolCallId = cleanOptionalString(input.toolCallId) || makeAssistantId('realtime-tool');
     const args = parseAssistantRealtimeToolArguments(input.arguments);
-    const alreadyHasToolCall = thread.messages.some((message) =>
-      message?.role === 'assistant' &&
-      Array.isArray(message?.content) &&
-      message.content.some((part: any) => part?.type === 'toolCall' && String(part?.id ?? '') === toolCallId),
-    );
-    if (!alreadyHasToolCall) {
-      thread.messages.push(sanitizeMessage(makeAssistantToolCallMessage(toolCallId, toolName, args)));
-      thread.messages = thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
-      thread.updatedAt = nowIso();
-      await this.persist();
-    }
+    if (!this.realtimeHistoryAppendDelegate) throw new Error('Blip assistant history is not ready');
+    await this.realtimeHistoryAppendDelegate(thread.id, makeAssistantToolCallMessage(toolCallId, toolName, args));
 
     try {
       const result = await this.realtimeToolExecuteDelegate(thread.id, toolCallId, toolName, args, input.signal);
-      thread.messages.push(sanitizeMessage(makeAssistantToolResultMessage(toolCallId, toolName, result)));
-      thread.messages = thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
+      await this.realtimeHistoryAppendDelegate(thread.id, makeAssistantToolResultMessage(toolCallId, toolName, result));
       thread.updatedAt = nowIso();
       await this.persist();
       return {
@@ -2600,8 +2605,7 @@ export class HubAssistantService {
       };
     } catch (error: any) {
       const message = cleanOptionalString(error?.message ?? error) || `${toolName} failed.`;
-      thread.messages.push(sanitizeMessage(makeAssistantToolResultMessage(toolCallId, toolName, { ok: false, error: message }, message)));
-      thread.messages = thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT);
+      await this.realtimeHistoryAppendDelegate(thread.id, makeAssistantToolResultMessage(toolCallId, toolName, { ok: false, error: message }, message));
       thread.updatedAt = nowIso();
       thread.error = message;
       await this.persist();
@@ -2809,6 +2813,7 @@ export class HubAssistantService {
       chatIdleSubscriptions: [],
       pendingApprovals: this.pendingApprovals(),
       models: [],
+      defaultModel: { ...this.defaultModelSelection },
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       runningModels: {},

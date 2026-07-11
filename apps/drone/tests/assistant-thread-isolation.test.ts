@@ -137,7 +137,7 @@ describe('assistant thread isolation', () => {
         const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
 
         expect(thread.provider).toBe('openai');
-        expect(thread.model).toBe('gpt-5.5');
+        expect(thread.model).toBe('gpt-5.6-sol');
         expect(thread.thinkingLevel).toBe('off');
       } finally {
         if (previousCodexAuthFile == null) delete process.env.DRONE_HUB_CODEX_AUTH_FILE;
@@ -385,10 +385,14 @@ describe('assistant thread isolation', () => {
 
 
 
-  test('realtime transcripts are appended as normal assistant thread messages', async () => {
+  test('realtime transcripts are delegated to canonical Blip history', async () => {
     await withTempDroneDataDir('assistant-realtime-transcripts-', async () => {
       const service = makeService();
       installFakeRuntime(service, {});
+      const history: any[] = [];
+      service.setRealtimeHistoryDelegate(async (_threadId, message) => {
+        history.push(message);
+      });
 
       const config = await service.ensureLatestVoiceThread({ title: 'Desktop realtime thread' });
       await service.appendRealtimeMessage({ threadId: config.threadId, role: 'user', text: 'show me the drone list' });
@@ -396,9 +400,10 @@ describe('assistant thread isolation', () => {
 
       const snapshot = await service.threadSnapshot(config.threadId);
       const thread = snapshot.threads.find((item) => item.id === config.threadId) as any;
-      expect(thread.messages.map((message: any) => message.role)).toEqual(['user', 'assistant']);
-      expect(thread.messages[0].content[0].text).toBe('show me the drone list');
-      expect(thread.messages[1].content[0].text).toBe('I can do that.');
+      expect(history.map((message) => message.role)).toEqual(['user', 'assistant']);
+      expect(history[0].content[0].text).toBe('show me the drone list');
+      expect(history[1].content[0].text).toBe('I can do that.');
+      expect(thread.messages).toHaveLength(0);
       expect(thread.title).toBe('show me the drone list');
     });
   });
@@ -407,6 +412,10 @@ describe('assistant thread isolation', () => {
     await withTempDroneDataDir('assistant-realtime-streaming-transcripts-', async () => {
       const service = makeService();
       installFakeRuntime(service, {});
+      const history: any[] = [];
+      service.setRealtimeHistoryDelegate(async (_threadId, message) => {
+        history.push(message);
+      });
 
       const config = await service.ensureLatestVoiceThread({ title: 'Desktop realtime thread' });
       await service.updateRealtimeStreamingMessage({ threadId: config.threadId, role: 'user', text: 'show me' });
@@ -419,9 +428,10 @@ describe('assistant thread isolation', () => {
       const final = await service.threadSnapshot(config.threadId);
       expect((final as any).streamingMessage).toBeUndefined();
       const thread = final.threads.find((item) => item.id === config.threadId) as any;
-      expect(thread.messages).toHaveLength(1);
-      expect(thread.messages[0].role).toBe('user');
-      expect(thread.messages[0].content[0].text).toBe('show me the drones');
+      expect(history).toHaveLength(1);
+      expect(history[0].role).toBe('user');
+      expect(history[0].content[0].text).toBe('show me the drones');
+      expect(thread.messages).toHaveLength(0);
     });
   });
 
@@ -429,6 +439,10 @@ describe('assistant thread isolation', () => {
     await withTempDroneDataDir('assistant-realtime-dual-streaming-transcripts-', async () => {
       const service = makeService();
       installFakeRuntime(service, {});
+      const history: any[] = [];
+      service.setRealtimeHistoryDelegate(async (_threadId, message) => {
+        history.push(message);
+      });
 
       const config = await service.ensureLatestVoiceThread({ title: 'Desktop realtime thread' });
       await service.updateRealtimeStreamingMessage({ threadId: config.threadId, role: 'user', text: 'count to ten' });
@@ -446,13 +460,14 @@ describe('assistant thread isolation', () => {
       const assistantFinal = await service.threadSnapshot(config.threadId);
       expect((assistantFinal as any).streamingMessages).toBeUndefined();
       const thread = assistantFinal.threads.find((item) => item.id === config.threadId) as any;
-      expect(thread.messages.map((message: any) => message.role)).toEqual(['user', 'assistant']);
+      expect(history.map((message) => message.role)).toEqual(['user', 'assistant']);
+      expect(thread.messages).toHaveLength(0);
     });
   });
 
 
 
-  test('defaults new assistant threads to Codex GPT-5.5 instant when Codex is connected', async () => {
+  test('defaults new assistant threads to Codex GPT-5.6 Sol with no reasoning when Codex is connected', async () => {
     await withTempDroneDataDir('assistant-default-codex-', async (droneDataDir) => {
       const previousCodexAuthFile = process.env.DRONE_HUB_CODEX_AUTH_FILE;
       const authPath = path.join(droneDataDir, 'codex-auth.json');
@@ -469,7 +484,7 @@ describe('assistant thread isolation', () => {
         const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
 
         expect(thread.provider).toBe('codex');
-        expect(thread.model).toBe('gpt-5.5');
+        expect(thread.model).toBe('gpt-5.6-sol');
         expect(thread.thinkingLevel).toBe('off');
       } finally {
         if (previousCodexAuthFile == null) delete process.env.DRONE_HUB_CODEX_AUTH_FILE;
@@ -506,7 +521,7 @@ describe('assistant thread isolation', () => {
     });
   });
 
-  test('offers the same GPT-5.5 assistant model choices for Codex as OpenAI', async () => {
+  test('offers the same GPT-5.6 assistant model choices for Codex as OpenAI', async () => {
     await withTempDroneDataDir('assistant-codex-model-options-', async () => {
       const service = makeService();
       installFakeRuntime(service, {});
@@ -515,13 +530,21 @@ describe('assistant thread isolation', () => {
       const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
       const codexOptions = snapshot.models.filter((option) => option.provider === 'codex');
 
-      expect(thread.model).toBe('gpt-5.5');
+      expect(thread.model).toBe('gpt-5.6-sol');
       expect(thread.thinkingLevel).toBe('off');
-      expect(codexOptions.map((option) => `${option.id}:${option.thinkingLevel}`)).toEqual([
-        'gpt-5.5:off',
-        'gpt-5.5:low',
-        'gpt-5.5:medium',
-        'gpt-5.5:high',
+      expect(codexOptions.filter((option) => option.id.startsWith('gpt-5.6-')).map((option) => `${option.id}:${option.thinkingLevel}`)).toEqual([
+        'gpt-5.6-sol:off',
+        'gpt-5.6-sol:low',
+        'gpt-5.6-sol:medium',
+        'gpt-5.6-sol:high',
+        'gpt-5.6-terra:off',
+        'gpt-5.6-terra:low',
+        'gpt-5.6-terra:medium',
+        'gpt-5.6-terra:high',
+        'gpt-5.6-luna:off',
+        'gpt-5.6-luna:low',
+        'gpt-5.6-luna:medium',
+        'gpt-5.6-luna:high',
       ]);
     });
   });

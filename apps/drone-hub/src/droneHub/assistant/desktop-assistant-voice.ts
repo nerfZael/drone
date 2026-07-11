@@ -117,6 +117,54 @@ let currentRealtimeWebRtc: {
   dataChannel: RTCDataChannel;
   audio: HTMLAudioElement;
 } | null = null;
+let currentNativeMic: {
+  stream: MediaStream;
+  context: AudioContext;
+  source: MediaStreamAudioSourceNode;
+  processor: ScriptProcessorNode;
+  sink: GainNode;
+} | null = null;
+let nativeMicStartInFlight = false;
+let nativeMicGeneration = 0;
+let nativePcmUpload = Promise.resolve();
+let nativePcmChunks: Int16Array[] = [];
+let nativePcmSamples = 0;
+
+function resamplePcm16(input: Float32Array, inputRate: number, outputRate = 16_000): Int16Array {
+  const ratio = inputRate / outputRate;
+  const outputLength = Math.max(1, Math.floor(input.length / ratio));
+  const output = new Int16Array(outputLength);
+  for (let index = 0; index < outputLength; index += 1) {
+    const start = Math.floor(index * ratio);
+    const end = Math.max(start + 1, Math.min(input.length, Math.floor((index + 1) * ratio)));
+    let sum = 0;
+    for (let sourceIndex = start; sourceIndex < end; sourceIndex += 1) sum += input[sourceIndex] ?? 0;
+    const sample = Math.max(-1, Math.min(1, sum / Math.max(1, end - start)));
+    output[index] = sample < 0 ? Math.round(sample * 32768) : Math.round(sample * 32767);
+  }
+  return output;
+}
+
+function flushNativePcm(): void {
+  if (nativePcmSamples === 0) return;
+  const samples = new Int16Array(nativePcmSamples);
+  let offset = 0;
+  for (const chunk of nativePcmChunks) {
+    samples.set(chunk, offset);
+    offset += chunk.length;
+  }
+  nativePcmChunks = [];
+  nativePcmSamples = 0;
+  const body = new Uint8Array(samples.buffer);
+  nativePcmUpload = nativePcmUpload.catch(() => {}).then(async () => {
+    const response = await fetch('/api/assistant/desktop-voice/realtime/pcm', {
+      method: 'POST',
+      headers: { 'content-type': 'audio/pcm;rate=16000;channels=1' },
+      body,
+    });
+    if (!response.ok && response.status !== 409) throw new Error(`Native microphone upload failed (${response.status})`);
+  }).catch((error: any) => reportDesktopVoiceBrowserEvent('native-mic-upload-failed', error?.message ?? String(error)));
+}
 
 function reportDesktopVoiceBrowserEvent(event: string, message?: string): void {
   if (typeof window === 'undefined') return;
@@ -238,6 +286,72 @@ function stopDesktopVoiceWebRtc(): void {
     session.audio.remove();
   } catch {
     // Ignore audio cleanup failures.
+  }
+}
+
+function stopDesktopVoiceNativeMic(): void {
+  nativeMicGeneration += 1;
+  nativeMicStartInFlight = false;
+  flushNativePcm();
+  const session = currentNativeMic;
+  currentNativeMic = null;
+  if (!session) return;
+  session.processor.onaudioprocess = null;
+  try { session.processor.disconnect(); } catch { /* Ignore cleanup failures. */ }
+  try { session.source.disconnect(); } catch { /* Ignore cleanup failures. */ }
+  try { session.sink.disconnect(); } catch { /* Ignore cleanup failures. */ }
+  for (const track of session.stream.getTracks()) track.stop();
+  void session.context.close().catch(() => {});
+}
+
+async function startDesktopVoiceNativeMic(): Promise<void> {
+  if (typeof window === 'undefined' || currentNativeMic || nativeMicStartInFlight) return;
+  if (!navigator.mediaDevices?.getUserMedia) {
+    dispatchAssistantDesktopVoiceStatus({ mode: 'error', message: 'Browser microphone capture is unavailable.' });
+    void requestDesktopVoiceCancelRecording('');
+    return;
+  }
+  const generation = ++nativeMicGeneration;
+  nativeMicStartInFlight = true;
+  let stream: MediaStream | null = null;
+  let context: AudioContext | null = null;
+  try {
+    stopDesktopVoiceSpeech();
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+    if (generation !== nativeMicGeneration) throw new Error('Native microphone setup was cancelled.');
+    const AudioContextCtor = window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) throw new Error('Browser audio processing is unavailable.');
+    context = new AudioContextCtor({ sampleRate: 16_000 });
+    await context.resume();
+    const source = context.createMediaStreamSource(stream);
+    const processor = context.createScriptProcessor(4096, 1, 1);
+    const sink = context.createGain();
+    sink.gain.value = 0;
+    processor.onaudioprocess = (event) => {
+      if (generation !== nativeMicGeneration) return;
+      const pcm = resamplePcm16(event.inputBuffer.getChannelData(0), context?.sampleRate ?? 16_000);
+      nativePcmChunks.push(pcm);
+      nativePcmSamples += pcm.length;
+      if (nativePcmSamples >= 3_200) flushNativePcm();
+    };
+    source.connect(processor);
+    processor.connect(sink);
+    sink.connect(context.destination);
+    currentNativeMic = { stream, context, source, processor, sink };
+    reportDesktopVoiceBrowserEvent('native-mic-ready');
+  } catch (error: any) {
+    for (const track of stream?.getTracks() ?? []) track.stop();
+    if (context) void context.close().catch(() => {});
+    if (generation === nativeMicGeneration) {
+      const message = error?.message ?? String(error);
+      reportDesktopVoiceBrowserEvent('native-mic-failed', message);
+      dispatchAssistantDesktopVoiceStatus({ mode: 'error', message });
+      void requestDesktopVoiceCancelRecording('');
+    }
+  } finally {
+    if (generation === nativeMicGeneration) nativeMicStartInFlight = false;
   }
 }
 
@@ -591,6 +705,7 @@ async function requestDesktopVoiceRealtime(enabled: boolean): Promise<void> {
 export function dispatchAssistantDesktopVoiceStop(): void {
   if (typeof window === 'undefined') return;
   stopDesktopVoiceSpeech();
+  stopDesktopVoiceNativeMic();
   void requestDesktopVoiceStop();
 }
 
@@ -598,6 +713,7 @@ export function dispatchAssistantDesktopVoiceOff(): void {
   if (typeof window === 'undefined') return;
   stopDesktopVoiceSpeech();
   stopDesktopVoiceWebRtc();
+  stopDesktopVoiceNativeMic();
   void requestDesktopVoiceOff();
 }
 
@@ -663,6 +779,15 @@ export function dispatchAssistantDesktopVoiceStatus(status: DesktopAssistantVoic
   if (typeof window === 'undefined') return;
   if (status.mode === 'off' || status.mode === 'sleeping') stopDesktopVoiceSpeech();
   if (status.mode !== 'recording') stopDesktopVoiceWebRtc();
+  if (status.mode !== 'recording' || status.realtime?.provider !== 'native') stopDesktopVoiceNativeMic();
+  if (
+    status.mode === 'recording' &&
+    status.realtime?.enabled === true &&
+    status.realtime.ready === true &&
+    status.realtime.provider === 'native' &&
+    !currentNativeMic &&
+    !nativeMicStartInFlight
+  ) void startDesktopVoiceNativeMic();
   const webRtcSessionId = String(status.realtime?.webRtcSessionId ?? '').trim();
   if (
     status.mode === 'recording' &&
@@ -776,6 +901,12 @@ export function subscribeAssistantDesktopVoiceStatus(listener: (status: DesktopA
     nextSource.addEventListener('desktop_voice_webrtc_stop', () => {
       stopDesktopVoiceWebRtc();
     });
+    nextSource.addEventListener('desktop_voice_native_mic_start', () => {
+      void startDesktopVoiceNativeMic();
+    });
+    nextSource.addEventListener('desktop_voice_native_mic_stop', () => {
+      stopDesktopVoiceNativeMic();
+    });
     nextSource.onopen = () => {
       reconnectAttempt = 0;
     };
@@ -821,5 +952,6 @@ export function subscribeAssistantDesktopVoiceStatus(listener: (status: DesktopA
     window.removeEventListener(ASSISTANT_DESKTOP_VOICE_STATUS_EVENT, handler);
     source?.close();
     source = null;
+    stopDesktopVoiceNativeMic();
   };
 }
