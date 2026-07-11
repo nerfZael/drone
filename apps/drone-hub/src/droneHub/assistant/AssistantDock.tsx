@@ -54,7 +54,7 @@ import {
   RepeatedToolActivityRow,
   ToolActivityRow,
 } from './AssistantTranscript';
-import { ApprovalCard, QueuedPromptRow } from './AssistantWorkflowCards';
+import { ApprovalCard } from './AssistantWorkflowCards';
 import {
   assistantThreadStatusLabel,
   assistantThreadStatusTone,
@@ -103,7 +103,6 @@ import type {
   AssistantPanelMode,
   AssistantPromptDeliveryMode,
   AssistantProviderId,
-  AssistantQueuedPrompt,
   AssistantRunModel,
   AssistantScopeDraft,
   AssistantScopeDrone,
@@ -398,7 +397,6 @@ export function AssistantDock() {
   const [scopeSyncBusy, setScopeSyncBusy] = React.useState(false);
   const [droneNameById, setDroneNameById] = React.useState<AssistantDroneNameMap>({});
   const [approvalBusyId, setApprovalBusyId] = React.useState<string | null>(null);
-  const [queuedCancelBusyId, setQueuedCancelBusyId] = React.useState<string | null>(null);
   const [assistantStopBusy, setAssistantStopBusy] = React.useState(false);
   const [toolsPanelOpen, setToolsPanelOpen] = React.useState(false);
   const [enabledToolDraftNames, setEnabledToolDraftNames] = React.useState<string[]>([]);
@@ -606,18 +604,10 @@ export function AssistantDock() {
     return [...messages, ...visibleStreaming];
   }, [activeThread?.messages, blipSession.messages, blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages, voiceEnabled]);
   const visibleItems = React.useMemo(() => {
-    const items = renderItemsFromMessages(visibleMessages);
-    for (const prompt of activeThread?.queuedPrompts ?? []) {
-      items.push({ type: 'queued', key: `queued:${prompt.id}`, prompt });
-    }
-    return items;
-  }, [activeThread?.queuedPrompts, visibleMessages]);
+    return renderItemsFromMessages(visibleMessages);
+  }, [visibleMessages]);
   const latestActivityItemKey = React.useMemo(() => {
-    for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
-      const item = visibleItems[index];
-      if (item.type !== 'queued') return item.key;
-    }
-    return '';
+    return visibleItems[visibleItems.length - 1]?.key ?? '';
   }, [visibleItems]);
   const streamingAssistantSourceIndex = React.useMemo(() => {
     const streamingMessages = voiceEnabled
@@ -1727,27 +1717,6 @@ export function AssistantDock() {
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
-  const cancelQueuedPrompt = React.useCallback(async (prompt: AssistantQueuedPrompt) => {
-    if (!activeThread) return;
-    const requestSeq = beginSnapshotMutation();
-    setQueuedCancelBusyId(prompt.id);
-    try {
-      const next = await requestJson<AssistantSnapshot>(
-        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/queued/${encodeURIComponent(prompt.id)}`,
-        { method: 'DELETE' },
-      );
-      if (!snapshotMutationCurrent(requestSeq)) return;
-      applySnapshot(
-        next,
-        activeThread.id,
-      );
-    } catch (err: any) {
-      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
-    } finally {
-      setQueuedCancelBusyId(null);
-    }
-  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
-
   const resolveApproval = React.useCallback(async (approval: AssistantApproval, approved: boolean) => {
     if (!activeThread) return;
     const requestSeq = beginSnapshotMutation();
@@ -2301,16 +2270,8 @@ export function AssistantDock() {
                       />
                     ) : item.type === 'tool' ? (
                       <ToolActivityRow key={item.key} call={item.call} result={item.result} droneNameById={droneNameById} />
-                    ) : item.type === 'toolGroup' ? (
-                      <RepeatedToolActivityRow key={item.key} items={item.items} />
                     ) : (
-                      <QueuedPromptRow
-                        key={item.key}
-                        prompt={item.prompt}
-                        modelLabel={modelSelectionLabel({ provider: item.prompt.provider, model: item.prompt.model, thinkingLevel: item.prompt.thinkingLevel }, modelOptions)}
-                        busy={queuedCancelBusyId === item.prompt.id}
-                        onCancel={() => void cancelQueuedPrompt(item.prompt)}
-                      />
+                      <RepeatedToolActivityRow key={item.key} items={item.items} />
                     ),
                   )
                 )}

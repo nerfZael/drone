@@ -1,54 +1,7 @@
 import React from 'react';
 
 import { MarkdownMessage } from '../chat/MarkdownMessage';
-import type { AssistantApproval, AssistantQueuedPrompt } from './assistant-types';
-
-export function QueuedPromptRow({
-  prompt,
-  modelLabel,
-  busy,
-  onCancel,
-}: {
-  prompt: AssistantQueuedPrompt;
-  modelLabel: string;
-  busy: boolean;
-  onCancel: () => void;
-}) {
-  const asap = prompt.deliveryMode === 'asap';
-  return (
-    <div className="px-3 py-2 bg-[rgba(255,255,255,.018)] border-y border-[var(--border-subtle)]">
-      <div className="mb-1 flex items-center justify-between gap-2">
-        <div
-          className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          {asap ? 'ASAP queue' : 'Queued'}
-        </div>
-        <div className="flex min-w-0 items-center gap-1.5">
-          <span
-            className="max-w-[180px] truncate rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)]"
-            title={`Queued model: ${modelLabel}`}
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            {modelLabel}
-          </span>
-          <button
-            type="button"
-            disabled={busy}
-            onClick={onCancel}
-            className="h-6 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--red)] disabled:opacity-50"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            Cancel
-          </button>
-        </div>
-      </div>
-      <div className="whitespace-pre-wrap break-words text-[12px] text-[var(--fg-secondary)]">
-        {prompt.prompt}
-      </div>
-    </div>
-  );
-}
+import type { AssistantApproval } from './assistant-types';
 
 function formatAgentForApproval(raw: any): string {
   if (!raw || typeof raw !== 'object') return '';

@@ -375,6 +375,10 @@ export function createDronePendingPromptStore(deps: {
             regAny.drones[droneId] = drone;
           }
         });
+        // Registry writes can refresh the SQLite chat projection. Delete once
+        // more after updating the legacy mirror so that refresh cannot revive
+        // the prompt we just cancelled.
+        cancelQueuedPendingPromptInStore({ droneId, chatName, id: promptId });
         return { status: 'cancelled', pendingState: 'queued' };
       }
       if (storeCancel.state) return { status: 'already-submitted', pendingState: storeCancel.state as PendingPromptState };

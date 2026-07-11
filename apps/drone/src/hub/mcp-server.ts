@@ -1517,7 +1517,18 @@ function registerTools(server: McpServer) {
 export type DroneHubMcpServerContext = {
   principal: McpTokenIdentity;
   correlationId?: string;
+  allowedDroneRefs?: string[];
+  allowedWriteDroneRefs?: string[];
+  allowedDroneIds?: string[];
 };
+
+const WRITE_SCOPED_TOOLS = new Set([
+  'set_drone_group',
+  'rename_drones',
+  'reorder_drones',
+  'create_chat',
+  'send_message',
+]);
 
 const DRONE_PRINCIPAL_TOOLS = new Set([
   'list_drones',
@@ -1540,10 +1551,10 @@ const DRONE_PRINCIPAL_TOOLS = new Set([
 ]);
 
 function assertedDroneRefs(args: any): string[] {
-  const direct = [args?.drone, args?.droneId, args?.targetDroneId, args?.id]
+  const direct = [args?.drone, args?.droneId, args?.targetDroneId, args?.id, args?.beforeDrone, args?.afterDrone]
     .map((value) => cleanString(value))
     .filter(Boolean);
-  const arrays = [args?.drones, args?.droneIds, args?.targets]
+  const arrays = [args?.drones, args?.droneIds, args?.targets, args?.renames]
     .flatMap((value) => Array.isArray(value) ? value : [])
     .map((value: any) => cleanString(value?.drone || value?.droneId || value?.id || value))
     .filter(Boolean);
@@ -1552,6 +1563,14 @@ function assertedDroneRefs(args: any): string[] {
 
 export function authorizeDroneHubMcpTool(context: DroneHubMcpServerContext, tool: string, args: any): void {
   const principal = context.principal;
+  if (context.allowedDroneRefs) {
+    const scope = WRITE_SCOPED_TOOLS.has(tool) ? context.allowedWriteDroneRefs ?? [] : context.allowedDroneRefs;
+    const allowed = new Set(scope.map((value) => cleanString(value)).filter(Boolean));
+    const refs = assertedDroneRefs(args);
+    if (refs.some((ref) => !allowed.has(ref))) {
+      throw new Error(`MCP principal ${principal.name} is not authorized for the requested drone`);
+    }
+  }
   if (principal.kind === 'legacy' || principal.kind === 'host') return;
   const scopedDroneId = cleanString(principal.droneId);
   if (!scopedDroneId || !DRONE_PRINCIPAL_TOOLS.has(tool)) {
@@ -1566,11 +1585,15 @@ export function authorizeDroneHubMcpTool(context: DroneHubMcpServerContext, tool
 
 function projectMcpResultForPrincipal(context: DroneHubMcpServerContext, tool: string, result: any): any {
   const principal = context.principal;
-  if (principal.kind !== 'drone' || tool !== 'list_drones') return result;
+  if (tool !== 'list_drones') return result;
   const structured = result?.structuredContent;
   if (!structured || typeof structured !== 'object') return result;
+  const allowedIds = context.allowedDroneIds ? new Set(context.allowedDroneIds.map((value) => cleanString(value)).filter(Boolean)) : null;
+  if (principal.kind !== 'drone' && !allowedIds) return result;
   const drones = Array.isArray(structured.drones)
-    ? structured.drones.filter((drone: any) => cleanString(drone?.id) === principal.droneId)
+    ? structured.drones.filter((drone: any) => principal.kind === 'drone'
+      ? cleanString(drone?.id) === principal.droneId
+      : allowedIds!.has(cleanString(drone?.id)))
     : [];
   const next = { ...structured, count: drones.length, drones };
   return toolResult(next);
@@ -1591,6 +1614,9 @@ export function createDroneHubMcpServer(input?: Partial<DroneHubMcpServerContext
   const context: DroneHubMcpServerContext = {
     principal: input?.principal ?? { kind: 'legacy', tokenId: 'legacy', name: 'Legacy Drone Hub MCP token' },
     ...(input?.correlationId ? { correlationId: input.correlationId } : {}),
+    ...(input?.allowedDroneRefs ? { allowedDroneRefs: input.allowedDroneRefs } : {}),
+    ...(input?.allowedWriteDroneRefs ? { allowedWriteDroneRefs: input.allowedWriteDroneRefs } : {}),
+    ...(input?.allowedDroneIds ? { allowedDroneIds: input.allowedDroneIds } : {}),
   };
   const server = new McpServer(
     { name: 'Drone Hub MCP Server', version: '0.1.0' },

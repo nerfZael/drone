@@ -74,6 +74,8 @@ describe("Embedded Blip session", () => {
     expect(secondState.id).toBe(firstId);
     expect(events.filter((event) => event.type === "session_started")).toHaveLength(1);
     expect(events.filter((event) => event.type === "session_finished")).toHaveLength(2);
+    expect(new Set(events.map((event) => event.eventId)).size).toBe(events.length);
+    expect(events.filter((event) => event.type === "transcript_changed" && event.role === "assistant")).toHaveLength(2);
     expect(observed.map((item) => item.systemPrompt)).toEqual([
       "Injected host prompt",
       "Injected host prompt",

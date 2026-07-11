@@ -26,9 +26,10 @@ function nowIso(): string {
 function eventBase(
   sessionId: string,
   turnId?: string,
-): Pick<BlipRuntimeEvent, "version" | "sessionId" | "timestamp"> & { turnId?: string } {
+): Pick<BlipRuntimeEvent, "version" | "eventId" | "sessionId" | "timestamp"> & { turnId?: string } {
   return {
     version: 1,
+    eventId: randomUUID(),
     sessionId,
     timestamp: nowIso(),
     ...(turnId ? { turnId } : {}),

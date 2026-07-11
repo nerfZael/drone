@@ -164,6 +164,38 @@ describe('assistant thread isolation', () => {
     });
   });
 
+  test('auto approve does not bypass assistant write scope', async () => {
+    await withTempDroneDataDir('assistant-auto-approve-scope-', async () => {
+      await markDroneReady({ id: 'drone-a', name: 'Allowed' });
+      await markDroneReady({ id: 'drone-b', name: 'Denied' });
+      const service = new HubAssistantService({
+        listDrones: async () => [
+          { id: 'drone-a', name: 'Allowed', group: null, runtime: 'container', repoPath: '', status: 'ready', chats: ['default'] },
+          { id: 'drone-b', name: 'Denied', group: null, runtime: 'container', repoPath: '', status: 'ready', chats: ['default'] },
+        ],
+      });
+      const created = await service.createThread({ title: 'scope' });
+      const threadId = created.activeThreadId;
+      await service.updateAccessScope({ threadId, readMode: 'selected', writeMode: 'selected', droneIds: ['drone-a'] });
+      await service.updateThread(threadId, { autoApprove: true });
+
+      const denied = await service.preflightBlipTool(threadId, 'message_drone', 'call-denied', {
+        droneId: 'drone-b',
+        chatName: 'default',
+        message: 'no',
+      });
+      const allowed = await service.preflightBlipTool(threadId, 'message_drone', 'call-allowed', {
+        droneId: 'drone-a',
+        chatName: 'default',
+        message: 'yes',
+      });
+
+      expect(denied?.block).toBe(true);
+      expect(denied?.reason).toContain('scope does not include');
+      expect(allowed).toBeUndefined();
+    });
+  });
+
   test('compact assistant snapshots omit archived thread message bodies', async () => {
     await withTempDroneDataDir('assistant-compact-snapshot-', async () => {
       const service = makeService();
@@ -223,6 +255,7 @@ describe('assistant thread isolation', () => {
 
   test('approval pending snapshots omit inactive thread message bodies', async () => {
     await withTempDroneDataDir('assistant-approval-compact-snapshot-', async () => {
+      await markDroneReady({ id: 'drone-1', name: 'Approval drone' });
       const service = makeService();
       installFakeRuntime(service, {});
 
@@ -230,6 +263,7 @@ describe('assistant thread isolation', () => {
       const archivedThreadId = archived.activeThreadId;
       const active = await service.createThread({ title: 'approval' });
       const activeThreadId = active.activeThreadId;
+      await service.updateAccessScope({ threadId: activeThreadId, readMode: 'all', writeMode: 'all', droneIds: [] });
       const largeText = 'approval-large-payload'.repeat(20_000);
       const activeText = 'active approval context';
       const threads = (service as any).threads as any[];
@@ -471,8 +505,6 @@ describe('assistant thread isolation', () => {
       expect(context.appView).toBe('workspace');
     });
   });
-
-
 
   test('offers the same GPT-5.5 assistant model choices for Codex as OpenAI', async () => {
     await withTempDroneDataDir('assistant-codex-model-options-', async () => {

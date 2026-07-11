@@ -38,17 +38,21 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
   const [historyError, setHistoryError] = React.useState<string | null>(null);
   const threadIdRef = React.useRef(threadId);
   const seenEventKeysRef = React.useRef<string[]>([]);
+  const latestHistoryRequestRef = React.useRef(0);
   threadIdRef.current = threadId;
 
   const refreshHistory = React.useCallback(async (options?: { quiet?: boolean }) => {
     if (!enabled || !threadId) return;
+    const requestId = ++latestHistoryRequestRef.current;
     if (!options?.quiet) setHistoryLoading(true);
     try {
       const page = await requestHistory(threadId, { limit: 80 });
       if (threadIdRef.current !== threadId) return;
       setEntries((current) => mergeEntries(current, page.entries));
-      setBeforeCursor(page.page.beforeCursor);
-      setHasOlder(page.page.hasOlder);
+      if (requestId === latestHistoryRequestRef.current) {
+        setBeforeCursor(page.page.beforeCursor);
+        setHasOlder(page.page.hasOlder);
+      }
       setHistoryError(null);
     } catch (error) {
       if (threadIdRef.current === threadId) setHistoryError(error instanceof Error ? error.message : String(error));
@@ -66,6 +70,7 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
     setRunError(null);
     setHistoryError(null);
     seenEventKeysRef.current = [];
+    latestHistoryRequestRef.current += 1;
     if (enabled && threadId) void refreshHistory();
   }, [enabled, refreshHistory, threadId]);
 
@@ -103,7 +108,7 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
       setRunError(event.error);
       return;
     }
-    if (event.type === 'assistant_message' || event.type === 'tool_call_started' || event.type === 'tool_call_completed' || event.type === 'tool_call_failed') {
+    if (event.type === 'assistant_message' || event.type === 'transcript_changed' || event.type === 'tool_call_started' || event.type === 'tool_call_completed' || event.type === 'tool_call_failed') {
       setRunning(true);
       void refreshHistory({ quiet: true });
       return;
@@ -118,15 +123,18 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
 
   const handleStreamEvent = React.useCallback((envelope: BlipPromptStreamEvent | BlipThreadStreamEvent | any) => {
     if (envelope?.type === 'connected' && envelope.version === 1 && envelope.threadId === threadId) {
-      setRunning(envelope.running === true);
+      const nextRunning = envelope.running === true;
+      setRunning(nextRunning);
+      if (!nextRunning) setStreamingText('');
+      void refreshHistory({ quiet: true });
       return;
     }
     if (envelope?.type !== 'blip_event' || envelope.version !== 1 || envelope.threadId !== threadId) return;
-    const eventKey = JSON.stringify(envelope.event);
+    const eventKey = String(envelope.event?.eventId ?? '') || JSON.stringify(envelope.event);
     if (seenEventKeysRef.current.includes(eventKey)) return;
     seenEventKeysRef.current = [...seenEventKeysRef.current.slice(-399), eventKey];
     handleRuntimeEvent(envelope.event);
-  }, [handleRuntimeEvent, threadId]);
+  }, [handleRuntimeEvent, refreshHistory, threadId]);
 
   React.useEffect(() => {
     if (!enabled || !threadId || typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;

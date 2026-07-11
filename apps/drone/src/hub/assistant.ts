@@ -20,9 +20,6 @@ import {
   ASSISTANT_SYSTEM_PROMPT_MAX_CHARS,
   ASSISTANT_OVERVIEW_PROMPT_MAX_CHARS,
   ASSISTANT_OVERVIEW_INPUT_MAX_CHARS,
-  ASSISTANT_PROMPT_MAX_ATTACHMENTS,
-  ASSISTANT_PROMPT_MAX_ATTACHMENT_BYTES_EACH,
-  ASSISTANT_PROMPT_MAX_ATTACHMENT_BYTES_TOTAL,
   CHAT_MESSAGE_DEFAULT_LIMIT,
   CHAT_MESSAGE_MAX_LIMIT,
   CHAT_MESSAGE_RESPONSE_MAX_BYTES,
@@ -164,36 +161,8 @@ type AssistantThread = {
   promptDeliveryMode: AssistantPromptDeliveryMode;
   messageCount?: number;
   messages: any[];
-  queuedPrompts: AssistantQueuedPrompt[];
   status: AssistantThreadStatus;
   error: string | null;
-};
-
-type AssistantQueuedPrompt = {
-  id: string;
-  prompt: string;
-  attachments?: AssistantPromptAttachment[];
-  promptImages?: AssistantPromptImage[];
-  createdAt: string;
-  provider: LlmProviderId;
-  model: string;
-  thinkingLevel: AssistantThinkingLevel;
-  deliveryMode: AssistantPromptDeliveryMode;
-  voiceSource?: AssistantVoiceSource | null;
-};
-
-type AssistantPromptAttachment = {
-  path: string;
-  name: string;
-  mime: string;
-  size: number;
-};
-
-type AssistantPromptImage = {
-  name: string;
-  mime: string;
-  size: number;
-  dataBase64: string;
 };
 
 type AssistantPromptDeliveryMode = 'queue' | 'asap';
@@ -408,26 +377,6 @@ function normalizeAssistantPromptDeliveryMode(raw: unknown): AssistantPromptDeli
 
 function normalizeAssistantAutoApprove(raw: unknown): boolean {
   return raw === true || raw === 1 || String(raw ?? '').trim().toLowerCase() === 'true' || String(raw ?? '').trim() === '1';
-}
-
-function isAssistantImageMime(mimeRaw: unknown): boolean {
-  return String(mimeRaw ?? '').trim().toLowerCase().startsWith('image/');
-}
-
-function isAssistantImagePath(pathRaw: unknown): boolean {
-  return /\.(png|jpe?g|gif|webp|bmp|svg|avif|tiff?)$/i.test(String(pathRaw ?? '').trim());
-}
-
-function promptWithAssistantAttachments(promptRaw: string, attachments: AssistantPromptAttachment[]): string {
-  const prompt = String(promptRaw ?? '').trim();
-  const list = Array.isArray(attachments) ? attachments : [];
-  if (list.length === 0) return prompt;
-  const lines = list.map((attachment, index) => (
-    `${index + 1}. ${attachment.name} (${attachment.mime || 'application/octet-stream'}, ${attachment.size} bytes): ${attachment.path}`
-  ));
-  const label = list.length === 1 ? 'Assistant file attached to this message:' : 'Assistant files attached to this message:';
-  const note = `${label}\n${lines.join('\n')}`;
-  return prompt ? `${prompt}\n\n${note}` : note;
 }
 
 function makeAssistantUserMessage(prompt: string, images: Array<{ data: string; mimeType: string }> = []): any {
@@ -1264,106 +1213,6 @@ function describeAssistantAccessMode(mode: AssistantAccessScope['readMode'], dro
   return `selected drones (${droneIds.join(', ')})`;
 }
 
-function normalizeQueuedPrompt(raw: any, fallback: { provider: LlmProviderId; model: string; thinkingLevel?: AssistantThinkingLevel }): AssistantQueuedPrompt | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const id = cleanOptionalString(raw.id);
-  const prompt = cleanOptionalString(raw.prompt);
-  const attachments = normalizeAssistantPromptAttachments(raw.attachments);
-  const promptImages = normalizeAssistantPromptImages(raw.promptImages);
-  if (!id || (!prompt && attachments.length === 0 && promptImages.length === 0)) return null;
-  const provider = normalizeProvider(raw.provider ?? fallback.provider);
-  const model = allowedModelForProvider(provider, raw.model ?? fallback.model);
-  return {
-    id,
-    prompt,
-    ...(attachments.length > 0 ? { attachments } : {}),
-    ...(promptImages.length > 0 ? { promptImages } : {}),
-    createdAt: cleanOptionalString(raw.createdAt) || nowIso(),
-    provider,
-    model,
-    thinkingLevel: allowedThinkingLevelForModel(provider, model, raw.thinkingLevel ?? fallback.thinkingLevel ?? 'off'),
-    deliveryMode: normalizeAssistantPromptDeliveryMode(raw.deliveryMode),
-    voiceSource: normalizeAssistantVoiceSource(raw.voiceSource),
-  };
-}
-
-function normalizeAssistantPromptAttachments(raw: unknown): AssistantPromptAttachment[] {
-  const list = Array.isArray(raw) ? raw : [];
-  const out: AssistantPromptAttachment[] = [];
-  const seen = new Set<string>();
-  for (const item of list) {
-    if (!item || typeof item !== 'object') continue;
-    const pathValue = cleanOptionalString((item as any).path);
-    if (!pathValue || seen.has(pathValue)) continue;
-    const name = cleanOptionalString((item as any).name) || path.posix.basename(pathValue) || 'attachment';
-    const mime = cleanOptionalString((item as any).mime) || 'application/octet-stream';
-    const sizeNum = Number((item as any).size ?? 0);
-    seen.add(pathValue);
-    out.push({
-      path: pathValue,
-      name,
-      mime,
-      size: Number.isFinite(sizeNum) && sizeNum > 0 ? Math.floor(sizeNum) : 0,
-    });
-  }
-  return out.slice(0, 8);
-}
-
-function base64DecodedByteLengthForAssistantImage(b64Raw: string): number {
-  const b64 = String(b64Raw ?? '').replace(/\s+/g, '');
-  if (!b64) return 0;
-  let padding = 0;
-  if (b64.endsWith('==')) padding = 2;
-  else if (b64.endsWith('=')) padding = 1;
-  const n = Math.floor((b64.length * 3) / 4) - padding;
-  return Number.isFinite(n) && n > 0 ? n : 0;
-}
-
-function normalizeAssistantPromptImages(raw: unknown): AssistantPromptImage[] {
-  const list = Array.isArray(raw) ? raw : [];
-  const out: AssistantPromptImage[] = [];
-  let total = 0;
-  for (const item of list.slice(0, ASSISTANT_PROMPT_MAX_ATTACHMENTS)) {
-    if (!item || typeof item !== 'object') continue;
-    const mime = cleanOptionalString((item as any).mime).toLowerCase();
-    if (!isAssistantImageMime(mime)) continue;
-    const dataBase64 = String((item as any).dataBase64 ?? '').replace(/\s+/g, '');
-    if (!dataBase64 || dataBase64.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(dataBase64)) continue;
-    const declared = Number((item as any).size);
-    const decodedSize = base64DecodedByteLengthForAssistantImage(dataBase64);
-    const size = decodedSize || (Number.isFinite(declared) && declared > 0 ? Math.floor(declared) : 0);
-    if (!size || size > ASSISTANT_PROMPT_MAX_ATTACHMENT_BYTES_EACH) continue;
-    total += size;
-    if (total > ASSISTANT_PROMPT_MAX_ATTACHMENT_BYTES_TOTAL) break;
-    out.push({
-      name: cleanOptionalString((item as any).name) || `pasted-image-${out.length + 1}`,
-      mime,
-      size,
-      dataBase64,
-    });
-  }
-  return out;
-}
-
-function assistantPromptAttachmentDisposition(raw: unknown): 'artifact' | 'prompt' {
-  const value = cleanOptionalString((raw as any)?.disposition ?? (raw as any)?.source).toLowerCase();
-  return value === 'prompt' || value === 'chat' || value === 'inline' ? 'prompt' : 'artifact';
-}
-
-function splitAssistantPromptAttachmentInput(raw: unknown): { artifactUploads: unknown[]; promptImages: AssistantPromptImage[] } {
-  const list = Array.isArray(raw) ? raw : [];
-  if (list.length > ASSISTANT_PROMPT_MAX_ATTACHMENTS) {
-    throw new Error(`too many attachments (max ${ASSISTANT_PROMPT_MAX_ATTACHMENTS})`);
-  }
-  const artifactUploads: unknown[] = [];
-  const promptImageInputs: unknown[] = [];
-  for (const item of list) {
-    if (assistantPromptAttachmentDisposition(item) === 'prompt') promptImageInputs.push(item);
-    else artifactUploads.push(item);
-  }
-  return { artifactUploads, promptImages: normalizeAssistantPromptImages(promptImageInputs) };
-}
-
 function normalizeChatIdleSubscriptionStatus(raw: unknown): AssistantChatIdleSubscriptionStatus {
   const value = String(raw ?? '').trim().toLowerCase();
   if (value === 'fired' || value === 'cancelled' || value === 'expired') return value;
@@ -1438,7 +1287,6 @@ function sanitizeThread(thread: AssistantThread): AssistantThread {
     enabledTools: enabledToolsForVoiceMode(thread.enabledTools, voiceEnabled),
     messageCount: thread.messages.length,
     messages: thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT).map(sanitizeMessage),
-    queuedPrompts: thread.queuedPrompts.map(sanitizeMessage),
     status: thread.status === 'running' || thread.status === 'waiting_for_approval' ? 'idle' : thread.status,
   };
 }
@@ -1465,11 +1313,6 @@ function normalizeThread(
   const updatedAt = String(raw.updatedAt ?? '').trim() || createdAt;
   const messages = Array.isArray(raw.messages) ? raw.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT) : [];
   const thinkingLevel = allowedThinkingLevelForModel(provider, model, raw.thinkingLevel);
-  const queuedPrompts = Array.isArray(raw.queuedPrompts)
-    ? raw.queuedPrompts
-        .map((item: any) => normalizeQueuedPrompt(item, { provider, model, thinkingLevel }))
-        .filter(Boolean) as AssistantQueuedPrompt[]
-    : [];
   return {
     id,
     title: String(raw.title ?? '').trim() || DEFAULT_THREAD_TITLE,
@@ -1494,7 +1337,6 @@ function normalizeThread(
     autoApprove: normalizeAssistantAutoApprove(raw.autoApprove),
     promptDeliveryMode: normalizeAssistantPromptDeliveryMode(raw.promptDeliveryMode),
     messages,
-    queuedPrompts,
     status: raw.status === 'error' ? 'error' : 'idle',
     error: typeof raw.error === 'string' && raw.error.trim() ? raw.error : null,
   };
@@ -1729,7 +1571,7 @@ export class HubAssistantService {
     const regAny: any = await loadRegistry();
     const droneId = droneIdByAssistantRef(regAny, droneRef);
     const allowed = this.allowedDroneIdSet(kind, threadId);
-    if (allowed && !allowed.has(droneId)) throw new Error(`assistant scope does not include drone: ${droneRef}`);
+    if (allowed && !allowed.has(droneId)) throw new Error(`assistant ${kind} scope does not include drone: ${droneRef}`);
     return droneId;
   }
 
@@ -2401,19 +2243,6 @@ export class HubAssistantService {
     return this.beforeToolCall(threadId, { toolCall: { id: callId, name: toolName }, args }, undefined, signal);
   }
 
-  async cancelQueuedPrompt(threadId: string, queuedPromptId: string): Promise<AssistantSnapshot> {
-    await this.ensureLoaded();
-    const thread = this.threads.find((item) => item.id === String(threadId ?? '').trim());
-    if (!thread) throw new Error(`unknown assistant thread: ${threadId}`);
-    const id = String(queuedPromptId ?? '').trim();
-    const next = thread.queuedPrompts.filter((item) => item.id !== id);
-    if (next.length === thread.queuedPrompts.length) throw new Error(`unknown queued assistant message: ${queuedPromptId}`);
-    thread.queuedPrompts = next;
-    thread.updatedAt = nowIso();
-    await this.persist();
-    return await this.threadSnapshot(thread.id);
-  }
-
   async approve(approvalId: string, approved: boolean): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const approval = this.approvals.get(approvalId);
@@ -2532,7 +2361,6 @@ export class HubAssistantService {
       autoApprove: false,
       promptDeliveryMode: 'queue',
       messages: [],
-      queuedPrompts: [],
       status: 'idle',
       error: null,
     };
@@ -2763,7 +2591,6 @@ export class HubAssistantService {
   ): Promise<{ block?: boolean; reason?: string } | undefined> {
     const toolName = String(ctx?.toolCall?.name ?? '').trim();
     if (toolName !== 'message_drone' && toolName !== 'set_drone_group' && toolName !== 'set_drone_groups' && toolName !== 'rename_drones' && toolName !== 'bash') return undefined;
-    if (this.getThread(threadId).autoApprove) return undefined;
     const label =
       toolName === 'set_drone_group'
         ? 'Set drone group'
@@ -2873,10 +2700,11 @@ export class HubAssistantService {
             },
           };
         }
-      } catch {
-        approvalArgs = ctx?.args ?? {};
+      } catch (error: any) {
+        return { block: true, reason: cleanOptionalString(error?.message ?? error) || `Denied ${toolName}.` };
       }
     }
+    if (this.getThread(threadId).autoApprove) return undefined;
     const approval = await this.requestApproval({
       threadId,
       toolCallId: String(ctx?.toolCall?.id ?? '').trim(),
@@ -2980,7 +2808,6 @@ export class HubAssistantService {
     const storedMessages = Array.isArray(messageOverride) ? messageOverride : thread.messages;
     const messages = streamingMessages.length > 0 ? [...storedMessages, ...streamingMessages] : storedMessages;
     const approvals = this.pendingApprovals().filter((approval) => approval.threadId === thread.id && approval.status === 'pending');
-    const queuedPrompts = Array.isArray(thread.queuedPrompts) ? thread.queuedPrompts : [];
     const activeSubscriptions: AssistantChatIdleSubscription[] = [];
     const accessScope = thread.accessScope ?? makeAssistantAccessScope();
 
@@ -2993,11 +2820,6 @@ export class HubAssistantService {
       `Updated at: ${thread.updatedAt}`,
       `Model: ${thread.provider}/${thread.model} (${thread.thinkingLevel})`,
       `Access: read=${describeAssistantAccessMode(accessScope.readMode, accessScope.droneIds)}; write=${describeAssistantAccessMode(accessScope.writeMode, accessScope.droneIds)}`,
-      queuedPrompts.length > 0
-        ? `Queued prompts:\n${queuedPrompts
-            .map((prompt, index) => `${index + 1}. ${clipAssistantOverviewText(prompt.prompt, 700)} (${prompt.deliveryMode ?? 'queue'}, ${prompt.createdAt})`)
-            .join('\n')}`
-        : `Queued prompts: none`,
       approvals.length > 0
         ? `Pending approvals:\n${approvals
             .map((approval, index) => `${index + 1}. ${approval.label || approval.toolName} (${approval.toolName}, ${approval.createdAt})`)

@@ -10,6 +10,7 @@ export type BlipAssistantThreadConfiguration = {
   model: string;
   thinkingLevel: 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
   systemPrompt: string;
+  promptDeliveryMode?: 'queue' | 'asap';
   tools: AgentTool<any>[];
   toolProviders?: BlipToolProvider[];
   permissionPreflight?: BlipToolPreflight;
@@ -20,6 +21,7 @@ export type BlipAssistantThreadConfiguration = {
 export class BlipAssistantHost {
   private readonly repository = new HubSessionRepository();
   private readonly handles = new Map<string, BlipSessionHandle>();
+  private readonly handlePromises = new Map<string, Promise<BlipSessionHandle>>();
   private readonly eventSinks = new Map<string, Set<(event: BlipRuntimeEvent) => Promise<void> | void>>();
   private readonly invalidatedThreads = new Set<string>();
   private readonly loadedTools = new Map<string, AgentTool<any>[]>();
@@ -44,7 +46,11 @@ export class BlipAssistantHost {
     }
     try {
       const handle = await this.handle(threadId);
-      if (handle.running) await handle.enqueue(prompt);
+      if (handle.running && this.loadedConfigurations.get(threadId)?.promptDeliveryMode === 'asap') {
+        handle.steer(prompt);
+        await handle.waitForIdle();
+      }
+      else if (handle.running) await handle.enqueue(prompt);
       else await handle.prompt(prompt);
     } finally {
       if (onEvent) {
@@ -99,7 +105,7 @@ export class BlipAssistantHost {
 
   invalidateThread(threadId: string): void {
     const handle = this.handles.get(threadId);
-    if (handle?.running) {
+    if (handle?.running || this.handlePromises.has(threadId)) {
       this.invalidatedThreads.add(threadId);
       return;
     }
@@ -110,62 +116,95 @@ export class BlipAssistantHost {
   }
 
   invalidateAll(): void {
-    for (const threadId of this.handles.keys()) this.invalidateThread(threadId);
+    for (const threadId of new Set([...this.handles.keys(), ...this.handlePromises.keys()])) this.invalidateThread(threadId);
   }
 
   async deleteThread(threadId: string): Promise<void> {
-    const handle = this.handles.get(threadId);
-    if (handle) await handle.delete();
+    let handle = this.handles.get(threadId);
+    if (!handle) handle = await this.handlePromises.get(threadId);
+    if (handle) {
+      if (handle.running) {
+        handle.abort();
+        await handle.waitForIdle();
+      }
+      await handle.delete();
+    }
     else {
       const sessionId = await this.repository.sessionIdForThread(threadId);
       if (sessionId) await this.repository.delete(sessionId);
     }
     this.handles.delete(threadId);
+    this.invalidatedThreads.delete(threadId);
     this.loadedTools.delete(threadId);
     await this.disposeConfiguration(threadId);
   }
 
   private async publishEvent(threadId: string, event: BlipRuntimeEvent): Promise<void> {
-    for (const sink of this.eventSinks.get(threadId) ?? []) await sink(event);
+    for (const sink of this.eventSinks.get(threadId) ?? []) {
+      try {
+        await sink(event);
+      } catch {
+        // A stale stream consumer must not fail or interrupt the agent run.
+      }
+    }
   }
 
   private async handle(threadId: string): Promise<BlipSessionHandle> {
     const existing = this.handles.get(threadId);
     if (existing) return existing;
+    const pending = this.handlePromises.get(threadId);
+    if (pending) return pending;
+    const created = this.createHandle(threadId);
+    this.handlePromises.set(threadId, created);
+    try {
+      return await created;
+    } finally {
+      if (this.handlePromises.get(threadId) === created) this.handlePromises.delete(threadId);
+    }
+  }
+
+  private async createHandle(threadId: string): Promise<BlipSessionHandle> {
     const runtime = await loadBlipRuntime();
     const config = await this.configuration(threadId);
-    const provider = config.provider === 'codex' ? 'openai-codex' : config.provider;
-    const model = runtime.resolveBlipModel(provider, config.model);
-    const sessionId = await this.repository.sessionIdForThread(threadId);
-    const handle = await runtime.createBlipSession({
-      workspaceRoot: 'drone-hub',
-      model,
-      permissionMode: 'workspace-write',
-      toolProfile: 'no-shell-workspace-write',
-      sessionRepository: this.repository,
-      ...(sessionId ? { sessionId } : {}),
-      reasoning: config.thinkingLevel,
-      tools: config.tools,
-      toolProviders: config.toolProviders,
-      permissionPreflight: config.permissionPreflight,
-      promptProvider: () => config.systemPrompt,
-      getApiKey: config.getApiKey,
-      eventSink: (event) => this.publishEvent(threadId, event),
-    });
-    if (!sessionId) await this.repository.bindThread(threadId, handle.state.id);
-    const context = {
-      session: handle.state,
-      repository: this.repository,
-      model,
-      workspaceRoot: 'drone-hub',
-      permissionMode: 'workspace-write' as const,
-      toolProfile: 'no-shell-workspace-write' as const,
-    };
-    const providerTools = (await Promise.all((config.toolProviders ?? []).map((toolProvider) => toolProvider.load(context)))).flat();
-    this.loadedTools.set(threadId, [...config.tools, ...providerTools]);
-    this.loadedConfigurations.set(threadId, config);
-    this.handles.set(threadId, handle);
-    return handle;
+    let handle: BlipSessionHandle | undefined;
+    try {
+      const provider = config.provider === 'codex' ? 'openai-codex' : config.provider;
+      const model = runtime.resolveBlipModel(provider, config.model);
+      const sessionId = await this.repository.sessionIdForThread(threadId);
+      handle = await runtime.createBlipSession({
+        workspaceRoot: 'drone-hub',
+        model,
+        permissionMode: 'workspace-write',
+        toolProfile: 'no-shell-workspace-write',
+        sessionRepository: this.repository,
+        ...(sessionId ? { sessionId } : {}),
+        reasoning: config.thinkingLevel,
+        tools: config.tools,
+        toolProviders: config.toolProviders,
+        permissionPreflight: config.permissionPreflight,
+        promptProvider: () => config.systemPrompt,
+        getApiKey: config.getApiKey,
+        eventSink: (event) => this.publishEvent(threadId, event),
+      });
+      if (!sessionId) await this.repository.bindThread(threadId, handle.state.id);
+      const context = {
+        session: handle.state,
+        repository: this.repository,
+        model,
+        workspaceRoot: 'drone-hub',
+        permissionMode: 'workspace-write' as const,
+        toolProfile: 'no-shell-workspace-write' as const,
+      };
+      const providerTools = (await Promise.all((config.toolProviders ?? []).map((toolProvider) => toolProvider.load(context)))).flat();
+      this.loadedTools.set(threadId, [...config.tools, ...providerTools]);
+      this.loadedConfigurations.set(threadId, config);
+      this.handles.set(threadId, handle);
+      return handle;
+    } catch (error) {
+      handle?.close();
+      await config.dispose?.();
+      throw error;
+    }
   }
 
   private async disposeConfiguration(threadId: string): Promise<void> {

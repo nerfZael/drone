@@ -41,10 +41,18 @@ function linkedTransports(): [LinkedTransport, LinkedTransport] {
   return [client, server];
 }
 
-export async function createInProcessDroneHubMcpClient(correlationId: string): Promise<Client> {
+export async function createInProcessDroneHubMcpClient(input: {
+  correlationId: string;
+  allowedDroneRefs: string[];
+  allowedWriteDroneRefs: string[];
+  allowedDroneIds: string[];
+}): Promise<Client> {
   const server = createDroneHubMcpServer({
-    principal: { kind: 'host', tokenId: `assistant:${correlationId}`, name: 'Drone Hub assistant' },
-    correlationId,
+    principal: { kind: 'host', tokenId: `assistant:${input.correlationId}`, name: 'Drone Hub assistant' },
+    correlationId: input.correlationId,
+    allowedDroneRefs: input.allowedDroneRefs,
+    allowedWriteDroneRefs: input.allowedWriteDroneRefs,
+    allowedDroneIds: input.allowedDroneIds,
   });
   const client = new Client({ name: 'Drone Hub Blip host', version: '0.1.0' });
   const [clientTransport, serverTransport] = linkedTransports();

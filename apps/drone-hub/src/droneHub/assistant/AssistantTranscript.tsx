@@ -27,7 +27,6 @@ import type {
   AssistantChatIdleSubscription,
   AssistantDroneNameMap,
   AssistantMessage,
-  AssistantQueuedPrompt,
 } from './assistant-types';
 
 function ToolDisclosure({

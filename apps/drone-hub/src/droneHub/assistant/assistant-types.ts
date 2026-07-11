@@ -32,16 +32,6 @@ export type AssistantPromptDeliveryMode = 'queue' | 'asap';
 export type AssistantPanelMode = 'normal' | 'voice';
 export type AssistantSystemPromptKind = 'normal' | 'voice';
 
-export type AssistantQueuedPrompt = {
-  id: string;
-  prompt: string;
-  createdAt: string;
-  provider: AssistantProviderId;
-  model: string;
-  thinkingLevel: string;
-  deliveryMode?: AssistantPromptDeliveryMode;
-};
-
 export type AssistantRunModel = {
   provider: AssistantProviderId;
   model: string;
@@ -85,7 +75,6 @@ export type AssistantThread = {
   promptDeliveryMode: AssistantPromptDeliveryMode;
   messageCount?: number;
   messages: AssistantMessage[];
-  queuedPrompts?: AssistantQueuedPrompt[];
   status: AssistantThreadStatus;
   error: string | null;
 };

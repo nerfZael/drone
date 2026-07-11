@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -548,6 +549,7 @@ function createCompactHumanRenderer(input: {
 function processDiagnosticsEvent(sessionId: string, reason: string): BlipRuntimeEvent {
   return {
     version: 1,
+    eventId: randomUUID(),
     type: "process_diagnostics",
     sessionId,
     timestamp: new Date().toISOString(),

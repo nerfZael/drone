@@ -224,7 +224,7 @@ Define a `SessionRepository` interface for:
 - Appending messages and runtime events.
 - Reading the raw transcript and compacted model-visible history.
 - Writing compaction checkpoints.
-- Persisting selected target, grants, queued prompts, and durable follow-up handles.
+- Persisting selected target, grants, and durable session settings.
 - Updating titles, model settings, and timestamps.
 
 Implementations:
@@ -392,7 +392,7 @@ Replace `HubAssistantService` with a smaller host around Blip. It remains respon
 
 It must not construct another agent loop or duplicate workspace tools.
 
-Keep the current AssistantDock API during backend migration. An `AssistantSessionProjector` converts Blip state and events into existing snapshots, streaming fields, approvals, queued prompts, and tool rows. After cutover, the UI may move to versioned Blip events and paginated session queries.
+During migration, keep the current AssistantDock shell while moving its transcript to versioned Blip events and paginated session queries. Drone Hub should project only host-owned metadata such as thread controls, approvals, targets, and artifacts.
 
 ## 10. Voice And Realtime Voice
 
@@ -468,7 +468,7 @@ Before removing the old runtime, confirm:
 
 - Sessions create, activate, resume, fork, delete, compact, title, and render full history.
 - User, assistant, thinking, tool, and result messages stream correctly.
-- Prompts queue, steer, cancel, stop, and recover after errors.
+- Follow-up prompts queue or steer according to thread mode, stop, and recover after errors.
 - Provider, model, reasoning, global prompt, and per-thread prompt settings survive.
 - Tool settings and target selection remain visible and stable.
 - Local, host, drone, and artifact operations land in the displayed target.

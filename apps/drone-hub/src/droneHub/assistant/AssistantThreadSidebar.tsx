@@ -116,9 +116,7 @@ export function AssistantThreadSidebar({
           <div className="space-y-1">
             {threads.map((thread) => {
               const active = thread.id === activeThreadId;
-              const messageCount =
-                (thread.messageCount ?? thread.messages.length) +
-                (thread.queuedPrompts?.length ?? 0);
+              const messageCount = thread.messageCount ?? thread.messages.length;
               return (
                 <div
                   key={thread.id}

@@ -14508,14 +14508,23 @@ export async function startDroneHubApiServer(opts: {
         const snapshot = await assistantService.threadSnapshot(threadId);
         const thread = snapshot.threads.find((candidate) => candidate.id === threadId);
         if (!thread) throw new Error(`unknown assistant thread: ${threadId}`);
-        const [{ createMcpToolProvider }, blipTools, mcpClient] = await Promise.all([
+        const [{ createMcpToolProvider }, blipTools] = await Promise.all([
           loadBlipMcp(),
           loadBlipTools(),
-          createInProcessDroneHubMcpClient(threadId),
         ]);
         const visibleDrones = await assistantService.visibleDrones(threadId);
         const workspaceCapabilities = ['files.list', 'files.read', 'files.search', 'git.status'] as const;
         const writableDroneIds = new Set(Array.isArray(thread.accessScope?.droneIds) ? thread.accessScope.droneIds : []);
+        const writableDrones = thread.accessScope?.writeMode === 'all'
+          ? visibleDrones
+          : visibleDrones.filter((drone: any) => writableDroneIds.has(drone.id));
+        const refsFor = (drones: any[]) => Array.from(new Set(drones.flatMap((drone: any) => [String(drone.id ?? ''), String(drone.name ?? '')]).filter(Boolean)));
+        const mcpClient = await createInProcessDroneHubMcpClient({
+          correlationId: threadId,
+          allowedDroneRefs: refsFor(visibleDrones),
+          allowedWriteDroneRefs: refsFor(writableDrones),
+          allowedDroneIds: visibleDrones.map((drone: any) => String(drone.id ?? '')).filter(Boolean),
+        });
         const droneTargets = visibleDrones.map((drone: any) => {
           const writable = thread.accessScope?.writeMode === 'all' || writableDroneIds.has(drone.id);
           return new DroneWorkspaceTarget({
@@ -14610,11 +14619,10 @@ export async function startDroneHubApiServer(opts: {
               open_drone: 'open_drone_chat',
               list_chats: 'read_chat_messages',
               read_chat: 'read_chat_messages',
-              list_chat_idle_subscriptions: 'subscribe_to_any_chat_idle',
-              cancel_chat_idle_subscription: 'subscribe_to_any_chat_idle',
             };
             return (await mcpProvider.load(context)).filter((tool) => {
               const unqualified = tool.name.replace(/^drone_hub__/, '');
+              if (unqualified === 'list_chat_idle_subscriptions' || unqualified === 'cancel_chat_idle_subscription') return false;
               return enabledTools.has(aliases[unqualified] ?? unqualified);
             });
           },
@@ -14623,6 +14631,7 @@ export async function startDroneHubApiServer(opts: {
           provider: thread.provider,
           model: thread.model,
           thinkingLevel: thread.thinkingLevel,
+          promptDeliveryMode: thread.promptDeliveryMode,
           systemPrompt: assistantService.resolvedSystemPrompt(threadId),
           tools,
           toolProviders: [enabledMcpProvider],
@@ -17364,8 +17373,9 @@ export async function startDroneHubApiServer(opts: {
 
           if (assistantParts.length === 4 && method === 'DELETE') {
             try {
+              await assistantService.threadSnapshot(threadId);
+              await blipAssistantHost.deleteThread(threadId);
               const result = await assistantService.deleteThread(threadId);
-              await blipAssistantHost?.deleteThread(threadId);
               json(res, 200, result);
             } catch (e: any) {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
@@ -17475,16 +17485,6 @@ export async function startDroneHubApiServer(opts: {
             } catch (e: any) {
               const statusCode = Number(e?.statusCode ?? 0) || (/unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400);
               json(res, statusCode, { ok: false, error: e?.message ?? String(e) });
-            }
-            return;
-          }
-
-          if (assistantParts.length === 6 && assistantParts[4] === 'queued' && method === 'DELETE') {
-            const queuedPromptId = decodeURIComponent(assistantParts[5] ?? '');
-            try {
-              json(res, 200, await assistantService.cancelQueuedPrompt(threadId, queuedPromptId));
-            } catch (e: any) {
-              json(res, /unknown (assistant thread|queued assistant message)/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
             }
             return;
           }

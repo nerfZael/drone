@@ -58,6 +58,22 @@ describe('Drone Hub MCP principal authorization', () => {
     const host = { principal: { kind: 'host' as const, tokenId: 'host', name: 'Host token' } };
     expect(() => authorizeDroneHubMcpTool(host, 'create_drone', {})).not.toThrow();
   });
+
+  test('enforces assistant read and write scopes for host principals', () => {
+    const assistant = {
+      principal: { kind: 'host' as const, tokenId: 'assistant', name: 'Assistant' },
+      allowedDroneRefs: ['drone-a', 'Allowed'],
+      allowedWriteDroneRefs: ['drone-a'],
+      allowedDroneIds: ['drone-a'],
+    };
+    expect(() => authorizeDroneHubMcpTool(assistant, 'read_chat', { drone: 'Allowed' })).not.toThrow();
+    expect(() => authorizeDroneHubMcpTool(assistant, 'read_chat', { drone: 'drone-b' })).toThrow('not authorized');
+    expect(() => authorizeDroneHubMcpTool(assistant, 'create_chat', { drone: 'Allowed' })).toThrow('not authorized');
+    expect(() => authorizeDroneHubMcpTool(assistant, 'rename_drones', {
+      renames: [{ drone: 'drone-b', newName: 'Nope' }],
+    })).toThrow('not authorized');
+  });
+
 });
 
 describe('Drone Hub MCP idle subscription persistence', () => {
@@ -95,7 +111,12 @@ describe('Drone Hub MCP idle subscription persistence', () => {
 describe('Drone Hub assistant MCP transport', () => {
   test('loads the authorized Hub catalog through an in-process MCP client', async () => {
     await withTempDroneDataDir('drone-assistant-mcp-', async () => {
-      const client = await createInProcessDroneHubMcpClient('thread-one');
+      const client = await createInProcessDroneHubMcpClient({
+        correlationId: 'thread-one',
+        allowedDroneRefs: [],
+        allowedWriteDroneRefs: [],
+        allowedDroneIds: [],
+      });
       const catalog = await client.listTools();
       expect(catalog.tools.map((tool) => tool.name)).toContain('send_message');
       expect(catalog.tools.map((tool) => tool.name)).toContain('list_chat_idle_subscriptions');

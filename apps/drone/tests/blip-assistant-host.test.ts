@@ -71,4 +71,36 @@ describe('Blip assistant host', () => {
       faux.unregister();
     });
   });
+
+  test('serializes concurrent first prompts onto one thread session', async () => {
+    await withTempDroneDataDir('blip-assistant-concurrent-', async () => {
+      const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
+      faux.setResponses([fauxAssistantMessage('first'), fauxAssistantMessage('second')]);
+      const events: any[] = [];
+      const host = new BlipAssistantHost(async () => ({
+        provider: 'faux',
+        model: faux.getModel().id,
+        thinkingLevel: 'off',
+        systemPrompt: 'Hub host prompt',
+        tools: [],
+      }));
+      const unsubscribe = host.subscribeEvents('thread-concurrent', (event) => events.push(event));
+      const unsubscribeBrokenSink = host.subscribeEvents('thread-concurrent', () => {
+        throw new Error('stale stream');
+      });
+
+      await Promise.all([
+        host.promptThread('thread-concurrent', 'one'),
+        host.promptThread('thread-concurrent', 'two'),
+      ]);
+
+      const page = await host.historyPage('thread-concurrent', { limit: 10 });
+      expect(page.entries.map((entry) => entry.message.role)).toEqual(['user', 'assistant', 'user', 'assistant']);
+      expect(events.filter((event) => event.type === 'session_started')).toHaveLength(1);
+      expect(events.filter((event) => event.type === 'session_finished')).toHaveLength(1);
+      unsubscribe();
+      unsubscribeBrokenSink();
+      faux.unregister();
+    });
+  });
 });

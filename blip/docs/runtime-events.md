@@ -11,6 +11,7 @@ Every event has:
 ```ts
 {
   version: 1;
+  eventId: string;
   type: string;
   sessionId: string;
   turnId?: string;
@@ -18,7 +19,7 @@ Every event has:
 }
 ```
 
-`timestamp` is an ISO string.
+`eventId` uniquely identifies one emitted event and is stable when an embedder delivers that event over multiple transports. `timestamp` is an ISO string.
 
 ## Implemented Events
 
@@ -28,6 +29,7 @@ Session lifecycle:
 - `turn_started`
 - `assistant_delta`
 - `assistant_message`
+- `transcript_changed`
 - `session_error`
 - `session_finished`
 - `process_diagnostics`
@@ -67,6 +69,8 @@ The CLI currently renders a small subset of events:
 
 Other events are still available in JSONL mode.
 
+`transcript_changed` is emitted after any user, assistant, or tool-result message is persisted. Browser embedders use it to refresh durable history without waiting for the entire session to finish.
+
 For one-shot CLI prompt runs, Blip emits an immediate `process_diagnostics` snapshot after `session_finished`, then flushes stdout/stderr and exits explicitly. This preserves handle/request debugging clues without waiting for provider keepalive sockets to close. Embedders that call the runtime directly can still opt into delayed process diagnostics.
 
 ## Status Semantics
@@ -97,5 +101,5 @@ Use `timing.nonToolWallMs` versus `timing.toolCallWallMs` to distinguish model/o
 - Event schemas are TypeScript types, not generated JSON Schema.
 - Provider billing token usage and cost are not included in events.
 - There are no approval events because Blip has no approval flow.
-- There is no server protocol around these events.
+- Core does not prescribe a server transport. Drone Hub carries them in versioned prompt-stream and SSE envelopes from `@blip/protocol`.
 - If the process crashes hard, Blip may not emit a final `session_error` or `session_finished`.

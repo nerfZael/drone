@@ -16,8 +16,8 @@ The baseline describes the old assistant from the user's point of view. It does 
 | Cancellation | Aborting an embedded prompt settles cleanly with `session_finished.status = cancelled` | `blip/packages/core/tests/runtime.test.ts` |
 | Attachments into Blip | Image blocks reach the model and are persisted in the session transcript | `blip/packages/core/tests/runtime.test.ts` |
 | Injected tools and policy | Hosts can supply tools and deny a validated call before execution | `blip/packages/core/tests/runtime.test.ts` |
-| Thread isolation | Threads retain separate controls, model choices, queues, app context, and active runs | `apps/drone/tests/assistant-thread-isolation.test.ts` |
-| Queue configuration | Running and queued prompts retain their selected model and thinking level | `apps/drone/tests/assistant-thread-isolation.test.ts` |
+| Thread isolation | Threads retain separate controls, model choices, prompt delivery modes, app context, and active runs | `apps/drone/tests/assistant-thread-isolation.test.ts` |
+| Prompt delivery | Queue mode follows up after the active turn; ASAP mode steers the active turn | `apps/drone/tests/blip-assistant-host.test.ts` |
 | Access scopes | Empty selection remains a valid no-write scope; new threads default to limited write access; newly created drones are added explicitly | `apps/drone/tests/assistant-thread-isolation.test.ts` |
 | File authorization | Read and write scopes are checked before drone file access | `apps/drone/tests/assistant-drone-files.test.ts` |
 | Approval behavior | Drone bash requests approval; disallowed host-runtime bash is blocked before approval | `apps/drone/tests/assistant-drone-files.test.ts` |

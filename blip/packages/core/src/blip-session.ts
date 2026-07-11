@@ -55,9 +55,10 @@ function nowIso(): string {
 function eventBase(
   sessionId: string,
   turnId?: string,
-): Pick<BlipRuntimeEvent, "version" | "sessionId" | "timestamp"> & { turnId?: string } {
+): Pick<BlipRuntimeEvent, "version" | "eventId" | "sessionId" | "timestamp"> & { turnId?: string } {
   return {
     version: 1,
+    eventId: randomUUID(),
     sessionId,
     timestamp: nowIso(),
     ...(turnId ? { turnId } : {}),
@@ -406,6 +407,11 @@ class BlipSession implements BlipSessionHandle {
     }
     if (event.type === "message_end") {
       await this.options.sessionRepository.appendMessage(this.state, event.message);
+      await this.emit({
+        ...eventBase(this.state.id, active.turnId),
+        type: "transcript_changed",
+        role: event.message.role,
+      });
       if (event.message.role === "assistant") {
         const text = messageText(event.message);
         if (text.trim()) {

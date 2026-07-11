@@ -1,8 +1,4 @@
-import type {
-  AssistantDroneNameMap,
-  AssistantMessage,
-  AssistantQueuedPrompt,
-} from './assistant-types';
+import type { AssistantDroneNameMap, AssistantMessage } from './assistant-types';
 
 const TOOL_ROW_MESSAGE_PREVIEW_MAX = 72;
 const TOOL_ROW_TARGET_PREVIEW_MAX = 3;
@@ -29,8 +25,7 @@ export type AssistantRenderItem =
       sourceMessageIndex: number;
     }
   | AssistantToolRenderItem
-  | { type: 'toolGroup'; key: string; items: AssistantToolRenderItem[] }
-  | { type: 'queued'; key: string; prompt: AssistantQueuedPrompt };
+  | { type: 'toolGroup'; key: string; items: AssistantToolRenderItem[] };
 
 export function messageText(message: AssistantMessage): string {
   const content = message.content;
