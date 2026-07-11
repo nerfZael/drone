@@ -21,10 +21,14 @@ type RemoteRepoPanelProps = {
   drone: DroneSummary;
   panel: RemoteRepoPanelKey;
   compactChanges?: boolean;
+  onOpenFile?: (target: { path: string; name: string }) => void;
+  openedFilePath?: string | null;
 };
 
 type RemoteRepoPanelsProps = {
   drone: DroneSummary;
+  onOpenFile?: (target: { path: string; name: string }) => void;
+  openedFilePath?: string | null;
 };
 
 const FS_LIST_REQUEST_TIMEOUT_MS = 12_000;
@@ -91,15 +95,17 @@ function normalizeRemoteFilesPath(rawPath: string): string {
   return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
 }
 
-function remoteFileOpenUrl(droneId: string, entry: DroneFsEntry): string {
-  const path = encodeURIComponent(entry.path);
-  if (entry.isImage || entry.isVideo) {
-    return `/api/drones/${encodeURIComponent(droneId)}/fs/media?path=${path}`;
-  }
-  return `/api/drones/${encodeURIComponent(droneId)}/fs/download?path=${path}`;
-}
-
-function RemoteFilesPanel({ DroneFilesDock, drone }: { DroneFilesDock: DroneFilesDockComponent; drone: DroneSummary }) {
+function RemoteFilesPanel({
+  DroneFilesDock,
+  drone,
+  onOpenFile,
+  openedFilePath,
+}: {
+  DroneFilesDock: DroneFilesDockComponent;
+  drone: DroneSummary;
+  onOpenFile?: (target: { path: string; name: string }) => void;
+  openedFilePath?: string | null;
+}) {
   const defaultPath = React.useMemo(() => droneHomePath(drone), [drone]);
   const [path, setPath] = React.useState(defaultPath);
   const [entries, setEntries] = React.useState<DroneFsEntry[]>([]);
@@ -153,9 +159,9 @@ function RemoteFilesPanel({ DroneFilesDock, drone }: { DroneFilesDock: DroneFile
   const openFile = React.useCallback(
     (entry: DroneFsEntry) => {
       if (entry.kind !== 'file') return;
-      window.open(remoteFileOpenUrl(drone.id, entry), '_blank', 'noopener,noreferrer');
+      onOpenFile?.({ path: entry.path, name: entry.name });
     },
-    [drone.id],
+    [onOpenFile],
   );
 
   return (
@@ -179,12 +185,13 @@ function RemoteFilesPanel({ DroneFilesDock, drone }: { DroneFilesDock: DroneFile
       onOpenFile={openFile}
       onOpenFileInPanel={() => false}
       onRefresh={() => setRefreshNonce((value) => value + 1)}
-      openedFile={EMPTY_OPENED_FILE}
+      openedFile={{ ...EMPTY_OPENED_FILE, path: openedFilePath ?? null }}
+      readOnly
     />
   );
 }
 
-export function RemoteRepoPanel({ drone, panel, compactChanges = false }: RemoteRepoPanelProps) {
+export function RemoteRepoPanel({ drone, panel, compactChanges = false, onOpenFile, openedFilePath }: RemoteRepoPanelProps) {
   const { repoPath, repoAttached, disabled, repoUnavailableReason } = remoteRepoState(drone);
 
   if (panel === 'assistant') {
@@ -210,7 +217,14 @@ export function RemoteRepoPanel({ drone, panel, compactChanges = false }: Remote
         loadingFallback={<RemotePanelLoading label="files" />}
         errorFallback={(message, retry) => <RemotePanelLoadError message={message} onRetry={retry} />}
       >
-        {(DroneFilesDock) => <RemoteFilesPanel drone={drone} DroneFilesDock={DroneFilesDock} />}
+        {(DroneFilesDock) => (
+          <RemoteFilesPanel
+            drone={drone}
+            DroneFilesDock={DroneFilesDock}
+            onOpenFile={onOpenFile}
+            openedFilePath={openedFilePath}
+          />
+        )}
       </AsyncPaneBoundary>
     );
   }
@@ -273,14 +287,14 @@ export function RemoteRepoPanel({ drone, panel, compactChanges = false }: Remote
   );
 }
 
-export function RemoteRepoPanels({ drone }: RemoteRepoPanelsProps) {
+export function RemoteRepoPanels({ drone, onOpenFile, openedFilePath }: RemoteRepoPanelsProps) {
   return (
     <div
       className="h-full min-h-0 min-w-0 bg-[var(--panel-alt)]"
       style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))' }}
     >
       <div className="min-h-0 min-w-0 overflow-hidden border-r border-[var(--border)]">
-        <RemoteRepoPanel drone={drone} panel="files" />
+        <RemoteRepoPanel drone={drone} panel="files" onOpenFile={onOpenFile} openedFilePath={openedFilePath} />
       </div>
       <div className="min-h-0 min-w-0 overflow-hidden border-r border-[var(--border)]">
         <RemoteRepoPanel drone={drone} panel="changes" />
