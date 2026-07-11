@@ -10,10 +10,12 @@ import type { RemoteRepoPanelKey } from './remote-repo-panel-config';
 type DroneChangesDockComponent = typeof import('../droneHub/changes/DroneChangesDock').DroneChangesDock;
 type DroneFilesDockComponent = typeof import('../droneHub/files/DroneFilesDock').DroneFilesDock;
 type DronePullRequestsDockComponent = typeof import('../droneHub/pullRequests/DronePullRequestsDock').DronePullRequestsDock;
+type AssistantDockComponent = typeof import('../droneHub/assistant/AssistantDock').AssistantDock;
 
 const loadDroneChangesDock: PaneModuleLoader<DroneChangesDockComponent> = async () => (await import('../droneHub/changes/DroneChangesDock')).DroneChangesDock;
 const loadDroneFilesDock: PaneModuleLoader<DroneFilesDockComponent> = async () => (await import('../droneHub/files/DroneFilesDock')).DroneFilesDock;
 const loadDronePullRequestsDock: PaneModuleLoader<DronePullRequestsDockComponent> = async () => (await import('../droneHub/pullRequests/DronePullRequestsDock')).DronePullRequestsDock;
+const loadAssistantDock: PaneModuleLoader<AssistantDockComponent> = async () => (await import('../droneHub/assistant/AssistantDock')).AssistantDock;
 
 type RemoteRepoPanelProps = {
   drone: DroneSummary;
@@ -185,6 +187,20 @@ function RemoteFilesPanel({ DroneFilesDock, drone }: { DroneFilesDock: DroneFile
 export function RemoteRepoPanel({ drone, panel, compactChanges = false }: RemoteRepoPanelProps) {
   const { repoPath, repoAttached, disabled, repoUnavailableReason } = remoteRepoState(drone);
 
+  if (panel === 'assistant') {
+    return (
+      <AsyncPaneBoundary
+        tab="assistant"
+        label="Remote Assistant"
+        load={loadAssistantDock}
+        loadingFallback={<RemotePanelLoading label="Assistant" />}
+        errorFallback={(message, retry) => <RemotePanelLoadError message={message} onRetry={retry} />}
+      >
+        {(AssistantDock) => <AssistantDock />}
+      </AsyncPaneBoundary>
+    );
+  }
+
   if (panel === 'files') {
     return (
       <AsyncPaneBoundary
@@ -269,8 +285,11 @@ export function RemoteRepoPanels({ drone }: RemoteRepoPanelsProps) {
       <div className="min-h-0 min-w-0 overflow-hidden border-r border-[var(--border)]">
         <RemoteRepoPanel drone={drone} panel="changes" />
       </div>
-      <div className="min-h-0 min-w-0 overflow-hidden">
+      <div className="min-h-0 min-w-0 overflow-hidden border-r border-[var(--border)]">
         <RemoteRepoPanel drone={drone} panel="prs" />
+      </div>
+      <div className="min-h-0 min-w-0 overflow-hidden">
+        <RemoteRepoPanel drone={drone} panel="assistant" />
       </div>
     </div>
   );

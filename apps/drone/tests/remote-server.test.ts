@@ -174,6 +174,20 @@ describe('remote Hub server', () => {
     expect(routeAllowed('GET', '/api/drones/drone-a/chats/default/models')).toBe(true);
   });
 
+  test('allows Assistant panel routes without opening unrelated APIs', () => {
+    expect(routeAllowed('GET', '/api/assistant/threads')).toBe(true);
+    expect(routeAllowed('GET', '/api/assistant/threads/thread-a')).toBe(true);
+    expect(routeAllowed('POST', '/api/assistant/threads/thread-a/prompt')).toBe(true);
+    expect(routeAllowed('POST', '/api/assistant/threads/thread-a/approvals/approval-a/approve')).toBe(true);
+    expect(routeAllowed('GET', '/api/assistant/threads/thread-a/artifacts/file')).toBe(true);
+    expect(routeAllowed('GET', '/api/assistant/events')).toBe(true);
+    expect(routeAllowed('POST', '/api/assistant/scope')).toBe(true);
+    expect(routeAllowed('POST', '/api/assistant/not-a-route')).toBe(false);
+    expect(routeAllowed('POST', '/api/assistant/ui-action')).toBe(false);
+    expect(routeAllowed('POST', '/api/assistant/voice/patch-message')).toBe(false);
+    expect(routeAllowed('POST', '/api/assistant/desktop-voice/clipboard-toggle')).toBe(false);
+  });
+
   test('allows remote whiteboard routes', () => {
     expect(routeAllowed('GET', '/api/whiteboards')).toBe(true);
     expect(routeAllowed('POST', '/api/whiteboards')).toBe(true);
