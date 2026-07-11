@@ -2,13 +2,6 @@ import React from 'react';
 import type { AgentPlan } from '../types';
 import { IconCheck, IconSpinner } from './icons';
 
-const SOURCE_LABELS: Record<AgentPlan['source'], string> = {
-  cursor: 'Cursor plan',
-  codex: 'Codex plan',
-  claude: 'Claude plan',
-  opencode: 'OpenCode plan',
-};
-
 const DEFAULT_VISIBLE_ITEMS = 8;
 
 export function AgentPlanList({ plan, running = false }: { plan?: AgentPlan; running?: boolean }) {
@@ -19,13 +12,13 @@ export function AgentPlanList({ plan, running = false }: { plan?: AgentPlan; run
   const visibleItems = expanded ? plan.items : plan.items.slice(0, DEFAULT_VISIBLE_ITEMS);
 
   return (
-    <section className="mt-2.5 border-t border-[var(--border-subtle)] pt-2.5" aria-label={SOURCE_LABELS[plan.source]}>
+    <section className="mt-2.5 border-t border-[var(--border-subtle)] pt-2.5" aria-label="Plan">
       <div className="mb-2 flex items-center justify-between gap-3">
         <span
           className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-dim)]"
           style={{ fontFamily: 'var(--display)' }}
         >
-          {SOURCE_LABELS[plan.source]}
+          Plan
         </span>
         <span className="font-mono text-[9px] tabular-nums text-[var(--muted-dim)]">
           {completed}/{plan.items.length}

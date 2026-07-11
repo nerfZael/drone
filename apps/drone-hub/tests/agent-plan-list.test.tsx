@@ -20,7 +20,7 @@ describe('AgentPlanList', () => {
       />,
     );
 
-    expect(html).toContain('Claude plan');
+    expect(html).toContain('Plan');
     expect(html).toContain('1/3');
     expect(html).toContain('Inspect the parser');
     expect(html).toContain('line-through');
