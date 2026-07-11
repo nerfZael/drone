@@ -95,9 +95,8 @@ Root workspace wiring includes `blip/packages/*`, and the root script `bun run b
 | Area | Pi | OpenCode | Codex | Current Blip | Current Gaps |
 | --- | --- | --- | --- | --- | --- |
 | Plugins | Not core to simple CLI. | Strong plugin direction. | MCP/plugins concepts. | No plugin system. | No MCP/plugin tool loading. |
-| Agents | Not core to simple CLI. | Task/agent features. | Delegation concepts. | `agent` tool for parallel agents with explicit context and authority. | Agent runs are scoped to the current Blip process. |
 | Remote execution | Not core to local CLI. | Broader architecture. | App/server concepts. | Local CLI only. | No remote workspace adapter. |
-| DroneHub/VoiceStream | External integrations possible. | Not directly relevant. | Not directly relevant. | No built-in integration. | CLI plus JSONL is the only integration surface. |
+| DroneHub/VoiceStream | External integrations possible. | Not directly relevant. | Not directly relevant. | Long-lived injected session API. | No Drone Hub host or server protocol yet. |
 
 ## Current Gaps Summary
 
@@ -108,7 +107,6 @@ Root workspace wiring includes `blip/packages/*`, and the root script `bun run b
 - No nested `AGENTS.md` support.
 - No skill loading in prompt assembly.
 - No plugin system.
-- Parallel agents via the `agent` tool.
 - No remote execution.
 - No remote/provider-native compaction.
 - No split-turn compaction summaries.

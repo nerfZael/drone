@@ -231,7 +231,6 @@ export function useChatConfigState({
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
-        blipClonesEnabled: prev?.blipClonesEnabled !== false,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -264,7 +263,6 @@ export function useChatConfigState({
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
-        blipClonesEnabled: prev?.blipClonesEnabled !== false,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -297,7 +295,6 @@ export function useChatConfigState({
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
-        blipClonesEnabled: prev?.blipClonesEnabled !== false,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -329,7 +326,6 @@ export function useChatConfigState({
         agentMessageAutoContinueEnabled: enabled,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
-        blipClonesEnabled: prev?.blipClonesEnabled !== false,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -361,7 +357,6 @@ export function useChatConfigState({
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: enabled,
         dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
-        blipClonesEnabled: prev?.blipClonesEnabled !== false,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -393,39 +388,6 @@ export function useChatConfigState({
         agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
         agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled: enabled,
-        blipClonesEnabled: prev?.blipClonesEnabled !== false,
-        sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
-        createdAt: prev?.createdAt ?? new Date().toISOString(),
-      }));
-      setChatInfoError(null);
-    },
-    [requestJson, selectedChat, selectedDrone],
-  );
-
-  const setBlipClonesEnabled = React.useCallback(
-    async (enabled: boolean) => {
-      if (!selectedDrone) return;
-      const chat = selectedChat || 'default';
-      await requestJson(
-        `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(
-          chat,
-        )}/config`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ blipClonesEnabled: enabled }),
-        },
-      );
-      setChatInfo((prev) => ({
-        name: selectedDrone,
-        chat,
-        agent: prev?.agent ?? ({ kind: 'builtin', id: 'blip' } as ChatAgentConfig),
-        model: prev?.model ?? null,
-        agentPermissionMode: prev?.agentPermissionMode ?? 'full-access',
-        agentMessageAutoContinueEnabled: prev?.agentMessageAutoContinueEnabled === true,
-        agentSuggestionEnabled: prev?.agentSuggestionEnabled === true,
-        dockerSnapshotAfterAgentMessageEnabled: prev?.dockerSnapshotAfterAgentMessageEnabled === true,
-        blipClonesEnabled: enabled,
         sessionName: prev?.sessionName ?? `drone-hub-chat-${chat}`,
         createdAt: prev?.createdAt ?? new Date().toISOString(),
       }));
@@ -463,7 +425,6 @@ export function useChatConfigState({
     setAgentMessageAutoContinueEnabled,
     setAgentSuggestionEnabled,
     setDockerSnapshotAfterAgentMessageEnabled,
-    setBlipClonesEnabled,
     handleSetAgentFailure,
   };
 }

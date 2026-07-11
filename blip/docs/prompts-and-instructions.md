@@ -11,10 +11,9 @@ The system prompt currently includes:
 1. Blip identity and basic coding-agent behavior.
 2. Workflow rules.
 3. Tool-profile-specific rules.
-4. Agent rules, when the agent tool is enabled.
-5. Patch rules.
-6. Permission and safety rules.
-7. Repository instructions from `<workspace>/AGENTS.md`, when that file exists.
+4. Patch rules.
+5. Permission and safety rules.
+6. Repository instructions from `<workspace>/AGENTS.md`, when that file exists.
 
 Compaction summaries are not injected into the system prompt. They are added to model-visible message history as a synthetic user message with the prefix `Summary of earlier conversation:`.
 
@@ -38,8 +37,6 @@ Tool rules depend on the active profile:
 - `no-shell-workspace-write`: tells the model that bash is unavailable and structured file tools are used.
 
 The workflow prompt asks the model to batch independent read/search/list/bash calls in one assistant turn when they can run in parallel.
-
-When agents are enabled, the prompt exposes the `agent` tool for bounded parallel agents with explicit context and authority. It tells the model not to use agents for simple discovery that can be handled with parallel read/search/list/bash calls, to prefer `read_only` authority for discovery and review, to use `scratch` for isolated patch candidates, and to use `wait:false` only when the parent can continue useful work before collecting results. It also tells the parent to avoid overlapping broad discovery while agents are running and to use agent progress/coverage updates before repeating work in the same lane. At runtime, completed non-blocking agent results may also be auto-delivered into the parent model context without a model-authored `agent collect` tool call.
 
 ## Current Gaps
 

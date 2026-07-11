@@ -468,16 +468,17 @@ import { createDroneProvisioningController } from './drone-provisioning';
 import {
   HubAssistantService,
   summarizeAssistantChatIdle,
-  type AssistantCreateChatResult,
-  type AssistantCreateDroneResult,
   type AssistantDroneSummary,
-  type AssistantRenameDronesResult,
-  type AssistantReorderDronesResult,
-  type AssistantSetDroneGroupResult,
-  type AssistantSetDroneGroupsResult,
   type AssistantUiAction,
   type AssistantVoiceSource,
 } from './assistant';
+import { BlipAssistantHost } from './assistant/blip-assistant-host';
+import { loadBlipMcp, loadBlipTools } from './assistant/blip-runtime-loader';
+import { createInProcessDroneHubMcpClient } from './assistant/in-process-drone-hub-mcp';
+import { AssistantArtifactsTarget } from './assistant/targets/assistant-artifacts-target';
+import { DroneWorkspaceTarget } from './assistant/targets/workspace-targets';
+import { saveAssistantArtifactUploads } from './assistant-artifacts';
+import { fetchContent, searchWeb } from './web-search';
 
 const HUB_API_LOADED_AT = new Date().toISOString();
 const HUB_API_BUILD_ID = crypto.randomBytes(6).toString('hex');
@@ -3786,6 +3787,49 @@ async function assistantDeleteDroneFile(opts: { droneId: string; path: string })
   return { droneId: target.id, path: target.targetPath, deleted: true };
 }
 
+async function assistantCreateDroneDirectory(opts: { droneId: string; path: string; recursive?: boolean }): Promise<any> {
+  const target = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.path, fallbackToHome: false });
+  if (!target.targetPath || target.targetPath === '/') throw new Error('missing directory path');
+  if (target.runtime === 'host') {
+    const resolvedPath = path.resolve(target.targetPath);
+    await fs.mkdir(resolvedPath, { recursive: opts.recursive === true });
+    return { droneId: target.id, path: resolvedPath, recursive: opts.recursive === true };
+  }
+  const command = opts.recursive === true ? 'mkdir -p -- "$target"' : 'mkdir -- "$target"';
+  const script = ['set -euo pipefail', `target=${bashQuote(target.targetPath)}`, command].join('\n');
+  const result = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) =>
+    dvmExec(containerName, 'bash', ['-lc', script]));
+  if (result.code !== 0) throw new Error((result.stderr || result.stdout || 'failed creating directory').trim());
+  return { droneId: target.id, path: target.targetPath, recursive: opts.recursive === true };
+}
+
+async function assistantDeleteDroneDirectory(opts: { droneId: string; path: string; recursive?: boolean }): Promise<any> {
+  const target = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.path, fallbackToHome: false });
+  if (!target.targetPath || target.targetPath === '/') throw new Error('missing directory path');
+  if (target.runtime === 'host') {
+    const resolvedPath = path.resolve(target.targetPath);
+    const info = await fs.stat(resolvedPath);
+    if (!info.isDirectory()) throw new Error(`path is not a directory: ${resolvedPath}`);
+    await fs.rm(resolvedPath, { recursive: opts.recursive === true });
+    return { droneId: target.id, path: resolvedPath, deleted: true, recursive: opts.recursive === true };
+  }
+  const command = opts.recursive === true ? 'rm -r -- "$target"' : 'rmdir -- "$target"';
+  const script = [
+    'set -euo pipefail',
+    `target=${bashQuote(target.targetPath)}`,
+    'if [ ! -d "$target" ]; then echo "__ERR__\\tnot-directory"; exit 3; fi',
+    command,
+  ].join('\n');
+  const result = await withLockedDroneContainer({ requestedDroneName: target.name, droneEntry: target.drone }, async ({ containerName }) =>
+    dvmExec(containerName, 'bash', ['-lc', script]));
+  if (result.code !== 0) {
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+    if (/__ERR__\s+not-directory\b/i.test(output)) throw new Error(`path is not a directory: ${target.targetPath}`);
+    throw new Error((result.stderr || result.stdout || 'failed deleting directory').trim());
+  }
+  return { droneId: target.id, path: target.targetPath, deleted: true, recursive: opts.recursive === true };
+}
+
 async function assistantMoveDroneFile(opts: { droneId: string; fromPath: string; toPath: string }): Promise<any> {
   const from = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.fromPath, fallbackToHome: false });
   const to = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.toPath, fallbackToHome: false });
@@ -3812,6 +3856,46 @@ async function assistantMoveDroneFile(opts: { droneId: string; fromPath: string;
     const out = `${r.stdout || ''}\n${r.stderr || ''}`;
     if (/__ERR__\s+not-file\b/i.test(out)) throw new Error(`file not found: ${from.targetPath}`);
     throw new Error((r.stderr || r.stdout || 'failed moving file').trim());
+  }
+  return { droneId: from.id, path: from.targetPath, movedTo: to.targetPath };
+}
+
+async function assistantMoveDronePath(opts: { droneId: string; fromPath: string; toPath: string; overwrite?: boolean }): Promise<any> {
+  const from = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.fromPath, fallbackToHome: false });
+  const to = await resolveAssistantDroneFsTarget({ droneId: opts.droneId, path: opts.toPath, fallbackToHome: false });
+  if (!from.targetPath || from.targetPath === '/' || !to.targetPath || to.targetPath === '/') throw new Error('missing path');
+  if (from.runtime === 'host') {
+    const fromPath = path.resolve(from.targetPath);
+    const toPath = path.resolve(to.targetPath);
+    await fs.stat(fromPath);
+    try {
+      await fs.stat(toPath);
+      if (!opts.overwrite) throw new Error(`destination exists: ${toPath}`);
+      await fs.rm(toPath, { recursive: true, force: true });
+    } catch (error: any) {
+      if (String(error?.code ?? '') !== 'ENOENT') throw error;
+    }
+    await fs.mkdir(path.dirname(toPath), { recursive: true });
+    await fs.rename(fromPath, toPath);
+    return { droneId: from.id, path: fromPath, movedTo: toPath };
+  }
+  const script = [
+    'set -euo pipefail',
+    `from_path=${bashQuote(from.targetPath)}`,
+    `to_path=${bashQuote(to.targetPath)}`,
+    `overwrite=${opts.overwrite === true ? '1' : '0'}`,
+    'if [ ! -e "$from_path" ]; then echo "__ERR__\\tmissing-source"; exit 3; fi',
+    'if [ -e "$to_path" ]; then if [ "$overwrite" = "1" ]; then rm -rf -- "$to_path"; else echo "__ERR__\\tdestination-exists"; exit 4; fi; fi',
+    'mkdir -p "$(dirname -- "$to_path")"',
+    'mv -- "$from_path" "$to_path"',
+  ].join('\n');
+  const result = await withLockedDroneContainer({ requestedDroneName: from.name, droneEntry: from.drone }, async ({ containerName }) =>
+    dvmExec(containerName, 'bash', ['-lc', script]));
+  if (result.code !== 0) {
+    const output = `${result.stdout || ''}\n${result.stderr || ''}`;
+    if (/__ERR__\s+missing-source\b/i.test(output)) throw new Error(`path not found: ${from.targetPath}`);
+    if (/__ERR__\s+destination-exists\b/i.test(output)) throw new Error(`destination exists: ${to.targetPath}`);
+    throw new Error((result.stderr || result.stdout || 'failed moving path').trim());
   }
   return { droneId: from.id, path: from.targetPath, movedTo: to.targetPath };
 }
@@ -6577,7 +6661,6 @@ async function sendPromptToChat(opts: {
 
     if (agent.kind === 'builtin' && agent.id === 'blip') {
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
-      const agentsArg = (chat as any)?.blipClonesEnabled === false ? ' --no-agents' : ' --agents';
       const permissionArgs =
         agentPermissionMode === 'read-only'
           ? '--permission read-only --profile read-only'
@@ -6591,7 +6674,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `${blipCommand} --jsonl ${permissionArgs}${agentsArg}${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+        `${blipCommand} --jsonl ${permissionArgs}${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({ id: opts.id, drone: d, waitForDaemonMs: opts.waitForDaemonMs, kind: 'blip', script });
       return {
@@ -9650,25 +9733,6 @@ function chatHasReconcilablePendingPrompts(entry: any): boolean {
   return false;
 }
 
-function normalizePendingBlipClones(raw: any): { status: 'running'; count: number; tasks: string[] } | undefined {
-  if (!raw || typeof raw !== 'object') return undefined;
-  if (String(raw.status ?? '').trim() !== 'running') return undefined;
-  const tasks = Array.isArray(raw.tasks) ? raw.tasks.map((task: any) => String(task ?? '').trim()).filter(Boolean).slice(0, 8) : [];
-  if (tasks.length === 0) return undefined;
-  const countRaw = Number(raw.count);
-  const count = Number.isFinite(countRaw) && countRaw > 0 ? Math.floor(countRaw) : tasks.length;
-  return { status: 'running', count: Math.max(1, count), tasks };
-}
-
-function samePendingBlipClones(leftRaw: any, rightRaw: any): boolean {
-  const left = normalizePendingBlipClones(leftRaw);
-  const right = normalizePendingBlipClones(rightRaw);
-  if (!left && !right) return true;
-  if (!left || !right) return false;
-  if (left.count !== right.count || left.tasks.length !== right.tasks.length) return false;
-  return left.tasks.every((task, index) => task === right.tasks[index]);
-}
-
 async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string }): Promise<void> {
   const droneId = normalizeDroneIdentity(opts.droneId);
   const chatName = normalizeChatName(opts.chatName);
@@ -9830,11 +9894,9 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         entry.blipSessionId = parsedBlip.sessionId;
         changed = true;
       }
-      const nextBlipClones = parsedBlip?.cloneActivity;
-      const blipClonesChanged = jobKind === 'blip' && !samePendingBlipClones((p as any).blipClones, nextBlipClones);
       const observabilityChanged = Boolean((p as any).observability);
-      if (state !== 'sent' || blipClonesChanged || observabilityChanged) {
-        pendingList[i] = { ...p, state: 'sent', observability: undefined, blipClones: nextBlipClones, updatedAt: nowIso() };
+      if (state !== 'sent' || observabilityChanged) {
+        pendingList[i] = { ...p, state: 'sent', observability: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -9902,7 +9964,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             fallbackRaw: 'codex finished but no message was parsed',
             exitCode: 0,
           });
-          pendingList[i] = { ...p, state: 'failed', error, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error, observability: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -9926,7 +9988,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         });
         transcriptIds.add(id);
         completedTurnIdsForSnapshot.push(id);
-        pendingList[i] = { ...p, state: 'sent', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', observability: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -9941,7 +10003,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         }
         const output = String(parsed.message ?? '').trimEnd();
         if (!output) {
-          pendingList[i] = { ...p, state: 'failed', error: 'pi finished but no assistant message was parsed', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error: 'pi finished but no assistant message was parsed', observability: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -9960,7 +10022,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         });
         transcriptIds.add(id);
         completedTurnIdsForSnapshot.push(id);
-        pendingList[i] = { ...p, state: 'sent', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', observability: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -9975,7 +10037,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
         }
         const output = String(parsed.message ?? '').trimEnd();
         if (!output) {
-          pendingList[i] = { ...p, state: 'failed', error: 'blip finished but no assistant message was parsed', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'failed', error: 'blip finished but no assistant message was parsed', observability: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -9993,7 +10055,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           output,
         });
         transcriptIds.add(id);
-        pendingList[i] = { ...p, state: 'sent', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+        pendingList[i] = { ...p, state: 'sent', observability: undefined, updatedAt: nowIso() };
         changed = true;
         continue;
       }
@@ -10033,7 +10095,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
       });
       transcriptIds.add(id);
       completedTurnIdsForSnapshot.push(id);
-      pendingList[i] = { ...p, state: 'sent', observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'sent', observability: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }
@@ -10081,7 +10143,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           });
           transcriptIds.add(id);
           completedTurnIdsForSnapshot.push(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, observability: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -10120,7 +10182,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           });
           transcriptIds.add(id);
           completedTurnIdsForSnapshot.push(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, observability: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -10155,7 +10217,7 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
             output,
           });
           transcriptIds.add(id);
-          pendingList[i] = { ...p, state: 'sent', error: undefined, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+          pendingList[i] = { ...p, state: 'sent', error: undefined, observability: undefined, updatedAt: nowIso() };
           changed = true;
           continue;
         }
@@ -10175,13 +10237,13 @@ async function reconcileChatFromDaemon(opts: { droneId: string; chatName: string
           '',
         exitCode,
       });
-      pendingList[i] = { ...p, state: 'failed', error: errText, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'failed', error: errText, observability: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }
 
     if (jobState === 'canceled') {
-      pendingList[i] = { ...p, state: 'failed', error: STOPPED_BY_USER_ERROR, observability: undefined, blipClones: undefined, updatedAt: nowIso() };
+      pendingList[i] = { ...p, state: 'failed', error: STOPPED_BY_USER_ERROR, observability: undefined, updatedAt: nowIso() };
       changed = true;
       continue;
     }
@@ -12448,9 +12510,6 @@ function buildNewChatEntry(opts: {
     entry.agentSuggestionEnabled = true;
     entry.agentSuggestionEnabledAt = opts.createdAt;
   }
-  if (agent.kind === 'builtin' && agent.id === 'blip' && opts.sourceChatEntry?.blipClonesEnabled === false) {
-    entry.blipClonesEnabled = false;
-  }
   return entry;
 }
 
@@ -13337,16 +13396,6 @@ async function setChatAgentConfig(opts: {
         error.statusCode = 400;
         throw error;
       }
-    }
-    if (opts.setBlipClonesEnabled && effectiveAgent.kind !== 'builtin') {
-      const error: Error & { statusCode?: number } = new Error('Blip agents are only supported for Blip chats');
-      error.statusCode = 400;
-      throw error;
-    }
-    if (opts.setBlipClonesEnabled && effectiveAgent.kind === 'builtin' && effectiveAgent.id !== 'blip') {
-      const error: Error & { statusCode?: number } = new Error('Blip agents are only supported for Blip chats');
-      error.statusCode = 400;
-      throw error;
     }
     if (opts.agent) {
       assertChatAgentSupportedForDrone(d, opts.agent);
@@ -14773,24 +14822,6 @@ export async function startDroneHubApiServer(opts: {
     return out.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   }
 
-  async function setAssistantDroneGroup(opts: { droneIds: string[]; group: string | null }): Promise<AssistantSetDroneGroupResult> {
-    const beforeGroups = opts.group ? listAllKnownGroups(await loadRegistry()) : [];
-    const data = await callLocalHubApi('/api/drones/group-set', { droneIds: opts.droneIds, group: opts.group });
-    if (opts.group && Array.isArray(data?.moved) && data.moved.length > 0 && !beforeGroups.includes(opts.group)) {
-      const current = await resolveUiPreferencesSettingsResponse();
-      await upsertStoredUiPreferencesSettings({
-        ...current.uiPreferences,
-        sidebarGroupOrder: insertAssistantGroupTokenAtParentTop(current.uiPreferences.sidebarGroupOrder, beforeGroups, opts.group),
-      });
-    }
-    return {
-      group: typeof data?.group === 'string' && data.group.trim() ? data.group.trim() : null,
-      moved: Array.isArray(data?.moved) ? data.moved : [],
-      rejected: Array.isArray(data?.rejected) ? data.rejected : [],
-      total: Number.isFinite(Number(data?.total)) ? Number(data.total) : 0,
-    };
-  }
-
   type WhiteboardChangeReason = 'created' | 'updated' | 'deleted';
   type WhiteboardChangeEvent = {
     type: 'whiteboard_changed';
@@ -14837,312 +14868,187 @@ export async function startDroneHubApiServer(opts: {
     };
   }
 
-  function compactWhiteboardForAssistant(whiteboard: WhiteboardDocument): Record<string, unknown> {
-    const elements = Array.isArray(whiteboard.scene?.elements) ? whiteboard.scene.elements : [];
-    const visible = elements.filter((element: any) => element?.isDeleted !== true);
-    const compactElements = visible.slice(0, 100).map((element: any) => {
-      const compact: Record<string, unknown> = {
-        id: String(element?.id ?? ''),
-        type: String(element?.type ?? ''),
-        x: Number(element?.x ?? 0),
-        y: Number(element?.y ?? 0),
-        width: Number(element?.width ?? 0),
-        height: Number(element?.height ?? 0),
-      };
-      if (typeof element?.text === 'string') {
-        compact.text = element.text.length > 500 ? `${element.text.slice(0, 500)}...` : element.text;
-      }
-      if (typeof element?.strokeColor === 'string') compact.strokeColor = element.strokeColor;
-      if (typeof element?.backgroundColor === 'string') compact.backgroundColor = element.backgroundColor;
-      if (Array.isArray(element?.points)) compact.points = element.points;
-      return compact;
-    });
-    return {
-      id: whiteboard.id,
-      title: whiteboard.title,
-      scopeType: whiteboard.scopeType,
-      scopeValue: whiteboard.scopeValue,
-      version: whiteboard.version,
-      updatedAt: whiteboard.updatedAt,
-      totalElementCount: elements.length,
-      visibleElementCount: visible.length,
-      truncatedElements: visible.length > compactElements.length,
-      elements: compactElements,
-    };
-  }
-
   const assistantService = new HubAssistantService({
     listDrones: async (): Promise<AssistantDroneSummary[]> => {
       const regAny: any = await loadRegistry();
       return buildAssistantDroneSummariesFromRegistry(regAny);
     },
-    createDrone: async (request): Promise<AssistantCreateDroneResult> => {
-      const seedPrompt = String(request?.seedPrompt ?? request?.initialMessage ?? request?.seed?.prompt ?? '').trim();
-      const submittedRequest =
-        seedPrompt && !String(request?.seedSubmittedAt ?? request?.submittedAt ?? request?.seed?.submittedAt ?? request?.seed?.clientSubmittedAt ?? '').trim()
-          ? { ...request, seedSubmittedAt: nowIso() }
-          : request;
-      const data = await callLocalHubApi('/api/drones', submittedRequest);
-      return {
-        id: String(data?.id ?? '').trim(),
-        name: String(data?.name ?? '').trim(),
-        runtime: String(data?.runtime ?? submittedRequest?.runtime ?? 'container').trim() || 'container',
-        phase: String(data?.phase ?? 'starting').trim() || 'starting',
-        request: submittedRequest,
-      };
-    },
-    createChat: async ({ droneId, chatName, draft }): Promise<AssistantCreateChatResult> => {
-      const data = await callLocalHubApi(`/api/drones/${encodeURIComponent(droneId)}/chats`, { name: chatName, ...(draft ? { draft: true } : {}) });
-      return {
-        droneId: String(data?.id ?? droneId).trim() || droneId,
-        droneName: String(data?.name ?? droneId).trim() || droneId,
-        chatName: String(data?.chat ?? chatName).trim() || chatName,
-        chats: Array.isArray(data?.chats) ? data.chats.map((chat: any) => String(chat ?? '').trim()).filter(Boolean) : [],
-      };
-    },
-    createGroup: async ({ group }) => {
-      const target = validateGroupNameOrThrow(group, 'group');
-      const beforeGroups = listAllKnownGroups(await loadRegistry());
-      let data: any = null;
-      let created = true;
-      try {
-        data = await callLocalHubApi('/api/groups', { name: target });
-      } catch (error: any) {
-        if (!/group already exists/i.test(String(error?.message ?? error ?? ''))) throw error;
-        created = false;
-        data = { name: target, createdAt: null };
-      }
-      let groupOrder: unknown = { updated: false, group: target };
-      if (created || !beforeGroups.includes(target)) {
-        const current = await resolveUiPreferencesSettingsResponse();
-        const nextUiPreferences: UiPreferencesSettings = {
-          ...current.uiPreferences,
-          sidebarGroupOrder: insertAssistantGroupTokenAtParentTop(current.uiPreferences.sidebarGroupOrder, beforeGroups, target),
-        };
-        await upsertStoredUiPreferencesSettings(nextUiPreferences);
-        const saved = await resolveUiPreferencesSettingsResponse();
-        groupOrder = { updated: true, group: target, sidebarGroupOrder: saved.uiPreferences.sidebarGroupOrder };
-      }
-      return {
-        ok: true,
-        group: String(data?.name ?? target).trim() || target,
-        created,
-        createdAt: typeof data?.createdAt === 'string' ? data.createdAt : null,
-        groupOrder,
-      };
-    },
-    setDroneGroup: async ({ droneIds, group }): Promise<AssistantSetDroneGroupResult> => {
-      return await setAssistantDroneGroup({ droneIds, group });
-    },
-    setDroneGroups: async ({ assignments }): Promise<AssistantSetDroneGroupsResult> => {
-      const results: AssistantSetDroneGroupsResult['assignments'] = [];
-      for (const assignment of assignments) {
-        const result = await setAssistantDroneGroup({ droneIds: assignment.droneIds, group: assignment.group });
-        results.push({ ...assignment, result });
-      }
-      return {
-        assignments: results,
-        moved: results.flatMap((assignment) => assignment.result.moved),
-        rejected: results.flatMap((assignment) => assignment.result.rejected),
-        total: results.reduce((sum, assignment) => sum + assignment.result.total, 0),
-      };
-    },
-    reorderDrones: async ({ droneIds, group, beforeDroneId, afterDroneId }): Promise<AssistantReorderDronesResult> => {
-      const targetGroup = normalizeGroupName(group) || 'Ungrouped';
-      const allDrones = buildAssistantDroneSummariesFromRegistry(await loadRegistry());
-      const byId = new Map(allDrones.map((drone) => [drone.id, drone]));
-      const movingIds = normalizeAssistantUiOrderList(droneIds);
-      const movingDrones = movingIds.map((id) => {
-        const drone = byId.get(id);
-        if (!drone) throw new Error(`unknown drone: ${id}`);
-        return drone;
-      });
-      const normalizeOrderGroup = (value: unknown) => {
-        const normalized = normalizeGroupName(value);
-        return !normalized || isUngroupedGroupName(normalized) ? 'Ungrouped' : normalized;
-      };
-      const scopeDrones = allDrones.filter((drone) => normalizeOrderGroup(drone.group) === targetGroup);
-      const scopeIds = scopeDrones.map((drone) => drone.id).filter(Boolean);
-      for (const drone of movingDrones) {
-        if (normalizeOrderGroup(drone.group) !== targetGroup) throw new Error(`drone is not in group ${targetGroup}: ${drone.name || drone.id}`);
-      }
-      const beforeId = beforeDroneId ? String(beforeDroneId).trim() : '';
-      const afterId = afterDroneId ? String(afterDroneId).trim() : '';
-      const beforeDrone = beforeId ? byId.get(beforeId) : null;
-      const afterDrone = afterId ? byId.get(afterId) : null;
-      if (beforeId && !beforeDrone) throw new Error(`unknown beforeDrone: ${beforeId}`);
-      if (afterId && !afterDrone) throw new Error(`unknown afterDrone: ${afterId}`);
-      if (beforeDrone && normalizeOrderGroup(beforeDrone.group) !== targetGroup) {
-        throw new Error(`beforeDrone is not in group ${targetGroup}: ${beforeDrone.name || beforeDrone.id}`);
-      }
-      if (afterDrone && normalizeOrderGroup(afterDrone.group) !== targetGroup) {
-        throw new Error(`afterDrone is not in group ${targetGroup}: ${afterDrone.name || afterDrone.id}`);
-      }
-      const groupOrderKey = assistantSidebarGroupToken(targetGroup);
-      const parentId = targetGroup === 'Ungrouped' ? 'root' : assistantSidebarFolderNodeId(targetGroup);
-      const current = await resolveUiPreferencesSettingsResponse();
-      const nextUiPreferences: UiPreferencesSettings = {
-        ...current.uiPreferences,
-        sidebarDroneOrderByGroup: {
-          ...current.uiPreferences.sidebarDroneOrderByGroup,
-          [groupOrderKey]: reorderAssistantVisibleEntries(
-            current.uiPreferences.sidebarDroneOrderByGroup[groupOrderKey] ?? [],
-            scopeIds,
-            movingIds,
-            beforeId,
-            afterId,
-          ),
-        },
-        sidebarNodeOrderByParent: {
-          ...current.uiPreferences.sidebarNodeOrderByParent,
-          [parentId]: reorderAssistantVisibleEntries(
-            current.uiPreferences.sidebarNodeOrderByParent[parentId] ?? [],
-            scopeIds.map(assistantSidebarDroneNodeId),
-            movingIds.map(assistantSidebarDroneNodeId),
-            beforeId ? assistantSidebarDroneNodeId(beforeId) : '',
-            afterId ? assistantSidebarDroneNodeId(afterId) : '',
-          ),
-        },
-      };
-      await upsertStoredUiPreferencesSettings(nextUiPreferences);
-      const saved = await resolveUiPreferencesSettingsResponse();
-      return {
-        ok: true,
-        group: targetGroup,
-        drones: movingDrones.map((drone) => ({ id: drone.id, name: drone.name })),
-        sidebarDroneOrder: saved.uiPreferences.sidebarDroneOrderByGroup[groupOrderKey] ?? [],
-        sidebarNodeOrder: saved.uiPreferences.sidebarNodeOrderByParent[parentId] ?? [],
-      };
-    },
-    renameDrones: async ({ renames }): Promise<AssistantRenameDronesResult> => {
-      const renamed: AssistantRenameDronesResult['renamed'] = [];
-      const rejected: AssistantRenameDronesResult['rejected'] = [];
-      for (const request of renames) {
-        const droneId = String(request?.droneId ?? '').trim();
-        const newName = String(request?.newName ?? '').trim();
-        if (!droneId || !newName) {
-          rejected.push({ id: droneId, newName, error: 'missing drone id or new name' });
-          continue;
-        }
-        try {
-          const data = await callLocalHubApi(`/api/drones/${encodeURIComponent(droneId)}/rename`, {
-            newName,
-            source: 'drone-hub-assistant',
-          });
-          renamed.push({
-            id: String(data?.id ?? droneId).trim() || droneId,
-            oldName: String(data?.oldName ?? droneId).trim() || droneId,
-            newName: String(data?.newName ?? newName).trim() || newName,
-            renamed: data?.renamed !== false,
-          });
-        } catch (error: any) {
-          rejected.push({
-            id: droneId,
-            newName,
-            error: String(error?.message ?? error ?? 'rename failed'),
-          });
-        }
-      }
-      return { renamed, rejected, total: renames.length };
-    },
-    messageDrone: async ({ droneId, chatName, prompt }) => {
-      const resolved = await resolveDroneOrPendingForReadRef(droneId);
-      if (!resolved) throw new Error(`unknown drone: ${droneId}`);
-      const id = resolved.id;
-      const chat = normalizeChatName(chatName || 'default');
-      const message = String(prompt ?? '').trim();
-      if (!message) throw new Error('missing prompt');
-      const submittedAt = nowIso();
-      if (resolved.kind === 'pending') {
-        const pendingPromptId = crypto.randomBytes(9).toString('hex');
-        const queuedStatus = await pushPendingStartupPrompt({
-          droneId: id,
-          chatName: chat,
-          pending: {
-            id: pendingPromptId,
-            at: submittedAt,
-            prompt: message,
-            state: 'queued',
-            updatedAt: submittedAt,
-          },
-        });
-        if (queuedStatus !== 'queued') {
-          const r = await createOrEnqueuePromptUnified({ id: pendingPromptId, droneId: id, chatName: chat, prompt: message, cwd: null, submittedAt });
-          if (r.kind === 'error') throw new Error(r.error);
-          return { promptId: r.id, pendingState: r.pendingState, blockedByAutomation: r.blockedByAutomation };
-        }
-        return { promptId: pendingPromptId, pendingState: 'queued', blockedByAutomation: false };
-      }
-      const r = await createOrEnqueuePromptUnified({ droneId: id, chatName: chat, prompt: message, cwd: null, submittedAt });
-      if (r.kind === 'error') throw new Error(r.error);
-      return { promptId: r.id, pendingState: r.pendingState, blockedByAutomation: r.blockedByAutomation };
-    },
-    speak: speakToVoiceTarget,
     listDroneFiles: async ({ droneId, path }) => await assistantListDroneFiles({ droneId, path }),
     readDroneFile: async ({ droneId, path, startLine, endLine }) => await assistantReadDroneFile({ droneId, path, startLine, endLine }),
     writeDroneFile: async ({ droneId, path, content }) => await assistantWriteDroneFile({ droneId, path, content }),
     deleteDroneFile: async ({ droneId, path }) => await assistantDeleteDroneFile({ droneId, path }),
     moveDroneFile: async ({ droneId, fromPath, toPath }) => await assistantMoveDroneFile({ droneId, fromPath, toPath }),
+    moveDronePath: async ({ droneId, fromPath, toPath, overwrite }) => await assistantMoveDronePath({ droneId, fromPath, toPath, overwrite }),
+    createDroneDirectory: async ({ droneId, path, recursive }) => await assistantCreateDroneDirectory({ droneId, path, recursive }),
+    deleteDroneDirectory: async ({ droneId, path, recursive }) => await assistantDeleteDroneDirectory({ droneId, path, recursive }),
     searchDroneFiles: async ({ droneId, path, query, limit, contextBefore, contextAfter }) =>
       await assistantSearchDroneFiles({ droneId, path, query, limit, contextBefore, contextAfter }),
-    findDroneFiles: async ({ droneId, path, pattern, limit }) => await assistantFindDroneFiles({ droneId, path, pattern, limit }),
     statDronePath: async ({ droneId, path }) => await assistantStatDronePath({ droneId, path }),
     runDroneBash: async ({ droneId, command, cwd, timeoutMs }) => await assistantRunDroneBash({ droneId, command, cwd, timeoutMs }),
     listDroneChangedFiles: async ({ droneId }) => await assistantListDroneChangedFiles({ droneId }),
-    listWhiteboards: async ({ scopeType, scopeValue } = {}) => ({
-      ok: true,
-      whiteboards: requireWhiteboardStore().list({ scopeType, scopeValue }),
-    }),
-    readWhiteboard: async ({ whiteboardId }) => {
-      const store = requireWhiteboardStore();
-      const id = String(whiteboardId ?? '').trim() || 'main';
-      const whiteboard = id === 'main'
-        ? store.get(id) ?? store.ensureDefault()
-        : store.get(id);
-      if (!whiteboard) throw new Error(`unknown whiteboard: ${id}`);
-      return { ok: true, whiteboard: compactWhiteboardForAssistant(whiteboard) };
-    },
-    createWhiteboard: async ({ title, scopeType, scopeValue }) => {
-      const whiteboard = requireWhiteboardStore().create({ title, scopeType, scopeValue });
-      emitWhiteboardChange({ whiteboardId: whiteboard.id, version: whiteboard.version, reason: 'created', source: 'assistant' });
-      return { ok: true, whiteboard: compactWhiteboardForAssistant(whiteboard) };
-    },
-    updateWhiteboard: async ({ whiteboardId, operations, shapes, title }) => {
-      const store = requireWhiteboardStore();
-      const id = String(whiteboardId ?? '').trim() || 'main';
-      let whiteboard = id === 'main'
-        ? store.get(id) ?? store.ensureDefault()
-        : store.get(id);
-      if (!whiteboard) throw new Error(`unknown whiteboard: ${id}`);
-      let changed = false;
-      if (title) {
-        whiteboard = store.save(whiteboard.id, { baseVersion: whiteboard.version, title, actorId: 'assistant' });
-        changed = true;
-      }
-      const normalizedOperations =
-        Array.isArray(operations) && operations.length > 0
-          ? operations
-          : Array.isArray(shapes) && shapes.length > 0
-            ? [{ action: 'add_shape', shapes }]
-            : [];
-      if (normalizedOperations.length > 0) {
-        whiteboard = store.applyOperations(whiteboard.id, normalizedOperations, 'assistant');
-        changed = true;
-      }
-      if (changed) emitWhiteboardChange({ whiteboardId: whiteboard.id, version: whiteboard.version, reason: 'updated', source: 'assistant' });
-      return { ok: true, whiteboard: compactWhiteboardForAssistant(whiteboard) };
-    },
-    captureWhiteboard: async ({ whiteboardId, padding, maxWidth, maxHeight, backgroundColor }) => {
-      const store = requireWhiteboardStore();
-      const id = String(whiteboardId ?? '').trim() || 'main';
-      const whiteboard = id === 'main'
-        ? store.get(id) ?? store.ensureDefault()
-        : store.get(id);
-      if (!whiteboard) throw new Error(`unknown whiteboard: ${id}`);
-      const image = renderWhiteboardPng(whiteboard, { padding, maxWidth, maxHeight, backgroundColor });
-      const { data, ...metadata } = image;
-      return { ...image, metadata };
-    },
+  });
+  const blipAssistantHost = new BlipAssistantHost(async (threadId) => {
+        const snapshot = await assistantService.threadSnapshot(threadId);
+        const thread = snapshot.threads.find((candidate) => candidate.id === threadId);
+        if (!thread) throw new Error(`unknown assistant thread: ${threadId}`);
+        const [{ createMcpToolProvider }, blipTools] = await Promise.all([
+          loadBlipMcp(),
+          loadBlipTools(),
+        ]);
+        const visibleDrones = await assistantService.visibleDrones(threadId);
+        const workspaceCapabilities = ['files.list', 'files.read', 'files.search', 'git.status'] as const;
+        const writableDroneIds = new Set(Array.isArray(thread.accessScope?.droneIds) ? thread.accessScope.droneIds : []);
+        const writableDrones = thread.accessScope?.writeMode === 'all'
+          ? visibleDrones
+          : visibleDrones.filter((drone: any) => writableDroneIds.has(drone.id));
+        const refsFor = (drones: any[]) => Array.from(new Set(drones.flatMap((drone: any) => [String(drone.id ?? ''), String(drone.name ?? '')]).filter(Boolean)));
+        const mcpClient = await createInProcessDroneHubMcpClient({
+          correlationId: threadId,
+          allowedDroneRefs: refsFor(visibleDrones),
+          allowedWriteDroneRefs: refsFor(writableDrones),
+          allowedDroneIds: visibleDrones.map((drone: any) => String(drone.id ?? '')).filter(Boolean),
+        });
+        const droneTargets = visibleDrones.map((drone: any) => {
+          const writable = thread.accessScope?.writeMode === 'all' || writableDroneIds.has(drone.id);
+          return new DroneWorkspaceTarget({
+            id: `drone:${drone.id}`,
+            droneId: drone.id,
+            label: drone.name || drone.id,
+            rootLabel: `${drone.name || drone.id} workspace`,
+            capabilities: [
+              ...workspaceCapabilities,
+              ...(writable ? [
+                'files.write', 'files.delete', 'files.move', 'directories.create', 'directories.delete', 'patch.apply', 'shell.execute',
+              ] as const : []),
+            ],
+            execute: async (call) => assistantService.executeDroneWorkspaceTool(threadId, drone.id, call, {
+              parse: blipTools.parsePatch,
+              applyHunks: blipTools.applyPatchHunks,
+            }),
+          });
+        });
+        const artifactTarget = new AssistantArtifactsTarget(threadId);
+        const targets = [...droneTargets, artifactTarget];
+        const preferredDroneId = Array.isArray(thread.accessScope?.droneIds) ? thread.accessScope.droneIds[0] : '';
+        const activeTargetId = droneTargets.find((target: DroneWorkspaceTarget) => target.droneId === preferredDroneId)?.descriptor.id ?? targets[0]?.descriptor.id;
+        const targetCatalog = new blipTools.WorkspaceTargetCatalog(targets, activeTargetId);
+        const enabledTools = new Set(Array.isArray(thread.enabledTools) ? thread.enabledTools : []);
+        const workspaceTools = blipTools.createWorkspaceTargetTools({
+          profile: 'no-shell-workspace-write',
+          resolveTarget: (targetId?: string) => targetCatalog.resolve(targetId),
+        }).filter((tool) => enabledTools.has(tool.name));
+        const tools = [{
+          name: 'get_current_context',
+          label: 'Get current context',
+          description: 'Read the current Drone Hub UI context and this thread access scope.',
+          parameters: { type: 'object', properties: {}, additionalProperties: false },
+          execute: async () => {
+            const context = assistantService.currentContext(threadId);
+            return { content: [{ type: 'text' as const, text: JSON.stringify(context, null, 2) }], details: context };
+          },
+        }, {
+          name: 'web_search',
+          label: 'Web search',
+          description: 'Search the web for current information and source URLs.',
+          parameters: {
+            type: 'object',
+            properties: {
+              query: { type: 'string' },
+              numResults: { type: 'number' },
+              recencyFilter: { type: 'string', enum: ['day', 'week', 'month', 'year'] },
+              domainFilter: { type: 'array', items: { type: 'string' } },
+            },
+            required: ['query'],
+          },
+          execute: async (_callId: string, args: any) => {
+            const settings = await resolveExaApiKeySettings();
+            const result = await searchWeb(args, settings.apiKey ?? '');
+            return { content: [{ type: 'text' as const, text: result.answer }], details: result };
+          },
+        }, {
+          name: 'fetch_content',
+          label: 'Fetch content',
+          description: 'Fetch readable content from an HTTP or HTTPS URL.',
+          parameters: {
+            type: 'object',
+            properties: {
+              url: { type: 'string' },
+              maxCharacters: { type: 'number' },
+              livecrawl: { type: 'string', enum: ['never', 'fallback', 'preferred', 'always'] },
+            },
+            required: ['url'],
+          },
+          execute: async (_callId: string, args: any) => {
+            const settings = await resolveExaApiKeySettings();
+            const result = await fetchContent(args, settings.apiKey ?? '');
+            return { content: [{ type: 'text' as const, text: result.answer }], details: result };
+          },
+        }, ...workspaceTools].filter((tool) => enabledTools.has(tool.name));
+        const mcpProvider = createMcpToolProvider({
+          id: 'drone-hub',
+          namePrefix: 'drone_hub',
+          client: mcpClient,
+          promptGuidance: 'Use drone_hub__ tools for Drone Hub drones, chats, groups, repositories, and whiteboards.',
+          correlation: () => ({ threadId }),
+        });
+        const enabledMcpProvider = {
+          id: mcpProvider.id,
+          promptSections: mcpProvider.promptSections?.bind(mcpProvider),
+          async load(context: any) {
+            const aliases: Record<string, string> = {
+              send_message: 'message_drone',
+              list_repos: 'list_drones',
+              list_groups: 'list_drones',
+              open_drone: 'open_drone_chat',
+              list_chats: 'read_chat_messages',
+              read_chat: 'read_chat_messages',
+            };
+            return (await mcpProvider.load(context)).filter((tool) => {
+              const unqualified = tool.name.replace(/^drone_hub__/, '');
+              if (unqualified === 'list_chat_idle_subscriptions' || unqualified === 'cancel_chat_idle_subscription') return false;
+              return enabledTools.has(aliases[unqualified] ?? unqualified);
+            });
+          },
+        };
+        return {
+          provider: thread.provider,
+          model: thread.model,
+          thinkingLevel: thread.thinkingLevel,
+          promptDeliveryMode: thread.promptDeliveryMode,
+          systemPrompt: assistantService.resolvedSystemPrompt(threadId),
+          tools,
+          toolProviders: [enabledMcpProvider],
+          permissionPreflight: async (request) => {
+            let toolName = request.tool;
+            let args: any = request.args && typeof request.args === 'object' ? request.args : {};
+            if (toolName === 'drone_hub__send_message') {
+              toolName = 'message_drone';
+              args = { ...args, droneId: args.drone, chatName: args.chat };
+            } else if (toolName === 'drone_hub__set_drone_group') {
+              toolName = 'set_drone_group';
+            } else if (toolName === 'drone_hub__rename_drones') {
+              toolName = 'rename_drones';
+            } else if (toolName === 'bash') {
+              const target = targetCatalog.resolve(args.target);
+              if (target instanceof DroneWorkspaceTarget) args = { ...args, droneId: target.droneId };
+            }
+            const decision = await assistantService.preflightBlipTool(threadId, toolName, request.callId, args, request.signal);
+            return decision?.block ? { status: 'deny' as const, reason: decision.reason ?? `Denied ${toolName}` } : { status: 'allow' as const };
+          },
+          getApiKey: async (provider: string) => {
+            const normalized = provider === 'openai-codex' ? 'codex' : provider === 'google' ? 'gemini' : provider;
+            if (normalized !== 'openai' && normalized !== 'codex' && normalized !== 'gemini') return undefined;
+            return (await resolveEffectiveProviderApiKeySettings(normalized)).apiKey ?? undefined;
+          },
+          dispose: () => mcpClient.close(),
+        };
+      });
+  assistantService.setTextPromptDelegate(async (threadId, prompt) => {
+    await blipAssistantHost.promptThread(threadId, prompt);
+  });
+  assistantService.setRealtimeToolDelegate({
+    catalog: (threadId) => blipAssistantHost.toolCatalog(threadId),
+    execute: (threadId, callId, toolName, args, signal) => blipAssistantHost.executeTool(threadId, callId, toolName, args, signal),
   });
   let desktopVoicePatchSessionId: string | null = null;
   let desktopRealtimeWebRtcSession: OpenAiRealtimeWebRtcAssistantSession | null = null;
@@ -16267,7 +16173,6 @@ export async function startDroneHubApiServer(opts: {
         id: String(item?.id ?? ''),
         state: String(item?.state ?? ''),
         error: String(item?.error ?? ''),
-        blipClones: normalizePendingBlipClones(item?.blipClones) ?? null,
         updatedAt: String(item?.updatedAt ?? ''),
       })),
     });
@@ -16672,7 +16577,7 @@ export async function startDroneHubApiServer(opts: {
         }
 
         let transport: StreamableHTTPServerTransport;
-        const mcpServer = createDroneHubMcpServer();
+        const mcpServer = createDroneHubMcpServer({ principal: mcpIdentity });
         transport = new StreamableHTTPServerTransport({
           sessionIdGenerator: () => crypto.randomUUID(),
           onsessioninitialized: (nextSessionId) => {
@@ -17780,6 +17685,7 @@ export async function startDroneHubApiServer(opts: {
         }
         try {
           const accessScope = await assistantService.updateAccessScope(body ?? {});
+          blipAssistantHost?.invalidateAll();
           json(res, 200, { ok: true, accessScope });
         } catch (e: any) {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
@@ -17797,6 +17703,57 @@ export async function startDroneHubApiServer(opts: {
           assistantParts[2] === 'threads'
         ) {
           const threadId = decodeURIComponent(assistantParts[3] ?? '');
+
+          if (assistantParts.length === 5 && assistantParts[4] === 'events' && method === 'GET') {
+            try {
+              await assistantService.threadSnapshot(threadId);
+            } catch {
+              json(res, 404, { ok: false, error: `unknown assistant thread: ${threadId}` });
+              return;
+            }
+            res.statusCode = 200;
+            res.setHeader('content-type', 'text/event-stream; charset=utf-8');
+            res.setHeader('cache-control', 'no-cache, no-transform');
+            res.setHeader('connection', 'keep-alive');
+            req.socket.setTimeout(0);
+            (res as any).flushHeaders?.();
+            const unsubscribe = blipAssistantHost.subscribeEvents(threadId, (event) => {
+              writeAssistantSseEvent(res, 'blip_event', { type: 'blip_event', version: 1, threadId, event });
+            });
+            writeAssistantSseEvent(res, 'connected', {
+              type: 'connected',
+              version: 1,
+              threadId,
+              running: blipAssistantHost.isThreadRunning(threadId),
+              at: nowIso(),
+            });
+            const keepAlive = setInterval(() => {
+              if (!res.destroyed && !res.writableEnded) res.write(': keepalive\n\n');
+            }, 25_000);
+            (keepAlive as any).unref?.();
+            const cleanup = () => {
+              clearInterval(keepAlive);
+              unsubscribe();
+            };
+            req.once('close', cleanup);
+            res.once('close', cleanup);
+            return;
+          }
+
+          if (assistantParts.length === 5 && assistantParts[4] === 'history' && method === 'GET') {
+            try {
+              await assistantService.threadSnapshot(threadId);
+              const beforeRaw = Number(u.searchParams.get('before'));
+              const limitRaw = Number(u.searchParams.get('limit'));
+              json(res, 200, await blipAssistantHost.historyPage(threadId, {
+                ...(Number.isFinite(beforeRaw) && beforeRaw > 0 ? { before: beforeRaw } : {}),
+                ...(Number.isFinite(limitRaw) && limitRaw > 0 ? { limit: limitRaw } : {}),
+              }));
+            } catch (e: any) {
+              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
+            }
+            return;
+          }
 
           if (assistantParts.length === 4 && method === 'GET') {
             try {
@@ -17816,7 +17773,9 @@ export async function startDroneHubApiServer(opts: {
               return;
             }
             try {
-              json(res, 200, await assistantService.updateThread(threadId, body ?? {}));
+              const snapshot = await assistantService.updateThread(threadId, body ?? {});
+              blipAssistantHost.invalidateThread(threadId);
+              json(res, 200, snapshot);
             } catch (e: any) {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
             }
@@ -17825,7 +17784,10 @@ export async function startDroneHubApiServer(opts: {
 
           if (assistantParts.length === 4 && method === 'DELETE') {
             try {
-              json(res, 200, await assistantService.deleteThread(threadId));
+              await assistantService.threadSnapshot(threadId);
+              await blipAssistantHost.deleteThread(threadId);
+              const result = await assistantService.deleteThread(threadId);
+              json(res, 200, result);
             } catch (e: any) {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
             }
@@ -17834,7 +17796,8 @@ export async function startDroneHubApiServer(opts: {
 
           if (assistantParts.length === 5 && assistantParts[4] === 'activate' && method === 'POST') {
             try {
-              json(res, 200, await assistantService.activateThread(threadId));
+              const snapshot = await assistantService.activateThread(threadId);
+              json(res, 200, snapshot);
             } catch (e: any) {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
             }
@@ -17843,6 +17806,7 @@ export async function startDroneHubApiServer(opts: {
 
           if (assistantParts.length === 5 && assistantParts[4] === 'stop' && method === 'POST') {
             try {
+              blipAssistantHost.stopThread(threadId);
               json(res, 200, await assistantService.stopThread(threadId));
             } catch (e: any) {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
@@ -17869,7 +17833,9 @@ export async function startDroneHubApiServer(opts: {
                 return;
               }
               try {
-                json(res, 200, await assistantService.updateThreadSystemPrompt(threadId, body ?? {}));
+                const result = await assistantService.updateThreadSystemPrompt(threadId, body ?? {});
+                blipAssistantHost?.invalidateThread(threadId);
+                json(res, 200, result);
               } catch (e: any) {
                 json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
               }
@@ -17902,7 +17868,11 @@ export async function startDroneHubApiServer(opts: {
               return;
             }
             try {
-              json(res, 200, await assistantService.generateThreadOverview(threadId, body ?? {}));
+              const history = await blipAssistantHost.historyPage(threadId, { limit: 200 });
+              json(res, 200, await assistantService.generateThreadOverview(threadId, {
+                ...(body ?? {}),
+                ...(history.sessionId ? { messages: history.entries.map((entry) => entry.message) } : {}),
+              }));
             } catch (e: any) {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
             }
@@ -17930,16 +17900,6 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
 
-          if (assistantParts.length === 6 && assistantParts[4] === 'queued' && method === 'DELETE') {
-            const queuedPromptId = decodeURIComponent(assistantParts[5] ?? '');
-            try {
-              json(res, 200, await assistantService.cancelQueuedPrompt(threadId, queuedPromptId));
-            } catch (e: any) {
-              json(res, /unknown (assistant thread|queued assistant message)/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
-            }
-            return;
-          }
-
           if (assistantParts.length === 5 && assistantParts[4] === 'prompt' && method === 'POST') {
             let body: any = null;
             try {
@@ -17963,7 +17923,30 @@ export async function startDroneHubApiServer(opts: {
             }, 15_000);
             (keepAlive as any).unref?.();
             try {
-              await assistantService.promptThread(threadId, body ?? {}, writeEvent);
+              {
+                let prompt = String(body?.prompt ?? '').trim();
+                const attachments = Array.isArray(body?.attachments) ? body.attachments : [];
+                const promptImages = attachments.filter((item: any) => item?.disposition === 'prompt' && /^image\//i.test(String(item?.mime ?? '')));
+                const artifactUploads = attachments.filter((item: any) => item?.disposition !== 'prompt');
+                const uploaded = await saveAssistantArtifactUploads(threadId, artifactUploads);
+                if (uploaded.length > 0) {
+                  const references = uploaded.map((file) => `- ${file.path}`).join('\n');
+                  prompt = `${prompt}${prompt ? '\n\n' : ''}Attached assistant files:\n${references}`;
+                }
+                if (!prompt && promptImages.length === 0) throw new Error('missing prompt');
+                const threadSnapshot = await assistantService.threadSnapshot(threadId);
+                const threadMetadata = threadSnapshot.threads.find((thread) => thread.id === threadId);
+                const requestedTitle = String(body?.prompt ?? '').replace(/\s+/g, ' ').trim();
+                if (threadMetadata?.title === 'New thread' && requestedTitle) {
+                  await assistantService.updateThread(threadId, { title: requestedTitle.slice(0, 80) });
+                }
+                await blipAssistantHost.promptThread(threadId, promptImages.length > 0 ? {
+                  text: prompt,
+                  images: promptImages.map((item: any) => ({ type: 'image', data: String(item.dataBase64 ?? ''), mimeType: String(item.mime ?? 'image/png') })),
+                } : prompt, async (event) => {
+                  writeEvent({ type: 'blip_event', version: 1, threadId, event });
+                });
+              }
               writeEvent({ type: 'done' });
             } catch (e: any) {
               writeEvent({ type: 'error', error: e?.message ?? String(e) });
@@ -29172,7 +29155,6 @@ export async function startDroneHubApiServer(opts: {
             agentMessageAutoContinueEnabled: (chatEntry as any).agentMessageAutoContinueEnabled === true,
             agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
             dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(resolved.drone, chatEntry),
-            blipClonesEnabled: (chatEntry as any).blipClonesEnabled !== false,
             turns: (chatEntry as any).turns ?? [],
             sessionName: hubChatSessionName(chatName || 'default'),
             createdAt: chatEntry.createdAt,
@@ -29226,14 +29208,11 @@ export async function startDroneHubApiServer(opts: {
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'agentSuggestionEnabled'));
         const hasDockerSnapshotField =
           Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'dockerSnapshotAfterAgentMessageEnabled'));
-        const hasBlipClonesField =
-          Boolean(body && typeof body === 'object' && Object.prototype.hasOwnProperty.call(body, 'blipClonesEnabled'));
         let model: string | null = null;
         let agentPermissionMode: AgentPermissionMode = 'full-access';
         let agentMessageAutoContinueEnabled = false;
         let agentSuggestionEnabled = false;
         let dockerSnapshotAfterAgentMessageEnabled = false;
-        let blipClonesEnabled = true;
         if (hasModelField) {
           try {
             model = parseChatModelForUpdate(
@@ -29275,13 +29254,6 @@ export async function startDroneHubApiServer(opts: {
           }
           dockerSnapshotAfterAgentMessageEnabled = body.dockerSnapshotAfterAgentMessageEnabled === true;
         }
-        if (hasBlipClonesField) {
-          if (body?.blipClonesEnabled !== true && body?.blipClonesEnabled !== false) {
-            json(res, 400, { ok: false, error: 'blipClonesEnabled must be a boolean' });
-            return;
-          }
-          blipClonesEnabled = body.blipClonesEnabled !== false;
-        }
         try {
           await ensureChatEntry({ droneId, chatName });
           const builtinId = normalizeBuiltinAgentId(kind === 'builtin' ? agentRaw?.id : kind);
@@ -29301,8 +29273,6 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
-              setBlipClonesEnabled: hasBlipClonesField,
-              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -29315,7 +29285,6 @@ export async function startDroneHubApiServer(opts: {
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
-              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -29341,8 +29310,6 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
-              setBlipClonesEnabled: hasBlipClonesField,
-              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -29355,7 +29322,6 @@ export async function startDroneHubApiServer(opts: {
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
-              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -29373,8 +29339,6 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
-              setBlipClonesEnabled: hasBlipClonesField,
-              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -29386,7 +29350,6 @@ export async function startDroneHubApiServer(opts: {
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
-              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -29402,8 +29365,6 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
-              setBlipClonesEnabled: hasBlipClonesField,
-              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -29414,7 +29375,6 @@ export async function startDroneHubApiServer(opts: {
               ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
-              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -29430,8 +29390,6 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
-              setBlipClonesEnabled: hasBlipClonesField,
-              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -29441,7 +29399,6 @@ export async function startDroneHubApiServer(opts: {
               agentMessageAutoContinueEnabled,
               ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
-              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -29455,8 +29412,6 @@ export async function startDroneHubApiServer(opts: {
               agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
-              setBlipClonesEnabled: hasBlipClonesField,
-              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -29465,7 +29420,6 @@ export async function startDroneHubApiServer(opts: {
               chat: chatName,
               agentSuggestionEnabled,
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
-              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
             });
             return;
           }
@@ -29477,8 +29431,6 @@ export async function startDroneHubApiServer(opts: {
               agentPermissionMode,
               setDockerSnapshotAfterAgentMessageEnabled: true,
               dockerSnapshotAfterAgentMessageEnabled,
-              setBlipClonesEnabled: hasBlipClonesField,
-              blipClonesEnabled,
             });
             json(res, 200, {
               ok: true,
@@ -29486,31 +29438,12 @@ export async function startDroneHubApiServer(opts: {
               name: droneName,
               chat: chatName,
               dockerSnapshotAfterAgentMessageEnabled,
-              ...(hasBlipClonesField ? { blipClonesEnabled } : {}),
-            });
-            return;
-          }
-          if (hasBlipClonesField) {
-            await setChatAgentConfig({
-              droneId,
-              chatName,
-              setAgentPermissionMode: hasAgentPermissionModeField,
-              agentPermissionMode,
-              setBlipClonesEnabled: true,
-              blipClonesEnabled,
-            });
-            json(res, 200, {
-              ok: true,
-              id: droneId,
-              name: droneName,
-              chat: chatName,
-              blipClonesEnabled,
             });
             return;
           }
           json(res, 400, {
             ok: false,
-            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|blip|custom, model, agentPermissionMode, agentMessageAutoContinueEnabled, agentSuggestionEnabled, dockerSnapshotAfterAgentMessageEnabled, or blipClonesEnabled)`,
+            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|blip|custom, model, agentPermissionMode, agentMessageAutoContinueEnabled, agentSuggestionEnabled, dockerSnapshotAfterAgentMessageEnabled)`,
           });
           return;
         } catch (e: any) {

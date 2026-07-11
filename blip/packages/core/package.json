@@ -20,6 +20,7 @@
     "test": "bun test tests"
   },
   "dependencies": {
+    "@blip/protocol": "workspace:*",
     "@blip/tools": "workspace:*",
     "@mariozechner/pi-ai": "workspace:*",
     "@mariozechner/pi-agent-core": "workspace:*"

@@ -629,11 +629,6 @@ export type PendingPrompt = {
     lastCheckedAt: string;
     lastError?: string;
   };
-  blipClones?: {
-    status: 'running';
-    count: number;
-    tasks: string[];
-  };
   updatedAt?: string;
 };
 

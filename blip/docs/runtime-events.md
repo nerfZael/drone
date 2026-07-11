@@ -2,6 +2,8 @@
 
 Blip emits runtime events from `@blip/core`. The CLI renders those events for humans, or writes each event as JSON when `--jsonl` is enabled.
 
+For a long-lived embedded session, `session_started` is emitted once when the handle is created. Each call to `prompt()` emits its own turn events and one `session_finished` event. A finished prompt does not close the session handle.
+
 ## Event Envelope
 
 Every event has:
@@ -9,6 +11,7 @@ Every event has:
 ```ts
 {
   version: 1;
+  eventId: string;
   type: string;
   sessionId: string;
   turnId?: string;
@@ -16,7 +19,7 @@ Every event has:
 }
 ```
 
-`timestamp` is an ISO string.
+`eventId` uniquely identifies one emitted event and is stable when an embedder delivers that event over multiple transports. `timestamp` is an ISO string.
 
 ## Implemented Events
 
@@ -26,6 +29,7 @@ Session lifecycle:
 - `turn_started`
 - `assistant_delta`
 - `assistant_message`
+- `transcript_changed`
 - `session_error`
 - `session_finished`
 - `process_diagnostics`
@@ -36,11 +40,8 @@ Tool lifecycle:
 - `tool_call_progress`
 - `tool_call_completed`
 - `tool_call_failed`
-- `agent_results_delivered`
 
-`tool_call_progress` is emitted for tool partial updates. For the `agent` tool, Blip derives progress from child-agent tool activity instead of asking child agents to write status reports. The progress `message` is a compact coverage summary, and `details` includes the agent run id, agent id, task, status, and coverage such as read files, changed files, search queries, listed paths, bash commands, and per-tool counts.
-
-While agent runs are active, Blip also injects compact runtime-generated agent context into the parent model context before each parent model request. Running agents appear as an ephemeral status digest so the parent can avoid duplicate discovery. Completed non-blocking agent runs are delivered once as compact result context, without spending a model-chosen tool turn on `agent collect`. Delivery emits `agent_results_delivered`; the delivered context itself is ephemeral and is not persisted as a transcript message.
+`tool_call_progress` is emitted for partial updates reported by a tool while it runs.
 
 Compaction:
 
@@ -67,6 +68,8 @@ The CLI currently renders a small subset of events:
 - Compaction completion or skip.
 
 Other events are still available in JSONL mode.
+
+`transcript_changed` is emitted after any user, assistant, or tool-result message is persisted. Browser embedders use it to refresh durable history without waiting for the entire session to finish.
 
 For one-shot CLI prompt runs, Blip emits an immediate `process_diagnostics` snapshot after `session_finished`, then flushes stdout/stderr and exits explicitly. This preserves handle/request debugging clues without waiting for provider keepalive sockets to close. Embedders that call the runtime directly can still opt into delayed process diagnostics.
 
@@ -98,5 +101,5 @@ Use `timing.nonToolWallMs` versus `timing.toolCallWallMs` to distinguish model/o
 - Event schemas are TypeScript types, not generated JSON Schema.
 - Provider billing token usage and cost are not included in events.
 - There are no approval events because Blip has no approval flow.
-- There is no server protocol around these events.
+- Core does not prescribe a server transport. Drone Hub carries them in versioned prompt-stream and SSE envelopes from `@blip/protocol`.
 - If the process crashes hard, Blip may not emit a final `session_error` or `session_finished`.

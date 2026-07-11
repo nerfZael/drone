@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
-import { mkdir, readFile, readdir, stat, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
-import type { PermissionMode, ToolProfile } from "@blip/tools";
+import type { CreateSessionInput, ForkSessionInput, SessionRepository } from "./session-repository.js";
 import type { BlipRuntimeEvent, BlipSessionState, TranscriptEntry } from "./types.js";
 
 const BLIP_DATA_DIR_ENV = "BLIP_DATA_DIR";
@@ -36,7 +36,7 @@ function defaultDataRoot(): string {
   return path.join(xdgDataHome || path.join(os.homedir(), ".local", "share"), "blip");
 }
 
-export class SessionStore {
+export class SessionStore implements SessionRepository {
   readonly workspaceRoot: string;
   readonly rootDir: string;
   readonly workspaceDir: string;
@@ -63,15 +63,7 @@ export class SessionStore {
     return path.join(this.sessionDir(sessionId), "transcript.jsonl");
   }
 
-  async create(input: {
-    provider: string;
-    model: string;
-    permissionMode: PermissionMode;
-    toolProfile: ToolProfile;
-    parentSessionId?: string;
-    forkedFromEntryId?: string;
-    transcriptSeed?: TranscriptEntry[];
-  }): Promise<BlipSessionState> {
+  async create(input: CreateSessionInput): Promise<BlipSessionState> {
     await this.ensure();
     const id = sessionIdFromTime();
     const createdAt = nowIso();
@@ -106,6 +98,10 @@ export class SessionStore {
     await mkdir(this.sessionDir(session.id), { recursive: true });
     await writeFile(this.metadataPath(session.id), `${JSON.stringify(next, null, 2)}\n`);
     Object.assign(session, next);
+  }
+
+  async delete(sessionId: string): Promise<void> {
+    await rm(this.sessionDir(sessionId), { recursive: true, force: true });
   }
 
   async load(sessionId: string): Promise<BlipSessionState> {
@@ -205,7 +201,7 @@ export class SessionStore {
     return messages;
   }
 
-  async fork(source: BlipSessionState, input: { provider: string; model: string; permissionMode: PermissionMode; toolProfile: ToolProfile }): Promise<BlipSessionState> {
+  async fork(source: BlipSessionState, input: ForkSessionInput): Promise<BlipSessionState> {
     const transcript = await this.readTranscript(source);
     return this.create({
       ...input,

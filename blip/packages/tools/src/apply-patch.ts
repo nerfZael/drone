@@ -6,14 +6,14 @@ import { assertWorkspacePath, toWorkspaceRelative } from "./path-utils.js";
 import { textResult } from "./result.js";
 import type { BlipTool, BlipToolContext } from "./types.js";
 
-type PatchOperation = { type: "add"; path: string; lines: string[] } | { type: "delete"; path: string } | { type: "update"; path: string; moveTo?: string; hunks: PatchLine[][] };
+export type PatchOperation = { type: "add"; path: string; lines: string[] } | { type: "delete"; path: string } | { type: "update"; path: string; moveTo?: string; hunks: PatchLine[][] };
 
-type PatchLine = {
+export type PatchLine = {
   kind: "context" | "remove" | "add";
   text: string;
 };
 
-function parsePatch(patch: string): PatchOperation[] {
+export function parsePatch(patch: string): PatchOperation[] {
   const lines = patch.replace(/\r\n/g, "\n").split("\n");
   if (lines[0] !== "*** Begin Patch") throw new Error("patch must start with *** Begin Patch");
   if (lines[lines.length - 1] === "") lines.pop();
@@ -126,7 +126,7 @@ function patchContextFailureMessage(lines: string[], oldLines: string[], filePat
   return [`could not find patch context in ${filePath}`, "Patch expected this existing context:", expectedText + suffix, "Nearest matching file content:", nearbyText, "Read the current file around the target area and retry with fresh context."].join("\n");
 }
 
-function applyHunks(original: string, hunks: PatchLine[][], filePath: string): string {
+export function applyPatchHunks(original: string, hunks: PatchLine[][], filePath: string): string {
   let lines = original.split(/\r?\n/);
   let searchFrom = 0;
 
@@ -188,7 +188,7 @@ export function createApplyPatchTool(context: BlipToolContext): BlipTool {
           } else {
             const source = assertWorkspacePath(context.workspaceRoot, operation.path);
             const current = await readFile(source, "utf8");
-            const content = operation.hunks.length > 0 ? applyHunks(current, operation.hunks, operation.path) : current;
+            const content = operation.hunks.length > 0 ? applyPatchHunks(current, operation.hunks, operation.path) : current;
             const target = operation.moveTo ? assertWorkspacePath(context.workspaceRoot, operation.moveTo) : source;
             if (operation.moveTo) {
               try {

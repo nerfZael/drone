@@ -56,18 +56,32 @@ describe('assistant whiteboard images', () => {
         }),
       });
       installFakeRuntime(service);
+      service.setRealtimeToolDelegate({
+        catalog: async () => [{
+          name: 'drone_hub__capture_whiteboard',
+          description: 'Capture whiteboard',
+          parameters: { type: 'object', properties: {} },
+        }],
+        execute: async () => ({
+          content: [
+            { type: 'image', data: pngData, mimeType: 'image/png' },
+            { type: 'text', text: 'Captured Main whiteboard.' },
+          ],
+          details: { whiteboardId: 'main', mimeType: 'image/png' },
+        }),
+      });
 
       const config = await service.realtimeSessionConfig({ source: 'desktop' });
-      expect(config.tools.map((tool) => tool.name)).toContain('capture_whiteboard');
+      expect(config.tools.map((tool) => tool.name)).toContain('drone_hub__capture_whiteboard');
 
       const result = await service.executeRealtimeTool({
         threadId: config.threadId,
         toolCallId: 'call_capture_whiteboard',
-        toolName: 'capture_whiteboard',
+        toolName: 'drone_hub__capture_whiteboard',
         arguments: {},
         source: 'desktop',
       });
-      expect(result.output).toContain('"images"');
+      expect(result.output).toContain('whiteboardId');
       expect((result.result as any).whiteboardId).toBe('main');
 
       const snapshot = await service.threadSnapshot(config.threadId);

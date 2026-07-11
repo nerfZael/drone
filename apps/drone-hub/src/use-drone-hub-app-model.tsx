@@ -667,7 +667,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setAgentMessageAutoContinueEnabled,
     setAgentSuggestionEnabled,
     setDockerSnapshotAfterAgentMessageEnabled,
-    setBlipClonesEnabled,
     handleSetAgentFailure,
   } = useChatConfigState({
     selectedDrone,
@@ -2214,7 +2213,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           agentMessageAutoContinueEnabled: false,
           agentSuggestionEnabled: false,
           dockerSnapshotAfterAgentMessageEnabled: false,
-          blipClonesEnabled: true,
           sessionName: `drone-hub-chat-${startupSeedForCurrentDrone.chatName || selectedChat || 'default'}`,
           createdAt: startupSeedForCurrentDrone.at || new Date().toISOString(),
         }
@@ -4041,8 +4039,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setAgentSuggestionEnabled,
     dockerSnapshotAfterAgentMessageEnabled: effectiveChatInfo?.dockerSnapshotAfterAgentMessageEnabled === true,
     setDockerSnapshotAfterAgentMessageEnabled,
-    blipClonesEnabled: effectiveChatInfo?.blipClonesEnabled !== false,
-    setBlipClonesEnabled,
     setChatInfoError,
     modelMenuEntries,
     modelDisabled,

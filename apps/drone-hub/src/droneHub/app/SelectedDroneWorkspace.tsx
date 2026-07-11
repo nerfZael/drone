@@ -188,8 +188,6 @@ type SelectedDroneWorkspaceProps = {
   setAgentSuggestionEnabled: (enabled: boolean) => Promise<void>;
   dockerSnapshotAfterAgentMessageEnabled: boolean;
   setDockerSnapshotAfterAgentMessageEnabled: (enabled: boolean) => Promise<void>;
-  blipClonesEnabled: boolean;
-  setBlipClonesEnabled: (enabled: boolean) => Promise<void>;
   setChatInfoError: React.Dispatch<React.SetStateAction<string | null>>;
   modelMenuEntries: UiMenuSelectEntry[];
   modelDisabled: boolean;
@@ -323,8 +321,6 @@ export function SelectedDroneWorkspace({
   setAgentSuggestionEnabled,
   dockerSnapshotAfterAgentMessageEnabled,
   setDockerSnapshotAfterAgentMessageEnabled,
-  blipClonesEnabled,
-  setBlipClonesEnabled,
   setChatInfoError,
   modelMenuEntries,
   modelDisabled,
@@ -534,7 +530,6 @@ export function SelectedDroneWorkspace({
   }, [currentDrone.id, repoOp?.kind]);
   const hostRuntime = String(currentDrone.runtime ?? '').trim().toLowerCase() === 'host';
   const dockerSnapshotSupported = !hostRuntime && currentDrone.persistVolume === false;
-  const blipClonesSupported = currentAgentKey === 'builtin:blip';
   const readOnlySupported = currentAgentKey === 'builtin:codex' || currentAgentKey === 'builtin:blip';
   const [dockerSizeState, setDockerSizeState] = React.useState<{
     droneId: string;
@@ -1561,46 +1556,6 @@ export function SelectedDroneWorkspace({
                       />
                     </span>
                     {dockerSnapshotAfterAgentMessageEnabled ? 'On' : 'Off'}
-                  </button>
-                </div>
-              ) : null}
-              {hasChats && chatUiMode === 'transcript' && blipClonesSupported ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Blip agents
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={blipClonesEnabled}
-                    onClick={() => {
-                      void setBlipClonesEnabled(!blipClonesEnabled).catch((err: any) =>
-                        setChatInfoError(err?.message ?? String(err)),
-                      );
-                    }}
-                    disabled={loadingChatInfo}
-                    className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                      loadingChatInfo
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : blipClonesEnabled
-                          ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Allow Blip to run up to eight parallel agents for independent subtasks."
-                  >
-                    <span
-                      className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                        blipClonesEnabled ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
-                          blipClonesEnabled ? 'translate-x-[11px]' : 'translate-x-[1px]'
-                        }`}
-                      />
-                    </span>
-                    {blipClonesEnabled ? 'On' : 'Off'}
                   </button>
                 </div>
               ) : null}

@@ -1,5 +1,13 @@
 # Sessions
 
+## Embedding API
+
+`createBlipSession()` creates a long-lived session around an injected `SessionRepository`, model, tool providers, prompt provider, preflight hook, and event sink. The handle supports `prompt`, `steer`, `enqueue`, `abort`, `compact`, `delete`, and `waitForIdle`.
+
+`runBlipTask()` is the file-backed local compatibility wrapper used by the CLI. It now supplies `SessionStore`, local profile tools, the CLI prompt, and local file telemetry to the same embedded runtime.
+
+`SessionRepository` is the persistence boundary. `SessionStore` is its current file-backed implementation; Drone Hub will supply its own implementation in a later phase.
+
 Blip uses **session** as the canonical persisted unit of work.
 
 A session stores model settings, workspace root, permission mode, active tool profile, file-operation metadata, and a JSONL transcript. The raw transcript remains on disk even when compaction changes the model-visible context.
@@ -86,4 +94,4 @@ Implemented session flags:
 - `--resume` does not yet provide an interactive picker; it behaves like latest-session resume.
 - `forkedFromEntryId` exists in the schema but the CLI does not expose a way to fork from a specific transcript entry.
 - There is no in-place session tree navigation.
-- Session storage is local filesystem storage only.
+- `SessionStore` is the only included repository implementation; Drone Hub does not yet supply its own.

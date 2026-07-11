@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { randomUUID } from "node:crypto";
 import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, writeFileSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -13,7 +14,6 @@ import { getOAuthApiKey, refreshOpenAICodexToken, type OAuthCredentials } from "
 const DEFAULT_PROVIDER = "openai-codex";
 const DEFAULT_MODEL = "gpt-5.5";
 const DEFAULT_REASONING: NonNullable<CliOptions["reasoning"]> = "high";
-const DEFAULT_AGENTS_ENABLED = true;
 const OPENAI_CODEX_PROVIDER = "openai-codex";
 const BLIP_CONFIG_FILE_ENV = "BLIP_CONFIG_FILE";
 const CLI_VERSION = "0.1.0";
@@ -33,7 +33,6 @@ type CliConfig = {
   provider?: string;
   model?: string;
   reasoning?: ReasoningLevel;
-  agentsEnabled?: boolean;
 };
 
 type ReasoningLevel = (typeof REASONING_LEVELS)[number];
@@ -56,7 +55,6 @@ type CliOptions = {
   compact: boolean;
   help: boolean;
   reasoning?: "off" | "minimal" | "low" | "medium" | "high" | "xhigh";
-  agentsEnabled?: boolean;
 };
 
 function helpText(): string {
@@ -75,8 +73,6 @@ Options:
   --provider <provider>      Model provider (default: BLIP_PROVIDER, saved config, or openai-codex)
   --model <model>            Model id, or provider/model (default: BLIP_MODEL, saved config, or gpt-5.5)
   --reasoning <level>        off|minimal|low|medium|high|xhigh (default: BLIP_REASONING, saved config, or high)
-  --agents                   Enable agent tool support
-  --no-agents                Disable agent tool support
   --workspace <path>         Workspace root (default: cwd)
   --permission <mode>        read-only|workspace-write|full-access
   --profile <profile>        local-trusted-write|read-only|no-shell-workspace-write
@@ -91,7 +87,7 @@ Options:
 
 Interactive:
   Run "blip" with no prompt to open an interactive session.
-  Commands: /model [id|provider/id], /reasoning [level], /agents on|off, /exit, /quit
+  Commands: /model [id|provider/id], /reasoning [level], /exit, /quit
 
 Environment:
   BLIP_PROVIDER              Default provider
@@ -99,7 +95,6 @@ Environment:
   BLIP_CONFIG_FILE           Override Blip CLI config file path
   BLIP_DATA_DIR              Override Blip session data directory
   BLIP_REASONING             Default reasoning level
-  BLIP_AGENTS                Default agent support: on|off
   BLIP_CODEX_AUTH_FILE       Override Codex auth file path
 `;
 }
@@ -130,8 +125,6 @@ function parseArgs(argv: string[]): CliOptions {
     else if (arg === "--provider") options.provider = next();
     else if (arg === "--model") options.model = next();
     else if (arg === "--reasoning") options.reasoning = parseReasoning(next());
-    else if (arg === "--agents") options.agentsEnabled = true;
-    else if (arg === "--no-agents") options.agentsEnabled = false;
     else if (arg === "--workspace") options.workspace = next();
     else if (arg === "--permission") options.permission = parsePermission(next());
     else if (arg === "--profile") options.profile = parseProfile(next());
@@ -164,13 +157,6 @@ function parseProfile(value: string): ToolProfile {
 function parseReasoning(value: string): NonNullable<CliOptions["reasoning"]> {
   if (REASONING_LEVELS.includes(value as ReasoningLevel)) return value as ReasoningLevel;
   throw new Error("invalid reasoning level");
-}
-
-function parseBooleanSetting(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  if (normalized === "1" || normalized === "true" || normalized === "on" || normalized === "yes" || normalized === "enabled") return true;
-  if (normalized === "0" || normalized === "false" || normalized === "off" || normalized === "no" || normalized === "disabled") return false;
-  throw new Error("invalid boolean setting");
 }
 
 function ansi(code: string, text: string): string {
@@ -249,18 +235,12 @@ function readCliConfig(): CliConfig {
     ...(typeof raw.provider === "string" && raw.provider.trim() ? { provider: raw.provider.trim() } : {}),
     ...(typeof raw.model === "string" && raw.model.trim() ? { model: raw.model.trim() } : {}),
     ...(reasoning ? { reasoning } : {}),
-    ...(typeof raw.agentsEnabled === "boolean" ? { agentsEnabled: raw.agentsEnabled } : {}),
   };
 }
 
 function saveDefaultModelSetup(provider: string, model: string, reasoning: ReasoningLevel): void {
   const current = readCliConfig();
   writeJsonFile(blipConfigFilePath(), { ...current, provider, model, reasoning });
-}
-
-function saveAgentsEnabled(agentsEnabled: boolean): void {
-  const current = readCliConfig();
-  writeJsonFile(blipConfigFilePath(), { ...current, agentsEnabled });
 }
 
 function splitProviderModel(rawModel: string, fallbackProvider: string): { provider: string; model: string } {
@@ -284,12 +264,6 @@ function resolveProviderModel(options: CliOptions): { provider: string; model: s
 function resolveReasoning(options: CliOptions): NonNullable<CliOptions["reasoning"]> {
   const config = readCliConfig();
   return options.reasoning ?? parseReasoning(process.env.BLIP_REASONING || config.reasoning || DEFAULT_REASONING);
-}
-
-function resolveAgentsEnabled(options: CliOptions): boolean {
-  const config = readCliConfig();
-  const env = String(process.env.BLIP_AGENTS ?? "").trim();
-  return options.agentsEnabled ?? (env ? parseBooleanSetting(env) : (config.agentsEnabled ?? DEFAULT_AGENTS_ENABLED));
 }
 
 function jwtExpiresAtMs(token: string): number | undefined {
@@ -478,8 +452,6 @@ function renderHuman(event: BlipRuntimeEvent): void {
     console.error(`\n[tool] ${event.tool}`);
   } else if (event.type === "tool_call_failed") {
     console.error(`[tool failed] ${event.tool}: ${event.error}`);
-  } else if (event.type === "agent_results_delivered") {
-    console.error(`[agent] delivered ${event.agentCount} result${event.agentCount === 1 ? "" : "s"} from ${event.runId}`);
   } else if (event.type === "session_error") {
     console.error(`[error] ${event.error}`);
   } else if (event.type === "session_finished") {
@@ -543,12 +515,6 @@ function createCompactHumanRenderer(input: {
       return;
     }
 
-    if (event.type === "agent_results_delivered") {
-      if (input.statusEnabled) ensureStatusOwnLine();
-      status.show(`${input.statusPrefix ?? ""}${gray("↳")} ${gray("agent results delivered")} ${gray(event.runId)}`);
-      return;
-    }
-
     if (event.type === "session_error") {
       status.clear();
       ensureStatusOwnLine();
@@ -583,6 +549,7 @@ function createCompactHumanRenderer(input: {
 function processDiagnosticsEvent(sessionId: string, reason: string): BlipRuntimeEvent {
   return {
     version: 1,
+    eventId: randomUUID(),
     type: "process_diagnostics",
     sessionId,
     timestamp: new Date().toISOString(),
@@ -632,7 +599,6 @@ type RunContext = {
   permissionMode: PermissionMode;
   toolProfile: ToolProfile;
   reasoning: ReasoningLevel;
-  agentsEnabled: boolean;
   processExitDiagnosticsDelayMs: number;
   getApiKey: (provider: string) => Promise<string | undefined>;
   emit: (event: BlipRuntimeEvent) => void;
@@ -781,9 +747,8 @@ async function exitOneShot(code: number): Promise<void> {
 
 function renderInteractiveHeader(context: RunContext, write: (text: string) => void): void {
   const model = `${formatModelLabel(context.provider, context.model)} ${context.reasoning}`;
-  const agents = context.agentsEnabled ? "on" : "off";
   const directory = displayPath(context.workspaceRoot);
-  const width = Math.max(42, visibleLength(directory) + 13, visibleLength(model) + 29, visibleLength(agents) + 28);
+  const width = Math.max(42, visibleLength(directory) + 13, visibleLength(model) + 29);
   const line = (content = "") => {
     const padding = " ".repeat(Math.max(0, width - visibleLength(content)));
     write(`${dim("│")}  ${content}${padding}  ${dim("│")}\n`);
@@ -793,10 +758,9 @@ function renderInteractiveHeader(context: RunContext, write: (text: string) => v
   line(`${bold("Blip")} ${gray(`(v${CLI_VERSION})`)}`);
   line();
   line(`${gray("model:")}     ${green(model)}  ${cyan("/model")} ${gray("to change")}`);
-  line(`${gray("agents:")}    ${green(agents)}  ${cyan("/agents")} ${gray("to change")}`);
   line(`${gray("directory:")} ${cyan(directory)}`);
   write(`${dim(`╰${"─".repeat(width + 4)}╯`)}\n\n`);
-  write(`${gray("Tip:")} ${cyan("/model")} ${gray("model")}  ${cyan("/reasoning")} ${gray("reasoning")}  ${cyan("/agents")} ${gray("agents")}  ${cyan("/exit")} ${gray("quit")}\n\n`);
+  write(`${gray("Tip:")} ${cyan("/model")} ${gray("model")}  ${cyan("/reasoning")} ${gray("reasoning")}  ${cyan("/exit")} ${gray("quit")}\n\n`);
 }
 
 function inputLinePrefix(): string {
@@ -926,7 +890,6 @@ async function runPrompt(prompt: string, context: RunContext, options: CliOption
       forkSessionId: options.forkSessionId,
       jsonl: options.jsonl,
       reasoning: context.reasoning,
-      agentsEnabled: context.agentsEnabled,
       processExitDiagnosticsDelayMs,
       getApiKey: context.getApiKey,
     },
@@ -972,11 +935,6 @@ async function runInteractive(context: RunContext, options: CliOptions): Promise
         }
         continue;
       }
-      if (prompt === "/agents" || prompt.startsWith("/agents ")) {
-        chooseInteractiveAgents(prompt.slice("/agents".length).trim(), context);
-        continue;
-      }
-
       const renderState: InteractiveRenderState = { sawError: false };
       const turnRenderer: HumanEventRenderer = options.debug
         ? (createInteractiveRenderer(write, renderState) as HumanEventRenderer)
@@ -1072,24 +1030,6 @@ async function chooseInteractiveModel(rawSelection: string, context: RunContext,
   console.error(`${green("Default model set")} ${formatModelLabel(next.provider, next.model)} ${gray(`with ${context.reasoning} reasoning`)}`);
 }
 
-function chooseInteractiveAgents(rawSelection: string, context: RunContext): void {
-  const selection = rawSelection.trim();
-  if (!selection) {
-    console.error(`Blip agents are ${context.agentsEnabled ? "on" : "off"}. Use /agents on or /agents off.`);
-    return;
-  }
-  let agentsEnabled: boolean;
-  try {
-    agentsEnabled = parseBooleanSetting(selection);
-  } catch {
-    console.error(`Unknown agents setting: ${selection}`);
-    return;
-  }
-  context.agentsEnabled = agentsEnabled;
-  saveAgentsEnabled(agentsEnabled);
-  console.error(`Blip agents ${agentsEnabled ? "enabled" : "disabled"}`);
-}
-
 async function chooseInteractiveReasoning(rawSelection: string, context: RunContext, interactive: InteractiveReadline): Promise<boolean> {
   const selection = rawSelection.trim();
   if (selection) {
@@ -1128,7 +1068,6 @@ async function main(): Promise<void> {
 
   const { provider, model } = resolveProviderModel(options);
   const reasoning = resolveReasoning(options);
-  const agentsEnabled = resolveAgentsEnabled(options);
   if (options.listModels) {
     listModels(provider, model);
     return;
@@ -1196,7 +1135,6 @@ async function main(): Promise<void> {
     permissionMode,
     toolProfile,
     reasoning,
-    agentsEnabled,
     processExitDiagnosticsDelayMs: 0,
     getApiKey,
     emit: emitAndTrack,
