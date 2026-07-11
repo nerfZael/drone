@@ -136,8 +136,6 @@ export function useChatRuntimeOrchestration({
 }: UseChatRuntimeOrchestrationArgs) {
   const [sendingPromptCount, setSendingPromptCount] = React.useState(0);
   const [promptError, setPromptError] = React.useState<string | null>(null);
-  const [unstickingPendingPromptById, setUnstickingPendingPromptById] = React.useState<Record<string, true>>({});
-  const [unstickPendingPromptErrorById, setUnstickPendingPromptErrorById] = React.useState<Record<string, string>>({});
   const [cancellingPendingPromptById, setCancellingPendingPromptById] = React.useState<Record<string, true>>({});
   const [cancelPendingPromptErrorById, setCancelPendingPromptErrorById] = React.useState<Record<string, string>>({});
   const [stoppingResponse, setStoppingResponse] = React.useState(false);
@@ -226,8 +224,6 @@ export function useChatRuntimeOrchestration({
   React.useEffect(() => {
     // Clear any local optimistic entries when switching chats/drones.
     setOptimisticPendingPrompts([]);
-    setUnstickingPendingPromptById({});
-    setUnstickPendingPromptErrorById({});
     setCancellingPendingPromptById({});
     setCancelPendingPromptErrorById({});
     setStoppingResponse(false);
@@ -372,35 +368,6 @@ export function useChatRuntimeOrchestration({
       requestJson,
       selectedChat,
     ],
-  );
-
-  const requestUnstickPendingPrompt = React.useCallback(
-    async (promptIdRaw: string): Promise<void> => {
-      const id = String(promptIdRaw ?? '').trim();
-      if (!id || !selectedDrone || !selectedChat) return;
-
-      if (!beginRecordBusyKey(setUnstickingPendingPromptById, id)) return;
-      setUnstickPendingPromptErrorById((prev) => {
-        return removeRecordKey(prev, id);
-      });
-
-      try {
-        await requestJson<{ ok: true }>(
-          `/api/drones/${encodeURIComponent(selectedDrone)}/chats/${encodeURIComponent(selectedChat || 'default')}/pending/${encodeURIComponent(id)}/unstick`,
-          { method: 'POST' },
-        );
-        setOptimisticPendingPrompts((prev) =>
-          prev.map((p) => (p.id === id ? { ...p, state: 'sent', error: undefined, updatedAt: new Date().toISOString() } : p)),
-        );
-      } catch (e: any) {
-        setUnstickPendingPromptErrorById((prev) => ({ ...prev, [id]: e?.message ?? String(e) }));
-      } finally {
-        setUnstickingPendingPromptById((prev) => {
-          return removeRecordKey(prev, id);
-        });
-      }
-    },
-    [requestJson, selectedChat, selectedDrone, setOptimisticPendingPrompts],
   );
 
   const requestCancelPendingPrompt = React.useCallback(
@@ -929,14 +896,11 @@ export function useChatRuntimeOrchestration({
     promptError,
     requestCancelPendingPrompt,
     requestStopResponse,
-    requestUnstickPendingPrompt,
     selectedIsResponding,
     sendPromptText,
     sendingPrompt,
     stopResponseError,
     stoppingResponse,
-    unstickingPendingPromptById,
-    unstickPendingPromptErrorById,
     visiblePendingPromptsWithStartup,
   };
 }

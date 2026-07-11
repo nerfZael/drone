@@ -30,7 +30,6 @@ type FleetWorkItem = {
   attachmentsCount: number;
   canCancel: boolean;
   canRetry: boolean;
-  canUnstick: boolean;
 };
 
 type FleetWorkPayload = {
@@ -62,7 +61,6 @@ type DashboardQueueItem = {
   runtime: 'container' | 'host' | null;
   canCancel: boolean;
   canRetry: boolean;
-  canUnstick: boolean;
   blockedByAutomation: boolean;
   attachmentsCount: number;
   localQueueKey?: string;
@@ -153,7 +151,6 @@ function useFleetDashboardState({
           runtime: drone?.runtime ?? null,
           canCancel: true,
           canRetry: false,
-          canUnstick: false,
           blockedByAutomation: Boolean(prompt.blockedByAutomation),
           attachmentsCount: Array.isArray(prompt.attachments) ? prompt.attachments.length : 0,
           localQueueKey: key,
@@ -180,7 +177,6 @@ function useFleetDashboardState({
       runtime: item.runtime,
       canCancel: item.canCancel,
       canRetry: item.canRetry,
-      canUnstick: item.canUnstick,
       blockedByAutomation: item.blockedByAutomation,
       attachmentsCount: item.attachmentsCount,
     }));
@@ -293,7 +289,7 @@ function useFleetDashboardState({
   }, []);
 
   const runQueueAction = React.useCallback(
-    async (item: DashboardQueueItem, action: 'cancel' | 'retry' | 'unstick' | 'remove') => {
+    async (item: DashboardQueueItem, action: 'cancel' | 'retry' | 'remove') => {
       const key = `${action}:${item.key}`;
       setQueueActionBusyByKey((prev) => ({ ...prev, [key]: true }));
       setActionError(null);
@@ -323,10 +319,6 @@ function useFleetDashboardState({
           });
           return;
         }
-        await requestJson(
-          `/api/drones/${encodeURIComponent(item.droneId)}/chats/${encodeURIComponent(item.chatName)}/pending/${encodeURIComponent(item.promptId)}/unstick`,
-          { method: 'POST' },
-        );
       } catch (error: any) {
         setActionError(error?.message ?? String(error));
       } finally {
@@ -557,7 +549,6 @@ export function FleetDashboard({
                   const busyRemove = queueActionBusyByKey[`remove:${item.key}`];
                   const busyCancel = queueActionBusyByKey[`cancel:${item.key}`];
                   const busyRetry = queueActionBusyByKey[`retry:${item.key}`];
-                  const busyUnstick = queueActionBusyByKey[`unstick:${item.key}`];
                   return (
                     <div
                       key={item.key}
@@ -614,13 +605,6 @@ export function FleetDashboard({
                               label={busyRetry ? 'Retrying…' : 'Retry'}
                               disabled={Boolean(busyRetry)}
                               onClick={() => void runQueueAction(item, 'retry')}
-                            />
-                          ) : null}
-                          {item.source === 'server' && item.canUnstick ? (
-                            <ActionButton
-                              label={busyUnstick ? 'Unsticking…' : 'Unstick'}
-                              disabled={Boolean(busyUnstick)}
-                              onClick={() => void runQueueAction(item, 'unstick')}
                             />
                           ) : null}
                         </div>
