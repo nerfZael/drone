@@ -40,8 +40,8 @@ export type ShortcutDefinition = {
 export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
     id: 'openFleetDashboard',
-    label: 'Open fleet dashboard',
-    description: 'Clears the current drone selection and returns to the fleet overview.',
+    label: 'Open home',
+    description: 'Clears the current drone selection and returns to the home screen.',
   },
   {
     id: 'createDraftDrone',

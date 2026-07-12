@@ -262,11 +262,8 @@ type SelectedDroneWorkspaceProps = {
   stoppingResponse: boolean;
   stopResponseError: string | null;
   requestCancelPendingPrompt: (promptId: string) => Promise<void>;
-  requestUnstickPendingPrompt: (promptId: string) => Promise<void>;
   cancellingPendingPromptById: Record<string, true>;
   cancelPendingPromptErrorById: Record<string, string>;
-  unstickingPendingPromptById: Record<string, true>;
-  unstickPendingPromptErrorById: Record<string, string>;
   openedEditorFileOpenFailureMessage: string | null;
   openedEditorFileOpenFailureAt: number | null;
   onOpenMarkdownFileReference: (ref: MarkdownFileReference) => void;
@@ -389,11 +386,8 @@ export function SelectedDroneWorkspace({
   stoppingResponse,
   stopResponseError,
   requestCancelPendingPrompt,
-  requestUnstickPendingPrompt,
   cancellingPendingPromptById,
   cancelPendingPromptErrorById,
-  unstickingPendingPromptById,
-  unstickPendingPromptErrorById,
   openedEditorFileOpenFailureMessage,
   openedEditorFileOpenFailureAt,
   onOpenMarkdownFileReference,
@@ -2170,15 +2164,12 @@ export function SelectedDroneWorkspace({
                               item={p}
                               showRoleIcons={false}
                               onCancelQueued={requestCancelPendingPrompt}
-                              onRequestUnstick={requestUnstickPendingPrompt}
                               onOpenFileReference={onOpenMarkdownFileReference}
                               onOpenLink={tryOpenMarkdownPullRequest}
                               droneId={currentDrone.id}
                               droneHomePath={currentDroneHomePath}
                               cancelBusy={Boolean(cancellingPendingPromptById[p.id])}
                               cancelError={cancelPendingPromptErrorById[p.id] ?? null}
-                              unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
-                              unstickError={unstickPendingPromptErrorById[p.id] ?? null}
                             />
                           );
                         }
@@ -2232,15 +2223,12 @@ export function SelectedDroneWorkspace({
                             item={p}
                             showRoleIcons={false}
                             onCancelQueued={requestCancelPendingPrompt}
-                            onRequestUnstick={requestUnstickPendingPrompt}
                             onOpenFileReference={onOpenMarkdownFileReference}
                             onOpenLink={tryOpenMarkdownPullRequest}
                             droneId={currentDrone.id}
                             droneHomePath={currentDroneHomePath}
                             cancelBusy={Boolean(cancellingPendingPromptById[p.id])}
                             cancelError={cancelPendingPromptErrorById[p.id] ?? null}
-                            unstickBusy={Boolean(unstickingPendingPromptById[p.id])}
-                            unstickError={unstickPendingPromptErrorById[p.id] ?? null}
                           />
                         );
                       }

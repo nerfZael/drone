@@ -20,7 +20,7 @@ describe('AgentPlanList', () => {
       />,
     );
 
-    expect(html).toContain('Claude plan');
+    expect(html).toContain('Plan');
     expect(html).toContain('1/3');
     expect(html).toContain('Inspect the parser');
     expect(html).toContain('line-through');
@@ -32,9 +32,32 @@ describe('AgentPlanList', () => {
     expect(renderToStaticMarkup(<AgentPlanList />)).toBe('');
   });
 
-  test('limits long plans and does not animate completed transcript plans', () => {
+  test('collapses completed transcript plans to one row', () => {
     const html = renderToStaticMarkup(
       <AgentPlanList
+        plan={{
+          source: 'cursor',
+          updatedAt: '2026-07-11T12:00:00.000Z',
+          items: Array.from({ length: 10 }, (_, index) => ({
+            text: `Step ${index + 1}`,
+            status: index === 0 ? 'completed' as const : 'pending' as const,
+          })),
+        }}
+      />,
+    );
+
+    expect(html).toContain('Show plan');
+    expect(html).toContain('aria-expanded="false"');
+    expect(html).toContain('1/10');
+    expect(html).not.toContain('Step 1');
+    expect(html).not.toContain('Show 2 more');
+    expect(html).not.toContain('animate-spin');
+  });
+
+  test('limits long live plans', () => {
+    const html = renderToStaticMarkup(
+      <AgentPlanList
+        running
         plan={{
           source: 'cursor',
           updatedAt: '2026-07-11T12:00:00.000Z',
@@ -49,7 +72,7 @@ describe('AgentPlanList', () => {
     expect(html).toContain('Show 2 more');
     expect(html).toContain('Step 8');
     expect(html).not.toContain('Step 9');
-    expect(html).not.toContain('animate-spin');
+    expect(html).toContain('animate-spin');
     expect(html).toContain('In progress:');
   });
 });

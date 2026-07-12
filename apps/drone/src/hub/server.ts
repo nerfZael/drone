@@ -7316,7 +7316,6 @@ function buildFleetWorkPayload(regAny: any) {
     attachmentsCount: number;
     canCancel: boolean;
     canRetry: boolean;
-    canUnstick: boolean;
   }> = [];
 
   for (const [droneIdRaw, entry] of Object.entries(regAny?.drones ?? {}) as Array<[string, any]>) {
@@ -7350,7 +7349,6 @@ function buildFleetWorkPayload(regAny: any) {
           attachmentsCount,
           canCancel: item.state === 'queued',
           canRetry: !item.automation && item.state === 'failed' && attachmentsCount === 0 && Boolean(item.prompt.trim()),
-          canUnstick: runtime !== 'host' && derivedState === 'stuck',
         });
       }
     }
@@ -7382,7 +7380,6 @@ function buildFleetWorkPayload(regAny: any) {
         attachmentsCount: 0,
         canCancel: false,
         canRetry: pendingPrompt.state === 'failed' && Boolean(pendingPrompt.prompt.trim()),
-        canUnstick: false,
       });
     }
   }
@@ -28686,137 +28683,6 @@ export async function startDroneHubApiServer(opts: {
           if (result.status === 'cancelled') {
             enqueuePendingPromptPump(droneId, chatName);
           }
-          return;
-        } catch (e: any) {
-          const msg = e?.message ?? String(e);
-          const code = /still starting/i.test(msg) ? 409 : /unknown drone/i.test(msg) ? 404 : 500;
-          json(res, code, { ok: false, error: msg });
-          return;
-        }
-      }
-
-      // POST /api/drones/:id/chats/:chat/pending/:promptId/unstick
-      if (
-        method === 'POST' &&
-        parts.length === 8 &&
-        parts[0] === 'api' &&
-        parts[1] === 'drones' &&
-        parts[3] === 'chats' &&
-        parts[5] === 'pending' &&
-        parts[7] === 'unstick'
-      ) {
-        const droneRef = decodeURIComponent(parts[2]);
-        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
-        const promptId = String(decodeURIComponent(parts[6] ?? '')).trim();
-        if (!isSafePromptId(promptId)) {
-          json(res, 400, { ok: false, error: 'invalid promptId' });
-          return;
-        }
-        try {
-          const resolved = await resolveDroneOrRespond(res, droneRef);
-          if (!resolved) return;
-          const droneId = resolved.id;
-          const drone = resolved.drone;
-          const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
-          if (droneRuntime(drone) === 'host') {
-            json(res, 409, { ok: false, error: 'manual unstick is not yet supported for host runtime drones' });
-            return;
-          }
-
-          await reconcileChatFromDaemon({ droneId, chatName });
-          const regBefore: any = await loadRegistry();
-          const entryBefore = regBefore?.drones?.[droneId]?.chats?.[chatName] ?? null;
-          const alreadyRecovered = transcriptTurnIdsFromEntry(entryBefore).has(promptId);
-          if (alreadyRecovered) {
-            json(res, 200, {
-              ok: true,
-              id: droneId,
-              name: droneName,
-              chat: chatName,
-              promptId,
-              recovered: true,
-              pendingState: null,
-              alreadyRecovered: true,
-            });
-            return;
-          }
-          const pendingBefore = await readPendingPrompts({ droneId, chatName });
-          const pendingItemBefore = pendingBefore.find((p) => p.id === promptId) ?? null;
-          if (!pendingItemBefore) {
-            json(res, 404, { ok: false, error: `unknown pending prompt: ${promptId}` });
-            return;
-          }
-
-          const sessionName = promptJobTmuxSessionName(promptId);
-          await withLockedDroneContainer({ requestedDroneName: droneName, droneEntry: drone }, async ({ containerName }) => {
-            const script = `tmux kill-session -t ${bashQuote(sessionName)} 2>/dev/null || true`;
-            await dvmExec(containerName, 'bash', ['-lc', script]);
-          });
-
-          let jobState: string | null = null;
-          const regAfterKill: any = await loadRegistry();
-          const dAfterKill = regAfterKill?.drones?.[droneId] ?? null;
-          const token = typeof dAfterKill?.token === 'string' ? String(dAfterKill.token).trim() : '';
-          const containerName =
-            String(dAfterKill?.containerName ?? dAfterKill?.name ?? droneId).trim() || droneId;
-          const hostPort =
-            typeof dAfterKill?.hostPort === 'number' && Number.isFinite(dAfterKill.hostPort)
-              ? dAfterKill.hostPort
-              : await resolveHostPort(containerName, dAfterKill?.containerPort);
-          if (token && hostPort) {
-            const client = makeClient(hostPort, token);
-            for (let attempt = 0; attempt < 10; attempt++) {
-              try {
-                // eslint-disable-next-line no-await-in-loop
-                const r: any = await dronePromptGet(client, promptId);
-                const nextState = String(r?.job?.state ?? '').trim();
-                if (nextState) jobState = nextState;
-                if (nextState && nextState !== 'queued' && nextState !== 'running') break;
-              } catch {
-                // keep best-effort behavior; reconcile below will handle stale rows.
-              }
-              // eslint-disable-next-line no-await-in-loop
-              await sleepMs(250);
-            }
-          }
-
-          await reconcileChatFromDaemon({ droneId, chatName });
-          let pendingAfter = await readPendingPrompts({ droneId, chatName });
-          let pendingItemAfter = pendingAfter.find((p) => p.id === promptId) ?? null;
-          const regAfter: any = await loadRegistry();
-          const turnsAfter: any[] = Array.isArray(regAfter?.drones?.[droneId]?.chats?.[chatName]?.turns)
-            ? regAfter.drones[droneId].chats[chatName].turns
-            : [];
-          const recovered = turnsAfter.some((t: any) => String(t?.id ?? '').trim() === promptId);
-          let forceFinalized = false;
-          if (!recovered && pendingItemAfter && pendingItemAfter.state !== 'failed') {
-            const jobStateText = String(jobState ?? '').trim();
-            const reason = jobStateText
-              ? `manual unstick requested; daemon job state after session kill: ${jobStateText}`
-              : 'manual unstick requested; no completion recovered after session kill';
-            await updatePendingPrompt({
-              droneId,
-              chatName,
-              id: promptId,
-              patch: { state: 'failed', error: reason, updatedAt: nowIso() },
-            });
-            forceFinalized = true;
-            pendingAfter = await readPendingPrompts({ droneId, chatName });
-            pendingItemAfter = pendingAfter.find((p) => p.id === promptId) ?? null;
-          }
-
-          json(res, 200, {
-            ok: true,
-            id: droneId,
-            name: droneName,
-            chat: chatName,
-            promptId,
-            sessionName,
-            recovered,
-            pendingState: pendingItemAfter?.state ?? null,
-            jobState,
-            forceFinalized,
-          });
           return;
         } catch (e: any) {
           const msg = e?.message ?? String(e);
