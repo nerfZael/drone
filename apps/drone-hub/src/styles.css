@@ -50,7 +50,7 @@
 
   /* ── Typography ── */
   --display: 'Chakra Petch', system-ui, sans-serif;
-  --sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
   --code: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* ── Glow ── */
@@ -125,6 +125,37 @@ code, pre {
   );
   pointer-events: none;
   z-index: 1;
+}
+
+/* No-selection home: quiet launch surface, not a dashboard. */
+.dh-launch-state {
+  background:
+    radial-gradient(circle at 18% 18%, rgba(167, 139, 250, .09), transparent 30%),
+    radial-gradient(circle at 84% 76%, rgba(148, 163, 184, .035), transparent 26%),
+    var(--panel);
+}
+
+.dh-launch-grid {
+  opacity: .45;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, .018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, .018) 1px, transparent 1px);
+  background-size: 48px 48px;
+  mask-image: radial-gradient(circle at 46% 46%, black, transparent 76%);
+}
+
+:where(button, [role='button'], a, input, textarea, select):focus-visible {
+  outline: 2px solid rgba(167, 139, 250, .78);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
 }
 
 /* ──────────────────────────────────────────────────────────
