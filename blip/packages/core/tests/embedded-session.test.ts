@@ -54,6 +54,7 @@ describe("Embedded Blip session", () => {
       fauxAssistantMessage("embedded summary"),
     ]);
     const events: BlipRuntimeEvent[] = [];
+    const providerResponses: Array<{ status: number; model: string }> = [];
     const repository = new SessionStore(workspace);
     const session = await createBlipSession({
       workspaceRoot: workspace,
@@ -62,6 +63,7 @@ describe("Embedded Blip session", () => {
       toolProfile: "no-shell-workspace-write",
       sessionRepository: repository,
       promptProvider: () => "Injected host prompt",
+      onResponse: (response, model) => providerResponses.push({ status: response.status, model: model.id }),
       eventSink: (event) => events.push(event),
     });
 
@@ -76,6 +78,10 @@ describe("Embedded Blip session", () => {
     expect(events.filter((event) => event.type === "session_finished")).toHaveLength(2);
     expect(new Set(events.map((event) => event.eventId)).size).toBe(events.length);
     expect(events.filter((event) => event.type === "transcript_changed" && event.role === "assistant")).toHaveLength(2);
+    expect(providerResponses).toEqual([
+      { status: 200, model: faux.getModel().id },
+      { status: 200, model: faux.getModel().id },
+    ]);
     expect(observed.map((item) => item.systemPrompt)).toEqual([
       "Injected host prompt",
       "Injected host prompt",

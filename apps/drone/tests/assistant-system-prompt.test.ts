@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { loadAssistantState } from '../src/host/assistant-store';
 import { HubAssistantService } from '../src/hub/assistant';
+import { ASSISTANT_TOOL_SUMMARIES } from '../src/hub/assistant/assistant-config';
 import { withTempDroneDataDir } from './test-helpers';
 
 function makeAssistantService(): HubAssistantService {
@@ -9,6 +10,37 @@ function makeAssistantService(): HubAssistantService {
 }
 
 describe('assistant system prompt settings', () => {
+  test('advertises the complete grouped tool catalog without legacy aliases', () => {
+    const names = ASSISTANT_TOOL_SUMMARIES.map((tool) => tool.name);
+    for (const name of ['list_targets', 'set_target', 'get_working_tree_status', 'delete_file', 'create_directory', 'delete_directory', 'move_path']) expect(names).toContain(name);
+    for (const name of ['assistant_files', 'find_files', 'list_changed_files', 'message_drone', 'read_chat_messages']) expect(names).not.toContain(name);
+    expect(ASSISTANT_TOOL_SUMMARIES.find((tool) => tool.name === 'send_message')?.group).toEqual({ kind: 'mcp', id: 'drone-hub', label: 'Drone Hub' });
+    expect(ASSISTANT_TOOL_SUMMARIES.find((tool) => tool.name === 'read_file')?.group).toBeUndefined();
+  });
+
+  test('exposes target selection only when a thread has multiple workspaces', async () => {
+    await withTempDroneDataDir('assistant-target-tool-cardinality-', async () => {
+      const artifactsOnly = makeAssistantService();
+      const single = await artifactsOnly.createThread({ title: 'artifacts only' });
+      expect(single.availableTools.map((tool) => tool.name)).not.toContain('set_target');
+      expect(artifactsOnly.resolvedSystemPrompt(single.activeThreadId, { multipleWorkspaceTargets: false })).toContain('only workspace');
+
+      const withDrone = new HubAssistantService({
+        listDrones: async () => [{ id: 'drone-a', name: 'Drone A', group: null, status: 'ready' } as any],
+      });
+      const multiple = await withDrone.createThread({ title: 'multiple targets' });
+      expect(multiple.availableTools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['list_targets', 'set_target']));
+    });
+  });
+
+  test('keeps snapshots available when target discovery fails', async () => {
+    await withTempDroneDataDir('assistant-target-discovery-failure-', async () => {
+      const service = new HubAssistantService({ listDrones: async () => { throw new Error('registry unavailable'); } });
+      const snapshot = await service.createThread({ title: 'fallback tools' });
+      expect(snapshot.availableTools.map((tool) => tool.name)).not.toContain('set_target');
+    });
+  });
+
   test('persists normal and voice defaults in the canonical assistant store and applies them to new threads', async () => {
     await withTempDroneDataDir('assistant-system-prompts-', async () => {
       const service = makeAssistantService();
@@ -68,17 +100,82 @@ describe('assistant system prompt settings', () => {
     });
   });
 
+  test('migrates legacy artifact, changed-file, and MCP toggle aliases', async () => {
+    await withTempDroneDataDir('assistant-legacy-tool-settings-', async () => {
+      const service = makeAssistantService();
+      const created = await service.createThread({ title: 'legacy tools' });
+      const updated = await service.updateThread(created.activeThreadId, { enabledTools: ['assistant_files', 'list_changed_files', 'message_drone', 'read_chat_messages'] });
+      const thread = updated.threads.find((item) => item.id === created.activeThreadId) as any;
+      expect(thread.enabledTools).toEqual(['list_targets', 'set_target', 'get_working_tree_status', 'send_message', 'list_chats', 'read_chat']);
+    });
+  });
+
   test('persists the default model used by new threads', async () => {
     await withTempDroneDataDir('assistant-default-model-', async () => {
       const service = makeAssistantService();
-      await service.updateDefaultModel({ provider: 'codex', model: 'gpt-5.5' });
+      await service.updateDefaultModel({ provider: 'codex', model: 'gpt-5.5', thinkingLevel: 'high' });
 
       const reloaded = makeAssistantService();
       const snapshot = await reloaded.createThread({ title: 'default model thread' });
       const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
-      expect(snapshot.defaultModel).toEqual({ provider: 'codex', model: 'gpt-5.5' });
+      expect(snapshot.defaultModel).toEqual({ provider: 'codex', model: 'gpt-5.5', thinkingLevel: 'high' });
       expect(thread.provider).toBe('codex');
       expect(thread.model).toBe('gpt-5.5');
+      expect(thread.thinkingLevel).toBe('high');
+    });
+  });
+
+  test('persists default tools without changing existing threads', async () => {
+    await withTempDroneDataDir('assistant-default-tools-', async () => {
+      const service = makeAssistantService();
+      const existing = await service.createThread({ title: 'existing' });
+      const existingThread = existing.threads.find((item) => item.id === existing.activeThreadId) as any;
+      const defaults = ['list_drones', 'read_chat'];
+
+      await service.updateDefaultEnabledTools({ enabledTools: defaults });
+      const unchanged = await service.threadSnapshot(existing.activeThreadId);
+      expect((unchanged.threads.find((item) => item.id === existing.activeThreadId) as any).enabledTools).toEqual(existingThread.enabledTools);
+
+      const reloaded = makeAssistantService();
+      const created = await reloaded.createThread({ title: 'new defaults' });
+      const thread = created.threads.find((item) => item.id === created.activeThreadId) as any;
+      expect(created.defaultEnabledTools).toEqual(defaults);
+      expect(thread.enabledTools).toEqual(defaults);
+    });
+  });
+
+  test('persists and manages queued assistant prompts', async () => {
+    await withTempDroneDataDir('assistant-queued-prompts-', async () => {
+      const service = makeAssistantService();
+      const created = await service.createThread({ title: 'queue' });
+      const queued = await service.enqueueThreadPrompt(created.activeThreadId, {
+        prompt: 'Follow up after the current turn',
+        promptImages: [{ type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' }],
+      });
+      expect(queued).toMatchObject({ status: 'queued', prompt: 'Follow up after the current turn', imageCount: 1 });
+      expect(queued.promptImages[0]?.data).toBe('');
+
+      const reloaded = makeAssistantService();
+      const claimed = await reloaded.claimNextQueuedPrompt(created.activeThreadId);
+      expect(claimed?.promptImages[0]?.data).toBe('aW1hZ2U=');
+      await reloaded.completeQueuedPrompt(created.activeThreadId, claimed!.id);
+      expect((await reloaded.threadSnapshot(created.activeThreadId)).threads.find((thread) => thread.id === created.activeThreadId)?.queuedPrompts).toEqual([]);
+
+      const failed = await reloaded.enqueueThreadPrompt(created.activeThreadId, { prompt: 'This one fails' });
+      await reloaded.claimNextQueuedPrompt(created.activeThreadId);
+      await reloaded.failQueuedPrompt(created.activeThreadId, failed.id, new Error('provider unavailable'));
+      const failedSnapshot = await reloaded.threadSnapshot(created.activeThreadId);
+      expect(failedSnapshot.threads.find((thread) => thread.id === created.activeThreadId)?.queuedPrompts[0]).toMatchObject({
+        id: failed.id,
+        status: 'failed',
+        error: 'provider unavailable',
+      });
+      await reloaded.cancelQueuedPrompt(created.activeThreadId, failed.id);
+      expect(await reloaded.hasQueuedPrompts(created.activeThreadId)).toBe(false);
+      for (let index = 0; index < 32; index += 1) {
+        await reloaded.enqueueThreadPrompt(created.activeThreadId, { prompt: `Queued ${index + 1}` });
+      }
+      await expect(reloaded.enqueueThreadPrompt(created.activeThreadId, { prompt: 'Too many' })).rejects.toThrow('queue is full');
     });
   });
 });

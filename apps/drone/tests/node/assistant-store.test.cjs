@@ -34,7 +34,8 @@ function useDataDir(dataDir) {
 function state(title = 'first') {
   return {
     activeThreadId: 'thread-1',
-    defaultModel: { provider: 'openai', model: 'gpt-5.6-sol' },
+    defaultModel: { provider: 'openai', model: 'gpt-5.6-sol', thinkingLevel: 'medium' },
+    defaultEnabledTools: ['list_drones', 'read_chat'],
     webSearchToolMigrationApplied: true,
     fetchContentToolMigrationApplied: true,
     systemPrompt: 'default prompt',
@@ -68,6 +69,8 @@ function state(title = 'first') {
             model: 'gpt-5.5',
             thinkingLevel: 'off',
             deliveryMode: 'queue',
+            status: 'queued',
+            error: null,
             attachments: [{ path: '/tmp/reference.txt', name: 'reference.txt' }],
             futureQueueField: { kept: true },
           },

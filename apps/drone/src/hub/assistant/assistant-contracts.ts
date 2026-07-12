@@ -140,6 +140,7 @@ export type AssistantToolSummary = {
   label: string;
   description: string;
   category: 'context' | 'prompts' | 'files' | 'chats' | 'drones' | 'actions';
+  group?: { kind: 'mcp'; id: string; label: string };
 };
 
 export type AssistantRealtimeFunctionTool = {
@@ -192,28 +193,4 @@ export type AssistantThreadSystemPromptSettings = {
     maxPromptChars: number;
     runtimeAppendix: string;
   };
-};
-
-export type AssistantOverviewPromptSettings = {
-  ok: true;
-  assistantOverviewPrompt: {
-    prompt: string;
-    promptSource: 'settings' | 'default';
-    updatedAt: string | null;
-    defaultPrompt: string;
-    maxPromptChars: number;
-  };
-};
-
-export type AssistantThreadOverviewResult = {
-  ok: true;
-  threadId: string;
-  markdown: string;
-  generatedAt: string;
-  inputFingerprint: string;
-  promptFingerprint: string;
-  provider: LlmProviderId;
-  model: string;
-  cached: boolean;
-  inputReused: boolean;
 };

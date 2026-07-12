@@ -14,7 +14,8 @@ import { droneRootPath } from './paths';
 
 export type StoredAssistantState = {
   activeThreadId?: string | null;
-  defaultModel?: { provider?: string; model?: string };
+  defaultModel?: { provider?: string; model?: string; thinkingLevel?: string };
+  defaultEnabledTools?: string[];
   threads?: any[];
   chatIdleSubscriptions?: any[];
   webSearchToolMigrationApplied?: boolean;
@@ -23,8 +24,6 @@ export type StoredAssistantState = {
   systemPromptUpdatedAt?: string;
   voiceSystemPrompt?: string;
   voiceSystemPromptUpdatedAt?: string;
-  overviewPrompt?: string;
-  overviewPromptUpdatedAt?: string;
   updatedAt?: string;
 };
 
@@ -46,8 +45,6 @@ export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
           system_prompt_updated_at TEXT,
           voice_system_prompt TEXT,
           voice_system_prompt_updated_at TEXT,
-          overview_prompt TEXT,
-          overview_prompt_updated_at TEXT,
           state_updated_at TEXT
         );
 
@@ -139,20 +136,34 @@ export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    name: 'assistant default reasoning',
+    migrate(connection) {
+      connection.exec('ALTER TABLE assistant_preferences ADD COLUMN default_thinking_level TEXT;');
+    },
+  },
+  {
+    version: 4,
+    name: 'assistant default tools',
+    migrate(connection) {
+      connection.exec('ALTER TABLE assistant_preferences ADD COLUMN default_enabled_tools_json TEXT;');
+    },
+  },
 ];
 
 type PreferenceRow = {
   active_thread_id: string | null;
   default_provider: string | null;
   default_model: string | null;
+  default_thinking_level: string | null;
+  default_enabled_tools_json: string | null;
   web_search_tool_migration_applied: number | null;
   fetch_content_tool_migration_applied: number | null;
   system_prompt: string | null;
   system_prompt_updated_at: string | null;
   voice_system_prompt: string | null;
   voice_system_prompt_updated_at: string | null;
-  overview_prompt: string | null;
-  overview_prompt_updated_at: string | null;
   state_updated_at: string | null;
 };
 
@@ -279,36 +290,35 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
     .prepare(
       `
     INSERT INTO assistant_preferences (
-      singleton, active_thread_id, default_provider, default_model,
+      singleton, active_thread_id, default_provider, default_model, default_thinking_level, default_enabled_tools_json,
       web_search_tool_migration_applied,
       fetch_content_tool_migration_applied, system_prompt, system_prompt_updated_at,
-      voice_system_prompt, voice_system_prompt_updated_at, overview_prompt,
-      overview_prompt_updated_at, state_updated_at
+      voice_system_prompt, voice_system_prompt_updated_at, state_updated_at
     ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(singleton) DO UPDATE SET
       active_thread_id = excluded.active_thread_id,
       default_provider = excluded.default_provider,
       default_model = excluded.default_model,
+      default_thinking_level = excluded.default_thinking_level,
+      default_enabled_tools_json = excluded.default_enabled_tools_json,
       web_search_tool_migration_applied = excluded.web_search_tool_migration_applied,
       fetch_content_tool_migration_applied = excluded.fetch_content_tool_migration_applied,
       system_prompt = excluded.system_prompt,
       system_prompt_updated_at = excluded.system_prompt_updated_at,
       voice_system_prompt = excluded.voice_system_prompt,
       voice_system_prompt_updated_at = excluded.voice_system_prompt_updated_at,
-      overview_prompt = excluded.overview_prompt,
-      overview_prompt_updated_at = excluded.overview_prompt_updated_at,
       state_updated_at = excluded.state_updated_at
     WHERE active_thread_id IS NOT excluded.active_thread_id
        OR default_provider IS NOT excluded.default_provider
        OR default_model IS NOT excluded.default_model
+       OR default_thinking_level IS NOT excluded.default_thinking_level
+       OR default_enabled_tools_json IS NOT excluded.default_enabled_tools_json
        OR web_search_tool_migration_applied IS NOT excluded.web_search_tool_migration_applied
        OR fetch_content_tool_migration_applied IS NOT excluded.fetch_content_tool_migration_applied
        OR system_prompt IS NOT excluded.system_prompt
        OR system_prompt_updated_at IS NOT excluded.system_prompt_updated_at
        OR voice_system_prompt IS NOT excluded.voice_system_prompt
        OR voice_system_prompt_updated_at IS NOT excluded.voice_system_prompt_updated_at
-       OR overview_prompt IS NOT excluded.overview_prompt
-       OR overview_prompt_updated_at IS NOT excluded.overview_prompt_updated_at
        OR state_updated_at IS NOT excluded.state_updated_at
   `,
     )
@@ -316,14 +326,14 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       optionalText(state.activeThreadId),
       optionalText(state.defaultModel?.provider),
       optionalText(state.defaultModel?.model),
+      optionalText(state.defaultModel?.thinkingLevel),
+      Array.isArray(state.defaultEnabledTools) ? json(state.defaultEnabledTools) : null,
       optionalBoolean(state.webSearchToolMigrationApplied),
       optionalBoolean(state.fetchContentToolMigrationApplied),
       optionalText(state.systemPrompt),
       optionalText(state.systemPromptUpdatedAt),
       optionalText(state.voiceSystemPrompt),
       optionalText(state.voiceSystemPromptUpdatedAt),
-      optionalText(state.overviewPrompt),
-      optionalText(state.overviewPromptUpdatedAt),
       optionalText(state.updatedAt),
     );
 
@@ -663,9 +673,11 @@ function readStateRows(connection: HubDatabaseConnection): StoredAssistantState 
           defaultModel: {
             provider: preferences.default_provider ?? undefined,
             model: preferences.default_model ?? undefined,
+            thinkingLevel: preferences.default_thinking_level ?? undefined,
           },
         }
       : {}),
+    defaultEnabledTools: parseJson(preferences.default_enabled_tools_json),
     threads,
     ...(subscriptions.length > 0 ? { chatIdleSubscriptions: subscriptions } : {}),
     webSearchToolMigrationApplied:
@@ -680,8 +692,6 @@ function readStateRows(connection: HubDatabaseConnection): StoredAssistantState 
     systemPromptUpdatedAt: preferences.system_prompt_updated_at ?? undefined,
     voiceSystemPrompt: preferences.voice_system_prompt ?? undefined,
     voiceSystemPromptUpdatedAt: preferences.voice_system_prompt_updated_at ?? undefined,
-    overviewPrompt: preferences.overview_prompt ?? undefined,
-    overviewPromptUpdatedAt: preferences.overview_prompt_updated_at ?? undefined,
     updatedAt: preferences.state_updated_at ?? undefined,
   });
 }

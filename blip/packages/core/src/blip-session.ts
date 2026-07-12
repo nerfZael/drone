@@ -212,6 +212,7 @@ class BlipSession implements BlipSessionHandle {
       sessionId: state.id,
       toolExecution: "parallel",
       getApiKey: options.getApiKey,
+      onResponse: options.onResponse,
       transformContext: options.transformContext,
       convertToLlm: options.convertToLlm,
       beforeToolCall: (context, signal) => this.preflight(context, signal),

@@ -1,5 +1,7 @@
 import React from 'react';
 
+import { IconWrench } from '../app/icons';
+
 import type {
   AssistantScopeMode,
   AssistantSystemPromptKind,
@@ -53,131 +55,107 @@ export function ScopeModeControl({
   );
 }
 
-const ASSISTANT_TOOL_CATEGORY_LABELS: Record<AssistantToolSummary['category'], string> = {
-  context: 'Context',
-  prompts: 'Prompts',
-  files: 'Files',
-  chats: 'Chats',
-  drones: 'Drones',
-  actions: 'Actions',
-};
-
 export function AssistantToolsPanel({
   tools,
   enabledTools,
   disabled,
   onToggleTool,
+  onToggleTools,
   onEnableAll,
   onDisableAll,
   onClose,
+  variant = 'popover',
 }: {
   tools: AssistantToolSummary[];
   enabledTools: string[];
   disabled: boolean;
   onToggleTool: (toolName: string, enabled: boolean) => void;
+  onToggleTools: (toolNames: string[], enabled: boolean) => void;
   onEnableAll: () => void;
   onDisableAll: () => void;
-  onClose: () => void;
+  onClose?: () => void;
+  variant?: 'popover' | 'settings';
 }) {
+  const panelRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    if (variant !== 'popover' || !onClose) return;
+    const dismiss = (event: PointerEvent) => {
+      if ((event.target as Element | null)?.closest?.('[data-assistant-tools-trigger]')) return;
+      if (!panelRef.current?.contains(event.target as Node)) onClose();
+    };
+    window.addEventListener('pointerdown', dismiss);
+    return () => window.removeEventListener('pointerdown', dismiss);
+  }, [onClose, variant]);
   const enabled = new Set(enabledTools);
-  const categories = React.useMemo(() => {
-    const groups = new Map<AssistantToolSummary['category'], AssistantToolSummary[]>();
+  const { ungroupedTools, mcpGroups } = React.useMemo(() => {
+    const ungroupedTools: AssistantToolSummary[] = [];
+    const groups = new Map<string, { label: string; tools: AssistantToolSummary[] }>();
     for (const tool of tools) {
-      const current = groups.get(tool.category) ?? [];
-      current.push(tool);
-      groups.set(tool.category, current);
+      if (!tool.group || tool.group.kind !== 'mcp') {
+        ungroupedTools.push(tool);
+        continue;
+      }
+      const current = groups.get(tool.group.id) ?? { label: tool.group.label, tools: [] };
+      current.tools.push(tool);
+      groups.set(tool.group.id, current);
     }
-    return Array.from(groups.entries());
+    return { ungroupedTools, mcpGroups: Array.from(groups.entries()) };
   }, [tools]);
 
+  const renderTool = (tool: AssistantToolSummary) => {
+    const checked = enabled.has(tool.name);
+    return (
+      <label key={tool.name} className={`flex cursor-pointer items-start gap-2 rounded border px-2 py-1.5 transition-colors ${checked ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]' : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] hover:bg-[var(--hover)]'}`}>
+        <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onToggleTool(tool.name, event.target.checked)} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]" />
+        <span className="min-w-0">
+          <span className="block truncate text-[11px] font-medium text-[var(--fg-secondary)]">{tool.label}</span>
+          <span className="mt-0.5 block text-[10px] leading-snug text-[var(--muted-dim)]">{tool.description}</span>
+        </span>
+      </label>
+    );
+  };
+
   return (
-    <div className="absolute right-2 top-10 z-30 w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_rgba(0,0,0,.48)]">
+    <div ref={panelRef} className={variant === 'popover'
+      ? 'absolute right-2 top-10 z-30 w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_rgba(0,0,0,.48)]'
+      : 'overflow-hidden rounded border border-[var(--border)] bg-[rgba(0,0,0,.10)]'}>
       <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2">
-        <div className="min-w-0">
+        <div className="flex min-w-0 items-center gap-2">
+          <IconWrench className="h-3.5 w-3.5 text-[var(--muted)]" />
           <div
             className="text-[12px] font-semibold text-[var(--fg)]"
             style={{ fontFamily: 'var(--display)' }}
           >
-            Assistant tools
-          </div>
-          <div className="mt-0.5 truncate text-[10px] text-[var(--muted-dim)]">
-            Tool changes apply when the assistant starts its next turn.
+            {variant === 'settings' ? 'Default tools' : 'Tools'}
           </div>
         </div>
-        <button
-          type="button"
-          onClick={onClose}
-          className="h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          Close
-        </button>
+        <div className="text-[10px] tabular-nums text-[var(--muted-dim)]">{enabledTools.length} / {tools.length}</div>
       </div>
-      <div className="flex items-center gap-1.5 border-b border-[var(--border-subtle)] px-3 py-2">
-        <button
-          type="button"
-          onClick={onEnableAll}
-          disabled={disabled}
-          className="h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-45"
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          Enable all
-        </button>
-        <button
-          type="button"
-          onClick={onDisableAll}
-          disabled={disabled}
-          className="h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-45"
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          Disable all
-        </button>
-        <div className="ml-auto text-[10px] text-[var(--muted-dim)]">
-          {enabledTools.length} / {tools.length}
+      <div className="flex items-center border-b border-[var(--border-subtle)] px-3 py-1.5">
+        <div className="inline-flex overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]" role="group" aria-label="Set all tools">
+          <button type="button" onClick={onEnableAll} disabled={disabled || enabledTools.length === tools.length} className="h-5 px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title="Enable every tool">All</button>
+          <button type="button" onClick={onDisableAll} disabled={disabled || enabledTools.length === 0} className="h-5 border-l border-[var(--border-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title="Disable every tool">None</button>
         </div>
       </div>
-      <div className="max-h-[min(520px,calc(100vh-190px))] overflow-y-auto p-2">
-        {categories.map(([category, categoryTools]) => (
-          <section key={category} className="mb-2 last:mb-0">
-            <div
-              className="mb-1 px-1 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {ASSISTANT_TOOL_CATEGORY_LABELS[category]}
-            </div>
-            <div className="space-y-1">
-              {categoryTools.map((tool) => {
-                const checked = enabled.has(tool.name);
-                return (
-                  <label
-                    key={tool.name}
-                    className={`flex cursor-pointer items-start gap-2 rounded border px-2 py-1.5 transition-colors ${
-                      checked
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] hover:bg-[var(--hover)]'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={checked}
-                      disabled={disabled}
-                      onChange={(event) => onToggleTool(tool.name, event.target.checked)}
-                      className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]"
-                    />
-                    <span className="min-w-0">
-                      <span className="block truncate text-[11px] font-medium text-[var(--fg-secondary)]">
-                        {tool.label}
-                      </span>
-                      <span className="mt-0.5 block text-[10px] leading-snug text-[var(--muted-dim)]">
-                        {tool.description}
-                      </span>
-                    </span>
-                  </label>
-                );
-              })}
-            </div>
-          </section>
-        ))}
+      <div className={variant === 'popover' ? 'max-h-[min(520px,calc(100vh-190px))] overflow-y-auto p-2' : 'p-2'}>
+        {ungroupedTools.length > 0 ? <section className="mb-3"><div className="space-y-1">{ungroupedTools.map(renderTool)}</div></section> : null}
+        {mcpGroups.map(([groupId, group]) => {
+          const groupToolNames = group.tools.map((tool) => tool.name);
+          const enabledCount = groupToolNames.filter((name) => enabled.has(name)).length;
+          return (
+            <section key={groupId} className="mb-3 last:mb-0">
+              <div className="mb-1 flex items-center gap-1 px-1">
+                <div className="text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>{group.label}</div>
+                <div className="text-[9px] text-[var(--muted-dim)]">{enabledCount} / {group.tools.length}</div>
+                <div className="ml-auto inline-flex overflow-hidden rounded border border-[var(--border-subtle)]">
+                  <button type="button" onClick={() => onToggleTools(groupToolNames, true)} disabled={disabled || enabledCount === group.tools.length} className="h-5 px-1.5 text-[8px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title={`Enable all ${group.label} tools`}>All</button>
+                  <button type="button" onClick={() => onToggleTools(groupToolNames, false)} disabled={disabled || enabledCount === 0} className="h-5 border-l border-[var(--border-subtle)] px-1.5 text-[8px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35" title={`Disable all ${group.label} tools`}>None</button>
+                </div>
+              </div>
+              <div className="space-y-1">{group.tools.map(renderTool)}</div>
+            </section>
+          );
+        })}
       </div>
     </div>
   );

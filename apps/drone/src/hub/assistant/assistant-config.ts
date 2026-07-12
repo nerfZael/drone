@@ -4,8 +4,6 @@ import type { AssistantThinkingLevel, AssistantToolSummary } from './assistant-c
 export const ASSISTANT_THREAD_MESSAGE_LIMIT = 80;
 export const ASSISTANT_REGISTRY_MAX_THREADS = 24;
 export const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
-export const ASSISTANT_OVERVIEW_PROMPT_MAX_CHARS = 20_000;
-export const ASSISTANT_OVERVIEW_INPUT_MAX_CHARS = 48_000;
 export const CHAT_MESSAGE_DEFAULT_LIMIT = 10;
 export const CHAT_MESSAGE_MAX_LIMIT = 50;
 export const CHAT_MESSAGE_RESPONSE_MAX_BYTES = 500_000;
@@ -33,22 +31,26 @@ export const ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY =
   'When you send a drone chat message and need the result later, call subscribe_to_chats_idle on the target chat. This returns immediately so you can continue other work. If there is nothing else to do, end your turn; the system will resume this thread when the subscribed chats become idle.';
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
   'When you send drone chat messages and need results later, call subscribe_to_any_chat_idle to resume as soon as one target chat is idle, or subscribe_to_all_chats_idle to resume only after every target chat is idle. These tools return immediately so you can continue other work. If there is nothing else to do, end your turn; the system will resume this thread when the subscription fires.';
+export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
+  'Use list_targets to discover drone workspaces and the private assistant artifacts target. Use set_target to choose the default workspace before a sequence of file operations, or pass target explicitly on an individual workspace tool.';
+export const ASSISTANT_SINGLE_TARGET_PROMPT_LINE =
+  'Filesystem tools are bound to this thread\'s only workspace. Call them without a target argument; list_targets and set_target are intentionally unavailable.';
 export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'You are Drone Hub Assistant, a concise operator assistant embedded in the Drone Hub app.',
   'You help the user understand available drones and coordinate work across drone chats.',
   'Use get_current_context when the user asks about the current, active, selected, or open drone/chat, or before acting on phrases like "this drone".',
   'Use web_search for current information, documentation, news, prices, schedules, or facts that may have changed. Use fetch_content when the user gives a direct URL to read, inspect, summarize, or analyze. Cite source URLs in the final answer.',
   'Use list_drones before referring to specific drones unless the user already provided an exact drone id.',
-  'Use get_chat_overview before reading chat details, then read_chat_messages in pages when you need conversation context.',
-  'Use assistant_files to maintain private, thread-scoped Markdown notes when tracking work, decisions, plans, questions, or handoff details. These files are for the user-facing Artifacts UI and are not visible to drones.',
-  'Use list_files, find_files, search_files, read_file, write_file, and apply_patch to inspect and modify files in drones you can access. Prefer apply_patch for coordinated code edits.',
+  'Use list_chats to discover chats and read_chat in pages when you need drone conversation context.',
+  ASSISTANT_MULTI_TARGET_PROMPT_LINE,
+  'Use list_files, search_files, read_file, write_file, and apply_patch to inspect and modify files in a workspace target. Prefer apply_patch for coordinated code edits.',
   'File results keep path as the runtime path and include relativePath when the path can be expressed relative to the drone workspace or repo root.',
-  'Use list_changed_files as a read-only review helper to inspect repo working tree status before reviewing or editing; it only works for repo-attached drones.',
+  'Use get_working_tree_status as a read-only review helper before reviewing or editing; it only works for repo-attached drone targets.',
   'Use read_file line ranges and search_files context when you only need a focused section of a file.',
   'Use bash only when a command is the right tool for inspection, tests, builds, or small scripted checks in an accessible container drone. Bash is approval-gated, non-interactive, and not for background processes.',
   'Use set_thinking_level when the user asks to change how much the assistant thinks. It changes this assistant thread to another supported thinking level for the same selected model and does not require approval.',
   'Use create_new_thread only when the user explicitly asks to start, open, create, clear, reset, or switch to a new assistant thread or session.',
-  'Use create_group for empty groups, set_drone_group for moving one batch to one group, set_drone_groups when different drones need different groups or no group, reorder_drones for sidebar order, open_drone_chat for UI navigation, highlight_drones to visually point out drones for about 10 seconds, and open_whiteboard/close_whiteboard for whiteboard panel navigation.',
+  'Use create_group for empty groups, set_drone_group for moving drones to one group, reorder_drones for sidebar order, open_drone_chat for UI navigation, highlight_drones to visually point out drones for about 10 seconds, and open_whiteboard/close_whiteboard for whiteboard panel navigation.',
   'Use whiteboard tools for simple diagrams, rectangles, arrows, and labels. Prefer structured shapes over raw scene JSON. Use capture_whiteboard when you need to inspect or share the full visible board as an image.',
   'File paths are interpreted by drone id plus path. Relative paths resolve inside the target drone workspace, usually the repo root for repo-backed drones.',
   'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
@@ -63,13 +65,15 @@ export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Do not claim a drone completed work unless the drone transcript or user says so.',
   'Keep responses practical and short.',
 ].join('\n');
-export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
+const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
   {
     name: 'list_drones',
     label: 'List drones',
-    category: 'context',
+    category: 'drones',
     description: 'List drones visible to this assistant thread.',
   },
+  { name: 'list_repos', label: 'List repositories', category: 'drones', description: 'List repositories known to Drone Hub.' },
+  { name: 'list_groups', label: 'List groups', category: 'drones', description: 'List Drone Hub groups.' },
   {
     name: 'get_current_context',
     label: 'Get current context',
@@ -87,12 +91,6 @@ export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
     label: 'Fetch content',
     category: 'context',
     description: 'Fetch readable page content from a URL.',
-  },
-  {
-    name: 'assistant_files',
-    label: 'Assistant files',
-    category: 'files',
-    description: 'Maintain private Markdown or text artifacts for this thread.',
   },
   {
     name: 'list_whiteboards',
@@ -161,78 +159,56 @@ export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
     category: 'actions',
     description: 'Open a fresh assistant thread or voice session.',
   },
-  {
-    name: 'inspect_drone',
-    label: 'Inspect drone',
-    category: 'drones',
-    description: 'Inspect one drone by id or name.',
-  },
+  { name: 'list_targets', label: 'List workspace targets', category: 'files', description: 'List drone workspaces and private assistant artifacts available to this thread.' },
+  { name: 'set_target', label: 'Set workspace target', category: 'files', description: 'Choose the default target for later workspace tool calls.' },
   {
     name: 'list_files',
     label: 'List files',
     category: 'files',
-    description: 'List files and folders in one drone.',
+    description: 'List files and folders in a workspace target.',
   },
   {
-    name: 'list_changed_files',
-    label: 'List changed files',
+    name: 'get_working_tree_status',
+    label: 'Get working tree status',
     category: 'files',
-    description: 'List changed files in one repo-attached drone.',
+    description: 'Inspect Git status in a repo-backed workspace target.',
   },
   {
     name: 'read_file',
     label: 'Read file',
     category: 'files',
-    description: 'Read a UTF-8 text file from one drone.',
+    description: 'Read a UTF-8 text file from a workspace target.',
   },
   {
     name: 'search_files',
     label: 'Search files',
     category: 'files',
-    description: 'Search text files in one drone.',
-  },
-  {
-    name: 'find_files',
-    label: 'Find files',
-    category: 'files',
-    description: 'Find file and directory paths in one drone.',
+    description: 'Search text files in a workspace target.',
   },
   {
     name: 'write_file',
     label: 'Write file',
     category: 'files',
-    description: 'Create or overwrite a UTF-8 text file in one drone.',
+    description: 'Create or overwrite a UTF-8 text file in a writable workspace target.',
   },
+  { name: 'delete_file', label: 'Delete file', category: 'files', description: 'Delete a file from a writable workspace target.' },
+  { name: 'create_directory', label: 'Create directory', category: 'files', description: 'Create a directory in a writable workspace target.' },
+  { name: 'delete_directory', label: 'Delete directory', category: 'files', description: 'Delete a directory from a writable workspace target.' },
+  { name: 'move_path', label: 'Move path', category: 'files', description: 'Move or rename a file or directory in a writable workspace target.' },
   {
     name: 'bash',
     label: 'Run bash',
     category: 'actions',
-    description: 'Run a non-interactive bash command in one container drone.',
+    description: 'Run a non-interactive bash command in a shell-capable workspace target.',
   },
   {
     name: 'apply_patch',
     label: 'Apply patch',
     category: 'actions',
-    description: 'Apply a patch envelope to files in one drone.',
+    description: 'Apply a patch envelope to a writable workspace target.',
   },
-  {
-    name: 'get_chat_overview',
-    label: 'Get chat overview',
-    category: 'chats',
-    description: 'Read a lightweight overview of drone chats.',
-  },
-  {
-    name: 'read_chat_messages',
-    label: 'Read chat messages',
-    category: 'chats',
-    description: 'Read a paginated timeline for a drone chat.',
-  },
-  {
-    name: 'search_chat_messages',
-    label: 'Search chat messages',
-    category: 'chats',
-    description: 'Search user and agent messages across drone chats.',
-  },
+  { name: 'list_chats', label: 'List chats', category: 'chats', description: 'List chats for a drone.' },
+  { name: 'read_chat', label: 'Read chat', category: 'chats', description: 'Read a paginated timeline for a drone chat.' },
   {
     name: 'subscribe_to_any_chat_idle',
     label: 'Subscribe to any chat idle',
@@ -245,16 +221,18 @@ export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
     category: 'chats',
     description: 'Resume this thread when all subscribed drone chats become idle.',
   },
+  { name: 'list_chat_idle_subscriptions', label: 'List chat idle subscriptions', category: 'chats', description: 'List durable chat-idle subscriptions associated with this assistant session.' },
+  { name: 'cancel_chat_idle_subscription', label: 'Cancel chat idle subscription', category: 'chats', description: 'Cancel a durable chat-idle subscription.' },
   {
     name: 'speak',
     label: 'Speak',
-    category: 'actions',
+    category: 'drones',
     description: 'Send a short spoken reply to the connected Android or desktop voice device.',
   },
   {
     name: 'create_drone',
     label: 'Create drone',
-    category: 'actions',
+    category: 'drones',
     description: 'Create a new container drone.',
   },
   {
@@ -275,6 +253,7 @@ export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
     category: 'actions',
     description: 'Open an existing drone chat in the Drone Hub UI.',
   },
+  { name: 'open_drone', label: 'Open drone', category: 'actions', description: 'Open a drone in the Drone Hub UI.' },
   {
     name: 'highlight_drones',
     label: 'Highlight drones',
@@ -286,12 +265,6 @@ export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
     label: 'Create group',
     category: 'actions',
     description: 'Create an empty Drone Hub group.',
-  },
-  {
-    name: 'set_drone_groups',
-    label: 'Set drone groups',
-    category: 'actions',
-    description: 'Move different drones into different groups, or clear groups, after approval.',
   },
   {
     name: 'reorder_drones',
@@ -312,12 +285,22 @@ export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [
     description: 'Move drones to a group after user approval.',
   },
   {
-    name: 'message_drone',
-    label: 'Send user message to drone',
+    name: 'send_message',
+    label: 'Send message',
     category: 'actions',
     description: 'Send a user message to a drone chat after approval.',
   },
 ];
+const DRONE_HUB_MCP_TOOL_NAMES = new Set([
+  'list_drones', 'list_repos', 'list_groups', 'create_group', 'set_drone_group', 'rename_drones', 'reorder_drones',
+  'open_drone_chat', 'open_drone', 'highlight_drones', 'list_whiteboards', 'read_whiteboard', 'create_whiteboard',
+  'update_whiteboard', 'capture_whiteboard', 'open_whiteboard', 'close_whiteboard', 'create_drone', 'clone_drone',
+  'list_chats', 'create_chat', 'send_message', 'subscribe_to_any_chat_idle', 'subscribe_to_all_chats_idle',
+  'list_chat_idle_subscriptions', 'cancel_chat_idle_subscription', 'read_chat',
+]);
+export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = ASSISTANT_TOOL_SUMMARY_DEFINITIONS.map((tool) =>
+  DRONE_HUB_MCP_TOOL_NAMES.has(tool.name) ? { ...tool, group: { kind: 'mcp', id: 'drone-hub', label: 'Drone Hub' } } : tool,
+);
 export const ASSISTANT_ALL_TOOL_NAMES = ASSISTANT_TOOL_SUMMARIES.map((tool) => tool.name);
 export const ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_ALL_TOOL_NAMES.filter(
   (name) =>
@@ -332,7 +315,6 @@ export const ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES = [
   'open_drone_chat',
   'highlight_drones',
   'create_group',
-  'set_drone_groups',
   'reorder_drones',
   'list_whiteboards',
   'read_whiteboard',
@@ -409,13 +391,6 @@ export const ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_E
     'set_thinking_level',
     'speak',
   ];
-export const ASSISTANT_OVERVIEW_PROMPT_DEFAULT = [
-  'You write a concise Markdown status overview for an assistant thread in Drone Hub.',
-  'Focus on the current state of the work, recent actions, tool calls, approvals, blockers, and next likely step.',
-  'Do not invent facts. If the thread does not show a result yet, say that it is still in progress or unknown.',
-  'Prefer compact sections and bullets. Keep it useful at a glance.',
-  'Use present tense for current work and past tense for completed actions.',
-].join('\n');
 type AssistantModelOptionDefinition = {
   provider: LlmProviderId;
   id: string;

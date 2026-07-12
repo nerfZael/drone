@@ -350,10 +350,10 @@ function assistantRouteAllowed(method: string, parts: string[]): boolean {
 
   if (parts.length === 3) {
     const route = parts[2];
-    if ((route === 'system-prompt' || route === 'overview-prompt') && (method === 'GET' || method === 'POST')) return true;
+    if (route === 'system-prompt' && (method === 'GET' || method === 'POST')) return true;
     if (route === 'threads' && (method === 'GET' || method === 'POST')) return true;
     if (route === 'events' && method === 'GET') return true;
-    if ((route === 'default-model' || route === 'context' || route === 'scope') && method === 'POST') return true;
+    if ((route === 'default-model' || route === 'default-tools' || route === 'context' || route === 'scope') && method === 'POST') return true;
     return false;
   }
 
@@ -379,7 +379,7 @@ function assistantRouteAllowed(method: string, parts: string[]): boolean {
   if (parts.length === 4 && (method === 'GET' || method === 'PATCH' || method === 'DELETE')) return true;
   if (parts.length === 5) {
     const action = parts[4];
-    if ((action === 'activate' || action === 'stop' || action === 'promote-system-prompt' || action === 'overview' || action === 'prompt') && method === 'POST') return true;
+    if ((action === 'activate' || action === 'stop' || action === 'promote-system-prompt' || action === 'prompt') && method === 'POST') return true;
     if (action === 'system-prompt' && (method === 'GET' || method === 'POST')) return true;
     return action === 'artifacts' && method === 'GET';
   }

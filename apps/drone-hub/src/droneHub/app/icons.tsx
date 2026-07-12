@@ -10,6 +10,15 @@ export function IconSettings({ className }: { className?: string }) {
   );
 }
 
+export function IconWrench({ className }: { className?: string }) {
+  return (
+    <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9.7 2.1a3.7 3.7 0 0 0-4.55 4.55l-3.7 3.7a1.65 1.65 0 0 0 2.33 2.33l3.7-3.7a3.7 3.7 0 0 0 4.55-4.55L9.9 6.56 8.15 4.81 9.7 2.1Z" />
+      <circle cx="2.75" cy="11.38" r=".55" fill="currentColor" stroke="none" />
+    </svg>
+  );
+}
+
 export function IconShieldCheck({ className }: { className?: string }) {
   return (
     <svg className={className} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">

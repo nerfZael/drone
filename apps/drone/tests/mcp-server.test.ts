@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { McpIdleSubscriptionStore } from '../src/hub/assistant/mcp-idle-subscription-store';
+import { ASSISTANT_TOOL_SUMMARIES } from '../src/hub/assistant/assistant-config';
 import { createInProcessDroneHubMcpClient } from '../src/hub/assistant/in-process-drone-hub-mcp';
 import { authorizeDroneHubMcpTool, imageToolResult } from '../src/hub/mcp-server';
 import { droneStatusSummary } from '../src/hub/mcp-summaries';
@@ -118,8 +119,9 @@ describe('Drone Hub assistant MCP transport', () => {
         allowedDroneIds: [],
       });
       const catalog = await client.listTools();
-      expect(catalog.tools.map((tool) => tool.name)).toContain('send_message');
-      expect(catalog.tools.map((tool) => tool.name)).toContain('list_chat_idle_subscriptions');
+      const catalogNames = catalog.tools.map((tool) => tool.name).sort();
+      const displayedMcpNames = ASSISTANT_TOOL_SUMMARIES.filter((tool) => tool.group?.kind === 'mcp' && tool.group.id === 'drone-hub').map((tool) => tool.name).sort();
+      expect(displayedMcpNames).toEqual(catalogNames);
       await client.close();
     });
   });

@@ -24,11 +24,13 @@ export type AssistantArtifactPatch = {
 };
 
 export type AssistantArtifactActionInput = {
-  action: 'list' | 'read' | 'write' | 'append' | 'patch' | 'delete';
+  action: 'list' | 'read' | 'write' | 'append' | 'patch' | 'delete' | 'create_directory';
   path?: unknown;
   content?: unknown;
   baseRevision?: unknown;
   patches?: unknown;
+  recursive?: unknown;
+  mode?: unknown;
 };
 
 const ARTIFACT_MAX_FILE_BYTES = 500_000;
@@ -103,6 +105,26 @@ function resolveArtifactPath(threadId: string, artifactPathRaw: unknown): { root
     throw errorWithStatus(`invalid artifact path: ${artifactPath}`, 400);
   }
   return { root, artifactPath, filePath };
+}
+
+function resolveArtifactDirectoryPath(threadId: string, directoryPathRaw: unknown): { root: string; artifactPath: string; directoryPath: string } {
+  const input = String(directoryPathRaw ?? '').trim().replace(/\\/g, '/').replace(/^\/+|\/+$/g, '').replace(/\/+/g, '/');
+  if (!input) throw errorWithStatus('missing artifact directory path', 400);
+  if (input.length > ARTIFACT_MAX_PATH_CHARS) throw errorWithStatus('artifact directory path is too long', 400);
+  const segments = input.split('/').filter(Boolean);
+  for (const segment of segments) {
+    if (segment === '.' || segment === '..' || segment.startsWith('.') || segment.includes('\0')) {
+      throw errorWithStatus(`invalid artifact directory path: ${input}`, 400);
+    }
+  }
+  const artifactPath = segments.join('/');
+  const root = artifactsRoot(threadId);
+  const directoryPath = path.resolve(root, artifactPath);
+  const rootResolved = path.resolve(root);
+  if (!directoryPath.startsWith(`${rootResolved}${path.sep}`)) {
+    throw errorWithStatus(`invalid artifact directory path: ${artifactPath}`, 400);
+  }
+  return { root, artifactPath, directoryPath };
 }
 
 function revisionForContent(content: string | Buffer): string {
@@ -234,6 +256,43 @@ export async function listAssistantArtifactFiles(threadId: string): Promise<Assi
   return files;
 }
 
+export async function listAssistantArtifactEntries(
+  threadId: string,
+  directoryPathRaw?: unknown,
+  limitRaw?: unknown,
+): Promise<{ entries: Array<{ path: string; type: 'directory' | 'file'; size: number; modifiedAt: string }>; truncated: boolean }> {
+  const root = artifactsRoot(threadId);
+  const rawPath = String(directoryPathRaw ?? '').trim();
+  const artifactPath = rawPath && rawPath !== '.' ? resolveArtifactDirectoryPath(threadId, rawPath).artifactPath : '';
+  const directoryPath = artifactPath ? path.resolve(root, artifactPath) : root;
+  let entries: Array<import('node:fs').Dirent>;
+  try {
+    entries = await fs.readdir(directoryPath, { withFileTypes: true });
+  } catch (error: any) {
+    if (error?.code === 'ENOENT' && !artifactPath) return { entries: [], truncated: false };
+    if (error?.code === 'ENOENT') throw errorWithStatus(`artifact directory not found: ${artifactPath}`, 404);
+    if (error?.code === 'ENOTDIR') throw errorWithStatus(`artifact path is not a directory: ${artifactPath}`, 400);
+    throw error;
+  }
+  const requestedLimit = Number(limitRaw);
+  const limit = Number.isFinite(requestedLimit) ? Math.max(1, Math.min(500, Math.floor(requestedLimit))) : 200;
+  const visible = entries
+    .filter((entry) => !entry.name.startsWith('.') && (entry.isDirectory() || entry.isFile()))
+    .sort((a, b) => Number(b.isDirectory()) - Number(a.isDirectory()) || a.name.localeCompare(b.name));
+  const selected = visible.slice(0, limit);
+  const details = await Promise.all(selected.map(async (entry) => {
+    const entryPath = [artifactPath, entry.name].filter(Boolean).join('/');
+    const stat = await fs.stat(path.join(directoryPath, entry.name));
+    return {
+      path: entryPath,
+      type: entry.isDirectory() ? 'directory' as const : 'file' as const,
+      size: stat.size,
+      modifiedAt: stat.mtime.toISOString(),
+    };
+  }));
+  return { entries: details, truncated: visible.length > selected.length };
+}
+
 export async function deleteAssistantArtifactsForThread(threadId: string): Promise<void> {
   await fs.rm(artifactsRoot(threadId), { recursive: true, force: true });
 }
@@ -283,6 +342,7 @@ async function writeAssistantArtifactFile(
   artifactPathRaw: unknown,
   contentRaw: unknown,
   baseRevisionRaw?: unknown,
+  modeRaw?: unknown,
 ): Promise<AssistantArtifactFile> {
   const { artifactPath, filePath } = resolveArtifactPath(threadId, artifactPathRaw);
   const content = String(contentRaw ?? '');
@@ -291,6 +351,18 @@ async function writeAssistantArtifactFile(
     throw errorWithStatus(`artifact is too large (${bytes} bytes, max ${ARTIFACT_MAX_FILE_BYTES})`, 413);
   }
   const baseRevision = String(baseRevisionRaw ?? '').trim();
+  const mode = String(modeRaw ?? '').trim();
+  let exists = false;
+  try {
+    const stat = await fs.stat(filePath);
+    exists = stat.isFile();
+    if (!exists) throw errorWithStatus(`artifact is not a file: ${artifactPath}`, 409);
+  } catch (error: any) {
+    if (error?.statusCode) throw error;
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  if (mode === 'create' && exists) throw errorWithStatus(`artifact already exists: ${artifactPath}`, 409);
+  if (mode === 'overwrite' && !exists) throw errorWithStatus(`artifact not found: ${artifactPath}`, 404);
   if (baseRevision) {
     const existing = await readAssistantArtifactFile(threadId, artifactPath);
     if (existing.revision !== baseRevision) {
@@ -353,15 +425,32 @@ async function patchAssistantArtifactFile(
   return await writeAssistantArtifactFile(threadId, current.path, nextContent);
 }
 
-async function deleteAssistantArtifactFile(threadId: string, artifactPathRaw: unknown): Promise<{ path: string; deleted: boolean }> {
+async function deleteAssistantArtifactFile(threadId: string, artifactPathRaw: unknown, baseRevisionRaw?: unknown): Promise<{ path: string; deleted: boolean }> {
   const { artifactPath, filePath } = resolveArtifactPath(threadId, artifactPathRaw);
   try {
+    const baseRevision = String(baseRevisionRaw ?? '').trim();
+    if (baseRevision) {
+      const existing = await readAssistantArtifactFile(threadId, artifactPath);
+      if (existing.revision !== baseRevision) throw errorWithStatus(`artifact revision changed: ${artifactPath}`, 409);
+    }
     await fs.rm(filePath, { force: false });
     return { path: artifactPath, deleted: true };
   } catch (e: any) {
     if (e?.code === 'ENOENT') return { path: artifactPath, deleted: false };
     throw e;
   }
+}
+
+async function createAssistantArtifactDirectory(
+  threadId: string,
+  directoryPathRaw: unknown,
+  recursiveRaw: unknown,
+): Promise<{ path: string; recursive: boolean }> {
+  const { root, artifactPath, directoryPath } = resolveArtifactDirectoryPath(threadId, directoryPathRaw);
+  const recursive = recursiveRaw === true;
+  await fs.mkdir(root, { recursive: true });
+  await fs.mkdir(directoryPath, { recursive });
+  return { path: artifactPath, recursive };
 }
 
 function base64DecodedByteLength(b64Raw: string): number {
@@ -372,6 +461,33 @@ function base64DecodedByteLength(b64Raw: string): number {
   else if (b64.endsWith('=')) padding = 1;
   const n = Math.floor((b64.length * 3) / 4) - padding;
   return Number.isFinite(n) && n > 0 ? n : 0;
+}
+
+export function validateAssistantPromptImages(raw: unknown): Array<{ type: 'image'; data: string; mimeType: string }> {
+  const list = Array.isArray(raw) ? raw : [];
+  if (list.length > ARTIFACT_MAX_UPLOAD_FILES) {
+    throw errorWithStatus(`too many prompt images (max ${ARTIFACT_MAX_UPLOAD_FILES})`, 413);
+  }
+  let total = 0;
+  return list.map((item: any) => {
+    const mimeType = String(item?.mimeType ?? item?.mime ?? '').trim().toLowerCase();
+    if (!isImageMimeType(mimeType)) throw errorWithStatus(`invalid prompt image type: ${mimeType || '(empty)'}`, 400);
+    const data = String(item?.data ?? item?.dataBase64 ?? '').replace(/\s+/g, '');
+    if (!data || data.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(data)) {
+      throw errorWithStatus('prompt image dataBase64 looks invalid', 400);
+    }
+    const size = base64DecodedByteLength(data);
+    if (!size || size > ARTIFACT_MAX_UPLOAD_BYTES_EACH) {
+      throw errorWithStatus(`prompt image size is invalid or exceeds ${ARTIFACT_MAX_UPLOAD_BYTES_EACH} bytes`, 413);
+    }
+    const decoded = Buffer.from(data, 'base64');
+    if (decoded.length !== size) throw errorWithStatus('prompt image size does not match payload', 400);
+    total += size;
+    if (total > ARTIFACT_MAX_UPLOAD_BYTES_TOTAL) {
+      throw errorWithStatus(`prompt images are too large in total (max ${ARTIFACT_MAX_UPLOAD_BYTES_TOTAL} bytes)`, 413);
+    }
+    return { type: 'image' as const, data, mimeType };
+  });
 }
 
 function extForUploadMime(mimeRaw: string): string {
@@ -496,7 +612,7 @@ export async function runAssistantArtifactAction(threadId: string, input: Assist
     return { ok: true, file: await readAssistantArtifactFile(threadId, input.path) };
   }
   if (action === 'write') {
-    return { ok: true, file: await writeAssistantArtifactFile(threadId, input.path, input.content, input.baseRevision) };
+    return { ok: true, file: await writeAssistantArtifactFile(threadId, input.path, input.content, input.baseRevision, input.mode) };
   }
   if (action === 'append') {
     return { ok: true, file: await appendAssistantArtifactFile(threadId, input.path, input.content, input.baseRevision) };
@@ -505,7 +621,10 @@ export async function runAssistantArtifactAction(threadId: string, input: Assist
     return { ok: true, file: await patchAssistantArtifactFile(threadId, input.path, input.patches, input.baseRevision) };
   }
   if (action === 'delete') {
-    return { ok: true, ...(await deleteAssistantArtifactFile(threadId, input.path)) };
+    return { ok: true, ...(await deleteAssistantArtifactFile(threadId, input.path, input.baseRevision)) };
+  }
+  if (action === 'create_directory') {
+    return { ok: true, ...(await createAssistantArtifactDirectory(threadId, input.path, input.recursive)) };
   }
   throw errorWithStatus(`unknown artifact action: ${action || '(empty)'}`, 400);
 }

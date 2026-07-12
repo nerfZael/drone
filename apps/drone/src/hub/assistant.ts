@@ -17,8 +17,6 @@ import {
   ASSISTANT_THREAD_MESSAGE_LIMIT,
   ASSISTANT_REGISTRY_MAX_THREADS,
   ASSISTANT_SYSTEM_PROMPT_MAX_CHARS,
-  ASSISTANT_OVERVIEW_PROMPT_MAX_CHARS,
-  ASSISTANT_OVERVIEW_INPUT_MAX_CHARS,
   CHAT_MESSAGE_DEFAULT_LIMIT,
   CHAT_MESSAGE_MAX_LIMIT,
   CHAT_MESSAGE_RESPONSE_MAX_BYTES,
@@ -43,6 +41,8 @@ import {
   ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX,
   ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY,
   ASSISTANT_CHAT_IDLE_PROMPT_LINE,
+  ASSISTANT_MULTI_TARGET_PROMPT_LINE,
+  ASSISTANT_SINGLE_TARGET_PROMPT_LINE,
   ASSISTANT_SYSTEM_PROMPT_DEFAULT,
   ASSISTANT_TOOL_SUMMARIES,
   ASSISTANT_ALL_TOOL_NAMES,
@@ -64,10 +64,8 @@ import {
   ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
   ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
   ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
-  ASSISTANT_OVERVIEW_PROMPT_DEFAULT,
   ASSISTANT_MODEL_OPTIONS,
 } from './assistant/assistant-config';
-import { generateAssistantOverview } from './assistant/assistant-overview-generator';
 import {
   formatAssistantReadFileToolText,
   type AssistantApplyPatchResult,
@@ -93,7 +91,6 @@ import type {
   AssistantDroneSummary,
   AssistantMessageDroneResult,
   AssistantModelOption,
-  AssistantOverviewPromptSettings,
   AssistantRealtimeFunctionTool,
   AssistantRealtimeMessageRole,
   AssistantRealtimeSessionConfig,
@@ -105,7 +102,6 @@ import type {
   AssistantSnapshotMode,
   AssistantSystemPromptSettings,
   AssistantThinkingLevel,
-  AssistantThreadOverviewResult,
   AssistantThreadSystemPromptSettings,
   AssistantToolSummary,
   AssistantUiAction,
@@ -122,7 +118,6 @@ export type {
   AssistantDroneSummary,
   AssistantMessageDroneResult,
   AssistantModelOption,
-  AssistantOverviewPromptSettings,
   AssistantRealtimeFunctionTool,
   AssistantRealtimeMessageRole,
   AssistantRealtimeSessionConfig,
@@ -134,7 +129,6 @@ export type {
   AssistantSnapshotMode,
   AssistantSystemPromptSettings,
   AssistantThinkingLevel,
-  AssistantThreadOverviewResult,
   AssistantThreadSystemPromptSettings,
   AssistantToolSummary,
   AssistantUiAction,
@@ -160,11 +154,23 @@ type AssistantThread = {
   promptDeliveryMode: AssistantPromptDeliveryMode;
   messageCount?: number;
   messages: any[];
+  queuedPrompts: AssistantQueuedPrompt[];
   status: AssistantThreadStatus;
   error: string | null;
 };
 
+export type AssistantQueuedPrompt = {
+  id: string;
+  prompt: string;
+  promptImages: Array<{ type: 'image'; data: string; mimeType: string }>;
+  imageCount: number;
+  createdAt: string;
+  status: 'queued' | 'running' | 'failed';
+  error: string | null;
+};
+
 type AssistantPromptDeliveryMode = 'queue' | 'asap';
+const ASSISTANT_QUEUED_PROMPT_LIMIT = 32;
 
 type AssistantChatIdleSubscriptionStatus = 'active' | 'fired' | 'cancelled' | 'expired';
 export type AssistantChatIdleSubscription = {
@@ -197,6 +203,7 @@ type AssistantRunModel = {
 type AssistantDefaultModel = {
   provider: LlmProviderId;
   model: string;
+  thinkingLevel: AssistantThinkingLevel;
 };
 
 type AssistantApproval = {
@@ -212,7 +219,8 @@ type AssistantApproval = {
 
 type StoredAssistantState = {
   activeThreadId?: string | null;
-  defaultModel?: { provider?: string; model?: string };
+  defaultModel?: { provider?: string; model?: string; thinkingLevel?: string };
+  defaultEnabledTools?: string[];
   threads?: AssistantThread[];
   chatIdleSubscriptions?: AssistantChatIdleSubscription[];
   webSearchToolMigrationApplied?: boolean;
@@ -221,19 +229,7 @@ type StoredAssistantState = {
   systemPromptUpdatedAt?: string;
   voiceSystemPrompt?: string;
   voiceSystemPromptUpdatedAt?: string;
-  overviewPrompt?: string;
-  overviewPromptUpdatedAt?: string;
   updatedAt?: string;
-};
-
-type AssistantThreadOverviewCacheEntry = {
-  inputText: string;
-  inputFingerprint: string;
-  promptFingerprint: string;
-  markdown: string;
-  generatedAt: string;
-  provider: LlmProviderId;
-  model: string;
 };
 
 type AssistantRuntime = {
@@ -296,6 +292,7 @@ export type AssistantSnapshot = {
   pendingApprovals: AssistantApproval[];
   models: AssistantModelOption[];
   defaultModel: AssistantDefaultModel;
+  defaultEnabledTools: string[];
   availableTools: AssistantToolSummary[];
   accessScope: AssistantAccessScope;
   runningModels: Record<string, AssistantRunModel>;
@@ -710,14 +707,6 @@ function migrateAssistantSystemPrompt(raw: unknown): string {
   return normalizeAssistantSystemPrompt(prompt.replace(ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY, ASSISTANT_CHAT_IDLE_PROMPT_LINE));
 }
 
-function normalizeAssistantOverviewPrompt(raw: unknown): string {
-  const text = typeof raw === 'string' ? raw.trim() : '';
-  if (!text) return '';
-  return text.length > ASSISTANT_OVERVIEW_PROMPT_MAX_CHARS
-    ? text.slice(0, ASSISTANT_OVERVIEW_PROMPT_MAX_CHARS).trim()
-    : text;
-}
-
 function normalizeAssistantEnabledTools(raw: unknown, fallback: string[] = ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES): string[] {
   if (!Array.isArray(raw)) return [...fallback];
   const allowed = new Set(ASSISTANT_ALL_TOOL_NAMES);
@@ -728,6 +717,20 @@ function normalizeAssistantEnabledTools(raw: unknown, fallback: string[] = ASSIS
     const names =
       rawName === 'subscribe_to_chats_idle'
         ? ['subscribe_to_all_chats_idle']
+        : rawName === 'assistant_files'
+          ? ['list_targets', 'set_target']
+          : rawName === 'list_changed_files'
+            ? ['get_working_tree_status']
+            : rawName === 'message_drone'
+              ? ['send_message']
+              : rawName === 'read_chat_messages'
+                ? ['list_chats', 'read_chat']
+                : rawName === 'get_chat_overview'
+                  ? ['list_chats']
+                  : rawName === 'inspect_drone'
+                    ? ['list_drones']
+                    : rawName === 'set_drone_groups'
+                      ? ['set_drone_group']
         : [rawName];
     for (const name of names) {
       if (!allowed.has(name) || seen.has(name)) continue;
@@ -923,58 +926,6 @@ function applyAssistantSystemPromptPatches(prompt: string, rawPatches: unknown):
     next = replaceTextOnce(next, patch.oldText, patch.newText, 'thread system prompt');
   }
   return normalizeAssistantSystemPrompt(next);
-}
-
-function assistantTextFingerprint(text: string): string {
-  return crypto.createHash('sha256').update(text).digest('hex');
-}
-
-function clipAssistantOverviewText(raw: unknown, maxChars: number): string {
-  const text = String(raw ?? '').trim();
-  if (!text) return '';
-  return text.length > maxChars ? `${text.slice(0, maxChars).trimEnd()}...` : text;
-}
-
-function assistantOverviewContentText(message: any): string {
-  const content = message?.content;
-  if (typeof content === 'string') return clipAssistantOverviewText(content, 5000);
-  if (!Array.isArray(content)) return '';
-  return content
-    .map((part: any) => {
-      if (!part || typeof part !== 'object') return '';
-      if (part.type === 'text') return clipAssistantOverviewText(part.text, 5000);
-      if (part.type === 'thinking') return `[thinking] ${clipAssistantOverviewText(part.thinking ?? part.text, 1200)}`;
-      if (part.type === 'toolCall') {
-        const name = cleanOptionalString(part.name) || 'tool';
-        const id = cleanOptionalString(part.id);
-        const args = clipAssistantOverviewText(JSON.stringify(part.arguments ?? {}, null, 2), 2400);
-        return [`[tool call] ${name}${id ? ` (${id})` : ''}`, args].filter(Boolean).join('\n');
-      }
-      return '';
-    })
-    .filter(Boolean)
-    .join('\n\n');
-}
-
-function assistantOverviewMessageText(message: any, index: number): string {
-  const role = cleanOptionalString(message?.role) || 'message';
-  const at = typeof message?.timestamp === 'number' ? new Date(message.timestamp).toISOString() : cleanOptionalString(message?.at);
-  const toolName = cleanOptionalString(message?.toolName);
-  const toolCallId = cleanOptionalString(message?.toolCallId);
-  const isError = message?.isError ? 'yes' : 'no';
-  const body = assistantOverviewContentText(message) || '(no text content)';
-  return [
-    `## Message ${index + 1}`,
-    `Role: ${role}`,
-    at ? `At: ${at}` : null,
-    toolName ? `Tool: ${toolName}` : null,
-    toolCallId ? `Tool call id: ${toolCallId}` : null,
-    message?.isError != null ? `Error: ${isError}` : null,
-    '',
-    body,
-  ]
-    .filter((line): line is string => typeof line === 'string')
-    .join('\n');
 }
 
 function clampChatIdleTimeoutMs(raw: unknown): number {
@@ -1282,7 +1233,26 @@ function activeChatIdleSubscriptionSummaries(subscriptions: AssistantChatIdleSub
     .map((subscription) => ({ ...sanitizeChatIdleSubscription(subscription), lastResult: null }));
 }
 
-function sanitizeThread(thread: AssistantThread): AssistantThread {
+function sanitizeQueuedPrompt(prompt: AssistantQueuedPrompt, includeImageData: boolean): AssistantQueuedPrompt {
+  const promptImages = Array.isArray(prompt.promptImages)
+    ? prompt.promptImages.map((image) => ({
+        type: 'image' as const,
+        data: includeImageData ? String(image?.data ?? '') : '',
+        mimeType: String(image?.mimeType ?? 'image/png'),
+      }))
+    : [];
+  return {
+    id: cleanOptionalString(prompt.id) || makeAssistantId('queued'),
+    prompt: String(prompt.prompt ?? ''),
+    promptImages,
+    imageCount: promptImages.length,
+    createdAt: cleanOptionalString(prompt.createdAt) || nowIso(),
+    status: prompt.status === 'failed' ? 'failed' : prompt.status === 'running' ? 'running' : 'queued',
+    error: cleanOptionalString(prompt.error) || null,
+  };
+}
+
+function sanitizeThread(thread: AssistantThread, includeQueuedImageData = true): AssistantThread {
   const voiceEnabled = normalizeAssistantVoiceEnabled(thread.voiceEnabled);
   return {
     ...thread,
@@ -1293,12 +1263,13 @@ function sanitizeThread(thread: AssistantThread): AssistantThread {
     enabledTools: enabledToolsForVoiceMode(thread.enabledTools, voiceEnabled),
     messageCount: thread.messages.length,
     messages: thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT).map(sanitizeMessage),
+    queuedPrompts: (thread.queuedPrompts ?? []).map((prompt) => sanitizeQueuedPrompt(prompt, includeQueuedImageData)),
     status: thread.status === 'running' || thread.status === 'waiting_for_approval' ? 'idle' : thread.status,
   };
 }
 
 function sanitizeThreadSummary(thread: AssistantThread): AssistantThread {
-  const sanitized = sanitizeThread(thread);
+  const sanitized = sanitizeThread(thread, false);
   return {
     ...sanitized,
     messages: [],
@@ -1318,6 +1289,11 @@ function normalizeThread(
   const createdAt = String(raw.createdAt ?? '').trim() || nowIso();
   const updatedAt = String(raw.updatedAt ?? '').trim() || createdAt;
   const messages = Array.isArray(raw.messages) ? raw.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT) : [];
+  const queuedPrompts = Array.isArray(raw.queuedPrompts)
+    ? raw.queuedPrompts
+        .slice(-ASSISTANT_QUEUED_PROMPT_LIMIT)
+        .map((prompt: AssistantQueuedPrompt) => sanitizeQueuedPrompt({ ...prompt, status: prompt?.status === 'failed' ? 'failed' : 'queued' }, true))
+    : [];
   const thinkingLevel = allowedThinkingLevelForModel(provider, model, raw.thinkingLevel);
   return {
     id,
@@ -1343,6 +1319,7 @@ function normalizeThread(
     autoApprove: normalizeAssistantAutoApprove(raw.autoApprove),
     promptDeliveryMode: normalizeAssistantPromptDeliveryMode(raw.promptDeliveryMode),
     messages,
+    queuedPrompts,
     status: raw.status === 'error' ? 'error' : 'idle',
     error: typeof raw.error === 'string' && raw.error.trim() ? raw.error : null,
   };
@@ -1351,25 +1328,24 @@ function normalizeThread(
 function serializeState(input: {
   activeThreadId: string;
   defaultModel: AssistantDefaultModel;
+  defaultEnabledTools: string[];
   threads: AssistantThread[];
   chatIdleSubscriptions: AssistantChatIdleSubscription[];
   systemPrompt: string;
   systemPromptUpdatedAt: string | null;
   voiceSystemPrompt: string;
   voiceSystemPromptUpdatedAt: string | null;
-  overviewPrompt: string;
-  overviewPromptUpdatedAt: string | null;
 }): StoredAssistantState {
   const systemPrompt = normalizeAssistantSystemPrompt(input.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
   const voiceSystemPrompt = normalizeAssistantSystemPrompt(input.voiceSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
-  const overviewPrompt = normalizeAssistantOverviewPrompt(input.overviewPrompt) || ASSISTANT_OVERVIEW_PROMPT_DEFAULT;
   const chatIdleSubscriptions = input.chatIdleSubscriptions
     .slice(-CHAT_IDLE_MAX_SUBSCRIPTIONS)
     .map(sanitizeChatIdleSubscription);
   return {
     activeThreadId: input.activeThreadId,
     defaultModel: input.defaultModel,
-    threads: input.threads.slice(0, ASSISTANT_REGISTRY_MAX_THREADS).map(sanitizeThread),
+    defaultEnabledTools: normalizeAssistantEnabledTools(input.defaultEnabledTools),
+    threads: input.threads.slice(0, ASSISTANT_REGISTRY_MAX_THREADS).map((thread) => sanitizeThread(thread, true)),
     ...(chatIdleSubscriptions.length > 0 ? { chatIdleSubscriptions } : {}),
     webSearchToolMigrationApplied: true,
     fetchContentToolMigrationApplied: true,
@@ -1385,12 +1361,6 @@ function serializeState(input: {
           ...(voiceSystemPrompt !== ASSISTANT_SYSTEM_PROMPT_DEFAULT
             ? { voiceSystemPromptUpdatedAt: input.voiceSystemPromptUpdatedAt ?? nowIso() }
             : {}),
-        }
-      : {}),
-    ...(overviewPrompt !== ASSISTANT_OVERVIEW_PROMPT_DEFAULT
-      ? {
-          overviewPrompt,
-          overviewPromptUpdatedAt: input.overviewPromptUpdatedAt ?? nowIso(),
         }
       : {}),
     updatedAt: nowIso(),
@@ -1413,11 +1383,8 @@ export class HubAssistantService {
   private defaultSystemPromptUpdatedAt: string | null = null;
   private defaultVoiceSystemPrompt = ASSISTANT_SYSTEM_PROMPT_DEFAULT;
   private defaultVoiceSystemPromptUpdatedAt: string | null = null;
-  private defaultOverviewPrompt = ASSISTANT_OVERVIEW_PROMPT_DEFAULT;
-  private defaultOverviewPromptUpdatedAt: string | null = null;
-  private defaultModelSelection: AssistantDefaultModel = { provider: 'openai', model: DEFAULT_OPENAI_MODEL };
-  private overviewCache = new Map<string, AssistantThreadOverviewCacheEntry>();
-  private overviewInFlight = new Map<string, Promise<AssistantThreadOverviewResult>>();
+  private defaultModelSelection: AssistantDefaultModel = { provider: 'openai', model: DEFAULT_OPENAI_MODEL, thinkingLevel: 'off' };
+  private defaultEnabledTools = [...ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES];
   private changeSequence = 0;
   private readonly changeListeners = new Set<(event: AssistantChangeEvent) => void>();
   private appContext: AssistantAppContext = {
@@ -1765,15 +1732,17 @@ export class HubAssistantService {
     const streamingMessages = this.threadStreamingMessages(this.activeThreadId);
     const streamingMessage = this.primaryThreadStreamingMessage(this.activeThreadId);
     const compact = mode === 'compact';
+    const availableTools = await this.availableToolsForThread(this.activeThreadId);
     return {
       ok: true,
       activeThreadId: this.activeThreadId,
-      threads: this.threads.map((thread) => (compact ? sanitizeThreadSummary(thread) : { ...sanitizeThread(thread), messages: thread.messages.map(sanitizeMessage) })),
+      threads: this.threads.map((thread) => (compact ? sanitizeThreadSummary(thread) : { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) })),
       chatIdleSubscriptions: [],
       pendingApprovals: this.pendingApprovals(),
       models: await this.modelOptions(),
       defaultModel: { ...this.defaultModelSelection },
-      availableTools: ASSISTANT_TOOL_SUMMARIES,
+      defaultEnabledTools: [...this.defaultEnabledTools],
+      availableTools,
       accessScope: sanitizeMessage(this.activeAccessScope()),
       runningModels: {},
       ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages } : {}),
@@ -1788,17 +1757,19 @@ export class HubAssistantService {
     if (options?.activate) this.activeThreadId = id;
     const streamingMessages = this.threadStreamingMessages(id);
     const streamingMessage = this.primaryThreadStreamingMessage(id);
+    const availableTools = await this.availableToolsForThread(id);
     return {
       ok: true,
       activeThreadId: id,
       threads: this.threads.map((thread) =>
-        thread.id === id ? { ...sanitizeThread(thread), messages: thread.messages.map(sanitizeMessage) } : sanitizeThreadSummary(thread),
+        thread.id === id ? { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) } : sanitizeThreadSummary(thread),
       ),
       chatIdleSubscriptions: [],
       pendingApprovals: this.pendingApprovals(),
       models: await this.modelOptions(),
       defaultModel: { ...this.defaultModelSelection },
-      availableTools: ASSISTANT_TOOL_SUMMARIES,
+      defaultEnabledTools: [...this.defaultEnabledTools],
+      availableTools,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       runningModels: {},
       ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages } : {}),
@@ -1821,6 +1792,7 @@ export class HubAssistantService {
     const thread = this.makeThread({
       provider,
       model: String(input?.model ?? '').trim() || (explicitProvider ? defaultModelForProvider(provider) : this.defaultModelSelection.model),
+      ...(!explicitProvider && !String(input?.model ?? '').trim() ? { thinkingLevel: this.defaultModelSelection.thinkingLevel } : {}),
       title: String(input?.title ?? '').trim() || DEFAULT_THREAD_TITLE,
       accessScope: this.defaultAccessScopeForNewThread({ ...input, voiceEnabled }),
       voiceEnabled,
@@ -1837,13 +1809,14 @@ export class HubAssistantService {
     if (existing) {
       this.activeThreadId = existing.id;
       await this.persist();
-      return { ok: true, threadId: existing.id, created: false, thread: sanitizeThread(existing) };
+      return { ok: true, threadId: existing.id, created: false, thread: sanitizeThread(existing, false) };
     }
 
     const provider = this.defaultModelSelection.provider;
     const thread = this.makeThread({
       provider,
       model: this.defaultModelSelection.model,
+      thinkingLevel: this.defaultModelSelection.thinkingLevel,
       title: String(input?.title ?? '').trim() || 'Realtime thread',
       voiceEnabled: true,
       accessScope: this.defaultAccessScopeForNewThread({ voiceEnabled: true }),
@@ -1851,10 +1824,10 @@ export class HubAssistantService {
     this.threads = [thread, ...this.threads].slice(0, ASSISTANT_REGISTRY_MAX_THREADS);
     this.activeThreadId = thread.id;
     await this.persist();
-    return { ok: true, threadId: thread.id, created: true, thread: sanitizeThread(thread) };
+    return { ok: true, threadId: thread.id, created: true, thread: sanitizeThread(thread, false) };
   }
 
-  private async createNewThreadFromThread(threadId: string, input?: { title?: unknown }): Promise<{ ok: true; previousThreadId: string; threadId: string; thread: AssistantThread }> {
+  async createNewThreadFromThread(threadId: string, input?: { title?: unknown }): Promise<{ ok: true; previousThreadId: string; threadId: string; thread: AssistantThread }> {
     await this.ensureLoaded();
     const previousThread = this.getThread(threadId);
     const voiceEnabled = normalizeAssistantVoiceEnabled(previousThread.voiceEnabled);
@@ -1870,7 +1843,7 @@ export class HubAssistantService {
     this.threads = [thread, ...this.threads].slice(0, ASSISTANT_REGISTRY_MAX_THREADS);
     this.activeThreadId = thread.id;
     await this.persist();
-    return { ok: true, previousThreadId: previousThread.id, threadId: thread.id, thread: sanitizeThread(thread) };
+    return { ok: true, previousThreadId: previousThread.id, threadId: thread.id, thread: sanitizeThread(thread, false) };
   }
 
   async submitVoicePrompt(input: { prompt?: unknown; title?: unknown; source?: AssistantVoiceSource; deliveryMode?: unknown }): Promise<{ ok: true; threadId: string; created: boolean; accepted: boolean }> {
@@ -1947,102 +1920,6 @@ export class HubAssistantService {
     return this.systemPromptSettingsSync();
   }
 
-  async overviewPromptSettings(): Promise<AssistantOverviewPromptSettings> {
-    await this.ensureLoaded();
-    return this.overviewPromptSettingsSync();
-  }
-
-  async updateOverviewPrompt(input: { prompt?: unknown }): Promise<AssistantOverviewPromptSettings> {
-    await this.ensureLoaded();
-    const prompt = normalizeAssistantOverviewPrompt(input.prompt);
-    if (!prompt) throw new Error('missing overview prompt');
-    this.defaultOverviewPrompt = prompt;
-    this.defaultOverviewPromptUpdatedAt = prompt === ASSISTANT_OVERVIEW_PROMPT_DEFAULT ? null : nowIso();
-    await this.persist();
-    return this.overviewPromptSettingsSync();
-  }
-
-  async generateThreadOverview(
-    threadId: string,
-    input?: { force?: unknown; reuseLastInput?: unknown; messages?: any[] },
-  ): Promise<AssistantThreadOverviewResult> {
-    await this.ensureLoaded();
-    const thread = this.getThread(threadId);
-    const prompt = normalizeAssistantOverviewPrompt(this.defaultOverviewPrompt) || ASSISTANT_OVERVIEW_PROMPT_DEFAULT;
-    const promptFingerprint = assistantTextFingerprint(prompt);
-    const prior = this.overviewCache.get(thread.id) ?? null;
-    const reuseLastInput = input?.reuseLastInput === true || String(input?.reuseLastInput ?? '').trim() === '1';
-    const inputText = reuseLastInput ? prior?.inputText : this.buildOverviewInput(thread, input?.messages);
-    if (!inputText) throw new Error(reuseLastInput ? 'no previous overview input is available' : 'assistant thread has no overview input');
-    const inputFingerprint = assistantTextFingerprint(inputText);
-    const force = input?.force === true || String(input?.force ?? '').trim() === '1';
-    const cached =
-      prior &&
-      !force &&
-      !reuseLastInput &&
-      prior.inputFingerprint === inputFingerprint &&
-      prior.promptFingerprint === promptFingerprint;
-    if (cached) {
-      return {
-        ok: true,
-        threadId: thread.id,
-        markdown: prior.markdown,
-        generatedAt: prior.generatedAt,
-        inputFingerprint: prior.inputFingerprint,
-        promptFingerprint: prior.promptFingerprint,
-        provider: prior.provider,
-        model: prior.model,
-        cached: true,
-        inputReused: false,
-      };
-    }
-
-    const inFlightKey = `${thread.id}\u0000${inputFingerprint}\u0000${promptFingerprint}`;
-    if (!force) {
-      const inFlight = this.overviewInFlight.get(inFlightKey);
-      if (inFlight) return await inFlight;
-    }
-
-    const generated = (async (): Promise<AssistantThreadOverviewResult> => {
-      const provider = await defaultAssistantProvider();
-      const generatedOverview = await generateAssistantOverview({
-        provider,
-        instructions: prompt,
-        threadInput: inputText,
-      });
-      const markdown = clipAssistantOverviewText(generatedOverview.markdown, 12_000);
-      const next: AssistantThreadOverviewCacheEntry = {
-        inputText,
-        inputFingerprint,
-        promptFingerprint,
-        markdown,
-        generatedAt: nowIso(),
-        provider: generatedOverview.provider,
-        model: generatedOverview.model,
-      };
-      this.overviewCache.set(thread.id, next);
-      return {
-        ok: true,
-        threadId: thread.id,
-        markdown: next.markdown,
-        generatedAt: next.generatedAt,
-        inputFingerprint: next.inputFingerprint,
-        promptFingerprint: next.promptFingerprint,
-        provider: next.provider,
-        model: next.model,
-        cached: false,
-        inputReused: reuseLastInput,
-      };
-    })();
-
-    if (!force) this.overviewInFlight.set(inFlightKey, generated);
-    try {
-      return await generated;
-    } finally {
-      if (this.overviewInFlight.get(inFlightKey) === generated) this.overviewInFlight.delete(inFlightKey);
-    }
-  }
-
   async updateThread(
     threadId: string,
     patch: {
@@ -2086,15 +1963,31 @@ export class HubAssistantService {
     return await this.threadSnapshot(thread.id);
   }
 
-  async updateDefaultModel(input?: { provider?: unknown; model?: unknown }): Promise<AssistantSnapshot> {
+  async updateDefaultModel(input?: { provider?: unknown; model?: unknown; thinkingLevel?: unknown }): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const provider = normalizeProvider(input?.provider);
     const model = String(input?.model ?? '').trim();
     if (!ASSISTANT_MODEL_OPTIONS.some((option) => option.provider === provider && option.id === model)) {
       throw new Error(`unknown assistant model: ${provider}/${model}`);
     }
-    if (this.defaultModelSelection.provider !== provider || this.defaultModelSelection.model !== model) {
-      this.defaultModelSelection = { provider, model };
+    const thinkingLevel = allowedThinkingLevelForModel(provider, model, input?.thinkingLevel);
+    if (
+      this.defaultModelSelection.provider !== provider ||
+      this.defaultModelSelection.model !== model ||
+      this.defaultModelSelection.thinkingLevel !== thinkingLevel
+    ) {
+      this.defaultModelSelection = { provider, model, thinkingLevel };
+      await this.persist();
+    }
+    return await this.threadSnapshot(this.activeThreadId);
+  }
+
+  async updateDefaultEnabledTools(input?: { enabledTools?: unknown }): Promise<AssistantSnapshot> {
+    await this.ensureLoaded();
+    if (!Array.isArray(input?.enabledTools)) throw new Error('enabledTools must be an array');
+    const enabledTools = normalizeAssistantEnabledTools(input.enabledTools, this.defaultEnabledTools);
+    if (!sameToolSet(new Set(this.defaultEnabledTools), enabledTools)) {
+      this.defaultEnabledTools = enabledTools;
       await this.persist();
     }
     return await this.threadSnapshot(this.activeThreadId);
@@ -2103,10 +1996,6 @@ export class HubAssistantService {
   async deleteThread(threadId: string): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     this.clearThreadStreamingMessages(threadId);
-    this.overviewCache.delete(threadId);
-    for (const key of [...this.overviewInFlight.keys()]) {
-      if (key.startsWith(`${threadId}\u0000`)) this.overviewInFlight.delete(key);
-    }
     await deleteAssistantArtifactsForThread(threadId);
     this.threads = this.threads.filter((thread) => thread.id !== threadId);
     if (this.threads.length === 0) {
@@ -2147,6 +2036,23 @@ export class HubAssistantService {
     await this.ensureLoaded();
     this.getThread(threadId);
     return this.filterDronesForScope(await this.tools.listDrones(), threadId);
+  }
+
+  private async availableToolsForThread(threadId: string): Promise<AssistantToolSummary[]> {
+    // Every Assistant thread has its artifacts workspace. Target discovery and
+    // selection are useful only when at least one drone workspace is also visible.
+    let hasMultipleTargets = false;
+    try {
+      hasMultipleTargets = (await this.visibleDrones(threadId)).length > 0;
+    } catch (error: any) {
+      hubLog('warn', 'assistant target catalog unavailable while building tool summary', {
+        threadId,
+        error: error?.message ?? String(error),
+      });
+    }
+    return hasMultipleTargets
+      ? ASSISTANT_TOOL_SUMMARIES
+      : ASSISTANT_TOOL_SUMMARIES.filter((tool) => tool.name !== 'list_targets' && tool.name !== 'set_target');
   }
 
   async executeDroneWorkspaceTool(
@@ -2269,8 +2175,12 @@ export class HubAssistantService {
     };
   }
 
-  resolvedSystemPrompt(threadId: string): string {
-    return this.systemPrompt(threadId);
+  resolvedSystemPrompt(threadId: string, options?: { multipleWorkspaceTargets?: boolean }): string {
+    const prompt = this.systemPrompt(threadId);
+    if (options?.multipleWorkspaceTargets !== false) return prompt;
+    return prompt.includes(ASSISTANT_MULTI_TARGET_PROMPT_LINE)
+      ? prompt.replace(ASSISTANT_MULTI_TARGET_PROMPT_LINE, ASSISTANT_SINGLE_TARGET_PROMPT_LINE)
+      : `${prompt}\n\n${ASSISTANT_SINGLE_TARGET_PROMPT_LINE}`;
   }
 
   async preflightBlipTool(threadId: string, toolName: string, callId: string, args: any, signal?: AbortSignal): Promise<{ block?: boolean; reason?: string } | undefined> {
@@ -2296,6 +2206,91 @@ export class HubAssistantService {
     }
   }
 
+  async enqueueThreadPrompt(
+    threadId: string,
+    input: { prompt?: unknown; promptImages?: unknown },
+  ): Promise<AssistantQueuedPrompt> {
+    await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    if (thread.queuedPrompts.length >= ASSISTANT_QUEUED_PROMPT_LIMIT) {
+      throw new Error(`assistant prompt queue is full (max ${ASSISTANT_QUEUED_PROMPT_LIMIT})`);
+    }
+    const prompt = String(input.prompt ?? '').trim();
+    const promptImages = Array.isArray(input.promptImages)
+      ? input.promptImages
+          .map((image: any) => ({
+            type: 'image' as const,
+            data: String(image?.data ?? ''),
+            mimeType: String(image?.mimeType ?? 'image/png'),
+          }))
+          .filter((image) => image.data)
+      : [];
+    if (!prompt && promptImages.length === 0) throw new Error('missing prompt');
+    const queued = sanitizeQueuedPrompt({
+      id: makeAssistantId('queued'),
+      prompt,
+      promptImages,
+      imageCount: promptImages.length,
+      createdAt: nowIso(),
+      status: 'queued',
+      error: null,
+    }, true);
+    thread.queuedPrompts.push(queued);
+    thread.updatedAt = nowIso();
+    await this.persist();
+    return sanitizeQueuedPrompt(queued, false);
+  }
+
+  async claimNextQueuedPrompt(threadId: string): Promise<AssistantQueuedPrompt | null> {
+    await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    const queued = thread.queuedPrompts.find((prompt) => prompt.status === 'queued');
+    if (!queued) return null;
+    queued.status = 'running';
+    queued.error = null;
+    thread.updatedAt = nowIso();
+    await this.persist();
+    return sanitizeQueuedPrompt(queued, true);
+  }
+
+  async completeQueuedPrompt(threadId: string, promptId: string): Promise<void> {
+    await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    const next = thread.queuedPrompts.filter((prompt) => prompt.id !== promptId);
+    if (next.length === thread.queuedPrompts.length) return;
+    thread.queuedPrompts = next;
+    thread.updatedAt = nowIso();
+    await this.persist();
+  }
+
+  async failQueuedPrompt(threadId: string, promptId: string, error: unknown): Promise<void> {
+    await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    const queued = thread.queuedPrompts.find((prompt) => prompt.id === promptId);
+    if (!queued) return;
+    queued.status = 'failed';
+    queued.error = String((error as any)?.message ?? error ?? 'Assistant prompt failed');
+    thread.updatedAt = nowIso();
+    await this.persist();
+  }
+
+  async cancelQueuedPrompt(threadId: string, promptId: string): Promise<AssistantSnapshot> {
+    await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    const queued = thread.queuedPrompts.find((prompt) => prompt.id === promptId);
+    if (!queued) throw new Error(`unknown queued assistant prompt: ${promptId}`);
+    if (queued.status === 'running') throw new Error('assistant prompt is already running');
+    thread.queuedPrompts = thread.queuedPrompts.filter((prompt) => prompt.id !== promptId);
+    thread.updatedAt = nowIso();
+    await this.persist();
+    return await this.threadSnapshot(threadId);
+  }
+
+  async hasQueuedPrompts(threadId: string): Promise<boolean> {
+    await this.ensureLoaded();
+    return this.getThread(threadId).queuedPrompts.some((prompt) => prompt.status === 'queued');
+  }
+
   async promptThread(
     threadId: string,
     input: { prompt?: unknown; voiceSource?: unknown },
@@ -2318,7 +2313,6 @@ export class HubAssistantService {
     const stored = (await loadAssistantState()) ?? undefined;
     const storedSystemPrompt = migrateAssistantSystemPrompt(stored?.systemPrompt);
     const storedVoiceSystemPrompt = migrateAssistantSystemPrompt(stored?.voiceSystemPrompt);
-    const storedOverviewPrompt = normalizeAssistantOverviewPrompt(stored?.overviewPrompt);
     this.defaultSystemPrompt = storedSystemPrompt || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
     this.defaultSystemPromptUpdatedAt =
       storedSystemPrompt && typeof stored?.systemPromptUpdatedAt === 'string' && stored.systemPromptUpdatedAt.trim()
@@ -2333,17 +2327,18 @@ export class HubAssistantService {
           : storedSystemPrompt && typeof stored?.systemPromptUpdatedAt === 'string' && stored.systemPromptUpdatedAt.trim()
             ? stored.systemPromptUpdatedAt.trim()
             : null;
-    this.defaultOverviewPrompt = storedOverviewPrompt || ASSISTANT_OVERVIEW_PROMPT_DEFAULT;
-    this.defaultOverviewPromptUpdatedAt =
-      storedOverviewPrompt && typeof stored?.overviewPromptUpdatedAt === 'string' && stored.overviewPromptUpdatedAt.trim()
-        ? stored.overviewPromptUpdatedAt.trim()
-        : null;
     const fallbackDefaultProvider = await defaultAssistantProvider();
     const storedDefaultProvider = normalizeProvider(stored?.defaultModel?.provider ?? fallbackDefaultProvider);
     this.defaultModelSelection = {
       provider: storedDefaultProvider,
       model: allowedModelForProvider(storedDefaultProvider, stored?.defaultModel?.model),
+      thinkingLevel: allowedThinkingLevelForModel(
+        storedDefaultProvider,
+        allowedModelForProvider(storedDefaultProvider, stored?.defaultModel?.model),
+        stored?.defaultModel?.thinkingLevel,
+      ),
     };
+    this.defaultEnabledTools = normalizeAssistantEnabledTools(stored?.defaultEnabledTools, ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES);
     const storedThreads = Array.isArray(stored?.threads) ? stored.threads : [];
     const storedFallbackProvider = normalizeProvider(storedThreads.find((thread: any) => thread && typeof thread === 'object')?.provider);
     const storedFallback = {
@@ -2383,7 +2378,7 @@ export class HubAssistantService {
     return makeAssistantAccessScope({ readMode: 'all', writeMode: 'selected', droneIds: [activeDroneId] });
   }
 
-  private makeThread(input?: { provider?: LlmProviderId; model?: string; title?: string; accessScope?: AssistantAccessScope; systemPrompt?: string; voiceEnabled?: boolean }): AssistantThread {
+  private makeThread(input?: { provider?: LlmProviderId; model?: string; thinkingLevel?: AssistantThinkingLevel; title?: string; accessScope?: AssistantAccessScope; systemPrompt?: string; voiceEnabled?: boolean }): AssistantThread {
     const provider = normalizeProvider(input?.provider);
     const at = nowIso();
     const voiceEnabled = input?.voiceEnabled === true;
@@ -2396,14 +2391,18 @@ export class HubAssistantService {
       voiceEnabledAt: voiceEnabled ? at : null,
       provider,
       model: allowedModelForProvider(provider, input?.model),
-      thinkingLevel: allowedThinkingLevelForModel(provider, allowedModelForProvider(provider, input?.model), 'off'),
+      thinkingLevel: allowedThinkingLevelForModel(provider, allowedModelForProvider(provider, input?.model), input?.thinkingLevel),
       systemPrompt: normalizeAssistantSystemPrompt(input?.systemPrompt) || this.defaultSystemPromptForVoiceMode(voiceEnabled),
       systemPromptUpdatedAt: null,
-      enabledTools: [...(voiceEnabled ? ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES : ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES)],
+      enabledTools: enabledToolsForVoiceMode(
+        voiceEnabled ? [...this.defaultEnabledTools, 'set_thinking_level', 'create_new_thread'] : this.defaultEnabledTools,
+        voiceEnabled,
+      ),
       accessScope: input?.accessScope ?? this.defaultAccessScopeForNewThread({ voiceEnabled }),
       autoApprove: false,
       promptDeliveryMode: 'queue',
       messages: [],
+      queuedPrompts: [],
       status: 'idle',
       error: null,
     };
@@ -2444,14 +2443,13 @@ export class HubAssistantService {
     const state = serializeState({
       activeThreadId: activeThread.id,
       defaultModel: this.defaultModelSelection,
+      defaultEnabledTools: this.defaultEnabledTools,
       threads: this.threads,
       chatIdleSubscriptions: [],
       systemPrompt: this.defaultSystemPrompt,
       systemPromptUpdatedAt: this.defaultSystemPromptUpdatedAt,
       voiceSystemPrompt: this.defaultVoiceSystemPrompt,
       voiceSystemPromptUpdatedAt: this.defaultVoiceSystemPromptUpdatedAt,
-      overviewPrompt: this.defaultOverviewPrompt,
-      overviewPromptUpdatedAt: this.defaultOverviewPromptUpdatedAt,
     });
     await saveAssistantState(state);
     this.emitChange('persisted', activeThread.id);
@@ -2808,12 +2806,13 @@ export class HubAssistantService {
       ok: true,
       activeThreadId: snapshotThreadId,
       threads: this.threads.map((thread) =>
-        thread.id === snapshotThreadId ? { ...sanitizeThread(thread), messages: thread.messages.map(sanitizeMessage) } : sanitizeThreadSummary(thread),
+        thread.id === snapshotThreadId ? { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) } : sanitizeThreadSummary(thread),
       ),
       chatIdleSubscriptions: [],
       pendingApprovals: this.pendingApprovals(),
       models: [],
       defaultModel: { ...this.defaultModelSelection },
+      defaultEnabledTools: [...this.defaultEnabledTools],
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       runningModels: {},
@@ -2832,57 +2831,6 @@ export class HubAssistantService {
       createdAt: approval.createdAt,
       status: approval.status,
     }));
-  }
-
-  private buildOverviewInput(thread: AssistantThread, messageOverride?: any[]): string {
-    const streamingMessages = this.activeThreadId === thread.id ? this.threadStreamingMessages(thread.id) : [];
-    const storedMessages = Array.isArray(messageOverride) ? messageOverride : thread.messages;
-    const messages = streamingMessages.length > 0 ? [...storedMessages, ...streamingMessages] : storedMessages;
-    const approvals = this.pendingApprovals().filter((approval) => approval.threadId === thread.id && approval.status === 'pending');
-    const activeSubscriptions: AssistantChatIdleSubscription[] = [];
-    const accessScope = thread.accessScope ?? makeAssistantAccessScope();
-
-    const header = [
-      `# Assistant Thread`,
-      `Thread id: ${thread.id}`,
-      `Title: ${thread.title}`,
-      `Status: ${thread.status}`,
-      thread.error ? `Error: ${thread.error}` : null,
-      `Updated at: ${thread.updatedAt}`,
-      `Model: ${thread.provider}/${thread.model} (${thread.thinkingLevel})`,
-      `Access: read=${describeAssistantAccessMode(accessScope.readMode, accessScope.droneIds)}; write=${describeAssistantAccessMode(accessScope.writeMode, accessScope.droneIds)}`,
-      approvals.length > 0
-        ? `Pending approvals:\n${approvals
-            .map((approval, index) => `${index + 1}. ${approval.label || approval.toolName} (${approval.toolName}, ${approval.createdAt})`)
-            .join('\n')}`
-        : `Pending approvals: none`,
-      activeSubscriptions.length > 0
-        ? `Waiting for chats idle:\n${activeSubscriptions
-            .map((subscription, index) => `${index + 1}. ${subscription.targets.map((target) => `${target.droneId}/${target.chatName}`).join(', ')}`)
-            .join('\n')}`
-        : `Waiting for chats idle: no`,
-      '',
-      'Messages below are chronological. Older messages may be omitted to fit the input budget; the latest messages are retained.',
-    ]
-      .filter((line): line is string => typeof line === 'string')
-      .join('\n');
-
-    const budget = Math.max(4000, ASSISTANT_OVERVIEW_INPUT_MAX_CHARS - header.length - 2);
-    const blocks = messages.map((message, index) => assistantOverviewMessageText(message, index));
-    const selected: string[] = [];
-    let used = 0;
-    for (let i = blocks.length - 1; i >= 0; i -= 1) {
-      const block = blocks[i];
-      const nextUsed = used + block.length + (selected.length > 0 ? 2 : 0);
-      if (nextUsed > budget && selected.length > 0) break;
-      if (nextUsed > budget) {
-        selected.unshift(clipAssistantOverviewText(block, budget));
-        break;
-      }
-      selected.unshift(block);
-      used = nextUsed;
-    }
-    return [header, selected.length > 0 ? selected.join('\n\n') : '(no messages yet)'].join('\n\n');
   }
 
   private systemPromptSettingsSync(): AssistantSystemPromptSettings {
@@ -2932,20 +2880,6 @@ export class HubAssistantService {
         defaultPrompt: ASSISTANT_SYSTEM_PROMPT_DEFAULT,
         maxPromptChars: ASSISTANT_SYSTEM_PROMPT_MAX_CHARS,
         runtimeAppendix: ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX,
-      },
-    };
-  }
-
-  private overviewPromptSettingsSync(): AssistantOverviewPromptSettings {
-    const prompt = normalizeAssistantOverviewPrompt(this.defaultOverviewPrompt) || ASSISTANT_OVERVIEW_PROMPT_DEFAULT;
-    return {
-      ok: true,
-      assistantOverviewPrompt: {
-        prompt,
-        promptSource: prompt === ASSISTANT_OVERVIEW_PROMPT_DEFAULT ? 'default' : 'settings',
-        updatedAt: prompt === ASSISTANT_OVERVIEW_PROMPT_DEFAULT ? null : this.defaultOverviewPromptUpdatedAt,
-        defaultPrompt: ASSISTANT_OVERVIEW_PROMPT_DEFAULT,
-        maxPromptChars: ASSISTANT_OVERVIEW_PROMPT_MAX_CHARS,
       },
     };
   }

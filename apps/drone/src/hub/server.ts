@@ -481,7 +481,7 @@ import { loadBlipMcp, loadBlipTools } from './assistant/blip-runtime-loader';
 import { createInProcessDroneHubMcpClient } from './assistant/in-process-drone-hub-mcp';
 import { AssistantArtifactsTarget } from './assistant/targets/assistant-artifacts-target';
 import { DroneWorkspaceTarget } from './assistant/targets/workspace-targets';
-import { saveAssistantArtifactUploads } from './assistant-artifacts';
+import { saveAssistantArtifactUploads, validateAssistantPromptImages } from './assistant-artifacts';
 import { fetchContent, searchWeb } from './web-search';
 
 const HUB_API_LOADED_AT = new Date().toISOString();
@@ -15072,8 +15072,10 @@ export async function startDroneHubApiServer(opts: {
         if (nativeVoiceThreadIds.has(threadId)) enabledTools.delete('speak');
         const workspaceTools = blipTools.createWorkspaceTargetTools({
           profile: 'no-shell-workspace-write',
-          resolveTarget: (targetId?: string) => targetCatalog.resolve(targetId),
+          includeShell: true,
+          catalog: targetCatalog,
         }).filter((tool) => enabledTools.has(tool.name));
+        const targetTools = blipTools.createWorkspaceTargetSelectionTools(targetCatalog).filter((tool) => enabledTools.has(tool.name));
         const tools = [{
           name: 'get_current_context',
           label: 'Get current context',
@@ -15082,6 +15084,48 @@ export async function startDroneHubApiServer(opts: {
           execute: async () => {
             const context = assistantService.currentContext(threadId);
             return { content: [{ type: 'text' as const, text: JSON.stringify(context, null, 2) }], details: context };
+          },
+        }, {
+          name: 'get_system_prompt', label: 'Get system prompt',
+          description: 'Read the current thread system prompt, global prompt, and runtime appendix.',
+          parameters: { type: 'object', properties: {}, additionalProperties: false },
+          execute: async () => {
+            const result = await assistantService.threadSystemPromptSettings(threadId);
+            return { content: [{ type: 'text' as const, text: JSON.stringify(result, null, 2) }], details: result };
+          },
+        }, {
+          name: 'update_system_prompt', label: 'Update system prompt', description: 'Replace or patch only this assistant thread system prompt.',
+          parameters: { type: 'object', properties: { prompt: { type: 'string' }, patches: { type: 'array', items: { type: 'object', properties: { oldText: { type: 'string' }, newText: { type: 'string' } }, required: ['oldText', 'newText'], additionalProperties: false } } }, additionalProperties: false },
+          execute: async (_callId: string, args: any) => {
+            const result = await assistantService.updateThreadSystemPrompt(threadId, args ?? {});
+            return { content: [{ type: 'text' as const, text: 'Updated this assistant thread system prompt.' }], details: result };
+          },
+        }, {
+          name: 'set_thinking_level', label: 'Set thinking level', description: 'Change the thinking level for this assistant thread while keeping its current model.',
+          parameters: { type: 'object', properties: { level: { type: 'string', enum: ['off', 'minimal', 'low', 'medium', 'high', 'xhigh'] } }, required: ['level'], additionalProperties: false },
+          execute: async (_callId: string, args: any) => {
+            const before = thread.thinkingLevel;
+            const updated = await assistantService.updateThread(threadId, { thinkingLevel: args?.level });
+            const next = updated.threads.find((candidate) => candidate.id === threadId)?.thinkingLevel ?? before;
+            setTimeout(() => blipAssistantHost.invalidateThread(threadId), 0);
+            const result = { previousThinkingLevel: before, thinkingLevel: next, provider: thread.provider, model: thread.model };
+            return { content: [{ type: 'text' as const, text: `Thinking level is now ${next}.` }], details: result };
+          },
+        }, {
+          name: 'create_new_thread', label: 'Create new thread', description: 'Create a fresh assistant thread only when the user explicitly asks for one.',
+          parameters: { type: 'object', properties: { title: { type: 'string' } }, additionalProperties: false },
+          execute: async (_callId: string, args: any) => {
+            const result = await assistantService.createNewThreadFromThread(threadId, { title: args?.title });
+            return { content: [{ type: 'text' as const, text: `Created assistant thread ${result.thread.title}.` }], details: result };
+          },
+        }, {
+          name: 'speak', label: 'Speak', description: 'Send a short spoken reply to the voice device that started this thread.',
+          parameters: { type: 'object', properties: { text: { type: 'string' } }, required: ['text'], additionalProperties: false },
+          execute: async (_callId: string, args: any) => {
+            const text = String(args?.text ?? '').trim();
+            if (!text) throw new Error('missing text');
+            const result = await speakToVoiceTarget({ threadId, text, source: null });
+            return { content: [{ type: 'text' as const, text: 'Spoken reply sent.' }], details: result };
           },
         }, {
           name: 'web_search',
@@ -15120,7 +15164,7 @@ export async function startDroneHubApiServer(opts: {
             const result = await fetchContent(args, settings.apiKey ?? '');
             return { content: [{ type: 'text' as const, text: result.answer }], details: result };
           },
-        }, ...workspaceTools].filter((tool) => enabledTools.has(tool.name));
+        }, ...targetTools, ...workspaceTools].filter((tool) => enabledTools.has(tool.name));
         const mcpProvider = createMcpToolProvider({
           id: 'drone-hub',
           namePrefix: 'drone_hub',
@@ -15132,34 +15176,54 @@ export async function startDroneHubApiServer(opts: {
           id: mcpProvider.id,
           promptSections: mcpProvider.promptSections?.bind(mcpProvider),
           async load(context: any) {
-            const aliases: Record<string, string> = {
-              send_message: 'message_drone',
-              list_repos: 'list_drones',
-              list_groups: 'list_drones',
-              open_drone: 'open_drone_chat',
-              list_chats: 'read_chat_messages',
-              read_chat: 'read_chat_messages',
-            };
             return (await mcpProvider.load(context)).filter((tool) => {
               const unqualified = tool.name.replace(/^drone_hub__/, '');
-              if (unqualified === 'list_chat_idle_subscriptions' || unqualified === 'cancel_chat_idle_subscription') return false;
-              return enabledTools.has(aliases[unqualified] ?? unqualified);
+              return enabledTools.has(unqualified);
             });
           },
         };
+        const transportProvider = thread.provider === 'codex' ? 'openai-codex' : thread.provider === 'gemini' ? 'google' : thread.provider;
+        hubLog('info', 'assistant model session configuring', {
+          threadId,
+          provider: thread.provider,
+          transportProvider,
+          model: thread.model,
+          thinkingLevel: thread.thinkingLevel,
+        });
         return {
           provider: thread.provider,
           model: thread.model,
           thinkingLevel: thread.thinkingLevel,
           promptDeliveryMode: nativeVoiceThreadIds.has(threadId) ? 'asap' : thread.promptDeliveryMode,
           systemPrompt: [
-            assistantService.resolvedSystemPrompt(threadId),
+            assistantService.resolvedSystemPrompt(threadId, { multipleWorkspaceTargets: targetCatalog.size() > 1 }),
             nativeVoiceThreadIds.has(threadId)
               ? 'You are in native realtime voice mode. Your response text is spoken automatically. Keep spoken updates concise and do not call the speak tool.'
               : '',
           ].filter(Boolean).join('\n\n'),
           tools,
           toolProviders: [enabledMcpProvider],
+          onResponse: async (response: any, model: any) => {
+            const headers = response?.headers && typeof response.headers === 'object' ? response.headers : {};
+            const header = (name: string) => {
+              const value = String(headers[name] ?? headers[name.toLowerCase()] ?? '').trim();
+              return value || undefined;
+            };
+            const status = Number(response?.status ?? 0) || undefined;
+            hubLog(status != null && status >= 400 ? 'warn' : 'info', 'assistant model provider response', {
+              threadId,
+              provider: thread.provider,
+              transportProvider: String(model?.provider ?? transportProvider),
+              model: String(model?.id ?? thread.model),
+              api: String(model?.api ?? ''),
+              status,
+              requestId: header('x-request-id') ?? header('request-id') ?? header('openai-request-id'),
+              clientRequestId: header('x-client-request-id'),
+              processingMs: header('openai-processing-ms'),
+              cfRay: header('cf-ray'),
+              remainingRequests: header('x-ratelimit-remaining-requests'),
+            });
+          },
           permissionPreflight: async (request) => {
             let toolName = request.tool;
             let args: any = request.args && typeof request.args === 'object' ? request.args : {};
@@ -15170,8 +15234,9 @@ export async function startDroneHubApiServer(opts: {
               toolName = 'set_drone_group';
             } else if (toolName === 'drone_hub__rename_drones') {
               toolName = 'rename_drones';
-            } else if (toolName === 'bash') {
+            } else if (blipTools.capabilityForWorkspaceTool(toolName)) {
               const target = targetCatalog.resolve(args.target);
+              if (targetCatalog.size() > 1) args.target = target.descriptor.id;
               if (target instanceof DroneWorkspaceTarget) args = { ...args, droneId: target.droneId };
             }
             const decision = await assistantService.preflightBlipTool(threadId, toolName, request.callId, args, request.signal);
@@ -15186,6 +15251,23 @@ export async function startDroneHubApiServer(opts: {
         };
       }, async (threadId, event) => {
         if (event.type === 'transcript_changed') await assistantService.notifyCanonicalHistoryChanged(threadId);
+        if (event.type === 'session_error') {
+          let thread: any;
+          try {
+            thread = (await assistantService.threadSnapshot(threadId)).threads.find((candidate) => candidate.id === threadId);
+          } catch {}
+          hubLog('warn', 'assistant model session failed', {
+            threadId,
+            sessionId: event.sessionId,
+            turnId: event.turnId,
+            eventId: event.eventId,
+            provider: thread?.provider,
+            model: thread?.model,
+            thinkingLevel: thread?.thinkingLevel,
+            error: String(event.error ?? '').slice(0, 2_000),
+            recoverable: event.recoverable,
+          });
+        }
       });
   assistantService.setTextPromptDelegate(async (threadId, prompt) => {
     await blipAssistantHost.promptThread(threadId, prompt);
@@ -15196,6 +15278,74 @@ export async function startDroneHubApiServer(opts: {
   assistantService.setRealtimeToolDelegate({
     catalog: (threadId) => blipAssistantHost.toolCatalog(threadId),
     execute: (threadId, callId, toolName, args, signal) => blipAssistantHost.executeTool(threadId, callId, toolName, args, signal),
+  });
+  type AssistantPromptInput = string | { text: string; images: Array<{ type: 'image'; data: string; mimeType: string }> };
+  const assistantPromptDrains = new Map<string, Promise<void>>();
+  const queuedPromptInput = (queued: any): AssistantPromptInput => {
+    const images = Array.isArray(queued?.promptImages) ? queued.promptImages : [];
+    return images.length > 0 ? { text: String(queued?.prompt ?? ''), images } : String(queued?.prompt ?? '');
+  };
+  const startAssistantPromptDrain = (
+    threadId: string,
+    initial?: { input: AssistantPromptInput; onEvent?: (event: any) => Promise<void> | void },
+  ): { started: boolean; promise: Promise<void>; initialPromise: Promise<void> } => {
+    const existing = assistantPromptDrains.get(threadId);
+    if (existing) return { started: false, promise: existing, initialPromise: existing };
+    let resolveInitial!: () => void;
+    let rejectInitial!: (error: unknown) => void;
+    const initialPromise = new Promise<void>((resolve, reject) => {
+      resolveInitial = resolve;
+      rejectInitial = reject;
+    });
+    if (!initial) void initialPromise.catch(() => {});
+    const promise = Promise.resolve().then(async () => {
+      try {
+        if (initial) {
+          await blipAssistantHost.waitForThreadIdle(threadId);
+          await blipAssistantHost.promptThread(threadId, initial.input, initial.onEvent);
+        } else {
+          await blipAssistantHost.waitForThreadIdle(threadId);
+        }
+        resolveInitial();
+      } catch (error) {
+        rejectInitial(error);
+        throw error;
+      }
+      while (true) {
+        const queued = await assistantService.claimNextQueuedPrompt(threadId);
+        if (!queued) break;
+        try {
+          await blipAssistantHost.waitForThreadIdle(threadId);
+          await blipAssistantHost.promptThread(threadId, queuedPromptInput(queued));
+          await assistantService.completeQueuedPrompt(threadId, queued.id);
+        } catch (error) {
+          await assistantService.failQueuedPrompt(threadId, queued.id, error);
+        }
+      }
+    }).finally(() => {
+      assistantPromptDrains.delete(threadId);
+      void assistantService.hasQueuedPrompts(threadId).then((hasQueued) => {
+        if (hasQueued) {
+          const restarted = startAssistantPromptDrain(threadId);
+          void restarted.promise.catch((error: any) => {
+            hubLog('warn', 'assistant queued prompt drain failed', { threadId, error: error?.message ?? String(error) });
+          });
+        }
+      }).catch(() => {});
+    });
+    assistantPromptDrains.set(threadId, promise);
+    return { started: true, promise, initialPromise };
+  };
+  void assistantService.snapshot('compact').then((snapshot) => {
+    for (const thread of snapshot.threads) {
+      if (!thread.queuedPrompts?.some((prompt: any) => prompt.status === 'queued')) continue;
+      const drain = startAssistantPromptDrain(thread.id);
+      void drain.promise.catch((error: any) => {
+        hubLog('warn', 'assistant queued prompt recovery drain failed', { threadId: thread.id, error: error?.message ?? String(error) });
+      });
+    }
+  }).catch((error: any) => {
+    hubLog('warn', 'assistant queued prompt recovery failed', { error: error?.message ?? String(error) });
   });
   let desktopVoicePatchSessionId: string | null = null;
   let desktopVoiceRealtimeProvider: VoiceRealtimeProvider = 'openai';
@@ -17393,29 +17543,6 @@ export async function startDroneHubApiServer(opts: {
         }
       }
 
-      if (pathname === '/api/assistant/overview-prompt') {
-        if (method === 'GET') {
-          json(res, 200, await assistantService.overviewPromptSettings());
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            json(res, 200, await assistantService.updateOverviewPrompt(body ?? {}));
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-      }
-
       if (pathname === '/api/assistant/threads' && method === 'GET') {
         json(res, 200, await assistantService.snapshot('compact'));
         return;
@@ -17677,6 +17804,17 @@ export async function startDroneHubApiServer(opts: {
         try {
           body = await readJsonBody(req);
           json(res, 200, await assistantService.updateDefaultModel(body ?? {}));
+        } catch (e: any) {
+          json(res, 400, { ok: false, error: e?.message ?? String(e) });
+        }
+        return;
+      }
+
+      if (pathname === '/api/assistant/default-tools' && method === 'POST') {
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+          json(res, 200, await assistantService.updateDefaultEnabledTools(body ?? {}));
         } catch (e: any) {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
         }
@@ -18088,26 +18226,6 @@ export async function startDroneHubApiServer(opts: {
             return;
           }
 
-          if (assistantParts.length === 5 && assistantParts[4] === 'overview' && method === 'POST') {
-            let body: any = null;
-            try {
-              body = await readJsonBody(req);
-            } catch (e: any) {
-              json(res, 400, { ok: false, error: e?.message ?? String(e) });
-              return;
-            }
-            try {
-              const history = await blipAssistantHost.historyPage(threadId, { limit: 200 });
-              json(res, 200, await assistantService.generateThreadOverview(threadId, {
-                ...(body ?? {}),
-                ...(history.sessionId ? { messages: history.entries.map((entry) => entry.message) } : {}),
-              }));
-            } catch (e: any) {
-              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, { ok: false, error: e?.message ?? String(e) });
-            }
-            return;
-          }
-
           if (assistantParts.length === 5 && assistantParts[4] === 'artifacts' && method === 'GET') {
             try {
               json(res, 200, { ok: true, threadId, files: await assistantService.listArtifactFiles(threadId) });
@@ -18155,7 +18273,9 @@ export async function startDroneHubApiServer(opts: {
               {
                 let prompt = String(body?.prompt ?? '').trim();
                 const attachments = Array.isArray(body?.attachments) ? body.attachments : [];
-                const promptImages = attachments.filter((item: any) => item?.disposition === 'prompt' && /^image\//i.test(String(item?.mime ?? '')));
+                const promptImages = validateAssistantPromptImages(
+                  attachments.filter((item: any) => item?.disposition === 'prompt'),
+                );
                 const artifactUploads = attachments.filter((item: any) => item?.disposition !== 'prompt');
                 const uploaded = await saveAssistantArtifactUploads(threadId, artifactUploads);
                 if (uploaded.length > 0) {
@@ -18169,12 +18289,38 @@ export async function startDroneHubApiServer(opts: {
                 if (threadMetadata?.title === 'New thread' && requestedTitle) {
                   await assistantService.updateThread(threadId, { title: requestedTitle.slice(0, 80) });
                 }
-                await blipAssistantHost.promptThread(threadId, promptImages.length > 0 ? {
-                  text: prompt,
-                  images: promptImages.map((item: any) => ({ type: 'image', data: String(item.dataBase64 ?? ''), mimeType: String(item.mime ?? 'image/png') })),
-                } : prompt, async (event) => {
-                  writeEvent({ type: 'blip_event', version: 1, threadId, event });
-                });
+                const promptInput: AssistantPromptInput = promptImages.length > 0 ? { text: prompt, images: promptImages } : prompt;
+                const shouldQueue = threadMetadata?.promptDeliveryMode !== 'asap' && (
+                  assistantPromptDrains.has(threadId) || blipAssistantHost.isThreadRunning(threadId)
+                );
+                if (shouldQueue) {
+                  const queued = await assistantService.enqueueThreadPrompt(threadId, { prompt, promptImages });
+                  const drain = startAssistantPromptDrain(threadId);
+                  void drain.promise.catch((error: any) => {
+                    hubLog('warn', 'assistant queued prompt drain failed', { threadId, error: error?.message ?? String(error) });
+                  });
+                  writeEvent({ type: 'queued', threadId, prompt: queued });
+                } else if (threadMetadata?.promptDeliveryMode === 'asap' && blipAssistantHost.isThreadRunning(threadId)) {
+                  await blipAssistantHost.promptThread(threadId, promptInput, async (event) => {
+                    writeEvent({ type: 'blip_event', version: 1, threadId, event });
+                  });
+                } else {
+                  const drain = startAssistantPromptDrain(threadId, {
+                    input: promptInput,
+                    onEvent: async (event) => {
+                      writeEvent({ type: 'blip_event', version: 1, threadId, event });
+                    },
+                  });
+                  if (!drain.started) {
+                    const queued = await assistantService.enqueueThreadPrompt(threadId, { prompt, promptImages });
+                    writeEvent({ type: 'queued', threadId, prompt: queued });
+                  } else {
+                    void drain.promise.catch((error: any) => {
+                      hubLog('warn', 'assistant prompt drain failed', { threadId, error: error?.message ?? String(error) });
+                    });
+                    await drain.initialPromise;
+                  }
+                }
               }
               writeEvent({ type: 'done' });
             } catch (e: any) {
@@ -18182,6 +18328,20 @@ export async function startDroneHubApiServer(opts: {
             } finally {
               clearInterval(keepAlive);
               res.end();
+            }
+            return;
+          }
+
+          if (assistantParts.length === 6 && assistantParts[4] === 'queued' && method === 'DELETE') {
+            const promptId = decodeURIComponent(assistantParts[5] ?? '');
+            try {
+              json(res, 200, await assistantService.cancelQueuedPrompt(threadId, promptId));
+            } catch (e: any) {
+              const message = String(e?.message ?? e);
+              json(res, /unknown queued assistant prompt/i.test(message) ? 404 : /already running/i.test(message) ? 409 : 400, {
+                ok: false,
+                error: e?.message ?? String(e),
+              });
             }
             return;
           }

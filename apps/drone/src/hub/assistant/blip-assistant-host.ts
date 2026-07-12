@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import type { AgentMessage, AgentTool } from '@mariozechner/pi-agent-core';
-import type { BlipPromptInput, BlipRuntimeEvent, BlipSessionHandle, BlipToolPreflight, BlipToolProvider } from '@blip/core';
+import type { BlipPromptInput, BlipRuntimeEvent, BlipSessionHandle, BlipToolPreflight, BlipToolProvider, CreateBlipSessionOptions } from '@blip/core';
 import type { BlipHistoryPage } from '@blip/protocol';
 
 import { HubSessionRepository } from './hub-session-repository';
@@ -13,6 +13,7 @@ export type BlipAssistantThreadConfiguration = {
   systemPrompt: string;
   promptDeliveryMode?: 'queue' | 'asap';
   tools: AgentTool<any>[];
+  onResponse?: CreateBlipSessionOptions['onResponse'];
   toolProviders?: BlipToolProvider[];
   permissionPreflight?: BlipToolPreflight;
   getApiKey?: (provider: string) => Promise<string | undefined> | string | undefined;
@@ -103,6 +104,12 @@ export class BlipAssistantHost {
 
   isThreadRunning(threadId: string): boolean {
     return this.handles.get(threadId)?.running === true;
+  }
+
+  async waitForThreadIdle(threadId: string): Promise<void> {
+    const pending = this.handlePromises.get(threadId);
+    const handle = this.handles.get(threadId) ?? (pending ? await pending : null);
+    if (handle?.running) await handle.waitForIdle();
   }
 
   async toolCatalog(threadId: string): Promise<Array<{ name: string; description: string; parameters: unknown }>> {
@@ -214,6 +221,7 @@ export class BlipAssistantHost {
         sessionRepository: this.repository,
         ...(sessionId ? { sessionId } : {}),
         reasoning: config.thinkingLevel,
+        onResponse: config.onResponse,
         tools: config.tools,
         toolProviders: config.toolProviders,
         permissionPreflight: config.permissionPreflight,

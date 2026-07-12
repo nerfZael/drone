@@ -73,6 +73,7 @@ export interface CreateBlipSessionOptions {
   promptProvider?: BlipPromptProvider;
   transformContext?: AgentOptions["transformContext"];
   convertToLlm?: AgentOptions["convertToLlm"];
+  onResponse?: AgentOptions["onResponse"];
   permissionPreflight?: BlipToolPreflight;
   eventSink?: BlipEventSink;
   compactionSettings?: CompactionSettings;

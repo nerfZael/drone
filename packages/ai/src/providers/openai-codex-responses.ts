@@ -102,10 +102,20 @@ interface RequestBody {
 // ============================================================================
 
 function isRetryableError(status: number, errorText: string): boolean {
-	if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
+	if (status === 408 || status === 409 || status === 429 || status === 500 || status === 502 || status === 503 || status === 504) {
 		return true;
 	}
 	return /rate.?limit|overloaded|service.?unavailable|upstream.?connect|connection.?refused/i.test(errorText);
+}
+
+class CodexHttpError extends Error {
+	constructor(
+		message: string,
+		readonly status: number,
+	) {
+		super(message);
+		this.name = "CodexHttpError";
+	}
 }
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
@@ -267,8 +277,9 @@ export const streamOpenAICodexResponses: StreamFunction<"openai-codex-responses"
 						statusText: response.statusText,
 					});
 					const info = await parseErrorResponse(fakeResponse);
-					throw new Error(info.friendlyMessage || info.message);
+					throw new CodexHttpError(info.friendlyMessage || info.message, response.status);
 				} catch (error) {
+					if (error instanceof CodexHttpError) throw error;
 					if (error instanceof Error) {
 						if (error.name === "AbortError" || error.message === "Request was aborted") {
 							throw new Error("Request was aborted");
@@ -1290,9 +1301,11 @@ function buildBaseCodexHeaders(
 		headers.set(key, value);
 	}
 	headers.set("Authorization", `Bearer ${token}`);
-	headers.set("chatgpt-account-id", accountId);
-	headers.set("originator", "pi");
-	const userAgent = _os ? `pi (${_os.platform()} ${_os.release()}; ${_os.arch()})` : "pi (browser)";
+	headers.set("ChatGPT-Account-ID", accountId);
+	headers.set("originator", "codex_cli_rs");
+	const userAgent = _os
+		? `codex_cli_rs/0.0.1 (${_os.platform()} ${_os.release()}; ${_os.arch()})`
+		: "codex_cli_rs/0.0.1 (browser)";
 	headers.set("User-Agent", userAgent);
 	return headers;
 }
@@ -1305,7 +1318,6 @@ function buildSSEHeaders(
 	sessionId?: string,
 ): Headers {
 	const headers = buildBaseCodexHeaders(initHeaders, additionalHeaders, accountId, token);
-	headers.set("OpenAI-Beta", "responses=experimental");
 	headers.set("accept", "text/event-stream");
 	headers.set("content-type", "application/json");
 

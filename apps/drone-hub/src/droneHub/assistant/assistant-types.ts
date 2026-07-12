@@ -75,7 +75,17 @@ export type AssistantThread = {
   promptDeliveryMode: AssistantPromptDeliveryMode;
   messageCount?: number;
   messages: AssistantMessage[];
+  queuedPrompts?: AssistantQueuedPrompt[];
   status: AssistantThreadStatus;
+  error: string | null;
+};
+
+export type AssistantQueuedPrompt = {
+  id: string;
+  prompt: string;
+  imageCount: number;
+  createdAt: string;
+  status: 'queued' | 'running' | 'failed';
   error: string | null;
 };
 
@@ -103,6 +113,7 @@ export type AssistantToolSummary = {
   label: string;
   description: string;
   category: 'context' | 'prompts' | 'files' | 'chats' | 'drones' | 'actions';
+  group?: { kind: 'mcp'; id: string; label: string };
 };
 
 export type AssistantScopeUpdateResult = { ok: true; accessScope?: AssistantAccessScope };
@@ -127,7 +138,8 @@ export type AssistantSnapshot = {
   pendingApprovals: AssistantApproval[];
   chatIdleSubscriptions?: AssistantChatIdleSubscription[];
   models: AssistantModelOption[];
-  defaultModel: { provider: AssistantProviderId; model: string };
+  defaultModel: { provider: AssistantProviderId; model: string; thinkingLevel: string };
+  defaultEnabledTools: string[];
   availableTools?: AssistantToolSummary[];
   accessScope?: AssistantAccessScope;
   runningModels?: Record<string, AssistantRunModel>;
@@ -170,29 +182,6 @@ export type AssistantThreadSystemPromptSettings = {
   };
 };
 
-export type AssistantOverviewPromptSettings = {
-  ok: true;
-  assistantOverviewPrompt: {
-    prompt: string;
-    promptSource: 'settings' | 'default';
-    updatedAt: string | null;
-    defaultPrompt: string;
-    maxPromptChars: number;
-  };
-};
-
-export type AssistantThreadOverviewResult = {
-  ok: true;
-  threadId: string;
-  markdown: string;
-  generatedAt: string;
-  inputFingerprint: string;
-  promptFingerprint: string;
-  provider: AssistantProviderId;
-  model: string;
-  cached: boolean;
-  inputReused: boolean;
-};
 
 export type AssistantArtifactSummary = {
   path: string;

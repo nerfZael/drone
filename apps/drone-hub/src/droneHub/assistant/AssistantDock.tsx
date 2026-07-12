@@ -22,7 +22,6 @@ import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-d
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import {
   IconChatThread,
-  IconEye,
   IconPencil,
   IconPlus,
   IconSettings,
@@ -31,13 +30,13 @@ import {
   IconSidebarExpand,
   IconSpinner,
   IconTrash,
+  IconWrench,
 } from '../app/icons';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { IconChevron, IconDrone, IconFile, IconFolder, iconForFilePath } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import { useBlipThreadSession } from './useBlipThreadSession';
-import { AssistantOverviewOverlay, AssistantOverviewPromptModal } from './AssistantOverviewPanels';
 import { AssistantThreadFilesView, selectDefaultArtifactPath } from './AssistantThreadFilesView';
 import { AssistantThreadSidebar } from './AssistantThreadSidebar';
 import {
@@ -47,6 +46,7 @@ import {
 } from './AssistantSettingsPanels';
 import {
   AssistantChatIdleFooterBanner,
+  AssistantQueuedPromptRow,
   AssistantMessageRow,
   AssistantThinkingRow,
   ChatsIdleActivityRow,
@@ -99,7 +99,6 @@ import type {
   AssistantDroneReference,
   AssistantMessage,
   AssistantModelOption,
-  AssistantOverviewPromptSettings,
   AssistantPanelMode,
   AssistantPromptDeliveryMode,
   AssistantProviderId,
@@ -112,7 +111,6 @@ import type {
   AssistantSystemPromptKind,
   AssistantSystemPromptSettings,
   AssistantThread,
-  AssistantThreadOverviewResult,
   AssistantThreadStatus,
   AssistantThreadSystemPromptSettings,
   AssistantToolSummary,
@@ -153,10 +151,10 @@ function snapshotWithPreferredActiveThread(snapshot: AssistantSnapshot, preferre
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
 const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
 
-const ASSISTANT_PROVIDERS: Array<{ id: AssistantProviderId; label: string; authLabel: string; title: string }> = [
-  { id: 'codex', label: 'Codex', authLabel: 'CLI subscription', title: 'Use Codex CLI ChatGPT authentication for Codex models.' },
-  { id: 'openai', label: 'OpenAI', authLabel: 'API key', title: 'Use the configured OpenAI API key for OpenAI models.' },
-  { id: 'gemini', label: 'Gemini', authLabel: 'API key', title: 'Use the configured Gemini API key for Gemini models.' },
+const ASSISTANT_PROVIDERS: Array<{ id: AssistantProviderId; label: string; title: string }> = [
+  { id: 'codex', label: 'Codex', title: 'Use Codex models.' },
+  { id: 'openai', label: 'OpenAI', title: 'Use OpenAI models.' },
+  { id: 'gemini', label: 'Gemini', title: 'Use Gemini models.' },
 ];
 
 function readInitialThreadSidebarOpen(): boolean {
@@ -394,10 +392,14 @@ export function AssistantDock() {
   const [scopeSyncBusy, setScopeSyncBusy] = React.useState(false);
   const [droneNameById, setDroneNameById] = React.useState<AssistantDroneNameMap>({});
   const [approvalBusyId, setApprovalBusyId] = React.useState<string | null>(null);
+  const [queuedPromptBusyId, setQueuedPromptBusyId] = React.useState<string | null>(null);
   const [assistantStopBusy, setAssistantStopBusy] = React.useState(false);
   const [defaultModelBusy, setDefaultModelBusy] = React.useState(false);
   const [toolsPanelOpen, setToolsPanelOpen] = React.useState(false);
+  const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [enabledToolDraftNames, setEnabledToolDraftNames] = React.useState<string[]>([]);
+  const [defaultEnabledToolDraftNames, setDefaultEnabledToolDraftNames] = React.useState<string[]>([]);
+  const [defaultToolsBusy, setDefaultToolsBusy] = React.useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = React.useState(false);
   const [systemPromptMode, setSystemPromptMode] = React.useState<'thread' | 'global'>('thread');
   const [systemPromptGlobalKind, setSystemPromptGlobalKind] = React.useState<AssistantSystemPromptKind>('normal');
@@ -412,17 +414,6 @@ export function AssistantDock() {
   const [promoteSystemPromptSaving, setPromoteSystemPromptSaving] = React.useState(false);
   const [systemPromptError, setSystemPromptError] = React.useState<string | null>(null);
   const [systemPromptNotice, setSystemPromptNotice] = React.useState<string | null>(null);
-  const [overviewOpen, setOverviewOpen] = React.useState(false);
-  const [overview, setOverview] = React.useState<AssistantThreadOverviewResult | null>(null);
-  const [overviewLoading, setOverviewLoading] = React.useState(false);
-  const [overviewError, setOverviewError] = React.useState<string | null>(null);
-  const [overviewPromptOpen, setOverviewPromptOpen] = React.useState(false);
-  const [overviewPromptSettings, setOverviewPromptSettings] = React.useState<AssistantOverviewPromptSettings | null>(null);
-  const [overviewPromptDraft, setOverviewPromptDraft] = React.useState('');
-  const [overviewPromptLoading, setOverviewPromptLoading] = React.useState(false);
-  const [overviewPromptSaving, setOverviewPromptSaving] = React.useState(false);
-  const [overviewPromptError, setOverviewPromptError] = React.useState<string | null>(null);
-  const [overviewPromptNotice, setOverviewPromptNotice] = React.useState<string | null>(null);
   const [assistantEventsConnected, setAssistantEventsConnected] = React.useState(false);
   const [assistantEventsUnavailable, setAssistantEventsUnavailable] = React.useState(
     () => typeof window === 'undefined' || typeof window.EventSource === 'undefined',
@@ -462,6 +453,7 @@ export function AssistantDock() {
   const updateThreadRequestRef = React.useRef(0);
   const snapshotRequestSeqRef = React.useRef(0);
   const enabledToolDraftNamesRef = React.useRef<string[]>([]);
+  const defaultEnabledToolDraftNamesRef = React.useRef<string[]>([]);
   const assistantEventRefreshTimerRef = React.useRef<number | null>(null);
   const draftRef = React.useRef('');
   const voiceDraftActiveRef = React.useRef(false);
@@ -551,6 +543,10 @@ export function AssistantDock() {
   const activePendingApprovals = React.useMemo(
     () => (snapshot?.pendingApprovals ?? []).filter((approval) => approval.threadId === activeThread?.id && approval.status === 'pending'),
     [activeThread?.id, snapshot?.pendingApprovals],
+  );
+  const visibleQueuedPrompts = React.useMemo(
+    () => (activeThread?.queuedPrompts ?? []).filter((prompt) => prompt.status !== 'running'),
+    [activeThread?.queuedPrompts],
   );
   const activeRunningModel = activeThread ? snapshot?.runningModels?.[activeThread.id] ?? null : null;
   const running = blipSession.running || activeThread?.status === 'running' || activeThread?.status === 'waiting_for_approval' || Boolean(activeRunningModel);
@@ -653,7 +649,13 @@ export function AssistantDock() {
     activePendingApprovals.length === 0 &&
     !latestActivityShowsReasoning &&
     !messageText(streamingAssistantMessage ?? { role: 'assistant' }).trim();
-  const showEmptyAssistantThread = !(loading && !snapshot) && !blipSession.historyLoading && visibleItems.length === 0 && !showThinking;
+  const showEmptyAssistantThread =
+    !(loading && !snapshot) &&
+    !blipSession.historyLoading &&
+    visibleItems.length === 0 &&
+    visibleQueuedPrompts.length === 0 &&
+    activePendingApprovals.length === 0 &&
+    !showThinking;
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
   const applySnapshot = React.useCallback((next: AssistantSnapshot, preferredThreadId?: string | null) => {
@@ -887,70 +889,6 @@ export function AssistantDock() {
     }
   }, [activeThread?.voiceEnabled, loadSystemPromptSettings, refresh, threadSystemPromptDraft]);
 
-  const loadOverviewPromptSettings = React.useCallback(async () => {
-    setOverviewPromptLoading(true);
-    setOverviewPromptError(null);
-    setOverviewPromptNotice(null);
-    try {
-      const data = await requestJson<AssistantOverviewPromptSettings>('/api/assistant/overview-prompt');
-      setOverviewPromptSettings(data);
-      setOverviewPromptDraft(data.assistantOverviewPrompt.prompt);
-    } catch (err: any) {
-      setOverviewPromptError(err?.message ?? String(err));
-    } finally {
-      setOverviewPromptLoading(false);
-    }
-  }, []);
-
-  const openOverviewPromptEditor = React.useCallback(() => {
-    setOverviewPromptOpen(true);
-    void loadOverviewPromptSettings();
-  }, [loadOverviewPromptSettings]);
-
-  const saveOverviewPromptSettings = React.useCallback(async () => {
-    setOverviewPromptSaving(true);
-    setOverviewPromptError(null);
-    setOverviewPromptNotice(null);
-    try {
-      const data = await requestJson<AssistantOverviewPromptSettings>('/api/assistant/overview-prompt', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt: overviewPromptDraft }),
-      });
-      setOverviewPromptSettings(data);
-      setOverviewPromptDraft(data.assistantOverviewPrompt.prompt);
-      setOverviewPromptNotice('Saved. Overview generation will use this prompt.');
-    } catch (err: any) {
-      setOverviewPromptError(err?.message ?? String(err));
-    } finally {
-      setOverviewPromptSaving(false);
-    }
-  }, [overviewPromptDraft]);
-
-  const requestOverview = React.useCallback(
-    async (options: { force?: boolean; reuseLastInput?: boolean; silent?: boolean } = {}) => {
-      const threadId = activeThreadIdRef.current;
-      if (!threadId) return;
-      if (!options.silent) setOverviewLoading(true);
-      setOverviewError(null);
-      try {
-        const data = await requestJson<AssistantThreadOverviewResult>(`/api/assistant/threads/${encodeURIComponent(threadId)}/overview`, {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ force: Boolean(options.force), reuseLastInput: Boolean(options.reuseLastInput) }),
-        });
-        if (activeThreadIdRef.current !== threadId) return;
-        setOverview(data);
-      } catch (err: any) {
-        if (activeThreadIdRef.current !== threadId) return;
-        setOverviewError(err?.message ?? String(err));
-      } finally {
-        if (!options.silent && activeThreadIdRef.current === threadId) setOverviewLoading(false);
-      }
-    },
-    [],
-  );
-
   React.useEffect(() => {
     void refresh();
   }, [refresh]);
@@ -1103,12 +1041,6 @@ export function AssistantDock() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(ASSISTANT_THREAD_MODE_STORAGE_KEY, assistantPanelMode);
   }, [assistantPanelMode]);
-
-  React.useEffect(() => {
-    setOverview(null);
-    setOverviewError(null);
-    setOverviewLoading(false);
-  }, [activeThreadId]);
 
   React.useEffect(() => {
     if (!systemPromptOpen) return;
@@ -1305,7 +1237,7 @@ export function AssistantDock() {
   React.useEffect(() => {
     if (!assistantStickToBottomRef.current) return;
     scrollAssistantToBottom();
-  }, [activePendingApprovals.length, scrollAssistantToBottom, showThinking, snapshot?.streamingMessage, visibleItems]);
+  }, [activePendingApprovals.length, scrollAssistantToBottom, showThinking, snapshot?.streamingMessage, visibleItems, visibleQueuedPrompts.length]);
 
   React.useEffect(() => {
     const node = scrollRef.current;
@@ -1704,6 +1636,23 @@ export function AssistantDock() {
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
+  const cancelQueuedPrompt = React.useCallback(async (promptId: string) => {
+    if (!activeThread) return;
+    const requestSeq = beginSnapshotMutation();
+    setQueuedPromptBusyId(promptId);
+    try {
+      const next = await requestJson<AssistantSnapshot>(
+        `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/queued/${encodeURIComponent(promptId)}`,
+        { method: 'DELETE' },
+      );
+      if (snapshotMutationCurrent(requestSeq)) applySnapshot(next, activeThread.id);
+    } catch (err: any) {
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
+    } finally {
+      setQueuedPromptBusyId(null);
+    }
+  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
+
   const resolveApproval = React.useCallback(async (approval: AssistantApproval, approved: boolean) => {
     if (!activeThread) return;
     const requestSeq = beginSnapshotMutation();
@@ -1727,14 +1676,18 @@ export function AssistantDock() {
 
   const setActiveModelAsDefault = React.useCallback(async () => {
     if (!activeThread) return;
-    if (snapshot?.defaultModel.provider === activeThread.provider && snapshot.defaultModel.model === activeThread.model) return;
+    if (
+      snapshot?.defaultModel.provider === activeThread.provider &&
+      snapshot.defaultModel.model === activeThread.model &&
+      snapshot.defaultModel.thinkingLevel === activeThread.thinkingLevel
+    ) return;
     const requestSeq = beginSnapshotMutation();
     setDefaultModelBusy(true);
     try {
       const next = await requestJson<AssistantSnapshot>('/api/assistant/default-model', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ provider: activeThread.provider, model: activeThread.model }),
+        body: JSON.stringify({ provider: activeThread.provider, model: activeThread.model, thinkingLevel: activeThread.thinkingLevel }),
       });
       if (snapshotMutationCurrent(requestSeq)) applySnapshot(next, activeThread.id);
     } catch (err: any) {
@@ -1799,7 +1752,10 @@ export function AssistantDock() {
     return modelSelectionLabel({ provider: activeThread.provider, model: activeThread.model, thinkingLevel: activeThread.thinkingLevel }, modelOptions);
   }, [activeThread, modelOptions]);
   const activeModelIsDefault = Boolean(
-    activeThread && snapshot?.defaultModel.provider === activeThread.provider && snapshot.defaultModel.model === activeThread.model,
+    activeThread &&
+      snapshot?.defaultModel.provider === activeThread.provider &&
+      snapshot.defaultModel.model === activeThread.model &&
+      snapshot.defaultModel.thinkingLevel === activeThread.thinkingLevel,
   );
   const activeProviderMeta = providerOptions.find((provider) => provider.id === activeProvider) ?? ASSISTANT_PROVIDERS[0];
   const activeRunningModelLabel = activeRunningModel ? modelSelectionLabel(activeRunningModel, modelOptions) : '';
@@ -1822,6 +1778,16 @@ export function AssistantDock() {
     setEnabledToolDraftNames(snapshotEnabledToolNames);
   }, [activeThreadId, availableToolNamesKey, snapshotEnabledToolNames]);
 
+  React.useEffect(() => {
+    const available = new Set(availableTools.map((tool) => tool.name));
+    const nextTools = (snapshot?.defaultEnabledTools ?? []).filter((name) => available.has(name));
+    const currentKey = defaultEnabledToolDraftNamesRef.current.join('\u0000');
+    const nextKey = nextTools.join('\u0000');
+    if (currentKey === nextKey) return;
+    defaultEnabledToolDraftNamesRef.current = nextTools;
+    setDefaultEnabledToolDraftNames(nextTools);
+  }, [availableToolNamesKey, availableTools, snapshot?.defaultEnabledTools]);
+
   const enabledToolNames = React.useMemo(() => {
     const available = new Set(availableTools.map((tool) => tool.name));
     return enabledToolDraftNames.filter((name) => available.has(name));
@@ -1831,9 +1797,11 @@ export function AssistantDock() {
     (nextTools: string[]) => {
       enabledToolDraftNamesRef.current = nextTools;
       setEnabledToolDraftNames(nextTools);
-      void updateThread({ enabledTools: nextTools });
+      const available = new Set(availableTools.map((tool) => tool.name));
+      const unavailableConfigured = (activeThread?.enabledTools ?? []).filter((name) => !available.has(name));
+      void updateThread({ enabledTools: [...nextTools, ...unavailableConfigured] });
     },
-    [updateThread],
+    [activeThread?.enabledTools, availableTools, updateThread],
   );
 
   const toggleAssistantTool = React.useCallback(
@@ -1845,6 +1813,66 @@ export function AssistantDock() {
       updateEnabledTools(ordered);
     },
     [availableTools, updateEnabledTools],
+  );
+
+  const toggleAssistantTools = React.useCallback(
+    (toolNames: string[], enabled: boolean) => {
+      const current = new Set(enabledToolDraftNamesRef.current);
+      for (const toolName of toolNames) {
+        if (enabled) current.add(toolName);
+        else current.delete(toolName);
+      }
+      const ordered = availableTools.map((tool) => tool.name).filter((name) => current.has(name));
+      updateEnabledTools(ordered);
+    },
+    [availableTools, updateEnabledTools],
+  );
+
+  const updateDefaultEnabledTools = React.useCallback(
+    async (nextTools: string[]) => {
+      defaultEnabledToolDraftNamesRef.current = nextTools;
+      setDefaultEnabledToolDraftNames(nextTools);
+      const available = new Set(availableTools.map((tool) => tool.name));
+      const unavailableConfigured = (snapshot?.defaultEnabledTools ?? []).filter((name) => !available.has(name));
+      const persistedTools = [...nextTools, ...unavailableConfigured];
+      const requestSeq = beginSnapshotMutation();
+      setDefaultToolsBusy(true);
+      try {
+        const next = await requestJson<AssistantSnapshot>('/api/assistant/default-tools', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ enabledTools: persistedTools }),
+        });
+        if (snapshotMutationCurrent(requestSeq)) applySnapshot(next, activeThreadIdRef.current);
+      } catch (err: any) {
+        if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
+      } finally {
+        setDefaultToolsBusy(false);
+      }
+    },
+    [applySnapshot, availableTools, beginSnapshotMutation, snapshot?.defaultEnabledTools, snapshotMutationCurrent],
+  );
+
+  const toggleDefaultTool = React.useCallback(
+    (toolName: string, enabled: boolean) => {
+      const current = new Set(defaultEnabledToolDraftNamesRef.current);
+      if (enabled) current.add(toolName);
+      else current.delete(toolName);
+      void updateDefaultEnabledTools(availableTools.map((tool) => tool.name).filter((name) => current.has(name)));
+    },
+    [availableTools, updateDefaultEnabledTools],
+  );
+
+  const toggleDefaultTools = React.useCallback(
+    (toolNames: string[], enabled: boolean) => {
+      const current = new Set(defaultEnabledToolDraftNamesRef.current);
+      for (const toolName of toolNames) {
+        if (enabled) current.add(toolName);
+        else current.delete(toolName);
+      }
+      void updateDefaultEnabledTools(availableTools.map((tool) => tool.name).filter((name) => current.has(name)));
+    },
+    [availableTools, updateDefaultEnabledTools],
   );
 
   const loadArtifactFiles = React.useCallback(async (options: { silent?: boolean } = {}) => {
@@ -1957,7 +1985,7 @@ export function AssistantDock() {
       <div
         ref={assistantThreadRef}
         tabIndex={-1}
-        className={`flex min-w-0 flex-1 flex-col outline-none ${attachmentDragActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
+        className={`relative flex min-w-0 flex-1 flex-col outline-none ${attachmentDragActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
         onMouseDown={focusAssistantThreadForPaste}
         onPaste={(event) => {
           handleAssistantPaste(event);
@@ -2107,7 +2135,11 @@ export function AssistantDock() {
           </button>
           <button
             type="button"
-            onClick={() => setToolsPanelOpen((value) => !value)}
+            data-assistant-tools-trigger
+            onClick={() => {
+              setSettingsOpen(false);
+              setToolsPanelOpen((value) => !value);
+            }}
             disabled={!activeThread}
             aria-pressed={toolsPanelOpen}
             className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
@@ -2115,8 +2147,25 @@ export function AssistantDock() {
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
             }`}
-            title="Toggle assistant tools"
-            aria-label="Toggle assistant tools"
+            title="Configure thread tools"
+            aria-label="Configure thread tools"
+          >
+            <IconWrench className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
+            onClick={() => {
+              setToolsPanelOpen(false);
+              setSettingsOpen((value) => !value);
+            }}
+            aria-pressed={settingsOpen}
+            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] ${
+              settingsOpen
+                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
+            }`}
+            title="Assistant settings"
+            aria-label="Assistant settings"
           >
             <IconSettings className="h-3.5 w-3.5" />
           </button>
@@ -2161,12 +2210,37 @@ export function AssistantDock() {
               enabledTools={enabledToolNames}
               disabled={!activeThread}
               onToggleTool={toggleAssistantTool}
+              onToggleTools={toggleAssistantTools}
               onEnableAll={() => updateEnabledTools(availableTools.map((tool) => tool.name))}
               onDisableAll={() => updateEnabledTools([])}
               onClose={() => setToolsPanelOpen(false)}
             />
           ) : null}
         </div>
+
+      {settingsOpen ? (
+        <div className="absolute inset-x-0 bottom-0 top-11 z-20 overflow-y-auto bg-[var(--panel-alt)]">
+          <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
+            <div className="mb-4">
+              <div className="flex items-center gap-2 text-[15px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
+                <IconSettings className="h-4 w-4 text-[var(--muted)]" />
+                Settings
+              </div>
+              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Defaults apply to newly created threads. Existing threads keep their current configuration.</div>
+            </div>
+            <AssistantToolsPanel
+              variant="settings"
+              tools={availableTools}
+              enabledTools={defaultEnabledToolDraftNames}
+              disabled={defaultToolsBusy}
+              onToggleTool={toggleDefaultTool}
+              onToggleTools={toggleDefaultTools}
+              onEnableAll={() => void updateDefaultEnabledTools(availableTools.map((tool) => tool.name))}
+              onDisableAll={() => void updateDefaultEnabledTools([])}
+            />
+          </div>
+        </div>
+      ) : null}
 
       <div
         ref={setScopeDropNodeRef}
@@ -2294,20 +2368,17 @@ export function AssistantDock() {
                     onDeny={() => void resolveApproval(approval, false)}
                   />
                 ))}
+                {visibleQueuedPrompts.map((prompt) => (
+                  <AssistantQueuedPromptRow
+                    key={prompt.id}
+                    prompt={prompt}
+                    cancelling={queuedPromptBusyId === prompt.id}
+                    onCancel={() => void cancelQueuedPrompt(prompt.id)}
+                  />
+                ))}
                 {error || blipSession.runError || blipSession.historyError ? <div className="mx-3 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-3 py-2 text-[11px] text-[var(--red)]">{error ?? blipSession.runError ?? blipSession.historyError}</div> : null}
               </div>
             </div>
-            {overviewOpen ? (
-              <AssistantOverviewOverlay
-                overview={overview}
-                loading={overviewLoading}
-                error={overviewError}
-                canRerun={Boolean(overview)}
-                onClose={() => setOverviewOpen(false)}
-                onRerun={() => void requestOverview({ force: true, reuseLastInput: true })}
-                onEditPrompt={openOverviewPromptEditor}
-              />
-            ) : null}
           </div>
 
           {assistantChatIdleHold ? (
@@ -2332,7 +2403,7 @@ export function AssistantDock() {
               value: provider.id,
               label: provider.label,
               title: provider.title,
-              searchText: `${provider.label} ${provider.authLabel}`,
+              searchText: provider.label,
               disabled: provider.models.length === 0,
             }))}
             variant="toolbar"
@@ -2366,21 +2437,6 @@ export function AssistantDock() {
             searchable
             searchPlaceholder="Search models"
           />
-          <button
-            type="button"
-            disabled={!activeThread || defaultModelBusy}
-            aria-pressed={activeModelIsDefault}
-            aria-label={activeModelIsDefault ? 'Current default model' : 'Set current model as default'}
-            title={activeModelIsDefault ? 'Default model for new threads' : 'Make this the default model for new threads'}
-            onClick={() => void setActiveModelAsDefault()}
-            className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
-              activeModelIsDefault
-                ? 'bg-[rgba(250,204,21,.10)] text-[var(--yellow)]'
-                : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--yellow)]'
-            }`}
-          >
-            <DefaultModelStar selected={activeModelIsDefault} />
-          </button>
           <UiMenuSelect
             value={activeThread?.thinkingLevel ?? ''}
             disabled={!activeThread || defaultModelBusy || reasoningMenuEntries.length === 0}
@@ -2397,6 +2453,21 @@ export function AssistantDock() {
             menuClassName="max-h-56 overflow-y-auto"
             header="Reasoning"
           />
+          <button
+            type="button"
+            disabled={!activeThread || defaultModelBusy}
+            aria-pressed={activeModelIsDefault}
+            aria-label={activeModelIsDefault ? 'Current default model and reasoning' : 'Set current model and reasoning as default'}
+            title={activeModelIsDefault ? 'Default model and reasoning for new threads' : 'Make this model and reasoning the default for new threads'}
+            onClick={() => void setActiveModelAsDefault()}
+            className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
+              activeModelIsDefault
+                ? 'bg-[rgba(250,204,21,.10)] text-[var(--yellow)]'
+                : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--yellow)]'
+            }`}
+          >
+            <DefaultModelStar selected={activeModelIsDefault} />
+          </button>
           <div
             className="grid h-7 flex-shrink-0 grid-cols-2 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"
             role="group"
@@ -2420,34 +2491,6 @@ export function AssistantDock() {
                 {mode === 'queue' ? 'Queue' : 'ASAP'}
               </button>
             ))}
-          </div>
-          <div
-            className="inline-flex h-7 max-w-[130px] flex-shrink-0 items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] text-[var(--muted)]"
-            title={activeProviderMeta.title}
-          >
-            <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${activeProvider === 'codex' ? 'bg-[var(--green)]' : 'bg-[var(--muted-dim)]'}`} />
-            <span className="truncate">{activeProviderMeta.authLabel}</span>
-          </div>
-          <div className="ml-auto flex flex-shrink-0 items-center gap-1.5">
-            <button
-              type="button"
-              onClick={() => {
-                const next = !overviewOpen;
-                setOverviewOpen(next);
-                if (next && !overview && !overviewLoading) void requestOverview();
-              }}
-              disabled={!activeThread}
-              aria-pressed={overviewOpen}
-              className={`flex h-7 w-7 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
-                overviewOpen
-                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
-              }`}
-              title={overviewOpen ? 'Hide thread overview' : 'Show thread overview'}
-              aria-label={overviewOpen ? 'Hide thread overview' : 'Show thread overview'}
-            >
-              {overviewLoading ? <IconSpinner className="h-3.5 w-3.5" /> : <IconEye className="h-3.5 w-3.5" />}
-            </button>
           </div>
         </div>
         {attachmentError ? (
@@ -2723,20 +2766,6 @@ export function AssistantDock() {
           onSaveGlobal={() => void saveSystemPromptSettings()}
           onSaveThread={() => void saveThreadSystemPromptSettings()}
           onPromoteThread={() => void promoteThreadSystemPrompt()}
-        />
-      ) : null}
-      {overviewPromptOpen ? (
-        <AssistantOverviewPromptModal
-          settings={overviewPromptSettings}
-          draft={overviewPromptDraft}
-          loading={overviewPromptLoading}
-          saving={overviewPromptSaving}
-          error={overviewPromptError}
-          notice={overviewPromptNotice}
-          onDraftChange={setOverviewPromptDraft}
-          onUseDefault={() => setOverviewPromptDraft(overviewPromptSettings?.assistantOverviewPrompt.defaultPrompt ?? '')}
-          onClose={() => setOverviewPromptOpen(false)}
-          onSave={() => void saveOverviewPromptSettings()}
         />
       ) : null}
     </div>

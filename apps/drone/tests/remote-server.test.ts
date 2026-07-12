@@ -178,10 +178,12 @@ describe('remote Hub server', () => {
     expect(routeAllowed('GET', '/api/assistant/threads')).toBe(true);
     expect(routeAllowed('GET', '/api/assistant/threads/thread-a')).toBe(true);
     expect(routeAllowed('POST', '/api/assistant/threads/thread-a/prompt')).toBe(true);
+    expect(routeAllowed('DELETE', '/api/assistant/threads/thread-a/queued/prompt-a')).toBe(true);
     expect(routeAllowed('POST', '/api/assistant/threads/thread-a/approvals/approval-a/approve')).toBe(true);
     expect(routeAllowed('GET', '/api/assistant/threads/thread-a/artifacts/file')).toBe(true);
     expect(routeAllowed('GET', '/api/assistant/events')).toBe(true);
     expect(routeAllowed('POST', '/api/assistant/scope')).toBe(true);
+    expect(routeAllowed('POST', '/api/assistant/default-tools')).toBe(true);
     expect(routeAllowed('POST', '/api/assistant/not-a-route')).toBe(false);
     expect(routeAllowed('POST', '/api/assistant/ui-action')).toBe(false);
     expect(routeAllowed('POST', '/api/assistant/voice/patch-message')).toBe(false);
