@@ -433,6 +433,8 @@ export function AssistantDock() {
   const kanbanBoardOpen = useDroneHubUiStore((state) => state.kanbanBoardOpen);
   const playbookRunsOpen = useDroneHubUiStore((state) => state.playbookRunsOpen);
   const selectedGroupMultiChat = useDroneHubUiStore((state) => state.selectedGroupMultiChat);
+  const threadSidebarDockSide = useDroneHubUiStore((state) => state.assistantThreadSidebarDockSide);
+  const setThreadSidebarDockSide = useDroneHubUiStore((state) => state.setAssistantThreadSidebarDockSide);
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const scrollContentRef = React.useRef<HTMLDivElement | null>(null);
@@ -1340,7 +1342,30 @@ export function AssistantDock() {
     }
   }, [applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
-  const updateThread = React.useCallback(async (patch: Partial<Pick<AssistantThread, 'model' | 'provider' | 'thinkingLevel' | 'autoApprove' | 'promptDeliveryMode' | 'enabledTools' | 'voiceEnabled'>>) => {
+  const renameThread = React.useCallback(async (thread: AssistantThread, title: string) => {
+    updateThreadRequestRef.current += 1;
+    const requestSeq = beginSnapshotMutation();
+    const preferredThreadId = activeThreadIdRef.current;
+    try {
+      let next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ title }),
+      });
+      if (!snapshotMutationCurrent(requestSeq)) return;
+      if (preferredThreadId && preferredThreadId !== thread.id) {
+        next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(preferredThreadId)}/activate`, { method: 'POST' });
+        if (!snapshotMutationCurrent(requestSeq)) return;
+      }
+      activeThreadIdRef.current = preferredThreadId || String(next.activeThreadId ?? '').trim();
+      applySnapshot(next, activeThreadIdRef.current);
+    } catch (err: any) {
+      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
+      throw err;
+    }
+  }, [applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
+
+  const updateThread = React.useCallback(async (patch: Partial<Pick<AssistantThread, 'title' | 'model' | 'provider' | 'thinkingLevel' | 'autoApprove' | 'promptDeliveryMode' | 'enabledTools' | 'voiceEnabled'>>) => {
     if (!activeThread) return;
     const requestId = updateThreadRequestRef.current + 1;
     updateThreadRequestRef.current = requestId;
@@ -1963,25 +1988,30 @@ export function AssistantDock() {
     return () => window.clearInterval(timer);
   }, [filesOpen, loadSelectedArtifactFile, selectedArtifactPath]);
 
+  const threadSidebar = threadSidebarOpen ? (
+    <AssistantThreadSidebar
+      threads={visibleThreads}
+      activeThreadId={activeThread?.id ?? null}
+      dockSide={threadSidebarDockSide}
+      mode={assistantPanelMode}
+      onCreateThread={() => void createThread()}
+      onSelectThread={(thread) => void selectThread(thread)}
+      onDockSideChange={setThreadSidebarDockSide}
+      onRenameThread={renameThread}
+      onDeleteThread={(thread) => void deleteThread(thread)}
+      onModeChange={setAssistantPanelMode}
+      onOpenPairing={() => void openVoicePairing()}
+      desktopVoiceStatus={desktopVoiceStatus}
+      onToggleDesktopVoice={dispatchAssistantDesktopVoiceToggle}
+      onStartDesktopVoiceRecording={dispatchAssistantDesktopVoiceStartRecording}
+      onStopDesktopVoice={dispatchAssistantDesktopVoiceOff}
+      onCollapse={() => setThreadSidebarOpen(false)}
+    />
+  ) : null;
+
   return (
-    <div className="flex h-full min-h-0 bg-[var(--panel-alt)]">
-      {threadSidebarOpen ? (
-        <AssistantThreadSidebar
-          threads={visibleThreads}
-          activeThreadId={activeThread?.id ?? null}
-          mode={assistantPanelMode}
-          onCreateThread={() => void createThread()}
-          onSelectThread={(thread) => void selectThread(thread)}
-          onDeleteThread={(thread) => void deleteThread(thread)}
-          onModeChange={setAssistantPanelMode}
-          onOpenPairing={() => void openVoicePairing()}
-          desktopVoiceStatus={desktopVoiceStatus}
-          onToggleDesktopVoice={dispatchAssistantDesktopVoiceToggle}
-          onStartDesktopVoiceRecording={dispatchAssistantDesktopVoiceStartRecording}
-          onStopDesktopVoice={dispatchAssistantDesktopVoiceOff}
-          onCollapse={() => setThreadSidebarOpen(false)}
-        />
-      ) : null}
+    <div data-assistant-dock-root="true" className="flex h-full min-h-0 bg-[var(--panel-alt)]">
+      {threadSidebarDockSide === 'left' ? threadSidebar : null}
       <div
         ref={assistantThreadRef}
         tabIndex={-1}
@@ -2014,14 +2044,18 @@ export function AssistantDock() {
             onClick={() => setThreadSidebarOpen((open) => !open)}
             className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg-secondary)] ${
               threadSidebarOpen
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
             }`}
             title={threadSidebarOpen ? 'Hide thread sidebar' : 'Show thread sidebar'}
             aria-label={threadSidebarOpen ? 'Hide thread sidebar' : 'Show thread sidebar'}
             aria-pressed={threadSidebarOpen}
           >
-            {threadSidebarOpen ? <IconSidebarCollapse className="h-3.5 w-3.5" /> : <IconSidebarExpand className="h-3.5 w-3.5" />}
+            {threadSidebarOpen ? (
+              <IconSidebarCollapse className={`h-3.5 w-3.5 ${threadSidebarDockSide === 'right' ? 'rotate-180' : ''}`} />
+            ) : (
+              <IconSidebarExpand className={`h-3.5 w-3.5 ${threadSidebarDockSide === 'right' ? 'rotate-180' : ''}`} />
+            )}
           </button>
           <div className="min-w-0 flex-1">
             <div className="truncate text-[12px] font-semibold text-[var(--fg)]">{activeThread?.title ?? 'Assistant'}</div>
@@ -2111,7 +2145,7 @@ export function AssistantDock() {
             aria-pressed={filesOpen}
             className={`relative flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] ${
               filesOpen
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
             }`}
             title={filesOpen ? 'Hide thread files' : 'Show thread files'}
@@ -2144,7 +2178,7 @@ export function AssistantDock() {
             aria-pressed={toolsPanelOpen}
             className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
               toolsPanelOpen
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
             }`}
             title="Configure thread tools"
@@ -2161,7 +2195,7 @@ export function AssistantDock() {
             aria-pressed={settingsOpen}
             className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] ${
               settingsOpen
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
             }`}
             title="Assistant settings"
@@ -2178,7 +2212,7 @@ export function AssistantDock() {
             title={voiceEnabled ? 'Realtime mode is on' : 'Realtime mode is off'}
             className={`h-8 w-8 flex-shrink-0 rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
               voiceEnabled
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
             }`}
           >
@@ -2198,7 +2232,7 @@ export function AssistantDock() {
             title={autoApprove ? 'Auto-approve proposals is on' : 'Auto-approve proposals is off'}
             className={`h-8 w-8 flex-shrink-0 rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
               autoApprove
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
             }`}
           >
@@ -2733,6 +2767,7 @@ export function AssistantDock() {
         </div>
       )}
       </div>
+      {threadSidebarDockSide === 'right' ? threadSidebar : null}
       {systemPromptOpen ? (
         <AssistantSystemPromptModal
           mode={systemPromptMode}

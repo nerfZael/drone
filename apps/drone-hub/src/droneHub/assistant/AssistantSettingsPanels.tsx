@@ -105,7 +105,7 @@ export function AssistantToolsPanel({
   const renderTool = (tool: AssistantToolSummary) => {
     const checked = enabled.has(tool.name);
     return (
-      <label key={tool.name} className={`flex cursor-pointer items-start gap-2 rounded border px-2 py-1.5 transition-colors ${checked ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]' : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] hover:bg-[var(--hover)]'}`}>
+      <label key={tool.name} className={`flex cursor-pointer items-start gap-2 rounded border border-[var(--border-subtle)] px-2 py-1.5 transition-colors ${checked ? 'bg-[rgba(255,255,255,.055)]' : 'bg-[rgba(255,255,255,.02)] hover:bg-[var(--hover)]'}`}>
         <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onToggleTool(tool.name, event.target.checked)} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]" />
         <span className="min-w-0">
           <span className="block truncate text-[11px] font-medium text-[var(--fg-secondary)]">{tool.label}</span>

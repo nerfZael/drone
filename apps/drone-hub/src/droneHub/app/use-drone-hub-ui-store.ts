@@ -87,6 +87,7 @@ type DroneHubUiState = {
   sidebarGroupingMode: SidebarGroupingMode;
   sidebarDensityMode: SidebarDensityMode;
   sidebarDockSide: SidebarDockSide;
+  assistantThreadSidebarDockSide: SidebarDockSide;
   appView: AppView;
   viewMode: ViewMode;
   collapsedGroups: Record<string, boolean>;
@@ -156,6 +157,7 @@ type DroneHubUiState = {
   setSidebarGroupingMode: (next: Updater<SidebarGroupingMode>) => void;
   setSidebarDensityMode: (next: Updater<SidebarDensityMode>) => void;
   setSidebarDockSide: (next: Updater<SidebarDockSide>) => void;
+  setAssistantThreadSidebarDockSide: (next: Updater<SidebarDockSide>) => void;
   setAppView: (next: Updater<AppView>) => void;
   setViewMode: (next: Updater<ViewMode>) => void;
   setCollapsedGroups: (next: Updater<Record<string, boolean>>) => void;
@@ -320,6 +322,7 @@ type DroneHubUiPersistedState = Pick<
   | 'sidebarGroupingMode'
   | 'sidebarDensityMode'
   | 'sidebarDockSide'
+  | 'assistantThreadSidebarDockSide'
   | 'appView'
   | 'viewMode'
   | 'collapsedGroups'
@@ -362,6 +365,11 @@ export function migrateDroneHubUiPersistedState(
   const migrated = { ...persisted };
   if (Object.prototype.hasOwnProperty.call(migrated, 'sidebarDockSide')) {
     migrated.sidebarDockSide = normalizeSidebarDockSide(migrated.sidebarDockSide);
+  }
+  if (Object.prototype.hasOwnProperty.call(migrated, 'assistantThreadSidebarDockSide')) {
+    migrated.assistantThreadSidebarDockSide = normalizeSidebarDockSide(
+      migrated.assistantThreadSidebarDockSide,
+    );
   }
   const migratedShortcutBindings = migrateLegacyShortcutBindings(migrated.shortcutBindings);
   if (migratedShortcutBindings !== undefined) {
@@ -682,6 +690,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       sidebarGroupingMode: 'repos',
       sidebarDensityMode: 'default',
       sidebarDockSide: 'left',
+      assistantThreadSidebarDockSide: 'left',
       appView: 'workspace',
       viewMode: 'grouped',
       collapsedGroups: {},
@@ -765,6 +774,12 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({ sidebarDensityMode: normalizeSidebarDensityMode(resolveNext(s.sidebarDensityMode, next)) })),
       setSidebarDockSide: (next) =>
         set((s) => ({ sidebarDockSide: normalizeSidebarDockSide(resolveNext(s.sidebarDockSide, next)) })),
+      setAssistantThreadSidebarDockSide: (next) =>
+        set((s) => ({
+          assistantThreadSidebarDockSide: normalizeSidebarDockSide(
+            resolveNext(s.assistantThreadSidebarDockSide, next),
+          ),
+        })),
       setAppView: (next) => set((s) => ({ appView: resolveNext(s.appView, next) })),
       setViewMode: (next) => set((s) => ({ viewMode: resolveNext(s.viewMode, next) })),
       setCollapsedGroups: (next) => set((s) => ({ collapsedGroups: resolveNext(s.collapsedGroups, next) })),
@@ -1040,6 +1055,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         sidebarGroupingMode: state.sidebarGroupingMode,
         sidebarDensityMode: state.sidebarDensityMode,
         sidebarDockSide: state.sidebarDockSide,
+        assistantThreadSidebarDockSide: state.assistantThreadSidebarDockSide,
         appView: state.appView,
         viewMode: state.viewMode,
         collapsedGroups: state.collapsedGroups,
@@ -1134,6 +1150,9 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             persisted.sidebarDensityMode ?? currentState.sidebarDensityMode,
           ),
           sidebarDockSide: normalizeSidebarDockSide(persisted.sidebarDockSide ?? currentState.sidebarDockSide),
+          assistantThreadSidebarDockSide: normalizeSidebarDockSide(
+            persisted.assistantThreadSidebarDockSide ?? currentState.assistantThreadSidebarDockSide,
+          ),
           viewMode: normalizeViewMode(persisted.viewMode ?? currentState.viewMode),
           collapsedGroups: normalizeCollapsedGroups(persisted.collapsedGroups ?? currentState.collapsedGroups),
           sidebarGroupOrder: normalizeSidebarGroupOrder(

@@ -1,6 +1,6 @@
 import React from 'react';
 
-import { IconChatThread, IconPlus, IconSidebarCollapse, IconTrash } from '../app/icons';
+import { IconChatThread, IconPencil, IconPlus, IconSidebarCollapse, IconTrash } from '../app/icons';
 import {
   desktopAssistantVoiceControlLabel,
   desktopAssistantVoiceControlTitle,
@@ -17,12 +17,29 @@ import {
 } from './assistant-formatters';
 import type { AssistantPanelMode, AssistantThread } from './assistant-types';
 
+type AssistantThreadSidebarDockSide = 'left' | 'right';
+
+type AssistantThreadSidebarDockPreview = {
+  side: AssistantThreadSidebarDockSide;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
+function isAssistantThreadSidebarHeaderAction(target: EventTarget | null): boolean {
+  return target instanceof Element && Boolean(target.closest('button, input, select, textarea, a'));
+}
+
 export function AssistantThreadSidebar({
   threads,
   activeThreadId,
+  dockSide,
   mode,
   onCreateThread,
   onSelectThread,
+  onDockSideChange,
+  onRenameThread,
   onDeleteThread,
   onModeChange,
   onOpenPairing,
@@ -34,9 +51,12 @@ export function AssistantThreadSidebar({
 }: {
   threads: AssistantThread[];
   activeThreadId: string | null;
+  dockSide: AssistantThreadSidebarDockSide;
   mode: AssistantPanelMode;
   onCreateThread: () => void;
   onSelectThread: (thread: AssistantThread) => void;
+  onDockSideChange: (side: AssistantThreadSidebarDockSide) => void;
+  onRenameThread: (thread: AssistantThread, title: string) => Promise<void>;
   onDeleteThread: (thread: AssistantThread) => void;
   onModeChange: (mode: AssistantPanelMode) => void;
   onOpenPairing: () => void;
@@ -46,6 +66,13 @@ export function AssistantThreadSidebar({
   onStopDesktopVoice: () => void;
   onCollapse: () => void;
 }) {
+  const [renamingThreadId, setRenamingThreadId] = React.useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = React.useState('');
+  const [renameSaving, setRenameSaving] = React.useState(false);
+  const renameInputRef = React.useRef<HTMLInputElement>(null);
+  const dockDragStartXRef = React.useRef<number | null>(null);
+  const dockDragBoundsRef = React.useRef<DOMRect | null>(null);
+  const [dockDragPreview, setDockDragPreview] = React.useState<AssistantThreadSidebarDockPreview | null>(null);
   const voiceMode = mode === 'voice';
   const desktopVoiceActive = isDesktopAssistantVoiceActive(desktopVoiceStatus);
   const desktopVoiceBusy = isDesktopAssistantVoiceBusy(desktopVoiceStatus);
@@ -54,9 +81,109 @@ export function AssistantThreadSidebar({
   const desktopVoiceMainTitle = desktopAssistantVoiceControlTitle(desktopVoiceStatus);
   const desktopVoiceRealtimeAvailable = desktopVoiceStatus.realtime?.available === true;
   const desktopVoiceRealtimeEnabled = desktopVoiceStatus.realtime?.enabled === true;
+
+  const resolveDockPreview = React.useCallback((clientX: number): AssistantThreadSidebarDockPreview | null => {
+    const bounds = dockDragBoundsRef.current;
+    if (!bounds) return null;
+    const side: AssistantThreadSidebarDockSide = clientX > bounds.left + bounds.width / 2 ? 'right' : 'left';
+    const width = Math.min(208, bounds.width * 0.46);
+    return {
+      side,
+      left: side === 'right' ? bounds.right - width : bounds.left,
+      top: bounds.top,
+      width,
+      height: bounds.height,
+    };
+  }, []);
+
+  const finishDockDrag = React.useCallback((event: React.PointerEvent<HTMLDivElement>, commit: boolean) => {
+    const startX = dockDragStartXRef.current;
+    const finalPreview = resolveDockPreview(event.clientX);
+    if (commit && startX != null && Math.abs(event.clientX - startX) >= 8 && finalPreview) {
+      onDockSideChange(finalPreview.side);
+    }
+    dockDragStartXRef.current = null;
+    dockDragBoundsRef.current = null;
+    setDockDragPreview(null);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  }, [onDockSideChange, resolveDockPreview]);
+
+  React.useEffect(() => {
+    if (!renamingThreadId) return;
+    renameInputRef.current?.focus();
+    renameInputRef.current?.select();
+  }, [renamingThreadId]);
+
+  const beginRename = (thread: AssistantThread) => {
+    setRenameDraft(thread.title || 'Untitled thread');
+    setRenamingThreadId(thread.id);
+  };
+
+  const cancelRename = () => {
+    if (renameSaving) return;
+    setRenamingThreadId(null);
+    setRenameDraft('');
+  };
+
+  const commitRename = async (thread: AssistantThread) => {
+    const title = renameDraft.trim();
+    if (!title || title === thread.title) {
+      cancelRename();
+      return;
+    }
+    setRenameSaving(true);
+    try {
+      await onRenameThread(thread, title);
+      setRenamingThreadId(null);
+      setRenameDraft('');
+    } catch {
+      // The dock surfaces request errors; keep the editor open so the title can be retried.
+    } finally {
+      setRenameSaving(false);
+    }
+  };
   return (
-    <aside className="flex w-52 max-w-[46%] min-w-0 flex-shrink-0 flex-col border-r border-[var(--border)] bg-[rgba(0,0,0,.14)]">
-      <div className="flex h-11 flex-shrink-0 items-center gap-2 border-b border-[var(--border)] px-2">
+    <>
+      {dockDragPreview ? (
+        <div className="pointer-events-none fixed inset-0 z-[10000]" aria-hidden="true">
+          <div
+            className="absolute border border-[rgba(148,163,184,.32)] bg-[rgba(148,163,184,.10)] shadow-[inset_0_0_0_1px_rgba(255,255,255,.025)]"
+            style={{
+              left: dockDragPreview.left,
+              top: dockDragPreview.top,
+              width: dockDragPreview.width,
+              height: dockDragPreview.height,
+            }}
+          />
+        </div>
+      ) : null}
+      <aside
+        data-assistant-thread-sidebar="true"
+        data-dock-side={dockSide}
+        className={`flex w-52 max-w-[46%] min-w-0 flex-shrink-0 flex-col border-[var(--border)] bg-[rgba(0,0,0,.14)] ${dockSide === 'right' ? 'border-l' : 'border-r'}`}
+      >
+      <div
+        className={`flex h-11 flex-shrink-0 touch-none select-none items-center gap-2 border-b border-[var(--border)] px-2 ${dockDragPreview ? 'cursor-grabbing' : 'cursor-grab'}`}
+        title="Drag header to dock thread sidebar left or right"
+        onPointerDown={(event) => {
+          if (isAssistantThreadSidebarHeaderAction(event.target)) return;
+          const root = event.currentTarget.closest('[data-assistant-dock-root="true"]');
+          if (!(root instanceof HTMLElement)) return;
+          dockDragStartXRef.current = event.clientX;
+          dockDragBoundsRef.current = root.getBoundingClientRect();
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          const startX = dockDragStartXRef.current;
+          if (startX == null) return;
+          if (!dockDragPreview && Math.abs(event.clientX - startX) < 8) return;
+          setDockDragPreview(resolveDockPreview(event.clientX));
+        }}
+        onPointerUp={(event) => finishDockDrag(event, true)}
+        onPointerCancel={(event) => finishDockDrag(event, false)}
+      >
         <div className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--muted)]">
           {voiceMode ? (
             <svg
@@ -93,7 +220,7 @@ export function AssistantThreadSidebar({
           title="Hide thread sidebar"
           aria-label="Hide thread sidebar"
         >
-          <IconSidebarCollapse className="h-3.5 w-3.5" />
+          <IconSidebarCollapse className={`h-3.5 w-3.5 ${dockSide === 'right' ? 'rotate-180' : ''}`} />
         </button>
       </div>
       <div className="flex-shrink-0 border-b border-[var(--border-subtle)] p-2">
@@ -122,19 +249,19 @@ export function AssistantThreadSidebar({
                   key={thread.id}
                   className={`group relative rounded border transition-colors ${
                     active
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
+                      ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)]'
                       : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
                   }`}
                 >
                   <button
                     type="button"
                     onClick={() => onSelectThread(thread)}
-                    className="min-h-[58px] w-full min-w-0 px-2 py-1.5 pr-8 text-left"
+                    className="min-h-[64px] w-full min-w-0 px-2 py-1.5 text-left"
                     aria-current={active ? 'true' : undefined}
                   >
-                    <div className="flex min-w-0 items-center gap-1.5">
+                    <div className="flex min-w-0 items-start gap-1.5 pr-[4.4rem]">
                       <span
-                        className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${assistantThreadStatusTone(thread.status)}`}
+                        className={`mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full ${assistantThreadStatusTone(thread.status)}`}
                       />
                       <span
                         className={`min-w-0 flex-1 truncate text-[12px] font-semibold ${active ? 'text-[var(--fg)]' : 'text-[var(--fg-secondary)]'}`}
@@ -142,12 +269,10 @@ export function AssistantThreadSidebar({
                         {thread.title || 'Untitled thread'}
                       </span>
                     </div>
-                    <div className="mt-1 flex min-w-0 items-center gap-1.5 text-[10px] text-[var(--muted-dim)]">
+                    <div className="mt-2 flex min-w-0 items-center gap-1.5 pr-14 text-[10px] text-[var(--muted-dim)]">
                       <span className="truncate">
                         {assistantThreadStatusLabel(thread.status, 'idle')}
                       </span>
-                      <span aria-hidden="true">·</span>
-                      <span>{formatUpdatedAt(thread.updatedAt)}</span>
                       {messageCount > 0 ? (
                         <>
                           <span aria-hidden="true">·</span>
@@ -156,10 +281,48 @@ export function AssistantThreadSidebar({
                       ) : null}
                     </div>
                   </button>
+                  <span className="pointer-events-none absolute right-2 top-2 text-[9px] tabular-nums text-[var(--muted-dim)]">
+                    {formatUpdatedAt(thread.updatedAt)}
+                  </span>
+                  {renamingThreadId === thread.id ? (
+                    <form
+                      className="absolute inset-x-1.5 top-1.5 z-10"
+                      onSubmit={(event) => {
+                        event.preventDefault();
+                        void commitRename(thread);
+                      }}
+                    >
+                      <input
+                        ref={renameInputRef}
+                        value={renameDraft}
+                        maxLength={80}
+                        disabled={renameSaving}
+                        onChange={(event) => setRenameDraft(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            cancelRename();
+                          }
+                        }}
+                        onBlur={() => void commitRename(thread)}
+                        className="h-7 w-full rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-2 text-[11px] font-semibold text-[var(--fg)] outline-none focus:bg-[var(--panel)]"
+                        aria-label={`Rename ${thread.title || 'thread'}`}
+                      />
+                    </form>
+                  ) : null}
+                  <button
+                    type="button"
+                    onClick={() => beginRename(thread)}
+                    className="absolute bottom-1.5 right-8 flex h-6 w-6 items-center justify-center rounded text-[var(--muted-dim)] opacity-0 hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] group-hover:opacity-100 focus:opacity-100"
+                    title={`Rename ${thread.title || 'thread'}`}
+                    aria-label={`Rename ${thread.title || 'thread'}`}
+                  >
+                    <IconPencil className="h-3.5 w-3.5" />
+                  </button>
                   <button
                     type="button"
                     onClick={() => onDeleteThread(thread)}
-                    className="absolute right-1.5 top-1.5 flex h-6 w-6 items-center justify-center rounded text-[var(--muted-dim)] opacity-0 hover:bg-[rgba(255,90,90,.1)] hover:text-[var(--red)] group-hover:opacity-100 focus:opacity-100"
+                    className="absolute bottom-1.5 right-1.5 flex h-6 w-6 items-center justify-center rounded text-[var(--muted-dim)] opacity-0 hover:bg-[rgba(255,90,90,.1)] hover:text-[var(--red)] group-hover:opacity-100 focus:opacity-100"
                     title={`Delete ${thread.title || 'thread'}`}
                     aria-label={`Delete ${thread.title || 'thread'}`}
                   >
@@ -315,7 +478,7 @@ export function AssistantThreadSidebar({
           title={voiceMode ? 'Show standard assistant threads' : 'Show realtime assistant threads'}
           className={`flex min-h-[44px] w-full items-center justify-center gap-2 rounded border px-2 text-[10px] font-semibold uppercase tracking-wide transition-colors ${
             voiceMode
-              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_18px_rgba(167,139,250,.16)]'
+              ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
               : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
           }`}
           style={{ fontFamily: 'var(--display)' }}
@@ -361,6 +524,7 @@ export function AssistantThreadSidebar({
           </button>
         ) : null}
       </div>
-    </aside>
+      </aside>
+    </>
   );
 }

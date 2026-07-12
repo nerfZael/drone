@@ -12,6 +12,7 @@ describe('drone hub ui store migration', () => {
       {
         sidebarGroupingMode: 'repos',
         sidebarDockSide: 'right',
+        assistantThreadSidebarDockSide: 'right',
         autoDelete: true,
         showCanvasLastMessagePreviews: true,
         seenModelIds: ['gpt-5.4', 'o3'],
@@ -35,6 +36,7 @@ describe('drone hub ui store migration', () => {
     expect(migrated).toMatchObject({
       sidebarGroupingMode: 'repos',
       sidebarDockSide: 'right',
+      assistantThreadSidebarDockSide: 'right',
       autoDelete: true,
       showCanvasLastMessagePreviews: true,
       seenModelIds: ['gpt-5.4', 'o3'],
@@ -59,8 +61,9 @@ describe('drone hub ui store migration', () => {
   });
 
   test('normalizes invalid persisted sidebar dock sides to left', () => {
-    expect(migrateDroneHubUiPersistedState({ sidebarDockSide: 'floating' }, 13)).toMatchObject({
+    expect(migrateDroneHubUiPersistedState({ sidebarDockSide: 'floating', assistantThreadSidebarDockSide: 'floating' }, 13)).toMatchObject({
       sidebarDockSide: 'left',
+      assistantThreadSidebarDockSide: 'left',
     });
   });
 
