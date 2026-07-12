@@ -1,80 +1,99 @@
 import React from 'react';
 import type { AgentPlan } from '../types';
-import { IconCheck, IconSpinner } from './icons';
+import { IconCheck, IconChevron, IconSpinner } from './icons';
 
 const DEFAULT_VISIBLE_ITEMS = 8;
 
 export function AgentPlanList({ plan, running = false }: { plan?: AgentPlan; running?: boolean }) {
-  const [expanded, setExpanded] = React.useState(false);
+  const [planExpanded, setPlanExpanded] = React.useState(running);
+  const [stepsExpanded, setStepsExpanded] = React.useState(false);
   if (!plan?.items.length) return null;
   const completed = plan.items.filter((item) => item.status === 'completed').length;
   const hasHiddenItems = plan.items.length > DEFAULT_VISIBLE_ITEMS;
-  const visibleItems = expanded ? plan.items : plan.items.slice(0, DEFAULT_VISIBLE_ITEMS);
+  const showPlanItems = running || planExpanded;
+  const visibleItems = stepsExpanded ? plan.items : plan.items.slice(0, DEFAULT_VISIBLE_ITEMS);
 
   return (
     <section className="mt-2.5 border-t border-[var(--border-subtle)] pt-2.5" aria-label="Plan">
-      <div className="mb-2 flex items-center justify-between gap-3">
-        <span
-          className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-dim)]"
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          Plan
-        </span>
+      <div className={`${showPlanItems ? 'mb-2' : ''} flex items-center justify-between gap-3`}>
+        {running ? (
+          <span
+            className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-dim)]"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Plan
+          </span>
+        ) : (
+          <button
+            type="button"
+            onClick={() => setPlanExpanded((value) => !value)}
+            className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-dim)] transition-colors hover:text-[var(--accent)] focus-visible:text-[var(--accent)] focus-visible:outline-none"
+            style={{ fontFamily: 'var(--display)' }}
+            aria-expanded={planExpanded}
+          >
+            <IconChevron down={planExpanded} />
+            {planExpanded ? 'Hide plan' : 'Show plan'}
+          </button>
+        )}
         <span className="font-mono text-[9px] tabular-nums text-[var(--muted-dim)]">
           {completed}/{plan.items.length}
         </span>
       </div>
-      <ol className="space-y-1.5">
-        {visibleItems.map((item, index) => {
-          const done = item.status === 'completed';
-          const active = item.status === 'in_progress';
-          const cancelled = item.status === 'cancelled';
-          return (
-            <li
-              key={item.id || `${index}:${item.text}`}
-              className="grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2 text-[11px] leading-[1.45]"
-            >
-              <span className="mt-[1px] flex h-4 w-4 items-center justify-center" aria-hidden="true">
-                {done ? (
-                  <span className="flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-[rgba(80,210,160,.35)] bg-[rgba(80,210,160,.08)] text-[var(--green)]">
-                    <IconCheck className="h-2.5 w-2.5" />
+      {showPlanItems ? (
+        <>
+          <ol className="space-y-1.5">
+            {visibleItems.map((item, index) => {
+              const done = item.status === 'completed';
+              const active = item.status === 'in_progress';
+              const cancelled = item.status === 'cancelled';
+              return (
+                <li
+                  key={item.id || `${index}:${item.text}`}
+                  className="grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2 text-[11px] leading-[1.45]"
+                >
+                  <span className="mt-[1px] flex h-4 w-4 items-center justify-center" aria-hidden="true">
+                    {done ? (
+                      <span className="flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-[rgba(80,210,160,.35)] bg-[rgba(80,210,160,.08)] text-[var(--green)]">
+                        <IconCheck className="h-2.5 w-2.5" />
+                      </span>
+                    ) : active && running ? (
+                      <IconSpinner className="h-3.5 w-3.5 text-[var(--accent)]" />
+                    ) : active ? (
+                      <span className="h-2 w-2 rounded-full border border-[var(--accent)] bg-[var(--accent-subtle)]" />
+                    ) : (
+                      <span className={`h-2 w-2 rounded-full border ${cancelled ? 'border-[var(--muted-dim)] opacity-45' : 'border-[var(--accent-muted)]'}`} />
+                    )}
                   </span>
-                ) : active && running ? (
-                  <IconSpinner className="h-3.5 w-3.5 text-[var(--accent)]" />
-                ) : active ? (
-                  <span className="h-2 w-2 rounded-full border border-[var(--accent)] bg-[var(--accent-subtle)]" />
-                ) : (
-                  <span className={`h-2 w-2 rounded-full border ${cancelled ? 'border-[var(--muted-dim)] opacity-45' : 'border-[var(--accent-muted)]'}`} />
-                )}
-              </span>
-              <span
-                className={
-                  done
-                    ? 'break-words text-[var(--muted-dim)] line-through decoration-[rgba(148,163,184,.45)]'
-                    : cancelled
-                      ? 'break-words text-[var(--muted-dim)] line-through opacity-60'
-                      : active
-                        ? 'break-words font-medium text-[var(--fg)]'
-                        : 'break-words text-[var(--fg-secondary)]'
-                }
-              >
-                <span className="sr-only">{done ? 'Completed: ' : cancelled ? 'Cancelled: ' : active ? 'In progress: ' : 'Pending: '}</span>
-                {item.text}
-              </span>
-            </li>
-          );
-        })}
-      </ol>
-      {hasHiddenItems ? (
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          className="mt-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)] transition-colors hover:text-[var(--accent)] focus-visible:text-[var(--accent)] focus-visible:outline-none"
-          style={{ fontFamily: 'var(--display)' }}
-          aria-expanded={expanded}
-        >
-          {expanded ? 'Show fewer steps' : `Show ${plan.items.length - DEFAULT_VISIBLE_ITEMS} more`}
-        </button>
+                  <span
+                    className={
+                      done
+                        ? 'break-words text-[var(--muted-dim)] line-through decoration-[rgba(148,163,184,.45)]'
+                        : cancelled
+                          ? 'break-words text-[var(--muted-dim)] line-through opacity-60'
+                          : active
+                            ? 'break-words font-medium text-[var(--fg)]'
+                            : 'break-words text-[var(--fg-secondary)]'
+                    }
+                  >
+                    <span className="sr-only">{done ? 'Completed: ' : cancelled ? 'Cancelled: ' : active ? 'In progress: ' : 'Pending: '}</span>
+                    {item.text}
+                  </span>
+                </li>
+              );
+            })}
+          </ol>
+          {hasHiddenItems ? (
+            <button
+              type="button"
+              onClick={() => setStepsExpanded((value) => !value)}
+              className="mt-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)] transition-colors hover:text-[var(--accent)] focus-visible:text-[var(--accent)] focus-visible:outline-none"
+              style={{ fontFamily: 'var(--display)' }}
+              aria-expanded={stepsExpanded}
+            >
+              {stepsExpanded ? 'Show fewer steps' : `Show ${plan.items.length - DEFAULT_VISIBLE_ITEMS} more`}
+            </button>
+          ) : null}
+        </>
       ) : null}
     </section>
   );
