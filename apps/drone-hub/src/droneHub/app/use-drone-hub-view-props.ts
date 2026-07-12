@@ -844,17 +844,11 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     noDroneSelectedStateProps: {
       dronesLoading,
       sidebarDroneCount: sidebarDrones.length,
-      sidebarDrones,
       dronesError,
-      unreadAgentMessageByChatNodeId,
-      queuedPromptsByDroneChat,
-      removeQueuedPrompt,
       onOpenDraftChatComposer: openDraftChatComposer,
       onOpenCreateModal: openCreateModal,
       onOpenKanbanBoard: openKanbanBoard,
       onOpenPlaybookRuns: openPlaybookRuns,
-      onSelectDrone: selectDroneCard,
-      onSelectDroneChat: selectDroneChat,
     },
     renderPersistentPreviewContent,
     selectedDroneWorkspaceProps: currentDrone
