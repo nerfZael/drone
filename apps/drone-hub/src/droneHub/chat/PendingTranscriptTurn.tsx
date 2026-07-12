@@ -9,17 +9,9 @@ import { RelativeTimeText } from './RelativeTimeText';
 import { IconBot, IconCopy, IconUser, TypingDots } from './icons';
 import { AgentPlanList } from './AgentPlanList';
 
-const MANUAL_UNSTICK_STALE_MS = 2 * 60_000;
-
-function parseTimeMs(raw: string | undefined): number | null {
-  const ms = Date.parse(String(raw ?? ''));
-  return Number.isFinite(ms) ? ms : null;
-}
-
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
   showRoleIcons = true,
-  onRequestUnstick,
   onCancelQueued,
   onOpenFileReference,
   onOpenLink,
@@ -27,12 +19,9 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   droneHomePath,
   cancelBusy = false,
   cancelError = null,
-  unstickBusy = false,
-  unstickError = null,
 }: {
   item: PendingPrompt;
   showRoleIcons?: boolean;
-  onRequestUnstick?: (promptId: string) => Promise<void> | void;
   onCancelQueued?: (promptId: string) => Promise<void> | void;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
@@ -40,8 +29,6 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   droneHomePath?: string;
   cancelBusy?: boolean;
   cancelError?: string | null;
-  unstickBusy?: boolean;
-  unstickError?: string | null;
 }) {
   const [copiedToastRole, setCopiedToastRole] = React.useState<'user' | 'agent' | null>(null);
   const copiedToastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -59,21 +46,6 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   const isStopped =
     isFailed && /stopped by user|stopped before submission|stopped because the drone was archived|stopped because the drone was deleted/i.test(String(item.error ?? ''));
   const badgeLabel = isStopped ? 'Stopped' : isFailed ? 'Failed' : item.state === 'queued' ? 'Queued' : 'Pending';
-  const activeAtMs = parseTimeMs(item.updatedAt ?? item.at);
-  const [nowMs, setNowMs] = React.useState(() => Date.now());
-  React.useEffect(() => {
-    if (!onRequestUnstick || isFailed || (item.state !== 'sending' && item.state !== 'sent')) return;
-    const timer = window.setInterval(() => {
-      setNowMs(Date.now());
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [isFailed, item.state, onRequestUnstick]);
-  const ageMs = activeAtMs == null ? 0 : Math.max(0, nowMs - activeAtMs);
-  const canRequestUnstick =
-    !isFailed &&
-    (item.state === 'sending' || item.state === 'sent') &&
-    ageMs >= MANUAL_UNSTICK_STALE_MS &&
-    Boolean(onRequestUnstick);
   const canCancelQueued = item.state === 'queued' && !item.automation && Boolean(onCancelQueued);
   const showAgentPendingBubble = !(item.state === 'queued' && !isFailed);
   const userCopyText = String(promptText ?? '');
@@ -280,30 +252,6 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
                     </div>
                   ) : null}
                   <AgentPlanList plan={item.agentPlan} running />
-                  {canRequestUnstick ? (
-                    <div className="mt-2 pt-2 border-t border-[var(--border-subtle)] flex items-center justify-between gap-2">
-                      <span className="text-[10px] text-[var(--muted-dim)]">Still waiting for agent completion.</span>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          void onRequestUnstick?.(item.id);
-                        }}
-                        disabled={unstickBusy}
-                        className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
-                          unstickBusy
-                            ? 'opacity-50 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)]'
-                            : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                        }`}
-                        style={{ fontFamily: 'var(--display)' }}
-                        title="Force-finalize this stuck prompt"
-                      >
-                        {unstickBusy ? 'Unsticking...' : 'Unstick'}
-                      </button>
-                    </div>
-                  ) : null}
-                  {unstickError ? (
-                    <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap">{stripAnsi(unstickError)}</div>
-                  ) : null}
                   {cancelError ? (
                     <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap">{stripAnsi(cancelError)}</div>
                   ) : null}

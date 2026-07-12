@@ -135,7 +135,7 @@ export function CollapsibleMarkdown({
     setCollapsed(isLong);
   }, [isLong, text]);
 
-  const canToggleByPointer = toggleOnMessageClick && isLong;
+  const canExpandByPointer = toggleOnMessageClick && isLong && collapsed;
   const clearPendingPointerToggle = React.useCallback(() => {
     if (pointerToggleTimerRef.current == null) return;
     clearTimeout(pointerToggleTimerRef.current);
@@ -150,7 +150,7 @@ export function CollapsibleMarkdown({
   const handlePointerDown = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
       clearPendingPointerToggle();
-      if (!canToggleByPointer) return;
+      if (!canExpandByPointer) return;
       if (event.pointerType === 'mouse' && event.button !== 0) {
         pointerDownRef.current = null;
         return;
@@ -163,11 +163,11 @@ export function CollapsibleMarkdown({
         pointerId: event.pointerId,
       };
     },
-    [canToggleByPointer, clearPendingPointerToggle],
+    [canExpandByPointer, clearPendingPointerToggle],
   );
   const handlePointerUp = React.useCallback(
     (event: React.PointerEvent<HTMLDivElement>) => {
-      if (!canToggleByPointer) return;
+      if (!canExpandByPointer) return;
       const down = pointerDownRef.current;
       pointerDownRef.current = null;
       if (!down || down.pointerId !== event.pointerId) return;
@@ -181,10 +181,10 @@ export function CollapsibleMarkdown({
 
       pointerToggleTimerRef.current = setTimeout(() => {
         pointerToggleTimerRef.current = null;
-        setCollapsed((v) => !v);
+        setCollapsed(false);
       }, POINTER_TOGGLE_DELAY_MS);
     },
-    [canToggleByPointer],
+    [canExpandByPointer],
   );
   const handlePointerCancel = React.useCallback(() => {
     pointerDownRef.current = null;
@@ -198,7 +198,7 @@ export function CollapsibleMarkdown({
 
   return (
     <div
-      className={`relative ${canToggleByPointer ? 'dh-collapsible-markdown--click-toggle' : ''}`}
+      className={`relative ${canExpandByPointer ? 'dh-collapsible-markdown--click-toggle' : ''}`}
       onPointerDown={handlePointerDown}
       onPointerUp={handlePointerUp}
       onPointerCancel={handlePointerCancel}
