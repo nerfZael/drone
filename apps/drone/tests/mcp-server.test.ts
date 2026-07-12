@@ -73,6 +73,7 @@ describe('Drone Hub MCP principal authorization', () => {
     expect(() => authorizeDroneHubMcpTool(assistant, 'rename_drones', {
       renames: [{ drone: 'drone-b', newName: 'Nope' }],
     })).toThrow('not authorized');
+    expect(() => authorizeDroneHubMcpTool(assistant, 'create_drone', { name: 'New draft', draft: true })).not.toThrow();
   });
 
 });
@@ -123,6 +124,58 @@ describe('Drone Hub assistant MCP transport', () => {
       const displayedMcpNames = ASSISTANT_TOOL_SUMMARIES.filter((tool) => tool.group?.kind === 'mcp' && tool.group.id === 'drone-hub').map((tool) => tool.name).sort();
       expect(displayedMcpNames).toEqual(catalogNames);
       await client.close();
+    });
+  });
+
+  test('returns draft drone creation immediately without polling for readiness', async () => {
+    await withTempDroneDataDir('drone-assistant-mcp-draft-', async () => {
+      const previousBaseUrl = process.env.DRONE_HUB_BASE_URL;
+      const previousToken = process.env.DRONE_TOKEN;
+      const previousFetch = globalThis.fetch;
+      const requests: Array<{ pathname: string; method: string; body?: any }> = [];
+      globalThis.fetch = (async (input, init) => {
+        const url = new URL(typeof input === 'string' ? input : input instanceof URL ? input : input.url);
+        const method = String(init?.method ?? 'GET').toUpperCase();
+        const body = method === 'POST' && typeof init?.body === 'string' ? JSON.parse(init.body) : undefined;
+        requests.push({ pathname: url.pathname, method, ...(body === undefined ? {} : { body }) });
+        if (url.pathname === '/api/settings/ui-preferences') {
+          return Response.json({ ok: false, error: 'not found' }, { status: 404 });
+        }
+        if (url.pathname === '/api/drones' && method === 'POST') {
+          return Response.json({ ok: true, id: 'draft-1', name: 'New draft', runtime: 'container', phase: 'draft', draft: true }, { status: 201 });
+        }
+        return Response.json({ ok: false, error: 'unexpected request' }, { status: 500 });
+      }) as typeof fetch;
+      process.env.DRONE_HUB_BASE_URL = 'http://drone-hub.test';
+      process.env.DRONE_TOKEN = 'assistant-test-token';
+      let client: Awaited<ReturnType<typeof createInProcessDroneHubMcpClient>> | null = null;
+      try {
+        client = await createInProcessDroneHubMcpClient({
+          correlationId: 'thread-draft',
+          allowedDroneRefs: [],
+          allowedWriteDroneRefs: [],
+          allowedDroneIds: [],
+        });
+        const result = await client.callTool({ name: 'create_drone', arguments: { name: 'New draft', draft: true } });
+        expect(result.structuredContent).toMatchObject({
+          ok: true,
+          phase: 'draft',
+          drone: { id: 'draft-1', name: 'New draft', status: 'draft' },
+          raw: { draft: true, phase: 'draft' },
+        });
+        expect(requests.map((request) => `${request.method} ${request.pathname}`)).toEqual([
+          'GET /api/settings/ui-preferences',
+          'POST /api/drones',
+        ]);
+        expect(requests[1]?.body).toMatchObject({ name: 'New draft', runtime: 'container', draft: true });
+      } finally {
+        await client?.close();
+        globalThis.fetch = previousFetch;
+        if (previousBaseUrl == null) delete process.env.DRONE_HUB_BASE_URL;
+        else process.env.DRONE_HUB_BASE_URL = previousBaseUrl;
+        if (previousToken == null) delete process.env.DRONE_TOKEN;
+        else process.env.DRONE_TOKEN = previousToken;
+      }
     });
   });
 });

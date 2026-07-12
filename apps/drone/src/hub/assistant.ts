@@ -2889,7 +2889,7 @@ export class HubAssistantService {
     const accessScope = this.activeAccessScope(threadId);
     const readScope = describeAssistantAccessMode(accessScope.readMode, accessScope.droneIds);
     const writeScope = describeAssistantAccessMode(accessScope.writeMode, accessScope.droneIds);
-    const scopeText = `Current access scope: read=${readScope}; write=${writeScope}. Do not claim read or write access outside those scopes.`;
+    const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}. Do not claim access to existing drones outside those scopes. This scope does not restrict enabled global creation tools such as create_drone, clone_drone, or create_group.`;
     const basePrompt = normalizeAssistantSystemPrompt(thread?.systemPrompt) || (thread ? this.defaultSystemPromptForThread(thread) : this.defaultSystemPrompt);
     return [basePrompt, scopeText].join('\n\n');
   }

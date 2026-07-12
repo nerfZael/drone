@@ -1285,7 +1285,7 @@ function registerTools(server: McpServer) {
 
   server.registerTool('create_drone', {
     title: 'Create drone',
-    description: 'Create a new Drone Hub container drone. Returns when ready unless completion is accepted.',
+    description: 'Create a new Drone Hub container drone. Drafts return immediately; other drones return when ready unless completion is accepted.',
     inputSchema: {
       name: z.string(),
       group: z.string().optional(),
@@ -1328,10 +1328,11 @@ function registerTools(server: McpServer) {
     };
     const response = await requestJson('/api/drones', { method: 'POST', body: JSON.stringify(body) }, 30_000);
     const accepted = droneSummary({ ...body, ...response });
-    const drone = args.completion === 'accepted'
+    const returnsImmediately = args.draft === true || args.completion === 'accepted';
+    const drone = returnsImmediately
       ? accepted
       : await waitForMcpDroneReady(cleanString(response?.id || response?.name, accepted.id || accepted.name));
-    return toolResult({ ok: true, phase: args.completion === 'accepted' ? 'accepted' : 'ready', drone, raw: response, createDefaults: defaults, repo: resolvedRepo });
+    return toolResult({ ok: true, phase: args.draft === true ? 'draft' : returnsImmediately ? 'accepted' : 'ready', drone, raw: response, createDefaults: defaults, repo: resolvedRepo });
   });
 
   server.registerTool('clone_drone', {

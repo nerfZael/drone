@@ -10,6 +10,22 @@ function makeAssistantService(): HubAssistantService {
 }
 
 describe('assistant system prompt settings', () => {
+  test('explains that existing-drone scope does not block global drone creation', async () => {
+    await withTempDroneDataDir('assistant-global-create-scope-', async () => {
+      const service = makeAssistantService();
+      const snapshot = await service.createThread({ title: 'create scope' });
+      await service.updateAccessScope({
+        threadId: snapshot.activeThreadId,
+        readMode: 'all',
+        writeMode: 'selected',
+        droneIds: [],
+      });
+      const prompt = service.resolvedSystemPrompt(snapshot.activeThreadId);
+      expect(prompt).toContain('Current existing-drone access scope: read=all drones; write=no selected drones.');
+      expect(prompt).toContain('This scope does not restrict enabled global creation tools such as create_drone, clone_drone, or create_group.');
+    });
+  });
+
   test('advertises the complete grouped tool catalog without legacy aliases', () => {
     const names = ASSISTANT_TOOL_SUMMARIES.map((tool) => tool.name);
     for (const name of ['list_targets', 'set_target', 'get_working_tree_status', 'delete_file', 'create_directory', 'delete_directory', 'move_path']) expect(names).toContain(name);

@@ -12,7 +12,6 @@ import {
 } from './desktop-assistant-voice';
 import {
   assistantThreadStatusLabel,
-  assistantThreadStatusTone,
   formatUpdatedAt,
 } from './assistant-formatters';
 import type { AssistantPanelMode, AssistantThread } from './assistant-types';
@@ -256,34 +255,34 @@ export function AssistantThreadSidebar({
                   <button
                     type="button"
                     onClick={() => onSelectThread(thread)}
-                    className="min-h-[64px] w-full min-w-0 px-2 py-1.5 text-left"
+                    className="min-h-[50px] w-full min-w-0 px-2 py-2 text-left"
                     aria-current={active ? 'true' : undefined}
+                    title={thread.title || 'Untitled thread'}
                   >
-                    <div className="flex min-w-0 items-start gap-1.5 pr-[4.4rem]">
-                      <span
-                        className={`mt-1 h-1.5 w-1.5 flex-shrink-0 rounded-full ${assistantThreadStatusTone(thread.status)}`}
-                      />
-                      <span
-                        className={`min-w-0 flex-1 truncate text-[12px] font-semibold ${active ? 'text-[var(--fg)]' : 'text-[var(--fg-secondary)]'}`}
-                      >
-                        {thread.title || 'Untitled thread'}
-                      </span>
+                    <div
+                      className={`truncate text-[12px] font-semibold ${active ? 'text-[var(--fg)]' : 'text-[var(--fg-secondary)]'}`}
+                    >
+                      {thread.title || 'Untitled thread'}
                     </div>
-                    <div className="mt-2 flex min-w-0 items-center gap-1.5 pr-14 text-[10px] text-[var(--muted-dim)]">
-                      <span className="truncate">
-                        {assistantThreadStatusLabel(thread.status, 'idle')}
+                    <div className="mt-1 flex min-w-0 items-center justify-between gap-2 text-[10px] text-[var(--muted-dim)]">
+                      <span className="flex min-w-0 items-center gap-1.5">
+                        <span className="truncate">
+                          {assistantThreadStatusLabel(thread.status, 'idle')}
+                        </span>
+                        {messageCount > 0 ? (
+                          <>
+                            <span aria-hidden="true">·</span>
+                            <span>{messageCount}</span>
+                          </>
+                        ) : null}
                       </span>
-                      {messageCount > 0 ? (
-                        <>
-                          <span aria-hidden="true">·</span>
-                          <span>{messageCount}</span>
-                        </>
-                      ) : null}
+                      <span
+                        className="flex-shrink-0 tabular-nums transition-opacity group-hover:opacity-0"
+                      >
+                        {formatUpdatedAt(thread.updatedAt)}
+                      </span>
                     </div>
                   </button>
-                  <span className="pointer-events-none absolute right-2 top-2 text-[9px] tabular-nums text-[var(--muted-dim)]">
-                    {formatUpdatedAt(thread.updatedAt)}
-                  </span>
                   {renamingThreadId === thread.id ? (
                     <form
                       className="absolute inset-x-1.5 top-1.5 z-10"
@@ -313,7 +312,7 @@ export function AssistantThreadSidebar({
                   <button
                     type="button"
                     onClick={() => beginRename(thread)}
-                    className="absolute bottom-1.5 right-8 flex h-6 w-6 items-center justify-center rounded text-[var(--muted-dim)] opacity-0 hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] group-hover:opacity-100 focus:opacity-100"
+                    className="absolute bottom-1 right-7 flex h-6 w-6 items-center justify-center rounded bg-[var(--panel-alt)] text-[var(--muted-dim)] opacity-0 hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] group-hover:opacity-100 focus:opacity-100"
                     title={`Rename ${thread.title || 'thread'}`}
                     aria-label={`Rename ${thread.title || 'thread'}`}
                   >
@@ -322,7 +321,7 @@ export function AssistantThreadSidebar({
                   <button
                     type="button"
                     onClick={() => onDeleteThread(thread)}
-                    className="absolute bottom-1.5 right-1.5 flex h-6 w-6 items-center justify-center rounded text-[var(--muted-dim)] opacity-0 hover:bg-[rgba(255,90,90,.1)] hover:text-[var(--red)] group-hover:opacity-100 focus:opacity-100"
+                    className="absolute bottom-1 right-1 flex h-6 w-6 items-center justify-center rounded bg-[var(--panel-alt)] text-[var(--muted-dim)] opacity-0 hover:bg-[rgba(255,90,90,.1)] hover:text-[var(--red)] group-hover:opacity-100 focus:opacity-100"
                     title={`Delete ${thread.title || 'thread'}`}
                     aria-label={`Delete ${thread.title || 'thread'}`}
                   >

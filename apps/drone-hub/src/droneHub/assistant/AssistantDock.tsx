@@ -2284,7 +2284,7 @@ export function AssistantDock() {
       >
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
           <div className="mr-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-            Access
+            Existing drones
           </div>
           <div className="flex flex-shrink-0 items-center gap-1">
             <ScopeModeControl label="R" mode={scopeReadMode} onChange={updateScopeReadMode} />
@@ -2294,8 +2294,8 @@ export function AssistantDock() {
             {scopeDrones.length === 0 ? (
               <div className="truncate text-[10px] text-[var(--muted-dim)]">
                 {scopeReadMode === 'selected' || scopeWriteMode === 'selected'
-                  ? 'No selected drones. Drop drones here to allow access.'
-                  : 'Drop drones here to limit access.'}
+                  ? 'No selected drones. Drop drones here to allow existing-drone access.'
+                  : 'Drop drones here to limit existing-drone access.'}
               </div>
             ) : (
               <div className="flex min-w-0 gap-1 overflow-x-auto no-scrollbar">

@@ -26,7 +26,7 @@ export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
 export const DEFAULT_CODEX_MODEL = 'gpt-5.6-sol';
 export const DEFAULT_THREAD_TITLE = 'New thread';
 export const ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX =
-  'Current access scope is appended at run time. The assistant must not claim read or write access outside that scope.';
+  'Current existing-drone access scope is appended at run time. It limits operations that target existing drones; enabled global creation tools are governed separately.';
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY =
   'When you send a drone chat message and need the result later, call subscribe_to_chats_idle on the target chat. This returns immediately so you can continue other work. If there is nothing else to do, end your turn; the system will resume this thread when the subscribed chats become idle.';
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
@@ -56,7 +56,7 @@ export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Chat timelines contain user messages and agent messages. Queued or pending user messages appear in the same timeline with a non-completed status.',
   ASSISTANT_CHAT_IDLE_PROMPT_LINE,
   'Do not load more chat pages than needed. Start with the latest page.',
-  'Creating or cloning drones, creating chats, creating groups, opening chats, highlighting drones, and reordering the sidebar do not require approval. Assistant-created drones must use the container (Docker) runtime. Renaming drones, changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
+  'Creating or cloning drones, creating chats, creating groups, opening chats, highlighting drones, and reordering the sidebar do not require approval. Creating or cloning a drone and creating a group are global operations: when their tools are enabled, existing-drone read/write scope does not block them. Assistant-created drones must use the container (Docker) runtime. Renaming drones, changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
   'File write tools require write access to the target drone and should be used carefully for concrete code or content edits.',
   'If an approval-gated write tool returns successfully, the user already approved that action. Do not ask for the same approval again.',
   'Realtime threads can use speak to send short spoken replies back to the voice device that started the request.',
