@@ -889,6 +889,8 @@ function codexAuthFilePath(): string {
   return path.join(os.homedir(), '.codex', 'auth.json');
 }
 
+const CODEX_AUTH_TRANSFER_MAX_BYTES = 128 * 1024;
+
 function decodeJwtPayload(token: string): any | null {
   try {
     const parts = String(token ?? '').split('.');
@@ -927,6 +929,40 @@ function codexCredentialsFromAuthJson(parsed: any): {
     lastRefresh,
     expires: codexAccessTokenExpiresAt(access),
   };
+}
+
+export async function readCodexCliAuthJsonForTransfer(): Promise<string | null> {
+  try {
+    const authJson = await fs.readFile(codexAuthFilePath(), 'utf8');
+    if (Buffer.byteLength(authJson) > CODEX_AUTH_TRANSFER_MAX_BYTES) return null;
+    if (!codexCredentialsFromAuthJson(JSON.parse(authJson))) return null;
+    return authJson;
+  } catch {
+    return null;
+  }
+}
+
+export async function installCodexCliAuthJsonFromTransfer(authJson: string): Promise<void> {
+  if (Buffer.byteLength(authJson) > CODEX_AUTH_TRANSFER_MAX_BYTES)
+    throw new Error('Codex credential file is too large.');
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(authJson);
+  } catch {
+    throw new Error('Codex credential file is not valid JSON.');
+  }
+  if (!codexCredentialsFromAuthJson(parsed))
+    throw new Error('Codex credential file does not contain a usable login.');
+  const authPath = codexAuthFilePath();
+  await fs.mkdir(path.dirname(authPath), { recursive: true });
+  const temporaryPath = `${authPath}.${crypto.randomUUID()}.tmp`;
+  try {
+    await fs.writeFile(temporaryPath, JSON.stringify(parsed, null, 2), { mode: 0o600 });
+    await fs.rename(temporaryPath, authPath);
+  } finally {
+    await fs.rm(temporaryPath, { force: true }).catch(() => {});
+  }
+  await fs.chmod(authPath, 0o600).catch(() => {});
 }
 
 async function refreshCodexCliAuthFile(authPath: string, parsed: any, refreshToken: string): Promise<{ apiKey: string; updatedAt: string | null }> {

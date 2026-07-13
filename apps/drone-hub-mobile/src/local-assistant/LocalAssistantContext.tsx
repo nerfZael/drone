@@ -1,0 +1,239 @@
+import React from 'react';
+import * as Crypto from 'expo-crypto';
+import { useMesh } from '../mesh/MeshContext';
+import { readLocalAssistantApiKey, loadLocalAssistantSettings } from './local-assistant-settings';
+import {
+  boundLocalAssistantMessages,
+  loadLocalAssistantThreads,
+  saveLocalAssistantThreads,
+} from './local-assistant-storage';
+import type {
+  LocalAssistantMessage,
+  LocalAssistantThread,
+  LocalWorkspaceTarget,
+} from './local-assistant-types';
+import { runOpenAiChat } from './openai-chat-client';
+import { executeWorkspaceTool, workspaceToolsForThread } from './workspace-tools';
+
+type LocalAssistantContextValue = {
+  threads: LocalAssistantThread[];
+  activeThreadId: string;
+  loading: boolean;
+  runningThreadId: string | null;
+  error: string | null;
+  selectThread(threadId: string): void;
+  createThread(title?: string): Promise<LocalAssistantThread>;
+  deleteThread(threadId: string): Promise<void>;
+  updateThread(
+    threadId: string,
+    patch: { title?: string; workspaceTarget?: LocalWorkspaceTarget | null },
+  ): Promise<void>;
+  sendPrompt(threadId: string, prompt: string): Promise<void>;
+  stop(threadId: string): void;
+};
+
+const LocalAssistantContext = React.createContext<LocalAssistantContextValue | null>(null);
+
+function userMessage(prompt: string): LocalAssistantMessage {
+  return {
+    id: Crypto.randomUUID(),
+    createdAt: new Date().toISOString(),
+    role: 'user',
+    content: prompt,
+  };
+}
+
+export function LocalAssistantProvider({ children }: { children: React.ReactNode }) {
+  const mesh = useMesh();
+  const [threads, setThreads] = React.useState<LocalAssistantThread[]>([]);
+  const [activeThreadId, setActiveThreadId] = React.useState('');
+  const [loading, setLoading] = React.useState(true);
+  const [runningThreadId, setRunningThreadId] = React.useState<string | null>(null);
+  const [error, setError] = React.useState<string | null>(null);
+  const threadsRef = React.useRef<LocalAssistantThread[]>([]);
+  const abortRef = React.useRef<{ threadId: string; controller: AbortController } | null>(null);
+
+  const replaceThreads = React.useCallback(async (next: LocalAssistantThread[]) => {
+    threadsRef.current = next;
+    setThreads(next);
+    await saveLocalAssistantThreads(next);
+  }, []);
+
+  const replaceThread = React.useCallback(
+    async (nextThread: LocalAssistantThread) => {
+      const next = threadsRef.current.map((thread) =>
+        thread.id === nextThread.id ? nextThread : thread,
+      );
+      await replaceThreads(next);
+    },
+    [replaceThreads],
+  );
+
+  React.useEffect(() => {
+    let active = true;
+    void loadLocalAssistantThreads()
+      .then((stored) => {
+        if (!active) return;
+        threadsRef.current = stored;
+        setThreads(stored);
+        setActiveThreadId(stored[0]?.id ?? '');
+      })
+      .catch((nextError) => active && setError(nextError?.message ?? String(nextError)))
+      .finally(() => active && setLoading(false));
+    return () => {
+      active = false;
+      abortRef.current?.controller.abort();
+    };
+  }, []);
+
+  const createThread = React.useCallback(
+    async (title = '') => {
+      const settings = await loadLocalAssistantSettings();
+      const now = new Date().toISOString();
+      const thread: LocalAssistantThread = {
+        id: `mobile_thread_${Crypto.randomUUID()}`,
+        title: title.trim().slice(0, 160) || `Phone thread ${threadsRef.current.length + 1}`,
+        createdAt: now,
+        updatedAt: now,
+        model: settings.model,
+        status: 'idle',
+        error: null,
+        workspaceTarget: null,
+        messages: [],
+      };
+      await replaceThreads([thread, ...threadsRef.current]);
+      setActiveThreadId(thread.id);
+      return thread;
+    },
+    [replaceThreads],
+  );
+
+  const deleteThread = React.useCallback(
+    async (threadId: string) => {
+      if (abortRef.current?.threadId === threadId) abortRef.current.controller.abort();
+      const next = threadsRef.current.filter((thread) => thread.id !== threadId);
+      await replaceThreads(next);
+      setActiveThreadId((current) => (current === threadId ? (next[0]?.id ?? '') : current));
+    },
+    [replaceThreads],
+  );
+
+  const updateThread = React.useCallback(
+    async (
+      threadId: string,
+      patch: { title?: string; workspaceTarget?: LocalWorkspaceTarget | null },
+    ) => {
+      const current = threadsRef.current.find((thread) => thread.id === threadId);
+      if (!current) return;
+      await replaceThread({
+        ...current,
+        ...(patch.title !== undefined ? { title: patch.title.trim().slice(0, 160) } : {}),
+        ...(patch.workspaceTarget !== undefined ? { workspaceTarget: patch.workspaceTarget } : {}),
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    [replaceThread],
+  );
+
+  const sendPrompt = React.useCallback(
+    async (threadId: string, rawPrompt: string) => {
+      const prompt = rawPrompt.trim();
+      if (!prompt) return;
+      if (abortRef.current) throw new Error('Another phone assistant run is already active');
+      const current = threadsRef.current.find((thread) => thread.id === threadId);
+      if (!current) throw new Error('Local assistant thread was not found');
+      const [apiKey, settings] = await Promise.all([
+        readLocalAssistantApiKey(),
+        loadLocalAssistantSettings(),
+      ]);
+      if (!apiKey) throw new Error('Add an OpenAI API key in Settings before sending a prompt');
+      if (!mesh.identity) throw new Error('Phone device identity is not ready');
+
+      setError(null);
+      const controller = new AbortController();
+      abortRef.current = { threadId, controller };
+      setRunningThreadId(threadId);
+      let running: LocalAssistantThread = {
+        ...current,
+        model: settings.model,
+        status: 'running',
+        error: null,
+        updatedAt: new Date().toISOString(),
+        messages: [...current.messages, userMessage(prompt)],
+      };
+      await replaceThread(running);
+      try {
+        const messages = await runOpenAiChat({
+          apiKey,
+          model: settings.model,
+          thread: running,
+          tools: workspaceToolsForThread(running),
+          signal: controller.signal,
+          executeTool: async (name, args) =>
+            await executeWorkspaceTool({
+              thread: running,
+              phoneDeviceId: mesh.identity!.id,
+              name,
+              args,
+              request: mesh.request,
+            }),
+          onMessages: async (messages) => {
+            running = {
+              ...running,
+              messages: boundLocalAssistantMessages(messages),
+              updatedAt: new Date().toISOString(),
+            };
+            await replaceThread(running);
+          },
+        });
+        running = {
+          ...running,
+          messages: boundLocalAssistantMessages(messages),
+          status: 'idle',
+          error: null,
+          updatedAt: new Date().toISOString(),
+        };
+        await replaceThread(running);
+      } catch (nextError: any) {
+        const stopped = controller.signal.aborted;
+        running = {
+          ...running,
+          status: stopped ? 'idle' : 'error',
+          error: stopped ? null : (nextError?.message ?? String(nextError)),
+          updatedAt: new Date().toISOString(),
+        };
+        await replaceThread(running);
+        if (!stopped) throw nextError;
+      } finally {
+        if (abortRef.current?.controller === controller) abortRef.current = null;
+        setRunningThreadId((value) => (value === threadId ? null : value));
+      }
+    },
+    [mesh.identity, mesh.request, replaceThread],
+  );
+
+  const stop = React.useCallback((threadId: string) => {
+    if (abortRef.current?.threadId === threadId) abortRef.current.controller.abort();
+  }, []);
+
+  const value: LocalAssistantContextValue = {
+    threads,
+    activeThreadId,
+    loading,
+    runningThreadId,
+    error,
+    selectThread: setActiveThreadId,
+    createThread,
+    deleteThread,
+    updateThread,
+    sendPrompt,
+    stop,
+  };
+  return <LocalAssistantContext.Provider value={value}>{children}</LocalAssistantContext.Provider>;
+}
+
+export function useLocalAssistant(): LocalAssistantContextValue {
+  const value = React.useContext(LocalAssistantContext);
+  if (!value) throw new Error('useLocalAssistant must be used inside LocalAssistantProvider');
+  return value;
+}

@@ -1,4 +1,7 @@
 import type { DraftChatAttachment } from '../chat/chat-input-attachments';
+import type { AssistantDroneNameMap, AssistantMessage } from '@drone/assistant-chat';
+
+export type { AssistantDroneNameMap, AssistantMessage } from '@drone/assistant-chat';
 
 export type AssistantThreadStatus =
   | 'idle'
@@ -6,26 +9,6 @@ export type AssistantThreadStatus =
   | 'waiting_for_approval'
   | 'waiting_for_chats_idle'
   | 'error';
-
-export type AssistantMessage = {
-  role: 'user' | 'assistant' | 'toolResult';
-  content?:
-    | string
-    | Array<{
-        type: string;
-        text?: string;
-        thinking?: string;
-        name?: string;
-        arguments?: any;
-        id?: string;
-        data?: string;
-        mimeType?: string;
-      }>;
-  toolName?: string;
-  toolCallId?: string;
-  isError?: boolean;
-  errorMessage?: string;
-};
 
 export type AssistantProviderId = 'openai' | 'gemini' | 'codex';
 export type AssistantPromptDeliveryMode = 'queue' | 'asap';
@@ -226,4 +209,3 @@ export type AssistantDraftAttachment =
   | AssistantDraftTextAttachment
   | AssistantDraftFileAttachment;
 export type AssistantDroneReference = { id: string; name: string };
-export type AssistantDroneNameMap = Record<string, string>;
