@@ -7,6 +7,7 @@ import { createDeviceMeshService } from '../src/hub/device-mesh';
 
 type TestHub = {
   url: string;
+  ingressUrl: string;
   token: string;
   close(): Promise<void>;
 };
@@ -36,12 +37,19 @@ async function startHub(): Promise<TestHub> {
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('test Hub did not bind');
   url = `http://127.0.0.1:${address.port}`;
-  service.start();
+  await service.start();
+  const ingress = await adminJson({ url, token }, '/api/device-mesh/ingress');
+  const ingressUrl = `http://127.0.0.1:${ingress.status.port}`;
+  await adminJson({ url, token }, '/api/device-mesh/ingress', {
+    method: 'PUT',
+    body: JSON.stringify({ port: ingress.status.port, publicEndpoint: ingressUrl }),
+  });
   const hub: TestHub = {
     url,
+    ingressUrl,
     token,
     async close() {
-      service.close();
+      await service.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
       await fs.rm(rootDir, { recursive: true, force: true });
     },
@@ -50,7 +58,11 @@ async function startHub(): Promise<TestHub> {
   return hub;
 }
 
-async function adminJson(hub: TestHub, pathname: string, init?: RequestInit): Promise<any> {
+async function adminJson(
+  hub: Pick<TestHub, 'url' | 'token'>,
+  pathname: string,
+  init?: RequestInit,
+): Promise<any> {
   const response = await fetch(`${hub.url}${pathname}`, {
     ...init,
     headers: {
@@ -79,6 +91,17 @@ afterEach(async () => {
 });
 
 describe('desktop device pairing', () => {
+  test('keeps the administration API off the public mesh listener', async () => {
+    const hub = await startHub();
+    const health = await fetch(`${hub.ingressUrl}/api/device-mesh/health`);
+    expect(health.status).toBe(200);
+
+    const administration = await fetch(`${hub.ingressUrl}/api/device-mesh`, {
+      headers: { authorization: `Bearer ${hub.token}` },
+    });
+    expect(administration.status).toBe(404);
+  });
+
   test('joins through a one-time code and keeps grants destination-local', async () => {
     const inviter = await startHub();
     const joining = await startHub();
@@ -86,6 +109,7 @@ describe('desktop device pairing', () => {
       method: 'POST',
       body: JSON.stringify({ publicEndpoint: inviter.url }),
     });
+    expect(invitation.payload.endpoint).toBe(inviter.ingressUrl);
     const join = await adminJson(joining, '/api/device-mesh/joins', {
       method: 'POST',
       body: JSON.stringify({ payload: JSON.stringify(invitation.payload) }),

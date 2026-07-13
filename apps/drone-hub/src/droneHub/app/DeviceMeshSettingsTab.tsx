@@ -1,6 +1,7 @@
 import React from 'react';
 import { IconSpinner } from './icons';
 import { CrossDeviceAssistantPolicyPanel } from './CrossDeviceAssistantPolicyPanel';
+import { DeviceMeshIngressPanel, type DeviceMeshIngressStatus } from './DeviceMeshIngressPanel';
 import { ProviderCredentialTransferPanel } from './ProviderCredentialTransferPanel';
 import {
   type MeshCapability,
@@ -137,7 +138,7 @@ function DeviceCard({
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
+      <div className={`mt-4 grid gap-3 ${isSelf ? '' : 'sm:grid-cols-2'}`}>
         <label className="grid gap-1">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-dim)]">
             Device name
@@ -148,17 +149,19 @@ function DeviceCard({
             className="rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
           />
         </label>
-        <label className="grid gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-dim)]">
-            Public endpoint
-          </span>
-          <input
-            value={endpoint}
-            onChange={(event) => setEndpoint(event.target.value)}
-            placeholder="https://hub.example.com"
-            className="rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 font-mono text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
-          />
-        </label>
+        {!isSelf ? (
+          <label className="grid gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-dim)]">
+              Public endpoint
+            </span>
+            <input
+              value={endpoint}
+              onChange={(event) => setEndpoint(event.target.value)}
+              placeholder="https://hub.example.com"
+              className="rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 font-mono text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+            />
+          </label>
+        ) : null}
       </div>
 
       {!isSelf ? (
@@ -189,14 +192,15 @@ function DeviceCard({
         <button
           type="button"
           disabled={busy || !name.trim()}
-          onClick={() =>
-            onSave({
+          onClick={() => {
+            const update: Partial<MeshDevice> = {
               name,
-              endpoints: endpoint.trim() ? [endpoint.trim()] : [],
               administrator,
               grants: grantsFromOperations(capabilities, selected),
-            })
-          }
+            };
+            if (!isSelf) update.endpoints = endpoint.trim() ? [endpoint.trim()] : [];
+            onSave(update);
+          }}
           className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--fg)] hover:bg-[var(--accent-soft)] disabled:opacity-50"
         >
           {busy ? 'Saving…' : 'Save device'}
@@ -218,10 +222,14 @@ function DeviceCard({
 
 export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJson }) {
   const mesh = useDeviceMesh(requestJson);
-  const [publicEndpoint, setPublicEndpoint] = React.useState(() => window.location.origin);
+  const [ingressStatus, setIngressStatus] = React.useState<DeviceMeshIngressStatus | null>(null);
   const [joinCode, setJoinCode] = React.useState('');
   const [pendingSelections, setPendingSelections] = React.useState<Record<string, Set<string>>>({});
   const [pendingAdmins, setPendingAdmins] = React.useState<Record<string, boolean>>({});
+  const handleIngressStatus = React.useCallback(
+    (status: DeviceMeshIngressStatus | null) => setIngressStatus(status),
+    [],
+  );
 
   if (mesh.loading && !mesh.status) {
     return (
@@ -251,29 +259,23 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
             </div>
           ) : null}
         </div>
-        <div className="grid gap-3 p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-          <label className="grid gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-dim)]">
-              Reachable HTTPS endpoint
-            </span>
-            <input
-              value={publicEndpoint}
-              onChange={(event) => setPublicEndpoint(event.target.value)}
-              placeholder="https://your-hub.ngrok.app"
-              className="rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 font-mono text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
-            />
-            <span className="text-[10px] text-[var(--muted)]">
-              This address is embedded in the invitation; it is never treated as proof of identity.
-            </span>
-          </label>
+        <div className="grid gap-3 p-4">
+          <DeviceMeshIngressPanel requestJson={requestJson} onStatus={handleIngressStatus} />
           <button
             type="button"
-            disabled={mesh.busyId === 'invite' || !publicEndpoint.trim()}
-            onClick={() => void mesh.createInvitation(publicEndpoint)}
-            className="h-9 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--fg)] hover:bg-[var(--accent-soft)] disabled:opacity-50"
+            disabled={
+              mesh.busyId === 'invite' || !ingressStatus?.running || !ingressStatus.publicEndpoint
+            }
+            onClick={() => void mesh.createInvitation()}
+            className="h-9 justify-self-start rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--fg)] hover:bg-[var(--accent-soft)] disabled:opacity-50"
           >
             {mesh.busyId === 'invite' ? 'Creating…' : 'Create pairing QR'}
           </button>
+          {!ingressStatus?.publicEndpoint ? (
+            <span className="text-[10px] text-[var(--muted)]">
+              Configure the secure ingress before creating an invitation.
+            </span>
+          ) : null}
         </div>
         {mesh.invitation ? (
           <div className="grid gap-4 border-t border-[var(--border-subtle)] p-4 sm:grid-cols-[180px_minmax(0,1fr)] sm:items-center">

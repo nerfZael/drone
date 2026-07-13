@@ -14,7 +14,7 @@ describe('device protocol', () => {
     expect(isGranted([], 'provider-credentials', 1, 'openai.export')).toBe(false);
   });
 
-  test('public pairing endpoints require HTTPS', () => {
+  test('public pairing endpoints require a safe HTTPS origin', () => {
     expect(() =>
       parsePairingPayload({
         version: 1,
@@ -24,5 +24,23 @@ describe('device protocol', () => {
         expiresAt: 'now',
       }),
     ).toThrow('HTTPS');
+    expect(() =>
+      parsePairingPayload({
+        version: 1,
+        endpoint: 'ftp://localhost:8791',
+        token: 'x',
+        inviterDeviceId: 'a',
+        expiresAt: 'now',
+      }),
+    ).toThrow('HTTPS');
+    expect(() =>
+      parsePairingPayload({
+        version: 1,
+        endpoint: 'https://example.com/private/path',
+        token: 'x',
+        inviterDeviceId: 'a',
+        expiresAt: 'now',
+      }),
+    ).toThrow('origin');
   });
 });

@@ -62,6 +62,7 @@ import {
 } from './hub/drone-lifecycle-service';
 import { permanentlyDeleteCanonicalDrone } from './hub/drone-deletion-service';
 import { renameDroneDisplayName, setDroneGroupMetadata } from './hub/drone-metadata-commands';
+import { DEFAULT_DEVICE_MESH_INGRESS_PORT } from './hub/device-mesh/device-mesh-ingress';
 import { parseHubRunnerProcessesFromPsOutput, parseHubUiServerProcessesFromPsOutput, selectHubRunnerPidsToStop } from './hub/orphan-hub-runners';
 import {
   normalizeRemotePublicUrl,
@@ -2414,6 +2415,7 @@ async function hubRun(options: any) {
     containerMcpPort,
     containerMcpUrl,
     apiToken,
+    deviceMeshIngressPort: DEFAULT_DEVICE_MESH_INGRESS_PORT,
     mcpToken,
     voiceStreamUrl: voiceStreamEnabled ? `http://127.0.0.1:${voiceStreamPort}` : null,
     allowedOrigins: Array.from(allowedOrigins),

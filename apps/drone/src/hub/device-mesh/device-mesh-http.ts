@@ -61,8 +61,19 @@ function publicEndpoint(value: unknown): string {
     .trim()
     .replace(/\/+$/, '');
   const parsed = new URL(endpoint);
-  if (parsed.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(parsed.hostname)) {
+  const loopbackHttp =
+    parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+  if (parsed.protocol !== 'https:' && !loopbackHttp) {
     throw new Error('public endpoint must use HTTPS');
+  }
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    (parsed.pathname && parsed.pathname !== '/')
+  ) {
+    throw new Error('public endpoint must be an origin without credentials or a path');
   }
   return endpoint;
 }
@@ -138,7 +149,40 @@ export class DeviceMeshHttp {
     private readonly audit: DeviceMeshAuditStore,
     private readonly apiToken: string,
     private readonly extensions: DeviceMeshHttpExtension[] = [],
+    private readonly invitationEndpoint: () => string | null = () => null,
   ) {}
+
+  async handlePublic(
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+    url: URL,
+  ): Promise<boolean> {
+    const method = String(request.method ?? 'GET').toUpperCase();
+    const parts = url.pathname.split('/').filter(Boolean);
+    const isClaim = method === 'POST' && url.pathname === '/api/device-mesh/invitations/claim';
+    const isClaimStatus =
+      method === 'GET' &&
+      parts.length === 5 &&
+      parts[0] === 'api' &&
+      parts[1] === 'device-mesh' &&
+      parts[2] === 'invitations' &&
+      parts[4] === 'status';
+    if (!isClaim && !isClaimStatus) return false;
+    try {
+      if (isClaim) {
+        await this.claim(request, response);
+      } else {
+        await this.claimStatus(
+          response,
+          parts[3],
+          String(url.searchParams.get('claimSecret') ?? ''),
+        );
+      }
+    } catch (error: any) {
+      json(response, 400, { ok: false, error: error?.message ?? String(error) });
+    }
+    return true;
+  }
 
   async handle(
     request: http.IncomingMessage,
@@ -146,26 +190,10 @@ export class DeviceMeshHttp {
     url: URL,
   ): Promise<boolean> {
     if (!url.pathname.startsWith('/api/device-mesh')) return false;
+    if (await this.handlePublic(request, response, url)) return true;
     try {
       const method = String(request.method ?? 'GET').toUpperCase();
       const parts = url.pathname.split('/').filter(Boolean);
-      if (method === 'POST' && url.pathname === '/api/device-mesh/invitations/claim') {
-        await this.claim(request, response);
-        return true;
-      }
-      if (
-        method === 'GET' &&
-        parts.length === 5 &&
-        parts[2] === 'invitations' &&
-        parts[4] === 'status'
-      ) {
-        await this.claimStatus(
-          response,
-          parts[3],
-          String(url.searchParams.get('claimSecret') ?? ''),
-        );
-        return true;
-      }
       if (!this.adminAuthorized(request)) {
         response.setHeader('www-authenticate', 'Bearer realm="drone-device-mesh"');
         json(response, 401, { ok: false, error: 'unauthorized' });
@@ -257,8 +285,10 @@ export class DeviceMeshHttp {
     request: http.IncomingMessage,
     response: http.ServerResponse,
   ): Promise<void> {
-    const body = await readBody(request);
-    const endpoint = publicEndpoint(body.publicEndpoint);
+    await readBody(request);
+    const configuredEndpoint = this.invitationEndpoint();
+    if (!configuredEndpoint) throw new Error('configure secure mesh ingress before inviting');
+    const endpoint = publicEndpoint(configuredEndpoint);
     await this.router.announceEndpoint(endpoint);
     const token = crypto.randomBytes(32).toString('base64url');
     const id = crypto.randomUUID();
@@ -464,6 +494,9 @@ export class DeviceMeshHttp {
     const device = await this.store.update((state) => {
       const current = state.devices[deviceId];
       if (!current || current.revokedAt) throw new Error('device not found');
+      if (deviceId === state.selfDeviceId && Array.isArray(body.endpoints)) {
+        throw new Error('configure this device endpoint through secure mesh ingress');
+      }
       if (typeof body.name === 'string' && body.name.trim())
         current.name = body.name.trim().slice(0, 80);
       if (typeof body.administrator === 'boolean') current.administrator = body.administrator;
@@ -474,9 +507,6 @@ export class DeviceMeshHttp {
       current.updatedAt = new Date().toISOString();
       return current;
     });
-    if (deviceId === (await this.store.read()).selfDeviceId && Array.isArray(body.endpoints)) {
-      await this.router.announceEndpoint(device.endpoints[0] ?? null);
-    }
     await this.router.broadcastMembership();
     json(response, 200, { ok: true, device });
   }
