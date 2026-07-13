@@ -88,12 +88,11 @@ export function useDeviceMesh(requestJson: RequestJson) {
     busyId,
     error,
     load,
-    createInvitation: (publicEndpoint: string) =>
+    createInvitation: () =>
       action('invite', async () => {
         setInvitation(
           await requestJson<MeshInvitation>('/api/device-mesh/invitations', {
             method: 'POST',
-            body: JSON.stringify({ publicEndpoint }),
           }),
         );
       }),

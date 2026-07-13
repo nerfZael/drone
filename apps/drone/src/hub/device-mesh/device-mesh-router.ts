@@ -89,13 +89,6 @@ export class DeviceMeshRouter {
     );
     this.reconnectTimer.unref?.();
     void this.connectToKnownPeers().catch(() => undefined);
-    void this.store
-      .read()
-      .then((state) => {
-        const endpoint = state.devices[state.selfDeviceId]?.endpoints[0];
-        if (endpoint) return this.announceEndpoint(endpoint);
-      })
-      .catch(() => undefined);
   }
 
   close(): void {

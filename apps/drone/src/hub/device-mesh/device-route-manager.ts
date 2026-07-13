@@ -8,8 +8,19 @@ const ROUTE_CLOCK_SKEW_MS = 30_000;
 function normalizeEndpoint(value: string): string {
   const endpoint = value.trim().replace(/\/+$/, '');
   const url = new URL(endpoint);
-  if (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname)) {
+  const loopbackHttp =
+    url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !loopbackHttp) {
     throw new Error('public endpoint must use HTTPS');
+  }
+  if (
+    url.username ||
+    url.password ||
+    url.search ||
+    url.hash ||
+    (url.pathname && url.pathname !== '/')
+  ) {
+    throw new Error('public endpoint must be an origin without credentials or a path');
   }
   return endpoint;
 }

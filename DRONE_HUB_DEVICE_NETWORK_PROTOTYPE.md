@@ -14,6 +14,8 @@ The repository now contains:
 - `apps/drone/src/hub/device-mesh`, an isolated Hub mesh service with stable P-256 identity, one-time pairing, desktop-to-desktop join, signed membership and revocation synchronization, authenticated WSS, direct and one-hop routing, replay/expiry/idempotency checks, and destination-local grants;
 - a statically registered `drone-control` adapter that calls the existing local Hub API with its token kept on that Hub;
 - a Devices settings surface in the existing Drone Hub UI for invites, incoming approvals, names, endpoints, administrator status, permissions, and revocation;
+- a dedicated localhost-only mesh ingress, using port `8791` by default, that exposes only health, one-time pairing, pairing status, and authenticated mesh WebSockets; the Drone Hub UI and local administration API are not served from this port;
+- separate Device Mesh ngrok control state, with reuse of an existing local ngrok agent when available and automatic signed route announcements when an ngrok-managed public URL changes;
 - `apps/drone-hub-mobile`, an Android-first Expo/React Native application for QR pairing, device and route diagnostics, target selection, drone/chat browsing, prompt/stop, and separately authorized host/container creation.
 - signed, sequence-numbered route announcements, primary/backup Android bridge selection, event-triggered topology refresh, relayed membership and revocation events, and explicit TLS-only bridge-trust diagnostics;
 - separate `assistant-threads` and `workspace` capability modules, a phone Assistant screen, and matching home/target thread policy records configured from the desktop Devices settings;
@@ -27,6 +29,7 @@ Implementation findings changed a few details without changing the product bound
 - Membership snapshots, revocations, and route changes are signed and resynchronized over authenticated peer links. Operational grants never propagate; every destination keeps its own grants.
 - Desktop join progress is held in memory while the durable identity and mesh state live under the Drone Hub data directory. Restarting during an unapproved join requires starting that join again.
 - WSS is the only ongoing transport implemented. SSE fallback, multiple endpoints per single peer, and production-grade traffic controls remain later work; the prototype has fixed message, connection, forwarding-table, and per-peer request bounds. Target audit history is a local bounded 500-entry file, not a production audit database.
+- Public reachability is configured independently from the UI and main Hub API. A VPS reverse proxy or ngrok tunnel should target the restricted mesh ingress on `127.0.0.1:8791`, never the Vite UI port (`5174`) or the main Hub API (`8787`).
 - Android is foreground-only. It disconnects when suspended and reconnects to all configured bridge devices when active.
 - Cross-device assistant policy is deliberately manual in this slice: an administrator copies the thread and root IDs into matching home and target records. The target compares the home device, thread, root, and read/write flags exactly before every operation.
 - Remote assistant prompts are accepted quickly by the mesh and continue on the home Hub. The Android transcript currently refreshes after submission rather than streaming assistant events through the mesh.
