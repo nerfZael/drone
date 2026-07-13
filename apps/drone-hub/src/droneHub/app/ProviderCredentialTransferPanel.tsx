@@ -2,7 +2,7 @@ import React from 'react';
 import type { MeshDevice } from './use-device-mesh';
 
 type RequestJson = <T>(url: string, init?: RequestInit) => Promise<T>;
-type Credential = 'openai' | 'codex';
+type Credential = 'openai' | 'codex' | 'groq';
 
 export function ProviderCredentialTransferPanel({
   requestJson,
@@ -31,11 +31,16 @@ export function ProviderCredentialTransferPanel({
 
   const importCredential = async (credential: Credential) => {
     if (!selectedSource) return;
-    const label = credential === 'codex' ? 'Codex login' : 'OpenAI API key';
+    const label =
+      credential === 'codex'
+        ? 'Codex login'
+        : credential === 'groq'
+          ? 'GROQ API key'
+          : 'OpenAI API key';
     const warning =
       credential === 'codex'
         ? `Replace this computer's file-based Codex login with the login from ${selectedSource.name}?`
-        : `Copy the OpenAI API key from ${selectedSource.name} to this computer?`;
+        : `Copy the ${credential === 'groq' ? 'GROQ' : 'OpenAI'} API key from ${selectedSource.name} to this computer?`;
     if (!window.confirm(warning)) return;
     setBusy(credential);
     setError(null);
@@ -104,6 +109,14 @@ export function ProviderCredentialTransferPanel({
             className="h-9 rounded border border-[var(--border-subtle)] px-3 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"
           >
             {busy === 'codex' ? 'Copying…' : 'Copy Codex login'}
+          </button>
+          <button
+            type="button"
+            disabled={!selectedSource || !selfIsAdministrator || busy !== null}
+            onClick={() => void importCredential('groq')}
+            className="h-9 rounded border border-[var(--border-subtle)] px-3 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"
+          >
+            {busy === 'groq' ? 'Copying…' : 'Copy GROQ key'}
           </button>
         </div>
       )}

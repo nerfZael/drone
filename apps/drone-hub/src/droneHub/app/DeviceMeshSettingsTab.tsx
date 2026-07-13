@@ -3,6 +3,7 @@ import { IconSpinner } from './icons';
 import { CrossDeviceAssistantPolicyPanel } from './CrossDeviceAssistantPolicyPanel';
 import { DeviceMeshIngressPanel, type DeviceMeshIngressStatus } from './DeviceMeshIngressPanel';
 import { ProviderCredentialTransferPanel } from './ProviderCredentialTransferPanel';
+import { deviceEditorSourceKey } from './device-editor-state';
 import {
   type MeshCapability,
   type MeshDevice,
@@ -104,13 +105,14 @@ function DeviceCard({
   const [endpoint, setEndpoint] = React.useState(device.endpoints[0] ?? '');
   const [administrator, setAdministrator] = React.useState(device.administrator);
   const [selected, setSelected] = React.useState(() => operationsFromGrants(device.grants));
+  const sourceKey = deviceEditorSourceKey(device);
 
   React.useEffect(() => {
     setName(device.name);
     setEndpoint(device.endpoints[0] ?? '');
     setAdministrator(device.administrator);
     setSelected(operationsFromGrants(device.grants));
-  }, [device]);
+  }, [sourceKey]);
 
   return (
     <article

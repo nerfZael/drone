@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -8,6 +9,7 @@ import {
   View,
   type ViewStyle,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { colors } from '../theme';
 
 export function Card({ children, style }: { children: any; style?: ViewStyle }) {
@@ -67,6 +69,78 @@ export function ErrorBanner({ message }: { message: string | null }) {
   );
 }
 
+export function ConfirmDialog({
+  visible,
+  title,
+  message,
+  confirmLabel,
+  busy,
+  destructive = false,
+  onCancel,
+  onConfirm,
+}: {
+  visible: boolean;
+  title: string;
+  message: string;
+  confirmLabel: string;
+  busy?: boolean;
+  destructive?: boolean;
+  onCancel(): void;
+  onConfirm(): void;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={busy ? undefined : onCancel}
+    >
+      <View
+        style={[
+          styles.dialogLayer,
+          {
+            paddingTop: Math.max(insets.top, 24),
+            paddingBottom: Math.max(insets.bottom, 24),
+          },
+        ]}
+      >
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close confirmation"
+          disabled={busy}
+          onPress={onCancel}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.dialog}>
+          <View style={[styles.dialogMark, destructive && styles.dialogMarkDanger]}>
+            <Text style={[styles.dialogMarkText, destructive && styles.dialogMarkTextDanger]}>
+              !
+            </Text>
+          </View>
+          <Text style={styles.dialogTitle}>{title}</Text>
+          <Text style={styles.dialogMessage}>{message}</Text>
+          <View style={styles.dialogActions}>
+            <Button tone="quiet" disabled={busy} onPress={onCancel} style={styles.dialogButton}>
+              Cancel
+            </Button>
+            <Button
+              tone={destructive ? 'danger' : 'accent'}
+              loading={busy}
+              onPress={onConfirm}
+              style={styles.dialogButton}
+            >
+              {confirmLabel}
+            </Button>
+          </View>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export const textStyles: Record<string, TextStyle> = {
   title: { color: colors.text, fontSize: 27, fontWeight: '700', letterSpacing: -0.7 },
   heading: { color: colors.text, fontSize: 17, fontWeight: '700' },
@@ -117,4 +191,41 @@ const styles = StyleSheet.create({
     padding: 12,
   },
   errorText: { color: colors.danger, fontSize: 13, lineHeight: 18 },
+  dialogLayer: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 24,
+    backgroundColor: 'rgba(3, 10, 12, 0.76)',
+  },
+  dialog: {
+    width: '100%',
+    maxWidth: 420,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panelRaised,
+    padding: 22,
+    shadowColor: '#000',
+    shadowOpacity: 0.5,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 16,
+  },
+  dialogMark: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 11,
+    backgroundColor: colors.accentDark,
+    marginBottom: 16,
+  },
+  dialogMarkDanger: { backgroundColor: '#35191d' },
+  dialogMarkText: { color: colors.accent, fontSize: 18, fontWeight: '900' },
+  dialogMarkTextDanger: { color: colors.danger },
+  dialogTitle: { color: colors.text, fontSize: 21, fontWeight: '800', letterSpacing: -0.4 },
+  dialogMessage: { color: colors.muted, fontSize: 14, lineHeight: 21, marginTop: 9 },
+  dialogActions: { flexDirection: 'row', gap: 9, marginTop: 22 },
+  dialogButton: { flex: 1 },
 });

@@ -1,73 +1,66 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  Animated,
+  KeyboardAvoidingView,
+  Platform,
+  StyleSheet,
+  View,
+} from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import type { AppDrawerNavigationItem } from '../local-assistant/AssistantThreadDrawer';
 import { LocalAssistantScreen } from '../local-assistant/LocalAssistantScreen';
-import { colors } from '../theme';
 import { AssistantScreen } from './AssistantScreen';
 
-type AssistantLocation = 'phone' | 'devices';
+export type AssistantLocation = 'phone' | 'devices';
 
-export function AssistantHomeScreen() {
-  const [location, setLocation] = React.useState<AssistantLocation>('phone');
-  return (
-    <View style={styles.page}>
-      <View style={styles.switcher}>
-        <LocationButton
-          label="ON THIS PHONE"
-          active={location === 'phone'}
-          onPress={() => setLocation('phone')}
-        />
-        <LocationButton
-          label="ON DEVICES"
-          active={location === 'devices'}
-          onPress={() => setLocation('devices')}
-        />
-      </View>
-      <View style={styles.content}>
-        {location === 'phone' ? <LocalAssistantScreen /> : <AssistantScreen />}
-      </View>
-    </View>
-  );
-}
+const APP_HEADER_HEIGHT = 54;
 
-function LocationButton({
-  label,
-  active,
-  onPress,
+export function AssistantHomeScreen({
+  drawerOpen,
+  drawerOffset,
+  navigationItems,
+  openingGestureActive,
+  onDrawerOpenChange,
+  location,
 }: {
-  label: string;
-  active: boolean;
-  onPress(): void;
+  drawerOpen: boolean;
+  drawerOffset: Animated.Value;
+  navigationItems: AppDrawerNavigationItem[];
+  openingGestureActive: boolean;
+  onDrawerOpenChange(open: boolean): void;
+  location: AssistantLocation;
 }) {
+  const insets = useSafeAreaInsets();
   return (
-    <Pressable onPress={onPress} style={[styles.location, active && styles.locationActive]}>
-      <Text style={[styles.locationText, active && styles.locationTextActive]}>{label}</Text>
-    </Pressable>
+    <KeyboardAvoidingView
+      style={styles.page}
+      behavior={Platform.OS === 'android' ? 'height' : 'padding'}
+      keyboardVerticalOffset={insets.top + APP_HEADER_HEIGHT}
+    >
+      <View style={styles.content}>
+        {location === 'phone' ? (
+          <LocalAssistantScreen
+            drawerOpen={drawerOpen}
+            drawerOffset={drawerOffset}
+            navigationItems={navigationItems}
+            openingGestureActive={openingGestureActive}
+            onDrawerOpenChange={onDrawerOpenChange}
+          />
+        ) : (
+          <AssistantScreen
+            drawerOpen={drawerOpen}
+            drawerOffset={drawerOffset}
+            navigationItems={navigationItems}
+            openingGestureActive={openingGestureActive}
+            onDrawerOpenChange={onDrawerOpenChange}
+          />
+        )}
+      </View>
+    </KeyboardAvoidingView>
   );
 }
 
 const styles = StyleSheet.create({
   page: { flex: 1 },
-  switcher: {
-    flexDirection: 'row',
-    paddingHorizontal: 12,
-    paddingVertical: 8,
-    gap: 6,
-    backgroundColor: colors.background,
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
-  },
-  location: {
-    flex: 1,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
-    borderColor: colors.border,
-    borderWidth: 1,
-    backgroundColor: colors.panel,
-  },
-  locationActive: { borderColor: colors.accent, backgroundColor: colors.accentDark },
-  locationText: { color: colors.muted, fontSize: 8, fontWeight: '900', letterSpacing: 1.1 },
-  locationTextActive: { color: colors.accent },
   content: { flex: 1 },
 });

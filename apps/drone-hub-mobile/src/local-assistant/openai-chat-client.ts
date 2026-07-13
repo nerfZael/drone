@@ -1,6 +1,10 @@
 import * as Crypto from 'expo-crypto';
 import { messageText, toolCalls } from '@drone/assistant-chat';
-import type { LocalAssistantMessage, LocalAssistantThread } from './local-assistant-types';
+import type {
+  LocalAssistantMessage,
+  LocalAssistantThinkingLevel,
+  LocalAssistantThread,
+} from './local-assistant-types';
 import type { LocalAssistantTool } from './workspace-tools';
 
 type ProviderToolCall = {
@@ -89,6 +93,7 @@ function newMessage(
 export async function runOpenAiChat(input: {
   apiKey: string;
   model: string;
+  thinkingLevel: LocalAssistantThinkingLevel;
   thread: LocalAssistantThread;
   tools: LocalAssistantTool[];
   signal: AbortSignal;
@@ -117,6 +122,7 @@ export async function runOpenAiChat(input: {
       signal: input.signal,
       body: JSON.stringify({
         model: input.model,
+        ...(input.thinkingLevel !== 'off' ? { reasoning_effort: input.thinkingLevel } : {}),
         messages: [{ role: 'developer', content: developer }, ...providerMessages(messages)],
         ...(input.tools.length > 0 ? { tools: input.tools, tool_choice: 'auto' } : {}),
       }),

@@ -5,6 +5,7 @@ import {
 import {
   readCodexCliAuthJsonForTransfer,
   resolveEffectiveProviderApiKeySettings,
+  resolveGroqApiKeySettings,
 } from '../../../hub-settings';
 import { signDeviceText, type LocalDeviceIdentity } from '../../device-identity';
 import type { CapabilityContext, CapabilityHandler } from '../../device-mesh-types';
@@ -29,26 +30,37 @@ export function createProviderCredentialsCapability(
     async invoke(operation, payload, context) {
       requireAdministrator(context);
       if (operation === 'credentials.inspect') {
-        const [openai, codexAuthJson] = await Promise.all([
+        const [openai, codexAuthJson, groq] = await Promise.all([
           resolveEffectiveProviderApiKeySettings('openai'),
           readCodexCliAuthJsonForTransfer(),
+          resolveGroqApiKeySettings(),
         ]);
         return {
           credentials: [
             { id: 'openai', available: Boolean(openai.apiKey), source: openai.source },
             { id: 'codex', available: Boolean(codexAuthJson), source: 'codex-cli' },
+            { id: 'groq', available: Boolean(groq.apiKey), source: groq.source },
           ],
         };
       }
-      const credential: ProviderCredentialId = operation === 'codex.export' ? 'codex' : 'openai';
-      if (operation !== 'openai.export' && operation !== 'codex.export')
+      const credential: ProviderCredentialId =
+        operation === 'codex.export'
+          ? 'codex'
+          : operation === 'groq.export'
+            ? 'groq'
+            : 'openai';
+      if (
+        operation !== 'openai.export' &&
+        operation !== 'codex.export' &&
+        operation !== 'groq.export'
+      )
         throw Object.assign(new Error(`unsupported provider credential operation: ${operation}`), {
           code: 'UNSUPPORTED_OPERATION',
         });
       const plaintext =
-        credential === 'openai'
-          ? await openAiCredentialPlaintext()
-          : await codexCredentialPlaintext();
+        credential === 'codex'
+          ? await codexCredentialPlaintext()
+          : await apiKeyCredentialPlaintext(credential);
       const envelope = sealProviderCredential({
         request: payload as ProviderCredentialRequest,
         credential,
@@ -67,14 +79,20 @@ export function createProviderCredentialsCapability(
   };
 }
 
-async function openAiCredentialPlaintext(): Promise<string> {
-  const settings = await resolveEffectiveProviderApiKeySettings('openai');
+async function apiKeyCredentialPlaintext(credential: 'openai' | 'groq'): Promise<string> {
+  const settings =
+    credential === 'openai'
+      ? await resolveEffectiveProviderApiKeySettings('openai')
+      : await resolveGroqApiKeySettings();
   if (!settings.apiKey)
-    throw Object.assign(new Error('this device has no OpenAI API key to copy'), {
-      code: 'CREDENTIAL_NOT_FOUND',
-    });
+    throw Object.assign(
+      new Error(
+        `this device has no ${credential === 'groq' ? 'GROQ' : 'OpenAI'} API key to copy`,
+      ),
+      { code: 'CREDENTIAL_NOT_FOUND' },
+    );
   return JSON.stringify({
-    kind: 'openai-api-key',
+    kind: `${credential}-api-key`,
     apiKey: settings.apiKey,
     source: settings.source,
     exportedAt: new Date().toISOString(),

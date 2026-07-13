@@ -21,7 +21,7 @@ export type CapabilityGrant = {
   operations: string[];
 };
 
-export type ProviderCredentialId = 'openai' | 'codex';
+export type ProviderCredentialId = 'openai' | 'codex' | 'groq';
 
 export type ProviderCredentialRequest = {
   version: 1;
@@ -111,6 +111,17 @@ export type CapabilityResponse = {
   error?: { code: string; message: string };
 };
 
+export type CapabilityEvent = {
+  type: 'capability.event';
+  version: 1;
+  sourceDeviceId: string;
+  capability: string;
+  capabilityVersion: number;
+  event: string;
+  payload: Record<string, any>;
+  issuedAt: string;
+};
+
 export type MeshSocketMessage =
   | { type: 'auth.challenge'; nonce: string; deviceId: string; signature: string }
   | { type: 'auth.response'; deviceId: string; signature: string }
@@ -123,4 +134,5 @@ export type MeshSocketMessage =
   | { type: 'auth.error'; message: string }
   | SignedRouteAnnouncement
   | SignedCapabilityRequest
-  | CapabilityResponse;
+  | CapabilityResponse
+  | CapabilityEvent;

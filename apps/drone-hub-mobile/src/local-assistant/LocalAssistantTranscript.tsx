@@ -1,39 +1,199 @@
 import React from 'react';
-import { StyleSheet, Text, View } from 'react-native';
 import {
+  ActivityIndicator,
+  Animated,
+  Image,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import {
+  messageImageParts,
   messageText,
   renderItemsFromMessages,
   toolLabel,
+  type AssistantMessage,
+  type AssistantRenderItem,
   type AssistantToolRenderItem,
 } from '@drone/assistant-chat';
 import { colors } from '../theme';
 import type { LocalAssistantThread } from './local-assistant-types';
 
-function ToolRow({ item }: { item: AssistantToolRenderItem }) {
-  const failed = item.result?.isError === true;
-  const pending = !item.result;
+function TypingDots() {
+  const dots = React.useRef([
+    new Animated.Value(1),
+    new Animated.Value(1),
+    new Animated.Value(1),
+  ]).current;
+
+  React.useEffect(() => {
+    const animations = dots.map((dot, index) =>
+      Animated.sequence([
+        Animated.delay(index * 160),
+        Animated.loop(
+          Animated.sequence([
+            Animated.timing(dot, {
+              toValue: 0.35,
+              duration: 1000,
+              useNativeDriver: true,
+            }),
+            Animated.timing(dot, {
+              toValue: 1,
+              duration: 1000,
+              useNativeDriver: true,
+            }),
+          ]),
+        ),
+      ]),
+    );
+    animations.forEach((animation) => animation.start());
+    return () => animations.forEach((animation) => animation.stop());
+  }, [dots]);
+
   return (
-    <View style={[styles.toolRow, failed && styles.toolRowError]}>
-      <View style={[styles.toolGlyph, failed && styles.toolGlyphError]}>
-        <Text style={styles.toolGlyphText}>{pending ? '…' : failed ? '!' : '✓'}</Text>
-      </View>
-      <View style={styles.toolCopy}>
-        <Text style={styles.toolTitle}>{toolLabel(item.call?.name ?? item.result?.toolName)}</Text>
-        <Text numberOfLines={2} style={styles.toolSummary}>
-          {failed
-            ? item.result?.errorMessage
-            : pending
-              ? 'Waiting for the remote workspace'
-              : messageText(item.result!).trim() || 'Completed'}
-        </Text>
-      </View>
+    <View accessibilityLabel="Assistant is working" style={styles.typingDots}>
+      {dots.map((opacity, index) => (
+        <Animated.View key={index} style={[styles.typingDot, { opacity }]} />
+      ))}
     </View>
   );
 }
 
-export function LocalAssistantTranscript({ thread }: { thread: LocalAssistantThread }) {
-  const items = React.useMemo(() => renderItemsFromMessages(thread.messages), [thread.messages]);
-  if (items.length === 0) {
+function ToolRow({ item }: { item: AssistantToolRenderItem }) {
+  const failed = item.result?.isError === true;
+  const pending = !item.result;
+  const [open, setOpen] = React.useState(false);
+  const args = item.call?.args;
+  const result = item.result ? messageText(item.result).trim() : '';
+  return (
+    <Pressable
+      onPress={() => setOpen((value) => !value)}
+      style={[styles.tool, failed && styles.toolError]}
+    >
+      <View style={styles.toolHead}>
+        <View style={[styles.toolGlyph, failed && styles.toolGlyphError]}>
+          <Text style={styles.toolGlyphText}>{pending ? '…' : failed ? '!' : '✓'}</Text>
+        </View>
+        <View style={styles.toolCopy}>
+          <Text style={styles.toolTitle}>
+            {toolLabel(item.call?.name ?? item.result?.toolName)}
+          </Text>
+          <Text numberOfLines={open ? undefined : 1} style={styles.toolSummary}>
+            {failed
+              ? item.result?.errorMessage
+              : pending
+                ? 'Waiting for result'
+                : result || 'Completed'}
+          </Text>
+        </View>
+        <Text style={styles.disclosure}>{open ? '−' : '+'}</Text>
+      </View>
+      {open ? (
+        <View style={styles.toolDetails}>
+          {args !== undefined ? (
+            <>
+              <Text style={styles.detailLabel}>ARGUMENTS</Text>
+              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+                <Text selectable style={styles.detailText}>
+                  {JSON.stringify(args, null, 2)}
+                </Text>
+              </ScrollView>
+            </>
+          ) : null}
+          <Text style={styles.detailLabel}>RESULT</Text>
+          <Text selectable style={styles.detailText}>
+            {result || (pending ? 'Waiting…' : 'No result payload.')}
+          </Text>
+        </View>
+      ) : null}
+    </Pressable>
+  );
+}
+
+function ToolGroupRow({ item }: { item: Extract<AssistantRenderItem, { type: 'toolGroup' }> }) {
+  const [open, setOpen] = React.useState(false);
+  const failed = item.items.some((tool) => tool.result?.isError === true);
+  const pending = item.items.some((tool) => !tool.result);
+  const name = toolLabel(item.items[0]?.call?.name ?? item.items[0]?.result?.toolName);
+  return (
+    <View style={[styles.tool, failed && styles.toolError]}>
+      <Pressable onPress={() => setOpen((value) => !value)} style={styles.toolHead}>
+        <View style={[styles.toolGlyph, failed && styles.toolGlyphError]}>
+          <Text style={styles.toolGlyphText}>{pending ? '…' : failed ? '!' : '✓'}</Text>
+        </View>
+        <View style={styles.toolCopy}>
+          <Text style={styles.toolTitle}>
+            {name} × {item.items.length}
+          </Text>
+          <Text style={styles.toolSummary}>
+            {pending ? 'Tools are running' : failed ? 'One or more calls failed' : 'Completed'}
+          </Text>
+        </View>
+        <Text style={styles.disclosure}>{open ? '−' : '+'}</Text>
+      </Pressable>
+      {open ? (
+        <View style={styles.groupDetails}>
+          {item.items.map((tool) => (
+            <ToolRow key={tool.key} item={tool} />
+          ))}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function attachments(message: any): any[] {
+  return Array.isArray(message?.attachments)
+    ? message.attachments
+    : Array.isArray(message?.details?.attachments)
+      ? message.details.attachments
+      : [];
+}
+
+function visibleMessageText(message: AssistantMessage): string {
+  if (message.role !== 'assistant' || !Array.isArray(message.content)) return messageText(message);
+  return message.content
+    .filter((part) => part?.type === 'text')
+    .map((part) => String(part.text ?? ''))
+    .filter(Boolean)
+    .join('\n');
+}
+
+export function MobileAssistantTranscript({
+  messages,
+  running = false,
+  currentReasoning = '',
+  loading = false,
+}: {
+  messages: AssistantMessage[];
+  running?: boolean;
+  currentReasoning?: string;
+  loading?: boolean;
+}) {
+  const items = React.useMemo(() => renderItemsFromMessages(messages), [messages]);
+  if (loading) {
+    return (
+      <View style={styles.loadingTranscript}>
+        <ActivityIndicator color={colors.accent} size="small" />
+      </View>
+    );
+  }
+  const lastUserIndex = messages.reduce(
+    (latest, message, index) => (message.role === 'user' ? index : latest),
+    -1,
+  );
+  const assistantStarted = messages.slice(lastUserIndex + 1).some((message) => {
+    if (message.role !== 'assistant') return false;
+    return Boolean(
+      visibleMessageText(message).trim() ||
+        messageImageParts(message).length > 0 ||
+        attachments(message).length > 0 ||
+        message.errorMessage,
+    );
+  });
+  if (items.length === 0 && !running) {
     return (
       <View style={styles.emptyTranscript}>
         <View style={styles.emptyOrbit}>
@@ -51,71 +211,152 @@ export function LocalAssistantTranscript({ thread }: { thread: LocalAssistantThr
       {items.map((item) => {
         if (item.type === 'tool') return <ToolRow key={item.key} item={item} />;
         if (item.type === 'toolGroup') {
-          return (
-            <View key={item.key} style={styles.toolGroup}>
-              <Text style={styles.toolGroupTitle}>
-                {item.items.length} × {toolLabel(item.items[0]?.call?.name)}
-              </Text>
-              {item.items.map((tool) => (
-                <ToolRow key={tool.key} item={tool} />
-              ))}
-            </View>
-          );
+          return <ToolGroupRow key={item.key} item={item} />;
         }
-        const text = messageText(item.message).trim();
-        if (!text) return null;
+        const text = visibleMessageText(item.message).trim();
+        const images = messageImageParts(item.message);
+        const files = attachments(item.message);
+        if (!text && images.length === 0 && files.length === 0 && !item.message.errorMessage)
+          return null;
         const user = item.message.role === 'user';
+        const assistant = item.message.role === 'assistant';
         return (
-          <View key={item.key} style={[styles.messageRow, user && styles.messageRowUser]}>
-            <View style={[styles.messageBubble, user ? styles.userBubble : styles.assistantBubble]}>
-              <Text style={styles.messageRole}>{user ? 'YOU' : 'PHONE ASSISTANT'}</Text>
-              <Text style={styles.messageText}>{text}</Text>
-            </View>
+          <View key={item.key} style={[styles.message, user && styles.userMessage]}>
+            {assistant ? <Text style={styles.assistantHeading}>Assistant</Text> : null}
+            {text ? (
+              <Text selectable style={styles.messageText}>
+                {text}
+              </Text>
+            ) : null}
+            {item.message.errorMessage ? (
+              <Text style={styles.messageError}>{item.message.errorMessage}</Text>
+            ) : null}
+            {images.length > 0 ? (
+              <View style={styles.images}>
+                {images.map((image, index) => (
+                  <Image
+                    key={`${image.mimeType}:${index}`}
+                    source={{ uri: `data:${image.mimeType};base64,${image.data}` }}
+                    resizeMode="contain"
+                    style={styles.image}
+                  />
+                ))}
+              </View>
+            ) : null}
+            {files.length > 0 ? (
+              <View style={styles.attachments}>
+                {files.map((file, index) => (
+                  <View key={String(file?.id ?? file?.name ?? index)} style={styles.attachment}>
+                    <Text style={styles.attachmentIcon}>▧</Text>
+                    <View style={styles.attachmentCopy}>
+                      <Text numberOfLines={1} style={styles.attachmentName}>
+                        {String(file?.name ?? 'Attachment')}
+                      </Text>
+                      <Text numberOfLines={1} style={styles.attachmentMeta}>
+                        {String(file?.mime ?? file?.mimeType ?? 'file')}
+                      </Text>
+                    </View>
+                  </View>
+                ))}
+              </View>
+            ) : null}
           </View>
         );
       })}
+      {running ? (
+        currentReasoning.trim() ? (
+          <View style={styles.reasoning}>
+            {!assistantStarted ? <Text style={styles.assistantHeading}>Assistant</Text> : null}
+            <View style={styles.reasoningHead}>
+              <TypingDots />
+              <Text style={styles.reasoningLabel}>Reasoning</Text>
+            </View>
+            <Text style={styles.reasoningText}>{currentReasoning.trim()}</Text>
+          </View>
+        ) : (
+          <View style={styles.waiting}>
+            {!assistantStarted ? <Text style={styles.assistantHeading}>Assistant</Text> : null}
+            <TypingDots />
+          </View>
+        )
+      ) : null}
     </View>
   );
 }
 
+export function LocalAssistantTranscript({
+  thread,
+  running = false,
+  currentReasoning = '',
+}: {
+  thread: LocalAssistantThread;
+  running?: boolean;
+  currentReasoning?: string;
+}) {
+  return (
+    <MobileAssistantTranscript
+      messages={thread.messages}
+      running={running}
+      currentReasoning={currentReasoning}
+    />
+  );
+}
+
 const styles = StyleSheet.create({
-  messages: { gap: 10 },
-  messageRow: { flexDirection: 'row', justifyContent: 'flex-start' },
-  messageRowUser: { justifyContent: 'flex-end' },
-  messageBubble: { maxWidth: '88%', borderRadius: 15, paddingHorizontal: 13, paddingVertical: 11 },
-  assistantBubble: {
-    backgroundColor: colors.panel,
-    borderTopLeftRadius: 4,
+  messages: { gap: 2 },
+  message: { width: '100%', paddingHorizontal: 12, paddingVertical: 12 },
+  userMessage: {
+    width: 'auto',
+    maxWidth: '86%',
+    alignSelf: 'flex-end',
+    marginHorizontal: 12,
+    marginVertical: 5,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
     borderColor: colors.border,
-    borderWidth: 1,
-  },
-  userBubble: {
-    backgroundColor: colors.accentDark,
-    borderTopRightRadius: 4,
-    borderColor: '#28635d',
-    borderWidth: 1,
-  },
-  messageRole: {
-    color: colors.accent,
-    fontSize: 7,
-    fontWeight: '900',
-    letterSpacing: 1.2,
-    marginBottom: 5,
+    borderRadius: 14,
   },
   messageText: { color: colors.text, fontSize: 14, lineHeight: 21 },
-  toolRow: {
-    minHeight: 54,
+  assistantHeading: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '800',
+    marginBottom: 7,
+  },
+  messageError: { color: colors.danger, fontSize: 13, lineHeight: 19, marginTop: 5 },
+  images: { gap: 8, marginTop: 9 },
+  image: { width: '100%', height: 220, borderRadius: 12, backgroundColor: '#071014' },
+  attachments: { gap: 6, marginTop: 9 },
+  attachment: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 9,
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    padding: 9,
+  },
+  attachmentIcon: { color: colors.accent, fontSize: 18 },
+  attachmentCopy: { flex: 1, minWidth: 0 },
+  attachmentName: { color: colors.text, fontSize: 11, fontWeight: '700' },
+  attachmentMeta: { color: colors.muted, fontSize: 9, marginTop: 2 },
+  tool: {
     borderRadius: 12,
     borderColor: colors.border,
     borderWidth: 1,
     backgroundColor: '#091418',
-    paddingHorizontal: 11,
-    paddingVertical: 9,
+    marginHorizontal: 12,
+    marginVertical: 3,
   },
-  toolRowError: { borderColor: '#653139' },
+  toolError: { borderColor: '#653139' },
+  toolHead: {
+    minHeight: 52,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 11,
+    paddingVertical: 8,
+  },
   toolGlyph: {
     width: 25,
     height: 25,
@@ -129,8 +370,25 @@ const styles = StyleSheet.create({
   toolCopy: { flex: 1, minWidth: 0 },
   toolTitle: { color: colors.text, fontSize: 11, fontWeight: '800' },
   toolSummary: { color: colors.muted, fontSize: 9, lineHeight: 13, marginTop: 3 },
-  toolGroup: { gap: 6, borderLeftColor: colors.accentDark, borderLeftWidth: 2, paddingLeft: 8 },
-  toolGroupTitle: { color: colors.accent, fontSize: 8, fontWeight: '900', letterSpacing: 0.8 },
+  disclosure: { color: colors.muted, fontSize: 18, width: 22, textAlign: 'center' },
+  toolDetails: { gap: 6, padding: 11, borderTopWidth: 1, borderTopColor: colors.border },
+  detailLabel: { color: colors.accent, fontSize: 7, fontWeight: '900', letterSpacing: 1 },
+  detailText: { color: colors.muted, fontSize: 10, lineHeight: 15, fontFamily: 'monospace' },
+  groupDetails: { gap: 1, paddingVertical: 5, borderTopWidth: 1, borderTopColor: colors.border },
+  reasoning: {
+    margin: 12,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: '#091418',
+  },
+  waiting: { alignSelf: 'flex-start', gap: 2, marginHorizontal: 12, marginVertical: 10 },
+  reasoningHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  reasoningLabel: { color: colors.muted, fontSize: 11, fontWeight: '700' },
+  reasoningText: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 9 },
+  typingDots: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
   emptyTranscript: {
     flex: 1,
     minHeight: 340,
@@ -138,6 +396,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 28,
   },
+  loadingTranscript: { flex: 1, minHeight: 280, alignItems: 'center', justifyContent: 'center' },
   emptyOrbit: {
     width: 72,
     height: 72,

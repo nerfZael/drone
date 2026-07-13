@@ -5,6 +5,8 @@ import { fromByteArray, toByteArray } from 'base64-js';
 import { canonicalJson, type DevicePublicIdentity } from '@drone/device-protocol';
 
 const PRIVATE_KEY_NAME = 'droneHub.devicePrivateKey.v1';
+const DEVICE_NAME_NAME = 'droneHub.deviceName.v1';
+const DEFAULT_DEVICE_NAME = 'Android phone';
 const encoder = new TextEncoder();
 
 function base64Url(bytes: Uint8Array): string {
@@ -50,8 +52,25 @@ export async function mobileDeviceIdForPublicKey(publicKey: JsonWebKey): Promise
   return `device_${digest.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '').slice(0, 24)}`;
 }
 
-export async function loadDeviceIdentity(name = 'Android phone'): Promise<MobileDeviceIdentity> {
+function normalizedDeviceName(value: unknown): string {
+  return String(value ?? '')
+    .trim()
+    .slice(0, 80);
+}
+
+export async function saveDeviceName(value: string): Promise<string> {
+  const name = normalizedDeviceName(value);
+  if (!name) throw new Error('Device name is required');
+  await SecureStore.setItemAsync(DEVICE_NAME_NAME, name, {
+    keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
+  });
+  return name;
+}
+
+export async function loadDeviceIdentity(name?: string): Promise<MobileDeviceIdentity> {
   const privateKey = await readPrivateKey();
+  const storedName = await SecureStore.getItemAsync(DEVICE_NAME_NAME);
+  const deviceName = normalizedDeviceName(name ?? storedName) || DEFAULT_DEVICE_NAME;
   const publicBytes = p256.getPublicKey(privateKey, false);
   const publicKey: JsonWebKey = {
     crv: 'P-256',
@@ -64,7 +83,7 @@ export async function loadDeviceIdentity(name = 'Android phone'): Promise<Mobile
   const id = await mobileDeviceIdForPublicKey(publicKey);
   return {
     id,
-    name,
+    name: deviceName,
     platform: 'android',
     publicKey,
     async sign(text) {
@@ -84,7 +103,7 @@ export function verifyP256Signature(
     raw[0] = 4;
     raw.set(base64UrlBytes(publicKey.x), 1);
     raw.set(base64UrlBytes(publicKey.y), 33);
-    return p256.verify(base64UrlBytes(signature), encoder.encode(text), raw);
+    return p256.verify(base64UrlBytes(signature), encoder.encode(text), raw, { lowS: false });
   } catch {
     return false;
   }

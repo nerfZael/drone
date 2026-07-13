@@ -20,6 +20,7 @@ import {
 
 type ImportedCredential =
   | { kind: 'openai-api-key'; apiKey: string }
+  | { kind: 'groq-api-key'; apiKey: string }
   | { kind: 'codex-auth-json'; authJson: string };
 
 export class ProviderCredentialsHttp implements DeviceMeshHttpExtension {
@@ -42,18 +43,30 @@ export class ProviderCredentialsHttp implements DeviceMeshHttpExtension {
     const body = await readDeviceMeshBody(request);
     const sourceDeviceId = String(body.sourceDeviceId ?? '').trim();
     const credential =
-      body.credential === 'codex' ? 'codex' : body.credential === 'openai' ? 'openai' : null;
+      body.credential === 'codex'
+        ? 'codex'
+        : body.credential === 'openai'
+          ? 'openai'
+          : body.credential === 'groq'
+            ? 'groq'
+            : null;
     if (!sourceDeviceId || !credential)
       throw new Error('source device and credential are required');
     const imported = await this.fetch(sourceDeviceId, credential);
-    if (credential === 'openai') {
-      if (imported.kind !== 'openai-api-key' || !imported.apiKey.trim())
-        throw new Error('source returned an invalid OpenAI credential');
-      await upsertStoredProviderApiKey('openai', imported.apiKey);
-    } else {
+    if (credential === 'codex') {
       if (imported.kind !== 'codex-auth-json')
         throw new Error('source returned an invalid Codex credential');
       await installCodexCliAuthJsonFromTransfer(imported.authJson);
+    } else {
+      if (
+        !('apiKey' in imported) ||
+        imported.kind !== `${credential}-api-key` ||
+        !imported.apiKey.trim()
+      )
+        throw new Error(
+          `source returned an invalid ${credential === 'groq' ? 'GROQ' : 'OpenAI'} credential`,
+        );
+      await upsertStoredProviderApiKey(credential, imported.apiKey);
     }
     deviceMeshJson(response, 200, { ok: true, sourceDeviceId, credential });
     return true;

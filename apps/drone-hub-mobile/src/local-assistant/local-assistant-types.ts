@@ -1,4 +1,6 @@
 import type { AssistantMessage } from '@drone/assistant-chat';
+import type { LocalAssistantThinkingLevel } from './local-assistant-model';
+export type { LocalAssistantThinkingLevel } from './local-assistant-model';
 
 export type LocalAssistantMessage = AssistantMessage & {
   id: string;
@@ -18,6 +20,7 @@ export type LocalAssistantThread = {
   createdAt: string;
   updatedAt: string;
   model: string;
+  thinkingLevel: LocalAssistantThinkingLevel;
   status: 'idle' | 'running' | 'error';
   error: string | null;
   workspaceTarget: LocalWorkspaceTarget | null;
@@ -25,6 +28,9 @@ export type LocalAssistantThread = {
 };
 
 export type LocalAssistantSettings = {
+  provider: 'openai' | 'codex';
   model: string;
+  thinkingLevel: LocalAssistantThinkingLevel;
   hasApiKey: boolean;
+  hasCodexAuth: boolean;
 };

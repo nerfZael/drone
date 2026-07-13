@@ -1,15 +1,53 @@
 import React from 'react';
-import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Button, Card, ErrorBanner, Label, textStyles } from '../components/Ui';
+import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Button, Card, ConfirmDialog, ErrorBanner, Label, textStyles } from '../components/Ui';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSettingsCard';
 
-export function SettingsScreen() {
+export type SettingsTab = 'assistant' | 'devices' | 'pairing';
+
+const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
+  { id: 'assistant', label: 'Assistant' },
+  { id: 'devices', label: 'Devices' },
+  { id: 'pairing', label: 'Pairing' },
+];
+
+export function SettingsScreen({
+  tab,
+  onTabChange,
+  onPair,
+}: {
+  tab: SettingsTab;
+  onTabChange(tab: SettingsTab): void;
+  onPair(): void;
+}) {
   const mesh = useMesh();
   const [checking, setChecking] = React.useState(false);
+  const currentPhoneName =
+    mesh.devices.find((device) => device.id === mesh.identity?.id)?.name ??
+    mesh.identity?.name ??
+    'Android phone';
+  const [phoneName, setPhoneName] = React.useState(currentPhoneName);
+  const [renaming, setRenaming] = React.useState(false);
+  const [confirmForget, setConfirmForget] = React.useState(false);
+  const [forgetting, setForgetting] = React.useState(false);
   const [results, setResults] = React.useState<Record<string, string>>({});
   const [error, setError] = React.useState<string | null>(null);
+
+  React.useEffect(() => setPhoneName(currentPhoneName), [currentPhoneName]);
+
+  const renamePhone = async () => {
+    setRenaming(true);
+    setError(null);
+    try {
+      await mesh.renameSelf(phoneName);
+    } catch (nextError: any) {
+      setError(nextError?.message ?? String(nextError));
+    } finally {
+      setRenaming(false);
+    }
+  };
 
   const diagnose = async () => {
     setChecking(true);
@@ -33,93 +71,207 @@ export function SettingsScreen() {
   };
 
   return (
-    <ScrollView contentContainerStyle={styles.page}>
-      <View>
-        <Label>Settings & diagnostics</Label>
-        <Text style={[textStyles.title, styles.title]}>Know where the route ends.</Text>
-        <Text style={textStyles.body}>
-          These addresses are connection hints. The P-256 device keys—not URLs or names—prove
-          identity.
-        </Text>
+    <View style={styles.shell}>
+      <View style={styles.tabs}>
+        {SETTINGS_TABS.map((item) => {
+          const active = item.id === tab;
+          return (
+            <Pressable
+              key={item.id}
+              accessibilityRole="tab"
+              accessibilityState={{ selected: active }}
+              onPress={() => onTabChange(item.id)}
+              style={[styles.tab, active && styles.tabActive]}
+            >
+              <Text style={[styles.tabText, active && styles.tabTextActive]}>{item.label}</Text>
+            </Pressable>
+          );
+        })}
       </View>
-      <ErrorBanner message={error ?? mesh.error} />
-      <Card>
-        <Label>This phone</Label>
-        <Text style={[textStyles.heading, styles.cardTitle]}>
-          {mesh.identity?.name ?? 'Android phone'}
-        </Text>
-        <Text style={textStyles.mono}>{mesh.identity?.id}</Text>
-      </Card>
-      <Card>
-        <Label>Device network</Label>
-        <Text style={[textStyles.mono, styles.network]}>{mesh.profile?.networkId}</Text>
-      </Card>
-      <View style={styles.routes}>
-        {(mesh.profile?.connections ?? []).map((connection) => (
-          <Card key={connection.deviceId}>
-            <View style={styles.routeHead}>
-              <Text style={textStyles.heading}>
-                {mesh.devices.find((device) => device.id === connection.deviceId)?.name ??
-                  connection.deviceId}
+      <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
+        <ErrorBanner message={error ?? mesh.error} />
+        {tab === 'assistant' ? (
+          <>
+            <View>
+              <Label>Assistant</Label>
+              <Text style={[textStyles.title, styles.title]}>Model and credentials.</Text>
+              <Text style={textStyles.body}>
+                Choose how Assistant runs on this phone and manage its secure provider access.
               </Text>
-              <View style={styles.routeStatus}>
-                <Text style={styles.role}>{connection.role}</Text>
-                <Text style={styles.result}>
-                  {results[connection.deviceId] ??
-                    (mesh.connectedDeviceIds.includes(connection.deviceId)
-                      ? 'CONNECTED'
-                      : 'OFFLINE')}
-                </Text>
-              </View>
             </View>
-            <Text style={[textStyles.mono, styles.endpoint]}>{connection.endpoint}</Text>
-            {connection.role === 'backup' ? (
-              <View style={styles.primaryAction}>
-                <Button tone="quiet" onPress={() => void mesh.makePrimary(connection.deviceId)}>
-                  Make primary bridge
+            <LocalAssistantSettingsCard />
+          </>
+        ) : tab === 'devices' ? (
+          <>
+            <View>
+              <Label>Devices</Label>
+              <Text style={[textStyles.title, styles.title]}>Identity and routes.</Text>
+              <Text style={textStyles.body}>
+                Names and addresses are hints. Device keys prove identity across the mesh.
+              </Text>
+            </View>
+            <Card>
+              <Label>This phone</Label>
+              <TextInput
+                value={phoneName}
+                onChangeText={setPhoneName}
+                placeholder="Android phone"
+                placeholderTextColor="#5f767d"
+                autoCapitalize="words"
+                autoCorrect={false}
+                maxLength={80}
+                style={styles.nameInput}
+              />
+              <Text style={textStyles.mono}>{mesh.identity?.id}</Text>
+              <Button
+                onPress={() => void renamePhone()}
+                disabled={!phoneName.trim() || phoneName.trim() === currentPhoneName}
+                loading={renaming}
+                style={styles.renameButton}
+              >
+                Save phone name
+              </Button>
+            </Card>
+            <Card>
+              <Label>Device network</Label>
+              <Text style={[textStyles.mono, styles.network]}>{mesh.profile?.networkId}</Text>
+            </Card>
+            <View style={styles.routes}>
+              {(mesh.profile?.connections ?? []).map((connection) => (
+                <Card key={connection.deviceId}>
+                  <View style={styles.routeHead}>
+                    <Text style={textStyles.heading}>
+                      {mesh.devices.find((device) => device.id === connection.deviceId)?.name ??
+                        connection.deviceId}
+                    </Text>
+                    <View style={styles.routeStatus}>
+                      <Text style={styles.role}>{connection.role}</Text>
+                      <Text style={styles.result}>
+                        {results[connection.deviceId] ??
+                          (mesh.connectedDeviceIds.includes(connection.deviceId)
+                            ? 'CONNECTED'
+                            : 'OFFLINE')}
+                      </Text>
+                    </View>
+                  </View>
+                  <Text style={[textStyles.mono, styles.endpoint]}>{connection.endpoint}</Text>
+                  {connection.role === 'backup' ? (
+                    <View style={styles.primaryAction}>
+                      <Button
+                        tone="quiet"
+                        onPress={() => void mesh.makePrimary(connection.deviceId)}
+                      >
+                        Make primary bridge
+                      </Button>
+                    </View>
+                  ) : null}
+                </Card>
+              ))}
+            </View>
+            <Button onPress={() => void diagnose()} loading={checking}>
+              Run connection check
+            </Button>
+          </>
+        ) : (
+          <>
+            <View>
+              <Label>Pairing</Label>
+              <Text style={[textStyles.title, styles.title]}>Trust and access.</Text>
+              <Text style={textStyles.body}>
+                Add another trusted Hub or remove this phone from its current mesh.
+              </Text>
+            </View>
+            <Card>
+              <Label>Device mesh</Label>
+              <Text style={[textStyles.heading, styles.meshTitle]}>Pairing and access</Text>
+              <Text style={textStyles.body}>
+                Pair another Hub without removing your existing routes and permissions.
+              </Text>
+              <View style={styles.meshActions}>
+                <Button onPress={onPair}>Pair another Hub</Button>
+                <Button tone="danger" onPress={() => setConfirmForget(true)}>
+                  Forget mesh
                 </Button>
               </View>
-            ) : null}
-          </Card>
-        ))}
-      </View>
-      <Button onPress={() => void diagnose()} loading={checking}>
-        Run connection check
-      </Button>
-      <Card>
-        <Label>Prototype security</Label>
-        <Text style={[textStyles.body, styles.security]}>
-          The private identity is encrypted by Android secure storage. Requests are signed, expire
-          after one minute, and are checked again on the target. Forwarded payloads currently rely
-          on TLS and are visible to a bridge Hub. Provider credential copies are the exception: they
-          are encrypted specifically for this phone before forwarding.
-        </Text>
-      </Card>
-      <LocalAssistantSettingsCard />
-      <Button
-        tone="danger"
-        onPress={() =>
-          Alert.alert('Forget device mesh?', 'You will need a new pairing code to reconnect.', [
-            { text: 'Cancel', style: 'cancel' },
-            {
-              text: 'Forget',
-              style: 'destructive',
-              onPress: () =>
-                void mesh.forgetMesh().catch((nextError) => setError(nextError.message)),
-            },
-          ])
+            </Card>
+            <Card>
+              <Label>Security</Label>
+              <Text style={[textStyles.body, styles.security]}>
+                The private identity is encrypted by Android secure storage. Requests are signed,
+                expire after one minute, and are checked again on the target. Provider credential
+                copies are encrypted specifically for this phone before forwarding.
+              </Text>
+            </Card>
+          </>
+        )}
+      </ScrollView>
+      <ConfirmDialog
+        visible={confirmForget}
+        title="Forget this mesh?"
+        message="This removes all saved device routes and permissions from the phone. Your phone identity remains, but you will need a new pairing code to reconnect."
+        confirmLabel="Forget mesh"
+        destructive
+        busy={forgetting}
+        onCancel={() => setConfirmForget(false)}
+        onConfirm={() =>
+          void (async () => {
+            setForgetting(true);
+            setError(null);
+            try {
+              await mesh.forgetMesh();
+              setConfirmForget(false);
+            } catch (nextError: any) {
+              setError(nextError?.message ?? String(nextError));
+            } finally {
+              setForgetting(false);
+            }
+          })()
         }
-      >
-        Forget mesh
-      </Button>
-    </ScrollView>
+      />
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
+  shell: { flex: 1 },
+  tabs: {
+    flexDirection: 'row',
+    gap: 5,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.background,
+  },
+  tab: {
+    flex: 1,
+    minHeight: 36,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panel,
+  },
+  tabActive: { borderColor: colors.accent, backgroundColor: colors.accentDark },
+  tabText: { color: colors.muted, fontSize: 10, fontWeight: '800' },
+  tabTextActive: { color: colors.text },
   page: { padding: 20, gap: 14 },
   title: { marginTop: 6, marginBottom: 8 },
-  cardTitle: { marginTop: 5, marginBottom: 5 },
+  nameInput: {
+    minHeight: 44,
+    color: colors.text,
+    backgroundColor: colors.background,
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 12,
+    fontSize: 15,
+    fontWeight: '700',
+    marginTop: 8,
+    marginBottom: 8,
+  },
+  renameButton: { marginTop: 12 },
   network: { marginTop: 7, color: colors.accent },
   routes: { gap: 9 },
   routeHead: {
@@ -140,4 +292,6 @@ const styles = StyleSheet.create({
   endpoint: { marginTop: 8 },
   primaryAction: { marginTop: 12 },
   security: { marginTop: 8 },
+  meshTitle: { marginTop: 6, marginBottom: 7 },
+  meshActions: { gap: 9, marginTop: 14 },
 });

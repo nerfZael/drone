@@ -28,4 +28,23 @@ describe('assistant message model', () => {
       result: { toolCallId: 'call_1' },
     });
   });
+
+  test('groups consecutive repeated tool calls into one activity item', () => {
+    const items = renderItemsFromMessages([
+      {
+        role: 'assistant',
+        content: [
+          { type: 'toolCall', id: 'call_1', name: 'read_file', arguments: { path: 'a' } },
+          { type: 'toolCall', id: 'call_2', name: 'read_file', arguments: { path: 'b' } },
+          { type: 'toolCall', id: 'call_3', name: 'read_file', arguments: { path: 'c' } },
+        ],
+      },
+      { role: 'toolResult', toolCallId: 'call_1', toolName: 'read_file', content: 'a' },
+      { role: 'toolResult', toolCallId: 'call_2', toolName: 'read_file', content: 'b' },
+      { role: 'toolResult', toolCallId: 'call_3', toolName: 'read_file', content: 'c' },
+    ]);
+
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: 'toolGroup', items: [{}, {}, {}] });
+  });
 });

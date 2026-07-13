@@ -1,7 +1,16 @@
 import React from 'react';
 import { AppState } from 'react-native';
-import type { MeshDevice, PairingApproval, PairingPayload } from '@drone/device-protocol';
-import { loadDeviceIdentity, type MobileDeviceIdentity } from '../security/device-identity';
+import type {
+  CapabilityEvent,
+  MeshDevice,
+  PairingApproval,
+  PairingPayload,
+} from '@drone/device-protocol';
+import {
+  loadDeviceIdentity,
+  saveDeviceName,
+  type MobileDeviceIdentity,
+} from '../security/device-identity';
 import { MeshSocket } from './MeshSocket';
 import { claimPairing, validatePairingApproval, waitForPairingApproval } from './pair-device';
 import {
@@ -26,6 +35,12 @@ type MeshContextValue = {
     payload?: unknown,
   ): Promise<any>;
   refreshDevices(): Promise<void>;
+  subscribe(
+    capability: string,
+    event: string,
+    listener: (message: CapabilityEvent) => void,
+  ): () => void;
+  renameSelf(name: string): Promise<void>;
   makePrimary(deviceId: string): Promise<void>;
   forgetMesh(): Promise<void>;
 };
@@ -41,6 +56,19 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
   const sockets = React.useRef<MeshSocket[]>([]);
   const refreshRef = React.useRef<() => Promise<void>>(async () => undefined);
   const topologyRefreshTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const eventListeners = React.useRef(
+    new Set<{
+      capability: string;
+      event: string;
+      listener: (message: CapabilityEvent) => void;
+    }>(),
+  );
+  const emitCapabilityEvent = React.useCallback((event: CapabilityEvent) => {
+    for (const subscription of eventListeners.current) {
+      if (subscription.capability === event.capability && subscription.event === event.event)
+        subscription.listener(event);
+    }
+  }, []);
 
   const connect = React.useCallback(
     async (nextProfile: MeshProfile, nextIdentity: MobileDeviceIdentity) => {
@@ -62,6 +90,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
                 if (topologyRefreshTimer.current) clearTimeout(topologyRefreshTimer.current);
                 topologyRefreshTimer.current = setTimeout(() => void refreshRef.current(), 300);
               },
+              emitCapabilityEvent,
             ),
         );
       const results = await Promise.allSettled(sockets.current.map((socket) => socket.connect()));
@@ -71,6 +100,15 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
         );
         throw rejected?.reason ?? new Error('No paired device is reachable');
       }
+    },
+    [emitCapabilityEvent],
+  );
+
+  const subscribe = React.useCallback(
+    (capability: string, event: string, listener: (message: CapabilityEvent) => void) => {
+      const subscription = { capability, event, listener };
+      eventListeners.current.add(subscription);
+      return () => eventListeners.current.delete(subscription);
     },
     [],
   );
@@ -143,6 +181,11 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     const result: any = await request(target, 'device-core', 'devices.list');
     if (!Array.isArray(result?.devices)) return;
     const devices = result.devices as MeshDevice[];
+    const selfDevice = devices.find((device) => device.id === identity?.id);
+    if (identity && selfDevice?.name && selfDevice.name !== identity.name) {
+      const name = await saveDeviceName(selfDevice.name);
+      setIdentity({ ...identity, name });
+    }
     const capabilitiesByDevice = { ...(profile?.capabilitiesByDevice ?? {}) };
     await Promise.all(
       devices
@@ -186,6 +229,38 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     }
   }, [connect, identity, profile, request]);
   refreshRef.current = refreshDevices;
+
+  const renameSelf = React.useCallback(
+    async (rawName: string) => {
+      if (!identity || !profile) throw new Error('Device identity is not ready');
+      const name = rawName.trim().slice(0, 80);
+      if (!name) throw new Error('Device name is required');
+      const targets = sockets.current
+        .filter((socket) => socket.connected)
+        .map((socket) => socket.connection.deviceId);
+      if (targets.length === 0) throw new Error('No paired device is connected');
+      const results = await Promise.allSettled(
+        targets.map((target) => request(target, 'device-core', 'device.rename-self', { name })),
+      );
+      if (!results.some((result) => result.status === 'fulfilled')) {
+        const failure = results.find(
+          (result): result is PromiseRejectedResult => result.status === 'rejected',
+        );
+        throw failure?.reason ?? new Error('Could not rename this phone');
+      }
+      await saveDeviceName(name);
+      setIdentity({ ...identity, name });
+      const next: MeshProfile = {
+        ...profile,
+        devices: profile.devices.map((device) =>
+          device.id === identity.id ? { ...device, name } : device,
+        ),
+      };
+      await saveMeshProfile(next);
+      setProfile(next);
+    },
+    [identity, profile, request],
+  );
 
   const pair = React.useCallback(
     async (payload: PairingPayload, signal: AbortSignal) => {
@@ -266,6 +341,8 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     pair,
     request,
     refreshDevices,
+    subscribe,
+    renameSelf,
     makePrimary,
     forgetMesh,
   };

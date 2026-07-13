@@ -10,6 +10,7 @@ describe('phone assistant workspace tools', () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
       model: 'gpt-test',
+      thinkingLevel: 'low',
       status: 'idle',
       error: null,
       workspaceTarget: {

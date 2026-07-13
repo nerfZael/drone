@@ -9,10 +9,13 @@ import {
 } from './local-assistant-storage';
 import type {
   LocalAssistantMessage,
+  LocalAssistantThinkingLevel,
   LocalAssistantThread,
   LocalWorkspaceTarget,
 } from './local-assistant-types';
 import { runOpenAiChat } from './openai-chat-client';
+import { runCodexChat } from './codex-chat-client';
+import { readLocalAssistantCodexAuth } from './local-assistant-codex-auth';
 import { executeWorkspaceTool, workspaceToolsForThread } from './workspace-tools';
 
 type LocalAssistantContextValue = {
@@ -21,12 +24,18 @@ type LocalAssistantContextValue = {
   loading: boolean;
   runningThreadId: string | null;
   error: string | null;
+  refreshThreads(): Promise<LocalAssistantThread[]>;
   selectThread(threadId: string): void;
   createThread(title?: string): Promise<LocalAssistantThread>;
   deleteThread(threadId: string): Promise<void>;
   updateThread(
     threadId: string,
-    patch: { title?: string; workspaceTarget?: LocalWorkspaceTarget | null },
+    patch: {
+      title?: string;
+      model?: string;
+      thinkingLevel?: LocalAssistantThinkingLevel;
+      workspaceTarget?: LocalWorkspaceTarget | null;
+    },
   ): Promise<void>;
   sendPrompt(threadId: string, prompt: string): Promise<void>;
   stop(threadId: string): void;
@@ -86,6 +95,16 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     };
   }, []);
 
+  const refreshThreads = React.useCallback(async () => {
+    const stored = await loadLocalAssistantThreads();
+    threadsRef.current = stored;
+    setThreads(stored);
+    setActiveThreadId((current) =>
+      stored.some((thread) => thread.id === current) ? current : (stored[0]?.id ?? ''),
+    );
+    return stored;
+  }, []);
+
   const createThread = React.useCallback(
     async (title = '') => {
       const settings = await loadLocalAssistantSettings();
@@ -96,6 +115,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         createdAt: now,
         updatedAt: now,
         model: settings.model,
+        thinkingLevel: settings.thinkingLevel,
         status: 'idle',
         error: null,
         workspaceTarget: null,
@@ -121,13 +141,20 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
   const updateThread = React.useCallback(
     async (
       threadId: string,
-      patch: { title?: string; workspaceTarget?: LocalWorkspaceTarget | null },
+      patch: {
+        title?: string;
+        model?: string;
+        thinkingLevel?: LocalAssistantThinkingLevel;
+        workspaceTarget?: LocalWorkspaceTarget | null;
+      },
     ) => {
       const current = threadsRef.current.find((thread) => thread.id === threadId);
       if (!current) return;
       await replaceThread({
         ...current,
         ...(patch.title !== undefined ? { title: patch.title.trim().slice(0, 160) } : {}),
+        ...(patch.model !== undefined ? { model: patch.model.trim().slice(0, 100) } : {}),
+        ...(patch.thinkingLevel !== undefined ? { thinkingLevel: patch.thinkingLevel } : {}),
         ...(patch.workspaceTarget !== undefined ? { workspaceTarget: patch.workspaceTarget } : {}),
         updatedAt: new Date().toISOString(),
       });
@@ -146,7 +173,8 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         readLocalAssistantApiKey(),
         loadLocalAssistantSettings(),
       ]);
-      if (!apiKey) throw new Error('Add an OpenAI API key in Settings before sending a prompt');
+      if (settings.provider === 'openai' && !apiKey)
+        throw new Error('Add an OpenAI API key in Settings before sending a prompt');
       if (!mesh.identity) throw new Error('Phone device identity is not ready');
 
       setError(null);
@@ -155,7 +183,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       setRunningThreadId(threadId);
       let running: LocalAssistantThread = {
         ...current,
-        model: settings.model,
+        model: current.model || settings.model,
         status: 'running',
         error: null,
         updatedAt: new Date().toISOString(),
@@ -163,13 +191,13 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       };
       await replaceThread(running);
       try {
-        const messages = await runOpenAiChat({
-          apiKey,
-          model: settings.model,
+        const runInput = {
+          model: running.model,
+          thinkingLevel: running.thinkingLevel,
           thread: running,
           tools: workspaceToolsForThread(running),
           signal: controller.signal,
-          executeTool: async (name, args) =>
+          executeTool: async (name: string, args: Record<string, unknown>) =>
             await executeWorkspaceTool({
               thread: running,
               phoneDeviceId: mesh.identity!.id,
@@ -177,7 +205,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
               args,
               request: mesh.request,
             }),
-          onMessages: async (messages) => {
+          onMessages: async (messages: LocalAssistantMessage[]) => {
             running = {
               ...running,
               messages: boundLocalAssistantMessages(messages),
@@ -185,7 +213,26 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
             };
             await replaceThread(running);
           },
-        });
+          onStreamingMessages: async (messages: LocalAssistantMessage[]) => {
+            const preview = {
+              ...running,
+              messages: boundLocalAssistantMessages(messages),
+              updatedAt: new Date().toISOString(),
+            };
+            const next = threadsRef.current.map((thread) =>
+              thread.id === preview.id ? preview : thread,
+            );
+            threadsRef.current = next;
+            setThreads(next);
+          },
+        };
+        const messages =
+          settings.provider === 'codex'
+            ? await runCodexChat({
+                ...runInput,
+                auth: await readLocalAssistantCodexAuth(),
+              })
+            : await runOpenAiChat({ ...runInput, apiKey });
         running = {
           ...running,
           messages: boundLocalAssistantMessages(messages),
@@ -222,6 +269,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     loading,
     runningThreadId,
     error,
+    refreshThreads,
     selectThread: setActiveThreadId,
     createThread,
     deleteThread,

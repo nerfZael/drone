@@ -1,5 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type { LocalAssistantMessage, LocalAssistantThread } from './local-assistant-types';
+import {
+  migrateLocalAssistantModel,
+  normalizeLocalAssistantThinkingLevel,
+} from './local-assistant-model';
 
 const THREADS_KEY = 'droneHub.localAssistant.threads.v1';
 const MAX_THREADS = 30;
@@ -76,7 +80,8 @@ function cleanThread(value: any): LocalAssistantThread | null {
     title: String(value.title ?? 'Phone assistant').slice(0, 160),
     createdAt: String(value.createdAt ?? new Date().toISOString()),
     updatedAt: String(value.updatedAt ?? new Date().toISOString()),
-    model: String(value.model ?? '').slice(0, 100),
+    model: migrateLocalAssistantModel(value.model),
+    thinkingLevel: normalizeLocalAssistantThinkingLevel(value.thinkingLevel),
     status: value.status === 'error' ? 'error' : 'idle',
     error: value.status === 'error' && value.error ? String(value.error).slice(0, 2_000) : null,
     workspaceTarget,

@@ -25,6 +25,7 @@ function compactThread(thread: any, workspaceTarget: unknown) {
     error: thread?.error ? String(thread.error) : null,
     provider: String(thread?.provider ?? ''),
     model: String(thread?.model ?? ''),
+    thinkingLevel: String(thread?.thinkingLevel ?? ''),
     messageCount: Number(thread?.messageCount ?? 0),
     workspaceTarget,
   };
@@ -32,6 +33,36 @@ function compactThread(thread: any, workspaceTarget: unknown) {
 
 function threadsFromSnapshot(snapshot: any): any[] {
   return Array.isArray(snapshot?.threads) ? snapshot.threads : [];
+}
+
+function boundedArguments(value: unknown): unknown {
+  if (value == null) return undefined;
+  try {
+    return JSON.stringify(value).length <= 8_000 ? value : { truncated: true };
+  } catch {
+    return { truncated: true };
+  }
+}
+
+function boundedStreamingMessages(snapshot: any): any[] {
+  const values = Array.isArray(snapshot?.streamingMessages)
+    ? snapshot.streamingMessages
+    : snapshot?.streamingMessage
+      ? [snapshot.streamingMessage]
+      : [];
+  return values.slice(-2).map((message: any) => ({
+    role: message?.role === 'user' ? 'user' : 'assistant',
+    content: Array.isArray(message?.content)
+      ? message.content.slice(-12).map((part: any) => ({
+          type: String(part?.type ?? ''),
+          ...(part?.text ? { text: String(part.text).slice(0, 16_000) } : {}),
+          ...(part?.thinking ? { thinking: String(part.thinking).slice(0, 16_000) } : {}),
+          ...(part?.name ? { name: String(part.name).slice(0, 120) } : {}),
+          ...(part?.id ? { id: String(part.id).slice(0, 160) } : {}),
+          ...(part?.arguments ? { arguments: boundedArguments(part.arguments) } : {}),
+        }))
+      : String(message?.content ?? '').slice(0, 24_000),
+  }));
 }
 
 async function submitPrompt(
@@ -75,7 +106,23 @@ export function createAssistantThreadsCapability(
       const payload = object(rawPayload);
       if (operation === 'threads.list') {
         const snapshot = await localHubRequest(access, '/api/assistant/threads');
-        return { threads: await Promise.all(threadsFromSnapshot(snapshot).map(withTarget)) };
+        return {
+          threads: await Promise.all(threadsFromSnapshot(snapshot).map(withTarget)),
+          models: Array.isArray(snapshot?.models) ? snapshot.models : [],
+        };
+      }
+      if (operation === 'models.list') {
+        const snapshot = await localHubRequest(access, '/api/assistant/threads');
+        return {
+          models: Array.isArray(snapshot?.models)
+            ? snapshot.models.map((model: any) => ({
+                provider: String(model?.provider ?? ''),
+                id: String(model?.id ?? ''),
+                name: String(model?.name ?? model?.id ?? ''),
+                thinkingLevel: String(model?.thinkingLevel ?? ''),
+              }))
+            : [],
+        };
       }
       if (operation === 'thread.create') {
         const snapshot = await localHubRequest(access, '/api/assistant/threads', {
@@ -105,7 +152,24 @@ export function createAssistantThreadsCapability(
         return {
           thread: thread ? await withTarget(thread) : null,
           history: boundedAssistantHistory(history),
+          streamingMessages: boundedStreamingMessages(snapshot),
         };
+      }
+      if (operation === 'thread.update') {
+        const snapshot = await localHubRequest(
+          access,
+          `/api/assistant/threads/${encodeURIComponent(threadId)}`,
+          {
+            method: 'PATCH',
+            body: JSON.stringify({
+              provider: required(payload.provider, 'provider'),
+              model: required(payload.model, 'model'),
+              ...(payload.thinkingLevel ? { thinkingLevel: String(payload.thinkingLevel) } : {}),
+            }),
+          },
+        );
+        const thread = threadsFromSnapshot(snapshot).find((item) => item.id === threadId);
+        return { thread: thread ? await withTarget(thread) : null };
       }
       if (operation === 'thread.stop') {
         await localHubRequest(

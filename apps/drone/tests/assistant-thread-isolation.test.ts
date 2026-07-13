@@ -24,14 +24,17 @@ function fakePromptText(input: any): string {
   if (typeof input?.content === 'string') return input.content;
   if (!Array.isArray(input?.content)) return '';
   return input.content
-    .map((item: any) => item?.type === 'text' ? String(item.text ?? '') : '')
+    .map((item: any) => (item?.type === 'text' ? String(item.text ?? '') : ''))
     .join('\n');
 }
 
 function installFakeRuntime(
   service: HubAssistantService,
   handlers: {
-    onPrompt?: (prompt: string, run: { provider: string; model: string; thinkingLevel: string }) => Promise<void> | void;
+    onPrompt?: (
+      prompt: string,
+      run: { provider: string; model: string; thinkingLevel: string },
+    ) => Promise<void> | void;
   },
 ): void {
   const Type = {
@@ -72,8 +75,13 @@ function installFakeRuntime(
 
     async prompt(input: any): Promise<void> {
       const prompt = fakePromptText(input);
-      this.state.messages.push(typeof input === 'string' ? { role: 'user', content: input } : input);
-      this.state.streamingMessage = { role: 'assistant', content: [{ type: 'text', text: `running ${prompt}` }] };
+      this.state.messages.push(
+        typeof input === 'string' ? { role: 'user', content: input } : input,
+      );
+      this.state.streamingMessage = {
+        role: 'assistant',
+        content: [{ type: 'text', text: `running ${prompt}` }],
+      };
       await this.emit({ type: 'message_update', message: this.state.streamingMessage });
       await handlers.onPrompt?.(prompt, this.run);
       if (prompt.startsWith('speak:')) {
@@ -81,8 +89,14 @@ function installFakeRuntime(
         await speak?.execute?.('tool_fake_speak', { text: prompt.slice('speak:'.length).trim() });
       }
       this.state.streamingMessage = null;
-      this.state.messages.push({ role: 'assistant', content: [{ type: 'text', text: `done ${prompt}` }] });
-      await this.emit({ type: 'turn_end', message: this.state.messages[this.state.messages.length - 1] });
+      this.state.messages.push({
+        role: 'assistant',
+        content: [{ type: 'text', text: `done ${prompt}` }],
+      });
+      await this.emit({
+        type: 'turn_end',
+        message: this.state.messages[this.state.messages.length - 1],
+      });
       await this.emit({ type: 'agent_end' });
     }
 
@@ -106,7 +120,13 @@ function makeService(): HubAssistantService {
   });
 }
 
-async function markDroneReady(input: { id: string; name: string; runtime?: string; group?: string | null; repoPath?: string }): Promise<void> {
+async function markDroneReady(input: {
+  id: string;
+  name: string;
+  runtime?: string;
+  group?: string | null;
+  repoPath?: string;
+}): Promise<void> {
   const now = new Date().toISOString();
   await updateRegistry((reg: any) => {
     reg.pending = reg.pending ?? {};
@@ -157,7 +177,10 @@ describe('assistant thread isolation', () => {
       expect(thread.autoApprove).toBe(false);
       expect(thread.promptDeliveryMode).toBe('queue');
 
-      const updated = await service.updateThread(threadId, { autoApprove: true, promptDeliveryMode: 'asap' });
+      const updated = await service.updateThread(threadId, {
+        autoApprove: true,
+        promptDeliveryMode: 'asap',
+      });
       thread = updated.threads.find((item) => item.id === threadId) as any;
       expect(thread.autoApprove).toBe(true);
       expect(thread.promptDeliveryMode).toBe('asap');
@@ -170,13 +193,34 @@ describe('assistant thread isolation', () => {
       await markDroneReady({ id: 'drone-b', name: 'Denied' });
       const service = new HubAssistantService({
         listDrones: async () => [
-          { id: 'drone-a', name: 'Allowed', group: null, runtime: 'container', repoPath: '', status: 'ready', chats: ['default'] },
-          { id: 'drone-b', name: 'Denied', group: null, runtime: 'container', repoPath: '', status: 'ready', chats: ['default'] },
+          {
+            id: 'drone-a',
+            name: 'Allowed',
+            group: null,
+            runtime: 'container',
+            repoPath: '',
+            status: 'ready',
+            chats: ['default'],
+          },
+          {
+            id: 'drone-b',
+            name: 'Denied',
+            group: null,
+            runtime: 'container',
+            repoPath: '',
+            status: 'ready',
+            chats: ['default'],
+          },
         ],
       });
       const created = await service.createThread({ title: 'scope' });
       const threadId = created.activeThreadId;
-      await service.updateAccessScope({ threadId, readMode: 'selected', writeMode: 'selected', droneIds: ['drone-a'] });
+      await service.updateAccessScope({
+        threadId,
+        readMode: 'selected',
+        writeMode: 'selected',
+        droneIds: ['drone-a'],
+      });
       await service.updateThread(threadId, { autoApprove: true });
 
       const denied = await service.preflightBlipTool(threadId, 'message_drone', 'call-denied', {
@@ -207,8 +251,12 @@ describe('assistant thread isolation', () => {
       const secondThreadId = second.activeThreadId;
       const largeText = 'x'.repeat(250_000);
       const threads = (service as any).threads as any[];
-      threads.find((thread) => thread.id === firstThreadId).messages = [{ role: 'assistant', content: [{ type: 'text', text: largeText }] }];
-      threads.find((thread) => thread.id === secondThreadId).messages = [{ role: 'assistant', content: [{ type: 'text', text: largeText }] }];
+      threads.find((thread) => thread.id === firstThreadId).messages = [
+        { role: 'assistant', content: [{ type: 'text', text: largeText }] },
+      ];
+      threads.find((thread) => thread.id === secondThreadId).messages = [
+        { role: 'assistant', content: [{ type: 'text', text: largeText }] },
+      ];
       (service as any).chatIdleSubscriptions = [
         {
           id: 'sub-fired',
@@ -231,13 +279,19 @@ describe('assistant thread isolation', () => {
       const compact = await service.snapshot('compact');
       expect(JSON.stringify(compact)).not.toContain(largeText);
       expect(compact.threads.every((thread: any) => thread.messages.length === 0)).toBe(true);
-      expect(compact.threads.find((thread: any) => thread.id === firstThreadId)?.messageCount).toBe(1);
-      expect(compact.threads.find((thread: any) => thread.id === secondThreadId)?.messageCount).toBe(1);
+      expect(compact.threads.find((thread: any) => thread.id === firstThreadId)?.messageCount).toBe(
+        1,
+      );
+      expect(
+        compact.threads.find((thread: any) => thread.id === secondThreadId)?.messageCount,
+      ).toBe(1);
       expect(compact.chatIdleSubscriptions).toEqual([]);
 
       const detail = await service.threadSnapshot(firstThreadId);
       const firstDetail = detail.threads.find((thread: any) => thread.id === firstThreadId) as any;
-      const secondSummary = detail.threads.find((thread: any) => thread.id === secondThreadId) as any;
+      const secondSummary = detail.threads.find(
+        (thread: any) => thread.id === secondThreadId,
+      ) as any;
       expect(detail.activeThreadId).toBe(firstThreadId);
       expect((await service.snapshot('compact')).activeThreadId).toBe(secondThreadId);
       expect(JSON.stringify(firstDetail)).toContain(largeText);
@@ -263,17 +317,29 @@ describe('assistant thread isolation', () => {
       const archivedThreadId = archived.activeThreadId;
       const active = await service.createThread({ title: 'approval' });
       const activeThreadId = active.activeThreadId;
-      await service.updateAccessScope({ threadId: activeThreadId, readMode: 'all', writeMode: 'all', droneIds: [] });
+      await service.updateAccessScope({
+        threadId: activeThreadId,
+        readMode: 'all',
+        writeMode: 'all',
+        droneIds: [],
+      });
       const largeText = 'approval-large-payload'.repeat(20_000);
       const activeText = 'active approval context';
       const threads = (service as any).threads as any[];
-      threads.find((thread) => thread.id === archivedThreadId).messages = [{ role: 'assistant', content: [{ type: 'text', text: largeText }] }];
-      threads.find((thread) => thread.id === activeThreadId).messages = [{ role: 'assistant', content: [{ type: 'text', text: activeText }] }];
+      threads.find((thread) => thread.id === archivedThreadId).messages = [
+        { role: 'assistant', content: [{ type: 'text', text: largeText }] },
+      ];
+      threads.find((thread) => thread.id === activeThreadId).messages = [
+        { role: 'assistant', content: [{ type: 'text', text: activeText }] },
+      ];
 
       const events: any[] = [];
       const preflight = (service as any).beforeToolCall(
         activeThreadId,
-        { toolCall: { id: 'message-call', name: 'message_drone' }, args: { droneId: 'drone-1', chatName: 'default', prompt: 'hello' } },
+        {
+          toolCall: { id: 'message-call', name: 'message_drone' },
+          args: { droneId: 'drone-1', chatName: 'default', prompt: 'hello' },
+        },
         async (event: any) => {
           if (event.type !== 'approval_pending') return;
           events.push(event);
@@ -284,8 +350,12 @@ describe('assistant thread isolation', () => {
       await expect(preflight).resolves.toBeUndefined();
       expect(events).toHaveLength(1);
       const eventSnapshot = events[0].snapshot;
-      const archivedSummary = eventSnapshot.threads.find((thread: any) => thread.id === archivedThreadId) as any;
-      const activeDetail = eventSnapshot.threads.find((thread: any) => thread.id === activeThreadId) as any;
+      const archivedSummary = eventSnapshot.threads.find(
+        (thread: any) => thread.id === archivedThreadId,
+      ) as any;
+      const activeDetail = eventSnapshot.threads.find(
+        (thread: any) => thread.id === activeThreadId,
+      ) as any;
       expect(JSON.stringify(eventSnapshot)).not.toContain(largeText);
       expect(JSON.stringify(activeDetail)).toContain(activeText);
       expect(archivedSummary.messages).toEqual([]);
@@ -322,7 +392,11 @@ describe('assistant thread isolation', () => {
 
       const noActive = await service.createThread({ title: 'no active chat' });
       let thread = noActive.threads.find((item) => item.id === noActive.activeThreadId) as any;
-      expect(thread.accessScope).toMatchObject({ readMode: 'all', writeMode: 'selected', droneIds: [] });
+      expect(thread.accessScope).toMatchObject({
+        readMode: 'all',
+        writeMode: 'selected',
+        droneIds: [],
+      });
 
       service.updateAppContext({
         activeDroneId: 'drone-a',
@@ -332,17 +406,20 @@ describe('assistant thread isolation', () => {
       });
       const withActive = await service.createThread({ title: 'active chat' });
       thread = withActive.threads.find((item) => item.id === withActive.activeThreadId) as any;
-      expect(thread.accessScope).toMatchObject({ readMode: 'all', writeMode: 'selected', droneIds: ['drone-a'] });
+      expect(thread.accessScope).toMatchObject({
+        readMode: 'all',
+        writeMode: 'selected',
+        droneIds: ['drone-a'],
+      });
 
       const voice = await service.ensureLatestVoiceThread();
-      expect(voice.thread.accessScope).toMatchObject({ readMode: 'all', writeMode: 'selected', droneIds: [] });
+      expect(voice.thread.accessScope).toMatchObject({
+        readMode: 'all',
+        writeMode: 'selected',
+        droneIds: [],
+      });
     });
   });
-
-
-
-
-
 
   test('voice assistant threads are tagged and get speak by default', async () => {
     await withTempDroneDataDir('assistant-voice-thread-', async () => {
@@ -368,7 +445,9 @@ describe('assistant thread isolation', () => {
       expect(reused.threadId).toBe(voice.threadId);
 
       const disabled = await service.updateThread(voice.threadId, {
-        enabledTools: voice.thread.enabledTools.filter((name: string) => name !== 'set_thinking_level'),
+        enabledTools: voice.thread.enabledTools.filter(
+          (name: string) => name !== 'set_thinking_level',
+        ),
       });
       thread = disabled.threads.find((item) => item.id === voice.threadId) as any;
       expect(thread.enabledTools).not.toContain('set_thinking_level');
@@ -383,8 +462,6 @@ describe('assistant thread isolation', () => {
     });
   });
 
-
-
   test('realtime transcripts are delegated to canonical Blip history', async () => {
     await withTempDroneDataDir('assistant-realtime-transcripts-', async () => {
       const service = makeService();
@@ -395,8 +472,16 @@ describe('assistant thread isolation', () => {
       });
 
       const config = await service.ensureLatestVoiceThread({ title: 'Desktop realtime thread' });
-      await service.appendRealtimeMessage({ threadId: config.threadId, role: 'user', text: 'show me the drone list' });
-      await service.appendRealtimeMessage({ threadId: config.threadId, role: 'assistant', text: 'I can do that.' });
+      await service.appendRealtimeMessage({
+        threadId: config.threadId,
+        role: 'user',
+        text: 'show me the drone list',
+      });
+      await service.appendRealtimeMessage({
+        threadId: config.threadId,
+        role: 'assistant',
+        text: 'I can do that.',
+      });
 
       const snapshot = await service.threadSnapshot(config.threadId);
       const thread = snapshot.threads.find((item) => item.id === config.threadId) as any;
@@ -418,13 +503,21 @@ describe('assistant thread isolation', () => {
       });
 
       const config = await service.ensureLatestVoiceThread({ title: 'Desktop realtime thread' });
-      await service.updateRealtimeStreamingMessage({ threadId: config.threadId, role: 'user', text: 'show me' });
+      await service.updateRealtimeStreamingMessage({
+        threadId: config.threadId,
+        role: 'user',
+        text: 'show me',
+      });
 
       const streaming = await service.threadSnapshot(config.threadId);
       expect((streaming as any).streamingMessage?.role).toBe('user');
       expect((streaming as any).streamingMessage?.content?.[0]?.text).toBe('show me');
 
-      await service.appendRealtimeMessage({ threadId: config.threadId, role: 'user', text: 'show me the drones' });
+      await service.appendRealtimeMessage({
+        threadId: config.threadId,
+        role: 'user',
+        text: 'show me the drones',
+      });
       const final = await service.threadSnapshot(config.threadId);
       expect((final as any).streamingMessage).toBeUndefined();
       const thread = final.threads.find((item) => item.id === config.threadId) as any;
@@ -445,18 +538,41 @@ describe('assistant thread isolation', () => {
       });
 
       const config = await service.ensureLatestVoiceThread({ title: 'Desktop realtime thread' });
-      await service.updateRealtimeStreamingMessage({ threadId: config.threadId, role: 'user', text: 'count to ten' });
-      await service.updateRealtimeStreamingMessage({ threadId: config.threadId, role: 'assistant', text: 'one two' });
+      await service.updateRealtimeStreamingMessage({
+        threadId: config.threadId,
+        role: 'user',
+        text: 'count to ten',
+      });
+      await service.updateRealtimeStreamingMessage({
+        threadId: config.threadId,
+        role: 'assistant',
+        text: 'one two',
+      });
 
       const streaming = await service.threadSnapshot(config.threadId);
-      expect((streaming as any).streamingMessages.map((message: any) => message.role)).toEqual(['user', 'assistant']);
-      expect((streaming as any).streamingMessages.map((message: any) => message.content?.[0]?.text)).toEqual(['count to ten', 'one two']);
+      expect((streaming as any).streamingMessages.map((message: any) => message.role)).toEqual([
+        'user',
+        'assistant',
+      ]);
+      expect(
+        (streaming as any).streamingMessages.map((message: any) => message.content?.[0]?.text),
+      ).toEqual(['count to ten', 'one two']);
 
-      await service.appendRealtimeMessage({ threadId: config.threadId, role: 'user', text: 'count to ten' });
+      await service.appendRealtimeMessage({
+        threadId: config.threadId,
+        role: 'user',
+        text: 'count to ten',
+      });
       const userFinal = await service.threadSnapshot(config.threadId);
-      expect((userFinal as any).streamingMessages.map((message: any) => message.role)).toEqual(['assistant']);
+      expect((userFinal as any).streamingMessages.map((message: any) => message.role)).toEqual([
+        'assistant',
+      ]);
 
-      await service.appendRealtimeMessage({ threadId: config.threadId, role: 'assistant', text: 'one two three' });
+      await service.appendRealtimeMessage({
+        threadId: config.threadId,
+        role: 'assistant',
+        text: 'one two three',
+      });
       const assistantFinal = await service.threadSnapshot(config.threadId);
       expect((assistantFinal as any).streamingMessages).toBeUndefined();
       const thread = assistantFinal.threads.find((item) => item.id === config.threadId) as any;
@@ -465,7 +581,34 @@ describe('assistant thread isolation', () => {
     });
   });
 
+  test('projects model runtime deltas and running state into thread snapshots', async () => {
+    await withTempDroneDataDir('assistant-model-runtime-streaming-', async () => {
+      const service = makeService();
+      installFakeRuntime(service, {});
+      const initial = await service.snapshot('compact');
+      const threadId = initial.activeThreadId;
 
+      await service.notifyRuntimeEvent(threadId, { type: 'turn_started' });
+      await service.notifyRuntimeEvent(threadId, { type: 'assistant_delta', text: 'Hel' });
+      await service.notifyRuntimeEvent(threadId, { type: 'assistant_delta', text: 'lo' });
+
+      const streaming = await service.threadSnapshot(threadId);
+      expect(streaming.threads.find((thread) => thread.id === threadId)?.status).toBe('running');
+      expect((streaming as any).streamingMessage?.content?.[0]?.text).toBe('Hello');
+
+      await service.notifyRuntimeEvent(threadId, {
+        type: 'transcript_changed',
+        role: 'assistant',
+      });
+      const persisted = await service.threadSnapshot(threadId);
+      expect((persisted as any).streamingMessage).toBeUndefined();
+      expect(persisted.threads.find((thread) => thread.id === threadId)?.status).toBe('running');
+
+      await service.notifyRuntimeEvent(threadId, { type: 'session_finished' });
+      const finished = await service.threadSnapshot(threadId);
+      expect(finished.threads.find((thread) => thread.id === threadId)?.status).toBe('idle');
+    });
+  });
 
   test('defaults new assistant threads to Codex GPT-5.6 Sol with no reasoning when Codex is connected', async () => {
     await withTempDroneDataDir('assistant-default-codex-', async (droneDataDir) => {
@@ -473,7 +616,10 @@ describe('assistant thread isolation', () => {
       const authPath = path.join(droneDataDir, 'codex-auth.json');
       fs.writeFileSync(
         authPath,
-        JSON.stringify({ tokens: { access_token: 'test-access-token', refresh_token: 'test-refresh-token' }, last_refresh: '2026-05-08T00:00:00.000Z' }),
+        JSON.stringify({
+          tokens: { access_token: 'test-access-token', refresh_token: 'test-refresh-token' },
+          last_refresh: '2026-05-08T00:00:00.000Z',
+        }),
       );
       process.env.DRONE_HUB_CODEX_AUTH_FILE = authPath;
       try {
@@ -532,7 +678,11 @@ describe('assistant thread isolation', () => {
 
       expect(thread.model).toBe('gpt-5.6-sol');
       expect(thread.thinkingLevel).toBe('off');
-      expect(codexOptions.filter((option) => option.id.startsWith('gpt-5.6-')).map((option) => `${option.id}:${option.thinkingLevel}`)).toEqual([
+      expect(
+        codexOptions
+          .filter((option) => option.id.startsWith('gpt-5.6-'))
+          .map((option) => `${option.id}:${option.thinkingLevel}`),
+      ).toEqual([
         'gpt-5.6-sol:off',
         'gpt-5.6-sol:low',
         'gpt-5.6-sol:medium',
@@ -546,6 +696,23 @@ describe('assistant thread isolation', () => {
         'gpt-5.6-luna:medium',
         'gpt-5.6-luna:high',
       ]);
+    });
+  });
+
+  test('keeps advertising configured models when one runtime lookup fails', async () => {
+    await withTempDroneDataDir('assistant-partial-model-catalog-', async () => {
+      const service = makeService();
+      (service as any).runtime = async () => ({
+        getModel: (_provider: string, model: string) => {
+          if (model === 'gpt-5.6-luna') throw new Error('model is not installed');
+          return { reasoning: model !== 'gpt-5.5' };
+        },
+      });
+
+      const snapshot = await service.snapshot('compact');
+      expect(snapshot.models.some((option) => option.id === 'gpt-5.6-terra')).toBe(true);
+      expect(snapshot.models.some((option) => option.id === 'gpt-5.6-luna')).toBe(true);
+      expect(snapshot.models.some((option) => option.id === 'gpt-5.5')).toBe(true);
     });
   });
 });

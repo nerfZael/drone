@@ -1,24 +1,89 @@
 import React from 'react';
-import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Animated,
+  PanResponder,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  useWindowDimensions,
+  View,
+} from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
 import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext';
+import {
+  AssistantThreadDrawer,
+  assistantDrawerWidth,
+  type AppDrawerNavigationItem,
+} from '../local-assistant/AssistantThreadDrawer';
 import { DevicesScreen } from '../screens/DevicesScreen';
-import { AssistantHomeScreen } from '../screens/AssistantHomeScreen';
+import { AssistantHomeScreen, type AssistantLocation } from '../screens/AssistantHomeScreen';
 import { DronesScreen } from '../screens/DronesScreen';
 import { PairScreen } from '../screens/PairScreen';
-import { SettingsScreen } from '../screens/SettingsScreen';
+import { SettingsScreen, type SettingsTab } from '../screens/SettingsScreen';
 import { colors } from '../theme';
 
-type Tab = 'devices' | 'assistant' | 'drones' | 'pair' | 'settings';
+type Tab = 'assistant' | 'drones' | 'devices' | 'settings';
 
 function Shell() {
   const mesh = useMesh();
-  const [tab, setTab] = React.useState<Tab>('devices');
-
-  React.useEffect(() => {
-    if (!mesh.profile) setTab('pair');
-  }, [mesh.profile]);
+  const [tab, setTab] = React.useState<Tab>('assistant');
+  const [pairing, setPairing] = React.useState(false);
+  const [pairReturnTab, setPairReturnTab] = React.useState<Tab>('assistant');
+  const [appDrawerOpen, setAppDrawerOpen] = React.useState(false);
+  const [assistantLocation, setAssistantLocation] = React.useState<AssistantLocation>('phone');
+  const [settingsTab, setSettingsTab] = React.useState<SettingsTab>('assistant');
+  const { width: windowWidth } = useWindowDimensions();
+  const drawerWidth = assistantDrawerWidth(windowWidth);
+  const drawerOffset = React.useRef(new Animated.Value(-drawerWidth)).current;
+  const drawerOpenRef = React.useRef(appDrawerOpen);
+  const drawerWidthRef = React.useRef(drawerWidth);
+  const drawerEnabledRef = React.useRef(Boolean(mesh.profile));
+  const [openingGestureActive, setOpeningGestureActive] = React.useState(false);
+  drawerOpenRef.current = appDrawerOpen;
+  drawerWidthRef.current = drawerWidth;
+  drawerEnabledRef.current = Boolean(mesh.profile);
+  const drawerPanResponder = React.useMemo(
+    () =>
+      PanResponder.create({
+        onMoveShouldSetPanResponderCapture: (_event, gesture) =>
+          drawerEnabledRef.current &&
+          !drawerOpenRef.current &&
+          gesture.x0 <= 42 &&
+          gesture.dx > 3 &&
+          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15,
+        onMoveShouldSetPanResponder: (_event, gesture) =>
+          drawerEnabledRef.current &&
+          !drawerOpenRef.current &&
+          gesture.x0 <= 42 &&
+          gesture.dx > 3 &&
+          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15,
+        onPanResponderGrant: (_event, gesture) => {
+          const width = drawerWidthRef.current;
+          drawerOffset.stopAnimation();
+          drawerOffset.setValue(Math.min(0, -width + Math.max(0, gesture.dx)));
+          setOpeningGestureActive(true);
+          setAppDrawerOpen(true);
+        },
+        onPanResponderMove: (_event, gesture) => {
+          drawerOffset.setValue(
+            Math.min(0, -drawerWidthRef.current + Math.max(0, gesture.dx)),
+          );
+        },
+        onPanResponderRelease: (_event, gesture) => {
+          const shouldOpen = gesture.dx >= drawerWidthRef.current * 0.3 || gesture.vx >= 0.45;
+          setOpeningGestureActive(false);
+          setAppDrawerOpen(shouldOpen);
+        },
+        onPanResponderTerminate: () => {
+          setOpeningGestureActive(false);
+          setAppDrawerOpen(false);
+        },
+      }),
+    [drawerOffset],
+  );
 
   if (mesh.loading) {
     return (
@@ -29,62 +94,147 @@ function Shell() {
     );
   }
 
-  const content =
-    !mesh.profile || tab === 'pair' ? (
-      <ScrollView keyboardShouldPersistTaps="handled">
-        <PairScreen onComplete={() => setTab('devices')} />
-      </ScrollView>
-    ) : tab === 'settings' ? (
-      <SettingsScreen />
-    ) : tab === 'drones' ? (
-      <DronesScreen />
-    ) : tab === 'assistant' ? (
-      <AssistantHomeScreen />
-    ) : (
-      <DevicesScreen onPair={() => setTab('pair')} />
-    );
+  const openPairing = () => {
+    setPairReturnTab('settings');
+    setPairing(true);
+  };
+  const pairingVisible = pairing || !mesh.profile;
+  const navigateToTab = (nextTab: Tab) => {
+    setAppDrawerOpen(false);
+    if (!pairingVisible && tab === nextTab) return;
+    setTimeout(() => {
+      setPairing(false);
+      setTab(nextTab);
+    }, 180);
+  };
+  const navigationItems: AppDrawerNavigationItem[] = [
+    {
+      id: 'assistant',
+      label: 'Assistant',
+      active: !pairingVisible && tab === 'assistant',
+      onPress: () => navigateToTab('assistant'),
+    },
+    {
+      id: 'drones',
+      label: 'Drones',
+      active: !pairingVisible && tab === 'drones',
+      onPress: () => navigateToTab('drones'),
+    },
+    {
+      id: 'devices',
+      label: 'Devices',
+      active: !pairingVisible && tab === 'devices',
+      onPress: () => navigateToTab('devices'),
+    },
+    {
+      id: 'settings',
+      label: 'Settings',
+      active: !pairingVisible && tab === 'settings',
+      onPress: () => navigateToTab('settings'),
+    },
+  ];
+  const title = pairingVisible
+    ? 'Pair device'
+    : (
+        {
+          assistant: 'Assistant',
+          drones: 'Drones',
+          devices: 'Devices',
+          settings: 'Settings',
+        } as const
+      )[tab];
+  const content = pairingVisible ? (
+    <ScrollView keyboardShouldPersistTaps="handled">
+      {mesh.profile ? (
+        <View style={styles.pairBack}>
+          <Pressable onPress={() => setPairing(false)} style={styles.backButton}>
+            <Text style={styles.backText}>‹ Settings</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      <PairScreen
+        onComplete={() => {
+          setPairing(false);
+          setTab(pairReturnTab);
+        }}
+      />
+    </ScrollView>
+  ) : tab === 'settings' ? (
+    <SettingsScreen tab={settingsTab} onTabChange={setSettingsTab} onPair={openPairing} />
+  ) : tab === 'drones' ? (
+    <DronesScreen />
+  ) : tab === 'assistant' ? (
+    <AssistantHomeScreen
+      drawerOpen={appDrawerOpen}
+      drawerOffset={drawerOffset}
+      navigationItems={navigationItems}
+      openingGestureActive={openingGestureActive}
+      onDrawerOpenChange={setAppDrawerOpen}
+      location={assistantLocation}
+    />
+  ) : (
+    <DevicesScreen />
+  );
 
   return (
-    <SafeAreaView style={styles.safe} edges={['top', 'left', 'right']}>
+    <SafeAreaView
+      style={styles.safe}
+      edges={['top', 'right', 'bottom', 'left']}
+      {...drawerPanResponder.panHandlers}
+    >
+      {mesh.profile && (tab !== 'assistant' || pairingVisible) ? (
+        <AssistantThreadDrawer
+          open={appDrawerOpen}
+          title=""
+          threads={[]}
+          activeThreadId=""
+          offset={drawerOffset}
+          openingGestureActive={openingGestureActive}
+          navigationItems={navigationItems}
+          showThreads={false}
+          onClose={() => setAppDrawerOpen(false)}
+          onSelect={() => {}}
+          onCreate={() => {}}
+        />
+      ) : null}
       <View style={styles.header}>
-        <View style={styles.mark}>
-          <View style={styles.markInner} />
-        </View>
-        <Text style={styles.brand}>DRONE HUB</Text>
-        <View style={[styles.route, mesh.connectedDeviceIds.length > 0 && styles.routeOnline]}>
-          <Text style={styles.routeText}>
-            {mesh.connectedDeviceIds.length > 0 ? 'MESH LIVE' : 'OFFLINE'}
-          </Text>
+        {mesh.profile ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Toggle app menu"
+            onPress={() => setAppDrawerOpen((value) => !value)}
+            style={styles.titleButton}
+          >
+            <Text style={styles.title}>{title}</Text>
+            <Text style={styles.titleChevron}>{appDrawerOpen ? '‹' : '›'}</Text>
+          </Pressable>
+        ) : (
+          <Text style={styles.title}>{title}</Text>
+        )}
+        <View style={styles.headerActions}>
+          {tab === 'assistant' && !pairingVisible ? (
+            <Pressable
+              onPress={() => {
+                setAppDrawerOpen(false);
+                setAssistantLocation((value) => (value === 'phone' ? 'devices' : 'phone'));
+              }}
+              style={styles.locationToggle}
+            >
+              <Text style={styles.locationToggleText}>
+                {assistantLocation === 'phone' ? 'ON PHONE' : 'ON DEVICES'}
+              </Text>
+              <Text style={styles.locationToggleIcon}>⇄</Text>
+            </Pressable>
+          ) : null}
+          {mesh.connectedDeviceIds.length === 0 ? (
+            <View style={styles.route}>
+              <Text style={styles.routeText}>OFFLINE</Text>
+            </View>
+          ) : null}
         </View>
       </View>
       <View style={styles.content}>{content}</View>
-      {mesh.profile ? (
-        <View style={styles.nav}>
-          <NavItem label="Devices" active={tab === 'devices'} onPress={() => setTab('devices')} />
-          <NavItem
-            label="Assistant"
-            active={tab === 'assistant'}
-            onPress={() => setTab('assistant')}
-          />
-          <NavItem label="Drones" active={tab === 'drones'} onPress={() => setTab('drones')} />
-          <NavItem label="Pair" active={tab === 'pair'} onPress={() => setTab('pair')} />
-          <NavItem
-            label="Settings"
-            active={tab === 'settings'}
-            onPress={() => setTab('settings')}
-          />
-        </View>
-      ) : null}
     </SafeAreaView>
-  );
-}
-
-function NavItem({ label, active, onPress }: { label: string; active: boolean; onPress(): void }) {
-  return (
-    <Pressable onPress={onPress} style={styles.navItem}>
-      <View style={[styles.navLine, active && styles.navLineActive]} />
-      <Text style={[styles.navText, active && styles.navTextActive]}>{label}</Text>
-    </Pressable>
   );
 }
 
@@ -115,20 +265,25 @@ const styles = StyleSheet.create({
     paddingHorizontal: 20,
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
-    gap: 9,
+    justifyContent: 'space-between',
   },
-  mark: {
-    width: 21,
-    height: 21,
-    borderRadius: 6,
-    borderColor: colors.accent,
-    borderWidth: 1,
+  title: { color: colors.text, fontSize: 18, fontWeight: '800', letterSpacing: -0.2 },
+  titleButton: { flexDirection: 'row', alignItems: 'center', gap: 8, minHeight: 42 },
+  titleChevron: { color: colors.accent, fontSize: 20, fontWeight: '700' },
+  headerActions: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 7 },
+  locationToggle: {
+    minHeight: 30,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    transform: [{ rotate: '45deg' }],
+    gap: 5,
+    paddingHorizontal: 8,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panel,
   },
-  markInner: { width: 7, height: 7, backgroundColor: colors.accent, borderRadius: 2 },
-  brand: { color: colors.text, fontSize: 11, fontWeight: '900', letterSpacing: 1.7 },
+  locationToggleText: { color: colors.text, fontSize: 8, fontWeight: '900', letterSpacing: 0.7 },
+  locationToggleIcon: { color: colors.accent, fontSize: 12, fontWeight: '900' },
   route: {
     marginLeft: 'auto',
     borderColor: colors.border,
@@ -137,26 +292,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     paddingVertical: 4,
   },
-  routeOnline: { borderColor: '#285d4b', backgroundColor: '#102a21' },
   routeText: { color: colors.muted, fontSize: 8, fontWeight: '900', letterSpacing: 1 },
   content: { flex: 1 },
-  nav: {
-    minHeight: 63,
-    paddingBottom: 8,
-    flexDirection: 'row',
-    backgroundColor: colors.panel,
-    borderTopColor: colors.border,
-    borderTopWidth: 1,
-  },
-  navItem: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 8 },
-  navLine: { width: 22, height: 2, borderRadius: 2, backgroundColor: 'transparent' },
-  navLineActive: { backgroundColor: colors.accent },
-  navText: {
-    color: colors.muted,
-    fontSize: 10,
-    fontWeight: '800',
-    letterSpacing: 0.7,
-    textTransform: 'uppercase',
-  },
-  navTextActive: { color: colors.text },
+  pairBack: { paddingHorizontal: 20, paddingTop: 14 },
+  backButton: { alignSelf: 'flex-start', minHeight: 32, justifyContent: 'center' },
+  backText: { color: colors.accent, fontSize: 13, fontWeight: '800' },
 });

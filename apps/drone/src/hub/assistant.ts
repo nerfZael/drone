@@ -135,7 +135,12 @@ export type {
   AssistantVoiceSource,
 } from './assistant/assistant-contracts';
 
-type AssistantThreadStatus = 'idle' | 'running' | 'waiting_for_approval' | 'waiting_for_chats_idle' | 'error';
+type AssistantThreadStatus =
+  | 'idle'
+  | 'running'
+  | 'waiting_for_approval'
+  | 'waiting_for_chats_idle'
+  | 'error';
 type AssistantThread = {
   id: string;
   title: string;
@@ -300,7 +305,9 @@ export type AssistantSnapshot = {
   streamingMessages?: any[];
 };
 
-const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
+const dynamicImport = new Function('specifier', 'return import(specifier)') as (
+  specifier: string,
+) => Promise<any>;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -311,7 +318,9 @@ function makeAssistantId(prefix: string): string {
 }
 
 function normalizeProvider(raw: unknown): LlmProviderId {
-  const value = String(raw ?? '').trim().toLowerCase();
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (value === 'gemini') return 'gemini';
   if (value === 'codex' || value === 'openai-codex' || value === 'chatgpt-codex') return 'codex';
   return 'openai';
@@ -334,24 +343,42 @@ function defaultModelForProvider(provider: LlmProviderId): string {
 
 function allowedModelForProvider(provider: LlmProviderId, raw: unknown): string {
   const model = String(raw ?? '').trim();
-  return ASSISTANT_MODEL_OPTIONS.some((option) => option.provider === provider && option.id === model)
+  return ASSISTANT_MODEL_OPTIONS.some(
+    (option) => option.provider === provider && option.id === model,
+  )
     ? model
     : defaultModelForProvider(provider);
 }
 
-function allowedThinkingLevelForModel(provider: LlmProviderId, model: string, raw: unknown): AssistantThinkingLevel {
+function allowedThinkingLevelForModel(
+  provider: LlmProviderId,
+  model: string,
+  raw: unknown,
+): AssistantThinkingLevel {
   const requested = normalizeThinkingLevel(raw);
-  if (ASSISTANT_MODEL_OPTIONS.some((option) => option.provider === provider && option.id === model && option.thinkingLevel === requested)) {
+  if (
+    ASSISTANT_MODEL_OPTIONS.some(
+      (option) =>
+        option.provider === provider && option.id === model && option.thinkingLevel === requested,
+    )
+  ) {
     return requested;
   }
-  return ASSISTANT_MODEL_OPTIONS.find((option) => option.provider === provider && option.id === model)?.thinkingLevel ?? 'off';
+  return (
+    ASSISTANT_MODEL_OPTIONS.find((option) => option.provider === provider && option.id === model)
+      ?.thinkingLevel ?? 'off'
+  );
 }
 
-function supportedThinkingLevelsForModel(provider: LlmProviderId, model: string): AssistantThinkingLevel[] {
+function supportedThinkingLevelsForModel(
+  provider: LlmProviderId,
+  model: string,
+): AssistantThinkingLevel[] {
   const seen = new Set<AssistantThinkingLevel>();
   const levels: AssistantThinkingLevel[] = [];
   for (const option of ASSISTANT_MODEL_OPTIONS) {
-    if (option.provider !== provider || option.id !== model || seen.has(option.thinkingLevel)) continue;
+    if (option.provider !== provider || option.id !== model || seen.has(option.thinkingLevel))
+      continue;
     seen.add(option.thinkingLevel);
     levels.push(option.thinkingLevel);
   }
@@ -359,30 +386,61 @@ function supportedThinkingLevelsForModel(provider: LlmProviderId, model: string)
 }
 
 function normalizeThinkingLevel(raw: unknown): AssistantThinkingLevel {
-  const value = String(raw ?? '').trim().toLowerCase();
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (value === 'instant' || value === 'none') return 'off';
-  if (value === 'minimal' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh') return value;
+  if (
+    value === 'minimal' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh'
+  )
+    return value;
   return 'off';
 }
 
 function parseThinkingLevelForTool(raw: unknown): AssistantThinkingLevel {
-  const value = String(raw ?? '').trim().toLowerCase();
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (!value) throw new Error('missing thinking level');
   if (value === 'instant' || value === 'none') return 'off';
-  if (value === 'off' || value === 'minimal' || value === 'low' || value === 'medium' || value === 'high' || value === 'xhigh') return value;
+  if (
+    value === 'off' ||
+    value === 'minimal' ||
+    value === 'low' ||
+    value === 'medium' ||
+    value === 'high' ||
+    value === 'xhigh'
+  )
+    return value;
   throw new Error(`invalid thinking level: ${String(raw ?? '')}`);
 }
 
 function normalizeAssistantPromptDeliveryMode(raw: unknown): AssistantPromptDeliveryMode {
-  const value = String(raw ?? '').trim().toLowerCase();
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   return value === 'asap' || value === 'steer' || value === 'steering' ? 'asap' : 'queue';
 }
 
 function normalizeAssistantAutoApprove(raw: unknown): boolean {
-  return raw === true || raw === 1 || String(raw ?? '').trim().toLowerCase() === 'true' || String(raw ?? '').trim() === '1';
+  return (
+    raw === true ||
+    raw === 1 ||
+    String(raw ?? '')
+      .trim()
+      .toLowerCase() === 'true' ||
+    String(raw ?? '').trim() === '1'
+  );
 }
 
-function makeAssistantUserMessage(prompt: string, images: Array<{ data: string; mimeType: string }> = []): any {
+function makeAssistantUserMessage(
+  prompt: string,
+  images: Array<{ data: string; mimeType: string }> = [],
+): any {
   const content: any[] = [{ type: 'text', text: prompt }];
   for (const image of images) {
     if (!image.data || !image.mimeType) continue;
@@ -406,7 +464,9 @@ function makeAssistantTextMessage(role: AssistantRealtimeMessageRole, text: stri
 function makeAssistantToolCallMessage(toolCallId: string, toolName: string, args: unknown): any {
   return {
     role: 'assistant',
-    content: [{ type: 'toolCall', id: toolCallId, name: toolName, arguments: sanitizeMessage(args) }],
+    content: [
+      { type: 'toolCall', id: toolCallId, name: toolName, arguments: sanitizeMessage(args) },
+    ],
     timestamp: Date.now(),
   };
 }
@@ -414,9 +474,10 @@ function makeAssistantToolCallMessage(toolCallId: string, toolName: string, args
 function assistantToolResultContentBlocks(result: unknown, error?: unknown): any[] {
   const errorText = cleanOptionalString(error);
   if (errorText) return [{ type: 'text', text: errorText }];
-  const rawContent = result && typeof result === 'object' && Array.isArray((result as any).content)
-    ? (result as any).content
-    : [];
+  const rawContent =
+    result && typeof result === 'object' && Array.isArray((result as any).content)
+      ? (result as any).content
+      : [];
   const content = rawContent.flatMap((part: any) => {
     if (!part || typeof part !== 'object') return [];
     if (part.type === 'text') {
@@ -427,20 +488,33 @@ function assistantToolResultContentBlocks(result: unknown, error?: unknown): any
       const data = cleanOptionalString(part.data);
       const mimeType = cleanOptionalString(part.mimeType);
       if (!data || !mimeType) return [];
-      return [{
-        type: 'image',
-        data,
-        mimeType,
-        ...(part.annotations && typeof part.annotations === 'object' ? { annotations: sanitizeMessage(part.annotations) } : {}),
-        ...(part._meta && typeof part._meta === 'object' ? { _meta: sanitizeMessage(part._meta) } : {}),
-      }];
+      return [
+        {
+          type: 'image',
+          data,
+          mimeType,
+          ...(part.annotations && typeof part.annotations === 'object'
+            ? { annotations: sanitizeMessage(part.annotations) }
+            : {}),
+          ...(part._meta && typeof part._meta === 'object'
+            ? { _meta: sanitizeMessage(part._meta) }
+            : {}),
+        },
+      ];
     }
     return [];
   });
-  return content.length > 0 ? content : [{ type: 'text', text: assistantRealtimeToolOutput(result) }];
+  return content.length > 0
+    ? content
+    : [{ type: 'text', text: assistantRealtimeToolOutput(result) }];
 }
 
-function makeAssistantToolResultMessage(toolCallId: string, toolName: string, result: unknown, error?: unknown): any {
+function makeAssistantToolResultMessage(
+  toolCallId: string,
+  toolName: string,
+  result: unknown,
+  error?: unknown,
+): any {
   const errorText = cleanOptionalString(error);
   return {
     role: 'toolResult',
@@ -496,14 +570,26 @@ function normalizeSearchContextLines(raw: unknown, label: string): number {
   return Math.min(ASSISTANT_SEARCH_MAX_CONTEXT_LINES, n);
 }
 
-function normalizeWebSearchRecencyFilter(raw: unknown): 'day' | 'week' | 'month' | 'year' | undefined {
-  const value = String(raw ?? '').trim().toLowerCase();
-  return value === 'day' || value === 'week' || value === 'month' || value === 'year' ? value : undefined;
+function normalizeWebSearchRecencyFilter(
+  raw: unknown,
+): 'day' | 'week' | 'month' | 'year' | undefined {
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  return value === 'day' || value === 'week' || value === 'month' || value === 'year'
+    ? value
+    : undefined;
 }
 
-function normalizeFetchContentLivecrawl(raw: unknown): 'never' | 'fallback' | 'preferred' | 'always' | undefined {
-  const value = String(raw ?? '').trim().toLowerCase();
-  return value === 'never' || value === 'fallback' || value === 'preferred' || value === 'always' ? value : undefined;
+function normalizeFetchContentLivecrawl(
+  raw: unknown,
+): 'never' | 'fallback' | 'preferred' | 'always' | undefined {
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
+  return value === 'never' || value === 'fallback' || value === 'preferred' || value === 'always'
+    ? value
+    : undefined;
 }
 
 function normalizeChatNameForAssistant(raw: unknown): string {
@@ -548,19 +634,30 @@ function sleep(ms: number, signal?: AbortSignal): Promise<void> {
       if (timeout) clearTimeout(timeout);
       reject(abortError());
     };
-    timeout = setTimeout(() => {
-      signal?.removeEventListener('abort', onAbort);
-      resolve();
-    }, Math.max(0, ms));
+    timeout = setTimeout(
+      () => {
+        signal?.removeEventListener('abort', onAbort);
+        resolve();
+      },
+      Math.max(0, ms),
+    );
     signal?.addEventListener('abort', onAbort, { once: true });
   });
 }
 
-function droneEntryInAssistantCollection(collection: any, droneIdRaw: unknown): { id: string; key: string; drone: any } | null {
+function droneEntryInAssistantCollection(
+  collection: any,
+  droneIdRaw: unknown,
+): { id: string; key: string; drone: any } | null {
   const droneId = String(droneIdRaw ?? '').trim();
   const drones = collection && typeof collection === 'object' ? collection : {};
   const direct = drones[droneId];
-  if (direct) return { id: String((direct as any)?.id ?? droneId).trim() || droneId, key: droneId, drone: direct };
+  if (direct)
+    return {
+      id: String((direct as any)?.id ?? droneId).trim() || droneId,
+      key: droneId,
+      drone: direct,
+    };
   for (const [id, drone] of Object.entries(drones) as any[]) {
     const stableId = String((drone as any)?.id ?? id).trim();
     const name = String((drone as any)?.name ?? '').trim();
@@ -577,7 +674,10 @@ function droneEntryByAssistantId(regAny: any, droneIdRaw: unknown): { id: string
   throw new Error(`unknown drone: ${String(droneIdRaw ?? '').trim()}`);
 }
 
-function realDroneEntryByAssistantId(regAny: any, droneIdRaw: unknown): { id: string; drone: any } | null {
+function realDroneEntryByAssistantId(
+  regAny: any,
+  droneIdRaw: unknown,
+): { id: string; drone: any } | null {
   const found = droneEntryInAssistantCollection(regAny?.drones, droneIdRaw);
   return found ? { id: found.id, drone: found.drone } : null;
 }
@@ -599,7 +699,9 @@ function droneIdByAssistantRef(regAny: any, droneIdRaw: unknown): string {
 }
 
 function normalizeAssistantRuntime(raw: unknown, fallbackRaw: unknown): 'container' | 'host' {
-  const value = String(raw ?? fallbackRaw ?? '').trim().toLowerCase();
+  const value = String(raw ?? fallbackRaw ?? '')
+    .trim()
+    .toLowerCase();
   return value === 'host' ? 'host' : 'container';
 }
 
@@ -607,20 +709,23 @@ function cleanOptionalString(raw: unknown): string {
   return String(raw ?? '').trim();
 }
 
-function normalizeAssistantRenameRequests(raw: unknown): Array<{ droneId: string; newName: string }> {
-  const input = raw && typeof raw === 'object' ? raw as any : {};
+function normalizeAssistantRenameRequests(
+  raw: unknown,
+): Array<{ droneId: string; newName: string }> {
+  const input = raw && typeof raw === 'object' ? (raw as any) : {};
   const rawRenames = Array.isArray(input.renames) ? input.renames : [];
   const fallbackDrone = cleanOptionalString(input.droneId ?? input.drone ?? input.id);
   const fallbackNewName = cleanOptionalString(input.newName ?? input.nextName ?? input.name);
-  const source = rawRenames.length > 0
-    ? rawRenames
-    : fallbackDrone && fallbackNewName
-      ? [{ droneId: fallbackDrone, newName: fallbackNewName }]
-      : [];
+  const source =
+    rawRenames.length > 0
+      ? rawRenames
+      : fallbackDrone && fallbackNewName
+        ? [{ droneId: fallbackDrone, newName: fallbackNewName }]
+        : [];
   const seen = new Set<string>();
   const result: Array<{ droneId: string; newName: string }> = [];
   for (const item of source) {
-    const entry = item && typeof item === 'object' ? item as any : {};
+    const entry = item && typeof item === 'object' ? (item as any) : {};
     const explicitDrone = cleanOptionalString(entry.droneId ?? entry.drone ?? entry.id);
     const explicitNewName = cleanOptionalString(entry.newName ?? entry.nextName);
     const name = cleanOptionalString(entry.name);
@@ -643,18 +748,28 @@ function hasAssistantGroupValue(raw: unknown): boolean {
   return typeof raw === 'string';
 }
 
-function normalizeAssistantSetDroneGroupAssignments(raw: unknown): Array<{ droneRefs: string[]; group: string | null }> {
-  const input = raw && typeof raw === 'object' ? raw as any : {};
+function normalizeAssistantSetDroneGroupAssignments(
+  raw: unknown,
+): Array<{ droneRefs: string[]; group: string | null }> {
+  const input = raw && typeof raw === 'object' ? (raw as any) : {};
   const rawAssignments = Array.isArray(input.assignments) ? input.assignments : [];
   const source =
     rawAssignments.length > 0
       ? rawAssignments
-      : Array.isArray(input.droneIds) || Array.isArray(input.drones) || cleanOptionalString(input.droneId ?? input.drone ?? input.id)
-        ? [{ droneIds: input.droneIds ?? input.drones, droneId: input.droneId ?? input.drone ?? input.id, group: input.group }]
+      : Array.isArray(input.droneIds) ||
+          Array.isArray(input.drones) ||
+          cleanOptionalString(input.droneId ?? input.drone ?? input.id)
+        ? [
+            {
+              droneIds: input.droneIds ?? input.drones,
+              droneId: input.droneId ?? input.drone ?? input.id,
+              group: input.group,
+            },
+          ]
         : [];
   const result: Array<{ droneRefs: string[]; group: string | null }> = [];
   for (const item of source) {
-    const entry = item && typeof item === 'object' ? item as any : {};
+    const entry = item && typeof item === 'object' ? (item as any) : {};
     const rawRefs = Array.isArray(entry.droneIds)
       ? entry.droneIds
       : Array.isArray(entry.drones)
@@ -662,12 +777,18 @@ function normalizeAssistantSetDroneGroupAssignments(raw: unknown): Array<{ drone
         : [];
     const fallbackRef = cleanOptionalString(entry.droneId ?? entry.drone ?? entry.id);
     const droneRefs = Array.from(
-      new Set([...rawRefs.map((ref: any) => cleanOptionalString(ref)), fallbackRef].filter(Boolean)),
+      new Set(
+        [...rawRefs.map((ref: any) => cleanOptionalString(ref)), fallbackRef].filter(Boolean),
+      ),
     );
     if (droneRefs.length === 0) continue;
     const clearGroup = entry.clearGroup === true || String(entry.clearGroup ?? '').trim() === '1';
-    if (!clearGroup && !hasAssistantGroupValue(entry.group)) throw new Error('group is required unless clearGroup is true');
-    result.push({ droneRefs, group: clearGroup ? null : normalizeAssistantGroupValue(entry.group) });
+    if (!clearGroup && !hasAssistantGroupValue(entry.group))
+      throw new Error('group is required unless clearGroup is true');
+    result.push({
+      droneRefs,
+      group: clearGroup ? null : normalizeAssistantGroupValue(entry.group),
+    });
   }
   if (result.length === 0) throw new Error('missing drone group assignments');
   return result;
@@ -676,15 +797,22 @@ function normalizeAssistantSetDroneGroupAssignments(raw: unknown): Array<{ drone
 function normalizeAssistantDroneFilePath(raw: unknown): string {
   const value = String(raw ?? '').trim();
   if (!value) throw new Error('missing file path');
-  if (value.includes('\0') || value.includes('\r') || value.includes('\n')) throw new Error(`invalid file path: ${value}`);
+  if (value.includes('\0') || value.includes('\r') || value.includes('\n'))
+    throw new Error(`invalid file path: ${value}`);
   const normalized = path.posix.normalize(value.replace(/\\/g, '/'));
   if (!normalized || normalized === '.') throw new Error('missing file path');
   const withoutLeading = normalized.replace(/^\/+/, '');
-  if (withoutLeading === '..' || withoutLeading.startsWith('../')) throw new Error(`invalid file path: ${value}`);
+  if (withoutLeading === '..' || withoutLeading.startsWith('../'))
+    throw new Error(`invalid file path: ${value}`);
   return value.startsWith('/') ? `/${withoutLeading}` : withoutLeading;
 }
 
-function replaceTextOnce(content: string, oldText: string, newText: string, filePath: string): string {
+function replaceTextOnce(
+  content: string,
+  oldText: string,
+  newText: string,
+  filePath: string,
+): string {
   if (!oldText) throw new Error(`empty patch hunk for ${filePath}`);
   const first = content.indexOf(oldText);
   if (first < 0) throw new Error(`patch context not found in ${filePath}`);
@@ -704,10 +832,15 @@ function normalizeAssistantSystemPrompt(raw: unknown): string {
 function migrateAssistantSystemPrompt(raw: unknown): string {
   const prompt = normalizeAssistantSystemPrompt(raw);
   if (!prompt.includes(ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY)) return prompt;
-  return normalizeAssistantSystemPrompt(prompt.replace(ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY, ASSISTANT_CHAT_IDLE_PROMPT_LINE));
+  return normalizeAssistantSystemPrompt(
+    prompt.replace(ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY, ASSISTANT_CHAT_IDLE_PROMPT_LINE),
+  );
 }
 
-function normalizeAssistantEnabledTools(raw: unknown, fallback: string[] = ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES): string[] {
+function normalizeAssistantEnabledTools(
+  raw: unknown,
+  fallback: string[] = ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES,
+): string[] {
   if (!Array.isArray(raw)) return [...fallback];
   const allowed = new Set(ASSISTANT_ALL_TOOL_NAMES);
   const seen = new Set<string>();
@@ -731,7 +864,7 @@ function normalizeAssistantEnabledTools(raw: unknown, fallback: string[] = ASSIS
                     ? ['list_drones']
                     : rawName === 'set_drone_groups'
                       ? ['set_drone_group']
-        : [rawName];
+                      : [rawName];
     for (const name of names) {
       if (!allowed.has(name) || seen.has(name)) continue;
       seen.add(name);
@@ -741,15 +874,25 @@ function normalizeAssistantEnabledTools(raw: unknown, fallback: string[] = ASSIS
   return tools;
 }
 
-function normalizeAssistantChatIdleWaitMode(raw: unknown, fallback: AssistantChatIdleWaitMode = 'all'): AssistantChatIdleWaitMode {
-  const value = String(raw ?? '').trim().toLowerCase();
+function normalizeAssistantChatIdleWaitMode(
+  raw: unknown,
+  fallback: AssistantChatIdleWaitMode = 'all',
+): AssistantChatIdleWaitMode {
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (value === 'any') return 'any';
   if (value === 'all') return 'all';
   return fallback;
 }
 
-function chatIdleStatusesMatchMode(statuses: AssistantChatIdleStatus[], mode: AssistantChatIdleWaitMode): boolean {
-  return mode === 'any' ? statuses.some((status) => status.idle) : statuses.every((status) => status.idle);
+function chatIdleStatusesMatchMode(
+  statuses: AssistantChatIdleStatus[],
+  mode: AssistantChatIdleWaitMode,
+): boolean {
+  return mode === 'any'
+    ? statuses.some((status) => status.idle)
+    : statuses.every((status) => status.idle);
 }
 
 function chatIdleModeLabel(mode: AssistantChatIdleWaitMode): string {
@@ -769,7 +912,11 @@ function makeSubscribeToChatsIdleParameters(Type: any) {
       }),
       { minItems: 1, maxItems: CHAT_IDLE_MAX_TARGETS },
     ),
-    idleForMs: Type.Optional(Type.Number({ description: `Require the idle condition to remain true for this long before returning. Defaults to ${CHAT_IDLE_DEFAULT_IDLE_FOR_MS}.` })),
+    idleForMs: Type.Optional(
+      Type.Number({
+        description: `Require the idle condition to remain true for this long before returning. Defaults to ${CHAT_IDLE_DEFAULT_IDLE_FOR_MS}.`,
+      }),
+    ),
   });
 }
 
@@ -782,7 +929,10 @@ function sameToolSet(rawNames: Set<string>, names: string[]): boolean {
 }
 
 function sameToolSetWithout(rawNames: Set<string>, names: string[], omittedName: string): boolean {
-  return sameToolSet(rawNames, names.filter((name) => name !== omittedName));
+  return sameToolSet(
+    rawNames,
+    names.filter((name) => name !== omittedName),
+  );
 }
 
 function normalizeStoredAssistantEnabledTools(
@@ -791,97 +941,291 @@ function normalizeStoredAssistantEnabledTools(
   migrations: { webSearchDefaultTool: boolean; fetchContentDefaultTool: boolean },
 ): string[] {
   const base = normalizeAssistantEnabledTools(raw);
-  const rawNames = new Set(Array.isArray(raw) ? raw.map((name) => String(name ?? '').trim()).filter(Boolean) : []);
+  const rawNames = new Set(
+    Array.isArray(raw) ? raw.map((name) => String(name ?? '').trim()).filter(Boolean) : [],
+  );
   const rawNamesForDefaultComparison = new Set(rawNames);
   for (const name of ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES) {
     if (!rawNamesForDefaultComparison.has(name)) rawNamesForDefaultComparison.add(name);
   }
   const hadLegacyDefaultTools =
-    rawNames.size > 0 && (
-      ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNamesForDefaultComparison.has(name))
-      || ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNamesForDefaultComparison.has(name))
-      || ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNamesForDefaultComparison.has(name))
-    );
+    rawNames.size > 0 &&
+    (ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) =>
+      rawNamesForDefaultComparison.has(name),
+    ) ||
+      ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every(
+        (name) => rawNamesForDefaultComparison.has(name),
+      ) ||
+      ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.every((name) =>
+        rawNamesForDefaultComparison.has(name),
+      ));
   if (hadLegacyDefaultTools) {
     appendUniqueEnabledTool(base, 'create_chat');
     appendUniqueEnabledTool(base, 'subscribe_to_any_chat_idle');
     appendUniqueEnabledTool(base, 'subscribe_to_all_chats_idle');
   }
-  const hadPreWebSearchDefaultTools = migrations.webSearchDefaultTool && (
-    sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-  );
+  const hadPreWebSearchDefaultTools =
+    migrations.webSearchDefaultTool &&
+    (sameToolSet(
+      rawNamesForDefaultComparison,
+      ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES,
+    ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )));
   if (hadPreWebSearchDefaultTools) {
     appendUniqueEnabledTool(base, 'web_search');
   }
-  const hadPreFetchContentDefaultTools = migrations.fetchContentDefaultTool && (
-    sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-  );
+  const hadPreFetchContentDefaultTools =
+    migrations.fetchContentDefaultTool &&
+    (sameToolSet(
+      rawNamesForDefaultComparison,
+      ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES,
+    ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )));
   if (hadPreFetchContentDefaultTools) {
     appendUniqueEnabledTool(base, 'fetch_content');
   }
-  const missingDefaultMigrationTools = ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES.filter((name) => !rawNames.has(name));
-  const hadPreCurrentDefaultTools = missingDefaultMigrationTools.length > 0 && (
-    sameToolSet(rawNamesForDefaultComparison, ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES)
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
-    || (voiceEnabled && sameToolSet(rawNamesForDefaultComparison, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES))
+  const missingDefaultMigrationTools = ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES.filter(
+    (name) => !rawNames.has(name),
   );
+  const hadPreCurrentDefaultTools =
+    missingDefaultMigrationTools.length > 0 &&
+    (sameToolSet(rawNamesForDefaultComparison, ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES) ||
+      sameToolSet(rawNamesForDefaultComparison, ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      sameToolSet(
+        rawNamesForDefaultComparison,
+        ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+      ) ||
+      (voiceEnabled &&
+        sameToolSet(rawNamesForDefaultComparison, ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES)) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )) ||
+      (voiceEnabled &&
+        sameToolSet(
+          rawNamesForDefaultComparison,
+          ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+        )));
   if (hadPreCurrentDefaultTools) {
     for (const name of missingDefaultMigrationTools) appendUniqueEnabledTool(base, name);
   }
-  const hadPreRenameDefaultTools = !rawNames.has('rename_drones') && (
-    sameToolSetWithout(rawNames, ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
-    || sameToolSetWithout(rawNames, ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
-    || sameToolSetWithout(rawNames, ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
-    || sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
-    || sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
-    || sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
-    || sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
-    || sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
-    || sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones')
-    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
-    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
-    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
-    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
-    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
-    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
-    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
-    || (voiceEnabled && sameToolSetWithout(rawNames, ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones'))
-  );
+  const hadPreRenameDefaultTools =
+    !rawNames.has('rename_drones') &&
+    (sameToolSetWithout(rawNames, ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones') ||
+      sameToolSetWithout(rawNames, ASSISTANT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES, 'rename_drones') ||
+      sameToolSetWithout(
+        rawNames,
+        ASSISTANT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+        'rename_drones',
+      ) ||
+      sameToolSetWithout(
+        rawNames,
+        ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES,
+        'rename_drones',
+      ) ||
+      sameToolSetWithout(
+        rawNames,
+        ASSISTANT_PRE_FETCH_CONTENT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+        'rename_drones',
+      ) ||
+      sameToolSetWithout(
+        rawNames,
+        ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+        'rename_drones',
+      ) ||
+      sameToolSetWithout(
+        rawNames,
+        ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES,
+        'rename_drones',
+      ) ||
+      sameToolSetWithout(
+        rawNames,
+        ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+        'rename_drones',
+      ) ||
+      sameToolSetWithout(
+        rawNames,
+        ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
+        'rename_drones',
+      ) ||
+      (voiceEnabled &&
+        sameToolSetWithout(
+          rawNames,
+          ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+          'rename_drones',
+        )) ||
+      (voiceEnabled &&
+        sameToolSetWithout(
+          rawNames,
+          ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+          'rename_drones',
+        )) ||
+      (voiceEnabled &&
+        sameToolSetWithout(
+          rawNames,
+          ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+          'rename_drones',
+        )) ||
+      (voiceEnabled &&
+        sameToolSetWithout(
+          rawNames,
+          ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+          'rename_drones',
+        )) ||
+      (voiceEnabled &&
+        sameToolSetWithout(
+          rawNames,
+          ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+          'rename_drones',
+        )) ||
+      (voiceEnabled &&
+        sameToolSetWithout(
+          rawNames,
+          ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+          'rename_drones',
+        )) ||
+      (voiceEnabled &&
+        sameToolSetWithout(
+          rawNames,
+          ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+          'rename_drones',
+        )) ||
+      (voiceEnabled &&
+        sameToolSetWithout(
+          rawNames,
+          ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+          'rename_drones',
+        )));
   if (hadPreRenameDefaultTools) {
     appendUniqueEnabledTool(base, 'rename_drones');
   }
   const hadLegacyVoiceDefaultTools =
-    voiceEnabled && rawNames.size > 0 && ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES.every((name) => rawNamesForDefaultComparison.has(name));
+    voiceEnabled &&
+    rawNames.size > 0 &&
+    ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES.every((name) =>
+      rawNamesForDefaultComparison.has(name),
+    );
   if (hadLegacyVoiceDefaultTools) {
     appendUniqueEnabledTool(base, 'create_new_thread');
   }
@@ -889,7 +1233,9 @@ function normalizeStoredAssistantEnabledTools(
 }
 
 function normalizeAssistantSystemPromptKind(raw: unknown): 'normal' | 'voice' {
-  const value = String(raw ?? '').trim().toLowerCase();
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   return value === 'voice' ? 'voice' : 'normal';
 }
 
@@ -898,17 +1244,24 @@ function normalizeAssistantVoiceEnabled(raw: unknown): boolean {
 }
 
 function normalizeAssistantVoiceSource(raw: unknown): AssistantVoiceSource | null {
-  const value = String(raw ?? '').trim().toLowerCase();
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   return value === 'android' || value === 'desktop' ? value : null;
 }
 
 function enabledToolsForVoiceMode(enabledTools: string[], voiceEnabled: boolean): string[] {
   const base = normalizeAssistantEnabledTools(enabledTools);
   if (!voiceEnabled) return base.filter((name) => name !== 'speak');
-  return normalizeAssistantEnabledTools([...base, 'speak'], ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES);
+  return normalizeAssistantEnabledTools(
+    [...base, 'speak'],
+    ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+  );
 }
 
-function normalizeAssistantSystemPromptPatches(raw: unknown): Array<{ oldText: string; newText: string }> {
+function normalizeAssistantSystemPromptPatches(
+  raw: unknown,
+): Array<{ oldText: string; newText: string }> {
   if (!Array.isArray(raw)) return [];
   return raw.slice(0, 20).map((item, index) => {
     const oldText = typeof item?.oldText === 'string' ? item.oldText : '';
@@ -980,7 +1333,10 @@ function buildChatTimelineMessages(
     const turn = turns[i] as any;
     const turnId = String(turn?.id ?? `turn-${i + 1}`).trim() || `turn-${i + 1}`;
     const promptAt = safeMessageAt(turn?.promptAt ?? turn?.at, nowIso());
-    const completedAt = typeof turn?.completedAt === 'string' && turn.completedAt.trim() ? turn.completedAt.trim() : undefined;
+    const completedAt =
+      typeof turn?.completedAt === 'string' && turn.completedAt.trim()
+        ? turn.completedAt.trim()
+        : undefined;
     const ok = turn?.ok !== false;
     const userMessageId = `user:${turnId}`;
     out.push({
@@ -1010,20 +1366,26 @@ function buildChatTimelineMessages(
   }
 
   const pending = Array.isArray(chat.pendingPrompts) ? chat.pendingPrompts : [];
-  const completedTurnIds = new Set(turns.map((turn: any) => String(turn?.id ?? '').trim()).filter(Boolean));
+  const completedTurnIds = new Set(
+    turns.map((turn: any) => String(turn?.id ?? '').trim()).filter(Boolean),
+  );
   for (const item of pending as any[]) {
     const id = String(item?.id ?? '').trim();
     if (!id || completedTurnIds.has(id)) continue;
     const state = String(item?.state ?? '').trim();
     const status: ChatTimelineMessage['status'] =
-      state === 'queued' || state === 'sending' || state === 'sent' || state === 'failed' ? state : 'queued';
+      state === 'queued' || state === 'sending' || state === 'sent' || state === 'failed'
+        ? state
+        : 'queued';
     out.push({
       id: `user:${id}`,
       role: 'user',
       status,
       text: String(item?.prompt ?? ''),
       at: safeMessageAt(item?.at, nowIso()),
-      ...(typeof item?.updatedAt === 'string' && item.updatedAt.trim() ? { updatedAt: item.updatedAt.trim() } : {}),
+      ...(typeof item?.updatedAt === 'string' && item.updatedAt.trim()
+        ? { updatedAt: item.updatedAt.trim() }
+        : {}),
       ...(item?.error ? { error: String(item.error) } : {}),
       droneId,
       chatName,
@@ -1047,10 +1409,16 @@ export function summarizeAssistantChatIdle(
 ): AssistantChatIdleStatus {
   const messages = buildChatTimelineMessages(regAny, target, options);
   const activeUserMessages = messages.filter(
-    (message) => message.role === 'user' && (message.status === 'queued' || message.status === 'sending' || message.status === 'sent'),
+    (message) =>
+      message.role === 'user' &&
+      (message.status === 'queued' || message.status === 'sending' || message.status === 'sent'),
   ).length;
-  const queuedUserMessages = messages.filter((message) => message.role === 'user' && message.status === 'queued').length;
-  const failedUserMessages = messages.filter((message) => message.role === 'user' && message.status === 'failed').length;
+  const queuedUserMessages = messages.filter(
+    (message) => message.role === 'user' && message.status === 'queued',
+  ).length;
+  const failedUserMessages = messages.filter(
+    (message) => message.role === 'user' && message.status === 'failed',
+  ).length;
   const latest = messages[messages.length - 1] ?? null;
   const reason: AssistantChatIdleStatus['reason'] =
     activeUserMessages > 0
@@ -1062,7 +1430,11 @@ export function summarizeAssistantChatIdle(
           : latest.status === 'failed'
             ? 'latest_user_failed'
             : 'latest_user_message';
-  const idle = activeUserMessages === 0 && (reason === 'no_messages' || reason === 'latest_agent_message' || reason === 'latest_user_failed');
+  const idle =
+    activeUserMessages === 0 &&
+    (reason === 'no_messages' ||
+      reason === 'latest_agent_message' ||
+      reason === 'latest_user_failed');
   return {
     droneId: target.droneId,
     chatName: normalizeChatNameForAssistant(target.chatName),
@@ -1090,7 +1462,8 @@ function sanitizeMessage(message: any): any {
 }
 
 function jsonCloneObject(raw: unknown): Record<string, unknown> {
-  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return { type: 'object', properties: {}, required: [] };
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw))
+    return { type: 'object', properties: {}, required: [] };
   try {
     const cloned = JSON.parse(JSON.stringify(raw));
     return cloned && typeof cloned === 'object' && !Array.isArray(cloned)
@@ -1105,7 +1478,9 @@ function assistantRealtimeToolDefinition(tool: any): AssistantRealtimeFunctionTo
   return {
     type: 'function',
     name: String(tool?.name ?? '').trim(),
-    ...(String(tool?.description ?? '').trim() ? { description: String(tool.description).trim() } : {}),
+    ...(String(tool?.description ?? '').trim()
+      ? { description: String(tool.description).trim() }
+      : {}),
     parameters: jsonCloneObject(tool?.parameters),
   };
 }
@@ -1124,7 +1499,7 @@ function parseAssistantRealtimeToolArguments(raw: unknown): unknown {
 }
 
 function assistantRealtimeToolOutput(value: unknown): string {
-  const result = value && typeof value === 'object' ? value as any : {};
+  const result = value && typeof value === 'object' ? (value as any) : {};
   const content = Array.isArray(result.content) ? result.content : [];
   const text = content
     .map((part: any) => (part?.type === 'text' ? String(part.text ?? '') : ''))
@@ -1151,11 +1526,28 @@ function assistantRealtimeToolOutput(value: unknown): string {
   }
 }
 
-function makeAssistantAccessScope(input?: { readMode?: unknown; writeMode?: unknown; droneIds?: unknown; updatedAt?: unknown }): AssistantAccessScope {
-  const readMode = String(input?.readMode ?? '').trim().toLowerCase() === 'selected' ? 'selected' : 'all';
-  const writeMode = String(input?.writeMode ?? '').trim().toLowerCase() === 'selected' ? 'selected' : 'all';
+function makeAssistantAccessScope(input?: {
+  readMode?: unknown;
+  writeMode?: unknown;
+  droneIds?: unknown;
+  updatedAt?: unknown;
+}): AssistantAccessScope {
+  const readMode =
+    String(input?.readMode ?? '')
+      .trim()
+      .toLowerCase() === 'selected'
+      ? 'selected'
+      : 'all';
+  const writeMode =
+    String(input?.writeMode ?? '')
+      .trim()
+      .toLowerCase() === 'selected'
+      ? 'selected'
+      : 'all';
   const rawIds = Array.isArray(input?.droneIds) ? input.droneIds : [];
-  const droneIds = Array.from(new Set(rawIds.map((item) => cleanOptionalString(item)).filter(Boolean))).slice(0, 100);
+  const droneIds = Array.from(
+    new Set(rawIds.map((item) => cleanOptionalString(item)).filter(Boolean)),
+  ).slice(0, 100);
   return {
     readMode,
     writeMode,
@@ -1164,14 +1556,19 @@ function makeAssistantAccessScope(input?: { readMode?: unknown; writeMode?: unkn
   };
 }
 
-function describeAssistantAccessMode(mode: AssistantAccessScope['readMode'], droneIds: string[]): string {
+function describeAssistantAccessMode(
+  mode: AssistantAccessScope['readMode'],
+  droneIds: string[],
+): string {
   if (mode === 'all') return 'all drones';
   if (droneIds.length === 0) return 'no selected drones';
   return `selected drones (${droneIds.join(', ')})`;
 }
 
 function normalizeChatIdleSubscriptionStatus(raw: unknown): AssistantChatIdleSubscriptionStatus {
-  const value = String(raw ?? '').trim().toLowerCase();
+  const value = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (value === 'fired' || value === 'cancelled' || value === 'expired') return value;
   return 'active';
 }
@@ -1195,9 +1592,15 @@ function normalizeChatIdleSubscription(raw: any): AssistantChatIdleSubscription 
   const createdMs = Date.parse(createdAt);
   const expiresAt =
     cleanOptionalString(raw.expiresAt) ||
-    new Date((Number.isFinite(createdMs) ? createdMs : Date.now()) + CHAT_IDLE_SUBSCRIPTION_EXPIRES_AFTER_MS).toISOString();
+    new Date(
+      (Number.isFinite(createdMs) ? createdMs : Date.now()) +
+        CHAT_IDLE_SUBSCRIPTION_EXPIRES_AFTER_MS,
+    ).toISOString();
   const idleForMs = clampChatIdleForMs(raw.idleForMs);
-  const lastResult = raw.lastResult && typeof raw.lastResult === 'object' ? sanitizeMessage(raw.lastResult) as AssistantChatIdleWaitResult : null;
+  const lastResult =
+    raw.lastResult && typeof raw.lastResult === 'object'
+      ? (sanitizeMessage(raw.lastResult) as AssistantChatIdleWaitResult)
+      : null;
   return {
     id,
     threadId,
@@ -1217,23 +1620,33 @@ function normalizeChatIdleSubscription(raw: any): AssistantChatIdleSubscription 
   };
 }
 
-function sanitizeChatIdleSubscription(subscription: AssistantChatIdleSubscription): AssistantChatIdleSubscription {
+function sanitizeChatIdleSubscription(
+  subscription: AssistantChatIdleSubscription,
+): AssistantChatIdleSubscription {
   return {
     ...subscription,
     voiceSource: normalizeAssistantVoiceSource(subscription.voiceSource),
     mode: normalizeAssistantChatIdleWaitMode(subscription.mode, 'all'),
-    targets: subscription.targets.map((target) => ({ droneId: target.droneId, chatName: normalizeChatNameForAssistant(target.chatName) })),
+    targets: subscription.targets.map((target) => ({
+      droneId: target.droneId,
+      chatName: normalizeChatNameForAssistant(target.chatName),
+    })),
     lastResult: subscription.lastResult ? sanitizeMessage(subscription.lastResult) : null,
   };
 }
 
-function activeChatIdleSubscriptionSummaries(subscriptions: AssistantChatIdleSubscription[]): AssistantChatIdleSubscription[] {
+function activeChatIdleSubscriptionSummaries(
+  subscriptions: AssistantChatIdleSubscription[],
+): AssistantChatIdleSubscription[] {
   return subscriptions
     .filter((subscription) => subscription.status === 'active')
     .map((subscription) => ({ ...sanitizeChatIdleSubscription(subscription), lastResult: null }));
 }
 
-function sanitizeQueuedPrompt(prompt: AssistantQueuedPrompt, includeImageData: boolean): AssistantQueuedPrompt {
+function sanitizeQueuedPrompt(
+  prompt: AssistantQueuedPrompt,
+  includeImageData: boolean,
+): AssistantQueuedPrompt {
   const promptImages = Array.isArray(prompt.promptImages)
     ? prompt.promptImages.map((image) => ({
         type: 'image' as const,
@@ -1247,7 +1660,8 @@ function sanitizeQueuedPrompt(prompt: AssistantQueuedPrompt, includeImageData: b
     promptImages,
     imageCount: promptImages.length,
     createdAt: cleanOptionalString(prompt.createdAt) || nowIso(),
-    status: prompt.status === 'failed' ? 'failed' : prompt.status === 'running' ? 'running' : 'queued',
+    status:
+      prompt.status === 'failed' ? 'failed' : prompt.status === 'running' ? 'running' : 'queued',
     error: cleanOptionalString(prompt.error) || null,
   };
 }
@@ -1257,14 +1671,22 @@ function sanitizeThread(thread: AssistantThread, includeQueuedImageData = true):
   return {
     ...thread,
     voiceEnabled,
-    voiceEnabledAt: voiceEnabled ? cleanOptionalString(thread.voiceEnabledAt) || thread.updatedAt || thread.createdAt || null : null,
-    systemPrompt: migrateAssistantSystemPrompt(thread.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
+    voiceEnabledAt: voiceEnabled
+      ? cleanOptionalString(thread.voiceEnabledAt) || thread.updatedAt || thread.createdAt || null
+      : null,
+    systemPrompt:
+      migrateAssistantSystemPrompt(thread.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(thread.systemPromptUpdatedAt) || null,
     enabledTools: enabledToolsForVoiceMode(thread.enabledTools, voiceEnabled),
     messageCount: thread.messages.length,
     messages: thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT).map(sanitizeMessage),
-    queuedPrompts: (thread.queuedPrompts ?? []).map((prompt) => sanitizeQueuedPrompt(prompt, includeQueuedImageData)),
-    status: thread.status === 'running' || thread.status === 'waiting_for_approval' ? 'idle' : thread.status,
+    queuedPrompts: (thread.queuedPrompts ?? []).map((prompt) =>
+      sanitizeQueuedPrompt(prompt, includeQueuedImageData),
+    ),
+    status:
+      thread.status === 'running' || thread.status === 'waiting_for_approval'
+        ? 'idle'
+        : thread.status,
   };
 }
 
@@ -1288,11 +1710,18 @@ function normalizeThread(
   const model = allowedModelForProvider(provider, raw.model ?? fallback.model);
   const createdAt = String(raw.createdAt ?? '').trim() || nowIso();
   const updatedAt = String(raw.updatedAt ?? '').trim() || createdAt;
-  const messages = Array.isArray(raw.messages) ? raw.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT) : [];
+  const messages = Array.isArray(raw.messages)
+    ? raw.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT)
+    : [];
   const queuedPrompts = Array.isArray(raw.queuedPrompts)
     ? raw.queuedPrompts
         .slice(-ASSISTANT_QUEUED_PROMPT_LIMIT)
-        .map((prompt: AssistantQueuedPrompt) => sanitizeQueuedPrompt({ ...prompt, status: prompt?.status === 'failed' ? 'failed' : 'queued' }, true))
+        .map((prompt: AssistantQueuedPrompt) =>
+          sanitizeQueuedPrompt(
+            { ...prompt, status: prompt?.status === 'failed' ? 'failed' : 'queued' },
+            true,
+          ),
+        )
     : [];
   const thinkingLevel = allowedThinkingLevelForModel(provider, model, raw.thinkingLevel);
   return {
@@ -1301,11 +1730,16 @@ function normalizeThread(
     createdAt,
     updatedAt,
     voiceEnabled: normalizeAssistantVoiceEnabled(raw.voiceEnabled),
-    voiceEnabledAt: normalizeAssistantVoiceEnabled(raw.voiceEnabled) ? cleanOptionalString(raw.voiceEnabledAt) || updatedAt : null,
+    voiceEnabledAt: normalizeAssistantVoiceEnabled(raw.voiceEnabled)
+      ? cleanOptionalString(raw.voiceEnabledAt) || updatedAt
+      : null,
     model,
     provider,
     thinkingLevel,
-    systemPrompt: migrateAssistantSystemPrompt(raw.systemPrompt) || fallback.systemPrompt || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
+    systemPrompt:
+      migrateAssistantSystemPrompt(raw.systemPrompt) ||
+      fallback.systemPrompt ||
+      ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(raw.systemPromptUpdatedAt) || null,
     enabledTools: normalizeStoredAssistantEnabledTools(
       raw.enabledTools,
@@ -1336,8 +1770,10 @@ function serializeState(input: {
   voiceSystemPrompt: string;
   voiceSystemPromptUpdatedAt: string | null;
 }): StoredAssistantState {
-  const systemPrompt = normalizeAssistantSystemPrompt(input.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
-  const voiceSystemPrompt = normalizeAssistantSystemPrompt(input.voiceSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
+  const systemPrompt =
+    normalizeAssistantSystemPrompt(input.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
+  const voiceSystemPrompt =
+    normalizeAssistantSystemPrompt(input.voiceSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
   const chatIdleSubscriptions = input.chatIdleSubscriptions
     .slice(-CHAT_IDLE_MAX_SUBSCRIPTIONS)
     .map(sanitizeChatIdleSubscription);
@@ -1345,7 +1781,9 @@ function serializeState(input: {
     activeThreadId: input.activeThreadId,
     defaultModel: input.defaultModel,
     defaultEnabledTools: normalizeAssistantEnabledTools(input.defaultEnabledTools),
-    threads: input.threads.slice(0, ASSISTANT_REGISTRY_MAX_THREADS).map((thread) => sanitizeThread(thread, true)),
+    threads: input.threads
+      .slice(0, ASSISTANT_REGISTRY_MAX_THREADS)
+      .map((thread) => sanitizeThread(thread, true)),
     ...(chatIdleSubscriptions.length > 0 ? { chatIdleSubscriptions } : {}),
     webSearchToolMigrationApplied: true,
     fetchContentToolMigrationApplied: true,
@@ -1355,7 +1793,8 @@ function serializeState(input: {
           systemPromptUpdatedAt: input.systemPromptUpdatedAt ?? nowIso(),
         }
       : {}),
-    ...(voiceSystemPrompt !== ASSISTANT_SYSTEM_PROMPT_DEFAULT || systemPrompt !== ASSISTANT_SYSTEM_PROMPT_DEFAULT
+    ...(voiceSystemPrompt !== ASSISTANT_SYSTEM_PROMPT_DEFAULT ||
+    systemPrompt !== ASSISTANT_SYSTEM_PROMPT_DEFAULT
       ? {
           voiceSystemPrompt,
           ...(voiceSystemPrompt !== ASSISTANT_SYSTEM_PROMPT_DEFAULT
@@ -1379,11 +1818,18 @@ export class HubAssistantService {
   private loaded = false;
   private runtimePromise: Promise<AssistantRuntime> | null = null;
   private streamingMessages = new Map<string, Map<AssistantRealtimeMessageRole, any>>();
+  private modelStreamingText = new Map<string, string>();
+  private runningThreadIds = new Set<string>();
+  private runtimeChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private defaultSystemPrompt = ASSISTANT_SYSTEM_PROMPT_DEFAULT;
   private defaultSystemPromptUpdatedAt: string | null = null;
   private defaultVoiceSystemPrompt = ASSISTANT_SYSTEM_PROMPT_DEFAULT;
   private defaultVoiceSystemPromptUpdatedAt: string | null = null;
-  private defaultModelSelection: AssistantDefaultModel = { provider: 'openai', model: DEFAULT_OPENAI_MODEL, thinkingLevel: 'off' };
+  private defaultModelSelection: AssistantDefaultModel = {
+    provider: 'openai',
+    model: DEFAULT_OPENAI_MODEL,
+    thinkingLevel: 'off',
+  };
   private defaultEnabledTools = [...ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES];
   private changeSequence = 0;
   private readonly changeListeners = new Set<(event: AssistantChangeEvent) => void>();
@@ -1400,26 +1846,52 @@ export class HubAssistantService {
       resolve: (approved: boolean) => void;
     }
   >();
-  private textPromptDelegate: ((threadId: string, prompt: string, source: AssistantVoiceSource | null) => Promise<void>) | null = null;
+  private textPromptDelegate:
+    | ((threadId: string, prompt: string, source: AssistantVoiceSource | null) => Promise<void>)
+    | null = null;
   private realtimeToolCatalogDelegate: ((threadId: string) => Promise<any[]>) | null = null;
-  private realtimeToolExecuteDelegate: ((threadId: string, callId: string, toolName: string, args: any, signal?: AbortSignal) => Promise<any>) | null = null;
-  private realtimeHistoryAppendDelegate: ((threadId: string, message: AgentMessage) => Promise<void>) | null = null;
+  private realtimeToolExecuteDelegate:
+    | ((
+        threadId: string,
+        callId: string,
+        toolName: string,
+        args: any,
+        signal?: AbortSignal,
+      ) => Promise<any>)
+    | null = null;
+  private realtimeHistoryAppendDelegate:
+    | ((threadId: string, message: AgentMessage) => Promise<void>)
+    | null = null;
 
   constructor(private readonly tools: AssistantToolCallbacks) {}
 
-  setTextPromptDelegate(delegate: (threadId: string, prompt: string, source: AssistantVoiceSource | null) => Promise<void>): void {
+  setTextPromptDelegate(
+    delegate: (
+      threadId: string,
+      prompt: string,
+      source: AssistantVoiceSource | null,
+    ) => Promise<void>,
+  ): void {
     this.textPromptDelegate = delegate;
   }
 
   setRealtimeToolDelegate(input: {
     catalog: (threadId: string) => Promise<any[]>;
-    execute: (threadId: string, callId: string, toolName: string, args: any, signal?: AbortSignal) => Promise<any>;
+    execute: (
+      threadId: string,
+      callId: string,
+      toolName: string,
+      args: any,
+      signal?: AbortSignal,
+    ) => Promise<any>;
   }): void {
     this.realtimeToolCatalogDelegate = input.catalog;
     this.realtimeToolExecuteDelegate = input.execute;
   }
 
-  setRealtimeHistoryDelegate(delegate: (threadId: string, message: AgentMessage) => Promise<void>): void {
+  setRealtimeHistoryDelegate(
+    delegate: (threadId: string, message: AgentMessage) => Promise<void>,
+  ): void {
     this.realtimeHistoryAppendDelegate = delegate;
   }
 
@@ -1428,6 +1900,70 @@ export class HubAssistantService {
     const thread = this.getThread(threadId);
     thread.updatedAt = nowIso();
     this.emitChange('canonical_history_changed', thread.id);
+  }
+
+  async notifyRuntimeEvent(threadId: string, event: any): Promise<void> {
+    await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    const type = String(event?.type ?? '');
+    const emit = (reason: string, throttled = false) => {
+      if (!throttled) {
+        const timer = this.runtimeChangeTimers.get(thread.id);
+        if (timer) clearTimeout(timer);
+        this.runtimeChangeTimers.delete(thread.id);
+        this.emitChange(reason, thread.id);
+        return;
+      }
+      if (this.runtimeChangeTimers.has(thread.id)) return;
+      const timer = setTimeout(() => {
+        this.runtimeChangeTimers.delete(thread.id);
+        this.emitChange(reason, thread.id);
+      }, 120);
+      timer.unref?.();
+      this.runtimeChangeTimers.set(thread.id, timer);
+    };
+
+    if (type === 'session_started' || type === 'turn_started') {
+      this.runningThreadIds.add(thread.id);
+      this.modelStreamingText.set(thread.id, '');
+      thread.updatedAt = nowIso();
+      emit('runtime_started');
+      return;
+    }
+    if (type === 'assistant_delta') {
+      this.runningThreadIds.add(thread.id);
+      const text = `${this.modelStreamingText.get(thread.id) ?? ''}${String(event?.text ?? '')}`;
+      this.modelStreamingText.set(thread.id, text.slice(-24_000));
+      thread.updatedAt = nowIso();
+      emit('runtime_streaming', true);
+      return;
+    }
+    if (type === 'transcript_changed') {
+      this.runningThreadIds.add(thread.id);
+      if (String(event?.role ?? '') === 'assistant') this.modelStreamingText.delete(thread.id);
+      thread.updatedAt = nowIso();
+      emit('canonical_history_changed');
+      return;
+    }
+    if (
+      type === 'tool_call_started' ||
+      type === 'tool_call_progress' ||
+      type === 'tool_call_completed' ||
+      type === 'tool_call_failed'
+    ) {
+      this.runningThreadIds.add(thread.id);
+      thread.updatedAt = nowIso();
+      emit(`runtime_${type}`);
+      return;
+    }
+    if (type === 'session_finished') {
+      this.runningThreadIds.delete(thread.id);
+      this.modelStreamingText.delete(thread.id);
+      thread.updatedAt = nowIso();
+      emit('runtime_finished');
+      return;
+    }
+    if (type === 'session_error') emit('runtime_error');
   }
 
   subscribeChanges(listener: (event: AssistantChangeEvent) => void): () => void {
@@ -1462,7 +1998,10 @@ export class HubAssistantService {
     messages.set(role, sanitizeMessage(message));
   }
 
-  private clearThreadStreamingMessages(threadId: string, role?: AssistantRealtimeMessageRole): boolean {
+  private clearThreadStreamingMessages(
+    threadId: string,
+    role?: AssistantRealtimeMessageRole,
+  ): boolean {
     if (!role) return this.streamingMessages.delete(threadId);
     const messages = this.streamingMessages.get(threadId);
     if (!messages) return false;
@@ -1473,8 +2012,18 @@ export class HubAssistantService {
 
   private threadStreamingMessages(threadId: string): any[] {
     const messages = this.streamingMessages.get(threadId);
-    if (!messages) return [];
-    return (['user', 'assistant'] as const).map((role) => messages.get(role)).filter(Boolean).map(sanitizeMessage);
+    const values = messages
+      ? (['user', 'assistant'] as const)
+          .map((role) => messages.get(role))
+          .filter(Boolean)
+          .map(sanitizeMessage)
+      : [];
+    if (!this.modelStreamingText.has(threadId)) return values;
+    const withoutAssistant = values.filter((message) => message?.role !== 'assistant');
+    return [
+      ...withoutAssistant,
+      makeAssistantTextMessage('assistant', this.modelStreamingText.get(threadId) ?? ''),
+    ];
   }
 
   private primaryThreadStreamingMessage(threadId: string): any | null {
@@ -1500,7 +2049,10 @@ export class HubAssistantService {
     }
   }
 
-  emitExternalUiAction(uiAction: AssistantUiAction, threadId?: string): { ok: true; uiAction: AssistantUiAction } {
+  emitExternalUiAction(
+    uiAction: AssistantUiAction,
+    threadId?: string,
+  ): { ok: true; uiAction: AssistantUiAction } {
     this.emitUiAction(uiAction, threadId);
     return { ok: true, uiAction };
   }
@@ -1520,7 +2072,13 @@ export class HubAssistantService {
     };
   }
 
-  async updateAccessScope(input: { threadId?: unknown; mode?: unknown; readMode?: unknown; writeMode?: unknown; droneIds?: unknown }): Promise<AssistantAccessScope> {
+  async updateAccessScope(input: {
+    threadId?: unknown;
+    mode?: unknown;
+    readMode?: unknown;
+    writeMode?: unknown;
+    droneIds?: unknown;
+  }): Promise<AssistantAccessScope> {
     await this.ensureLoaded();
     const threadId = cleanOptionalString(input.threadId) || this.activeThreadId;
     const thread = this.threads.find((item) => item.id === threadId);
@@ -1546,30 +2104,44 @@ export class HubAssistantService {
     return firstThread(this.threads, this.activeThreadId).accessScope;
   }
 
-  private allowedDroneIdSet(kind: 'read' | 'write' = 'read', threadId?: string): Set<string> | null {
+  private allowedDroneIdSet(
+    kind: 'read' | 'write' = 'read',
+    threadId?: string,
+  ): Set<string> | null {
     const accessScope = this.activeAccessScope(threadId);
     const mode = kind === 'write' ? accessScope.writeMode : accessScope.readMode;
     if (mode !== 'selected') return null;
     return new Set(accessScope.droneIds);
   }
 
-  private async requireDroneInScope(droneRef: unknown, kind: 'read' | 'write' = 'read', threadId?: string): Promise<string> {
+  private async requireDroneInScope(
+    droneRef: unknown,
+    kind: 'read' | 'write' = 'read',
+    threadId?: string,
+  ): Promise<string> {
     const regAny: any = await loadRegistry();
     const droneId = droneIdByAssistantRef(regAny, droneRef);
     const allowed = this.allowedDroneIdSet(kind, threadId);
-    if (allowed && !allowed.has(droneId)) throw new Error(`assistant ${kind} scope does not include drone: ${droneRef}`);
+    if (allowed && !allowed.has(droneId))
+      throw new Error(`assistant ${kind} scope does not include drone: ${droneRef}`);
     return droneId;
   }
 
-  private filterDronesForScope(drones: AssistantDroneSummary[], threadId?: string): AssistantDroneSummary[] {
+  private filterDronesForScope(
+    drones: AssistantDroneSummary[],
+    threadId?: string,
+  ): AssistantDroneSummary[] {
     const allowed = this.allowedDroneIdSet('read', threadId);
     if (!allowed) return drones;
     return drones.filter((drone) => allowed.has(drone.id));
   }
 
-  private requireFileCallback<K extends keyof AssistantToolCallbacks>(name: K): NonNullable<AssistantToolCallbacks[K]> {
+  private requireFileCallback<K extends keyof AssistantToolCallbacks>(
+    name: K,
+  ): NonNullable<AssistantToolCallbacks[K]> {
     const callback = this.tools[name];
-    if (typeof callback !== 'function') throw new Error(`assistant file tool unavailable: ${String(name)}`);
+    if (typeof callback !== 'function')
+      throw new Error(`assistant file tool unavailable: ${String(name)}`);
     return callback as NonNullable<AssistantToolCallbacks[K]>;
   }
 
@@ -1603,7 +2175,8 @@ export class HubAssistantService {
 
     const pathExists = async (filePath: string): Promise<boolean> => {
       const existing = staged.get(filePath);
-      if (existing) return !existing.deleted && (existing.content != null || Boolean(existing.moveFrom));
+      if (existing)
+        return !existing.deleted && (existing.content != null || Boolean(existing.moveFrom));
       const stat = await statPath({ droneId, path: filePath });
       return Boolean(stat.exists);
     };
@@ -1611,14 +2184,19 @@ export class HubAssistantService {
     for (const operation of operations) {
       if (operation.type === 'add') {
         const content = operation.lines.join('\n');
-        if (await pathExists(operation.path)) throw new Error(`file already exists: ${operation.path}`);
+        if (await pathExists(operation.path))
+          throw new Error(`file already exists: ${operation.path}`);
         staged.set(operation.path, {
           path: operation.path,
           existsBefore: false,
           content,
           deleted: false,
         });
-        applied.push({ kind: 'add', path: operation.path, size: Buffer.byteLength(content, 'utf8') });
+        applied.push({
+          kind: 'add',
+          path: operation.path,
+          size: Buffer.byteLength(content, 'utf8'),
+        });
         continue;
       }
 
@@ -1671,8 +2249,10 @@ export class HubAssistantService {
         content = applyHunks(content, operation.hunks, operation.path);
       }
       if (operation.moveTo) {
-        if (operation.moveTo === operation.path) throw new Error(`move target matches source: ${operation.path}`);
-        if (await pathExists(operation.moveTo)) throw new Error(`move target already exists: ${operation.moveTo}`);
+        if (operation.moveTo === operation.path)
+          throw new Error(`move target matches source: ${operation.path}`);
+        if (await pathExists(operation.moveTo))
+          throw new Error(`move target already exists: ${operation.moveTo}`);
         current.content = null;
         current.deleted = true;
         delete current.moveFrom;
@@ -1690,7 +2270,11 @@ export class HubAssistantService {
       current.content = content;
       current.deleted = false;
       delete current.moveFrom;
-      applied.push({ kind: 'update', path: operation.path, size: Buffer.byteLength(content, 'utf8') });
+      applied.push({
+        kind: 'update',
+        path: operation.path,
+        size: Buffer.byteLength(content, 'utf8'),
+      });
     }
 
     const movedSources = new Set<string>();
@@ -1736,7 +2320,14 @@ export class HubAssistantService {
     return {
       ok: true,
       activeThreadId: this.activeThreadId,
-      threads: this.threads.map((thread) => (compact ? sanitizeThreadSummary(thread) : { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) })),
+      threads: this.threads.map((thread) => {
+        const sanitized = compact
+          ? sanitizeThreadSummary(thread)
+          : { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) };
+        return this.runningThreadIds.has(thread.id)
+          ? { ...sanitized, status: 'running' }
+          : sanitized;
+      }),
       chatIdleSubscriptions: [],
       pendingApprovals: this.pendingApprovals(),
       models: await this.modelOptions(),
@@ -1745,11 +2336,16 @@ export class HubAssistantService {
       availableTools,
       accessScope: sanitizeMessage(this.activeAccessScope()),
       runningModels: {},
-      ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages } : {}),
+      ...(streamingMessage
+        ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages }
+        : {}),
     };
   }
 
-  async threadSnapshot(threadId: string, options?: { activate?: boolean }): Promise<AssistantSnapshot> {
+  async threadSnapshot(
+    threadId: string,
+    options?: { activate?: boolean },
+  ): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const id = cleanOptionalString(threadId);
     const targetThread = this.threads.find((thread) => thread.id === id);
@@ -1761,9 +2357,15 @@ export class HubAssistantService {
     return {
       ok: true,
       activeThreadId: id,
-      threads: this.threads.map((thread) =>
-        thread.id === id ? { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) } : sanitizeThreadSummary(thread),
-      ),
+      threads: this.threads.map((thread) => {
+        const sanitized =
+          thread.id === id
+            ? { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) }
+            : sanitizeThreadSummary(thread);
+        return this.runningThreadIds.has(thread.id)
+          ? { ...sanitized, status: 'running' }
+          : sanitized;
+      }),
       chatIdleSubscriptions: [],
       pendingApprovals: this.pendingApprovals(),
       models: await this.modelOptions(),
@@ -1772,7 +2374,9 @@ export class HubAssistantService {
       availableTools,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       runningModels: {},
-      ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages } : {}),
+      ...(streamingMessage
+        ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages }
+        : {}),
     };
   }
 
@@ -1784,15 +2388,28 @@ export class HubAssistantService {
     return await this.threadSnapshot(thread.id);
   }
 
-  async createThread(input?: { title?: unknown; model?: unknown; provider?: unknown; activeDroneId?: unknown; activeChatName?: unknown; voiceEnabled?: unknown }): Promise<AssistantSnapshot> {
+  async createThread(input?: {
+    title?: unknown;
+    model?: unknown;
+    provider?: unknown;
+    activeDroneId?: unknown;
+    activeChatName?: unknown;
+    voiceEnabled?: unknown;
+  }): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const explicitProvider = String(input?.provider ?? '').trim();
-    const provider = explicitProvider ? normalizeProvider(explicitProvider) : this.defaultModelSelection.provider;
+    const provider = explicitProvider
+      ? normalizeProvider(explicitProvider)
+      : this.defaultModelSelection.provider;
     const voiceEnabled = normalizeAssistantVoiceEnabled(input?.voiceEnabled);
     const thread = this.makeThread({
       provider,
-      model: String(input?.model ?? '').trim() || (explicitProvider ? defaultModelForProvider(provider) : this.defaultModelSelection.model),
-      ...(!explicitProvider && !String(input?.model ?? '').trim() ? { thinkingLevel: this.defaultModelSelection.thinkingLevel } : {}),
+      model:
+        String(input?.model ?? '').trim() ||
+        (explicitProvider ? defaultModelForProvider(provider) : this.defaultModelSelection.model),
+      ...(!explicitProvider && !String(input?.model ?? '').trim()
+        ? { thinkingLevel: this.defaultModelSelection.thinkingLevel }
+        : {}),
       title: String(input?.title ?? '').trim() || DEFAULT_THREAD_TITLE,
       accessScope: this.defaultAccessScopeForNewThread({ ...input, voiceEnabled }),
       voiceEnabled,
@@ -1803,13 +2420,20 @@ export class HubAssistantService {
     return await this.threadSnapshot(thread.id);
   }
 
-  async ensureLatestVoiceThread(input?: { title?: unknown }): Promise<{ ok: true; threadId: string; created: boolean; thread: AssistantThread }> {
+  async ensureLatestVoiceThread(input?: {
+    title?: unknown;
+  }): Promise<{ ok: true; threadId: string; created: boolean; thread: AssistantThread }> {
     await this.ensureLoaded();
     const existing = this.latestVoiceThread();
     if (existing) {
       this.activeThreadId = existing.id;
       await this.persist();
-      return { ok: true, threadId: existing.id, created: false, thread: sanitizeThread(existing, false) };
+      return {
+        ok: true,
+        threadId: existing.id,
+        created: false,
+        thread: sanitizeThread(existing, false),
+      };
     }
 
     const provider = this.defaultModelSelection.provider;
@@ -1827,11 +2451,16 @@ export class HubAssistantService {
     return { ok: true, threadId: thread.id, created: true, thread: sanitizeThread(thread, false) };
   }
 
-  async createNewThreadFromThread(threadId: string, input?: { title?: unknown }): Promise<{ ok: true; previousThreadId: string; threadId: string; thread: AssistantThread }> {
+  async createNewThreadFromThread(
+    threadId: string,
+    input?: { title?: unknown },
+  ): Promise<{ ok: true; previousThreadId: string; threadId: string; thread: AssistantThread }> {
     await this.ensureLoaded();
     const previousThread = this.getThread(threadId);
     const voiceEnabled = normalizeAssistantVoiceEnabled(previousThread.voiceEnabled);
-    const title = cleanOptionalString(input?.title) || (voiceEnabled ? 'Realtime thread' : DEFAULT_THREAD_TITLE);
+    const title =
+      cleanOptionalString(input?.title) ||
+      (voiceEnabled ? 'Realtime thread' : DEFAULT_THREAD_TITLE);
     const thread = this.makeThread({
       provider: previousThread.provider,
       model: previousThread.model,
@@ -1839,25 +2468,46 @@ export class HubAssistantService {
       voiceEnabled,
       accessScope: this.defaultAccessScopeForNewThread({ voiceEnabled }),
     });
-    thread.thinkingLevel = allowedThinkingLevelForModel(thread.provider, thread.model, previousThread.thinkingLevel);
+    thread.thinkingLevel = allowedThinkingLevelForModel(
+      thread.provider,
+      thread.model,
+      previousThread.thinkingLevel,
+    );
     this.threads = [thread, ...this.threads].slice(0, ASSISTANT_REGISTRY_MAX_THREADS);
     this.activeThreadId = thread.id;
     await this.persist();
-    return { ok: true, previousThreadId: previousThread.id, threadId: thread.id, thread: sanitizeThread(thread, false) };
+    return {
+      ok: true,
+      previousThreadId: previousThread.id,
+      threadId: thread.id,
+      thread: sanitizeThread(thread, false),
+    };
   }
 
-  async submitVoicePrompt(input: { prompt?: unknown; title?: unknown; source?: AssistantVoiceSource; deliveryMode?: unknown }): Promise<{ ok: true; threadId: string; created: boolean; accepted: boolean }> {
+  async submitVoicePrompt(input: {
+    prompt?: unknown;
+    title?: unknown;
+    source?: AssistantVoiceSource;
+    deliveryMode?: unknown;
+  }): Promise<{ ok: true; threadId: string; created: boolean; accepted: boolean }> {
     const prompt = String(input.prompt ?? '').trim();
     if (!prompt) throw new Error('missing prompt');
     const voiceThread = await this.ensureLatestVoiceThread({ title: input.title });
     if (!this.textPromptDelegate) throw new Error('Blip assistant host is not ready');
-    void this.textPromptDelegate(voiceThread.threadId, prompt, input.source ?? null).catch((error: any) => {
-      console.warn('[assistant] voice prompt failed', {
-        threadId: voiceThread.threadId,
-        error: String(error?.message ?? error ?? ''),
-      });
-    });
-    return { ok: true, threadId: voiceThread.threadId, created: voiceThread.created, accepted: true };
+    void this.textPromptDelegate(voiceThread.threadId, prompt, input.source ?? null).catch(
+      (error: any) => {
+        console.warn('[assistant] voice prompt failed', {
+          threadId: voiceThread.threadId,
+          error: String(error?.message ?? error ?? ''),
+        });
+      },
+    );
+    return {
+      ok: true,
+      threadId: voiceThread.threadId,
+      created: voiceThread.created,
+      accepted: true,
+    };
   }
 
   async systemPromptSettings(): Promise<AssistantSystemPromptSettings> {
@@ -1865,17 +2515,26 @@ export class HubAssistantService {
     return this.systemPromptSettingsSync();
   }
 
-  async updateSystemPrompt(input: { prompt?: unknown; promptType?: unknown; assistantType?: unknown; type?: unknown }): Promise<AssistantSystemPromptSettings> {
+  async updateSystemPrompt(input: {
+    prompt?: unknown;
+    promptType?: unknown;
+    assistantType?: unknown;
+    type?: unknown;
+  }): Promise<AssistantSystemPromptSettings> {
     await this.ensureLoaded();
     const prompt = normalizeAssistantSystemPrompt(input.prompt);
     if (!prompt) throw new Error('missing system prompt');
-    const promptKind = normalizeAssistantSystemPromptKind(input.promptType ?? input.assistantType ?? input.type);
+    const promptKind = normalizeAssistantSystemPromptKind(
+      input.promptType ?? input.assistantType ?? input.type,
+    );
     if (promptKind === 'voice') {
       this.defaultVoiceSystemPrompt = prompt;
-      this.defaultVoiceSystemPromptUpdatedAt = prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : nowIso();
+      this.defaultVoiceSystemPromptUpdatedAt =
+        prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : nowIso();
     } else {
       this.defaultSystemPrompt = prompt;
-      this.defaultSystemPromptUpdatedAt = prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : nowIso();
+      this.defaultSystemPromptUpdatedAt =
+        prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : nowIso();
     }
     await this.persist();
     return this.systemPromptSettingsSync();
@@ -1886,7 +2545,10 @@ export class HubAssistantService {
     return this.threadSystemPromptSettingsSync(threadId);
   }
 
-  async updateThreadSystemPrompt(threadId: string, input: { prompt?: unknown; patches?: unknown }): Promise<AssistantThreadSystemPromptSettings> {
+  async updateThreadSystemPrompt(
+    threadId: string,
+    input: { prompt?: unknown; patches?: unknown },
+  ): Promise<AssistantThreadSystemPromptSettings> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
     const hasPrompt = typeof input.prompt === 'string' && input.prompt.trim();
@@ -1895,24 +2557,32 @@ export class HubAssistantService {
       : applyAssistantSystemPromptPatches(thread.systemPrompt, input.patches);
     if (!prompt) throw new Error('missing system prompt');
     thread.systemPrompt = prompt;
-    thread.systemPromptUpdatedAt = prompt === this.defaultSystemPromptForThread(thread) ? null : nowIso();
+    thread.systemPromptUpdatedAt =
+      prompt === this.defaultSystemPromptForThread(thread) ? null : nowIso();
     thread.updatedAt = nowIso();
     await this.persist();
     return this.threadSystemPromptSettingsSync(thread.id);
   }
 
-  async promoteThreadSystemPrompt(threadId: string, input?: { prompt?: unknown }): Promise<AssistantSystemPromptSettings> {
+  async promoteThreadSystemPrompt(
+    threadId: string,
+    input?: { prompt?: unknown },
+  ): Promise<AssistantSystemPromptSettings> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
-    const prompt = normalizeAssistantSystemPrompt(input?.prompt) || normalizeAssistantSystemPrompt(thread.systemPrompt);
+    const prompt =
+      normalizeAssistantSystemPrompt(input?.prompt) ||
+      normalizeAssistantSystemPrompt(thread.systemPrompt);
     if (!prompt) throw new Error('missing thread system prompt');
     thread.systemPrompt = prompt;
     if (thread.voiceEnabled) {
       this.defaultVoiceSystemPrompt = prompt;
-      this.defaultVoiceSystemPromptUpdatedAt = prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : nowIso();
+      this.defaultVoiceSystemPromptUpdatedAt =
+        prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : nowIso();
     } else {
       this.defaultSystemPrompt = prompt;
-      this.defaultSystemPromptUpdatedAt = prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : nowIso();
+      this.defaultSystemPromptUpdatedAt =
+        prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : nowIso();
     }
     thread.systemPromptUpdatedAt = null;
     thread.updatedAt = nowIso();
@@ -1939,23 +2609,33 @@ export class HubAssistantService {
     const title = typeof patch.title === 'string' ? patch.title.trim() : '';
     if (title) thread.title = title.slice(0, 80);
     if (patch.provider != null) thread.provider = normalizeProvider(patch.provider);
-    if (patch.model != null || patch.provider != null) thread.model = allowedModelForProvider(thread.provider, patch.model ?? thread.model);
+    if (patch.model != null || patch.provider != null)
+      thread.model = allowedModelForProvider(thread.provider, patch.model ?? thread.model);
     if (patch.thinkingLevel != null || patch.model != null || patch.provider != null) {
-      thread.thinkingLevel = allowedThinkingLevelForModel(thread.provider, thread.model, patch.thinkingLevel ?? thread.thinkingLevel);
+      thread.thinkingLevel = allowedThinkingLevelForModel(
+        thread.provider,
+        thread.model,
+        patch.thinkingLevel ?? thread.thinkingLevel,
+      );
     }
     if (patch.autoApprove != null) {
       thread.autoApprove = normalizeAssistantAutoApprove(patch.autoApprove);
       if (thread.autoApprove) this.resolvePendingApprovalsForThread(thread.id, true);
     }
-    if (patch.promptDeliveryMode != null) thread.promptDeliveryMode = normalizeAssistantPromptDeliveryMode(patch.promptDeliveryMode);
-    if (patch.enabledTools != null) thread.enabledTools = normalizeAssistantEnabledTools(patch.enabledTools, thread.enabledTools);
+    if (patch.promptDeliveryMode != null)
+      thread.promptDeliveryMode = normalizeAssistantPromptDeliveryMode(patch.promptDeliveryMode);
+    if (patch.enabledTools != null)
+      thread.enabledTools = normalizeAssistantEnabledTools(patch.enabledTools, thread.enabledTools);
     if (patch.voiceEnabled != null) {
       const wasVoiceEnabled = thread.voiceEnabled;
       thread.voiceEnabled = normalizeAssistantVoiceEnabled(patch.voiceEnabled);
       thread.voiceEnabledAt = thread.voiceEnabled ? nowIso() : null;
       thread.enabledTools =
         thread.voiceEnabled && !wasVoiceEnabled
-          ? normalizeAssistantEnabledTools([...thread.enabledTools, 'set_thinking_level', 'create_new_thread', 'speak'], ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES)
+          ? normalizeAssistantEnabledTools(
+              [...thread.enabledTools, 'set_thinking_level', 'create_new_thread', 'speak'],
+              ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES,
+            )
           : enabledToolsForVoiceMode(thread.enabledTools, thread.voiceEnabled);
     }
     thread.updatedAt = nowIso();
@@ -1963,11 +2643,17 @@ export class HubAssistantService {
     return await this.threadSnapshot(thread.id);
   }
 
-  async updateDefaultModel(input?: { provider?: unknown; model?: unknown; thinkingLevel?: unknown }): Promise<AssistantSnapshot> {
+  async updateDefaultModel(input?: {
+    provider?: unknown;
+    model?: unknown;
+    thinkingLevel?: unknown;
+  }): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const provider = normalizeProvider(input?.provider);
     const model = String(input?.model ?? '').trim();
-    if (!ASSISTANT_MODEL_OPTIONS.some((option) => option.provider === provider && option.id === model)) {
+    if (
+      !ASSISTANT_MODEL_OPTIONS.some((option) => option.provider === provider && option.id === model)
+    ) {
       throw new Error(`unknown assistant model: ${provider}/${model}`);
     }
     const thinkingLevel = allowedThinkingLevelForModel(provider, model, input?.thinkingLevel);
@@ -1985,7 +2671,10 @@ export class HubAssistantService {
   async updateDefaultEnabledTools(input?: { enabledTools?: unknown }): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     if (!Array.isArray(input?.enabledTools)) throw new Error('enabledTools must be an array');
-    const enabledTools = normalizeAssistantEnabledTools(input.enabledTools, this.defaultEnabledTools);
+    const enabledTools = normalizeAssistantEnabledTools(
+      input.enabledTools,
+      this.defaultEnabledTools,
+    );
     if (!sameToolSet(new Set(this.defaultEnabledTools), enabledTools)) {
       this.defaultEnabledTools = enabledTools;
       await this.persist();
@@ -1996,6 +2685,11 @@ export class HubAssistantService {
   async deleteThread(threadId: string): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     this.clearThreadStreamingMessages(threadId);
+    this.modelStreamingText.delete(threadId);
+    this.runningThreadIds.delete(threadId);
+    const runtimeTimer = this.runtimeChangeTimers.get(threadId);
+    if (runtimeTimer) clearTimeout(runtimeTimer);
+    this.runtimeChangeTimers.delete(threadId);
     await deleteAssistantArtifactsForThread(threadId);
     this.threads = this.threads.filter((thread) => thread.id !== threadId);
     if (this.threads.length === 0) {
@@ -2052,7 +2746,9 @@ export class HubAssistantService {
     }
     return hasMultipleTargets
       ? ASSISTANT_TOOL_SUMMARIES
-      : ASSISTANT_TOOL_SUMMARIES.filter((tool) => tool.name !== 'list_targets' && tool.name !== 'set_target');
+      : ASSISTANT_TOOL_SUMMARIES.filter(
+          (tool) => tool.name !== 'list_targets' && tool.name !== 'set_target',
+        );
   }
 
   async executeDroneWorkspaceTool(
@@ -2065,25 +2761,43 @@ export class HubAssistantService {
     },
   ): Promise<any> {
     await this.ensureLoaded();
-    const write = ['write_file', 'delete_file', 'move_path', 'create_directory', 'delete_directory', 'apply_patch', 'bash'].includes(call.tool);
+    const write = [
+      'write_file',
+      'delete_file',
+      'move_path',
+      'create_directory',
+      'delete_directory',
+      'apply_patch',
+      'bash',
+    ].includes(call.tool);
     const droneId = await this.requireDroneInScope(droneRef, write ? 'write' : 'read', threadId);
     const params: any = call.args ?? {};
     if (call.tool === 'list_files') {
       const rawPath = cleanOptionalString(params.path);
-      const result = await this.requireFileCallback('listDroneFiles')({ droneId, path: rawPath ? normalizeAssistantDroneFilePath(rawPath) : undefined });
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], details: result };
+      const result = await this.requireFileCallback('listDroneFiles')({
+        droneId,
+        path: rawPath ? normalizeAssistantDroneFilePath(rawPath) : undefined,
+      });
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
     }
     if (call.tool === 'read_file') {
       const startLine = normalizeOptionalPositiveLine(params.startLine, 'startLine');
       const endLine = normalizeOptionalPositiveLine(params.endLine, 'endLine');
-      if (startLine != null && endLine != null && startLine > endLine) throw new Error('startLine must be less than or equal to endLine');
+      if (startLine != null && endLine != null && startLine > endLine)
+        throw new Error('startLine must be less than or equal to endLine');
       const result = await this.requireFileCallback('readDroneFile')({
         droneId,
         path: normalizeAssistantDroneFilePath(params.path),
         startLine,
         endLine,
       });
-      return { content: [{ type: 'text', text: formatAssistantReadFileToolText(result) }], details: result };
+      return {
+        content: [{ type: 'text', text: formatAssistantReadFileToolText(result) }],
+        details: result,
+      };
     }
     if (call.tool === 'search_files') {
       const query = cleanOptionalString(params.query);
@@ -2093,11 +2807,16 @@ export class HubAssistantService {
         droneId,
         query,
         path: rawPath ? normalizeAssistantDroneFilePath(rawPath) : undefined,
-        limit: Number.isFinite(Number(params.limit)) ? Math.max(1, Math.min(100, Math.floor(Number(params.limit)))) : 20,
+        limit: Number.isFinite(Number(params.limit))
+          ? Math.max(1, Math.min(100, Math.floor(Number(params.limit))))
+          : 20,
         contextBefore: normalizeSearchContextLines(params.contextBefore, 'contextBefore'),
         contextAfter: normalizeSearchContextLines(params.contextAfter, 'contextAfter'),
       });
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], details: result };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
     }
     if (call.tool === 'write_file') {
       const result = await this.requireFileCallback('writeDroneFile')({
@@ -2105,10 +2824,16 @@ export class HubAssistantService {
         path: normalizeAssistantDroneFilePath(params.path),
         content: String(params.content ?? ''),
       });
-      return { content: [{ type: 'text', text: `Wrote ${result.path} (${result.size ?? 0} bytes).` }], details: result };
+      return {
+        content: [{ type: 'text', text: `Wrote ${result.path} (${result.size ?? 0} bytes).` }],
+        details: result,
+      };
     }
     if (call.tool === 'delete_file') {
-      const result = await this.requireFileCallback('deleteDroneFile')({ droneId, path: normalizeAssistantDroneFilePath(params.path) });
+      const result = await this.requireFileCallback('deleteDroneFile')({
+        droneId,
+        path: normalizeAssistantDroneFilePath(params.path),
+      });
       return { content: [{ type: 'text', text: `Deleted ${result.path}.` }], details: result };
     }
     if (call.tool === 'move_path') {
@@ -2118,7 +2843,10 @@ export class HubAssistantService {
         toPath: normalizeAssistantDroneFilePath(params.to),
         overwrite: params.overwrite === true,
       });
-      return { content: [{ type: 'text', text: `Moved ${result.path} to ${result.movedTo}.` }], details: result };
+      return {
+        content: [{ type: 'text', text: `Moved ${result.path} to ${result.movedTo}.` }],
+        details: result,
+      };
     }
     if (call.tool === 'create_directory') {
       const result = await this.requireFileCallback('createDroneDirectory')({
@@ -2126,7 +2854,10 @@ export class HubAssistantService {
         path: normalizeAssistantDroneFilePath(params.path),
         recursive: params.recursive === true,
       });
-      return { content: [{ type: 'text', text: `Created directory ${result.path}.` }], details: result };
+      return {
+        content: [{ type: 'text', text: `Created directory ${result.path}.` }],
+        details: result,
+      };
     }
     if (call.tool === 'delete_directory') {
       const result = await this.requireFileCallback('deleteDroneDirectory')({
@@ -2134,7 +2865,10 @@ export class HubAssistantService {
         path: normalizeAssistantDroneFilePath(params.path),
         recursive: params.recursive === true,
       });
-      return { content: [{ type: 'text', text: `Deleted directory ${result.path}.` }], details: result };
+      return {
+        content: [{ type: 'text', text: `Deleted directory ${result.path}.` }],
+        details: result,
+      };
     }
     if (call.tool === 'bash') {
       const command = String(params.command ?? '');
@@ -2146,11 +2880,17 @@ export class HubAssistantService {
         cwd: rawCwd ? normalizeAssistantDroneFilePath(rawCwd) : undefined,
         timeoutMs: clampAssistantBashTimeout(params.timeoutMs),
       });
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], details: result };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
     }
     if (call.tool === 'get_working_tree_status') {
       const result = await this.requireFileCallback('listDroneChangedFiles')({ droneId });
-      return { content: [{ type: 'text', text: JSON.stringify(result, null, 2) }], details: result };
+      return {
+        content: [{ type: 'text', text: JSON.stringify(result, null, 2) }],
+        details: result,
+      };
     }
     if (call.tool === 'apply_patch') {
       if (!patchEngine) throw new Error('patch engine unavailable');
@@ -2160,7 +2900,12 @@ export class HubAssistantService {
         applyHunks: patchEngine.applyHunks,
       });
       return {
-        content: [{ type: 'text', text: `Applied ${result.operations.length} patch operation${result.operations.length === 1 ? '' : 's'} to ${result.droneId}.` }],
+        content: [
+          {
+            type: 'text',
+            text: `Applied ${result.operations.length} patch operation${result.operations.length === 1 ? '' : 's'} to ${result.droneId}.`,
+          },
+        ],
         details: result,
       };
     }
@@ -2183,8 +2928,19 @@ export class HubAssistantService {
       : `${prompt}\n\n${ASSISTANT_SINGLE_TARGET_PROMPT_LINE}`;
   }
 
-  async preflightBlipTool(threadId: string, toolName: string, callId: string, args: any, signal?: AbortSignal): Promise<{ block?: boolean; reason?: string } | undefined> {
-    return this.beforeToolCall(threadId, { toolCall: { id: callId, name: toolName }, args }, undefined, signal);
+  async preflightBlipTool(
+    threadId: string,
+    toolName: string,
+    callId: string,
+    args: any,
+    signal?: AbortSignal,
+  ): Promise<{ block?: boolean; reason?: string } | undefined> {
+    return this.beforeToolCall(
+      threadId,
+      { toolCall: { id: callId, name: toolName }, args },
+      undefined,
+      signal,
+    );
   }
 
   async approve(approvalId: string, approved: boolean): Promise<AssistantSnapshot> {
@@ -2226,15 +2982,18 @@ export class HubAssistantService {
           .filter((image) => image.data)
       : [];
     if (!prompt && promptImages.length === 0) throw new Error('missing prompt');
-    const queued = sanitizeQueuedPrompt({
-      id: makeAssistantId('queued'),
-      prompt,
-      promptImages,
-      imageCount: promptImages.length,
-      createdAt: nowIso(),
-      status: 'queued',
-      error: null,
-    }, true);
+    const queued = sanitizeQueuedPrompt(
+      {
+        id: makeAssistantId('queued'),
+        prompt,
+        promptImages,
+        imageCount: promptImages.length,
+        createdAt: nowIso(),
+        status: 'queued',
+        error: null,
+      },
+      true,
+    );
     thread.queuedPrompts.push(queued);
     thread.updatedAt = nowIso();
     await this.persist();
@@ -2305,7 +3064,11 @@ export class HubAssistantService {
     thread.error = null;
     thread.updatedAt = nowIso();
     await this.persist();
-    await this.textPromptDelegate(thread.id, prompt, normalizeAssistantVoiceSource(input.voiceSource));
+    await this.textPromptDelegate(
+      thread.id,
+      prompt,
+      normalizeAssistantVoiceSource(input.voiceSource),
+    );
     await onEvent?.({ type: 'snapshot', snapshot: await this.threadSnapshot(thread.id) });
   }
   private async ensureLoaded(): Promise<void> {
@@ -2315,20 +3078,29 @@ export class HubAssistantService {
     const storedVoiceSystemPrompt = migrateAssistantSystemPrompt(stored?.voiceSystemPrompt);
     this.defaultSystemPrompt = storedSystemPrompt || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
     this.defaultSystemPromptUpdatedAt =
-      storedSystemPrompt && typeof stored?.systemPromptUpdatedAt === 'string' && stored.systemPromptUpdatedAt.trim()
+      storedSystemPrompt &&
+      typeof stored?.systemPromptUpdatedAt === 'string' &&
+      stored.systemPromptUpdatedAt.trim()
         ? stored.systemPromptUpdatedAt.trim()
         : null;
-    this.defaultVoiceSystemPrompt = storedVoiceSystemPrompt || storedSystemPrompt || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
+    this.defaultVoiceSystemPrompt =
+      storedVoiceSystemPrompt || storedSystemPrompt || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
     this.defaultVoiceSystemPromptUpdatedAt =
-      storedVoiceSystemPrompt && typeof stored?.voiceSystemPromptUpdatedAt === 'string' && stored.voiceSystemPromptUpdatedAt.trim()
+      storedVoiceSystemPrompt &&
+      typeof stored?.voiceSystemPromptUpdatedAt === 'string' &&
+      stored.voiceSystemPromptUpdatedAt.trim()
         ? stored.voiceSystemPromptUpdatedAt.trim()
         : storedVoiceSystemPrompt
           ? nowIso()
-          : storedSystemPrompt && typeof stored?.systemPromptUpdatedAt === 'string' && stored.systemPromptUpdatedAt.trim()
+          : storedSystemPrompt &&
+              typeof stored?.systemPromptUpdatedAt === 'string' &&
+              stored.systemPromptUpdatedAt.trim()
             ? stored.systemPromptUpdatedAt.trim()
             : null;
     const fallbackDefaultProvider = await defaultAssistantProvider();
-    const storedDefaultProvider = normalizeProvider(stored?.defaultModel?.provider ?? fallbackDefaultProvider);
+    const storedDefaultProvider = normalizeProvider(
+      stored?.defaultModel?.provider ?? fallbackDefaultProvider,
+    );
     this.defaultModelSelection = {
       provider: storedDefaultProvider,
       model: allowedModelForProvider(storedDefaultProvider, stored?.defaultModel?.model),
@@ -2338,9 +3110,14 @@ export class HubAssistantService {
         stored?.defaultModel?.thinkingLevel,
       ),
     };
-    this.defaultEnabledTools = normalizeAssistantEnabledTools(stored?.defaultEnabledTools, ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES);
+    this.defaultEnabledTools = normalizeAssistantEnabledTools(
+      stored?.defaultEnabledTools,
+      ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES,
+    );
     const storedThreads = Array.isArray(stored?.threads) ? stored.threads : [];
-    const storedFallbackProvider = normalizeProvider(storedThreads.find((thread: any) => thread && typeof thread === 'object')?.provider);
+    const storedFallbackProvider = normalizeProvider(
+      storedThreads.find((thread: any) => thread && typeof thread === 'object')?.provider,
+    );
     const storedFallback = {
       provider: storedFallbackProvider,
       model: defaultModelForProvider(storedFallbackProvider),
@@ -2349,7 +3126,12 @@ export class HubAssistantService {
     const migrateWebSearchDefaultTool = stored?.webSearchToolMigrationApplied !== true;
     const migrateFetchContentDefaultTool = stored?.fetchContentToolMigrationApplied !== true;
     const threads = storedThreads
-      .map((thread) => normalizeThread(thread, storedFallback, { migrateWebSearchDefaultTool, migrateFetchContentDefaultTool }))
+      .map((thread) =>
+        normalizeThread(thread, storedFallback, {
+          migrateWebSearchDefaultTool,
+          migrateFetchContentDefaultTool,
+        }),
+      )
       .filter(Boolean) as AssistantThread[];
     if (threads.length > 0) {
       this.threads = threads;
@@ -2362,23 +3144,46 @@ export class HubAssistantService {
       ];
     }
     const activeThreadId = String(stored?.activeThreadId ?? '').trim();
-    this.activeThreadId = this.threads.some((thread) => thread.id === activeThreadId) ? activeThreadId : this.threads[0].id;
+    this.activeThreadId = this.threads.some((thread) => thread.id === activeThreadId)
+      ? activeThreadId
+      : this.threads[0].id;
     this.loaded = true;
   }
 
-  private defaultAccessScopeForNewThread(input?: { activeDroneId?: unknown; activeChatName?: unknown; voiceEnabled?: unknown }): AssistantAccessScope {
+  private defaultAccessScopeForNewThread(input?: {
+    activeDroneId?: unknown;
+    activeChatName?: unknown;
+    voiceEnabled?: unknown;
+  }): AssistantAccessScope {
     if (normalizeAssistantVoiceEnabled(input?.voiceEnabled)) {
       return makeAssistantAccessScope({ readMode: 'all', writeMode: 'selected', droneIds: [] });
     }
     const hasInputDrone = Object.prototype.hasOwnProperty.call(input ?? {}, 'activeDroneId');
     const hasInputChat = Object.prototype.hasOwnProperty.call(input ?? {}, 'activeChatName');
-    const activeDroneId = hasInputDrone ? cleanOptionalString(input?.activeDroneId) : cleanOptionalString(this.appContext.activeDroneId);
-    const activeChatName = hasInputChat ? cleanOptionalString(input?.activeChatName) : cleanOptionalString(this.appContext.activeChatName);
-    if (!activeDroneId || !activeChatName) return makeAssistantAccessScope({ readMode: 'all', writeMode: 'selected', droneIds: [] });
-    return makeAssistantAccessScope({ readMode: 'all', writeMode: 'selected', droneIds: [activeDroneId] });
+    const activeDroneId = hasInputDrone
+      ? cleanOptionalString(input?.activeDroneId)
+      : cleanOptionalString(this.appContext.activeDroneId);
+    const activeChatName = hasInputChat
+      ? cleanOptionalString(input?.activeChatName)
+      : cleanOptionalString(this.appContext.activeChatName);
+    if (!activeDroneId || !activeChatName)
+      return makeAssistantAccessScope({ readMode: 'all', writeMode: 'selected', droneIds: [] });
+    return makeAssistantAccessScope({
+      readMode: 'all',
+      writeMode: 'selected',
+      droneIds: [activeDroneId],
+    });
   }
 
-  private makeThread(input?: { provider?: LlmProviderId; model?: string; thinkingLevel?: AssistantThinkingLevel; title?: string; accessScope?: AssistantAccessScope; systemPrompt?: string; voiceEnabled?: boolean }): AssistantThread {
+  private makeThread(input?: {
+    provider?: LlmProviderId;
+    model?: string;
+    thinkingLevel?: AssistantThinkingLevel;
+    title?: string;
+    accessScope?: AssistantAccessScope;
+    systemPrompt?: string;
+    voiceEnabled?: boolean;
+  }): AssistantThread {
     const provider = normalizeProvider(input?.provider);
     const at = nowIso();
     const voiceEnabled = input?.voiceEnabled === true;
@@ -2391,11 +3196,19 @@ export class HubAssistantService {
       voiceEnabledAt: voiceEnabled ? at : null,
       provider,
       model: allowedModelForProvider(provider, input?.model),
-      thinkingLevel: allowedThinkingLevelForModel(provider, allowedModelForProvider(provider, input?.model), input?.thinkingLevel),
-      systemPrompt: normalizeAssistantSystemPrompt(input?.systemPrompt) || this.defaultSystemPromptForVoiceMode(voiceEnabled),
+      thinkingLevel: allowedThinkingLevelForModel(
+        provider,
+        allowedModelForProvider(provider, input?.model),
+        input?.thinkingLevel,
+      ),
+      systemPrompt:
+        normalizeAssistantSystemPrompt(input?.systemPrompt) ||
+        this.defaultSystemPromptForVoiceMode(voiceEnabled),
       systemPromptUpdatedAt: null,
       enabledTools: enabledToolsForVoiceMode(
-        voiceEnabled ? [...this.defaultEnabledTools, 'set_thinking_level', 'create_new_thread'] : this.defaultEnabledTools,
+        voiceEnabled
+          ? [...this.defaultEnabledTools, 'set_thinking_level', 'create_new_thread']
+          : this.defaultEnabledTools,
         voiceEnabled,
       ),
       accessScope: input?.accessScope ?? this.defaultAccessScopeForNewThread({ voiceEnabled }),
@@ -2409,11 +3222,17 @@ export class HubAssistantService {
   }
 
   private defaultSystemPromptForVoiceMode(voiceEnabled: boolean): string {
-    return normalizeAssistantSystemPrompt(voiceEnabled ? this.defaultVoiceSystemPrompt : this.defaultSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
+    return (
+      normalizeAssistantSystemPrompt(
+        voiceEnabled ? this.defaultVoiceSystemPrompt : this.defaultSystemPrompt,
+      ) || ASSISTANT_SYSTEM_PROMPT_DEFAULT
+    );
   }
 
   private defaultSystemPromptForThread(thread: AssistantThread): string {
-    return this.defaultSystemPromptForVoiceMode(normalizeAssistantVoiceEnabled(thread.voiceEnabled));
+    return this.defaultSystemPromptForVoiceMode(
+      normalizeAssistantVoiceEnabled(thread.voiceEnabled),
+    );
   }
 
   private getThread(threadId: string): AssistantThread {
@@ -2465,35 +3284,37 @@ export class HubAssistantService {
   }
 
   private async modelOptions(): Promise<AssistantModelOption[]> {
+    let runtime: AssistantRuntime | null = null;
     try {
-      const runtime = await this.runtime();
-      return ASSISTANT_MODEL_OPTIONS.map((option) => {
-        const model = runtime.getModel(providerToPiProvider(option.provider), option.id);
-        return {
-          provider: option.provider,
-          id: option.id,
-          name: option.name,
-          reasoning: Boolean(model?.reasoning),
-          thinkingLevel: option.thinkingLevel,
-        };
-      });
-    } catch {
-      const provider = await defaultAssistantProvider();
-      return [
-        {
-          provider,
-          id: defaultModelForProvider(provider),
-          name: defaultModelForProvider(provider),
-          reasoning: false,
-          thinkingLevel: ASSISTANT_MODEL_OPTIONS.find((option) => option.provider === provider && option.id === defaultModelForProvider(provider))?.thinkingLevel ?? 'off',
-        },
-      ];
-    }
+      runtime = await this.runtime();
+    } catch {}
+    return ASSISTANT_MODEL_OPTIONS.map((option) => {
+      let reasoning = option.thinkingLevel !== 'off';
+      if (runtime) {
+        try {
+          const model = runtime.getModel(providerToPiProvider(option.provider), option.id);
+          reasoning = Boolean(model?.reasoning);
+        } catch {}
+      }
+      return {
+        provider: option.provider,
+        id: option.id,
+        name: option.name,
+        reasoning,
+        thinkingLevel: option.thinkingLevel,
+      };
+    });
   }
 
-  async realtimeSessionConfig(input?: { source?: AssistantVoiceSource | null; title?: unknown }): Promise<AssistantRealtimeSessionConfig> {
-    const voiceThread = await this.ensureLatestVoiceThread({ title: input?.title ?? 'Desktop realtime thread' });
-    if (!this.realtimeToolCatalogDelegate) throw new Error('Blip assistant tool catalog is not ready');
+  async realtimeSessionConfig(input?: {
+    source?: AssistantVoiceSource | null;
+    title?: unknown;
+  }): Promise<AssistantRealtimeSessionConfig> {
+    const voiceThread = await this.ensureLatestVoiceThread({
+      title: input?.title ?? 'Desktop realtime thread',
+    });
+    if (!this.realtimeToolCatalogDelegate)
+      throw new Error('Blip assistant tool catalog is not ready');
     const tools = (await this.realtimeToolCatalogDelegate(voiceThread.threadId))
       .filter((tool: any) => String(tool?.name ?? '') !== 'speak')
       .map(assistantRealtimeToolDefinition)
@@ -2519,7 +3340,9 @@ export class HubAssistantService {
     text?: unknown;
   }): Promise<{ ok: true; threadId: string; accepted: boolean }> {
     await this.ensureLoaded();
-    const threadId = cleanOptionalString(input.threadId) || (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
+    const threadId =
+      cleanOptionalString(input.threadId) ||
+      (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
     const thread = this.getThread(threadId);
     const roleRaw = cleanOptionalString(input.role).toLowerCase();
     const role: AssistantRealtimeMessageRole = roleRaw === 'assistant' ? 'assistant' : 'user';
@@ -2529,7 +3352,13 @@ export class HubAssistantService {
 
     this.clearThreadStreamingMessages(thread.id, role);
     await this.realtimeHistoryAppendDelegate(thread.id, makeAssistantTextMessage(role, text));
-    if (thread.title === DEFAULT_THREAD_TITLE || thread.title === 'Voice thread' || thread.title === 'Realtime thread' || thread.title === 'Desktop realtime voice thread' || thread.title === 'Desktop realtime thread') {
+    if (
+      thread.title === DEFAULT_THREAD_TITLE ||
+      thread.title === 'Voice thread' ||
+      thread.title === 'Realtime thread' ||
+      thread.title === 'Desktop realtime voice thread' ||
+      thread.title === 'Desktop realtime thread'
+    ) {
       if (role === 'user') thread.title = titleFromPrompt(text);
     }
     thread.updatedAt = nowIso();
@@ -2545,7 +3374,9 @@ export class HubAssistantService {
     text?: unknown;
   }): Promise<{ ok: true; threadId: string; accepted: boolean }> {
     await this.ensureLoaded();
-    const threadId = cleanOptionalString(input.threadId) || (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
+    const threadId =
+      cleanOptionalString(input.threadId) ||
+      (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
     const thread = this.getThread(threadId);
     const roleRaw = cleanOptionalString(input.role).toLowerCase();
     const role: AssistantRealtimeMessageRole = roleRaw === 'assistant' ? 'assistant' : 'user';
@@ -2559,9 +3390,13 @@ export class HubAssistantService {
     return { ok: true, threadId: thread.id, accepted: true };
   }
 
-  async clearRealtimeStreamingMessage(input?: { threadId?: unknown }): Promise<{ ok: true; threadId: string; cleared: boolean }> {
+  async clearRealtimeStreamingMessage(input?: {
+    threadId?: unknown;
+  }): Promise<{ ok: true; threadId: string; cleared: boolean }> {
     await this.ensureLoaded();
-    const threadId = cleanOptionalString(input?.threadId) || (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
+    const threadId =
+      cleanOptionalString(input?.threadId) ||
+      (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
     const thread = this.getThread(threadId);
     const cleared = this.clearThreadStreamingMessages(thread.id);
     if (cleared) this.emitChange('realtime_streaming_message_cleared', thread.id);
@@ -2577,20 +3412,35 @@ export class HubAssistantService {
     signal?: AbortSignal;
   }): Promise<AssistantRealtimeToolExecutionResult> {
     await this.ensureLoaded();
-    const threadId = cleanOptionalString(input.threadId) || (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
+    const threadId =
+      cleanOptionalString(input.threadId) ||
+      (await this.ensureLatestVoiceThread({ title: 'Desktop realtime thread' })).threadId;
     const thread = this.getThread(threadId);
     const toolName = cleanOptionalString(input.toolName);
     if (!toolName) throw new Error('missing realtime tool name');
-    if (!this.realtimeToolExecuteDelegate || toolName === 'speak') throw new Error(`assistant realtime tool unavailable: ${toolName}`);
+    if (!this.realtimeToolExecuteDelegate || toolName === 'speak')
+      throw new Error(`assistant realtime tool unavailable: ${toolName}`);
 
     const toolCallId = cleanOptionalString(input.toolCallId) || makeAssistantId('realtime-tool');
     const args = parseAssistantRealtimeToolArguments(input.arguments);
     if (!this.realtimeHistoryAppendDelegate) throw new Error('Blip assistant history is not ready');
-    await this.realtimeHistoryAppendDelegate(thread.id, makeAssistantToolCallMessage(toolCallId, toolName, args));
+    await this.realtimeHistoryAppendDelegate(
+      thread.id,
+      makeAssistantToolCallMessage(toolCallId, toolName, args),
+    );
 
     try {
-      const result = await this.realtimeToolExecuteDelegate(thread.id, toolCallId, toolName, args, input.signal);
-      await this.realtimeHistoryAppendDelegate(thread.id, makeAssistantToolResultMessage(toolCallId, toolName, result));
+      const result = await this.realtimeToolExecuteDelegate(
+        thread.id,
+        toolCallId,
+        toolName,
+        args,
+        input.signal,
+      );
+      await this.realtimeHistoryAppendDelegate(
+        thread.id,
+        makeAssistantToolResultMessage(toolCallId, toolName, result),
+      );
       thread.updatedAt = nowIso();
       await this.persist();
       return {
@@ -2603,7 +3453,15 @@ export class HubAssistantService {
       };
     } catch (error: any) {
       const message = cleanOptionalString(error?.message ?? error) || `${toolName} failed.`;
-      await this.realtimeHistoryAppendDelegate(thread.id, makeAssistantToolResultMessage(toolCallId, toolName, { ok: false, error: message }, message));
+      await this.realtimeHistoryAppendDelegate(
+        thread.id,
+        makeAssistantToolResultMessage(
+          toolCallId,
+          toolName,
+          { ok: false, error: message },
+          message,
+        ),
+      );
       thread.updatedAt = nowIso();
       thread.error = message;
       await this.persist();
@@ -2618,17 +3476,24 @@ export class HubAssistantService {
     signal?: AbortSignal,
   ): Promise<{ block?: boolean; reason?: string } | undefined> {
     const toolName = String(ctx?.toolCall?.name ?? '').trim();
-    if (toolName !== 'message_drone' && toolName !== 'set_drone_group' && toolName !== 'set_drone_groups' && toolName !== 'rename_drones' && toolName !== 'bash') return undefined;
+    if (
+      toolName !== 'message_drone' &&
+      toolName !== 'set_drone_group' &&
+      toolName !== 'set_drone_groups' &&
+      toolName !== 'rename_drones' &&
+      toolName !== 'bash'
+    )
+      return undefined;
     const label =
       toolName === 'set_drone_group'
         ? 'Set drone group'
         : toolName === 'set_drone_groups'
           ? 'Set drone groups'
-        : toolName === 'rename_drones'
-          ? 'Rename drones'
-          : toolName === 'bash'
-            ? 'Run bash in drone'
-            : 'Send message to drone';
+          : toolName === 'rename_drones'
+            ? 'Rename drones'
+            : toolName === 'bash'
+              ? 'Run bash in drone'
+              : 'Send message to drone';
     let approvalArgs = ctx?.args ?? {};
     if (toolName === 'bash') {
       const drones = await this.tools.listDrones();
@@ -2639,7 +3504,10 @@ export class HubAssistantService {
         drones.find((item) => item.name === rawDroneId) ??
         null;
       if (drone && String(drone.runtime ?? '').trim() !== 'container') {
-        return { block: true, reason: `bash is only supported for container drones: ${drone.name}` };
+        return {
+          block: true,
+          reason: `bash is only supported for container drones: ${drone.name}`,
+        };
       }
       const cwd = cleanOptionalString(ctx?.args?.cwd);
       approvalArgs = {
@@ -2659,11 +3527,14 @@ export class HubAssistantService {
           const rawList = Array.isArray(ctx?.args?.droneIds) ? ctx.args.droneIds : [];
           const drones = await this.tools.listDrones();
           const droneNameById = new Map(drones.map((drone) => [drone.id, drone.name]));
-          const droneIds: string[] = Array.from(new Set(rawList.map((item: any) => droneIdByAssistantRef(regAny, item))));
+          const droneIds: string[] = Array.from(
+            new Set(rawList.map((item: any) => droneIdByAssistantRef(regAny, item))),
+          );
           const allowed = this.allowedDroneIdSet('write', threadId);
           if (allowed) {
             const denied = droneIds.filter((id) => !allowed.has(id));
-            if (denied.length > 0) throw new Error(`assistant scope does not include drone: ${denied.join(', ')}`);
+            if (denied.length > 0)
+              throw new Error(`assistant scope does not include drone: ${denied.join(', ')}`);
           }
           approvalArgs = {
             requested: ctx?.args ?? {},
@@ -2679,13 +3550,19 @@ export class HubAssistantService {
           const droneNameById = new Map(drones.map((drone) => [drone.id, drone.name]));
           const assignments = normalized.map((assignment) => ({
             group: assignment.group,
-            drones: Array.from(new Set(assignment.droneRefs.map((ref) => droneIdByAssistantRef(regAny, ref))))
-              .map((id) => ({ id, name: droneNameById.get(id) ?? id })),
+            drones: Array.from(
+              new Set(assignment.droneRefs.map((ref) => droneIdByAssistantRef(regAny, ref))),
+            ).map((id) => ({ id, name: droneNameById.get(id) ?? id })),
           }));
           const allowed = this.allowedDroneIdSet('write', threadId);
           if (allowed) {
-            const denied = assignments.flatMap((assignment) => assignment.drones.map((drone) => drone.id)).filter((id) => !allowed.has(id));
-            if (denied.length > 0) throw new Error(`assistant scope does not include drone: ${Array.from(new Set(denied)).join(', ')}`);
+            const denied = assignments
+              .flatMap((assignment) => assignment.drones.map((drone) => drone.id))
+              .filter((id) => !allowed.has(id));
+            if (denied.length > 0)
+              throw new Error(
+                `assistant scope does not include drone: ${Array.from(new Set(denied)).join(', ')}`,
+              );
           }
           approvalArgs = {
             requested: ctx?.args ?? {},
@@ -2703,7 +3580,8 @@ export class HubAssistantService {
           const allowed = this.allowedDroneIdSet('write', threadId);
           if (allowed) {
             const denied = renames.map((item) => item.id).filter((id) => !allowed.has(id));
-            if (denied.length > 0) throw new Error(`assistant scope does not include drone: ${denied.join(', ')}`);
+            if (denied.length > 0)
+              throw new Error(`assistant scope does not include drone: ${denied.join(', ')}`);
           }
           approvalArgs = {
             requested: ctx?.args ?? {},
@@ -2729,7 +3607,10 @@ export class HubAssistantService {
           };
         }
       } catch (error: any) {
-        return { block: true, reason: cleanOptionalString(error?.message ?? error) || `Denied ${toolName}.` };
+        return {
+          block: true,
+          reason: cleanOptionalString(error?.message ?? error) || `Denied ${toolName}.`,
+        };
       }
     }
     if (this.getThread(threadId).autoApprove) return undefined;
@@ -2779,7 +3660,11 @@ export class HubAssistantService {
         },
       };
       this.approvals.set(approvalId, entry);
-      void input.onEvent?.({ type: 'approval_pending', approval, snapshot: this.snapshotSyncFallback(input.threadId) });
+      void input.onEvent?.({
+        type: 'approval_pending',
+        approval,
+        snapshot: this.snapshotSyncFallback(input.threadId),
+      });
       this.emitChange('approval_pending', input.threadId);
       if (input.signal) {
         input.signal.addEventListener(
@@ -2798,16 +3683,24 @@ export class HubAssistantService {
 
   private snapshotSyncFallback(threadId?: string): AssistantSnapshot {
     const id = cleanOptionalString(threadId) || this.activeThreadId;
-    const targetThread = this.threads.find((thread) => thread.id === id) ?? firstThread(this.threads, this.activeThreadId);
+    const targetThread =
+      this.threads.find((thread) => thread.id === id) ??
+      firstThread(this.threads, this.activeThreadId);
     const snapshotThreadId = targetThread.id;
     const streamingMessages = this.threadStreamingMessages(snapshotThreadId);
     const streamingMessage = this.primaryThreadStreamingMessage(snapshotThreadId);
     return {
       ok: true,
       activeThreadId: snapshotThreadId,
-      threads: this.threads.map((thread) =>
-        thread.id === snapshotThreadId ? { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) } : sanitizeThreadSummary(thread),
-      ),
+      threads: this.threads.map((thread) => {
+        const sanitized =
+          thread.id === snapshotThreadId
+            ? { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) }
+            : sanitizeThreadSummary(thread);
+        return this.runningThreadIds.has(thread.id)
+          ? { ...sanitized, status: 'running' }
+          : sanitized;
+      }),
       chatIdleSubscriptions: [],
       pendingApprovals: this.pendingApprovals(),
       models: [],
@@ -2816,7 +3709,9 @@ export class HubAssistantService {
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       runningModels: {},
-      ...(streamingMessage ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages } : {}),
+      ...(streamingMessage
+        ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages }
+        : {}),
     };
   }
 
@@ -2834,14 +3729,18 @@ export class HubAssistantService {
   }
 
   private systemPromptSettingsSync(): AssistantSystemPromptSettings {
-    const prompt = normalizeAssistantSystemPrompt(this.defaultSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
-    const voicePrompt = normalizeAssistantSystemPrompt(this.defaultVoiceSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
+    const prompt =
+      normalizeAssistantSystemPrompt(this.defaultSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
+    const voicePrompt =
+      normalizeAssistantSystemPrompt(this.defaultVoiceSystemPrompt) ||
+      ASSISTANT_SYSTEM_PROMPT_DEFAULT;
     return {
       ok: true,
       assistantSystemPrompt: {
         prompt,
         promptSource: prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? 'default' : 'settings',
-        updatedAt: prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : this.defaultSystemPromptUpdatedAt,
+        updatedAt:
+          prompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : this.defaultSystemPromptUpdatedAt,
         defaultPrompt: ASSISTANT_SYSTEM_PROMPT_DEFAULT,
         maxPromptChars: ASSISTANT_SYSTEM_PROMPT_MAX_CHARS,
         runtimeAppendix: ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX,
@@ -2849,7 +3748,10 @@ export class HubAssistantService {
       assistantVoiceSystemPrompt: {
         prompt: voicePrompt,
         promptSource: voicePrompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? 'default' : 'settings',
-        updatedAt: voicePrompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? null : this.defaultVoiceSystemPromptUpdatedAt,
+        updatedAt:
+          voicePrompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT
+            ? null
+            : this.defaultVoiceSystemPromptUpdatedAt,
         defaultPrompt: ASSISTANT_SYSTEM_PROMPT_DEFAULT,
         maxPromptChars: ASSISTANT_SYSTEM_PROMPT_MAX_CHARS,
         runtimeAppendix: ASSISTANT_SYSTEM_PROMPT_RUNTIME_APPENDIX,
@@ -2861,7 +3763,8 @@ export class HubAssistantService {
     const thread = this.getThread(threadId);
     const globalPrompt = this.defaultSystemPromptForThread(thread);
     const prompt = normalizeAssistantSystemPrompt(thread.systemPrompt) || globalPrompt;
-    const globalPromptSource = globalPrompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? 'default' : 'settings';
+    const globalPromptSource =
+      globalPrompt === ASSISTANT_SYSTEM_PROMPT_DEFAULT ? 'default' : 'settings';
     const promptSource =
       prompt === globalPrompt
         ? globalPromptSource === 'default'
@@ -2890,7 +3793,9 @@ export class HubAssistantService {
     const readScope = describeAssistantAccessMode(accessScope.readMode, accessScope.droneIds);
     const writeScope = describeAssistantAccessMode(accessScope.writeMode, accessScope.droneIds);
     const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}. Do not claim access to existing drones outside those scopes. This scope does not restrict enabled global creation tools such as create_drone, clone_drone, or create_group.`;
-    const basePrompt = normalizeAssistantSystemPrompt(thread?.systemPrompt) || (thread ? this.defaultSystemPromptForThread(thread) : this.defaultSystemPrompt);
+    const basePrompt =
+      normalizeAssistantSystemPrompt(thread?.systemPrompt) ||
+      (thread ? this.defaultSystemPromptForThread(thread) : this.defaultSystemPrompt);
     return [basePrompt, scopeText].join('\n\n');
   }
 }

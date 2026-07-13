@@ -89,6 +89,13 @@ export async function createDeviceMeshService(options: {
     store,
     onAssistantPolicyChange: (listener: (threadIds: string[]) => void) =>
       assistantPolicies.onChange(listener),
+    broadcastAssistantThreadChange: (payload: Record<string, any>) =>
+      router.broadcastCapabilityEvent(
+        'assistant-threads',
+        'threads.changed',
+        payload,
+        'threads.list',
+      ),
     remoteWorkspaceTarget: async (threadId: string) => {
       const policy = await assistantPolicies.homeTarget(threadId);
       if (!policy) return null;

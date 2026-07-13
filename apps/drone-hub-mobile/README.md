@@ -25,8 +25,9 @@ To pair:
 The **Assistant → On this phone** view runs a small assistant loop directly in the React Native
 process. It does not ask another Hub to host the thread.
 
-1. In the mobile **Settings** tab, save an OpenAI API key and model. The key is kept in Android
-   secure storage and is sent only to OpenAI.
+1. In the mobile **Settings** tab, choose either an OpenAI API key or a copied Codex subscription
+   login and select a model. Credentials are kept in Android secure storage and are sent only to
+   the selected OpenAI model service.
 2. Create a phone thread and open **Access**.
 3. Select a connected device that advertises the `workspace` capability, enter a root ID, and
    choose read or write access.
@@ -36,30 +37,42 @@ process. It does not ask another Hub to host the thread.
 
 Both checks are required. A generic device grant cannot bypass the exact thread rule on the
 workspace device. Phone conversations are bounded and stored in the app's private local storage;
-the API key is stored separately in Secure Store.
+provider credentials are stored separately in Secure Store.
 
-The first phone runtime deliberately uses non-streaming model responses because streaming fetch
-behavior varies across React Native versions. Stop cancels an active model request immediately,
-but an already-sent mesh file operation may take until its normal timeout to return.
+The phone commits complete model responses because streaming fetch behavior varies across React
+Native versions. Codex SSE is buffered until the response completes. Stop cancels an active model
+request immediately, but an already-sent mesh file operation may take until its normal timeout to
+return.
 
-### Copying an OpenAI key from another Hub
+Cross-device assistant thread lists refresh whenever their tab opens. While connected, authorized
+thread-change notifications travel over the existing authenticated mesh WebSocket and trigger a
+debounced refresh of the list and the open transcript.
 
-The phone can explicitly copy an OpenAI API key from a trusted Hub instead of requiring manual
-entry:
+Each assistant location opens its most recently updated thread. Tap the **Assistant** app header to
+open the shared thread drawer. Phone and cross-device transcripts use the same compact message,
+tool-call, image, attachment, composer, and model-selection presentation. Changing a model on a
+remote thread additionally requires the `assistant-threads/thread.update` grant.
+
+### Copying OpenAI or Codex credentials from another Hub
+
+The phone can explicitly copy an OpenAI API key or a file-based Codex CLI login from a trusted Hub:
 
 1. On the source Hub, open **Settings → Devices** and edit the phone.
-2. Mark the phone as an administrator and grant `provider-credentials/openai.export`.
-3. On the phone, open **Settings → Assistant on this phone**, select the source, and confirm the
-   copy.
+2. Mark the phone as an administrator and grant `provider-credentials/openai.export`,
+   `provider-credentials/codex.export`, or both.
+3. On the phone, open **Settings → Assistant on this phone**, select the source, and copy the
+   desired credential.
+4. Select **OpenAI API** or **Codex subscription** as the phone assistant provider and save the
+   assistant settings.
 
 The source grant and the confirmation on the phone are both required. The key is encrypted for a
 fresh, phone-owned transfer key before entering the mesh, so a forwarding bridge receives only
-ciphertext. The imported key is stored in Android Secure Store. Copies are one-time snapshots, not
-background synchronization.
+ciphertext. Imported credentials are stored in Android Secure Store. Copies are one-time snapshots,
+not background synchronization. Copied Codex access tokens are refreshed on the phone with the
+copied refresh token when they approach expiry.
 
 Hub computers can use the matching **Provider credentials** panel to copy an OpenAI key or a
 file-based Codex login from another Hub. Codex credentials held only in an operating-system
-keychain cannot be exported by this prototype. Copying a Codex login does not yet enable Codex as a
-provider for phone-local assistants.
+keychain cannot be exported by this prototype.
 
 The private P-256 key is encrypted through Expo Secure Store. It is loaded into JavaScript memory for prototype signing, so a native non-exportable Android key implementation remains production hardening. Forwarded application payloads are signed but rely on TLS until destination-only encryption is implemented.

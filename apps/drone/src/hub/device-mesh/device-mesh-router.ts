@@ -144,6 +144,30 @@ export class DeviceMeshRouter {
     for (const connection of this.connections.values()) send(connection.ws, event);
   }
 
+  async broadcastCapabilityEvent(
+    capability: string,
+    event: string,
+    payload: Record<string, any>,
+    requiredOperation: string,
+  ): Promise<void> {
+    const state = await this.store.read();
+    const message = {
+      type: 'capability.event',
+      version: 1,
+      sourceDeviceId: this.identity.id,
+      capability,
+      capabilityVersion: 1,
+      event,
+      payload,
+      issuedAt: new Date().toISOString(),
+    } as const;
+    for (const connection of this.connections.values()) {
+      const peer = state.devices[connection.peerDeviceId];
+      if (peer && !peer.revokedAt && isGranted(peer.grants, capability, 1, requiredOperation))
+        send(connection.ws, message);
+    }
+  }
+
   private async authenticateInbound(ws: WebSocket, request: http.IncomingMessage): Promise<void> {
     const url = new URL(request.url ?? '/', `http://${request.headers.host ?? 'localhost'}`);
     const requestedDeviceId = String(url.searchParams.get('deviceId') ?? '').trim();

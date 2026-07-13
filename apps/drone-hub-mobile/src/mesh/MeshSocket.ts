@@ -4,6 +4,7 @@ import {
   socketAuthSigningText,
   socketServerAuthSigningText,
   type CapabilityResponse,
+  type CapabilityEvent,
   type SignedCapabilityRequest,
 } from '@drone/device-protocol';
 import type { MobileDeviceIdentity } from '../security/device-identity';
@@ -38,6 +39,7 @@ export class MeshSocket {
     private readonly peerPublicKey: JsonWebKey,
     private readonly onState: () => void,
     private readonly onTopologyChange: () => void,
+    private readonly onCapabilityEvent: (event: CapabilityEvent) => void,
   ) {}
 
   get connected(): boolean {
@@ -196,6 +198,16 @@ export class MeshSocket {
       message.type === 'mesh.revocation'
     ) {
       this.onTopologyChange();
+      return;
+    }
+    if (message.type === 'capability.event') {
+      if (
+        message.version === 1 &&
+        message.sourceDeviceId === this.connection.deviceId &&
+        typeof message.capability === 'string' &&
+        typeof message.event === 'string'
+      )
+        this.onCapabilityEvent(message as CapabilityEvent);
       return;
     }
     if (message.type !== 'capability.response') return;

@@ -23,7 +23,15 @@ export const DRONE_CONTROL_CAPABILITY: CapabilityDescriptor = {
 export const ASSISTANT_THREADS_CAPABILITY: CapabilityDescriptor = {
   id: 'assistant-threads',
   version: 1,
-  operations: ['threads.list', 'thread.get', 'thread.create', 'thread.prompt', 'thread.stop'],
+  operations: [
+    'threads.list',
+    'models.list',
+    'thread.get',
+    'thread.create',
+    'thread.update',
+    'thread.prompt',
+    'thread.stop',
+  ],
 };
 
 export const WORKSPACE_CAPABILITY: CapabilityDescriptor = {
@@ -35,7 +43,7 @@ export const WORKSPACE_CAPABILITY: CapabilityDescriptor = {
 export const PROVIDER_CREDENTIALS_CAPABILITY: CapabilityDescriptor = {
   id: 'provider-credentials',
   version: 1,
-  operations: ['credentials.inspect', 'openai.export', 'codex.export'],
+  operations: ['credentials.inspect', 'openai.export', 'codex.export', 'groq.export'],
 };
 
 export function isGranted(
