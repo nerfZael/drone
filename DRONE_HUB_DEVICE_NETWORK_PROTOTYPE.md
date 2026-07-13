@@ -929,6 +929,23 @@ Before real production use of forwarding:
 - pass replay, tampering, key-loss, and revocation tests;
 - remove or clearly isolate any TLS-only forwarding mode.
 
+## Prototype review hardening
+
+Four detailed review passes after Milestones 0–3 added these safeguards without changing the
+capability-based architecture:
+
+- only an existing administrator can change another device's administrator status;
+- membership updates accept only HTTPS or local-development endpoints and validate device keys;
+- pairing approvals are checked against the phone identity and every advertised device key;
+- relayed responses must return over the expected authenticated connection;
+- request IDs and cached responses are isolated by source device and exact signed request data;
+- corrupt mobile routing data is discarded instead of preventing the phone identity from loading;
+- workspace writes honor their optional base hash, and searches have bounded work;
+- assistant prompt input and stored response history have explicit size bounds.
+
+These are prototype defenses, not a replacement for Milestone 4. A forwarding bridge can still read
+application payloads until destination-only encryption is implemented.
+
 ## Acceptance scenarios
 
 ### Capability modularity

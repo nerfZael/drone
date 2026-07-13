@@ -40,6 +40,7 @@ export class DeviceMeshAuditStore {
             assistantHomeDeviceId: String(actor.assistantHomeDeviceId ?? ''),
             threadId: String(actor.threadId ?? ''),
             rootId: String(actor.rootId ?? ''),
+            path: String(payload.path ?? '').slice(0, 500),
           }
         : null,
     });

@@ -67,5 +67,6 @@ export type DeviceMeshAuditEntry = {
     assistantHomeDeviceId: string;
     threadId: string;
     rootId: string;
+    path: string;
   } | null;
 };

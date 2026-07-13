@@ -21,9 +21,11 @@ describe('cross-device workspace policy', () => {
     const workspace = path.join(directory, 'workspace');
     await fs.mkdir(workspace);
     await fs.writeFile(path.join(workspace, 'hello.txt'), 'hello mesh\n');
+    const workspaceAlias = path.join(directory, 'workspace-alias');
+    await fs.symlink(workspace, workspaceAlias, 'dir');
     const policies = new CrossDeviceAssistantPolicyStore(path.join(directory, 'policy.json'));
     await policies.replace({
-      roots: [{ id: 'main-project', label: 'Main project', path: workspace }],
+      roots: [{ id: 'main-project', label: 'Main project', path: workspaceAlias }],
       homeTargets: [],
       targetRules: [
         {
@@ -61,6 +63,39 @@ describe('cross-device workspace policy', () => {
       { sourceDevice, requestId: 'request_1' },
     );
     expect(result.text).toContain('hello mesh');
+    const listing: any = await capability.invoke(
+      'files.list',
+      { actor, path: '.' },
+      { sourceDevice, requestId: 'request_list' },
+    );
+    expect(listing.details.entries[0].path).toBe('hello.txt');
+    await expect(
+      capability.invoke(
+        'files.write',
+        {
+          actor,
+          path: 'hello.txt',
+          content: 'changed\n',
+          mode: 'overwrite',
+          baseHash: 'outdated-hash',
+        },
+        { sourceDevice, requestId: 'request_hash' },
+      ),
+    ).rejects.toMatchObject({ code: 'BASE_HASH_MISMATCH' });
+    await fs.writeFile(path.join(workspace, 'empty.txt'), '');
+    await expect(
+      capability.invoke(
+        'files.write',
+        {
+          actor,
+          path: 'empty.txt',
+          content: 'changed\n',
+          mode: 'overwrite',
+          baseHash: 'outdated-hash',
+        },
+        { sourceDevice, requestId: 'request_empty_hash' },
+      ),
+    ).rejects.toMatchObject({ code: 'BASE_HASH_MISMATCH' });
     await expect(
       capability.invoke(
         'files.read',

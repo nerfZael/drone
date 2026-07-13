@@ -41,6 +41,15 @@ export type MobileDeviceIdentity = DevicePublicIdentity & {
   sign(text: string): Promise<string>;
 };
 
+export async function mobileDeviceIdForPublicKey(publicKey: JsonWebKey): Promise<string> {
+  const digest = await Crypto.digestStringAsync(
+    Crypto.CryptoDigestAlgorithm.SHA256,
+    canonicalJson({ crv: publicKey.crv, kty: publicKey.kty, x: publicKey.x, y: publicKey.y }),
+    { encoding: Crypto.CryptoEncoding.BASE64 },
+  );
+  return `device_${digest.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '').slice(0, 24)}`;
+}
+
 export async function loadDeviceIdentity(name = 'Android phone'): Promise<MobileDeviceIdentity> {
   const privateKey = await readPrivateKey();
   const publicBytes = p256.getPublicKey(privateKey, false);
@@ -52,12 +61,7 @@ export async function loadDeviceIdentity(name = 'Android phone'): Promise<Mobile
     x: base64Url(publicBytes.slice(1, 33)),
     y: base64Url(publicBytes.slice(33, 65)),
   };
-  const digest = await Crypto.digestStringAsync(
-    Crypto.CryptoDigestAlgorithm.SHA256,
-    canonicalJson({ crv: publicKey.crv, kty: publicKey.kty, x: publicKey.x, y: publicKey.y }),
-    { encoding: Crypto.CryptoEncoding.BASE64 },
-  );
-  const id = `device_${digest.replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '').slice(0, 24)}`;
+  const id = await mobileDeviceIdForPublicKey(publicKey);
   return {
     id,
     name,

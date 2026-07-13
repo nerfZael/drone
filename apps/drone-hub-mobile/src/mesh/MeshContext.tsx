@@ -3,7 +3,7 @@ import { AppState } from 'react-native';
 import type { MeshDevice, PairingApproval, PairingPayload } from '@drone/device-protocol';
 import { loadDeviceIdentity, type MobileDeviceIdentity } from '../security/device-identity';
 import { MeshSocket } from './MeshSocket';
-import { claimPairing, waitForPairingApproval } from './pair-device';
+import { claimPairing, validatePairingApproval, waitForPairingApproval } from './pair-device';
 import {
   clearMeshProfile,
   loadMeshProfile,
@@ -192,23 +192,25 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       if (!identity) throw new Error('Device identity is not ready');
       setError(null);
       const claim = await claimPairing(payload, identity);
-      const approval: PairingApproval = await waitForPairingApproval(
+      const approval: PairingApproval = await validatePairingApproval(
         payload,
-        claim.pendingId,
-        claim.claimSecret,
-        signal,
+        await waitForPairingApproval(payload, claim.pendingId, claim.claimSecret, signal),
+        identity,
       );
       const current = await loadMeshProfile();
       if (current && current.networkId !== approval.networkId)
         throw new Error('Forget the current mesh before joining another one');
+      const existingConnections = (current?.connections ?? []).filter(
+        (connection) => connection.deviceId !== payload.inviterDeviceId,
+      );
       const connections = [
-        ...(current?.connections ?? []).filter(
-          (connection) => connection.deviceId !== payload.inviterDeviceId,
-        ),
+        ...existingConnections,
         {
           deviceId: payload.inviterDeviceId,
           endpoint: approval.endpoint,
-          role: current?.connections.length ? ('backup' as const) : ('primary' as const),
+          role: existingConnections.some((connection) => connection.role === 'primary')
+            ? ('backup' as const)
+            : ('primary' as const),
         },
       ];
       const next: MeshProfile = {

@@ -7,6 +7,27 @@ import {
 } from './device-identity';
 import { DeviceMeshStore } from './device-mesh-store';
 
+function safeEndpoint(value: unknown): string | null {
+  try {
+    const endpoint = String(value ?? '')
+      .trim()
+      .replace(/\/+$/, '');
+    const url = new URL(endpoint);
+    if (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname))
+      return null;
+    return endpoint;
+  } catch {
+    return null;
+  }
+}
+
+function safeUpdatedAt(value: unknown): string | null {
+  const parsed = Date.parse(String(value ?? ''));
+  return Number.isFinite(parsed) && parsed <= Date.now() + 30_000
+    ? new Date(parsed).toISOString()
+    : null;
+}
+
 export class DeviceMembershipSynchronizer {
   constructor(
     private readonly identity: LocalDeviceIdentity,
@@ -61,6 +82,9 @@ export class DeviceMembershipSynchronizer {
       if (!issuer.administrator && raw?.id !== issuer.id) continue;
       const publicKey = raw?.publicKey as JsonWebKey;
       if (!publicKey || deviceIdForPublicKey(publicKey) !== raw?.id) continue;
+      const updatedAt = safeUpdatedAt(raw.updatedAt);
+      if (!updatedAt) continue;
+      const current = state.devices[raw.id];
       changed =
         (await this.store.upsertDiscoveredDevice({
           id: raw.id,
@@ -69,12 +93,19 @@ export class DeviceMembershipSynchronizer {
             ? raw.platform
             : 'unknown',
           publicKey,
-          administrator: raw.administrator === true,
+          administrator: issuer.administrator
+            ? raw.administrator === true
+            : current?.administrator === true,
           grants: [],
-          endpoints: Array.isArray(raw.endpoints) ? raw.endpoints.map(String).slice(0, 4) : [],
+          endpoints: Array.isArray(raw.endpoints)
+            ? raw.endpoints
+                .map(safeEndpoint)
+                .filter((item: string | null): item is string => Boolean(item))
+                .slice(0, 4)
+            : [],
           revokedAt: null,
           addedAt: String(raw.addedAt ?? new Date().toISOString()),
-          updatedAt: String(raw.updatedAt ?? new Date().toISOString()),
+          updatedAt,
         })) || changed;
     }
     return changed;

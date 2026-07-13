@@ -1,6 +1,7 @@
 import { ASSISTANT_THREADS_CAPABILITY } from '@drone/device-protocol';
 import type { CapabilityHandler } from '../../device-mesh-types';
 import { localHubRequest, type LocalHubAccess } from '../../local-hub-request';
+import { boundedAssistantHistory } from './bounded-assistant-history';
 import { CrossDeviceAssistantPolicyStore } from './policy-store';
 
 function object(value: unknown): Record<string, any> {
@@ -53,7 +54,12 @@ async function submitPrompt(
     const body = await response.json().catch(() => ({}));
     throw new Error(String(body?.error ?? `assistant prompt failed (${response.status})`));
   }
-  await response.text();
+  const reader = response.body?.getReader();
+  if (!reader) return;
+  for (;;) {
+    const chunk = await reader.read();
+    if (chunk.done) return;
+  }
 }
 
 export function createAssistantThreadsCapability(
@@ -74,7 +80,12 @@ export function createAssistantThreadsCapability(
       if (operation === 'thread.create') {
         const snapshot = await localHubRequest(access, '/api/assistant/threads', {
           method: 'POST',
-          body: JSON.stringify({ title: String(payload.title ?? '').trim() || undefined }),
+          body: JSON.stringify({
+            title:
+              String(payload.title ?? '')
+                .trim()
+                .slice(0, 160) || undefined,
+          }),
         });
         const threads = threadsFromSnapshot(snapshot);
         const activeId = String(snapshot?.activeThreadId ?? '');
@@ -91,7 +102,10 @@ export function createAssistantThreadsCapability(
           ),
         ]);
         const thread = threadsFromSnapshot(snapshot).find((item) => item.id === threadId);
-        return { thread: thread ? await withTarget(thread) : null, history };
+        return {
+          thread: thread ? await withTarget(thread) : null,
+          history: boundedAssistantHistory(history),
+        };
       }
       if (operation === 'thread.stop') {
         await localHubRequest(
@@ -106,6 +120,9 @@ export function createAssistantThreadsCapability(
       }
       if (operation === 'thread.prompt') {
         const prompt = required(payload.prompt, 'prompt');
+        if (prompt.length > 32_000)
+          throw Object.assign(new Error('prompt is too large'), { code: 'INVALID_REQUEST' });
+        await localHubRequest(access, `/api/assistant/threads/${encodeURIComponent(threadId)}`);
         void submitPrompt(access, threadId, prompt).catch(() => undefined);
         return { accepted: true, threadId };
       }

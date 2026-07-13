@@ -23,6 +23,11 @@ export class DeviceMeshStore {
     try {
       this.state = JSON.parse(await fs.readFile(this.statePath, 'utf8')) as DeviceMeshState;
       this.state.routes ??= {};
+      if (this.state.selfDeviceId !== this.identity.id || !this.state.devices[this.identity.id]) {
+        throw new Error(
+          'device mesh identity does not match its state; restore the original identity or remove the device-mesh data directory',
+        );
+      }
     } catch (error: any) {
       if (error?.code !== 'ENOENT') throw error;
       const at = now();

@@ -22,12 +22,14 @@ type PendingRequest = {
   resolve(value: unknown): void;
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
+  targetDeviceId: string;
 };
 
 export class MeshSocket {
   private socket: WebSocket | null = null;
   private ready = false;
   private pending = new Map<string, PendingRequest>();
+  private connectPromise: Promise<void> | null = null;
 
   constructor(
     readonly connection: MeshConnection,
@@ -43,8 +45,9 @@ export class MeshSocket {
   }
 
   async connect(): Promise<void> {
-    if (this.ready || this.socket?.readyState === WebSocket.CONNECTING) return;
-    await new Promise<void>((resolve, reject) => {
+    if (this.ready) return;
+    if (this.connectPromise) return await this.connectPromise;
+    const attempt = new Promise<void>((resolve, reject) => {
       const socket = new WebSocket(websocketUrl(this.connection.endpoint, this.identity.id));
       this.socket = socket;
       const timeout = setTimeout(() => {
@@ -64,21 +67,32 @@ export class MeshSocket {
       };
       socket.onclose = () => {
         clearTimeout(timeout);
+        if (this.socket !== socket) {
+          reject(new Error('Device connection was replaced'));
+          return;
+        }
+        this.socket = null;
+        const closedBeforeReady = !this.ready;
         this.ready = false;
         this.onState();
-        for (const request of this.pending.values()) {
-          clearTimeout(request.timer);
-          request.reject(new Error('Device connection closed'));
-        }
-        this.pending.clear();
+        this.rejectPending('Device connection closed');
+        if (closedBeforeReady) reject(new Error('Device connection closed during authentication'));
       };
     });
+    this.connectPromise = attempt;
+    try {
+      await attempt;
+    } finally {
+      if (this.connectPromise === attempt) this.connectPromise = null;
+    }
   }
 
   disconnect(): void {
-    this.socket?.close();
+    const socket = this.socket;
     this.socket = null;
     this.ready = false;
+    this.rejectPending('Device connection closed');
+    socket?.close();
   }
 
   async request(
@@ -87,7 +101,9 @@ export class MeshSocket {
     operation: string,
     payload: unknown,
   ): Promise<unknown> {
-    if (!this.ready || !this.socket) throw new Error('No mesh connection is available');
+    const socket = this.socket;
+    if (!this.ready || !socket || socket.readyState !== WebSocket.OPEN)
+      throw new Error('No mesh connection is available');
     const issuedAt = new Date();
     const unsigned: Omit<SignedCapabilityRequest, 'signature'> = {
       type: 'capability.request',
@@ -116,8 +132,14 @@ export class MeshSocket {
         this.pending.delete(request.requestId);
         reject(new Error('The target did not respond in time'));
       }, 30_000);
-      this.pending.set(request.requestId, { resolve, reject, timer });
-      this.socket?.send(JSON.stringify(request));
+      this.pending.set(request.requestId, { resolve, reject, timer, targetDeviceId });
+      try {
+        socket.send(JSON.stringify(request));
+      } catch (error) {
+        clearTimeout(timer);
+        this.pending.delete(request.requestId);
+        reject(error instanceof Error ? error : new Error(String(error)));
+      }
     });
   }
 
@@ -165,6 +187,9 @@ export class MeshSocket {
       resolveConnect();
       return;
     }
+    if (message.type === 'auth.error') {
+      throw new Error(String(message.message ?? 'Device authentication failed'));
+    }
     if (
       message.type === 'mesh.membership' ||
       message.type === 'mesh.route' ||
@@ -177,9 +202,27 @@ export class MeshSocket {
     const response = message as CapabilityResponse;
     const pending = this.pending.get(response.requestId);
     if (!pending) return;
+    if (
+      response.sourceDeviceId !== pending.targetDeviceId ||
+      response.targetDeviceId !== this.identity.id
+    )
+      return;
     clearTimeout(pending.timer);
     this.pending.delete(response.requestId);
     if (response.ok) pending.resolve(response.result);
-    else pending.reject(new Error(response.error?.message ?? 'Operation failed'));
+    else
+      pending.reject(
+        Object.assign(new Error(response.error?.message ?? 'Operation failed'), {
+          code: response.error?.code ?? 'OPERATION_FAILED',
+        }),
+      );
+  }
+
+  private rejectPending(message: string): void {
+    for (const request of this.pending.values()) {
+      clearTimeout(request.timer);
+      request.reject(new Error(message));
+    }
+    this.pending.clear();
   }
 }

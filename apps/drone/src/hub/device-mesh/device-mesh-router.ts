@@ -14,6 +14,7 @@ import { RawData, WebSocket, WebSocketServer } from 'ws';
 import { CapabilityRegistry } from './capability-registry';
 import { DeviceMembershipSynchronizer } from './device-membership-synchronizer';
 import { DeviceMeshAuditStore } from './device-mesh-audit-store';
+import { DeviceMeshRequestClient } from './device-mesh-request-client';
 import {
   signDeviceText,
   signSocketChallenge,
@@ -43,21 +44,25 @@ export class DeviceMeshRouter {
   private readonly connections = new Map<string, AuthenticatedSocket>();
   private readonly routes = new Map<
     string,
-    { ws: WebSocket; timer: ReturnType<typeof setTimeout> }
-  >();
-  private readonly localRequests = new Map<
-    string,
     {
-      resolve(value: unknown): void;
-      reject(error: Error): void;
+      sourceWs: WebSocket;
+      sourceDeviceId: string;
+      targetWs: WebSocket;
+      targetDeviceId: string;
+      requestId: string;
       timer: ReturnType<typeof setTimeout>;
     }
   >();
   private readonly replay = new Map<string, number>();
-  private readonly responses = new Map<string, { expires: number; response: CapabilityResponse }>();
+  private readonly responses = new Map<
+    string,
+    { expires: number; fingerprint: string; response: CapabilityResponse }
+  >();
   private readonly requestTimes = new Map<string, number[]>();
+  private readonly connecting = new Set<string>();
   private reconnectTimer: ReturnType<typeof setInterval> | null = null;
   private readonly membership: DeviceMembershipSynchronizer;
+  private readonly requestClient: DeviceMeshRequestClient;
 
   constructor(
     private readonly identity: LocalDeviceIdentity,
@@ -67,16 +72,23 @@ export class DeviceMeshRouter {
     private readonly audit: DeviceMeshAuditStore,
   ) {
     this.membership = new DeviceMembershipSynchronizer(identity, store);
+    this.requestClient = new DeviceMeshRequestClient(identity, (targetDeviceId) => {
+      const direct = this.connections.get(targetDeviceId);
+      return direct?.ws ?? this.connections.values().next().value?.ws;
+    });
     this.server.on('connection', (ws: WebSocket, request: http.IncomingMessage) => {
-      void this.authenticateInbound(ws, request);
+      void this.authenticateInbound(ws, request).catch(() => ws.close(1011, 'mesh unavailable'));
     });
   }
 
   start(): void {
     if (this.reconnectTimer) return;
-    this.reconnectTimer = setInterval(() => void this.connectToKnownPeers(), 10_000);
+    this.reconnectTimer = setInterval(
+      () => void this.connectToKnownPeers().catch(() => undefined),
+      10_000,
+    );
     this.reconnectTimer.unref?.();
-    void this.connectToKnownPeers();
+    void this.connectToKnownPeers().catch(() => undefined);
     void this.store
       .read()
       .then((state) => {
@@ -91,13 +103,10 @@ export class DeviceMeshRouter {
     this.reconnectTimer = null;
     for (const connection of this.connections.values()) connection.ws.close();
     this.connections.clear();
+    this.connecting.clear();
     for (const route of this.routes.values()) clearTimeout(route.timer);
     this.routes.clear();
-    for (const pending of this.localRequests.values()) {
-      clearTimeout(pending.timer);
-      pending.reject(new Error('device mesh stopped'));
-    }
-    this.localRequests.clear();
+    this.requestClient.close();
     this.server.close();
   }
 
@@ -129,41 +138,7 @@ export class DeviceMeshRouter {
     operation: string,
     payload: unknown,
   ): Promise<unknown> {
-    const direct = this.connections.get(targetDeviceId);
-    const connection = direct ?? this.connections.values().next().value;
-    if (!connection)
-      throw Object.assign(new Error('no mesh route is connected'), { code: 'TARGET_OFFLINE' });
-    const issuedAt = new Date();
-    const unsigned: Omit<SignedCapabilityRequest, 'signature'> = {
-      type: 'capability.request',
-      version: 1,
-      requestId: crypto.randomUUID(),
-      sourceDeviceId: this.identity.id,
-      targetDeviceId,
-      capability,
-      capabilityVersion: 1,
-      operation,
-      payload,
-      issuedAt: issuedAt.toISOString(),
-      expiresAt: new Date(issuedAt.getTime() + 60_000).toISOString(),
-      nonce: crypto.randomBytes(18).toString('base64url'),
-      maxHops: 1,
-    };
-    const request: SignedCapabilityRequest = {
-      ...unsigned,
-      signature: signDeviceText(this.identity, capabilityRequestSigningText(unsigned)),
-    };
-    return await new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
-        this.localRequests.delete(request.requestId);
-        reject(
-          Object.assign(new Error('target device did not respond'), { code: 'TARGET_TIMEOUT' }),
-        );
-      }, 35_000);
-      timer.unref?.();
-      this.localRequests.set(request.requestId, { resolve, reject, timer });
-      send(connection.ws, request);
-    });
+    return await this.requestClient.request(targetDeviceId, capability, operation, payload);
   }
 
   async broadcastMembership(): Promise<void> {
@@ -242,15 +217,34 @@ export class DeviceMeshRouter {
       existing.ws.close(4000, 'replaced');
     }
     this.connections.set(connection.peerDeviceId, connection);
-    connection.ws.on('message', (raw) => void this.onMessage(connection, raw));
+    connection.ws.on('message', (raw) => {
+      void this.onMessage(connection, raw).catch(() =>
+        connection.ws.close(1011, 'mesh processing failed'),
+      );
+    });
     connection.ws.on('close', () => {
       if (this.connections.get(connection.peerDeviceId)?.ws === connection.ws)
         this.connections.delete(connection.peerDeviceId);
       for (const [requestId, route] of this.routes) {
-        if (route.ws !== connection.ws) continue;
+        if (route.sourceWs !== connection.ws && route.targetWs !== connection.ws) continue;
         clearTimeout(route.timer);
         this.routes.delete(requestId);
+        if (route.targetWs === connection.ws && route.sourceWs !== connection.ws) {
+          send(
+            route.sourceWs,
+            this.errorResponse(
+              {
+                requestId: route.requestId,
+                sourceDeviceId: route.sourceDeviceId,
+                targetDeviceId: route.targetDeviceId,
+              },
+              'TARGET_OFFLINE',
+              'target device disconnected',
+            ),
+          );
+        }
       }
+      this.requestClient.connectionClosed(connection.ws);
     });
     void this.broadcastMembership();
     void this.routeManager
@@ -265,12 +259,20 @@ export class DeviceMeshRouter {
         device.id === state.selfDeviceId ||
         device.revokedAt ||
         this.connections.has(device.id) ||
+        this.connecting.has(device.id) ||
         device.endpoints.length === 0
       )
         continue;
       const endpoint = device.endpoints[0];
+      this.connecting.add(device.id);
       try {
         const ws = new WebSocket(socketUrl(endpoint, state.selfDeviceId));
+        const authTimeout = setTimeout(() => ws.close(4001, 'authentication timeout'), 12_000);
+        authTimeout.unref?.();
+        ws.once('close', () => {
+          clearTimeout(authTimeout);
+          this.connecting.delete(device.id);
+        });
         ws.once('message', (raw) => {
           try {
             const challenge = JSON.parse(raw.toString());
@@ -294,6 +296,7 @@ export class DeviceMeshRouter {
                 const ready = JSON.parse(readyRaw.toString());
                 if (ready?.type !== 'auth.ready' || ready?.networkId !== state.networkId)
                   throw new Error('network mismatch');
+                clearTimeout(authTimeout);
                 this.attach({ ws, peerDeviceId: device.id, outbound: true });
               } catch {
                 ws.close();
@@ -305,6 +308,7 @@ export class DeviceMeshRouter {
         });
         ws.on('error', () => ws.close());
       } catch {
+        this.connecting.delete(device.id);
         // Reconnect loop will try the next time the app is reachable.
       }
     }
@@ -348,25 +352,18 @@ export class DeviceMeshRouter {
       return;
     }
     if (message?.type === 'capability.response') {
-      const pending = this.localRequests.get(String(message.requestId ?? ''));
-      if (pending) {
-        this.localRequests.delete(message.requestId);
-        clearTimeout(pending.timer);
-        if (message.ok) pending.resolve(message.result);
-        else {
-          pending.reject(
-            Object.assign(new Error(message.error?.message ?? 'mesh operation failed'), {
-              code: message.error?.code ?? 'OPERATION_FAILED',
-            }),
-          );
-        }
-        return;
-      }
-      const route = this.routes.get(String(message.requestId ?? ''));
-      if (route) {
-        this.routes.delete(message.requestId);
+      if (this.requestClient.acceptResponse(message, connection.ws)) return;
+      const routeKey = `${String(message.targetDeviceId ?? '')}:${String(message.requestId ?? '')}`;
+      const route = this.routes.get(routeKey);
+      if (
+        route &&
+        route.targetWs === connection.ws &&
+        message.sourceDeviceId === route.targetDeviceId &&
+        message.targetDeviceId === route.sourceDeviceId
+      ) {
+        this.routes.delete(routeKey);
         clearTimeout(route.timer);
-        send(route.ws, message);
+        send(route.sourceWs, message);
       }
       return;
     }
@@ -417,27 +414,61 @@ export class DeviceMeshRouter {
         );
         return;
       }
+      const routeKey = `${request.sourceDeviceId}:${request.requestId}`;
+      if (this.routes.has(routeKey)) {
+        send(
+          connection.ws,
+          this.errorResponse(
+            request,
+            'DUPLICATE_REQUEST_ID',
+            'request id is already active for this source device',
+          ),
+        );
+        return;
+      }
       const timer = setTimeout(() => {
-        this.routes.delete(request.requestId);
+        this.routes.delete(routeKey);
         send(
           connection.ws,
           this.errorResponse(request, 'TARGET_TIMEOUT', 'target device did not respond'),
         );
       }, 35_000);
       timer.unref?.();
-      this.routes.set(request.requestId, { ws: connection.ws, timer });
+      this.routes.set(routeKey, {
+        sourceWs: connection.ws,
+        sourceDeviceId: request.sourceDeviceId,
+        targetWs: target.ws,
+        targetDeviceId: request.targetDeviceId,
+        requestId: request.requestId,
+        timer,
+      });
       send(target.ws, request);
       return;
     }
-    const cached = this.responses.get(request.requestId);
+    const responseKey = `${request.sourceDeviceId}:${request.requestId}`;
+    const fingerprint = crypto.createHash('sha256').update(JSON.stringify(request)).digest('hex');
+    const cached = this.responses.get(responseKey);
     if (cached && cached.expires > Date.now()) {
-      send(connection.ws, cached.response);
+      send(
+        connection.ws,
+        cached.fingerprint === fingerprint
+          ? cached.response
+          : this.errorResponse(
+              request,
+              'DUPLICATE_REQUEST_ID',
+              'request id was already used with different request data',
+            ),
+      );
       return;
     }
     const response = await this.execute(request);
     if (this.responses.size >= 10_000)
       this.responses.delete(this.responses.keys().next().value as string);
-    this.responses.set(request.requestId, { expires: Date.now() + 5 * 60_000, response });
+    this.responses.set(responseKey, {
+      expires: Date.now() + 5 * 60_000,
+      fingerprint,
+      response,
+    });
     send(connection.ws, response);
   }
 
@@ -492,7 +523,7 @@ export class DeviceMeshRouter {
           requestId: request.requestId,
         },
       );
-      await this.audit.record(request, 'allowed');
+      await this.recordAudit(request, 'allowed');
       return {
         type: 'capability.response',
         version: 1,
@@ -503,7 +534,7 @@ export class DeviceMeshRouter {
         result,
       };
     } catch (error: any) {
-      await this.audit.record(request, 'failed', String(error?.code ?? 'OPERATION_FAILED'));
+      await this.recordAudit(request, 'failed', String(error?.code ?? 'OPERATION_FAILED'));
       return this.errorResponse(
         request,
         String(error?.code ?? 'OPERATION_FAILED'),
@@ -517,8 +548,16 @@ export class DeviceMeshRouter {
     code: string,
     message: string,
   ): Promise<CapabilityResponse> {
-    await this.audit.record(request, 'denied', code);
+    await this.recordAudit(request, 'denied', code);
     return this.errorResponse(request, code, message);
+  }
+
+  private async recordAudit(
+    request: SignedCapabilityRequest,
+    outcome: 'allowed' | 'denied' | 'failed',
+    errorCode: string | null = null,
+  ): Promise<void> {
+    await this.audit.record(request, outcome, errorCode).catch(() => undefined);
   }
 
   private errorResponse(

@@ -111,7 +111,13 @@ export class CrossDeviceAssistantPolicyStore {
     const affected = [
       ...new Set([...previous.homeTargets, ...next.homeTargets].map((item) => item.threadId)),
     ];
-    for (const listener of this.listeners) listener(affected);
+    for (const listener of this.listeners) {
+      try {
+        listener(affected);
+      } catch {
+        // The policy is already durable; one UI invalidation must not make the save look failed.
+      }
+    }
     return next;
   }
 

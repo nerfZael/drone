@@ -15,11 +15,13 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
   const [status, setStatus] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const abort = React.useRef<AbortController | null>(null);
+  const pairingRef = React.useRef(false);
 
   React.useEffect(() => () => abort.current?.abort(), []);
 
   const pair = async (raw: string) => {
-    if (pairing) return;
+    if (pairingRef.current) return;
+    pairingRef.current = true;
     setPairing(true);
     setScanning(false);
     setError(null);
@@ -32,6 +34,7 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
       setError(nextError?.message ?? String(nextError));
       setStatus('');
     } finally {
+      pairingRef.current = false;
       setPairing(false);
     }
   };
