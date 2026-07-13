@@ -17,8 +17,19 @@ export function parsePairingPayload(value: unknown): PairingPayload {
   if (input.version !== 1) throw new Error('unsupported pairing version');
   const endpoint = text(input.endpoint, 'pairing endpoint', 2048).replace(/\/+$/, '');
   const parsed = new URL(endpoint);
-  if (parsed.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(parsed.hostname)) {
+  const loopbackHttp =
+    parsed.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(parsed.hostname);
+  if (parsed.protocol !== 'https:' && !loopbackHttp) {
     throw new Error('pairing endpoint must use HTTPS');
+  }
+  if (
+    parsed.username ||
+    parsed.password ||
+    parsed.search ||
+    parsed.hash ||
+    (parsed.pathname && parsed.pathname !== '/')
+  ) {
+    throw new Error('pairing endpoint must be an origin without credentials or a path');
   }
   return {
     version: 1,

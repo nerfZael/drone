@@ -14343,6 +14343,7 @@ export async function startDroneHubApiServer(opts: {
   containerMcpPort?: number;
   containerMcpUrl?: string;
   apiToken: string;
+  deviceMeshIngressPort?: number;
   mcpToken?: string;
   voiceStreamUrl?: string | null;
   allowedOrigins?: string[];
@@ -14376,6 +14377,7 @@ export async function startDroneHubApiServer(opts: {
     rootDir: droneRootPath('device-mesh'),
     apiToken,
     localHubBaseUrl: () => `http://127.0.0.1:${actualPort}`,
+    ingressPort: opts.deviceMeshIngressPort,
   });
 
   const notifyGroqApiKeySettingsChanged = () => {
@@ -30021,7 +30023,7 @@ export async function startDroneHubApiServer(opts: {
   scheduleDroneSummaryMaintenance('startup', 0);
   const address = server.address();
   actualPort = typeof address === 'object' && address ? address.port : opts.port;
-  deviceMesh.start();
+  await deviceMesh.start();
   if (mcpToken && containerMcpHost && containerMcpActualPort > 0) {
     const mcpOnlyServer = http.createServer(async (req, res) => {
       try {
@@ -30051,6 +30053,7 @@ export async function startDroneHubApiServer(opts: {
         mcpOnlyServer.listen(containerMcpActualPort, containerMcpHost, () => resolve());
       });
     } catch (error) {
+      await deviceMesh.close();
       await new Promise<void>((resolve) => server.close(() => resolve())).catch(() => {});
       throw error;
     }
@@ -30082,7 +30085,7 @@ export async function startDroneHubApiServer(opts: {
           }
         : null,
     close: async () => {
-      deviceMesh.close();
+      await deviceMesh.close();
       await hubOutboxDispatchLoop?.stop();
       if (notifyDroneChatWrite === notifyCanonicalPromptQueueChatWrite) {
         notifyDroneChatWrite = null;

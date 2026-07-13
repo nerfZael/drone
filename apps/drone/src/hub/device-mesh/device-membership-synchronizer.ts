@@ -13,7 +13,16 @@ function safeEndpoint(value: unknown): string | null {
       .trim()
       .replace(/\/+$/, '');
     const url = new URL(endpoint);
-    if (url.protocol !== 'https:' && !['localhost', '127.0.0.1'].includes(url.hostname))
+    const loopbackHttp =
+      url.protocol === 'http:' && ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname);
+    if (url.protocol !== 'https:' && !loopbackHttp) return null;
+    if (
+      url.username ||
+      url.password ||
+      url.search ||
+      url.hash ||
+      (url.pathname && url.pathname !== '/')
+    )
       return null;
     return endpoint;
   } catch {
