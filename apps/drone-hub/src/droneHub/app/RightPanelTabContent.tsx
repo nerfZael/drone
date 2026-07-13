@@ -21,19 +21,19 @@ import {
   type RightPanelTab,
 } from './app-config';
 import { AsyncPaneBoundary, type PaneModuleLoader } from './AsyncPaneBoundary';
+import { DroneEditorDock } from './DroneEditorDock';
 import { isDroneStartingOrSeeding } from './helpers';
 
 const loadAssistantDock = async () => (await import('../assistant/AssistantDock')).AssistantDock;
 const loadDroneCanvasDock = async () => (await import('../canvas/DroneCanvasDock')).DroneCanvasDock;
 const loadDroneChangesDock = async () => (await import('../changes/DroneChangesDock')).DroneChangesDock;
-const loadDroneEditorDock = async () => (await import('./DroneEditorDock')).DroneEditorDock;
 const loadDroneEnvDock = async () => (await import('../env/DroneEnvDock')).DroneEnvDock;
 const loadDroneFleetDock = async () => (await import('../fleet/DroneFleetDock')).DroneFleetDock;
 const loadDroneLinksDock = async () => (await import('../overview/DroneLinksDock')).DroneLinksDock;
 const loadDronePreviewDock = async () => (await import('../overview/DronePreviewDock')).DronePreviewDock;
 const loadDroneTerminalDock = async () => (await import('../terminal/DroneTerminalDock')).DroneTerminalDock;
 export const LAZY_RIGHT_PANEL_TABS: ReadonlySet<RightPanelTab> = new Set(
-  RIGHT_PANEL_TABS.filter((tab) => tab !== 'files' && tab !== 'whiteboard' && tab !== 'prs'),
+  RIGHT_PANEL_TABS.filter((tab) => tab !== 'files' && tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs'),
 );
 
 export function isRightPanelTabLazyLoaded(tab: RightPanelTab): boolean {
@@ -491,23 +491,19 @@ export function RightPanelTabContent({
 
     case 'editor':
       return (
-        <PaneModule tab={tab} load={loadDroneEditorDock}>
-          {(DroneEditorDock) => (
-            <DroneEditorDock
-              droneId={drone.id}
-              openedFile={openedFile}
-              quickOpen={quickOpen}
-              openedFileTabs={openedFileTabs}
-              activeOpenedFileTabId={activeOpenedFileTabId}
-              onOpenedEditorFileContentChange={onOpenedEditorFileContentChange}
-              onSaveOpenedEditorFile={onSaveOpenedEditorFile}
-              onCloseOpenedEditorFile={onCloseOpenedEditorFile}
-              onActivateOpenedEditorFileTab={onActivateOpenedEditorFileTab}
-              onReorderOpenedEditorFileTabs={onReorderOpenedEditorFileTabs}
-              onOpenFileTargetInEditor={onOpenFileTargetInEditor}
-            />
-          )}
-        </PaneModule>
+        <DroneEditorDock
+          droneId={drone.id}
+          openedFile={openedFile}
+          quickOpen={quickOpen}
+          openedFileTabs={openedFileTabs}
+          activeOpenedFileTabId={activeOpenedFileTabId}
+          onOpenedEditorFileContentChange={onOpenedEditorFileContentChange}
+          onSaveOpenedEditorFile={onSaveOpenedEditorFile}
+          onCloseOpenedEditorFile={onCloseOpenedEditorFile}
+          onActivateOpenedEditorFileTab={onActivateOpenedEditorFileTab}
+          onReorderOpenedEditorFileTabs={onReorderOpenedEditorFileTabs}
+          onOpenFileTargetInEditor={onOpenFileTargetInEditor}
+        />
       );
 
     case 'preview':

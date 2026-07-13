@@ -17,13 +17,20 @@ const {
 } = await import('../src/droneHub/app/RightPanelTabContent');
 
 describe('right panel tab content', () => {
-  test('lazy-loads every right panel pane', () => {
-    expect([...LAZY_RIGHT_PANEL_TABS].sort()).toEqual(RIGHT_PANEL_TABS.filter((tab) => tab !== 'files' && tab !== 'whiteboard' && tab !== 'prs').sort());
+  test('tracks only non-critical right panel panes as lazy-loaded', () => {
+    expect([...LAZY_RIGHT_PANEL_TABS].sort()).toEqual(
+      RIGHT_PANEL_TABS.filter(
+        (tab) => tab !== 'files' && tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs',
+      ).sort(),
+    );
     expect(isRightPanelTabLazyLoaded('files')).toBe(false);
+    expect(isRightPanelTabLazyLoaded('editor')).toBe(false);
     expect(isRightPanelTabLazyLoaded('whiteboard')).toBe(false);
     expect(isRightPanelTabLazyLoaded('prs')).toBe(false);
     for (const tab of RIGHT_PANEL_TABS) {
-      if (tab !== 'files' && tab !== 'whiteboard' && tab !== 'prs') expect(isRightPanelTabLazyLoaded(tab)).toBe(true);
+      if (tab !== 'files' && tab !== 'editor' && tab !== 'whiteboard' && tab !== 'prs') {
+        expect(isRightPanelTabLazyLoaded(tab)).toBe(true);
+      }
     }
   });
 
@@ -40,7 +47,7 @@ describe('right panel tab content', () => {
     );
   });
 
-  test('keeps non-files panes behind module loaders', () => {
+  test('keeps non-critical panes behind module loaders', () => {
     const sourcePath = path.join(import.meta.dir, '../src/droneHub/app/RightPanelTabContent.tsx');
     const source = fs.readFileSync(sourcePath, 'utf8');
     expect(source).not.toContain('React.lazy');
@@ -48,16 +55,18 @@ describe('right panel tab content', () => {
     expect(source).not.toContain("from '../files/OpenedDroneFilePanel'");
     expect(source).not.toContain("from '../files/QuickOpenModal'");
     expect(source).toContain("from '../whiteboard/WhiteboardDock'");
+    expect(source).toContain("from './DroneEditorDock'");
     expect(source).not.toContain('loadWhiteboardDock');
+    expect(source).not.toContain('loadDroneEditorDock');
     for (const tab of RIGHT_PANEL_TABS) {
-      if (tab === 'files' || tab === 'whiteboard' || tab === 'prs') continue;
+      if (tab === 'files' || tab === 'editor' || tab === 'whiteboard' || tab === 'prs') continue;
       if (tab === 'assistant') {
         expect(source).toContain("if (tab === 'assistant')");
       } else {
         expect(source).toContain(`case '${tab}'`);
       }
     }
-    expect(source.match(/<PaneModule tab=\{tab\}/g)?.length).toBe(RIGHT_PANEL_TABS.length - 3);
+    expect(source.match(/<PaneModule tab=\{tab\}/g)?.length).toBe(RIGHT_PANEL_TABS.length - 4);
   });
 
   test('loads the changes dock only when inspecting a pull request', () => {
