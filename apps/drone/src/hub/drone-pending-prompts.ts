@@ -61,8 +61,13 @@ export function createDronePendingPromptStore(deps: {
   normalizePendingStartupPrompts: (raw: unknown, chatNameFilter?: string) => PendingStartupPrompt[];
   normalizePromptAutomationMeta: (raw: unknown) => any;
   nowIso: () => string;
+  onPendingPromptChanged?: (change: { droneId: string; chatName: string }) => void;
   startupPromptToPendingPrompt: (prompt: PendingStartupPrompt) => PendingPrompt;
 }) {
+  function notifyPendingPromptChanged(droneId: string, chatName: string): void {
+    deps.onPendingPromptChanged?.({ droneId, chatName });
+  }
+
   function promptQueueForActiveDrone() {
     const queue = getPromptQueueRepository();
     if (queue) return queue;
@@ -289,11 +294,12 @@ export function createDronePendingPromptStore(deps: {
     if (queue && droneIdForStore) {
       const registry: any = await loadRegistry();
       if (!registry?.drones?.[droneIdForStore]) throw new Error(`unknown drone: ${opts.droneId}`);
-      await queue.enqueue({
+      const result = await queue.enqueue({
         droneId: droneIdForStore,
         chatName: chatNameForStore,
         prompt: opts.pending,
       });
+      if (result.inserted) notifyPendingPromptChanged(droneIdForStore, chatNameForStore);
       return;
     }
     if (droneIdForStore) {
@@ -385,12 +391,13 @@ export function createDronePendingPromptStore(deps: {
     const chatNameForStore = opts.chatName || 'default';
     const queue = promptQueueForActiveDrone();
     if (queue && droneIdForStore) {
-      await queue.update({
+      const updated = await queue.update({
         droneId: droneIdForStore,
         chatName: chatNameForStore,
         promptId: opts.id,
         patch: opts.patch,
       });
+      if (updated) notifyPendingPromptChanged(droneIdForStore, chatNameForStore);
       return;
     }
     if (droneIdForStore) {
@@ -431,13 +438,15 @@ export function createDronePendingPromptStore(deps: {
     const queue = promptQueueForActiveDrone();
     if (queue && droneId) {
       const current = queue.get({ droneId, chatName, promptId: opts.id });
-      return await queue.scheduleRetry({
+      const result = await queue.scheduleRetry({
         droneId,
         chatName,
         promptId: opts.id,
         error: opts.error,
         ...(current?.leaseOwner ? { leaseOwner: current.leaseOwner } : {}),
       });
+      if (result.disposition !== 'not-claimed') notifyPendingPromptChanged(droneId, chatName);
+      return result;
     }
     // Compatibility-only fallback retains the previous immediate retry state.
     await updatePendingPrompt({
@@ -467,6 +476,7 @@ export function createDronePendingPromptStore(deps: {
         promptId: opts.id,
         leaseOwner: `hub:${process.pid}`,
       });
+      if (claimed) notifyPendingPromptChanged(droneIdForStore, chatNameForStore);
       return Boolean(claimed);
     }
     let storeClaimed = false;
@@ -515,7 +525,10 @@ export function createDronePendingPromptStore(deps: {
     const queue = promptQueueForActiveDrone();
     if (queue) {
       const cancelled = await queue.cancelQueued({ droneId, chatName, promptId });
-      if (cancelled.cancelled) return { status: 'cancelled', pendingState: 'queued' };
+      if (cancelled.cancelled) {
+        notifyPendingPromptChanged(droneId, chatName);
+        return { status: 'cancelled', pendingState: 'queued' };
+      }
       if (cancelled.state === 'cancelled') return { status: 'not-found', pendingState: null };
       if (cancelled.state) {
         return { status: 'already-submitted', pendingState: cancelled.state as PendingPromptState };

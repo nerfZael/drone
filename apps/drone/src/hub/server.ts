@@ -489,6 +489,7 @@ const HUB_API_BUILD_ID = crypto.randomBytes(6).toString('hex');
 const requireForHub = createRequire(__filename);
 
 let notifyDroneRegistryWrite: (() => void) | null = null;
+let notifyDroneChatWrite: ((droneId: string, chatName: string) => void) | null = null;
 let notifyPromptAutomationLaneChange: ((droneId: string, chatName: string) => void) | null = null;
 
 async function updateRegistry<T>(
@@ -7084,6 +7085,7 @@ const {
   normalizePendingStartupPrompts,
   normalizePromptAutomationMeta,
   nowIso,
+  onPendingPromptChanged: ({ droneId, chatName }) => notifyDroneChatWrite?.(droneId, chatName),
   startupPromptToPendingPrompt,
 });
 
@@ -16868,6 +16870,14 @@ export async function startDroneHubApiServer(opts: {
     scheduleDroneRegistryBroadcasterRefresh();
     scheduleDroneChatEventRefresh();
   };
+  const notifyCanonicalPromptQueueChatWrite = (_droneId: string, _chatName: string) => {
+    // Prompt delivery state is canonical SQLite state and does not rewrite the
+    // registry. Invalidate the projection and wake chat SSE clients explicitly
+    // so live plan/status changes are not delayed until the fallback poll.
+    canonicalActiveModelCache = null;
+    scheduleDroneChatEventRefresh();
+  };
+  notifyDroneChatWrite = notifyCanonicalPromptQueueChatWrite;
   notifyPromptAutomationLaneChange = (droneId, chatName) => {
     schedulePromptAutomationEventRefresh(droneId, chatName);
   };
@@ -30057,6 +30067,9 @@ export async function startDroneHubApiServer(opts: {
         : null,
     close: async () => {
       await hubOutboxDispatchLoop?.stop();
+      if (notifyDroneChatWrite === notifyCanonicalPromptQueueChatWrite) {
+        notifyDroneChatWrite = null;
+      }
       if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
         activeDroneHubMcpProjectionConfig = null;
       }

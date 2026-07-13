@@ -317,6 +317,7 @@ test('the exact registry lock timeout is classified as transient', () => {
 test('active-drone lifecycle uses the canonical queue without rewriting the registry', async () => {
   repository('active-hot-path');
   const now = '2026-07-10T09:00:00.000Z';
+  const pendingChanges = [];
   const helpers = createPendingDroneStateHelpers({
     normalizeChatName: (raw) => String(raw || 'default').trim() || 'default',
     nowIso: () => now,
@@ -329,6 +330,7 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
     normalizePendingStartupPrompts: helpers.normalizePendingStartupPrompts,
     normalizePromptAutomationMeta: () => undefined,
     nowIso: () => now,
+    onPendingPromptChanged: (change) => pendingChanges.push(change),
     startupPromptToPendingPrompt: helpers.startupPromptToPendingPrompt,
   });
   await saveRegistry({
@@ -414,11 +416,27 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
     droneId: 'alpha',
     chatName: 'default',
     id: 'canonical',
-    patch: { state: 'sent', updatedAt: now },
+    patch: {
+      state: 'sent',
+      updatedAt: now,
+      agentPlan: {
+        source: 'codex',
+        updatedAt: now,
+        items: [
+          { text: 'Inspect code', status: 'completed' },
+          { text: 'Run tests', status: 'in_progress' },
+        ],
+      },
+    },
   });
+  assert.deepEqual(pendingChanges.at(-1), { droneId: 'alpha', chatName: 'default' });
   assert.equal(
     (await store.readPendingPrompts({ droneId: 'alpha', chatName: 'default' }))[0].state,
     'sent',
+  );
+  assert.deepEqual(
+    (await store.readPendingPrompts({ droneId: 'alpha', chatName: 'default' }))[0].agentPlan.items.map((item) => item.status),
+    ['completed', 'in_progress'],
   );
   assert.deepEqual(await loadRegistryRawSnapshot(), rawBeforeEnqueue);
   resetTranscriptStoreForTests();
