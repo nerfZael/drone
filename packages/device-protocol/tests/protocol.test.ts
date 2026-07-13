@@ -11,6 +11,7 @@ describe('device protocol', () => {
   test('default membership only permits discovery', () => {
     expect(isGranted([], 'device-core', 1, 'devices.list')).toBe(true);
     expect(isGranted([], 'drone-control', 1, 'drones.list')).toBe(false);
+    expect(isGranted([], 'provider-credentials', 1, 'openai.export')).toBe(false);
   });
 
   test('public pairing endpoints require HTTPS', () => {

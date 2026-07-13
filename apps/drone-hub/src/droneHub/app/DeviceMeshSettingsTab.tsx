@@ -1,6 +1,7 @@
 import React from 'react';
 import { IconSpinner } from './icons';
 import { CrossDeviceAssistantPolicyPanel } from './CrossDeviceAssistantPolicyPanel';
+import { ProviderCredentialTransferPanel } from './ProviderCredentialTransferPanel';
 import {
   type MeshCapability,
   type MeshDevice,
@@ -177,7 +178,7 @@ function DeviceCard({
                 checked={administrator}
                 onChange={(event) => setAdministrator(event.target.checked)}
               />
-              Can invite
+              Administrator
             </label>
           </div>
           <PermissionGrid capabilities={capabilities} selected={selected} onChange={setSelected} />
@@ -342,8 +343,8 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
         </div>
         <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-[var(--muted)]">
           Device signatures protect identity and destination permissions. A bridge Hub can still
-          read payloads it forwards because this milestone uses TLS between devices, not
-          destination-only encryption. Do not treat forwarded secrets as bridge-private yet.
+          read ordinary payloads it forwards because this milestone uses TLS between devices.
+          Provider credential transfers are separately encrypted for the receiving device.
         </p>
       </section>
 
@@ -388,7 +389,8 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                   }))
                 }
               />
-              Allow this device to invite and propagate members
+              Make this device an administrator. Administrators can invite devices and receive
+              separately granted provider credential copies.
             </label>
             <div className="mt-4 flex gap-2">
               <button
@@ -455,6 +457,11 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
             ))}
         </div>
       </section>
+      <ProviderCredentialTransferPanel
+        requestJson={requestJson}
+        devices={mesh.status?.devices ?? []}
+        selfDeviceId={mesh.status?.selfDeviceId ?? ''}
+      />
       <CrossDeviceAssistantPolicyPanel
         requestJson={requestJson}
         devices={mesh.status?.devices ?? []}

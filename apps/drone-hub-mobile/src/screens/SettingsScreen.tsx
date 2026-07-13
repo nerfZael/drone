@@ -3,6 +3,7 @@ import { Alert, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, Card, ErrorBanner, Label, textStyles } from '../components/Ui';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
+import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSettingsCard';
 
 export function SettingsScreen() {
   const mesh = useMesh();
@@ -90,10 +91,11 @@ export function SettingsScreen() {
         <Text style={[textStyles.body, styles.security]}>
           The private identity is encrypted by Android secure storage. Requests are signed, expire
           after one minute, and are checked again on the target. Forwarded payloads currently rely
-          on TLS and are visible to a bridge Hub; destination-only encryption is a later production
-          gate.
+          on TLS and are visible to a bridge Hub. Provider credential copies are the exception: they
+          are encrypted specifically for this phone before forwarding.
         </Text>
       </Card>
+      <LocalAssistantSettingsCard />
       <Button
         tone="danger"
         onPress={() =>

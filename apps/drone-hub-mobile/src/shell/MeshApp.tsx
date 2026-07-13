@@ -2,8 +2,9 @@ import React from 'react';
 import { ActivityIndicator, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
+import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext';
 import { DevicesScreen } from '../screens/DevicesScreen';
-import { AssistantScreen } from '../screens/AssistantScreen';
+import { AssistantHomeScreen } from '../screens/AssistantHomeScreen';
 import { DronesScreen } from '../screens/DronesScreen';
 import { PairScreen } from '../screens/PairScreen';
 import { SettingsScreen } from '../screens/SettingsScreen';
@@ -38,7 +39,7 @@ function Shell() {
     ) : tab === 'drones' ? (
       <DronesScreen />
     ) : tab === 'assistant' ? (
-      <AssistantScreen />
+      <AssistantHomeScreen />
     ) : (
       <DevicesScreen onPair={() => setTab('pair')} />
     );
@@ -90,7 +91,9 @@ function NavItem({ label, active, onPress }: { label: string; active: boolean; o
 export function MeshApp() {
   return (
     <MeshProvider>
-      <Shell />
+      <LocalAssistantProvider>
+        <Shell />
+      </LocalAssistantProvider>
     </MeshProvider>
   );
 }

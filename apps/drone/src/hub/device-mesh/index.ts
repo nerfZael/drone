@@ -15,6 +15,8 @@ import { CrossDeviceAssistantPolicyHttp } from './features/cross-device-assistan
 import { CrossDeviceAssistantPolicyStore } from './features/cross-device-assistant/policy-store';
 import { RemoteWorkspaceTarget } from './features/cross-device-assistant/remote-workspace-target';
 import { createWorkspaceCapability } from './features/cross-device-assistant/workspace-capability';
+import { createProviderCredentialsCapability } from './features/provider-credentials/provider-credentials-capability';
+import { ProviderCredentialsHttp } from './features/provider-credentials/provider-credentials-http';
 
 export async function createDeviceMeshService(options: {
   rootDir: string;
@@ -35,11 +37,13 @@ export async function createDeviceMeshService(options: {
   const localHubAccess = { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken };
   capabilities.register(createAssistantThreadsCapability(localHubAccess, assistantPolicies));
   capabilities.register(createWorkspaceCapability(assistantPolicies));
+  capabilities.register(createProviderCredentialsCapability(identity));
   const routeManager = new DeviceRouteManager(identity, store);
   const audit = new DeviceMeshAuditStore(path.join(options.rootDir, 'audit.json'));
   const router = new DeviceMeshRouter(identity, store, capabilities, routeManager, audit);
   const httpHandler = new DeviceMeshHttp(store, capabilities, router, audit, options.apiToken, [
     new CrossDeviceAssistantPolicyHttp(assistantPolicies),
+    new ProviderCredentialsHttp(identity, router, store),
   ]);
 
   return {

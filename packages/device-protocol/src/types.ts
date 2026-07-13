@@ -21,6 +21,26 @@ export type CapabilityGrant = {
   operations: string[];
 };
 
+export type ProviderCredentialId = 'openai' | 'codex';
+
+export type ProviderCredentialRequest = {
+  version: 1;
+  transferId: string;
+  recipientPublicKey: JsonWebKey;
+};
+
+export type ProviderCredentialEnvelope = {
+  version: 1;
+  transferId: string;
+  credential: ProviderCredentialId;
+  senderPublicKey: JsonWebKey;
+  salt: string;
+  iv: string;
+  ciphertext: string;
+  tag: string;
+  signature: string;
+};
+
 export type MeshDevice = DevicePublicIdentity & {
   administrator: boolean;
   grants: CapabilityGrant[];

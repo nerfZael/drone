@@ -39,3 +39,11 @@ export function routeAnnouncementSigningText(
 ): string {
   return `drone-device-route-v1\n${canonicalJson(route)}`;
 }
+
+export function providerCredentialEnvelopeSigningText(
+  envelope: Omit<import('./types').ProviderCredentialEnvelope, 'signature'>,
+  senderDeviceId: string,
+  recipientDeviceId: string,
+): string {
+  return `drone-provider-credential-envelope-v1\n${senderDeviceId}\n${recipientDeviceId}\n${canonicalJson(envelope)}`;
+}

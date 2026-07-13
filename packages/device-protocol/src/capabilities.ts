@@ -32,6 +32,12 @@ export const WORKSPACE_CAPABILITY: CapabilityDescriptor = {
   operations: ['files.list', 'files.read', 'files.search', 'files.write'],
 };
 
+export const PROVIDER_CREDENTIALS_CAPABILITY: CapabilityDescriptor = {
+  id: 'provider-credentials',
+  version: 1,
+  operations: ['credentials.inspect', 'openai.export', 'codex.export'],
+};
+
 export function isGranted(
   grants: CapabilityGrant[],
   capability: string,

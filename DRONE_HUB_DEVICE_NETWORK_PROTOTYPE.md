@@ -929,6 +929,52 @@ Before real production use of forwarding:
 - pass replay, tampering, key-loss, and revocation tests;
 - remove or clearly isolate any TLS-only forwarding mode.
 
+### Mobile-local assistant extension
+
+Implementation status: code complete and type-checked; physical Android model and remote workspace
+flows still need manual validation.
+
+This extension keeps the mesh kernel capability-based while allowing Android to be an assistant
+home:
+
+- phone threads and their bounded transcripts are stored locally on the phone;
+- the phone calls OpenAI directly with a phone-owned key held in Android secure storage;
+- a phone thread can bind one remote workspace device and root with read or write access;
+- file tool calls use the existing signed `workspace` capability with the phone device ID and
+  mobile thread ID as the actor;
+- the workspace device still requires both the generic device grant and its exact
+  home/thread/root/access policy rule;
+- desktop and mobile share `@drone/assistant-chat` for message text, tool calls, tool/result
+  pairing, grouping, and labels, while keeping platform-native visual components;
+- the mobile UI separates phone-hosted threads from threads hosted by other devices.
+
+The initial phone runtime uses non-streaming Chat Completions for React Native reliability. It
+supports the canonical list, read, search, and write tools, with at most eight model/tool rounds per
+prompt. It does not yet provide attachments, voice, approvals, compaction, several workspace
+targets per thread, or remote viewing of a phone-hosted thread.
+
+### Opt-in provider credential transfer
+
+An administrator device can explicitly copy supported provider credentials from another Hub. This
+is an optional `provider-credentials` capability and remains denied by default.
+
+- The source must mark the requesting device as an administrator and separately grant
+  `openai.export` or `codex.export`.
+- The receiving user must confirm each copy. Credentials are snapshots and never synchronize in
+  the background.
+- Every request creates an ephemeral P-256 recipient key. The source derives a one-time key with
+  ECDH and HKDF-SHA-256, then seals the credential with AES-256-GCM and request-bound authenticated
+  context.
+- The source signs the complete encrypted envelope with its permanent device identity. The
+  receiver rejects a bridge-substituted or modified envelope before decrypting it.
+- A forwarding bridge sees the signed request and encrypted envelope, but not the provider
+  credential.
+- OpenAI keys imported by Android are placed in Secure Store. Hub computers place imported OpenAI
+  keys in Hub settings and imported Codex login JSON in the configured Codex auth file with
+  owner-only permissions.
+- Codex transfer supports only a readable file-based login cache. An OS-keychain credential is not
+  exported, and the mobile-local runtime does not yet implement the Codex provider.
+
 ## Prototype review hardening
 
 Four detailed review passes after Milestones 0–3 added these safeguards without changing the
