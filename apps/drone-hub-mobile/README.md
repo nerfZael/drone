@@ -5,12 +5,12 @@ Android-first React Native client for the Drone Hub device mesh. It is an Expo d
 From the monorepo root:
 
 ```sh
-bun run --filter @drone/device-protocol build
-bun run --filter drone-hub-mobile typecheck
-bun run --filter drone-hub-mobile android:native
+bun run drone:mobile:android:install
 ```
 
-The native command requires the normal Android SDK/emulator or a connected Android device.
+The command builds the shared device protocol, asks which connected Android device to use, then
+builds, installs, and opens the development app. It requires the Android SDK, USB debugging, and a
+phone visible to `adb devices`.
 
 To pair:
 
