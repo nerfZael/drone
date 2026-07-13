@@ -32,6 +32,15 @@ export function LocalAssistantScreen() {
 
   React.useEffect(() => setSettingsOpen(false), [thread?.id]);
 
+  const runAction = async (action: () => Promise<unknown>) => {
+    setError(null);
+    try {
+      await action();
+    } catch (nextError: any) {
+      setError(nextError?.message ?? String(nextError));
+    }
+  };
+
   const send = async () => {
     if (!thread || !prompt.trim()) return;
     const nextPrompt = prompt;
@@ -40,6 +49,7 @@ export function LocalAssistantScreen() {
     try {
       await assistant.sendPrompt(thread.id, nextPrompt);
     } catch (nextError: any) {
+      setPrompt((current) => current || nextPrompt);
       setError(nextError?.message ?? String(nextError));
     }
   };
@@ -59,7 +69,9 @@ export function LocalAssistantScreen() {
           The model conversation runs on this phone. File operations cross the signed device mesh
           only when a destination has granted this exact thread access.
         </Text>
-        <Button onPress={() => void assistant.createThread()}>Create phone thread</Button>
+        <Button onPress={() => void runAction(() => assistant.createThread())}>
+          Create phone thread
+        </Button>
       </View>
     );
   }
@@ -89,7 +101,10 @@ export function LocalAssistantScreen() {
               </Text>
             </Pressable>
           ))}
-          <Pressable onPress={() => void assistant.createThread()} style={styles.newThread}>
+          <Pressable
+            onPress={() => void runAction(() => assistant.createThread())}
+            style={styles.newThread}
+          >
             <Text style={styles.newThreadText}>＋</Text>
           </Pressable>
         </ScrollView>
@@ -122,7 +137,7 @@ export function LocalAssistantScreen() {
               {
                 text: 'Delete',
                 style: 'destructive',
-                onPress: () => void assistant.deleteThread(thread.id),
+                onPress: () => void runAction(() => assistant.deleteThread(thread.id)),
               },
             ])
           }

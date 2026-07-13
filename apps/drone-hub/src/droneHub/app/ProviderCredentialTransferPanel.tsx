@@ -20,7 +20,8 @@ export function ProviderCredentialTransferPanel({
   const [busy, setBusy] = React.useState<Credential | null>(null);
   const [message, setMessage] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
-  const selectedSource = sources.find((device) => device.id === sourceDeviceId);
+  const selectedSource =
+    sources.find((device) => device.id === sourceDeviceId) ?? sources[0] ?? null;
   const selfIsAdministrator = devices.find((device) => device.id === selfDeviceId)?.administrator;
 
   React.useEffect(() => {
@@ -76,7 +77,7 @@ export function ProviderCredentialTransferPanel({
               Source device
             </span>
             <select
-              value={sourceDeviceId}
+              value={selectedSource?.id ?? ''}
               onChange={(event) => setSourceDeviceId(event.target.value)}
               disabled={busy !== null}
               className="h-9 rounded border border-[var(--border)] bg-[var(--input)] px-3 text-[12px] text-[var(--fg)]"

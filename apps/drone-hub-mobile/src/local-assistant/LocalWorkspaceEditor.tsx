@@ -36,6 +36,7 @@ export function LocalWorkspaceEditor({
   const [rootId, setRootId] = React.useState(initial?.rootId ?? '');
   const [read, setRead] = React.useState(initial?.read ?? true);
   const [write, setWrite] = React.useState(initial?.write ?? false);
+  const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
 
   const save = async () => {
@@ -43,14 +44,35 @@ export function LocalWorkspaceEditor({
       setError('Choose a workspace device and enter its configured root ID.');
       return;
     }
-    const target: LocalWorkspaceTarget = {
-      targetDeviceId: deviceId,
-      rootId: rootId.trim(),
-      read: read || write,
-      write,
-    };
-    await assistant.updateThread(thread.id, { workspaceTarget: target });
-    onClose();
+    setBusy(true);
+    setError(null);
+    try {
+      const target: LocalWorkspaceTarget = {
+        targetDeviceId: deviceId,
+        rootId: rootId.trim(),
+        read: read || write,
+        write,
+      };
+      await assistant.updateThread(thread.id, { workspaceTarget: target });
+      onClose();
+    } catch (nextError: any) {
+      setError(nextError?.message ?? String(nextError));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      await assistant.updateThread(thread.id, { workspaceTarget: null });
+      onClose();
+    } catch (nextError: any) {
+      setError(nextError?.message ?? String(nextError));
+    } finally {
+      setBusy(false);
+    }
   };
 
   return (
@@ -126,16 +148,11 @@ export function LocalWorkspaceEditor({
       </View>
       <ErrorBanner message={error} />
       <View style={styles.actions}>
-        <Button onPress={() => void save()} style={styles.save}>
+        <Button loading={busy} onPress={() => void save()} style={styles.save}>
           Use this workspace
         </Button>
         {thread.workspaceTarget ? (
-          <Button
-            tone="danger"
-            onPress={() =>
-              void assistant.updateThread(thread.id, { workspaceTarget: null }).then(onClose)
-            }
-          >
+          <Button disabled={busy} tone="danger" onPress={() => void remove()}>
             Remove
           </Button>
         ) : null}

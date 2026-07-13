@@ -3,6 +3,7 @@ import { signDeviceText, type LocalDeviceIdentity, verifyDeviceText } from './de
 import { DeviceMeshStore } from './device-mesh-store';
 
 const ROUTE_LIFETIME_MS = 7 * 24 * 60 * 60_000;
+const ROUTE_CLOCK_SKEW_MS = 30_000;
 
 function normalizeEndpoint(value: string): string {
   const endpoint = value.trim().replace(/\/+$/, '');
@@ -63,11 +64,17 @@ export class DeviceRouteManager {
       announcedAt: String(input.announcedAt ?? ''),
       expiresAt: String(input.expiresAt ?? ''),
     };
+    const announcedAt = Date.parse(unsigned.announcedAt);
+    const expiresAt = Date.parse(unsigned.expiresAt);
     if (
       !Number.isSafeInteger(unsigned.sequence) ||
       unsigned.sequence < 1 ||
-      !Number.isFinite(Date.parse(unsigned.announcedAt)) ||
-      Date.parse(unsigned.expiresAt) <= Date.now() ||
+      !Number.isFinite(announcedAt) ||
+      !Number.isFinite(expiresAt) ||
+      announcedAt > Date.now() + ROUTE_CLOCK_SKEW_MS ||
+      expiresAt <= Date.now() ||
+      expiresAt <= announcedAt ||
+      expiresAt - announcedAt > ROUTE_LIFETIME_MS ||
       !verifyDeviceText(
         device.publicKey,
         routeAnnouncementSigningText(unsigned),
