@@ -1,0 +1,17 @@
+{
+  "expo": {
+    "name": "Drone Hub Mobile",
+    "slug": "drone-hub-mobile",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "android": {
+      "package": "com.dronehub.mobile",
+      "permissions": ["CAMERA"]
+    },
+    "plugins": [
+      ["expo-camera", { "cameraPermission": "Allow Drone Hub to scan a device pairing code." }],
+      ["expo-secure-store", { "configureAndroidBackup": true }]
+    ]
+  }
+}

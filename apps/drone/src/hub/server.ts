@@ -96,6 +96,7 @@ import {
   terminalPrompt as droneTerminalPrompt,
 } from '../host/api';
 import { jobsPlanFromAgentMessage, suggestDroneNameFromMessage, suggestTaskTitleFromMessage } from './jobs-from-message';
+import { createDeviceMeshService } from './device-mesh';
 import {
   canonicalRepositoriesMap,
   ensureCanonicalGroup,
@@ -14370,6 +14371,12 @@ export async function startDroneHubApiServer(opts: {
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
   const voiceStreamUrl = String(opts.voiceStreamUrl ?? '').trim().replace(/\/+$/, '');
+  let actualPort = opts.port;
+  const deviceMesh = await createDeviceMeshService({
+    rootDir: droneRootPath('device-mesh'),
+    apiToken,
+    localHubBaseUrl: () => `http://127.0.0.1:${actualPort}`,
+  });
 
   const notifyGroqApiKeySettingsChanged = () => {
     if (!opts.onGroqApiKeySettingsChanged) return;
@@ -15063,7 +15070,12 @@ export async function startDroneHubApiServer(opts: {
           });
         });
         const artifactTarget = new AssistantArtifactsTarget(threadId);
-        const targets = [...droneTargets, artifactTarget];
+        const remoteWorkspaceTarget = await deviceMesh.remoteWorkspaceTarget(threadId);
+        const targets = [
+          ...droneTargets,
+          artifactTarget,
+          ...(remoteWorkspaceTarget ? [remoteWorkspaceTarget] : []),
+        ];
         const preferredDroneId = Array.isArray(thread.accessScope?.droneIds) ? thread.accessScope.droneIds[0] : '';
         const activeTargetId = droneTargets.find((target: DroneWorkspaceTarget) => target.droneId === preferredDroneId)?.descriptor.id ?? targets[0]?.descriptor.id;
         const targetCatalog = new blipTools.WorkspaceTargetCatalog(targets, activeTargetId);
@@ -15268,6 +15280,9 @@ export async function startDroneHubApiServer(opts: {
           });
         }
       });
+  deviceMesh.onAssistantPolicyChange((threadIds) => {
+    for (const threadId of threadIds) blipAssistantHost.invalidateThread(threadId);
+  });
   assistantService.setTextPromptDelegate(async (threadId, prompt) => {
     await blipAssistantHost.promptThread(threadId, prompt);
   });
@@ -16883,12 +16898,10 @@ export async function startDroneHubApiServer(opts: {
   };
 
   const mcpTransports = new Map<string, { transport: StreamableHTTPServerTransport; server: ReturnType<typeof createDroneHubMcpServer>; identity: McpTokenIdentity }>();
-  let actualPort = opts.port;
   let containerMcpServer: http.Server | null = null;
   let containerMcpActualPort = Number.isFinite(containerMcpPort) && containerMcpPort > 0 ? Math.floor(containerMcpPort) : 0;
   let containerMcpActualUrl = '';
   const containerMcpSockets = new Set<any>();
-
   const closeMcpTransport = async (sessionId: string | undefined): Promise<void> => {
     if (!sessionId) return;
     const entry = mcpTransports.get(sessionId);
@@ -17008,6 +17021,7 @@ export async function startDroneHubApiServer(opts: {
 
       const u = new URL(req.url ?? '/', `http://${req.headers.host ?? 'localhost'}`);
       const pathname = u.pathname;
+      if (await deviceMesh.handleHttp(req, res, u)) return;
       if (pathname === '/mcp') {
         await handleDroneHubMcpRequest(req, res, method);
         return;
@@ -29911,6 +29925,7 @@ export async function startDroneHubApiServer(opts: {
 
   server.on('upgrade', async (req, socket, head) => {
     try {
+      if (deviceMesh.handleUpgrade(req, socket, head)) return;
       const originRaw = typeof req.headers.origin === 'string' ? req.headers.origin : '';
       if (originRaw) {
         const origin = normalizeOrigin(originRaw);
@@ -30006,6 +30021,7 @@ export async function startDroneHubApiServer(opts: {
   scheduleDroneSummaryMaintenance('startup', 0);
   const address = server.address();
   actualPort = typeof address === 'object' && address ? address.port : opts.port;
+  deviceMesh.start();
   if (mcpToken && containerMcpHost && containerMcpActualPort > 0) {
     const mcpOnlyServer = http.createServer(async (req, res) => {
       try {
@@ -30066,6 +30082,7 @@ export async function startDroneHubApiServer(opts: {
           }
         : null,
     close: async () => {
+      deviceMesh.close();
       await hubOutboxDispatchLoop?.stop();
       if (notifyDroneChatWrite === notifyCanonicalPromptQueueChatWrite) {
         notifyDroneChatWrite = null;

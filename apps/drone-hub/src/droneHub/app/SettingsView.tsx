@@ -4,6 +4,7 @@ import { AutomationSettingsSection } from './AutomationSettingsSection';
 import { ArchiveSettingsTab } from './ArchiveSettingsTab';
 import { BackupsSettingsTab } from './BackupsSettingsTab';
 import { GeneralSettingsTab } from './GeneralSettingsTab';
+import { DeviceMeshSettingsTab } from './DeviceMeshSettingsTab';
 import { McpServersSection } from './McpServersSection';
 import { PlaybookSettingsSection } from './PlaybookSettingsSection';
 import { ProfilesSettingsTab } from './ProfilesSettingsTab';
@@ -213,6 +214,7 @@ export function SettingsView({
       );
     }
     if (activeTab === 'remote') return <RemoteAccessSettingsTab requestJson={requestJson} />;
+    if (activeTab === 'devices') return <DeviceMeshSettingsTab requestJson={requestJson} />;
     if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;
     if (activeTab === 'voice') return <VoiceApprovalSettingsTab voiceApproval={voiceApproval} />;
     if (activeTab === 'backups') return <BackupsSettingsTab backups={backups} />;
