@@ -17,6 +17,8 @@ export type AssistantMessage = {
   isError?: boolean;
   errorMessage?: string;
   details?: unknown;
+  createdAt?: string;
+  timestamp?: string | number;
 };
 
 export type AssistantDroneNameMap = Record<string, string>;

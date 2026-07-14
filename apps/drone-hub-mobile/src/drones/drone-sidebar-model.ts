@@ -13,6 +13,7 @@ export type MobileDroneSummary = {
   busyChats: string[];
   createdAt?: string;
   lastActivityAt?: string;
+  lastMessageAt?: string;
   statusOk?: boolean;
   statusError?: string | null;
 };
@@ -43,6 +44,7 @@ export type MobileDroneRepoGroup = {
   repoPath: string;
   roots: MobileDroneTreeNode[];
   folders: MobileDroneGroupFolder[];
+  entries: MobileDroneSidebarEntry[];
   droneCount: number;
 };
 
@@ -52,7 +54,28 @@ export type MobileDroneGroupFolder = {
   label: string;
   roots: MobileDroneTreeNode[];
   children: MobileDroneGroupFolder[];
+  entries: MobileDroneSidebarEntry[];
   droneCount: number;
+};
+
+export type MobileDroneSidebarEntry =
+  | { kind: 'drone'; node: MobileDroneTreeNode }
+  | { kind: 'folder'; folder: MobileDroneGroupFolder };
+
+export type MobileDroneSidebarOrder = {
+  registeredRepoPaths: string[];
+  groupCreatedAtByName: Record<string, string | null>;
+  sidebarGroupOrder: string[];
+  sidebarDroneOrderByGroup: Record<string, string[]>;
+  sidebarNodeOrderByParent: Record<string, string[]>;
+};
+
+export const EMPTY_MOBILE_DRONE_SIDEBAR_ORDER: MobileDroneSidebarOrder = {
+  registeredRepoPaths: [],
+  groupCreatedAtByName: {},
+  sidebarGroupOrder: [],
+  sidebarDroneOrderByGroup: {},
+  sidebarNodeOrderByParent: {},
 };
 
 function text(value: unknown): string {
@@ -63,6 +86,24 @@ function stringList(value: unknown, fallback: string[] = []): string[] {
   if (!Array.isArray(value)) return fallback;
   const result = value.map(text).filter(Boolean);
   return result.length > 0 ? [...new Set(result)] : fallback;
+}
+
+function stringListMap(value: unknown): Record<string, string[]> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, items]) => [text(key), stringList(items)] as const)
+      .filter(([key, items]) => Boolean(key && items.length)),
+  );
+}
+
+function nullableStringMap(value: unknown): Record<string, string | null> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value)
+      .map(([key, item]) => [text(key), text(item) || null] as const)
+      .filter(([key]) => Boolean(key)),
+  );
 }
 
 export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
@@ -92,6 +133,7 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
     busyChats: stringList(value.busyChats),
     createdAt: text(value.createdAt) || undefined,
     lastActivityAt: text(value.lastActivityAt) || undefined,
+    lastMessageAt: text(value.lastMessageAt) || undefined,
     statusOk: value.statusOk !== false,
     statusError: text(value.statusError) || null,
   };
@@ -108,11 +150,16 @@ export function normalizeMobileDrones(raw: unknown): MobileDroneSummary[] {
 export function normalizeMobileDroneListPayload(raw: unknown): {
   drones: MobileDroneSummary[];
   schemaVersion: number | null;
+  sidebar: MobileDroneSidebarOrder;
 } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { drones: [], schemaVersion: null };
+    return { drones: [], schemaVersion: null, sidebar: EMPTY_MOBILE_DRONE_SIDEBAR_ORDER };
   }
   const value = raw as Record<string, unknown>;
+  const sidebar =
+    value.sidebar && typeof value.sidebar === 'object' && !Array.isArray(value.sidebar)
+      ? (value.sidebar as Record<string, unknown>)
+      : {};
   const repoPathByDroneId =
     value.repoPathByDroneId &&
     typeof value.repoPathByDroneId === 'object' &&
@@ -129,6 +176,13 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
       typeof value.schemaVersion === 'number' && Number.isFinite(value.schemaVersion)
         ? value.schemaVersion
         : null,
+    sidebar: {
+      registeredRepoPaths: stringList(sidebar.registeredRepoPaths),
+      groupCreatedAtByName: nullableStringMap(sidebar.groupCreatedAtByName),
+      sidebarGroupOrder: stringList(sidebar.sidebarGroupOrder),
+      sidebarDroneOrderByGroup: stringListMap(sidebar.sidebarDroneOrderByGroup),
+      sidebarNodeOrderByParent: stringListMap(sidebar.sidebarNodeOrderByParent),
+    },
   };
 }
 
@@ -169,8 +223,75 @@ export function compareMobileDronesByNewestFirst(
   return left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
 }
 
-function buildGroupTree(drones: MobileDroneSummary[]): MobileDroneTreeNode[] {
-  const orderedDrones = drones.slice().sort(compareMobileDronesByNewestFirst);
+function orderSidebarEntries<T>(
+  entries: T[],
+  order: string[],
+  getKey: (entry: T) => string,
+  unorderedPlacement: 'start' | 'end',
+): T[] {
+  if (entries.length < 2 || order.length === 0) return entries.slice();
+  const orderIndex = new Map(order.map((key, index) => [key, index]));
+  return entries
+    .map((entry, index) => ({
+      entry,
+      index,
+      orderIndex:
+        orderIndex.get(getKey(entry)) ??
+        (unorderedPlacement === 'start'
+          ? Number.NEGATIVE_INFINITY
+          : Number.POSITIVE_INFINITY),
+    }))
+    .sort((left, right) => left.orderIndex - right.orderIndex || left.index - right.index)
+    .map(({ entry }) => entry);
+}
+
+function orderSidebarNodeEntries(
+  entries: MobileDroneSidebarEntry[],
+  order: string[],
+): MobileDroneSidebarEntry[] {
+  if (entries.length < 2 || order.length === 0) return entries.slice();
+  const entryId = (entry: MobileDroneSidebarEntry) =>
+    entry.kind === 'drone' ? `drone:${entry.node.drone.id}` : `folder:${entry.folder.id}`;
+  const visibleIds = entries.map(entryId);
+  const byId = new Map(entries.map((entry) => [entryId(entry), entry]));
+  const orderedVisibleIds = order.filter((id) => byId.has(id));
+  if (orderedVisibleIds.length === 0) return entries.slice();
+  const orderedSet = new Set(orderedVisibleIds);
+  const buckets = Array.from({ length: orderedVisibleIds.length + 1 }, () => [] as string[]);
+  let orderedSeen = 0;
+  for (const id of visibleIds) {
+    if (orderedSet.has(id)) orderedSeen += 1;
+    else buckets[Math.min(orderedSeen, buckets.length - 1)]!.push(id);
+  }
+  const result: MobileDroneSidebarEntry[] = [];
+  for (let index = 0; index < orderedVisibleIds.length; index += 1) {
+    for (const id of buckets[index]!) result.push(byId.get(id)!);
+    result.push(byId.get(orderedVisibleIds[index]!)!);
+  }
+  for (const id of buckets.at(-1)!) result.push(byId.get(id)!);
+  return result;
+}
+
+function orderDroneChildren(
+  node: MobileDroneTreeNode,
+  sidebarNodeOrderByParent: Record<string, string[]>,
+): void {
+  node.children = orderSidebarNodeEntries(
+    node.children.map((child) => ({ kind: 'drone' as const, node: child })),
+    sidebarNodeOrderByParent[`drone:${node.drone.id}`] ?? [],
+  ).map((entry) => (entry as { kind: 'drone'; node: MobileDroneTreeNode }).node);
+  for (const child of node.children) orderDroneChildren(child, sidebarNodeOrderByParent);
+}
+
+function buildGroupTree(
+  drones: MobileDroneSummary[],
+  repoOrder: string[],
+  groupOrder: string[],
+  sidebarNodeOrderByParent: Record<string, string[]>,
+): MobileDroneTreeNode[] {
+  let orderedDrones = drones.slice().sort(compareMobileDronesByNewestFirst);
+  orderedDrones = orderSidebarEntries(orderedDrones, repoOrder, (drone) => drone.id, 'start');
+  orderedDrones = orderSidebarEntries(orderedDrones, groupOrder, (drone) => drone.id, 'start');
   const byId = new Map(orderedDrones.map((drone) => [drone.id, drone]));
   const nodes = new Map<string, MobileDroneTreeNode>(
     orderedDrones.map((drone) => [drone.id, { drone, children: [] }]),
@@ -181,6 +302,7 @@ function buildGroupTree(drones: MobileDroneSummary[]): MobileDroneTreeNode[] {
     if (hasValidParent(drone, byId)) nodes.get(drone.fleetParentId!)!.children.push(node);
     else roots.push(node);
   }
+  for (const root of roots) orderDroneChildren(root, sidebarNodeOrderByParent);
   return roots;
 }
 
@@ -191,9 +313,19 @@ function normalizedGroupPath(value: string | null): string {
   return path.toLowerCase() === 'ungrouped' ? '' : path;
 }
 
-function buildDroneGroupFolders(drones: MobileDroneSummary[]): {
+function timestampMs(value: string | null | undefined): number | null {
+  const parsed = Date.parse(String(value ?? '').trim());
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function buildDroneGroupFolders(
+  drones: MobileDroneSummary[],
+  repoGroupId: string,
+  order: MobileDroneSidebarOrder,
+): {
   roots: MobileDroneTreeNode[];
   folders: MobileDroneGroupFolder[];
+  entries: MobileDroneSidebarEntry[];
 } {
   const ungrouped: MobileDroneSummary[] = [];
   const dronesByGroup = new Map<string, MobileDroneSummary[]>();
@@ -218,11 +350,12 @@ function buildDroneGroupFolders(drones: MobileDroneSummary[]): {
       let folder = foldersByPath.get(path);
       if (!folder) {
         folder = {
-          id: `group:${path}`,
+          id: `repo-scope:${repoGroupId}:${path}`,
           path,
           label: parts[index]!,
           roots: [],
           children: [],
+          entries: [],
           droneCount: 0,
         };
         foldersByPath.set(path, folder);
@@ -230,19 +363,67 @@ function buildDroneGroupFolders(drones: MobileDroneSummary[]): {
       }
       folder.droneCount += items.length;
       parentChildren = folder.children;
-      if (index === parts.length - 1) folder.roots = buildGroupTree(items);
+      if (index === parts.length - 1) {
+        folder.roots = buildGroupTree(
+          items,
+          order.sidebarDroneOrderByGroup[`repo:${repoGroupId}`] ?? [],
+          order.sidebarDroneOrderByGroup[`group:${groupPath}`] ?? [],
+          order.sidebarNodeOrderByParent,
+        );
+      }
     }
   }
+  const groupOrderIndex = new Map(
+    order.sidebarGroupOrder.map((token, index) => [token, index]),
+  );
   const sortFolders = (items: MobileDroneGroupFolder[]) => {
-    items.sort((left, right) => left.label.localeCompare(right.label));
-    for (const item of items) sortFolders(item.children);
+    items.sort((left, right) => {
+      const leftOrder = groupOrderIndex.get(`group:${left.path}`) ?? Number.POSITIVE_INFINITY;
+      const rightOrder = groupOrderIndex.get(`group:${right.path}`) ?? Number.POSITIVE_INFINITY;
+      if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      const leftMs = timestampMs(order.groupCreatedAtByName[left.path]);
+      const rightMs = timestampMs(order.groupCreatedAtByName[right.path]);
+      if (leftMs == null && rightMs != null) return 1;
+      if (leftMs != null && rightMs == null) return -1;
+      if (leftMs != null && rightMs != null && leftMs !== rightMs) return rightMs - leftMs;
+      return left.label.localeCompare(right.label);
+    });
+    for (const item of items) {
+      sortFolders(item.children);
+      item.entries = orderSidebarNodeEntries(
+        [
+          ...item.children.map((folder) => ({ kind: 'folder' as const, folder })),
+          ...item.roots.map((node) => ({ kind: 'drone' as const, node })),
+        ],
+        order.sidebarNodeOrderByParent[`folder:${item.id}`] ?? [],
+      );
+    }
   };
   sortFolders(folders);
-  return { roots: buildGroupTree(ungrouped), folders };
+  const roots = buildGroupTree(
+    ungrouped,
+    order.sidebarDroneOrderByGroup[`repo:${repoGroupId}`] ?? [],
+    order.sidebarDroneOrderByGroup['group:Ungrouped'] ?? [],
+    order.sidebarNodeOrderByParent,
+  );
+  const entries = orderSidebarNodeEntries(
+    [
+      ...folders.map((folder) => ({ kind: 'folder' as const, folder })),
+      ...roots.map((node) => ({ kind: 'drone' as const, node })),
+    ],
+    order.sidebarNodeOrderByParent[`folder:${repoGroupId}`] ?? [],
+  );
+  return { roots, folders, entries };
 }
 
-export function buildMobileDroneRepoGroups(drones: MobileDroneSummary[]): MobileDroneRepoGroup[] {
+export function buildMobileDroneRepoGroups(
+  drones: MobileDroneSummary[],
+  order: MobileDroneSidebarOrder = EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+): MobileDroneRepoGroup[] {
   const byRepo = new Map<string, MobileDroneSummary[]>();
+  for (const repoPath of order.registeredRepoPaths) {
+    if (text(repoPath)) byRepo.set(text(repoPath), []);
+  }
   for (const drone of drones) {
     const repoPath = text(drone.repoPath);
     const group = byRepo.get(repoPath) ?? [];
@@ -251,17 +432,26 @@ export function buildMobileDroneRepoGroups(drones: MobileDroneSummary[]): Mobile
   }
   return [...byRepo.entries()]
     .map(([repoPath, items]) => {
-      const tree = buildDroneGroupFolders(items);
+      const id = repoPath ? `repo:${repoPath}` : 'repo:ungrouped';
+      const tree = buildDroneGroupFolders(items, id, order);
       return {
-        id: repoPath ? `repo:${repoPath}` : 'repo:ungrouped',
+        id,
         label: mobileRepoLabel(repoPath),
         repoPath,
         roots: tree.roots,
         folders: tree.folders,
+        entries: tree.entries,
         droneCount: items.length,
       };
     })
     .sort((left, right) => {
+      const leftOrder = order.sidebarGroupOrder.indexOf(`repo:${left.id}`);
+      const rightOrder = order.sidebarGroupOrder.indexOf(`repo:${right.id}`);
+      if (leftOrder >= 0 || rightOrder >= 0) {
+        if (leftOrder < 0) return 1;
+        if (rightOrder < 0) return -1;
+        if (leftOrder !== rightOrder) return leftOrder - rightOrder;
+      }
       if (!left.repoPath && right.repoPath) return -1;
       if (left.repoPath && !right.repoPath) return 1;
       return left.label.localeCompare(right.label) || left.repoPath.localeCompare(right.repoPath);
@@ -276,6 +466,7 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
       messages.push({
         role: 'user',
         ...(prompt ? { content: prompt } : {}),
+        ...(turn.promptAt || turn.at ? { createdAt: turn.promptAt || turn.at } : {}),
         ...(attachments.length > 0 ? { details: { attachments } } : {}),
       });
     }
@@ -285,10 +476,19 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
           ? {
               role: 'assistant',
               ...(output ? { content: output } : {}),
+              ...(turn.completedAt || turn.at
+                ? { createdAt: turn.completedAt || turn.at }
+                : {}),
               isError: true,
               errorMessage: error,
             }
-          : { role: 'assistant', content: output || error },
+          : {
+              role: 'assistant',
+              content: output || error,
+              ...(turn.completedAt || turn.at
+                ? { createdAt: turn.completedAt || turn.at }
+                : {}),
+            },
       );
     }
     return messages;

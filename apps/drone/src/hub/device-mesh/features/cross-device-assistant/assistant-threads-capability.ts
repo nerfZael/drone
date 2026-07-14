@@ -52,6 +52,9 @@ function boundedStreamingMessages(snapshot: any): any[] {
       : [];
   return values.slice(-2).map((message: any) => ({
     role: message?.role === 'user' ? 'user' : 'assistant',
+    ...(typeof message?.timestamp === 'number' || typeof message?.timestamp === 'string'
+      ? { timestamp: message.timestamp }
+      : {}),
     content: Array.isArray(message?.content)
       ? message.content.slice(-12).map((part: any) => ({
           type: String(part?.type ?? ''),

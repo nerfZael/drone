@@ -1,6 +1,6 @@
 import React from 'react';
-import { Alert, StyleSheet, Text, View } from 'react-native';
-import { Button, ErrorBanner, textStyles } from '../components/Ui';
+import { StyleSheet, Text, View } from 'react-native';
+import { Button, ConfirmDialog, ErrorBanner, textStyles } from '../components/Ui';
 import { saveImportedCodexAuthJson } from '../local-assistant/local-assistant-codex-auth';
 import {
   saveImportedGroqApiKey,
@@ -11,6 +11,14 @@ import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { fetchProviderCredential } from './fetch-provider-credential';
 import type { ProviderCredentialId } from './provider-credential-crypto';
+
+function credentialLabel(credential: ProviderCredentialId): string {
+  return credential === 'codex'
+    ? 'Codex login'
+    : credential === 'groq'
+      ? 'GROQ API key'
+      : 'OpenAI API key';
+}
 
 export function ProviderCredentialImport({
   onImported,
@@ -29,6 +37,11 @@ export function ProviderCredentialImport({
   const [sourceDeviceId, setSourceDeviceId] = React.useState('');
   const [busy, setBusy] = React.useState(false);
   const [saved, setSaved] = React.useState<ProviderCredentialId | null>(null);
+  const [pendingCopy, setPendingCopy] = React.useState<{
+    credential: ProviderCredentialId;
+    sourceDeviceId: string;
+    sourceName: string;
+  } | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const source = sources.find((device) => device.id === sourceDeviceId) ?? sources[0];
   const self = mesh.devices.find((device) => device.id === mesh.identity?.id);
@@ -45,57 +58,55 @@ export function ProviderCredentialImport({
 
   const copy = (credential: ProviderCredentialId) => {
     if (!source || !mesh.identity) return;
-    const label =
-      credential === 'codex'
-        ? 'Codex login'
-        : credential === 'groq'
-          ? 'GROQ API key'
-          : 'OpenAI API key';
-    Alert.alert(
-      `Copy ${label}?`,
-      `Copy the ${label.toLowerCase()} from ${source.name} into this phone's secure storage?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Copy securely',
-          onPress: () =>
-            void (async () => {
-              setBusy(true);
-              setError(null);
-              setSaved(null);
-              try {
-                const imported = await fetchProviderCredential({
-                  sourceDeviceId: source.id,
-                  recipientDeviceId: mesh.identity!.id,
-                  sourceIdentityPublicKey: source.publicKey,
-                  credential,
-                  request: mesh.request,
-                });
-                if (credential === 'openai') {
-                  if (imported.kind !== 'openai-api-key' || !String(imported.apiKey ?? '').trim())
-                    throw new Error('source returned an invalid OpenAI API key');
-                  await saveImportedOpenAiApiKey(String(imported.apiKey));
-                } else if (credential === 'codex') {
-                  if (imported.kind !== 'codex-auth-json' || !String(imported.authJson ?? '').trim())
-                    throw new Error('source returned an invalid Codex login');
-                  await saveImportedCodexAuthJson(String(imported.authJson));
-                } else {
-                  if (imported.kind !== 'groq-api-key' || !String(imported.apiKey ?? '').trim())
-                    throw new Error('source returned an invalid GROQ API key');
-                  await saveImportedGroqApiKey(String(imported.apiKey));
-                }
-                if (credential !== 'groq') await saveLocalAssistantProvider(credential);
-                onImported(credential);
-                setSaved(credential);
-              } catch (nextError: any) {
-                setError(nextError?.message ?? String(nextError));
-              } finally {
-                setBusy(false);
-              }
-            })(),
-        },
-      ],
-    );
+    setPendingCopy({
+      credential,
+      sourceDeviceId: source.id,
+      sourceName: source.name,
+    });
+  };
+
+  const confirmCopy = async () => {
+    if (!pendingCopy || !mesh.identity) return;
+    const copySource = sources.find((device) => device.id === pendingCopy.sourceDeviceId);
+    if (!copySource) {
+      setPendingCopy(null);
+      setError('The credential source is no longer available.');
+      return;
+    }
+    const credential = pendingCopy.credential;
+    setBusy(true);
+    setError(null);
+    setSaved(null);
+    try {
+      const imported = await fetchProviderCredential({
+        sourceDeviceId: copySource.id,
+        recipientDeviceId: mesh.identity.id,
+        sourceIdentityPublicKey: copySource.publicKey,
+        credential,
+        request: mesh.request,
+      });
+      if (credential === 'openai') {
+        if (imported.kind !== 'openai-api-key' || !String(imported.apiKey ?? '').trim())
+          throw new Error('source returned an invalid OpenAI API key');
+        await saveImportedOpenAiApiKey(String(imported.apiKey));
+      } else if (credential === 'codex') {
+        if (imported.kind !== 'codex-auth-json' || !String(imported.authJson ?? '').trim())
+          throw new Error('source returned an invalid Codex login');
+        await saveImportedCodexAuthJson(String(imported.authJson));
+      } else {
+        if (imported.kind !== 'groq-api-key' || !String(imported.apiKey ?? '').trim())
+          throw new Error('source returned an invalid GROQ API key');
+        await saveImportedGroqApiKey(String(imported.apiKey));
+      }
+      if (credential !== 'groq') await saveLocalAssistantProvider(credential);
+      onImported(credential);
+      setSaved(credential);
+    } catch (nextError: any) {
+      setError(nextError?.message ?? String(nextError));
+    } finally {
+      setBusy(false);
+      setPendingCopy(null);
+    }
   };
 
   return (
@@ -163,6 +174,15 @@ export function ProviderCredentialImport({
           copied into secure storage
         </Text>
       ) : null}
+      <ConfirmDialog
+        visible={Boolean(pendingCopy)}
+        title={`Copy ${pendingCopy ? credentialLabel(pendingCopy.credential) : 'credential'}?`}
+        message={`Copy the ${pendingCopy ? credentialLabel(pendingCopy.credential).toLowerCase() : 'credential'} from ${pendingCopy?.sourceName ?? 'this device'} into this phone's secure storage?`}
+        confirmLabel="Copy securely"
+        busy={busy}
+        onCancel={() => setPendingCopy(null)}
+        onConfirm={() => void confirmCopy()}
+      />
     </View>
   );
 }

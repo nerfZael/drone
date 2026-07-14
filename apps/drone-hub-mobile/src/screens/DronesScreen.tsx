@@ -12,7 +12,6 @@ import {
   View,
 } from 'react-native';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
-import Boxes from 'lucide-react-native/icons/boxes';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Card, ErrorBanner, Label, textStyles } from '../components/Ui';
 import {
@@ -30,19 +29,20 @@ import { useLatestMessageScroll } from '../local-assistant/use-latest-message-sc
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import {
+  EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   mobileRepoLabel,
   mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneListPayload,
   normalizeMobileDroneTurns,
+  type MobileDroneSidebarOrder,
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
 
-const APP_HEADER_HEIGHT = 62;
+const APP_HEADER_HEIGHT = 58;
 
 export type DronesAppHeaderState = {
   title: string;
   subtitle: string;
-  statusOk: boolean;
 };
 
 export function DronesScreen({
@@ -80,6 +80,8 @@ export function DronesScreen({
   const targetSupportsDrones = targets.some((target) => target.id === targetId);
   const targetConnected = mesh.connectedDeviceIds.includes(targetId);
   const [drones, setDrones] = React.useState<MobileDroneSummary[]>([]);
+  const [droneSidebarOrder, setDroneSidebarOrder] =
+    React.useState<MobileDroneSidebarOrder>(EMPTY_MOBILE_DRONE_SIDEBAR_ORDER);
   const [selected, setSelected] = React.useState<MobileDroneSummary | null>(null);
   const [chats, setChats] = React.useState<string[]>([]);
   const [chatName, setChatName] = React.useState('default');
@@ -92,6 +94,7 @@ export function DronesScreen({
   const [prompt, setPrompt] = React.useState('');
   const [createName, setCreateName] = React.useState('');
   const [busy, setBusy] = React.useState('');
+  const [dronesLoaded, setDronesLoaded] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const targetIdRef = React.useRef(targetId);
   const selectedRef = React.useRef(selected);
@@ -138,6 +141,7 @@ export function DronesScreen({
         const normalized = normalizeMobileDroneListPayload(result);
         const nextDrones = normalized.drones;
         setDrones(nextDrones);
+        setDroneSidebarOrder(normalized.sidebar);
         const currentSelected = selectedRef.current;
         const nextSelected = currentSelected
           ? (nextDrones.find((drone) => drone.id === currentSelected.id) ?? null)
@@ -159,7 +163,7 @@ export function DronesScreen({
           }
         }
         if (
-          normalized.schemaVersion !== 2 &&
+          (normalized.schemaVersion == null || normalized.schemaVersion < 2) &&
           nextDrones.length > 0 &&
           nextDrones.every((drone) => !drone.repoPath)
         ) {
@@ -171,6 +175,8 @@ export function DronesScreen({
         if (targetIdRef.current === targetId && droneListVersion.current === requestVersion)
           setError(nextError?.message ?? String(nextError));
       } finally {
+        if (targetIdRef.current === targetId && droneListVersion.current === requestVersion)
+          setDronesLoaded(true);
         if (
           !quiet &&
           targetIdRef.current === targetId &&
@@ -185,6 +191,7 @@ export function DronesScreen({
 
   React.useEffect(() => {
     setDrones([]);
+    setDroneSidebarOrder(EMPTY_MOBILE_DRONE_SIDEBAR_ORDER);
     setSelected(null);
     setChats([]);
     setChatName('default');
@@ -195,6 +202,7 @@ export function DronesScreen({
     setPrompt('');
     setCreateName('');
     setBusy('');
+    setDronesLoaded(false);
     setError(null);
     setModelOpen(false);
     setModelBusy(false);
@@ -382,8 +390,10 @@ export function DronesScreen({
     () => mobileDroneTurnsToAssistantMessages(turns),
     [turns],
   );
+  const chatLoading = busy === 'chats' || busy === 'chat';
   const latestMessageScroll = useLatestMessageScroll(
     selected ? `${selected.id}:${chatName}` : '',
+    chatLoading,
   );
   const latestModel = [...normalizedTurns].reverse().find((turn) => turn.model)?.model;
   const running =
@@ -399,7 +409,6 @@ export function DronesScreen({
         ? {
             title: selected.name,
             subtitle: `${mobileRepoLabel(selected.repoPath)} · ${selected.runtime}${activeTarget ? ` · ${activeTarget.name}` : ''}`,
-            statusOk: selected.statusOk !== false,
           }
         : null,
     );
@@ -410,7 +419,6 @@ export function DronesScreen({
     selected?.name,
     selected?.repoPath,
     selected?.runtime,
-    selected?.statusOk,
   ]);
   React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
@@ -512,17 +520,22 @@ export function DronesScreen({
         showThreads={false}
         showDrones
         drones={drones}
+        droneSidebarOrder={droneSidebarOrder}
         activeDroneId={selected?.id ?? ''}
         activeChatName={chatName}
-        dronesLoading={busy === 'drones'}
+        dronesLoading={
+          targetConnected && targetSupportsDrones && (!dronesLoaded || busy === 'drones')
+        }
         devicePickerItems={devicePickerItems}
         activeDeviceId={targetId}
         onClose={() => onDrawerOpenChange(false)}
         onSelect={() => {}}
         onCreate={() => {}}
         onSelectDevice={(deviceId) => {
+          setDronesLoaded(false);
           onDeviceChange(deviceId);
           setDrones([]);
+          setDroneSidebarOrder(EMPTY_MOBILE_DRONE_SIDEBAR_ORDER);
           setSelected(null);
         }}
         onSelectDroneChat={(droneId, nextChat) => {
@@ -589,7 +602,10 @@ export function DronesScreen({
             <ScrollView
               ref={latestMessageScroll.ref}
               style={styles.transcriptScroll}
-              contentContainerStyle={styles.transcriptContent}
+              contentContainerStyle={[
+                styles.transcriptContent,
+                !latestMessageScroll.contentVisible && styles.transcriptContentHidden,
+              ]}
               keyboardDismissMode="interactive"
               keyboardShouldPersistTaps="handled"
               onLayout={latestMessageScroll.onLayout}
@@ -599,7 +615,7 @@ export function DronesScreen({
             >
               <MobileAssistantTranscript
                 messages={transcriptMessages}
-                loading={busy === 'chats' || busy === 'chat'}
+                loading={chatLoading}
                 running={running}
                 currentReasoning={running ? (normalizedTurns.at(-1)?.reasoning ?? '') : ''}
                 emptyTitle="This drone chat is ready."
@@ -632,73 +648,54 @@ export function DronesScreen({
           </View>
         ) : (
           <View style={styles.landing}>
-            <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-              <View style={styles.hero}>
-                <View style={styles.heroIcon}>
-                  <Boxes color={colors.accent} size={27} strokeWidth={2} />
-                </View>
-                <View>
-                  <Label>Drone control</Label>
-                  <Text style={[textStyles.title, styles.title]}>Choose a drone from the menu.</Text>
-                  <Text style={textStyles.body}>
-                    Drones are organized by repository, group, fleet hierarchy, and chat in the
-                    Drone Hub menu.
-                  </Text>
-                </View>
+            <ScrollView
+              contentContainerStyle={styles.landingPage}
+              keyboardShouldPersistTaps="handled"
+            >
+              <View style={styles.landingStack}>
+                {!targetSupportsDrones ? (
+                  <Card style={styles.flatCard}>
+                    <Text style={textStyles.body}>
+                      {activeTarget
+                        ? `${activeTarget.name} does not provide drone control. Choose a Drone Hub device from the menu.`
+                        : 'Choose a connected Drone Hub device from the menu.'}
+                    </Text>
+                  </Card>
+                ) : null}
+                <ErrorBanner message={error} />
+                {targetSupportsDrones ? (
+                  <Card style={styles.createCard}>
+                    <Label>Create</Label>
+                    <Text style={[textStyles.heading, styles.createTitle]}>
+                      New drone on this device
+                    </Text>
+                    <TextInput
+                      value={createName}
+                      onChangeText={setCreateName}
+                      placeholder="Optional name"
+                      placeholderTextColor={colors.subtle}
+                      style={styles.nameInput}
+                    />
+                    <View style={styles.createButtons}>
+                      <Button
+                        style={styles.flex}
+                        tone="quiet"
+                        onPress={() => void createDrone('container')}
+                        loading={busy === 'create-container'}
+                      >
+                        Container
+                      </Button>
+                      <Button
+                        style={styles.flex}
+                        onPress={() => void createDrone('host')}
+                        loading={busy === 'create-host'}
+                      >
+                        Host
+                      </Button>
+                    </View>
+                  </Card>
+                ) : null}
               </View>
-              {!targetSupportsDrones ? (
-                <Card>
-                  <Text style={textStyles.body}>
-                    {activeTarget
-                      ? `${activeTarget.name} does not provide drone control. Choose a Drone Hub device from the menu.`
-                      : 'Choose a connected Drone Hub device from the menu.'}
-                  </Text>
-                </Card>
-              ) : null}
-              <ErrorBanner message={error} />
-              {drones.length > 0 ? (
-                <Card>
-                  <Label>Available</Label>
-                  <Text style={[textStyles.heading, styles.createTitle]}>
-                    {drones.length} {drones.length === 1 ? 'drone' : 'drones'} on this device
-                  </Text>
-                  <Text style={textStyles.body}>
-                    Open the DroneHub menu and choose a drone or chat from the repository tree.
-                  </Text>
-                </Card>
-              ) : null}
-              {targetSupportsDrones ? (
-                <Card>
-                  <Label>Create</Label>
-                  <Text style={[textStyles.heading, styles.createTitle]}>
-                    New drone on this device
-                  </Text>
-                  <TextInput
-                    value={createName}
-                    onChangeText={setCreateName}
-                    placeholder="Optional name"
-                    placeholderTextColor={colors.subtle}
-                    style={styles.nameInput}
-                  />
-                  <View style={styles.createButtons}>
-                    <Button
-                      style={styles.flex}
-                      tone="quiet"
-                      onPress={() => void createDrone('container')}
-                      loading={busy === 'create-container'}
-                    >
-                      Container
-                    </Button>
-                    <Button
-                      style={styles.flex}
-                      onPress={() => void createDrone('host')}
-                      loading={busy === 'create-host'}
-                    >
-                      Host
-                    </Button>
-                  </View>
-                </Card>
-              ) : null}
             </ScrollView>
           </View>
         )}
@@ -711,37 +708,33 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: { flex: 1 },
   landing: { flex: 1 },
-  page: { padding: 20, paddingBottom: 32, gap: 16 },
-  hero: { gap: 15, marginBottom: 2 },
-  heroIcon: {
-    width: 52,
-    height: 52,
-    borderRadius: 17,
+  landingPage: {
+    flexGrow: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.accentBorder,
-    backgroundColor: colors.accentDark,
+    padding: 20,
   },
-  title: { marginTop: 6, marginBottom: 8 },
+  landingStack: { width: '100%', maxWidth: 420, gap: 12 },
+  flatCard: { borderRadius: 6, padding: 14, shadowOpacity: 0, elevation: 0 },
+  createCard: { borderRadius: 6, padding: 15, shadowOpacity: 0, elevation: 0 },
   chatWorkspace: { flex: 1, backgroundColor: colors.background },
   chatTabsFrame: {
-    minHeight: 49,
+    minHeight: 44,
     justifyContent: 'center',
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  chats: { gap: 7, paddingHorizontal: 12, paddingVertical: 8 },
+  chats: { gap: 5, paddingHorizontal: 10, paddingVertical: 6 },
   chatTab: {
-    minHeight: 32,
+    minHeight: 31,
     maxWidth: 190,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 7,
     paddingHorizontal: 11,
-    borderRadius: 10,
+    borderRadius: 5,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panelRaised,
@@ -756,13 +749,14 @@ const styles = StyleSheet.create({
   chatError: { paddingHorizontal: 12, paddingTop: 9 },
   transcriptScroll: { flex: 1 },
   transcriptContent: { flexGrow: 1 },
+  transcriptContentHidden: { opacity: 0 },
   createTitle: { marginTop: 4, marginBottom: 12 },
   nameInput: {
     color: colors.text,
     backgroundColor: colors.panel,
     borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 6,
     padding: 12,
     marginBottom: 10,
   },

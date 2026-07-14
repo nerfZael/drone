@@ -16,6 +16,7 @@ import {
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { latestAssistantThread } from '../local-assistant/latest-assistant-thread';
+import { nextAssistantThreadTitle } from '../local-assistant/next-assistant-thread-title';
 import { useLatestMessageScroll } from '../local-assistant/use-latest-message-scroll';
 import type { AssistantAppHeaderState } from './AssistantHomeScreen';
 
@@ -102,6 +103,7 @@ export function AssistantScreen({
   const [streamingMessages, setStreamingMessages] = React.useState<AssistantMessage[]>([]);
   const [prompt, setPrompt] = React.useState('');
   const [busy, setBusy] = React.useState('');
+  const [threadsLoaded, setThreadsLoaded] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const [modelOpen, setModelOpen] = React.useState(false);
   const [modelBusy, setModelBusy] = React.useState(false);
@@ -127,6 +129,7 @@ export function AssistantScreen({
     setStreamingMessages([]);
     setPrompt('');
     setBusy('');
+    setThreadsLoaded(false);
     setError(null);
     setModelOpen(false);
     setModelBusy(false);
@@ -175,6 +178,11 @@ export function AssistantScreen({
         )
           setError(nextError?.message ?? String(nextError));
       } finally {
+        if (
+          homeIdRef.current === destinationId &&
+          threadListVersion.current === requestVersion
+        )
+          setThreadsLoaded(true);
         if (
           !quiet &&
           homeIdRef.current === destinationId &&
@@ -250,7 +258,7 @@ export function AssistantScreen({
         destinationId,
         'assistant-threads',
         'thread.create',
-        {},
+        { title: nextAssistantThreadTitle(threads) },
       );
       if (homeIdRef.current !== destinationId) return;
       await loadThreads(true);
@@ -309,17 +317,24 @@ export function AssistantScreen({
   const selected = threads.find((thread) => thread.id === selectedId);
   const historyMessages = React.useMemo(
     () =>
-      entries.map((entry) => ({
-        ...(entry?.message ?? entry),
-        ...(Array.isArray(entry?.attachments) ? { attachments: entry.attachments } : {}),
-      })),
+      entries.map((entry) => {
+        const message = entry?.message ?? entry;
+        return {
+          ...message,
+          ...(message?.createdAt == null && message?.timestamp == null && entry?.timestamp
+            ? { timestamp: entry.timestamp }
+            : {}),
+          ...(Array.isArray(entry?.attachments) ? { attachments: entry.attachments } : {}),
+        };
+      }),
     [entries],
   );
   const transcriptMessages = React.useMemo(
     () => [...historyMessages, ...streamingMessages],
     [historyMessages, streamingMessages],
   );
-  const latestMessageScroll = useLatestMessageScroll(selectedId);
+  const threadLoading = busy === 'thread';
+  const latestMessageScroll = useLatestMessageScroll(selectedId, threadLoading);
   const streamingAssistant = streamingMessages.find((message) => message.role === 'assistant');
   const running = Boolean(
     streamingMessages.length > 0 ||
@@ -350,21 +365,14 @@ export function AssistantScreen({
         ? {
             title: selected.title,
             subtitle: `${selected.workspaceTarget ? `${selected.workspaceTarget.rootId} · ${selected.workspaceTarget.write ? 'read/write' : 'read-only'}` : 'Home device only'}${activeHome ? ` · ${activeHome.name}` : ''}`,
-            statusTone: selected.error
-              ? 'error'
-              : mesh.connectedDeviceIds.includes(homeId)
-                ? 'online'
-                : 'muted',
           }
         : null,
     );
   }, [
     activeHome?.name,
     homeId,
-    mesh.connectedDeviceIds,
     onHeaderChange,
     selected?.id,
-    selected?.error,
     selected?.title,
     selected?.workspaceTarget,
   ]);
@@ -391,13 +399,19 @@ export function AssistantScreen({
         threads={threads}
         activeThreadId={selectedId}
         creating={busy === 'create'}
+        threadsLoading={
+          homeSupportsAssistant && homeConnected && (!threadsLoaded || busy === 'threads')
+        }
         canCreate={homeSupportsAssistant}
         offset={drawerOffset}
         openingGestureActive={openingGestureActive}
         navigationItems={navigationItems}
         devicePickerItems={devicePickerItems}
         activeDeviceId={homeId}
-        onSelectDevice={onDeviceChange}
+        onSelectDevice={(deviceId) => {
+          setThreadsLoaded(false);
+          onDeviceChange(deviceId);
+        }}
         onClose={() => onDrawerOpenChange(false)}
         onSelect={(threadId) => {
           onDrawerOpenChange(false);
@@ -413,7 +427,10 @@ export function AssistantScreen({
           <ScrollView
             ref={latestMessageScroll.ref}
             style={styles.transcript}
-            contentContainerStyle={styles.entries}
+            contentContainerStyle={[
+              styles.entries,
+              !latestMessageScroll.contentVisible && styles.entriesHidden,
+            ]}
             keyboardShouldPersistTaps="handled"
             onLayout={latestMessageScroll.onLayout}
             onContentSizeChange={latestMessageScroll.onContentSizeChange}
@@ -424,7 +441,7 @@ export function AssistantScreen({
               messages={transcriptMessages}
               running={running}
               currentReasoning={currentReasoning}
-              loading={busy === 'thread'}
+              loading={threadLoading}
             />
           </ScrollView>
           <AssistantComposer
@@ -506,4 +523,5 @@ const styles = StyleSheet.create({
   insetCard: { margin: 12 },
   transcript: { flex: 1 },
   entries: { flexGrow: 1, paddingVertical: 10 },
+  entriesHidden: { opacity: 0 },
 });

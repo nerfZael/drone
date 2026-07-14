@@ -7,6 +7,30 @@ function payloadObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function normalizedGrants(
+  value: unknown,
+  capabilities: CapabilityHandler['descriptor'][],
+) {
+  if (!Array.isArray(value)) return [];
+  const descriptors = new Map(capabilities.map((descriptor) => [descriptor.id, descriptor]));
+  return value.flatMap((raw: any) => {
+    const capability = String(raw?.capability ?? '').trim();
+    const descriptor = descriptors.get(capability);
+    if (!descriptor || descriptor.id === DEVICE_CORE_CAPABILITY.id) return [];
+    if (Number(raw?.version) !== descriptor.version || !Array.isArray(raw?.operations)) return [];
+    const operations = [
+      ...new Set<string>(
+        raw.operations
+          .map(String)
+          .filter((operation: string) => descriptor.operations.includes(operation)),
+      ),
+    ];
+    return operations.length > 0
+      ? [{ capability, version: descriptor.version, operations }]
+      : [];
+  });
+}
+
 export function createDeviceCoreCapability(
   store: DeviceMeshStore,
   listCapabilities: () => CapabilityHandler['descriptor'][],
@@ -46,6 +70,22 @@ export function createDeviceCoreCapability(
           source.updatedAt = new Date().toISOString();
         });
         return { name };
+      }
+      if (operation === 'device.access.update-self') {
+        const capabilities = listCapabilities();
+        const grants = normalizedGrants(payloadObject(payload).grants, capabilities);
+        await store.update((state) => {
+          const source = state.devices[context.sourceDevice.id];
+          if (!source || source.revokedAt)
+            throw Object.assign(new Error('device is not active'), { code: 'DEVICE_REVOKED' });
+          if (!source.administrator)
+            throw Object.assign(new Error('administrator access is required'), {
+              code: 'PERMISSION_DENIED',
+            });
+          source.grants = grants;
+          source.updatedAt = new Date().toISOString();
+        });
+        return { grants };
       }
       throw Object.assign(new Error(`unsupported device-core operation: ${operation}`), {
         code: 'UNSUPPORTED_OPERATION',

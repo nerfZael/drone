@@ -21,6 +21,20 @@ function firstText(...values: unknown[]): string {
   return '';
 }
 
+function textList(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((item) => String(item ?? '').trim()).filter(Boolean))];
+}
+
+function textListMap(value: unknown): Record<string, string[]> {
+  const source = object(value);
+  return Object.fromEntries(
+    Object.entries(source)
+      .map(([key, items]) => [key.trim(), textList(items)] as const)
+      .filter(([key, items]) => Boolean(key && items.length)),
+  );
+}
+
 export function deviceMeshDroneSummary(drone: any) {
   const chats = Array.isArray(drone?.chats)
     ? drone.chats
@@ -48,6 +62,7 @@ export function deviceMeshDroneSummary(drone: any) {
       : [],
     createdAt: String(drone?.createdAt ?? ''),
     lastActivityAt: String(drone?.lastActivityAt ?? ''),
+    lastMessageAt: String(drone?.lastMessageAt ?? ''),
     statusOk: drone?.statusOk !== false,
     statusError: String(drone?.statusError ?? '').trim() || null,
   };
@@ -60,17 +75,44 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
       const payload = object(rawPayload);
       if (operation === 'drones.list') {
         const result = await localHubRequest(access, '/api/drones');
+        const [reposResult, groupsResult, preferencesResult] = await Promise.all([
+          localHubRequest(access, '/api/repos').catch(() => ({})),
+          localHubRequest(access, '/api/groups').catch(() => ({})),
+          localHubRequest(access, '/api/settings/ui-preferences').catch(() => ({})),
+        ]);
         const drones: ReturnType<typeof deviceMeshDroneSummary>[] = Array.isArray(result.drones)
           ? result.drones.map(deviceMeshDroneSummary)
           : [];
+        const preferences = object(preferencesResult.uiPreferences);
+        const groups: unknown[] = Array.isArray(groupsResult.groups) ? groupsResult.groups : [];
         return {
-          schemaVersion: 2,
+          schemaVersion: 3,
           drones,
           repoPathByDroneId: Object.fromEntries(
             drones
               .map((drone) => [drone.id, drone.repoPath] as const)
               .filter(([droneId, repoPath]) => Boolean(droneId && repoPath)),
           ),
+          sidebar: {
+            registeredRepoPaths: textList(
+              Array.isArray(reposResult.repos)
+                ? reposResult.repos.map((repo: unknown) => object(repo).path)
+                : [],
+            ),
+            groupCreatedAtByName: Object.fromEntries(
+              groups
+                .map((group: unknown) => {
+                  const entry = object(group);
+                  const name = String(entry.name ?? '').trim();
+                  const createdAt = String(entry.createdAt ?? '').trim();
+                  return [name, createdAt || null] as const;
+                })
+                .filter(([name]) => Boolean(name)),
+            ),
+            sidebarGroupOrder: textList(preferences.sidebarGroupOrder),
+            sidebarDroneOrderByGroup: textListMap(preferences.sidebarDroneOrderByGroup),
+            sidebarNodeOrderByParent: textListMap(preferences.sidebarNodeOrderByParent),
+          },
         };
       }
 

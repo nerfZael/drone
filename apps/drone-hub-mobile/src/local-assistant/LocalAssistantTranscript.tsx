@@ -20,6 +20,7 @@ import {
 } from '@drone/assistant-chat';
 import { colors } from '../theme';
 import { NativeMarkdown } from './NativeMarkdown';
+import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
 import type { LocalAssistantThread } from './local-assistant-types';
 
 function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
@@ -164,6 +165,10 @@ function visibleMessageText(message: AssistantMessage): string {
     .join('\n');
 }
 
+function messageTimestamp(message: AssistantMessage): string | number | undefined {
+  return message.createdAt ?? message.timestamp;
+}
+
 export function MobileAssistantTranscript({
   messages,
   running = false,
@@ -182,6 +187,17 @@ export function MobileAssistantTranscript({
   assistantLabel?: string;
 }) {
   const items = React.useMemo(() => renderItemsFromMessages(messages), [messages]);
+  const [visibleMessageTimestamps, setVisibleMessageTimestamps] = React.useState<Set<string>>(
+    () => new Set(),
+  );
+  const toggleMessageTimestamp = React.useCallback((key: string) => {
+    setVisibleMessageTimestamps((current) => {
+      const next = new Set(current);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
   if (loading) {
     return (
       <View style={styles.loadingTranscript}>
@@ -227,8 +243,11 @@ export function MobileAssistantTranscript({
           return null;
         const user = item.message.role === 'user';
         const assistant = item.message.role === 'assistant';
-        return (
-          <View key={item.key} style={[styles.message, user && styles.userMessage]}>
+        const timestamp = messageTimestamp(item.message);
+        const timestampKey = `${item.key}:${String(timestamp ?? '')}`;
+        const timestampVisible = visibleMessageTimestamps.has(timestampKey);
+        const content = (
+          <>
             {text && assistant ? (
               <NativeMarkdown text={text} />
             ) : text ? (
@@ -268,7 +287,39 @@ export function MobileAssistantTranscript({
                 ))}
               </View>
             ) : null}
-          </View>
+          </>
+        );
+        if (user) {
+          return (
+            <Pressable
+              key={item.key}
+              accessibilityRole="button"
+              accessibilityHint="Shows or hides this message timestamp"
+              accessibilityState={{ expanded: timestampVisible }}
+              onPress={() => toggleMessageTimestamp(timestampKey)}
+              style={styles.userMessageGroup}
+            >
+              {timestampVisible ? (
+                <RelativeMessageTimestamp timestamp={timestamp} style={styles.userMessageTime} />
+              ) : null}
+              <View style={[styles.message, styles.userMessage]}>{content}</View>
+            </Pressable>
+          );
+        }
+        return (
+          <Pressable
+            key={item.key}
+            accessibilityRole="button"
+            accessibilityHint="Shows or hides this message timestamp"
+            accessibilityState={{ expanded: timestampVisible }}
+            onPress={() => toggleMessageTimestamp(timestampKey)}
+            style={styles.message}
+          >
+            {content}
+            {timestampVisible ? (
+              <RelativeMessageTimestamp timestamp={timestamp} style={styles.messageTime} />
+            ) : null}
+          </Pressable>
         );
       })}
       {running ? (
@@ -313,20 +364,44 @@ export function LocalAssistantTranscript({
 const styles = StyleSheet.create({
   messages: { gap: 0 },
   message: { width: '100%', paddingHorizontal: 14, paddingVertical: 13 },
-  userMessage: {
+  userMessageGroup: {
     width: 'auto',
     maxWidth: '86%',
     alignSelf: 'flex-end',
+    alignItems: 'flex-end',
     marginHorizontal: 12,
-    marginVertical: 5,
-    backgroundColor: colors.accentDark,
-    borderWidth: 1,
-    borderColor: colors.accentBorder,
-    borderRadius: 16,
-    borderBottomRightRadius: 5,
+    marginVertical: 7,
+  },
+  userMessage: {
+    width: 'auto',
+    maxWidth: '100%',
+    alignSelf: 'flex-end',
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    backgroundColor: colors.borderStrong,
+    borderWidth: 0,
+    borderRadius: 10,
+    borderBottomRightRadius: 3,
   },
   messageText: { color: colors.text, fontSize: 14, lineHeight: 21 },
   userMessageText: { color: colors.textStrong },
+  messageTime: {
+    alignSelf: 'flex-start',
+    color: colors.subtle,
+    fontSize: 9,
+    fontFamily: 'monospace',
+    fontWeight: '700',
+    marginTop: 7,
+  },
+  userMessageTime: {
+    alignSelf: 'flex-end',
+    color: colors.muted,
+    fontSize: 9,
+    fontFamily: 'monospace',
+    fontWeight: '700',
+    marginRight: 3,
+    marginBottom: 4,
+  },
   messageRole: {
     color: colors.muted,
     fontSize: 9,
@@ -353,7 +428,7 @@ const styles = StyleSheet.create({
   attachmentName: { color: colors.text, fontSize: 11, fontWeight: '700' },
   attachmentMeta: { color: colors.muted, fontSize: 9, marginTop: 2 },
   tool: {
-    borderRadius: 12,
+    borderRadius: 5,
     borderColor: colors.border,
     borderWidth: 1,
     backgroundColor: colors.panel,
@@ -372,7 +447,7 @@ const styles = StyleSheet.create({
   toolGlyph: {
     width: 25,
     height: 25,
-    borderRadius: 8,
+    borderRadius: 4,
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: colors.accentDark,
@@ -390,7 +465,7 @@ const styles = StyleSheet.create({
   reasoning: {
     margin: 12,
     padding: 12,
-    borderRadius: 12,
+    borderRadius: 5,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panel,

@@ -16,6 +16,7 @@ describe('device mesh drone summaries', () => {
         fleetParentId: 'drone_parent',
         chats: ['default', 'review'],
         busyChats: ['review'],
+        lastMessageAt: '2026-07-14T10:00:00.000Z',
         statusOk: false,
         statusError: 'offline',
       }),
@@ -26,6 +27,7 @@ describe('device mesh drone summaries', () => {
       group: 'Review',
       chats: ['default', 'review'],
       busyChats: ['review'],
+      lastMessageAt: '2026-07-14T10:00:00.000Z',
       statusOk: false,
       statusError: 'offline',
     });
@@ -46,27 +48,63 @@ describe('device mesh drone summaries', () => {
     });
   });
 
-  test('returns a versioned repository map from drones.list', async () => {
+  test('returns timestamps and desktop sidebar ordering from drones.list', async () => {
     const originalFetch = globalThis.fetch;
-    globalThis.fetch = (async () =>
-      new Response(
-        JSON.stringify({
-          ok: true,
-          drones: [
-            { id: 'one', name: 'One', repoPath: '/work/one' },
-            { id: 'loose', name: 'Loose', repoPath: '' },
-          ],
-        }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      )) as typeof fetch;
+    globalThis.fetch = (async (input) => {
+      const pathname = new URL(String(input)).pathname;
+      const body =
+        pathname === '/api/drones'
+          ? {
+              ok: true,
+              drones: [
+                {
+                  id: 'one',
+                  name: 'One',
+                  repoPath: '/work/one',
+                  lastMessageAt: '2026-07-14T10:00:00.000Z',
+                },
+                { id: 'loose', name: 'Loose', repoPath: '' },
+              ],
+            }
+          : pathname === '/api/repos'
+            ? { ok: true, repos: [{ path: '/work/one' }, { path: '/work/empty' }] }
+            : pathname === '/api/groups'
+              ? {
+                  ok: true,
+                  groups: [{ name: 'Review', createdAt: '2026-07-13T10:00:00.000Z' }],
+                }
+              : {
+                  ok: true,
+                  uiPreferences: {
+                    sidebarGroupOrder: ['repo:repo:/work/one'],
+                    sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
+                    sidebarNodeOrderByParent: { root: ['drone:one'] },
+                  },
+                };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
     try {
       const capability = createDroneControlCapability({
         baseUrl: () => 'http://127.0.0.1:7777',
         apiToken: 'test',
       });
       await expect(capability.invoke('drones.list', {})).resolves.toMatchObject({
-        schemaVersion: 2,
+        schemaVersion: 3,
+        drones: [
+          { id: 'one', lastMessageAt: '2026-07-14T10:00:00.000Z' },
+          { id: 'loose' },
+        ],
         repoPathByDroneId: { one: '/work/one' },
+        sidebar: {
+          registeredRepoPaths: ['/work/one', '/work/empty'],
+          groupCreatedAtByName: { Review: '2026-07-13T10:00:00.000Z' },
+          sidebarGroupOrder: ['repo:repo:/work/one'],
+          sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
+          sidebarNodeOrderByParent: { root: ['drone:one'] },
+        },
       });
     } finally {
       globalThis.fetch = originalFetch;

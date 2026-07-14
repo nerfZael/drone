@@ -3,7 +3,6 @@ import {
   ActivityIndicator,
   Animated,
   Modal,
-  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -13,27 +12,30 @@ import {
 } from 'react-native';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
 import Network from 'lucide-react-native/icons/network';
-import Plane from 'lucide-react-native/icons/plane';
 import Plus from 'lucide-react-native/icons/plus';
 import Settings from 'lucide-react-native/icons/settings';
-import X from 'lucide-react-native/icons/x';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import FolderGit2 from 'lucide-react-native/icons/folder-git-2';
 import Folder from 'lucide-react-native/icons/folder';
+import Svg, { Circle, Line, Rect } from 'react-native-svg';
 import { colors } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { assistantThreadsNewestFirst } from './latest-assistant-thread';
+import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
 import {
   buildMobileDroneRepoGroups,
+  EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   type MobileDroneGroupFolder,
+  type MobileDroneSidebarEntry,
+  type MobileDroneSidebarOrder,
   type MobileDroneSummary,
   type MobileDroneTreeNode,
 } from '../drones/drone-sidebar-model';
 
 export function assistantDrawerWidth(windowWidth: number): number {
-  return Math.min(windowWidth * 0.86, 380);
+  return Math.min(windowWidth, 460);
 }
 
 export type DrawerAssistantThread = {
@@ -57,6 +59,51 @@ export type DrawerDevicePickerItem = {
   connected: boolean;
   detail?: string;
 };
+
+export type AssistantThreadDrawerProps = {
+  open: boolean;
+  title: string;
+  threads: DrawerAssistantThread[];
+  activeThreadId: string;
+  creating?: boolean;
+  threadsLoading?: boolean;
+  offset: Animated.Value;
+  openingGestureActive?: boolean;
+  navigationItems: AppDrawerNavigationItem[];
+  canCreate?: boolean;
+  showThreads?: boolean;
+  showDrones?: boolean;
+  drones?: MobileDroneSummary[];
+  droneSidebarOrder?: MobileDroneSidebarOrder;
+  activeDroneId?: string;
+  activeChatName?: string;
+  dronesLoading?: boolean;
+  devicePickerItems?: DrawerDevicePickerItem[];
+  activeDeviceId?: string;
+  onClose(): void;
+  onSelect(threadId: string): void;
+  onCreate(): void;
+  onSelectDroneChat?(droneId: string, chatName: string): void;
+  onSelectDevice?(deviceId: string): void;
+};
+
+type RegisterDrawer = (props: AssistantThreadDrawerProps) => void;
+
+const AssistantDrawerHostContext = React.createContext<RegisterDrawer | null>(null);
+
+export function AssistantDrawerProvider({ children }: { children: React.ReactNode }) {
+  const [drawerProps, setDrawerProps] = React.useState<AssistantThreadDrawerProps | null>(null);
+  const registerDrawer = React.useCallback<RegisterDrawer>((nextProps) => {
+    setDrawerProps(nextProps);
+  }, []);
+
+  return (
+    <AssistantDrawerHostContext.Provider value={registerDrawer}>
+      {children}
+      {drawerProps ? <AssistantThreadDrawerView {...drawerProps} /> : null}
+    </AssistantDrawerHostContext.Provider>
+  );
+}
 
 function DrawerDevicePicker({
   devices,
@@ -87,11 +134,6 @@ function DrawerDevicePicker({
           <Text numberOfLines={1} style={styles.devicePickerName}>
             {activeDevice?.name ?? 'Choose a device'}
           </Text>
-          {activeDevice?.detail ? (
-            <Text numberOfLines={1} style={styles.devicePickerDetail}>
-              {activeDevice.detail}
-            </Text>
-          ) : null}
         </View>
         <ChevronDown
           color={colors.muted}
@@ -150,8 +192,40 @@ function DrawerDevicePicker({
   );
 }
 
+function QuadDroneIcon({
+  color = colors.text,
+  size = 18,
+  strokeWidth = 1.9,
+}: {
+  color?: string;
+  size?: number;
+  strokeWidth?: number;
+}) {
+  return (
+    <Svg height={size} width={size} viewBox="0 0 16 16" fill="none">
+      <Rect
+        x="5"
+        y="5"
+        width="6"
+        height="6"
+        rx="1"
+        stroke={color}
+        strokeWidth={strokeWidth}
+      />
+      <Line x1="2" y1="2" x2="5" y2="5" stroke={color} strokeWidth={strokeWidth} />
+      <Line x1="14" y1="2" x2="11" y2="5" stroke={color} strokeWidth={strokeWidth} />
+      <Line x1="2" y1="14" x2="5" y2="11" stroke={color} strokeWidth={strokeWidth} />
+      <Line x1="14" y1="14" x2="11" y2="11" stroke={color} strokeWidth={strokeWidth} />
+      <Circle cx="2" cy="2" r="1" fill={color} />
+      <Circle cx="14" cy="2" r="1" fill={color} />
+      <Circle cx="2" cy="14" r="1" fill={color} />
+      <Circle cx="14" cy="14" r="1" fill={color} />
+    </Svg>
+  );
+}
+
 function navigationIcon(id: string) {
-  if (id === 'drones') return Plane;
+  if (id === 'drones') return QuadDroneIcon;
   if (id === 'devices') return Network;
   if (id === 'settings') return Settings;
   return MessageCircle;
@@ -167,6 +241,70 @@ function droneFolderContains(folder: MobileDroneGroupFolder, droneId: string): b
   return (
     droneTreeContains(folder.roots, droneId) ||
     folder.children.some((child) => droneFolderContains(child, droneId))
+  );
+}
+
+type DroneDisplayState =
+  | 'working'
+  | 'waiting'
+  | 'starting'
+  | 'blocked'
+  | 'offline'
+  | 'idle';
+type SwitchDisplayState = DroneDisplayState | 'done';
+
+function droneDisplayState(drone: MobileDroneSummary): DroneDisplayState {
+  const rawState = `${drone.phase ?? ''} ${drone.status ?? ''}`.toLowerCase();
+  if (drone.statusOk === false) return 'offline';
+  if (drone.busyChats.length > 0) return 'working';
+  if (rawState.includes('block') || rawState.includes('error')) return 'blocked';
+  if (rawState.includes('wait')) return 'waiting';
+  if (rawState.includes('start') || rawState.includes('creat') || rawState.includes('seed'))
+    return 'starting';
+  return 'idle';
+}
+
+function threadDisplayState(thread: DrawerAssistantThread): SwitchDisplayState {
+  const rawState = thread.status.trim().toLowerCase();
+  if (rawState.includes('error') || rawState.includes('block') || rawState.includes('approval'))
+    return 'blocked';
+  if (rawState.includes('waiting')) return 'waiting';
+  if (rawState.includes('run') || rawState.includes('work'))
+    return 'working';
+  if (rawState.includes('done') || rawState.includes('complete')) return 'done';
+  return 'idle';
+}
+
+function switchStateLabel(state: SwitchDisplayState): string {
+  if (state === 'offline') return 'unavailable';
+  if (state === 'idle') return 'ready';
+  return state;
+}
+
+function switchStateColor(state: SwitchDisplayState): string {
+  if (state === 'working') return colors.warning;
+  if (state === 'waiting' || state === 'starting') return colors.info;
+  if (state === 'blocked' || state === 'offline') return colors.danger;
+  if (state === 'done') return colors.online;
+  return colors.muted;
+}
+
+function SwitchItemState({
+  state,
+  detail,
+}: {
+  state: SwitchDisplayState;
+  detail?: string;
+}) {
+  const stateColor = switchStateColor(state);
+  return (
+    <View style={styles.switchItemMetaRow}>
+      <View style={[styles.switchStateDot, { backgroundColor: stateColor }]} />
+      <Text numberOfLines={1} style={[styles.switchItemMeta, { color: stateColor }]}>
+        {switchStateLabel(state)}
+        {detail ? ` · ${detail}` : ''}
+      </Text>
+    </View>
   );
 }
 
@@ -187,13 +325,7 @@ function DrawerDroneNode({
   const chats = drone.chats.length > 0 ? drone.chats : ['default'];
   const selected = drone.id === activeDroneId;
   const selectedChat = selected && chats.includes(activeChatName) ? activeChatName : chats[0]!;
-  const busy = drone.busyChats.length > 0;
-  const stateLabel =
-    drone.statusOk === false
-      ? 'Unavailable'
-      : busy
-        ? 'Responding'
-        : drone.phase || drone.status || drone.runtime;
+  const displayState = droneDisplayState(drone);
   return (
     <View style={styles.droneNode}>
       <Pressable
@@ -202,34 +334,27 @@ function DrawerDroneNode({
         accessibilityLabel={`Open ${drone.name} chat`}
         onPress={() => onSelect(drone.id, selectedChat)}
         style={({ pressed }) => [
-          styles.droneRow,
-          { paddingLeft: 10 + depth * 16 },
-          selected && styles.droneRowActive,
+          styles.switchItemRow,
+          { paddingLeft: 10 + depth * 16, paddingRight: 7 },
+          selected && styles.switchItemRowActive,
           pressed && styles.pressed,
         ]}
       >
-        {selected ? <View style={styles.selectedEdge} /> : null}
-        <View style={[styles.droneIcon, selected && styles.droneIconActive]}>
-          <Plane color={selected ? colors.accent : colors.muted} size={14} strokeWidth={1.9} />
+        <View style={styles.switchItemCopy}>
+          <View style={styles.switchItemTitleRow}>
+            <Text
+              numberOfLines={1}
+              style={[styles.switchItemTitle, selected && styles.activeText]}
+            >
+              {drone.name}
+            </Text>
+            <RelativeMessageTimestamp
+              timestamp={drone.lastMessageAt}
+              style={styles.switchItemTime}
+            />
+          </View>
+          <SwitchItemState state={displayState} detail={drone.runtime} />
         </View>
-        <View style={styles.droneCopy}>
-          <Text numberOfLines={1} style={[styles.droneName, selected && styles.activeText]}>
-            {drone.name}
-          </Text>
-          <Text numberOfLines={1} style={styles.droneMeta}>
-            {drone.runtime} · {stateLabel}
-          </Text>
-        </View>
-        {busy && chats.length === 1 ? (
-          <ActivityIndicator color={colors.warning} size="small" />
-        ) : (
-          <View
-            style={[
-              styles.droneStatus,
-              drone.statusOk === false ? styles.droneStatusError : styles.droneStatusOnline,
-            ]}
-          />
-        )}
       </Pressable>
       {chats.length > 1 ? (
         <View style={styles.chatList}>
@@ -317,20 +442,10 @@ function DrawerDroneFolder({
       </Pressable>
       {!collapsed ? (
         <>
-          {folder.roots.map((node) => (
-            <DrawerDroneNode
-              key={node.drone.id}
-              node={node}
-              depth={depth + 1}
-              activeDroneId={activeDroneId}
-              activeChatName={activeChatName}
-              onSelect={onSelect}
-            />
-          ))}
-          {folder.children.map((child) => (
-            <DrawerDroneFolder
-              key={child.id}
-              folder={child}
+          {folder.entries.map((entry) => (
+            <DrawerDroneEntry
+              key={entry.kind === 'drone' ? `drone:${entry.node.drone.id}` : `folder:${entry.folder.id}`}
+              entry={entry}
               depth={depth + 1}
               activeDroneId={activeDroneId}
               activeChatName={activeChatName}
@@ -343,12 +458,56 @@ function DrawerDroneFolder({
   );
 }
 
-export function AssistantThreadDrawer({
+function DrawerDroneEntry({
+  entry,
+  depth,
+  activeDroneId,
+  activeChatName,
+  onSelect,
+}: {
+  entry: MobileDroneSidebarEntry;
+  depth: number;
+  activeDroneId: string;
+  activeChatName: string;
+  onSelect(droneId: string, chatName: string): void;
+}) {
+  return entry.kind === 'drone' ? (
+    <DrawerDroneNode
+      node={entry.node}
+      depth={depth}
+      activeDroneId={activeDroneId}
+      activeChatName={activeChatName}
+      onSelect={onSelect}
+    />
+  ) : (
+    <DrawerDroneFolder
+      folder={entry.folder}
+      depth={depth}
+      activeDroneId={activeDroneId}
+      activeChatName={activeChatName}
+      onSelect={onSelect}
+    />
+  );
+}
+
+export function AssistantThreadDrawer(props: AssistantThreadDrawerProps) {
+  const registerDrawer = React.useContext(AssistantDrawerHostContext);
+
+  React.useLayoutEffect(() => {
+    registerDrawer?.(props);
+  }, [props, registerDrawer]);
+
+  if (registerDrawer) return null;
+  return <AssistantThreadDrawerView {...props} />;
+}
+
+function AssistantThreadDrawerView({
   open,
   title: _title,
   threads,
   activeThreadId,
   creating,
+  threadsLoading = false,
   offset,
   openingGestureActive,
   navigationItems,
@@ -356,6 +515,7 @@ export function AssistantThreadDrawer({
   showThreads = true,
   showDrones = false,
   drones = [],
+  droneSidebarOrder = EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   activeDroneId = '',
   activeChatName = 'default',
   dronesLoading = false,
@@ -366,35 +526,20 @@ export function AssistantThreadDrawer({
   onCreate,
   onSelectDroneChat,
   onSelectDevice,
-}: {
-  open: boolean;
-  title: string;
-  threads: DrawerAssistantThread[];
-  activeThreadId: string;
-  creating?: boolean;
-  offset: Animated.Value;
-  openingGestureActive?: boolean;
-  navigationItems: AppDrawerNavigationItem[];
-  canCreate?: boolean;
-  showThreads?: boolean;
-  showDrones?: boolean;
-  drones?: MobileDroneSummary[];
-  activeDroneId?: string;
-  activeChatName?: string;
-  dronesLoading?: boolean;
-  devicePickerItems?: DrawerDevicePickerItem[];
-  activeDeviceId?: string;
-  onClose(): void;
-  onSelect(threadId: string): void;
-  onCreate(): void;
-  onSelectDroneChat?(droneId: string, chatName: string): void;
-  onSelectDevice?(deviceId: string): void;
-}) {
+}: AssistantThreadDrawerProps) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const drawerWidth = assistantDrawerWidth(windowWidth);
   const closedX = -drawerWidth;
+  const closeSwipeDistance = Math.min(drawerWidth * 0.14, 52);
   const [visible, setVisible] = React.useState(open);
+  const swipeRef = React.useRef({
+    startX: 0,
+    startY: 0,
+    startedAt: 0,
+    dx: 0,
+    dragging: false,
+  });
   React.useEffect(() => {
     if (open || openingGestureActive) {
       setVisible(true);
@@ -418,48 +563,72 @@ export function AssistantThreadDrawer({
       if (finished) setVisible(false);
     });
   }, [closedX, offset, open, openingGestureActive]);
-  const panResponder = React.useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponderCapture: (_event, gesture) =>
-          gesture.dx < -3 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15,
-        onMoveShouldSetPanResponder: (_event, gesture) =>
-          gesture.dx < -3 && Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15,
-        onPanResponderGrant: () => {
-          offset.stopAnimation();
-        },
-        onPanResponderMove: (_event, gesture) => {
-          offset.setValue(Math.max(closedX, Math.min(0, gesture.dx)));
-        },
-        onPanResponderRelease: (_event, gesture) => {
-          if (gesture.dx <= -drawerWidth * 0.3 || gesture.vx <= -0.45) {
-            onClose();
-            return;
-          }
-          Animated.spring(offset, {
-            toValue: 0,
-            damping: 24,
-            stiffness: 260,
-            mass: 0.85,
-            useNativeDriver: true,
-          }).start();
-        },
-        onPanResponderTerminate: () => {
-          Animated.spring(offset, {
-            toValue: 0,
-            damping: 24,
-            stiffness: 260,
-            mass: 0.85,
-            useNativeDriver: true,
-          }).start();
-        },
-        onPanResponderTerminationRequest: () => false,
-        onShouldBlockNativeResponder: () => true,
-      }),
-    [closedX, drawerWidth, offset, onClose],
+  const settleSwipe = React.useCallback(() => {
+    const swipe = swipeRef.current;
+    if (!swipe.dragging) return;
+    const elapsedSeconds = Math.max((Date.now() - swipe.startedAt) / 1000, 0.016);
+    const velocityX = swipe.dx / elapsedSeconds;
+    swipe.dragging = false;
+    if (swipe.dx <= -closeSwipeDistance || velocityX <= -420) {
+      onClose();
+      return;
+    }
+    Animated.spring(offset, {
+      toValue: 0,
+      damping: 24,
+      stiffness: 260,
+      mass: 0.85,
+      useNativeDriver: true,
+    }).start();
+  }, [closeSwipeDistance, offset, onClose]);
+  const onDrawerTouchStart = React.useCallback(
+    (event: { nativeEvent: { pageX: number; pageY: number; touches: unknown[] } }) => {
+      if (!open || event.nativeEvent.touches.length > 1) return;
+      swipeRef.current = {
+        startX: event.nativeEvent.pageX,
+        startY: event.nativeEvent.pageY,
+        startedAt: Date.now(),
+        dx: 0,
+        dragging: false,
+      };
+    },
+    [open],
+  );
+  const onDrawerTouchMove = React.useCallback(
+    (event: { nativeEvent: { pageX: number; pageY: number; touches: unknown[] } }) => {
+      if (!open || event.nativeEvent.touches.length > 1) return;
+      const swipe = swipeRef.current;
+      const dx = event.nativeEvent.pageX - swipe.startX;
+      const dy = event.nativeEvent.pageY - swipe.startY;
+      if (!swipe.dragging) {
+        if (dx >= -5 || Math.abs(dx) <= Math.abs(dy) * 1.1) return;
+        swipe.dragging = true;
+        offset.stopAnimation();
+      }
+      swipe.dx = Math.min(0, dx);
+      offset.setValue(Math.max(closedX, swipe.dx));
+    },
+    [closedX, offset, open],
   );
   const orderedThreads = React.useMemo(() => assistantThreadsNewestFirst(threads), [threads]);
-  const droneGroups = React.useMemo(() => buildMobileDroneRepoGroups(drones), [drones]);
+  const droneGroups = React.useMemo(
+    () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
+    [droneSidebarOrder, drones],
+  );
+  const fleetStatus = React.useMemo(
+    () =>
+      drones.reduce(
+        (summary, drone) => {
+          const state = droneDisplayState(drone);
+          if (state === 'working' || state === 'starting') summary.working += 1;
+          else if (state === 'blocked' || state === 'offline') summary.issues += 1;
+          else summary.idle += 1;
+          return summary;
+        },
+        { working: 0, issues: 0, idle: 0 },
+      ),
+    [drones],
+  );
   const [activeRepoId, setActiveRepoId] = React.useState<string | null>(null);
   const activeRepo = droneGroups.find((group) => group.id === activeRepoId) ?? null;
   React.useEffect(() => {
@@ -485,7 +654,7 @@ export function AssistantThreadDrawer({
       navigationBarTranslucent
       onRequestClose={onClose}
     >
-      <View style={styles.layer} {...panResponder.panHandlers}>
+      <View style={styles.layer}>
         <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
           <Pressable
             accessibilityRole="button"
@@ -505,27 +674,28 @@ export function AssistantThreadDrawer({
             },
           ]}
         >
+          <View
+            {...({
+              onTouchStartCapture: onDrawerTouchStart,
+              onTouchMoveCapture: onDrawerTouchMove,
+              onTouchEndCapture: settleSwipe,
+              onTouchCancelCapture: settleSwipe,
+            } as any)}
+            style={styles.drawerTouchSurface}
+          >
           <View style={styles.header}>
-            <View style={styles.brandMark}>
-              <Plane color={colors.crust} size={19} strokeWidth={2.4} />
-            </View>
             <View style={styles.headerCopy}>
               <Text style={styles.title}>Drone Hub</Text>
-              <Text style={styles.brandSubtitle}>PRIVATE MESH CONTROL</Text>
             </View>
-            <Pressable onPress={onClose} style={styles.close}>
-              <X color={colors.muted} size={20} strokeWidth={2} />
-            </Pressable>
+            {devicePickerItems.length > 0 ? (
+              <DrawerDevicePicker
+                devices={devicePickerItems}
+                activeDeviceId={activeDeviceId}
+                onSelect={onSelectDevice}
+              />
+            ) : null}
           </View>
-          {devicePickerItems.length > 0 ? (
-            <DrawerDevicePicker
-              devices={devicePickerItems}
-              activeDeviceId={activeDeviceId}
-              onSelect={onSelectDevice}
-            />
-          ) : null}
           <View style={styles.navigation}>
-            <Text style={styles.sectionLabel}>NAVIGATION</Text>
             {navigationItems.map((item) => {
               const Icon = navigationIcon(item.id);
               return (
@@ -556,18 +726,25 @@ export function AssistantThreadDrawer({
           </View>
           {showThreads ? (
             <>
-              <View style={styles.threadToolbar}>
-                <Text style={styles.threadCount}>
-                  {threads.length} {threads.length === 1 ? 'thread' : 'threads'}
-                </Text>
+              <View style={styles.sidebarToolbar}>
+                {threadsLoading ? (
+                  <View style={styles.loadingSummary}>
+                    <ActivityIndicator color={colors.accent} size="small" />
+                    <Text style={styles.loadingSummaryText}>Loading threads…</Text>
+                  </View>
+                ) : (
+                  <Text style={styles.sidebarToolbarText}>
+                    {threads.length} {threads.length === 1 ? 'thread' : 'threads'}
+                  </Text>
+                )}
                 <Pressable
                   accessibilityRole="button"
                   accessibilityLabel="Create new thread"
-                  disabled={creating || !canCreate}
+                  disabled={threadsLoading || creating || !canCreate}
                   onPress={onCreate}
                   style={({ pressed }) => [
                     styles.create,
-                    !canCreate && styles.createDisabled,
+                    (threadsLoading || !canCreate) && styles.createDisabled,
                     pressed && styles.pressed,
                   ]}
                 >
@@ -581,22 +758,36 @@ export function AssistantThreadDrawer({
               <ScrollView style={styles.scroll} contentContainerStyle={styles.list}>
                 {orderedThreads.map((thread) => {
                   const active = thread.id === activeThreadId;
+                  const displayState = threadDisplayState(thread);
                   return (
                     <Pressable
                       key={thread.id}
                       onPress={() => onSelect(thread.id)}
-                      style={({ pressed }) => [styles.thread, pressed && styles.pressed]}
+                      style={({ pressed }) => [
+                        styles.switchItemRow,
+                        active && styles.switchItemRowActive,
+                        pressed && styles.pressed,
+                      ]}
                     >
-                      <Text
-                        numberOfLines={2}
-                        style={[styles.threadTitle, active && styles.activeText]}
-                      >
-                        {thread.title || 'Untitled thread'}
-                      </Text>
+                      <View style={styles.switchItemCopy}>
+                        <View style={styles.switchItemTitleRow}>
+                          <Text
+                            numberOfLines={1}
+                            style={[styles.switchItemTitle, active && styles.activeText]}
+                          >
+                            {thread.title || 'Untitled thread'}
+                          </Text>
+                          <RelativeMessageTimestamp
+                            timestamp={thread.updatedAt}
+                            style={styles.switchItemTime}
+                          />
+                        </View>
+                        <SwitchItemState state={displayState} detail={thread.model} />
+                      </View>
                     </Pressable>
                   );
                 })}
-                {threads.length === 0 ? (
+                {!threadsLoading && threads.length === 0 ? (
                   <Text style={styles.empty}>
                     No threads here yet. Create one to start a conversation.
                   </Text>
@@ -605,21 +796,63 @@ export function AssistantThreadDrawer({
             </>
           ) : showDrones ? (
             <>
-              {dronesLoading ? (
-                <View style={styles.droneLoading}>
-                  <ActivityIndicator color={colors.accent} size="small" />
-                </View>
-              ) : null}
-              {activeRepo ? (
-                <View style={styles.repoNavigationHead}>
+              <View style={styles.sidebarToolbar}>
+                {dronesLoading ? (
+                  <View style={styles.loadingSummary}>
+                    <ActivityIndicator color={colors.accent} size="small" />
+                    <Text style={styles.loadingSummaryText}>Loading drones…</Text>
+                  </View>
+                ) : (
+                  <Text numberOfLines={1} style={styles.sidebarToolbarText}>
+                    {drones.length} {drones.length === 1 ? 'drone' : 'drones'} · {droneGroups.length}{' '}
+                    {droneGroups.length === 1 ? 'space' : 'spaces'}
+                  </Text>
+                )}
+                <View style={styles.sidebarToolbarActions}>
+                  <View style={styles.fleetStates}>
+                    {fleetStatus.working > 0 ? (
+                      <View style={styles.fleetState}>
+                        <View style={[styles.fleetStateDot, styles.fleetStateWorking]} />
+                        <Text style={styles.fleetStateText}>{fleetStatus.working}</Text>
+                      </View>
+                    ) : null}
+                    {fleetStatus.idle > 0 ? (
+                      <View style={styles.fleetState}>
+                        <View style={[styles.fleetStateDot, styles.fleetStateIdle]} />
+                        <Text style={styles.fleetStateText}>{fleetStatus.idle}</Text>
+                      </View>
+                    ) : null}
+                    {fleetStatus.issues > 0 ? (
+                      <View style={styles.fleetState}>
+                        <View style={[styles.fleetStateDot, styles.fleetStateIssue]} />
+                        <Text style={styles.fleetStateText}>{fleetStatus.issues}</Text>
+                      </View>
+                    ) : null}
+                  </View>
                   <Pressable
                     accessibilityRole="button"
-                    accessibilityLabel="Back to repositories"
-                    onPress={() => setActiveRepoId(null)}
-                    style={({ pressed }) => [styles.repoBack, pressed && styles.pressed]}
+                    accessibilityLabel="Create new drone"
+                    accessibilityHint="Coming soon"
+                    onPress={() => {}}
+                    style={({ pressed }) => [styles.create, pressed && styles.pressed]}
                   >
-                    <ChevronLeft color={colors.accent} size={18} strokeWidth={2.2} />
+                    <Plus color={colors.accent} size={19} strokeWidth={2.2} />
                   </Pressable>
+                </View>
+              </View>
+              {activeRepo ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to repositories"
+                  onPress={() => setActiveRepoId(null)}
+                  style={({ pressed }) => [
+                    styles.repoNavigationHead,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <View style={styles.repoBack}>
+                    <ChevronLeft color={colors.accent} size={18} strokeWidth={2.2} />
+                  </View>
                   <FolderGit2 color={colors.accent} size={16} strokeWidth={1.9} />
                   <View style={styles.repoCopy}>
                     <Text numberOfLines={1} style={styles.repoNavigationTitle}>
@@ -631,36 +864,26 @@ export function AssistantThreadDrawer({
                       </Text>
                     ) : null}
                   </View>
-                </View>
+                </Pressable>
               ) : null}
               <ScrollView style={styles.scroll} contentContainerStyle={styles.droneList}>
                 {activeRepo
-                  ? [
-                      ...activeRepo.roots.map((node) => (
-                        <DrawerDroneNode
-                          key={node.drone.id}
-                          node={node}
-                          depth={0}
-                          activeDroneId={activeDroneId}
-                          activeChatName={activeChatName}
-                          onSelect={(droneId, chatName) =>
-                            onSelectDroneChat?.(droneId, chatName)
-                          }
-                        />
-                      )),
-                      ...activeRepo.folders.map((folder) => (
-                        <DrawerDroneFolder
-                          key={folder.id}
-                          folder={folder}
-                          depth={0}
-                          activeDroneId={activeDroneId}
-                          activeChatName={activeChatName}
-                          onSelect={(droneId, chatName) =>
-                            onSelectDroneChat?.(droneId, chatName)
-                          }
-                        />
-                      )),
-                    ]
+                  ? activeRepo.entries.map((entry) => (
+                      <DrawerDroneEntry
+                        key={
+                          entry.kind === 'drone'
+                            ? `drone:${entry.node.drone.id}`
+                            : `folder:${entry.folder.id}`
+                        }
+                        entry={entry}
+                        depth={0}
+                        activeDroneId={activeDroneId}
+                        activeChatName={activeChatName}
+                        onSelect={(droneId, chatName) =>
+                          onSelectDroneChat?.(droneId, chatName)
+                        }
+                      />
+                    ))
                   : droneGroups.map((group) => (
                     <View key={group.id} style={styles.repoGroup}>
                       <Pressable
@@ -699,8 +922,16 @@ export function AssistantThreadDrawer({
               </ScrollView>
             </>
           ) : (
-            <View style={styles.drawerFill} />
+            <View
+              onStartShouldSetResponder={() => true}
+              onResponderGrant={onDrawerTouchStart}
+              onResponderMove={onDrawerTouchMove}
+              onResponderRelease={settleSwipe}
+              onResponderTerminate={settleSwipe}
+              style={styles.drawerFill}
+            />
           )}
+          </View>
         </Animated.View>
       </View>
     </Modal>
@@ -729,70 +960,84 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 10, height: 0 },
     overflow: 'hidden',
   },
+  drawerTouchSurface: { flex: 1 },
   header: {
-    minHeight: 76,
+    minHeight: 68,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 10,
     paddingHorizontal: 14,
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
-  },
-  brandMark: {
-    width: 38,
-    height: 38,
-    borderRadius: 13,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginRight: 11,
-    backgroundColor: colors.accent,
+    zIndex: 30,
   },
   headerCopy: { flex: 1, minWidth: 0 },
-  title: { color: colors.textStrong, fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
-  brandSubtitle: {
-    color: colors.subtle,
-    fontSize: 7,
-    fontWeight: '900',
-    letterSpacing: 1.1,
-    marginTop: 2,
+  title: {
+    color: colors.textStrong,
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
   },
-  close: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   navigation: {
-    gap: 2,
-    paddingHorizontal: 12,
-    paddingTop: 14,
-    paddingBottom: 12,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 4,
+    paddingHorizontal: 10,
+    paddingTop: 11,
+    paddingBottom: 10,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   navigationItem: {
-    minHeight: 42,
-    flexDirection: 'row',
+    flex: 1,
+    minWidth: 70,
+    minHeight: 54,
+    flexDirection: 'column',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 10,
-    borderRadius: 11,
+    justifyContent: 'center',
+    gap: 4,
+    paddingHorizontal: 5,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: 'transparent',
   },
   navigationItemActive: { backgroundColor: colors.accentDark, borderColor: colors.accentBorder },
-  navigationLabel: { color: colors.muted, fontSize: 13, fontWeight: '700' },
-  navigationLabelActive: { color: colors.accentAlt },
-  sectionLabel: {
-    color: colors.accent,
-    fontSize: 8,
-    fontWeight: '900',
-    letterSpacing: 1.4,
-    marginHorizontal: 10,
-    marginBottom: 7,
+  navigationLabel: {
+    color: colors.muted,
+    fontSize: 9,
+    fontWeight: '800',
+    letterSpacing: 0.25,
+    textTransform: 'uppercase',
   },
-  threadToolbar: {
+  navigationLabelActive: { color: colors.accentAlt },
+  sidebarToolbar: {
     minHeight: 50,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    gap: 10,
     paddingHorizontal: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    backgroundColor: colors.panel,
   },
-  threadCount: { color: colors.muted, fontSize: 10, fontWeight: '800' },
+  sidebarToolbarText: {
+    flex: 1,
+    minWidth: 0,
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  sidebarToolbarActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  loadingSummary: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  loadingSummaryText: { color: colors.muted, fontSize: 10, fontWeight: '800' },
   create: {
     width: 36,
     height: 36,
@@ -805,36 +1050,28 @@ const styles = StyleSheet.create({
   },
   createDisabled: { opacity: 0.42 },
   scroll: { flex: 1 },
-  list: { paddingHorizontal: 12, paddingBottom: 20 },
-  thread: {
-    minHeight: 44,
-    justifyContent: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-  },
-  threadTitle: { color: colors.muted, fontSize: 13, lineHeight: 17, fontWeight: '700' },
+  list: { paddingHorizontal: 8, paddingBottom: 20 },
   activeText: { color: colors.accent, fontWeight: '800' },
   empty: { color: colors.muted, fontSize: 12, lineHeight: 18, padding: 12 },
-  droneLoading: { minHeight: 42, alignItems: 'center', justifyContent: 'center' },
   devicePickerSection: {
-    paddingHorizontal: 12,
-    paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    position: 'relative',
+    width: 164,
+    maxWidth: '55%',
+    zIndex: 40,
   },
   devicePicker: {
-    minHeight: 44,
+    height: 38,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 9,
-    paddingHorizontal: 11,
-    borderRadius: 10,
+    gap: 7,
+    paddingHorizontal: 9,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panel,
   },
   devicePickerCopy: { flex: 1, minWidth: 0 },
-  devicePickerName: { color: colors.text, fontSize: 13, fontWeight: '800' },
+  devicePickerName: { color: colors.text, fontSize: 11, fontWeight: '800' },
   devicePickerDetail: {
     color: colors.muted,
     fontSize: 8,
@@ -846,12 +1083,20 @@ const styles = StyleSheet.create({
   deviceDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.overlay0 },
   deviceDotOnline: { backgroundColor: colors.online },
   deviceOptions: {
+    position: 'absolute',
+    top: 42,
+    right: 0,
+    width: 220,
     maxHeight: 220,
-    marginTop: 6,
-    borderRadius: 10,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panelRaised,
+    elevation: 24,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.45,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 6 },
   },
   deviceOptionsContent: {
     padding: 4,
@@ -863,7 +1108,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 9,
     paddingHorizontal: 10,
-    borderRadius: 7,
+    borderRadius: 4,
   },
   deviceOptionActive: { backgroundColor: colors.accentDark },
   deviceOptionName: { color: colors.text, fontSize: 12, fontWeight: '700' },
@@ -881,16 +1126,20 @@ const styles = StyleSheet.create({
     height: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 8,
+    borderRadius: 5,
   },
   repoNavigationTitle: { color: colors.text, fontSize: 13, fontWeight: '800' },
-  droneList: { paddingHorizontal: 9, paddingBottom: 24, gap: 5 },
+  fleetStates: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  fleetState: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  fleetStateDot: { width: 6, height: 6, borderRadius: 3 },
+  fleetStateWorking: { backgroundColor: colors.warning },
+  fleetStateIdle: { backgroundColor: colors.online },
+  fleetStateIssue: { backgroundColor: colors.danger },
+  fleetStateText: { color: colors.muted, fontSize: 9, fontFamily: 'monospace' },
+  droneList: { paddingHorizontal: 8, paddingBottom: 24 },
   repoGroup: {
-    borderWidth: 1,
-    borderColor: colors.whiteWash,
-    borderRadius: 10,
-    backgroundColor: colors.whiteWashSoft,
-    overflow: 'hidden',
+    borderBottomWidth: 1,
+    borderBottomColor: colors.whiteWash,
   },
   repoRow: {
     minHeight: 46,
@@ -898,7 +1147,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 7,
     paddingHorizontal: 7,
-    borderRadius: 8,
+    borderRadius: 4,
   },
   repoRowActive: { backgroundColor: colors.accentWash },
   repoCopy: { flex: 1, minWidth: 0 },
@@ -917,48 +1166,45 @@ const styles = StyleSheet.create({
     paddingVertical: 2,
   },
   droneNode: { position: 'relative' },
-  droneRow: {
+  switchItemRow: {
     minHeight: 48,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingRight: 7,
-    borderRadius: 7,
+    paddingHorizontal: 10,
+    borderRadius: 4,
   },
-  droneRowActive: { backgroundColor: colors.panel },
-  selectedEdge: {
-    position: 'absolute',
-    left: 0,
-    top: 7,
-    bottom: 7,
-    width: 2,
-    borderRadius: 2,
-    backgroundColor: colors.accent,
+  switchItemRowActive: { backgroundColor: colors.panelRaised },
+  switchItemCopy: { flex: 1, minWidth: 0 },
+  switchItemTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  switchItemTitle: {
+    flex: 1,
+    minWidth: 0,
+    color: colors.text,
+    fontSize: 12,
+    fontWeight: '800',
   },
-  droneIcon: {
-    width: 28,
-    height: 28,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 8,
-    backgroundColor: colors.background,
-  },
-  droneIconActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
-  droneCopy: { flex: 1, minWidth: 0 },
-  droneName: { color: colors.text, fontSize: 12, fontWeight: '800' },
-  droneMeta: {
-    color: colors.muted,
-    fontSize: 8,
+  switchItemTime: {
+    color: colors.subtle,
+    fontSize: 9,
+    fontFamily: 'monospace',
     fontWeight: '700',
-    marginTop: 3,
-    textTransform: 'uppercase',
-    letterSpacing: 0.35,
   },
-  droneStatus: { width: 7, height: 7, borderRadius: 4, marginRight: 4 },
-  droneStatusOnline: { backgroundColor: colors.online },
-  droneStatusError: { backgroundColor: colors.danger },
+  switchItemMeta: {
+    color: colors.muted,
+    flexShrink: 1,
+    fontSize: 9,
+    fontWeight: '500',
+    letterSpacing: 0.1,
+    fontFamily: 'monospace',
+  },
+  switchItemMetaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: 3,
+  },
+  switchStateDot: { width: 6, height: 6, borderRadius: 3 },
   droneChildren: { borderLeftWidth: 1, borderLeftColor: colors.border },
   groupRow: {
     minHeight: 34,
@@ -966,7 +1212,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 6,
     paddingRight: 8,
-    borderRadius: 6,
+    borderRadius: 3,
   },
   groupName: { color: colors.muted, fontSize: 11, fontWeight: '800', flex: 1 },
   chatList: { gap: 1 },
@@ -976,7 +1222,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 7,
     paddingRight: 8,
-    borderRadius: 6,
+    borderRadius: 3,
   },
   chatRowActive: { backgroundColor: colors.panel },
   chatName: { color: colors.muted, fontSize: 11, fontFamily: 'monospace', flex: 1 },

@@ -3,7 +3,13 @@ import type { CapabilityDescriptor, CapabilityGrant } from './types';
 export const DEVICE_CORE_CAPABILITY: CapabilityDescriptor = {
   id: 'device-core',
   version: 1,
-  operations: ['device.describe', 'device.ping', 'devices.list', 'device.rename-self'],
+  operations: [
+    'device.describe',
+    'device.ping',
+    'devices.list',
+    'device.rename-self',
+    'device.access.update-self',
+  ],
 };
 
 export const DRONE_CONTROL_CAPABILITY: CapabilityDescriptor = {

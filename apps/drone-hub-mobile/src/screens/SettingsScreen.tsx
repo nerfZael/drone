@@ -100,26 +100,10 @@ export function SettingsScreen({
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
         <ErrorBanner message={error ?? mesh.error} />
         {tab === 'assistant' ? (
-          <>
-            <View>
-              <Label>Assistant</Label>
-              <Text style={[textStyles.title, styles.title]}>Model and credentials.</Text>
-              <Text style={textStyles.body}>
-                Choose how Assistant runs on this phone and manage its secure provider access.
-              </Text>
-            </View>
-            <LocalAssistantSettingsCard />
-          </>
+          <LocalAssistantSettingsCard />
         ) : tab === 'devices' ? (
           <>
-            <View>
-              <Label>Devices</Label>
-              <Text style={[textStyles.title, styles.title]}>Identity and routes.</Text>
-              <Text style={textStyles.body}>
-                Names and addresses are hints. Device keys prove identity across the mesh.
-              </Text>
-            </View>
-            <Card>
+            <Card style={styles.flatCard}>
               <Label>This phone</Label>
               <TextInput
                 value={phoneName}
@@ -141,13 +125,13 @@ export function SettingsScreen({
                 Save phone name
               </Button>
             </Card>
-            <Card>
+            <Card style={styles.flatCard}>
               <Label>Device network</Label>
               <Text style={[textStyles.mono, styles.network]}>{mesh.profile?.networkId}</Text>
             </Card>
             <View style={styles.routes}>
               {(mesh.profile?.connections ?? []).map((connection) => (
-                <Card key={connection.deviceId}>
+                <Card key={connection.deviceId} style={styles.flatCard}>
                   <View style={styles.routeHead}>
                     <Text style={textStyles.heading}>
                       {mesh.devices.find((device) => device.id === connection.deviceId)?.name ??
@@ -183,16 +167,8 @@ export function SettingsScreen({
           </>
         ) : (
           <>
-            <View>
-              <Label>Pairing</Label>
-              <Text style={[textStyles.title, styles.title]}>Trust and access.</Text>
-              <Text style={textStyles.body}>
-                Add another trusted Hub or remove this phone from its current mesh.
-              </Text>
-            </View>
-            <Card>
+            <Card style={styles.flatCard}>
               <Label>Device mesh</Label>
-              <Text style={[textStyles.heading, styles.meshTitle]}>Pairing and access</Text>
               <Text style={textStyles.body}>
                 Pair another Hub without removing your existing routes and permissions.
               </Text>
@@ -203,7 +179,7 @@ export function SettingsScreen({
                 </Button>
               </View>
             </Card>
-            <Card>
+            <Card style={styles.flatCard}>
               <Label>Security</Label>
               <Text style={[textStyles.body, styles.security]}>
                 The private identity is encrypted by Android secure storage. Requests are signed,
@@ -246,11 +222,9 @@ const styles = StyleSheet.create({
   tabs: {
     flexDirection: 'row',
     gap: 4,
-    marginHorizontal: 12,
-    marginVertical: 10,
-    padding: 4,
-    borderRadius: 14,
-    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    borderBottomWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panel,
   },
@@ -261,7 +235,7 @@ const styles = StyleSheet.create({
     gap: 6,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 10,
+    borderRadius: 5,
     borderWidth: 1,
     borderColor: 'transparent',
     backgroundColor: 'transparent',
@@ -269,15 +243,20 @@ const styles = StyleSheet.create({
   tabActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
   tabText: { color: colors.muted, fontSize: 10, fontWeight: '800' },
   tabTextActive: { color: colors.accentAlt },
-  page: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 28, gap: 14 },
-  title: { marginTop: 6, marginBottom: 8 },
+  page: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 28, gap: 10 },
+  flatCard: {
+    borderRadius: 6,
+    padding: 14,
+    shadowOpacity: 0,
+    elevation: 0,
+  },
   nameInput: {
     minHeight: 44,
     color: colors.text,
     backgroundColor: colors.panel,
     borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 6,
     paddingHorizontal: 12,
     fontSize: 15,
     fontWeight: '700',
@@ -305,6 +284,5 @@ const styles = StyleSheet.create({
   endpoint: { marginTop: 8 },
   primaryAction: { marginTop: 12 },
   security: { marginTop: 8 },
-  meshTitle: { marginTop: 6, marginBottom: 7 },
   meshActions: { gap: 9, marginTop: 14 },
 });

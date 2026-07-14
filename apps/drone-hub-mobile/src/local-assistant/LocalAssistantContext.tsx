@@ -16,6 +16,7 @@ import type {
 import { runOpenAiChat } from './openai-chat-client';
 import { runCodexChat } from './codex-chat-client';
 import { readLocalAssistantCodexAuth } from './local-assistant-codex-auth';
+import { nextAssistantThreadTitle } from './next-assistant-thread-title';
 import { executeWorkspaceTool, workspaceToolsForThread } from './workspace-tools';
 
 type LocalAssistantContextValue = {
@@ -111,7 +112,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       const now = new Date().toISOString();
       const thread: LocalAssistantThread = {
         id: `mobile_thread_${Crypto.randomUUID()}`,
-        title: title.trim().slice(0, 160) || `Phone thread ${threadsRef.current.length + 1}`,
+        title: title.trim().slice(0, 160) || nextAssistantThreadTitle(threadsRef.current),
         createdAt: now,
         updatedAt: now,
         model: settings.model,

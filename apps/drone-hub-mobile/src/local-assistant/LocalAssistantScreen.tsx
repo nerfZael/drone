@@ -1,7 +1,7 @@
 import React from 'react';
 import { latestThinkingText } from '@drone/assistant-chat';
-import { Alert, Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
-import { Button, ErrorBanner, Label, textStyles } from '../components/Ui';
+import { Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Button, ConfirmDialog, ErrorBanner, Label, textStyles } from '../components/Ui';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { useLocalAssistant } from './LocalAssistantContext';
@@ -51,6 +51,11 @@ export function LocalAssistantScreen({
   const [modelOpen, setModelOpen] = React.useState(false);
   const [localProvider, setLocalProvider] = React.useState<'openai' | 'codex'>('openai');
   const [error, setError] = React.useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = React.useState<{
+    id: string;
+    title: string;
+  } | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
   const thread = assistant.threads.find((item) => item.id === assistant.activeThreadId) ?? null;
   const latestMessageScroll = useLatestMessageScroll(thread?.id ?? '');
   const running = assistant.runningThreadId === thread?.id;
@@ -109,14 +114,7 @@ export function LocalAssistantScreen({
   const deleteActionRef = React.useRef<() => void>(() => {});
   deleteActionRef.current = () => {
     if (!thread) return;
-    Alert.alert('Delete phone thread?', 'Its local conversation will be removed.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Delete',
-        style: 'destructive',
-        onPress: () => void runAction(() => assistant.deleteThread(thread.id)),
-      },
-    ]);
+    setDeleteCandidate({ id: thread.id, title: thread.title });
   };
   const deleteFromHeader = React.useCallback(() => deleteActionRef.current(), []);
 
@@ -128,12 +126,6 @@ export function LocalAssistantScreen({
             subtitle: targetDevice
               ? `${targetDevice.name} / ${thread.workspaceTarget?.rootId}`
               : 'Phone only · no workspace',
-            statusTone:
-              thread.status === 'error' || thread.error
-                ? 'error'
-                : targetDevice && mesh.connectedDeviceIds.includes(targetDevice.id)
-                  ? 'online'
-                  : 'muted',
             accessOpen: settingsOpen,
             accessDisabled: running,
             onToggleAccess: toggleAccess,
@@ -143,15 +135,12 @@ export function LocalAssistantScreen({
     );
   }, [
     deleteFromHeader,
-    mesh.connectedDeviceIds,
     onHeaderChange,
     running,
     settingsOpen,
     targetDevice?.id,
     targetDevice?.name,
     thread?.id,
-    thread?.error,
-    thread?.status,
     thread?.title,
     thread?.workspaceTarget?.rootId,
     toggleAccess,
@@ -166,6 +155,7 @@ export function LocalAssistantScreen({
           title="On this phone"
           threads={assistant.threads}
           activeThreadId={assistant.activeThreadId}
+          threadsLoading
           offset={drawerOffset}
           openingGestureActive={openingGestureActive}
           navigationItems={navigationItems}
@@ -259,7 +249,10 @@ export function LocalAssistantScreen({
           <ScrollView
             ref={latestMessageScroll.ref}
             style={styles.transcript}
-            contentContainerStyle={styles.transcriptContent}
+            contentContainerStyle={[
+              styles.transcriptContent,
+              !latestMessageScroll.contentVisible && styles.transcriptContentHidden,
+            ]}
             keyboardShouldPersistTaps="handled"
             onLayout={latestMessageScroll.onLayout}
             onContentSizeChange={latestMessageScroll.onContentSizeChange}
@@ -303,6 +296,31 @@ export function LocalAssistantScreen({
           />
         </>
       )}
+      <ConfirmDialog
+        visible={Boolean(deleteCandidate)}
+        title="Delete phone thread?"
+        message={`“${deleteCandidate?.title ?? 'This thread'}” and its local conversation will be permanently removed.`}
+        confirmLabel="Delete thread"
+        destructive
+        busy={deleting}
+        onCancel={() => setDeleteCandidate(null)}
+        onConfirm={() =>
+          void (async () => {
+            if (!deleteCandidate) return;
+            setDeleting(true);
+            setError(null);
+            try {
+              await assistant.deleteThread(deleteCandidate.id);
+              setDeleteCandidate(null);
+            } catch (nextError: any) {
+              setDeleteCandidate(null);
+              setError(nextError?.message ?? String(nextError));
+            } finally {
+              setDeleting(false);
+            }
+          })()
+        }
+      />
     </View>
   );
 }
@@ -321,5 +339,6 @@ const styles = StyleSheet.create({
   welcomeBody: { color: colors.muted, fontSize: 15, lineHeight: 23, marginBottom: 8 },
   transcript: { flex: 1 },
   transcriptContent: { flexGrow: 1, padding: 14, paddingBottom: 20 },
+  transcriptContentHidden: { opacity: 0 },
   editorScroll: { padding: 14 },
 });

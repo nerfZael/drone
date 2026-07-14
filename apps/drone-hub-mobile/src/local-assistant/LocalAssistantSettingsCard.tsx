@@ -75,7 +75,7 @@ export function LocalAssistantSettingsCard() {
   };
 
   return (
-    <Card>
+    <Card style={styles.card}>
       <Label>Assistant on this phone</Label>
       <Text style={[textStyles.heading, styles.title]}>Direct model connection</Text>
       <Text style={textStyles.body}>
@@ -204,6 +204,7 @@ export function LocalAssistantSettingsCard() {
 }
 
 const styles = StyleSheet.create({
+  card: { borderRadius: 6, padding: 14, shadowOpacity: 0, elevation: 0 },
   title: { marginTop: 6, marginBottom: 7 },
   providerChoices: { flexDirection: 'row', gap: 8, marginTop: 14 },
   providerButton: { flex: 1, minHeight: 40 },
@@ -213,7 +214,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 13,
-    borderRadius: 12,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.background,
@@ -223,7 +224,7 @@ const styles = StyleSheet.create({
   modelFieldValue: { color: colors.text, fontSize: 13, fontWeight: '800', marginTop: 4 },
   input: {
     minHeight: 46,
-    borderRadius: 12,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.background,

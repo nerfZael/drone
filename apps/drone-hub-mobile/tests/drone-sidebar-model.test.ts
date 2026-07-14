@@ -70,6 +70,34 @@ describe('mobile drone sidebar model', () => {
     expect(buildMobileDroneRepoGroups(payload.drones)[0]?.label).toBe('mapped');
   });
 
+  test('normalizes last-message timestamps and desktop sidebar preferences', () => {
+    const payload = normalizeMobileDroneListPayload({
+      schemaVersion: 3,
+      drones: [
+        {
+          id: 'mapped',
+          lastMessageAt: '2026-07-14T10:00:00.000Z',
+        },
+      ],
+      sidebar: {
+        registeredRepoPaths: ['/work/mapped', '/work/empty'],
+        groupCreatedAtByName: { Review: '2026-07-13T10:00:00.000Z' },
+        sidebarGroupOrder: ['repo:repo:/work/mapped'],
+        sidebarDroneOrderByGroup: { 'group:Review': ['mapped'] },
+        sidebarNodeOrderByParent: { root: ['drone:mapped'] },
+      },
+    });
+
+    expect(payload.drones[0]?.lastMessageAt).toBe('2026-07-14T10:00:00.000Z');
+    expect(payload.sidebar).toEqual({
+      registeredRepoPaths: ['/work/mapped', '/work/empty'],
+      groupCreatedAtByName: { Review: '2026-07-13T10:00:00.000Z' },
+      sidebarGroupOrder: ['repo:repo:/work/mapped'],
+      sidebarDroneOrderByGroup: { 'group:Review': ['mapped'] },
+      sidebarNodeOrderByParent: { root: ['drone:mapped'] },
+    });
+  });
+
   test('keeps orphaned and cyclic children reachable at the repo root', () => {
     const drones = normalizeMobileDrones([
       { id: 'orphan', fleetParentId: 'missing', repoPath: '/repo' },
@@ -109,6 +137,66 @@ describe('mobile drone sidebar model', () => {
     expect(roots[0]!.children.map((node) => node.drone.id)).toEqual(['new-child', 'old-child']);
   });
 
+  test('matches saved desktop repo, group, drone, and mixed node ordering', () => {
+    const drones = normalizeMobileDrones([
+      {
+        id: 'direct',
+        name: 'Direct',
+        repoPath: '/repo',
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+      {
+        id: 'review-new',
+        name: 'Review new',
+        repoPath: '/repo',
+        group: 'Review',
+        createdAt: '2026-03-01T00:00:00Z',
+      },
+      {
+        id: 'review-old',
+        name: 'Review old',
+        repoPath: '/repo',
+        group: 'Review',
+        createdAt: '2026-01-01T00:00:00Z',
+      },
+      {
+        id: 'planning',
+        name: 'Planning',
+        repoPath: '/repo',
+        group: 'Planning',
+      },
+    ]);
+    const groups = buildMobileDroneRepoGroups(drones, {
+      registeredRepoPaths: ['/alpha', '/repo'],
+      groupCreatedAtByName: {
+        Planning: '2026-01-01T00:00:00Z',
+        Review: '2026-02-01T00:00:00Z',
+      },
+      sidebarGroupOrder: ['repo:repo:/repo', 'group:Planning', 'group:Review'],
+      sidebarDroneOrderByGroup: {
+        'group:Review': ['review-old', 'review-new'],
+      },
+      sidebarNodeOrderByParent: {
+        'folder:repo:/repo': [
+          'drone:direct',
+          'folder:repo-scope:repo:/repo:Planning',
+          'folder:repo-scope:repo:/repo:Review',
+        ],
+      },
+    });
+
+    expect(groups.map((group) => group.repoPath)).toEqual(['/repo', '/alpha']);
+    expect(
+      groups[0]!.entries.map((entry) =>
+        entry.kind === 'drone' ? entry.node.drone.id : entry.folder.path,
+      ),
+    ).toEqual(['direct', 'Planning', 'Review']);
+    expect(groups[0]!.folders[1]!.roots.map((node) => node.drone.id)).toEqual([
+      'review-old',
+      'review-new',
+    ]);
+  });
+
   test('projects each drone turn into the shared user and assistant transcript model', () => {
     expect(
       mobileDroneTurnsToAssistantMessages([
@@ -143,6 +231,30 @@ describe('mobile drone sidebar model', () => {
         attachments: [{ name: 'plan.md', mime: 'text/markdown', size: 42 }],
       },
     });
+  });
+
+  test('maps drone prompt and completion times onto chat messages', () => {
+    expect(
+      mobileDroneTurnsToAssistantMessages([
+        {
+          prompt: 'Ship it',
+          output: 'Done',
+          promptAt: '2026-07-14T09:59:58.000Z',
+          completedAt: '2026-07-14T10:00:02.000Z',
+        },
+      ]),
+    ).toEqual([
+      {
+        role: 'user',
+        content: 'Ship it',
+        createdAt: '2026-07-14T09:59:58.000Z',
+      },
+      {
+        role: 'assistant',
+        content: 'Done',
+        createdAt: '2026-07-14T10:00:02.000Z',
+      },
+    ]);
   });
 
   test('normalizes DroneHub transcript metadata for the native chat presentation', () => {

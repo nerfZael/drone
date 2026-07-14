@@ -18,6 +18,7 @@ import WifiOff from 'lucide-react-native/icons/wifi-off';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
 import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext';
 import {
+  AssistantDrawerProvider,
   AssistantThreadDrawer,
   assistantDrawerWidth,
   type AppDrawerNavigationItem,
@@ -74,7 +75,6 @@ function Shell() {
         id: device.id,
         name: device.name,
         connected: mesh.connectedDeviceIds.includes(device.id),
-        detail: device.platform,
       })),
     ];
   }, [mesh.connectedDeviceIds, mesh.devices, mesh.identity?.id, mesh.identity?.name]);
@@ -148,12 +148,10 @@ function Shell() {
   };
   const pairingVisible = pairing || !mesh.profile;
   const navigateToTab = (nextTab: Tab) => {
-    setAppDrawerOpen(false);
+    if (nextTab === 'devices' || nextTab === 'settings') setAppDrawerOpen(false);
     if (!pairingVisible && tab === nextTab) return;
-    setTimeout(() => {
-      setPairing(false);
-      setTab(nextTab);
-    }, 180);
+    setPairing(false);
+    setTab(nextTab);
   };
   const navigationItems: AppDrawerNavigationItem[] = [
     {
@@ -191,6 +189,11 @@ function Shell() {
           settings: 'Settings',
         } as const
       )[tab];
+  const hasOpenChatHeader = Boolean(
+    !pairingVisible &&
+      ((tab === 'drones' && dronesHeader) ||
+        (tab === 'assistant' && assistantHeader)),
+  );
   const content = pairingVisible ? (
     <ScrollView keyboardShouldPersistTaps="handled">
       {mesh.profile ? (
@@ -264,6 +267,7 @@ function Shell() {
         />
       ) : null}
       <View style={styles.header}>
+        <View pointerEvents="none" style={styles.headerAccent} />
         {mesh.profile ? (
           <Pressable
             accessibilityRole="button"
@@ -271,28 +275,18 @@ function Shell() {
             onPress={() => setAppDrawerOpen((value) => !value)}
             style={styles.titleButton}
           >
-            <View style={[styles.menuButton, appDrawerOpen && styles.menuButtonActive]}>
-              <Menu color={appDrawerOpen ? colors.accent : colors.text} size={19} strokeWidth={2.2} />
-            </View>
-            {!pairingVisible &&
-            ((tab === 'drones' && dronesHeader) || (tab === 'assistant' && assistantHeader)) ? (
+            {!hasOpenChatHeader ? (
+              <View style={[styles.menuButton, appDrawerOpen && styles.menuButtonActive]}>
+                <Menu
+                  color={appDrawerOpen ? colors.accent : colors.text}
+                  size={19}
+                  strokeWidth={2.2}
+                />
+              </View>
+            ) : null}
+            {hasOpenChatHeader ? (
               <View style={styles.contextTitle}>
                 <View style={styles.contextTitleRow}>
-                  <View
-                    style={[
-                      styles.contextStatus,
-                      ((tab === 'drones' && dronesHeader?.statusOk) ||
-                        (tab === 'assistant' && assistantHeader?.statusTone === 'online')) &&
-                        styles.contextStatusOnline,
-                      tab === 'assistant' &&
-                        assistantHeader?.statusTone === 'error' &&
-                        styles.contextStatusError,
-                      tab === 'drones' &&
-                        dronesHeader &&
-                        !dronesHeader.statusOk &&
-                        styles.contextStatusError,
-                    ]}
-                  />
                   <Text numberOfLines={1} style={styles.contextTitleText}>
                     {tab === 'drones' ? dronesHeader?.title : assistantHeader?.title}
                   </Text>
@@ -353,7 +347,9 @@ export function MeshApp() {
   return (
     <MeshProvider>
       <LocalAssistantProvider>
-        <Shell />
+        <AssistantDrawerProvider>
+          <Shell />
+        </AssistantDrawerProvider>
       </LocalAssistantProvider>
     </MeshProvider>
   );
@@ -370,27 +366,43 @@ const styles = StyleSheet.create({
   },
   loadingText: { color: colors.muted, fontSize: 12 },
   header: {
-    height: 62,
+    height: 58,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 12,
+    paddingHorizontal: 10,
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
     justifyContent: 'space-between',
+    backgroundColor: colors.panel,
   },
-  title: { color: colors.textStrong, fontSize: 18, fontWeight: '800', letterSpacing: -0.35 },
+  headerAccent: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    width: 94,
+    height: 1,
+    backgroundColor: colors.accent,
+    opacity: 0.7,
+  },
+  title: {
+    color: colors.textStrong,
+    fontSize: 15,
+    fontWeight: '800',
+    letterSpacing: 0.35,
+    textTransform: 'uppercase',
+  },
   titleButton: {
     flex: 1,
     minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 11,
-    minHeight: 48,
+    gap: 10,
+    minHeight: 44,
   },
   menuButton: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
+    width: 36,
+    height: 36,
+    borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
@@ -399,20 +411,17 @@ const styles = StyleSheet.create({
   },
   menuButtonActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
   contextTitle: { flex: 1, minWidth: 0, justifyContent: 'center' },
-  contextTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  contextStatus: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.overlay0 },
-  contextStatusOnline: { backgroundColor: colors.online },
-  contextStatusError: { backgroundColor: colors.danger },
+  contextTitleRow: { flexDirection: 'row', alignItems: 'center' },
   contextTitleText: {
     flexShrink: 1,
     color: colors.text,
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '800',
     letterSpacing: -0.15,
   },
   contextSubtitle: {
     color: colors.muted,
-    fontSize: 8,
+    fontSize: 9,
     fontFamily: 'monospace',
     marginTop: 2,
     marginLeft: 0,
@@ -425,7 +434,7 @@ const styles = StyleSheet.create({
     height: 32,
     paddingHorizontal: 9,
     justifyContent: 'center',
-    borderRadius: 11,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panelRaised,
@@ -439,7 +448,7 @@ const styles = StyleSheet.create({
   contextDeleteAction: {
     width: 32,
     height: 32,
-    borderRadius: 10,
+    borderRadius: 6,
     alignItems: 'center',
     justifyContent: 'center',
   },

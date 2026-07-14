@@ -51,6 +51,7 @@ export const colors = {
   accentWash: 'rgba(203, 166, 247, 0.07)',
   warning: catppuccin.yellow,
   warningDark: 'rgba(249, 226, 175, 0.12)',
+  warningBorder: 'rgba(249, 226, 175, 0.38)',
   danger: catppuccin.red,
   dangerDark: 'rgba(243, 139, 168, 0.12)',
   dangerBorder: 'rgba(243, 139, 168, 0.38)',
@@ -66,9 +67,9 @@ export const colors = {
 } as const;
 
 export const radii = {
-  small: 10,
-  medium: 14,
-  large: 18,
-  xlarge: 24,
+  small: 6,
+  medium: 8,
+  large: 10,
+  xlarge: 14,
   pill: 999,
 } as const;

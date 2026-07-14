@@ -19,14 +19,13 @@ export type AssistantLocation = 'phone' | 'devices';
 export type AssistantAppHeaderState = {
   title: string;
   subtitle: string;
-  statusTone: 'online' | 'muted' | 'error';
   accessOpen?: boolean;
   accessDisabled?: boolean;
   onToggleAccess?(): void;
   onDelete?(): void;
 };
 
-const APP_HEADER_HEIGHT = 54;
+const APP_HEADER_HEIGHT = 58;
 
 export function AssistantHomeScreen({
   drawerOpen,
