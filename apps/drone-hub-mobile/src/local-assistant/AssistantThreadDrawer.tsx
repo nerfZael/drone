@@ -506,8 +506,12 @@ export function AssistantThreadDrawer({
           ]}
         >
           <View style={styles.header}>
+            <View style={styles.brandMark}>
+              <Plane color={colors.crust} size={19} strokeWidth={2.4} />
+            </View>
             <View style={styles.headerCopy}>
-              <Text style={styles.title}>DroneHub</Text>
+              <Text style={styles.title}>Drone Hub</Text>
+              <Text style={styles.brandSubtitle}>PRIVATE MESH CONTROL</Text>
             </View>
             <Pressable onPress={onClose} style={styles.close}>
               <X color={colors.muted} size={20} strokeWidth={2} />
@@ -711,7 +715,7 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    backgroundColor: 'rgba(3, 10, 12, 0.62)',
+    backgroundColor: colors.overlay,
   },
   drawer: {
     flex: 1,
@@ -719,22 +723,38 @@ const styles = StyleSheet.create({
     borderRightColor: colors.border,
     borderRightWidth: 1,
     elevation: 20,
-    shadowColor: '#000',
+    shadowColor: colors.shadow,
     shadowOpacity: 0.5,
     shadowRadius: 24,
     shadowOffset: { width: 10, height: 0 },
     overflow: 'hidden',
   },
   header: {
-    minHeight: 68,
+    minHeight: 76,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 16,
+    paddingHorizontal: 14,
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
   },
+  brandMark: {
+    width: 38,
+    height: 38,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 11,
+    backgroundColor: colors.accent,
+  },
   headerCopy: { flex: 1, minWidth: 0 },
-  title: { color: colors.text, fontSize: 19, fontWeight: '800', letterSpacing: -0.3 },
+  title: { color: colors.textStrong, fontSize: 18, fontWeight: '800', letterSpacing: -0.3 },
+  brandSubtitle: {
+    color: colors.subtle,
+    fontSize: 7,
+    fontWeight: '900',
+    letterSpacing: 1.1,
+    marginTop: 2,
+  },
   close: { width: 38, height: 38, alignItems: 'center', justifyContent: 'center' },
   navigation: {
     gap: 2,
@@ -750,11 +770,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 12,
     paddingHorizontal: 10,
-    borderRadius: 9,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: 'transparent',
   },
-  navigationItemActive: { backgroundColor: colors.panel },
+  navigationItemActive: { backgroundColor: colors.accentDark, borderColor: colors.accentBorder },
   navigationLabel: { color: colors.muted, fontSize: 13, fontWeight: '700' },
-  navigationLabelActive: { color: colors.text },
+  navigationLabelActive: { color: colors.accentAlt },
   sectionLabel: {
     color: colors.accent,
     fontSize: 8,
@@ -779,7 +801,7 @@ const styles = StyleSheet.create({
     borderRadius: 18,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.panelRaised,
   },
   createDisabled: { opacity: 0.42 },
   scroll: { flex: 1 },
@@ -821,7 +843,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.45,
   },
-  deviceDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#53676d' },
+  deviceDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.overlay0 },
   deviceDotOnline: { backgroundColor: colors.online },
   deviceOptions: {
     maxHeight: 220,
@@ -865,9 +887,9 @@ const styles = StyleSheet.create({
   droneList: { paddingHorizontal: 9, paddingBottom: 24, gap: 5 },
   repoGroup: {
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.035)',
+    borderColor: colors.whiteWash,
     borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.012)',
+    backgroundColor: colors.whiteWashSoft,
     overflow: 'hidden',
   },
   repoRow: {
@@ -878,7 +900,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     borderRadius: 8,
   },
-  repoRowActive: { backgroundColor: 'rgba(98,217,199,0.035)' },
+  repoRowActive: { backgroundColor: colors.accentWash },
   repoCopy: { flex: 1, minWidth: 0 },
   repoName: { color: colors.text, fontSize: 12, fontWeight: '800' },
   repoPath: { color: colors.muted, fontSize: 8, fontFamily: 'monospace', marginTop: 1 },
@@ -923,7 +945,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: colors.background,
   },
-  droneIconActive: { borderColor: '#315b5d', backgroundColor: colors.accentDark },
+  droneIconActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
   droneCopy: { flex: 1, minWidth: 0 },
   droneName: { color: colors.text, fontSize: 12, fontWeight: '800' },
   droneMeta: {

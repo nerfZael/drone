@@ -56,7 +56,7 @@ function IconButton({
       ]}
     >
       <Icon
-        color={accent ? colors.background : colors.text}
+        color={accent ? colors.crust : colors.text}
         size={17}
         strokeWidth={accent ? 2.6 : 2.1}
       />
@@ -155,25 +155,25 @@ export function AssistantComposer({
 
 const styles = StyleSheet.create({
   frame: {
-    paddingHorizontal: 11,
-    paddingTop: 7,
-    paddingBottom: 10,
+    paddingHorizontal: 12,
+    paddingTop: 8,
+    paddingBottom: 11,
     backgroundColor: colors.background,
   },
   composer: {
     minHeight: 52,
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: '#294047',
+    borderColor: colors.border,
     backgroundColor: colors.panelRaised,
-    shadowColor: '#000',
-    shadowOpacity: 0.34,
-    shadowRadius: 16,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.42,
+    shadowRadius: 18,
     shadowOffset: { width: 0, height: 8 },
     elevation: 10,
     overflow: 'hidden',
   },
-  composerExpanded: { borderRadius: 20, borderColor: '#36545d' },
+  composerExpanded: { borderRadius: 20, borderColor: colors.accentBorder },
   input: {
     minHeight: 50,
     maxHeight: 132,
@@ -202,7 +202,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.surface1,
   },
   iconButtonAccent: { borderColor: colors.accent, backgroundColor: colors.accent },
   modelControl: {
@@ -212,7 +212,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 8,
-    borderRadius: 10,
+    borderRadius: 11,
+    backgroundColor: colors.accentWash,
   },
   modelLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', flexShrink: 1 },
   disabled: { opacity: 0.4 },

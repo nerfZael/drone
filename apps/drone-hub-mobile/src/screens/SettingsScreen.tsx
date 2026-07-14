@@ -1,5 +1,8 @@
 import React from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import Bot from 'lucide-react-native/icons/bot';
+import Link2 from 'lucide-react-native/icons/link-2';
+import Smartphone from 'lucide-react-native/icons/smartphone';
 import { Button, Card, ConfirmDialog, ErrorBanner, Label, textStyles } from '../components/Ui';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
@@ -7,10 +10,10 @@ import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSet
 
 export type SettingsTab = 'assistant' | 'devices' | 'pairing';
 
-const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
-  { id: 'assistant', label: 'Assistant' },
-  { id: 'devices', label: 'Devices' },
-  { id: 'pairing', label: 'Pairing' },
+const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; icon: typeof Bot }> = [
+  { id: 'assistant', label: 'Assistant', icon: Bot },
+  { id: 'devices', label: 'Devices', icon: Smartphone },
+  { id: 'pairing', label: 'Pairing', icon: Link2 },
 ];
 
 export function SettingsScreen({
@@ -75,6 +78,7 @@ export function SettingsScreen({
       <View style={styles.tabs}>
         {SETTINGS_TABS.map((item) => {
           const active = item.id === tab;
+          const Icon = item.icon;
           return (
             <Pressable
               key={item.id}
@@ -83,6 +87,11 @@ export function SettingsScreen({
               onPress={() => onTabChange(item.id)}
               style={[styles.tab, active && styles.tabActive]}
             >
+              <Icon
+                color={active ? colors.accent : colors.muted}
+                size={14}
+                strokeWidth={active ? 2.4 : 2}
+              />
               <Text style={[styles.tabText, active && styles.tabTextActive]}>{item.label}</Text>
             </Pressable>
           );
@@ -116,7 +125,7 @@ export function SettingsScreen({
                 value={phoneName}
                 onChangeText={setPhoneName}
                 placeholder="Android phone"
-                placeholderTextColor="#5f767d"
+                placeholderTextColor={colors.subtle}
                 autoCapitalize="words"
                 autoCorrect={false}
                 maxLength={80}
@@ -236,32 +245,36 @@ const styles = StyleSheet.create({
   shell: { flex: 1 },
   tabs: {
     flexDirection: 'row',
-    gap: 5,
-    paddingHorizontal: 12,
-    paddingVertical: 9,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    backgroundColor: colors.background,
-  },
-  tab: {
-    flex: 1,
-    minHeight: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
+    gap: 4,
+    marginHorizontal: 12,
+    marginVertical: 10,
+    padding: 4,
+    borderRadius: 14,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panel,
   },
-  tabActive: { borderColor: colors.accent, backgroundColor: colors.accentDark },
+  tab: {
+    flex: 1,
+    minHeight: 38,
+    flexDirection: 'row',
+    gap: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+  },
+  tabActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
   tabText: { color: colors.muted, fontSize: 10, fontWeight: '800' },
-  tabTextActive: { color: colors.text },
-  page: { padding: 20, gap: 14 },
+  tabTextActive: { color: colors.accentAlt },
+  page: { paddingHorizontal: 18, paddingTop: 10, paddingBottom: 28, gap: 14 },
   title: { marginTop: 6, marginBottom: 8 },
   nameInput: {
     minHeight: 44,
     color: colors.text,
-    backgroundColor: colors.background,
+    backgroundColor: colors.panel,
     borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 12,

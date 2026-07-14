@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
+import Boxes from 'lucide-react-native/icons/boxes';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Card, ErrorBanner, Label, textStyles } from '../components/Ui';
 import {
@@ -36,7 +37,7 @@ import {
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
 
-const APP_HEADER_HEIGHT = 54;
+const APP_HEADER_HEIGHT = 62;
 
 export type DronesAppHeaderState = {
   title: string;
@@ -632,13 +633,18 @@ export function DronesScreen({
         ) : (
           <View style={styles.landing}>
             <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
-              <View>
-                <Label>Drone control</Label>
-                <Text style={[textStyles.title, styles.title]}>Choose a drone from the menu.</Text>
-                <Text style={textStyles.body}>
-                  Drones are organized by repository, group, fleet hierarchy, and chat in the
-                  DroneHub menu.
-                </Text>
+              <View style={styles.hero}>
+                <View style={styles.heroIcon}>
+                  <Boxes color={colors.accent} size={27} strokeWidth={2} />
+                </View>
+                <View>
+                  <Label>Drone control</Label>
+                  <Text style={[textStyles.title, styles.title]}>Choose a drone from the menu.</Text>
+                  <Text style={textStyles.body}>
+                    Drones are organized by repository, group, fleet hierarchy, and chat in the
+                    Drone Hub menu.
+                  </Text>
+                </View>
               </View>
               {!targetSupportsDrones ? (
                 <Card>
@@ -671,7 +677,7 @@ export function DronesScreen({
                     value={createName}
                     onChangeText={setCreateName}
                     placeholder="Optional name"
-                    placeholderTextColor="#5f767d"
+                    placeholderTextColor={colors.subtle}
                     style={styles.nameInput}
                   />
                   <View style={styles.createButtons}>
@@ -705,7 +711,18 @@ const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: { flex: 1 },
   landing: { flex: 1 },
-  page: { padding: 20, gap: 14 },
+  page: { padding: 20, paddingBottom: 32, gap: 16 },
+  hero: { gap: 15, marginBottom: 2 },
+  heroIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
+    backgroundColor: colors.accentDark,
+  },
   title: { marginTop: 6, marginBottom: 8 },
   chatWorkspace: { flex: 1, backgroundColor: colors.background },
   chatTabsFrame: {
@@ -727,10 +744,10 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.panelRaised,
   },
   chatTabActive: {
-    borderColor: '#315b5d',
+    borderColor: colors.accentBorder,
     backgroundColor: colors.accentDark,
   },
   chatTabPressed: { opacity: 0.72 },
@@ -742,7 +759,7 @@ const styles = StyleSheet.create({
   createTitle: { marginTop: 4, marginBottom: 12 },
   nameInput: {
     color: colors.text,
-    backgroundColor: colors.background,
+    backgroundColor: colors.panel,
     borderColor: colors.border,
     borderWidth: 1,
     borderRadius: 12,

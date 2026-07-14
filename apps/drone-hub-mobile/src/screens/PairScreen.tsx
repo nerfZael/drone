@@ -1,6 +1,8 @@
 import React from 'react';
 import { StyleSheet, Text, TextInput, View } from 'react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import QrCode from 'lucide-react-native/icons/qr-code';
+import ShieldCheck from 'lucide-react-native/icons/shield-check';
 import { Button, Card, ErrorBanner, Label, textStyles } from '../components/Ui';
 import { useMesh } from '../mesh/MeshContext';
 import { readPairingCode } from '../mesh/pair-device';
@@ -54,13 +56,18 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
 
   return (
     <View style={styles.page}>
-      <View>
-        <Label>Private device mesh</Label>
-        <Text style={[textStyles.title, styles.title]}>Pair without an account.</Text>
-        <Text style={textStyles.body}>
-          Scan a short-lived code from a Drone Hub computer. That computer must approve this phone
-          before anything is shared.
-        </Text>
+      <View style={styles.hero}>
+        <View style={styles.heroIcon}>
+          <ShieldCheck color={colors.accent} size={27} strokeWidth={2} />
+        </View>
+        <View style={styles.heroCopy}>
+          <Label>Private device mesh</Label>
+          <Text style={[textStyles.title, styles.title]}>Pair without an account.</Text>
+          <Text style={textStyles.body}>
+            Scan a short-lived code from a Drone Hub computer. That computer must approve this phone
+            before anything is shared.
+          </Text>
+        </View>
       </View>
 
       {scanning ? (
@@ -77,7 +84,12 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
         </Card>
       ) : (
         <Card>
-          <Text style={textStyles.heading}>Add your first route</Text>
+          <View style={styles.cardHeading}>
+            <View style={styles.cardIcon}>
+              <QrCode color={colors.accentAlt} size={18} strokeWidth={2.2} />
+            </View>
+            <Text style={textStyles.heading}>Add your first route</Text>
+          </View>
           <Text style={[textStyles.body, styles.copy]}>
             The QR code contains an address and one-time secret. Your permanent private key stays in
             Android secure storage.
@@ -94,7 +106,7 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
             value={code}
             onChangeText={setCode}
             placeholder="Paste pairing JSON"
-            placeholderTextColor="#5f767d"
+            placeholderTextColor={colors.subtle}
             multiline
             autoCapitalize="none"
             autoCorrect={false}
@@ -126,8 +138,29 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
 }
 
 const styles = StyleSheet.create({
-  page: { padding: 20, gap: 16 },
+  page: { padding: 20, paddingBottom: 32, gap: 18 },
+  hero: { gap: 15 },
+  heroIcon: {
+    width: 52,
+    height: 52,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
+    backgroundColor: colors.accentDark,
+  },
+  heroCopy: { maxWidth: 500 },
   title: { marginTop: 6, marginBottom: 8 },
+  cardHeading: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  cardIcon: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.accentDark,
+  },
   copy: { marginTop: 6, marginBottom: 16 },
   divider: { flexDirection: 'row', alignItems: 'center', gap: 10, marginVertical: 16 },
   line: { flex: 1, height: 1, backgroundColor: colors.border },
@@ -135,10 +168,10 @@ const styles = StyleSheet.create({
   input: {
     minHeight: 92,
     color: colors.text,
-    backgroundColor: colors.background,
+    backgroundColor: colors.panel,
     borderColor: colors.border,
     borderWidth: 1,
-    borderRadius: 12,
+    borderRadius: 14,
     padding: 12,
     fontFamily: 'monospace',
     fontSize: 11,
@@ -159,7 +192,7 @@ const styles = StyleSheet.create({
   },
   waiting: { color: colors.warning, fontSize: 14, lineHeight: 20, marginBottom: 12 },
   identity: {
-    color: '#50666d',
+    color: colors.subtle,
     fontSize: 9,
     fontFamily: 'monospace',
     textAlign: 'center',

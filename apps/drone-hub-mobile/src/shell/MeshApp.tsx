@@ -11,6 +11,10 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import ChevronLeft from 'lucide-react-native/icons/chevron-left';
+import Menu from 'lucide-react-native/icons/menu';
+import Trash2 from 'lucide-react-native/icons/trash-2';
+import WifiOff from 'lucide-react-native/icons/wifi-off';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
 import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext';
 import {
@@ -192,7 +196,8 @@ function Shell() {
       {mesh.profile ? (
         <View style={styles.pairBack}>
           <Pressable onPress={() => setPairing(false)} style={styles.backButton}>
-            <Text style={styles.backText}>‹ Settings</Text>
+            <ChevronLeft color={colors.accent} size={17} strokeWidth={2.4} />
+            <Text style={styles.backText}>Settings</Text>
           </Pressable>
         </View>
       ) : null}
@@ -266,6 +271,9 @@ function Shell() {
             onPress={() => setAppDrawerOpen((value) => !value)}
             style={styles.titleButton}
           >
+            <View style={[styles.menuButton, appDrawerOpen && styles.menuButtonActive]}>
+              <Menu color={appDrawerOpen ? colors.accent : colors.text} size={19} strokeWidth={2.2} />
+            </View>
             {!pairingVisible &&
             ((tab === 'drones' && dronesHeader) || (tab === 'assistant' && assistantHeader)) ? (
               <View style={styles.contextTitle}>
@@ -288,17 +296,13 @@ function Shell() {
                   <Text numberOfLines={1} style={styles.contextTitleText}>
                     {tab === 'drones' ? dronesHeader?.title : assistantHeader?.title}
                   </Text>
-                  <Text style={styles.titleChevron}>{appDrawerOpen ? '‹' : '›'}</Text>
                 </View>
                 <Text numberOfLines={1} style={styles.contextSubtitle}>
                   {tab === 'drones' ? dronesHeader?.subtitle : assistantHeader?.subtitle}
                 </Text>
               </View>
             ) : (
-              <>
-                <Text style={styles.title}>{title}</Text>
-                <Text style={styles.titleChevron}>{appDrawerOpen ? '‹' : '›'}</Text>
-              </>
+              <Text style={styles.title}>{title}</Text>
             )}
           </Pressable>
         ) : (
@@ -329,12 +333,13 @@ function Shell() {
               onPress={assistantHeader.onDelete}
               style={styles.contextDeleteAction}
             >
-              <Text style={styles.contextDeleteActionText}>×</Text>
+              <Trash2 color={colors.muted} size={17} strokeWidth={2} />
             </Pressable>
           ) : null}
           {mesh.connectedDeviceIds.length === 0 ? (
             <View style={styles.route}>
-              <Text style={styles.routeText}>OFFLINE</Text>
+              <WifiOff color={colors.warning} size={11} strokeWidth={2.2} />
+              <Text style={styles.routeText}>Offline</Text>
             </View>
           ) : null}
         </View>
@@ -365,27 +370,37 @@ const styles = StyleSheet.create({
   },
   loadingText: { color: colors.muted, fontSize: 12 },
   header: {
-    height: 54,
+    height: 62,
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 20,
+    paddingHorizontal: 12,
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
     justifyContent: 'space-between',
   },
-  title: { color: colors.text, fontSize: 18, fontWeight: '800', letterSpacing: -0.2 },
+  title: { color: colors.textStrong, fontSize: 18, fontWeight: '800', letterSpacing: -0.35 },
   titleButton: {
     flex: 1,
     minWidth: 0,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
-    minHeight: 42,
+    gap: 11,
+    minHeight: 48,
   },
-  titleChevron: { color: colors.accent, fontSize: 20, fontWeight: '700' },
+  menuButton: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panelRaised,
+  },
+  menuButtonActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
   contextTitle: { flex: 1, minWidth: 0, justifyContent: 'center' },
   contextTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
-  contextStatus: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#53676d' },
+  contextStatus: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.overlay0 },
   contextStatusOnline: { backgroundColor: colors.online },
   contextStatusError: { backgroundColor: colors.danger },
   contextTitleText: {
@@ -400,7 +415,7 @@ const styles = StyleSheet.create({
     fontSize: 8,
     fontFamily: 'monospace',
     marginTop: 2,
-    marginLeft: 14,
+    marginLeft: 0,
     textTransform: 'uppercase',
     letterSpacing: 0.35,
   },
@@ -410,10 +425,10 @@ const styles = StyleSheet.create({
     height: 32,
     paddingHorizontal: 9,
     justifyContent: 'center',
-    borderRadius: 9,
+    borderRadius: 11,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.panel,
+    backgroundColor: colors.panelRaised,
   },
   contextTextActionLabel: {
     color: colors.accent,
@@ -421,19 +436,35 @@ const styles = StyleSheet.create({
     fontWeight: '900',
     letterSpacing: 0.8,
   },
-  contextDeleteAction: { width: 30, height: 32, alignItems: 'center', justifyContent: 'center' },
-  contextDeleteActionText: { color: colors.muted, fontSize: 22 },
+  contextDeleteAction: {
+    width: 32,
+    height: 32,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   route: {
     marginLeft: 'auto',
-    borderColor: colors.border,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderColor: colors.warning,
     borderWidth: 1,
-    borderRadius: 10,
-    paddingHorizontal: 7,
-    paddingVertical: 4,
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    backgroundColor: colors.warningDark,
   },
-  routeText: { color: colors.muted, fontSize: 8, fontWeight: '900', letterSpacing: 1 },
+  routeText: { color: colors.warning, fontSize: 9, fontWeight: '800', letterSpacing: 0.2 },
   content: { flex: 1 },
   pairBack: { paddingHorizontal: 20, paddingTop: 14 },
-  backButton: { alignSelf: 'flex-start', minHeight: 32, justifyContent: 'center' },
+  backButton: {
+    alignSelf: 'flex-start',
+    minHeight: 32,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 2,
+  },
   backText: { color: colors.accent, fontSize: 13, fontWeight: '800' },
 });

@@ -5,6 +5,15 @@
     "version": "0.1.0",
     "orientation": "portrait",
     "userInterfaceStyle": "dark",
+    "backgroundColor": "#1e1e2e",
+    "androidStatusBar": {
+      "backgroundColor": "#1e1e2e",
+      "barStyle": "light-content"
+    },
+    "androidNavigationBar": {
+      "backgroundColor": "#181825",
+      "barStyle": "light-content"
+    },
     "android": {
       "package": "com.dronehub.mobile",
       "softwareKeyboardLayoutMode": "resize",

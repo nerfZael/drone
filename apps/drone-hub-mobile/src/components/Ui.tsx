@@ -10,7 +10,8 @@ import {
   type ViewStyle,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { colors } from '../theme';
+import AlertTriangle from 'lucide-react-native/icons/triangle-alert';
+import { colors, radii } from '../theme';
 
 export function Card({ children, style }: { children: any; style?: ViewStyle }) {
   return <View style={[styles.card, style]}>{children}</View>;
@@ -116,9 +117,11 @@ export function ConfirmDialog({
         />
         <View style={styles.dialog}>
           <View style={[styles.dialogMark, destructive && styles.dialogMarkDanger]}>
-            <Text style={[styles.dialogMarkText, destructive && styles.dialogMarkTextDanger]}>
-              !
-            </Text>
+            <AlertTriangle
+              color={destructive ? colors.danger : colors.accent}
+              size={20}
+              strokeWidth={2.3}
+            />
           </View>
           <Text style={styles.dialogTitle}>{title}</Text>
           <Text style={styles.dialogMessage}>{message}</Text>
@@ -142,53 +145,58 @@ export function ConfirmDialog({
 }
 
 export const textStyles: Record<string, TextStyle> = {
-  title: { color: colors.text, fontSize: 27, fontWeight: '700', letterSpacing: -0.7 },
-  heading: { color: colors.text, fontSize: 17, fontWeight: '700' },
-  body: { color: colors.muted, fontSize: 14, lineHeight: 20 },
+  title: { color: colors.textStrong, fontSize: 29, fontWeight: '800', letterSpacing: -0.9 },
+  heading: { color: colors.text, fontSize: 17, fontWeight: '800', letterSpacing: -0.2 },
+  body: { color: colors.muted, fontSize: 14, lineHeight: 21 },
   mono: { color: colors.muted, fontSize: 11, fontFamily: 'monospace' },
 };
 
 const buttonTones = StyleSheet.create({
   accent: { backgroundColor: colors.accent, borderColor: colors.accent },
-  quiet: { backgroundColor: colors.panelRaised, borderColor: colors.border },
-  danger: { backgroundColor: '#35191d', borderColor: '#653139' },
+  quiet: { backgroundColor: colors.surface0, borderColor: colors.border },
+  danger: { backgroundColor: colors.dangerDark, borderColor: colors.dangerBorder },
 });
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.panel,
+    backgroundColor: colors.panelRaised,
     borderWidth: 1,
     borderColor: colors.border,
-    borderRadius: 16,
-    padding: 16,
+    borderRadius: radii.large,
+    padding: 17,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.18,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 5 },
+    elevation: 2,
   },
   label: {
-    color: colors.accent,
-    fontSize: 10,
+    color: colors.accentAlt,
+    fontSize: 9,
     fontWeight: '800',
-    letterSpacing: 1.5,
+    letterSpacing: 1.4,
     textTransform: 'uppercase',
   },
   button: {
-    minHeight: 44,
+    minHeight: 46,
     borderWidth: 1,
-    borderRadius: 12,
-    paddingHorizontal: 15,
+    borderRadius: radii.medium,
+    paddingHorizontal: 17,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
   },
-  buttonText: { color: colors.text, fontSize: 13, fontWeight: '700' },
-  accentButtonText: { color: colors.background },
+  buttonText: { color: colors.text, fontSize: 13, fontWeight: '800', letterSpacing: 0.1 },
+  accentButtonText: { color: colors.crust },
   disabled: { opacity: 0.45 },
   pressed: { transform: [{ scale: 0.985 }] },
   error: {
-    backgroundColor: '#35191d',
-    borderColor: '#653139',
+    backgroundColor: colors.dangerDark,
+    borderColor: colors.dangerBorder,
     borderWidth: 1,
-    borderRadius: 12,
-    padding: 12,
+    borderRadius: radii.medium,
+    padding: 13,
   },
   errorText: { color: colors.danger, fontSize: 13, lineHeight: 18 },
   dialogLayer: {
@@ -196,17 +204,17 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     padding: 24,
-    backgroundColor: 'rgba(3, 10, 12, 0.76)',
+    backgroundColor: colors.overlay,
   },
   dialog: {
     width: '100%',
     maxWidth: 420,
-    borderRadius: 22,
+    borderRadius: radii.xlarge,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.panelRaised,
-    padding: 22,
-    shadowColor: '#000',
+    backgroundColor: colors.panel,
+    padding: 24,
+    shadowColor: colors.shadow,
     shadowOpacity: 0.5,
     shadowRadius: 24,
     shadowOffset: { width: 0, height: 12 },
@@ -217,14 +225,12 @@ const styles = StyleSheet.create({
     height: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 11,
+    borderRadius: radii.medium,
     backgroundColor: colors.accentDark,
     marginBottom: 16,
   },
-  dialogMarkDanger: { backgroundColor: '#35191d' },
-  dialogMarkText: { color: colors.accent, fontSize: 18, fontWeight: '900' },
-  dialogMarkTextDanger: { color: colors.danger },
-  dialogTitle: { color: colors.text, fontSize: 21, fontWeight: '800', letterSpacing: -0.4 },
+  dialogMarkDanger: { backgroundColor: colors.dangerDark },
+  dialogTitle: { color: colors.textStrong, fontSize: 22, fontWeight: '800', letterSpacing: -0.5 },
   dialogMessage: { color: colors.muted, fontSize: 14, lineHeight: 21, marginTop: 9 },
   dialogActions: { flexDirection: 'row', gap: 9, marginTop: 22 },
   dialogButton: { flex: 1 },
