@@ -3,8 +3,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { WORKSPACE_CAPABILITY } from '@drone/device-protocol';
 import type { CapabilityHandler } from '../../device-mesh-types';
+import { CommandJobStore } from './command-job-store';
 import { CrossDeviceAssistantPolicyStore } from './policy-store';
-import type { TargetWorkspaceRule } from './policy-types';
 
 const MAX_FILE_BYTES = 192 * 1024;
 const MAX_SEARCH_ENTRIES = 5_000;
@@ -93,37 +93,101 @@ function boundedInteger(
 export function createWorkspaceCapability(
   policies: CrossDeviceAssistantPolicyStore,
 ): CapabilityHandler {
+  const commandJobs = new CommandJobStore();
+  const unsubscribe = policies.onChange(() => {
+    void commandJobs.cancelUnauthorized(async (deviceId, workspaceId) =>
+      Boolean((await policies.deviceGrant(deviceId, workspaceId))?.execute),
+    );
+  });
   return {
     descriptor: WORKSPACE_CAPABILITY,
+    close: () => {
+      unsubscribe();
+      commandJobs.close();
+    },
+    revokeDevice: (deviceId) => commandJobs.cancelForDevice(deviceId),
     async invoke(operation, rawPayload, context) {
       const payload = object(rawPayload);
-      const actor = object(payload.actor);
-      const rule: TargetWorkspaceRule = {
-        assistantHomeDeviceId: String(actor.assistantHomeDeviceId ?? ''),
-        threadId: String(actor.threadId ?? ''),
-        rootId: String(actor.rootId ?? ''),
-        read: actor.read === true,
-        write: actor.write === true,
-      };
-      if (
-        rule.assistantHomeDeviceId !== context.sourceDevice.id ||
-        !(await policies.exactTargetRule(rule))
-      ) {
-        throw Object.assign(new Error('thread workspace policy does not match this request'), {
-          code: 'THREAD_POLICY_DENIED',
+      if (operation === 'workspaces.list') {
+        const roots = await policies.grantedRoots(context.sourceDevice.id);
+        return {
+          workspaces: roots.map(({ id, label, read, write, execute }) => ({
+            id,
+            name: label || id,
+            read,
+            write,
+            execute,
+          })),
+        };
+      }
+      const rootId = String(payload.workspaceId ?? payload.rootId ?? '').trim();
+      const grant = await policies.deviceGrant(context.sourceDevice.id, rootId);
+      if (!grant) {
+        throw Object.assign(new Error('this device does not have access to that workspace'), {
+          code: 'WORKSPACE_POLICY_DENIED',
         });
       }
-      const writing = operation === 'files.write';
-      if ((writing && !rule.write) || (!writing && !rule.read))
-        throw Object.assign(new Error('thread does not have this workspace permission'), {
-          code: 'THREAD_POLICY_DENIED',
+      const required =
+        operation === 'files.write'
+          ? 'write'
+          : operation.startsWith('commands.')
+            ? 'execute'
+            : 'read';
+      if (!grant[required])
+        throw Object.assign(new Error(`this device does not have ${required} workspace access`), {
+          code: 'WORKSPACE_POLICY_DENIED',
         });
-      const root = await policies.root(rule.rootId);
+      const root = await policies.root(rootId);
       if (!root)
         throw Object.assign(new Error('configured workspace root was not found'), {
           code: 'ROOT_NOT_FOUND',
         });
       const rootPath = await fs.realpath(root.path);
+      if (operation === 'commands.start')
+        return commandJobs.start({
+          sourceDeviceId: context.sourceDevice.id,
+          workspaceId: rootId,
+          rootPath,
+          command: payload.command,
+          timeoutMs: payload.timeoutMs,
+        });
+      if (operation === 'commands.status')
+        return commandJobs.status(context.sourceDevice.id, rootId, payload.jobId);
+      if (operation === 'commands.output')
+        return await commandJobs.output({
+          sourceDeviceId: context.sourceDevice.id,
+          workspaceId: rootId,
+          jobId: payload.jobId,
+          cursor: payload.cursor,
+          waitMs: payload.waitMs,
+        });
+      if (operation === 'commands.cancel')
+        return commandJobs.cancel(context.sourceDevice.id, rootId, payload.jobId);
+      if (operation === 'commands.run') {
+        const job = commandJobs.start({
+          sourceDeviceId: context.sourceDevice.id,
+          workspaceId: rootId,
+          rootPath,
+          command: payload.command,
+          timeoutMs: payload.timeoutMs,
+          maximumTimeoutMs: 60 * 60_000,
+        });
+        let cursor = 0;
+        let text = '';
+        let current: any = job;
+        do {
+          current = await commandJobs.output({
+            sourceDeviceId: context.sourceDevice.id,
+            workspaceId: rootId,
+            jobId: job.jobId,
+            cursor,
+            waitMs: 5_000,
+          });
+          cursor = current.cursor;
+          text += current.chunks.map((chunk: any) => String(chunk.text ?? '')).join('');
+        } while (current.status === 'running');
+        return textResult(text || '(no output)', current);
+      }
       const requestedPath = relativePath(payload.path);
 
       if (operation === 'files.list') {

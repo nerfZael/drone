@@ -1,6 +1,8 @@
 import type { CapabilityDescriptor } from '@drone/device-protocol';
 import type { CapabilityContext, CapabilityHandler } from './device-mesh-types';
 
+const MAX_RESULT_BYTES = 220 * 1024;
+
 export class CapabilityRegistry {
   private readonly handlers = new Map<string, CapabilityHandler>();
 
@@ -12,6 +14,16 @@ export class CapabilityRegistry {
 
   list(): CapabilityDescriptor[] {
     return [...this.handlers.values()].map(({ descriptor }) => descriptor);
+  }
+
+  async close(): Promise<void> {
+    await Promise.all([...this.handlers.values()].map((handler) => handler.close?.()));
+  }
+
+  async revokeDevice(deviceId: string): Promise<void> {
+    await Promise.all(
+      [...this.handlers.values()].map((handler) => handler.revokeDevice?.(deviceId)),
+    );
   }
 
   async invoke(
@@ -32,6 +44,19 @@ export class CapabilityRegistry {
         { code: 'UNSUPPORTED_OPERATION' },
       );
     }
-    return await handler.invoke(operation, payload, context);
+    const result = await handler.invoke(operation, payload, context);
+    let serialized: string;
+    try {
+      serialized = JSON.stringify(result);
+    } catch {
+      throw Object.assign(new Error('capability result is not serializable'), {
+        code: 'INVALID_CAPABILITY_RESULT',
+      });
+    }
+    if (Buffer.byteLength(serialized) > MAX_RESULT_BYTES)
+      throw Object.assign(new Error('capability result is too large for the device mesh'), {
+        code: 'CAPABILITY_RESULT_TOO_LARGE',
+      });
+    return result;
   }
 }

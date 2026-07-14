@@ -9,9 +9,12 @@ export type LocalAssistantMessage = AssistantMessage & {
 
 export type LocalWorkspaceTarget = {
   targetDeviceId: string;
-  rootId: string;
+  deviceName: string;
+  workspaceId: string;
+  workspaceName: string;
   read: boolean;
   write: boolean;
+  execute: boolean;
 };
 
 export type LocalAssistantThread = {
@@ -23,7 +26,7 @@ export type LocalAssistantThread = {
   thinkingLevel: LocalAssistantThinkingLevel;
   status: 'idle' | 'running' | 'error';
   error: string | null;
-  workspaceTarget: LocalWorkspaceTarget | null;
+  workspaceTargets: LocalWorkspaceTarget[];
   messages: LocalAssistantMessage[];
 };
 

@@ -9,7 +9,11 @@ type PendingRequest = {
   timer: ReturnType<typeof setTimeout>;
   responseWs: WebSocket;
   targetDeviceId: string;
+  signal?: AbortSignal;
+  onAbort?: () => void;
 };
+
+const MAX_REQUEST_BYTES = 240 * 1024;
 
 function send(ws: WebSocket, payload: unknown): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
@@ -28,7 +32,10 @@ export class DeviceMeshRequestClient {
     capability: string,
     operation: string,
     payload: unknown,
+    signal?: AbortSignal,
   ): Promise<unknown> {
+    if (signal?.aborted)
+      throw Object.assign(new Error('mesh request cancelled'), { name: 'AbortError' });
     const connection = this.connectionFor(targetDeviceId);
     if (!connection)
       throw Object.assign(new Error('no mesh route is connected'), { code: 'TARGET_OFFLINE' });
@@ -53,9 +60,17 @@ export class DeviceMeshRequestClient {
       ...unsigned,
       signature: signDeviceText(this.identity, capabilityRequestSigningText(unsigned)),
     };
+    if (Buffer.byteLength(JSON.stringify(request)) > MAX_REQUEST_BYTES)
+      throw Object.assign(new Error('mesh request is too large'), { code: 'REQUEST_TOO_LARGE' });
 
     return await new Promise((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        this.pending.delete(request.requestId);
+        reject(Object.assign(new Error('mesh request cancelled'), { name: 'AbortError' }));
+      };
       const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
         this.pending.delete(request.requestId);
         reject(
           Object.assign(new Error('target device did not respond'), { code: 'TARGET_TIMEOUT' }),
@@ -68,7 +83,10 @@ export class DeviceMeshRequestClient {
         timer,
         responseWs: connection,
         targetDeviceId,
+        signal,
+        onAbort,
       });
+      signal?.addEventListener('abort', onAbort, { once: true });
       send(connection, request);
     });
   }
@@ -86,6 +104,7 @@ export class DeviceMeshRequestClient {
 
     this.pending.delete(requestId);
     clearTimeout(pending.timer);
+    pending.signal?.removeEventListener('abort', pending.onAbort!);
     if (message.ok) pending.resolve(message.result);
     else {
       pending.reject(
@@ -101,6 +120,7 @@ export class DeviceMeshRequestClient {
     for (const [requestId, pending] of this.pending) {
       if (pending.responseWs !== ws) continue;
       clearTimeout(pending.timer);
+      pending.signal?.removeEventListener('abort', pending.onAbort!);
       this.pending.delete(requestId);
       pending.reject(new Error('mesh route disconnected'));
     }
@@ -109,6 +129,7 @@ export class DeviceMeshRequestClient {
   close(): void {
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
+      pending.signal?.removeEventListener('abort', pending.onAbort!);
       pending.reject(new Error('device mesh stopped'));
     }
     this.pending.clear();

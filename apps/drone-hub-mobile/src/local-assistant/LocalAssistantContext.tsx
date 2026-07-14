@@ -4,6 +4,7 @@ import { useMesh } from '../mesh/MeshContext';
 import { readLocalAssistantApiKey, loadLocalAssistantSettings } from './local-assistant-settings';
 import {
   boundLocalAssistantMessages,
+  cleanLocalWorkspaceTargets,
   loadLocalAssistantThreads,
   saveLocalAssistantThreads,
 } from './local-assistant-storage';
@@ -17,7 +18,7 @@ import { runOpenAiChat } from './openai-chat-client';
 import { runCodexChat } from './codex-chat-client';
 import { readLocalAssistantCodexAuth } from './local-assistant-codex-auth';
 import { nextAssistantThreadTitle } from './next-assistant-thread-title';
-import { executeWorkspaceTool, workspaceToolsForThread } from './workspace-tools';
+import { createWorkspaceToolRuntime } from './workspace-tools';
 
 type LocalAssistantContextValue = {
   threads: LocalAssistantThread[];
@@ -35,7 +36,7 @@ type LocalAssistantContextValue = {
       title?: string;
       model?: string;
       thinkingLevel?: LocalAssistantThinkingLevel;
-      workspaceTarget?: LocalWorkspaceTarget | null;
+      workspaceTargets?: LocalWorkspaceTarget[];
     },
   ): Promise<void>;
   sendPrompt(threadId: string, prompt: string): Promise<void>;
@@ -119,7 +120,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         thinkingLevel: settings.thinkingLevel,
         status: 'idle',
         error: null,
-        workspaceTarget: null,
+        workspaceTargets: [],
         messages: [],
       };
       await replaceThreads([thread, ...threadsRef.current]);
@@ -146,7 +147,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         title?: string;
         model?: string;
         thinkingLevel?: LocalAssistantThinkingLevel;
-        workspaceTarget?: LocalWorkspaceTarget | null;
+        workspaceTargets?: LocalWorkspaceTarget[];
       },
     ) => {
       const current = threadsRef.current.find((thread) => thread.id === threadId);
@@ -156,7 +157,9 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         ...(patch.title !== undefined ? { title: patch.title.trim().slice(0, 160) } : {}),
         ...(patch.model !== undefined ? { model: patch.model.trim().slice(0, 100) } : {}),
         ...(patch.thinkingLevel !== undefined ? { thinkingLevel: patch.thinkingLevel } : {}),
-        ...(patch.workspaceTarget !== undefined ? { workspaceTarget: patch.workspaceTarget } : {}),
+        ...(patch.workspaceTargets !== undefined
+          ? { workspaceTargets: cleanLocalWorkspaceTargets(patch.workspaceTargets) }
+          : {}),
         updatedAt: new Date().toISOString(),
       });
     },
@@ -192,19 +195,23 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       };
       await replaceThread(running);
       try {
+        const workspaceRuntime = createWorkspaceToolRuntime(running, mesh.request);
         const runInput = {
           model: running.model,
           thinkingLevel: running.thinkingLevel,
           thread: running,
-          tools: workspaceToolsForThread(running),
+          tools: workspaceRuntime.tools,
           signal: controller.signal,
-          executeTool: async (name: string, args: Record<string, unknown>) =>
-            await executeWorkspaceTool({
-              thread: running,
-              phoneDeviceId: mesh.identity!.id,
+          executeTool: async (
+            name: string,
+            args: Record<string, unknown>,
+            onUpdate?: (result: { text: string; details: unknown }) => void | Promise<void>,
+          ) =>
+            await workspaceRuntime.execute({
               name,
               args,
-              request: mesh.request,
+              signal: controller.signal,
+              onOutput: onUpdate,
             }),
           onMessages: async (messages: LocalAssistantMessage[]) => {
             running = {

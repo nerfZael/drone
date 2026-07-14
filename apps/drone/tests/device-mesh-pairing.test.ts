@@ -105,6 +105,11 @@ describe('desktop device pairing', () => {
   test('joins through a one-time code and keeps grants destination-local', async () => {
     const inviter = await startHub();
     const joining = await startHub();
+    const joiningBeforePair = await adminJson(joining, '/api/device-mesh');
+    await adminJson(joining, `/api/device-mesh/devices/${joiningBeforePair.selfDeviceId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: 'Joining Hub' }),
+    });
     const invitation = await adminJson(inviter, '/api/device-mesh/invitations', {
       method: 'POST',
       body: JSON.stringify({ publicEndpoint: inviter.url }),

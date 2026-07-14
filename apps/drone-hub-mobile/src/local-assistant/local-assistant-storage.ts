@@ -1,5 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import type { LocalAssistantMessage, LocalAssistantThread } from './local-assistant-types';
+import type {
+  LocalAssistantMessage,
+  LocalAssistantThread,
+  LocalWorkspaceTarget,
+} from './local-assistant-types';
 import {
   migrateLocalAssistantModel,
   normalizeLocalAssistantThinkingLevel,
@@ -62,18 +66,61 @@ export function boundLocalAssistantMessages(values: unknown[]): LocalAssistantMe
   return messages;
 }
 
+export function cleanLocalWorkspaceTargets(values: unknown[]): LocalWorkspaceTarget[] {
+  const targets = new Map<string, LocalWorkspaceTarget>();
+  for (const workspace of values.slice(0, 100) as any[]) {
+    const targetDeviceId = String(workspace?.targetDeviceId ?? '')
+      .trim()
+      .slice(0, 160);
+    const workspaceId = String(workspace?.workspaceId ?? workspace?.rootId ?? '')
+      .trim()
+      .slice(0, 160);
+    if (!targetDeviceId || !workspaceId) continue;
+    const previous = targets.get(`${targetDeviceId}\0${workspaceId}`);
+    const write = workspace.write === true || previous?.write === true;
+    const read = workspace.read === true || write || previous?.read === true;
+    const execute = workspace.execute === true || previous?.execute === true;
+    if (!read && !write && !execute) continue;
+    targets.set(`${targetDeviceId}\0${workspaceId}`, {
+      targetDeviceId,
+      deviceName:
+        String(workspace.deviceName ?? previous?.deviceName ?? targetDeviceId)
+          .trim()
+          .slice(0, 80) || targetDeviceId,
+      workspaceId,
+      workspaceName:
+        String(
+          workspace.workspaceName ?? workspace.rootId ?? previous?.workspaceName ?? workspaceId,
+        )
+          .trim()
+          .slice(0, 160) || workspaceId,
+      read,
+      write,
+      execute,
+    });
+  }
+  return [...targets.values()].slice(0, 24);
+}
+
 function cleanThread(value: any): LocalAssistantThread | null {
   if (!value?.id) return null;
-  const workspace = value.workspaceTarget;
-  const workspaceTarget =
-    workspace?.targetDeviceId && workspace?.rootId
-      ? {
-          targetDeviceId: String(workspace.targetDeviceId),
-          rootId: String(workspace.rootId),
-          read: workspace.read === true,
-          write: workspace.write === true,
-        }
-      : null;
+  const legacyWorkspace = value.workspaceTarget;
+  const rawWorkspaces = Array.isArray(value.workspaceTargets)
+    ? value.workspaceTargets
+    : legacyWorkspace?.targetDeviceId && legacyWorkspace?.rootId
+      ? [
+          {
+            targetDeviceId: legacyWorkspace.targetDeviceId,
+            deviceName: legacyWorkspace.targetDeviceId,
+            workspaceId: legacyWorkspace.rootId,
+            workspaceName: legacyWorkspace.rootId,
+            read: legacyWorkspace.read,
+            write: legacyWorkspace.write,
+            execute: false,
+          },
+        ]
+      : [];
+  const workspaceTargets = cleanLocalWorkspaceTargets(rawWorkspaces);
   const messages = boundLocalAssistantMessages(Array.isArray(value.messages) ? value.messages : []);
   return {
     id: String(value.id).slice(0, 100),
@@ -84,7 +131,7 @@ function cleanThread(value: any): LocalAssistantThread | null {
     thinkingLevel: normalizeLocalAssistantThinkingLevel(value.thinkingLevel),
     status: value.status === 'error' ? 'error' : 'idle',
     error: value.status === 'error' && value.error ? String(value.error).slice(0, 2_000) : null,
-    workspaceTarget,
+    workspaceTargets,
     messages,
   };
 }

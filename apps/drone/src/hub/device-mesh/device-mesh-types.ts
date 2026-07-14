@@ -44,6 +44,8 @@ export type CapabilityContext = {
 export type CapabilityHandler = {
   descriptor: CapabilityDescriptor;
   invoke(operation: string, payload: unknown, context: CapabilityContext): Promise<unknown>;
+  close?(): void | Promise<void>;
+  revokeDevice?(deviceId: string): void | Promise<void>;
 };
 
 export type DeviceMeshAdminUpdate = {

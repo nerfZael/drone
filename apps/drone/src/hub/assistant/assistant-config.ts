@@ -17,8 +17,8 @@ export const CHAT_IDLE_MAX_TARGETS = 20;
 export const ASSISTANT_VOICE_AUTO_SPEAK_MAX_CHARS = 600;
 export const DRONE_READY_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 export const DRONE_READY_POLL_INTERVAL_MS = 250;
-export const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30_000;
-export const ASSISTANT_BASH_MAX_TIMEOUT_MS = 120_000;
+export const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30 * 60_000;
+export const ASSISTANT_BASH_MAX_TIMEOUT_MS = 60 * 60_000;
 export const ASSISTANT_SEARCH_MAX_CONTEXT_LINES = 10;
 export const ASSISTANT_CHANGED_FILES_LIMIT = 200;
 export const DEFAULT_OPENAI_MODEL = 'gpt-5.6-sol';
@@ -34,7 +34,7 @@ export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
 export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
   'Use list_targets to discover drone workspaces and the private assistant artifacts target. Use set_target to choose the default workspace before a sequence of file operations, or pass target explicitly on an individual workspace tool.';
 export const ASSISTANT_SINGLE_TARGET_PROMPT_LINE =
-  'Filesystem tools are bound to this thread\'s only workspace. Call them without a target argument; list_targets and set_target are intentionally unavailable.';
+  "Filesystem tools are bound to this thread's only workspace. Call them without a target argument; list_targets and set_target are intentionally unavailable.";
 export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'You are Drone Hub Assistant, a concise operator assistant embedded in the Drone Hub app.',
   'You help the user understand available drones and coordinate work across drone chats.',
@@ -72,8 +72,18 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     category: 'drones',
     description: 'List drones visible to this assistant thread.',
   },
-  { name: 'list_repos', label: 'List repositories', category: 'drones', description: 'List repositories known to Drone Hub.' },
-  { name: 'list_groups', label: 'List groups', category: 'drones', description: 'List Drone Hub groups.' },
+  {
+    name: 'list_repos',
+    label: 'List repositories',
+    category: 'drones',
+    description: 'List repositories known to Drone Hub.',
+  },
+  {
+    name: 'list_groups',
+    label: 'List groups',
+    category: 'drones',
+    description: 'List Drone Hub groups.',
+  },
   {
     name: 'get_current_context',
     label: 'Get current context',
@@ -159,8 +169,18 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     category: 'actions',
     description: 'Open a fresh assistant thread or voice session.',
   },
-  { name: 'list_targets', label: 'List workspace targets', category: 'files', description: 'List drone workspaces and private assistant artifacts available to this thread.' },
-  { name: 'set_target', label: 'Set workspace target', category: 'files', description: 'Choose the default target for later workspace tool calls.' },
+  {
+    name: 'list_targets',
+    label: 'List workspace targets',
+    category: 'files',
+    description: 'List drone workspaces and private assistant artifacts available to this thread.',
+  },
+  {
+    name: 'set_target',
+    label: 'Set workspace target',
+    category: 'files',
+    description: 'Choose the default target for later workspace tool calls.',
+  },
   {
     name: 'list_files',
     label: 'List files',
@@ -191,10 +211,30 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     category: 'files',
     description: 'Create or overwrite a UTF-8 text file in a writable workspace target.',
   },
-  { name: 'delete_file', label: 'Delete file', category: 'files', description: 'Delete a file from a writable workspace target.' },
-  { name: 'create_directory', label: 'Create directory', category: 'files', description: 'Create a directory in a writable workspace target.' },
-  { name: 'delete_directory', label: 'Delete directory', category: 'files', description: 'Delete a directory from a writable workspace target.' },
-  { name: 'move_path', label: 'Move path', category: 'files', description: 'Move or rename a file or directory in a writable workspace target.' },
+  {
+    name: 'delete_file',
+    label: 'Delete file',
+    category: 'files',
+    description: 'Delete a file from a writable workspace target.',
+  },
+  {
+    name: 'create_directory',
+    label: 'Create directory',
+    category: 'files',
+    description: 'Create a directory in a writable workspace target.',
+  },
+  {
+    name: 'delete_directory',
+    label: 'Delete directory',
+    category: 'files',
+    description: 'Delete a directory from a writable workspace target.',
+  },
+  {
+    name: 'move_path',
+    label: 'Move path',
+    category: 'files',
+    description: 'Move or rename a file or directory in a writable workspace target.',
+  },
   {
     name: 'bash',
     label: 'Run bash',
@@ -207,8 +247,18 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     category: 'actions',
     description: 'Apply a patch envelope to a writable workspace target.',
   },
-  { name: 'list_chats', label: 'List chats', category: 'chats', description: 'List chats for a drone.' },
-  { name: 'read_chat', label: 'Read chat', category: 'chats', description: 'Read a paginated timeline for a drone chat.' },
+  {
+    name: 'list_chats',
+    label: 'List chats',
+    category: 'chats',
+    description: 'List chats for a drone.',
+  },
+  {
+    name: 'read_chat',
+    label: 'Read chat',
+    category: 'chats',
+    description: 'Read a paginated timeline for a drone chat.',
+  },
   {
     name: 'subscribe_to_any_chat_idle',
     label: 'Subscribe to any chat idle',
@@ -221,8 +271,18 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     category: 'chats',
     description: 'Resume this thread when all subscribed drone chats become idle.',
   },
-  { name: 'list_chat_idle_subscriptions', label: 'List chat idle subscriptions', category: 'chats', description: 'List durable chat-idle subscriptions associated with this assistant session.' },
-  { name: 'cancel_chat_idle_subscription', label: 'Cancel chat idle subscription', category: 'chats', description: 'Cancel a durable chat-idle subscription.' },
+  {
+    name: 'list_chat_idle_subscriptions',
+    label: 'List chat idle subscriptions',
+    category: 'chats',
+    description: 'List durable chat-idle subscriptions associated with this assistant session.',
+  },
+  {
+    name: 'cancel_chat_idle_subscription',
+    label: 'Cancel chat idle subscription',
+    category: 'chats',
+    description: 'Cancel a durable chat-idle subscription.',
+  },
   {
     name: 'speak',
     label: 'Speak',
@@ -253,7 +313,12 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     category: 'actions',
     description: 'Open an existing drone chat in the Drone Hub UI.',
   },
-  { name: 'open_drone', label: 'Open drone', category: 'actions', description: 'Open a drone in the Drone Hub UI.' },
+  {
+    name: 'open_drone',
+    label: 'Open drone',
+    category: 'actions',
+    description: 'Open a drone in the Drone Hub UI.',
+  },
   {
     name: 'highlight_drones',
     label: 'Highlight drones',
@@ -292,15 +357,40 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
   },
 ];
 const DRONE_HUB_MCP_TOOL_NAMES = new Set([
-  'list_drones', 'list_repos', 'list_groups', 'create_group', 'set_drone_group', 'rename_drones', 'reorder_drones',
-  'open_drone_chat', 'open_drone', 'highlight_drones', 'list_whiteboards', 'read_whiteboard', 'create_whiteboard',
-  'update_whiteboard', 'capture_whiteboard', 'open_whiteboard', 'close_whiteboard', 'create_drone', 'clone_drone',
-  'list_chats', 'create_chat', 'send_message', 'subscribe_to_any_chat_idle', 'subscribe_to_all_chats_idle',
-  'list_chat_idle_subscriptions', 'cancel_chat_idle_subscription', 'read_chat',
+  'list_drones',
+  'list_repos',
+  'list_groups',
+  'create_group',
+  'set_drone_group',
+  'rename_drones',
+  'reorder_drones',
+  'open_drone_chat',
+  'open_drone',
+  'highlight_drones',
+  'list_whiteboards',
+  'read_whiteboard',
+  'create_whiteboard',
+  'update_whiteboard',
+  'capture_whiteboard',
+  'open_whiteboard',
+  'close_whiteboard',
+  'create_drone',
+  'clone_drone',
+  'list_chats',
+  'create_chat',
+  'send_message',
+  'subscribe_to_any_chat_idle',
+  'subscribe_to_all_chats_idle',
+  'list_chat_idle_subscriptions',
+  'cancel_chat_idle_subscription',
+  'read_chat',
 ]);
-export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = ASSISTANT_TOOL_SUMMARY_DEFINITIONS.map((tool) =>
-  DRONE_HUB_MCP_TOOL_NAMES.has(tool.name) ? { ...tool, group: { kind: 'mcp', id: 'drone-hub', label: 'Drone Hub' } } : tool,
-);
+export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] =
+  ASSISTANT_TOOL_SUMMARY_DEFINITIONS.map((tool) =>
+    DRONE_HUB_MCP_TOOL_NAMES.has(tool.name)
+      ? { ...tool, group: { kind: 'mcp', id: 'drone-hub', label: 'Drone Hub' } }
+      : tool,
+  );
 export const ASSISTANT_ALL_TOOL_NAMES = ASSISTANT_TOOL_SUMMARIES.map((tool) => tool.name);
 export const ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_ALL_TOOL_NAMES.filter(
   (name) =>
@@ -400,7 +490,11 @@ type AssistantModelOptionDefinition = {
 
 const ASSISTANT_REASONING_LEVELS: AssistantThinkingLevel[] = ['off', 'low', 'medium', 'high'];
 
-function reasoningModelOptions(provider: LlmProviderId, id: string, name: string): AssistantModelOptionDefinition[] {
+function reasoningModelOptions(
+  provider: LlmProviderId,
+  id: string,
+  name: string,
+): AssistantModelOptionDefinition[] {
   return ASSISTANT_REASONING_LEVELS.map((thinkingLevel) => ({ provider, id, name, thinkingLevel }));
 }
 

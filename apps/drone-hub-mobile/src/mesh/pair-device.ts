@@ -41,12 +41,19 @@ export async function validatePairingApproval(
   )
     throw new Error('Pairing approval has an invalid device list');
   const seen = new Set<string>();
+  const seenNames = new Set<string>();
   for (const device of approval.devices) {
     const deviceId = String(device?.id ?? '');
     if (!deviceId || seen.has(deviceId)) throw new Error('Pairing approval has duplicate devices');
     if ((await mobileDeviceIdForPublicKey(publicKey(device.publicKey))) !== deviceId)
       throw new Error('Pairing approval device ID does not match its public key');
+    const deviceName = String(device?.name ?? '')
+      .trim()
+      .toLowerCase();
+    if (!deviceName || seenNames.has(deviceName))
+      throw new Error('Pairing approval requires unique device names');
     seen.add(deviceId);
+    seenNames.add(deviceName);
   }
   if (!seen.has(payload.inviterDeviceId))
     throw new Error('Pairing approval does not contain the inviting device');

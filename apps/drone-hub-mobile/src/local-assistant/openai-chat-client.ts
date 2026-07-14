@@ -5,7 +5,7 @@ import type {
   LocalAssistantThinkingLevel,
   LocalAssistantThread,
 } from './local-assistant-types';
-import type { LocalAssistantTool } from './workspace-tools';
+import { workspaceHandle, type LocalAssistantTool } from './workspace-tools';
 
 type ProviderToolCall = {
   id: string;
@@ -100,18 +100,23 @@ export async function runOpenAiChat(input: {
   executeTool(
     name: string,
     args: Record<string, unknown>,
+    onUpdate?: (result: { text: string; details: unknown }) => void | Promise<void>,
   ): Promise<{ text: string; details: unknown }>;
   onMessages(messages: LocalAssistantMessage[]): Promise<void>;
+  onStreamingMessages?(messages: LocalAssistantMessage[]): Promise<void> | void;
 }): Promise<LocalAssistantMessage[]> {
   let messages = [...input.thread.messages];
   for (let step = 0; step < 8; step += 1) {
-    const target = input.thread.workspaceTarget;
+    const targets = input.thread.workspaceTargets;
     const developer = [
       'You are the coding assistant running directly on an Android phone in Drone Hub.',
       'Be concise, inspect files before editing, and use baseHash when overwriting a file you read.',
-      target
-        ? `The selected workspace is root ${target.rootId} on device ${target.targetDeviceId}. Use the available tools for it.`
-        : 'No workspace is selected. Explain that file tools require a remote workspace when relevant.',
+      targets.length > 0
+        ? `This thread can use these remote workspaces: ${targets.map(workspaceHandle).join(', ')}. Use only the available tools and their permitted workspaces.`
+        : 'No workspace is selected. Explain that file tools require remote workspace access when relevant.',
+      targets.length > 1
+        ? 'Use list_targets to inspect targets, set_target before a sequence of calls, or pass target on an individual filesystem or Bash call.'
+        : '',
     ].join('\n');
     const response = await fetch('https://api.openai.com/v1/chat/completions', {
       method: 'POST',
@@ -156,24 +161,33 @@ export async function runOpenAiChat(input: {
     for (const call of calls) {
       let result: { text: string; details: unknown };
       let error: Error | null = null;
+      const toolResult = newMessage({
+        role: 'toolResult',
+        content: '',
+        toolName: String(call.function?.name ?? ''),
+        toolCallId: String(call.id),
+      });
       try {
         const args = toolArguments(call.function?.arguments);
-        result = await input.executeTool(String(call.function?.name ?? ''), args);
+        result = await input.executeTool(String(call.function?.name ?? ''), args, (update) =>
+          input.onStreamingMessages?.([
+            ...messages,
+            { ...toolResult, content: update.text, details: update.details },
+          ]),
+        );
       } catch (nextError: any) {
         error = nextError instanceof Error ? nextError : new Error(String(nextError));
         result = { text: error.message, details: null };
       }
       messages = [
         ...messages,
-        newMessage({
-          role: 'toolResult',
+        {
+          ...toolResult,
           content: result.text,
-          toolName: String(call.function?.name ?? ''),
-          toolCallId: String(call.id),
           isError: Boolean(error),
           errorMessage: error?.message,
           details: result.details,
-        }),
+        },
       ];
       await input.onMessages(messages);
     }

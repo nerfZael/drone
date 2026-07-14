@@ -3173,8 +3173,8 @@ const FS_EDITOR_MAX_BYTES = 2 * 1024 * 1024;
 const FS_TEXT_CHUNK_MAX_BYTES = 512 * 1024;
 const FS_QUICK_OPEN_MAX_RESULTS = 200;
 const FS_LIST_TIMEOUT_MS = 10_000;
-const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30_000;
-const ASSISTANT_BASH_MAX_TIMEOUT_MS = 120_000;
+const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30 * 60_000;
+const ASSISTANT_BASH_MAX_TIMEOUT_MS = 60 * 60_000;
 const ASSISTANT_BASH_MAX_OUTPUT_BYTES = 64 * 1024;
 const ASSISTANT_BASH_MAX_COMMAND_BYTES = 20 * 1024;
 const ASSISTANT_SEARCH_MAX_CONTEXT_LINES = 10;
@@ -17191,12 +17191,8 @@ export async function startDroneHubApiServer(opts: {
         });
       });
       const artifactTarget = new AssistantArtifactsTarget(threadId);
-      const remoteWorkspaceTarget = await deviceMesh.remoteWorkspaceTarget(threadId);
-      const targets = [
-        ...droneTargets,
-        artifactTarget,
-        ...(remoteWorkspaceTarget ? [remoteWorkspaceTarget] : []),
-      ];
+      const remoteWorkspaceTargets = await deviceMesh.remoteWorkspaceTargets(threadId);
+      const targets = [...droneTargets, artifactTarget, ...remoteWorkspaceTargets];
       const preferredDroneId = Array.isArray(thread.accessScope?.droneIds)
         ? thread.accessScope.droneIds[0]
         : '';

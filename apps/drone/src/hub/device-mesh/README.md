@@ -14,6 +14,11 @@ Responsibilities are separated as follows:
 - `device-mesh-audit-store.ts`: bounded target-side operation history;
 - `capability-registry.ts`: feature-neutral operation dispatch;
 - `device-core-capability.ts` and `drone-control-capability.ts`: core and drone adapters;
-- `features/cross-device-assistant`: separate assistant-thread and workspace adapters, bounded assistant history, paired policy records, and the remote workspace target.
+- `features/cross-device-assistant`: separate assistant-thread and workspace adapters, bounded assistant history, destination-owned device/workspace grants, and origin-owned thread targets.
+
+Remote Bash uses destination-owned asynchronous command jobs. Starting a command returns a job
+handle; signed output requests consume incremental chunks; status and cancellation are separate
+operations. Jobs are scoped to the requesting device and workspace, retain bounded output in memory,
+default to 30 minutes, and cannot run longer than one hour.
 
 State is stored under the normal Drone Hub data directory in `device-mesh/`. The Hub API token is used only by local loopback adapters and is never placed in a mesh message.

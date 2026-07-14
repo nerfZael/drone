@@ -9,6 +9,10 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./workspace-target-catalog": {
+      "types": "./dist/workspace-target-catalog.d.ts",
+      "import": "./dist/workspace-target-catalog.js"
     }
   },
   "files": [

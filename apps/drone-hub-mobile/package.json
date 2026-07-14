@@ -14,6 +14,7 @@
   "dependencies": {
     "@drone/assistant-chat": "workspace:*",
     "@drone/device-protocol": "workspace:*",
+    "@blip/tools": "workspace:*",
     "@noble/curves": "^2.2.0",
     "@noble/hashes": "^2.2.0",
     "@react-native-async-storage/async-storage": "2.2.0",

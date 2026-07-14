@@ -30,7 +30,14 @@ export async function createDeviceMeshService(options: {
   const store = new DeviceMeshStore(path.join(options.rootDir, 'state.json'), identity);
   await store.read();
   const capabilities = new CapabilityRegistry();
-  capabilities.register(createDeviceCoreCapability(store, () => capabilities.list()));
+  let router: DeviceMeshRouter;
+  capabilities.register(
+    createDeviceCoreCapability(
+      store,
+      () => capabilities.list(),
+      () => router.broadcastMembership(),
+    ),
+  );
   capabilities.register(
     createDroneControlCapability({ baseUrl: options.localHubBaseUrl, apiToken: options.apiToken }),
   );
@@ -43,9 +50,11 @@ export async function createDeviceMeshService(options: {
   capabilities.register(createProviderCredentialsCapability(identity));
   const routeManager = new DeviceRouteManager(identity, store);
   const audit = new DeviceMeshAuditStore(path.join(options.rootDir, 'audit.json'));
-  const router = new DeviceMeshRouter(identity, store, capabilities, routeManager, audit);
+  router = new DeviceMeshRouter(identity, store, capabilities, routeManager, audit);
   const extensions: DeviceMeshHttpExtension[] = [
-    new CrossDeviceAssistantPolicyHttp(assistantPolicies),
+    new CrossDeviceAssistantPolicyHttp(assistantPolicies, (targetDeviceId) =>
+      router.request(targetDeviceId, 'workspace', 'workspaces.list', {}),
+    ),
     new ProviderCredentialsHttp(identity, router, store),
   ];
   let ingress: DeviceMeshIngress;
@@ -81,10 +90,16 @@ export async function createDeviceMeshService(options: {
     },
     close: async () => {
       await ingress.close();
+      await capabilities.close();
       router.close();
     },
-    request: (targetDeviceId: string, capability: string, operation: string, payload: unknown) =>
-      router.request(targetDeviceId, capability, operation, payload),
+    request: (
+      targetDeviceId: string,
+      capability: string,
+      operation: string,
+      payload: unknown,
+      signal?: AbortSignal,
+    ) => router.request(targetDeviceId, capability, operation, payload, signal),
     capabilities,
     store,
     onAssistantPolicyChange: (listener: (threadIds: string[]) => void) =>
@@ -97,33 +112,26 @@ export async function createDeviceMeshService(options: {
         'threads.list',
       ),
     broadcastDroneListChange: (payload: Record<string, any>) =>
-      router.broadcastCapabilityEvent(
-        'drone-control',
-        'drones.changed',
-        payload,
-        'drones.list',
-      ),
+      router.broadcastCapabilityEvent('drone-control', 'drones.changed', payload, 'drones.list'),
     broadcastDroneChatChange: (payload: Record<string, any>) =>
-      router.broadcastCapabilityEvent(
-        'drone-control',
-        'chat.changed',
-        payload,
-        'chat.read',
-      ),
-    remoteWorkspaceTarget: async (threadId: string) => {
-      const policy = await assistantPolicies.homeTarget(threadId);
-      if (!policy) return null;
+      router.broadcastCapabilityEvent('drone-control', 'chat.changed', payload, 'chat.read'),
+    remoteWorkspaceTargets: async (threadId: string) => {
+      const policies = await assistantPolicies.homeTargets(threadId);
       const state = await store.read();
-      const target = state.devices[policy.targetDeviceId];
-      if (!target || target.revokedAt) return null;
-      return new RemoteWorkspaceTarget(
-        state.selfDeviceId,
-        threadId,
-        policy,
-        target.name,
-        (targetDeviceId, capability, operation, payload) =>
-          router.request(targetDeviceId, capability, operation, payload),
-      );
+      return policies.flatMap((policy) => {
+        const target = state.devices[policy.targetDeviceId];
+        if (!target || target.revokedAt) return [];
+        return [
+          new RemoteWorkspaceTarget(
+            state.selfDeviceId,
+            threadId,
+            policy,
+            target.name,
+            (targetDeviceId, capability, operation, payload, signal) =>
+              router.request(targetDeviceId, capability, operation, payload, signal),
+          ),
+        ];
+      });
     },
   };
 }

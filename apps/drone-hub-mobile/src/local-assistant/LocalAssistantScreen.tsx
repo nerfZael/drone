@@ -2,7 +2,6 @@ import React from 'react';
 import { latestThinkingText } from '@drone/assistant-chat';
 import { Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, ConfirmDialog, ErrorBanner, Label, textStyles } from '../components/Ui';
-import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { useLocalAssistant } from './LocalAssistantContext';
 import { LocalAssistantTranscript } from './LocalAssistantTranscript';
@@ -44,10 +43,11 @@ export function LocalAssistantScreen({
   onDeviceChange(deviceId: string): void;
   onHeaderChange(header: AssistantAppHeaderState | null): void;
 }) {
-  const mesh = useMesh();
   const assistant = useLocalAssistant();
   const [prompt, setPrompt] = React.useState('');
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [accessDirty, setAccessDirty] = React.useState(false);
+  const [confirmAccessDiscard, setConfirmAccessDiscard] = React.useState(false);
   const [modelOpen, setModelOpen] = React.useState(false);
   const [localProvider, setLocalProvider] = React.useState<'openai' | 'codex'>('openai');
   const [error, setError] = React.useState<string | null>(null);
@@ -56,6 +56,7 @@ export function LocalAssistantScreen({
     title: string;
   } | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const pendingAfterAccessDiscard = React.useRef<(() => void) | null>(null);
   const thread = assistant.threads.find((item) => item.id === assistant.activeThreadId) ?? null;
   const latestMessageScroll = useLatestMessageScroll(thread?.id ?? '');
   const running = assistant.runningThreadId === thread?.id;
@@ -71,11 +72,12 @@ export function LocalAssistantScreen({
     : null;
   const currentReasoning =
     running && currentRunAssistant ? latestThinkingText(currentRunAssistant) : '';
-  const targetDevice = thread?.workspaceTarget
-    ? mesh.devices.find((device) => device.id === thread.workspaceTarget?.targetDeviceId)
-    : null;
-
-  React.useEffect(() => setSettingsOpen(false), [thread?.id]);
+  React.useEffect(() => {
+    setSettingsOpen(false);
+    setAccessDirty(false);
+    setConfirmAccessDiscard(false);
+    pendingAfterAccessDiscard.current = null;
+  }, [thread?.id]);
   React.useEffect(() => {
     void loadLocalAssistantSettings().then((settings) => setLocalProvider(settings.provider));
   }, []);
@@ -110,7 +112,25 @@ export function LocalAssistantScreen({
       setError(nextError?.message ?? String(nextError));
     }
   };
-  const toggleAccess = React.useCallback(() => setSettingsOpen((value) => !value), []);
+  const requestCloseAccess = React.useCallback(() => {
+    if (accessDirty) {
+      pendingAfterAccessDiscard.current = null;
+      setConfirmAccessDiscard(true);
+    } else setSettingsOpen(false);
+  }, [accessDirty]);
+  const guardAccessChanges = React.useCallback(
+    (action: () => void) => {
+      if (settingsOpen && accessDirty) {
+        pendingAfterAccessDiscard.current = action;
+        setConfirmAccessDiscard(true);
+      } else action();
+    },
+    [accessDirty, settingsOpen],
+  );
+  const toggleAccess = React.useCallback(() => {
+    if (settingsOpen) requestCloseAccess();
+    else setSettingsOpen(true);
+  }, [requestCloseAccess, settingsOpen]);
   const deleteActionRef = React.useRef<() => void>(() => {});
   deleteActionRef.current = () => {
     if (!thread) return;
@@ -123,9 +143,12 @@ export function LocalAssistantScreen({
       thread
         ? {
             title: thread.title,
-            subtitle: targetDevice
-              ? `${targetDevice.name} / ${thread.workspaceTarget?.rootId}`
-              : 'Phone only · no workspace',
+            subtitle:
+              thread.workspaceTargets.length === 0
+                ? 'Phone only · no workspace'
+                : thread.workspaceTargets.length === 1
+                  ? `${thread.workspaceTargets[0].deviceName} / ${thread.workspaceTargets[0].workspaceName}`
+                  : `${thread.workspaceTargets.length} workspaces · ${new Set(thread.workspaceTargets.map((target) => target.targetDeviceId)).size} devices`,
             accessOpen: settingsOpen,
             accessDisabled: running,
             onToggleAccess: toggleAccess,
@@ -138,11 +161,9 @@ export function LocalAssistantScreen({
     onHeaderChange,
     running,
     settingsOpen,
-    targetDevice?.id,
-    targetDevice?.name,
     thread?.id,
     thread?.title,
-    thread?.workspaceTarget?.rootId,
+    thread?.workspaceTargets,
     toggleAccess,
   ]);
   React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
@@ -164,10 +185,12 @@ export function LocalAssistantScreen({
           onSelectDevice={onDeviceChange}
           onClose={() => onDrawerOpenChange(false)}
           onSelect={(threadId) => {
-            assistant.selectThread(threadId);
-            onDrawerOpenChange(false);
+            guardAccessChanges(() => {
+              assistant.selectThread(threadId);
+              onDrawerOpenChange(false);
+            });
           }}
-          onCreate={() => void runAction(() => assistant.createThread())}
+          onCreate={() => guardAccessChanges(() => void runAction(() => assistant.createThread()))}
         />
         <View style={styles.centerState}>
           <Text style={textStyles.body}>Loading phone threads…</Text>
@@ -190,14 +213,19 @@ export function LocalAssistantScreen({
           onSelectDevice={onDeviceChange}
           onClose={() => onDrawerOpenChange(false)}
           onSelect={(threadId) => {
-            assistant.selectThread(threadId);
-            onDrawerOpenChange(false);
+            guardAccessChanges(() => {
+              assistant.selectThread(threadId);
+              onDrawerOpenChange(false);
+            });
           }}
           onCreate={() =>
-            void runAction(async () => {
-              await assistant.createThread();
-              onDrawerOpenChange(false);
-            })
+            guardAccessChanges(
+              () =>
+                void runAction(async () => {
+                  await assistant.createThread();
+                  onDrawerOpenChange(false);
+                }),
+            )
           }
         />
         <View style={styles.welcome}>
@@ -205,7 +233,7 @@ export function LocalAssistantScreen({
           <Text style={styles.welcomeTitle}>A coding assistant in your pocket.</Text>
           <Text style={styles.welcomeBody}>
             The model conversation runs on this phone. File operations cross the signed device mesh
-            only when a destination has granted this exact thread access.
+            only when this thread selects a workspace that its destination granted to this phone.
           </Text>
           <Button onPress={() => void runAction(() => assistant.createThread())}>
             Create phone thread
@@ -230,19 +258,32 @@ export function LocalAssistantScreen({
         onSelectDevice={onDeviceChange}
         onClose={() => onDrawerOpenChange(false)}
         onSelect={(threadId) => {
-          assistant.selectThread(threadId);
-          onDrawerOpenChange(false);
+          guardAccessChanges(() => {
+            assistant.selectThread(threadId);
+            onDrawerOpenChange(false);
+          });
         }}
         onCreate={() =>
-          void runAction(async () => {
-            await assistant.createThread();
-            onDrawerOpenChange(false);
-          })
+          guardAccessChanges(
+            () =>
+              void runAction(async () => {
+                await assistant.createThread();
+                onDrawerOpenChange(false);
+              }),
+          )
         }
       />
       {settingsOpen ? (
         <ScrollView contentContainerStyle={styles.editorScroll} keyboardShouldPersistTaps="handled">
-          <LocalWorkspaceEditor thread={thread} onClose={() => setSettingsOpen(false)} />
+          <LocalWorkspaceEditor
+            thread={thread}
+            onRequestClose={requestCloseAccess}
+            onApplied={() => {
+              setAccessDirty(false);
+              setSettingsOpen(false);
+            }}
+            onDirtyChange={setAccessDirty}
+          />
         </ScrollView>
       ) : (
         <>
@@ -296,6 +337,25 @@ export function LocalAssistantScreen({
           />
         </>
       )}
+      <ConfirmDialog
+        visible={confirmAccessDiscard}
+        title="Discard access changes?"
+        message="Your unsaved workspace selections will be lost."
+        confirmLabel="Discard changes"
+        destructive
+        onCancel={() => {
+          pendingAfterAccessDiscard.current = null;
+          setConfirmAccessDiscard(false);
+        }}
+        onConfirm={() => {
+          const nextAction = pendingAfterAccessDiscard.current;
+          pendingAfterAccessDiscard.current = null;
+          setConfirmAccessDiscard(false);
+          setAccessDirty(false);
+          setSettingsOpen(false);
+          nextAction?.();
+        }}
+      />
       <ConfirmDialog
         visible={Boolean(deleteCandidate)}
         title="Delete phone thread?"

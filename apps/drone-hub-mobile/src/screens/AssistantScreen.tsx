@@ -30,8 +30,33 @@ type Thread = {
   thinkingLevel?: string;
   error: string | null;
   messageCount: number;
-  workspaceTarget: null | { targetDeviceId: string; rootId: string; read: boolean; write: boolean };
+  workspaceTarget: null | {
+    targetDeviceId: string;
+    rootId: string;
+    workspaceName?: string;
+    read: boolean;
+    write: boolean;
+    execute?: boolean;
+  };
+  workspaceTargets?: Array<{
+    targetDeviceId: string;
+    rootId: string;
+    workspaceName?: string;
+    read: boolean;
+    write: boolean;
+    execute?: boolean;
+  }>;
 };
+
+function workspacePermissionSummary(target: {
+  read: boolean;
+  write: boolean;
+  execute?: boolean;
+}): string {
+  return [target.read && 'read', target.write && 'write', target.execute && 'commands']
+    .filter(Boolean)
+    .join('/');
+}
 
 function assistantMessageIsRenderable(message: any): boolean {
   if (!message || message.role !== 'assistant') return false;
@@ -47,8 +72,7 @@ function assistantMessageIsRenderable(message: any): boolean {
   )
     return true;
   return Boolean(
-    message.errorMessage ||
-      (Array.isArray(message.attachments) && message.attachments.length > 0),
+    message.errorMessage || (Array.isArray(message.attachments) && message.attachments.length > 0),
   );
 }
 
@@ -143,8 +167,7 @@ export function AssistantScreen({
     try {
       await task();
     } catch (nextError: any) {
-      if (runVersion.current === requestVersion)
-        setError(nextError?.message ?? String(nextError));
+      if (runVersion.current === requestVersion) setError(nextError?.message ?? String(nextError));
     } finally {
       if (busyVersion.current === busyRequestVersion) setBusy('');
     }
@@ -160,10 +183,7 @@ export function AssistantScreen({
       setError(null);
       try {
         const result = await mesh.request(destinationId, 'assistant-threads', 'threads.list');
-        if (
-          homeIdRef.current !== destinationId ||
-          threadListVersion.current !== requestVersion
-        )
+        if (homeIdRef.current !== destinationId || threadListVersion.current !== requestVersion)
           return;
         const nextThreads = Array.isArray(result?.threads) ? result.threads : [];
         setThreads(nextThreads);
@@ -172,16 +192,10 @@ export function AssistantScreen({
           nextThreads.some((thread: Thread) => thread.id === current) ? current : '',
         );
       } catch (nextError: any) {
-        if (
-          homeIdRef.current === destinationId &&
-          threadListVersion.current === requestVersion
-        )
+        if (homeIdRef.current === destinationId && threadListVersion.current === requestVersion)
           setError(nextError?.message ?? String(nextError));
       } finally {
-        if (
-          homeIdRef.current === destinationId &&
-          threadListVersion.current === requestVersion
-        )
+        if (homeIdRef.current === destinationId && threadListVersion.current === requestVersion)
           setThreadsLoaded(true);
         if (
           !quiet &&
@@ -212,10 +226,7 @@ export function AssistantScreen({
         const result = await mesh.request(destinationId, 'assistant-threads', 'thread.get', {
           threadId,
         });
-        if (
-          homeIdRef.current !== destinationId ||
-          threadReadVersion.current !== requestVersion
-        )
+        if (homeIdRef.current !== destinationId || threadReadVersion.current !== requestVersion)
           return;
         const nextEntries = Array.isArray(result?.history?.entries) ? result.history.entries : [];
         const nextStreaming = Array.isArray(result?.streamingMessages)
@@ -233,10 +244,7 @@ export function AssistantScreen({
             current.map((item) => (item.id === threadId ? result.thread : item)),
           );
       } catch (nextError: any) {
-        if (
-          homeIdRef.current === destinationId &&
-          threadReadVersion.current === requestVersion
-        )
+        if (homeIdRef.current === destinationId && threadReadVersion.current === requestVersion)
           setError(nextError?.message ?? String(nextError));
       } finally {
         if (
@@ -254,12 +262,9 @@ export function AssistantScreen({
   const createThread = () =>
     run('create', async () => {
       const destinationId = homeId;
-      const result = await mesh.request(
-        destinationId,
-        'assistant-threads',
-        'thread.create',
-        { title: nextAssistantThreadTitle(threads) },
-      );
+      const result = await mesh.request(destinationId, 'assistant-threads', 'thread.create', {
+        title: nextAssistantThreadTitle(threads),
+      });
       if (homeIdRef.current !== destinationId) return;
       await loadThreads(true);
       if (result?.thread?.id) await openThread(result.thread.id);
@@ -358,13 +363,20 @@ export function AssistantScreen({
     selected?.model ||
     'Model';
   const activeHome = homes.find((home) => home.id === homeId);
+  const selectedWorkspaceTargets = React.useMemo(
+    () =>
+      (
+        selected?.workspaceTargets ?? (selected?.workspaceTarget ? [selected.workspaceTarget] : [])
+      ).map((target) => ({ ...target, execute: 'execute' in target && target.execute === true })),
+    [selected?.workspaceTarget, selected?.workspaceTargets],
+  );
 
   React.useEffect(() => {
     onHeaderChange(
       selected
         ? {
             title: selected.title,
-            subtitle: `${selected.workspaceTarget ? `${selected.workspaceTarget.rootId} · ${selected.workspaceTarget.write ? 'read/write' : 'read-only'}` : 'Home device only'}${activeHome ? ` · ${activeHome.name}` : ''}`,
+            subtitle: `${selectedWorkspaceTargets.length > 1 ? `${selectedWorkspaceTargets.length} workspaces` : selectedWorkspaceTargets[0] ? `${selectedWorkspaceTargets[0].workspaceName ?? 'Workspace'} · ${workspacePermissionSummary(selectedWorkspaceTargets[0])}` : 'Home device only'}${activeHome ? ` · ${activeHome.name}` : ''}`,
           }
         : null,
     );
@@ -374,7 +386,7 @@ export function AssistantScreen({
     onHeaderChange,
     selected?.id,
     selected?.title,
-    selected?.workspaceTarget,
+    selectedWorkspaceTargets,
   ]);
   React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 

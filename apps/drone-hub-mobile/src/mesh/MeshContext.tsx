@@ -33,6 +33,7 @@ type MeshContextValue = {
     capability: string,
     operation: string,
     payload?: unknown,
+    signal?: AbortSignal,
   ): Promise<any>;
   refreshDevices(): Promise<void>;
   subscribe(
@@ -163,6 +164,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       capability: string,
       operation: string,
       payload: unknown = {},
+      signal?: AbortSignal,
     ) => {
       const direct = sockets.current.find(
         (socket) => socket.connected && socket.connection.deviceId === targetDeviceId,
@@ -170,7 +172,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       const relay = sockets.current.find((socket) => socket.connected);
       const socket = direct ?? relay;
       if (!socket) throw new Error('No paired device is connected');
-      return await socket.request(targetDeviceId, capability, operation, payload);
+      return await socket.request(targetDeviceId, capability, operation, payload, signal);
     },
     [],
   );
@@ -242,9 +244,16 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       const results = await Promise.allSettled(
         targets.map((target) => request(target, 'device-core', 'device.rename-self', { name })),
       );
-      if (!results.some((result) => result.status === 'fulfilled')) {
+      if (results.some((result) => result.status === 'rejected')) {
         const failure = results.find(
           (result): result is PromiseRejectedResult => result.status === 'rejected',
+        );
+        await Promise.allSettled(
+          targets
+            .filter((_, index) => results[index]?.status === 'fulfilled')
+            .map((target) =>
+              request(target, 'device-core', 'device.rename-self', { name: identity.name }),
+            ),
         );
         throw failure?.reason ?? new Error('Could not rename this phone');
       }

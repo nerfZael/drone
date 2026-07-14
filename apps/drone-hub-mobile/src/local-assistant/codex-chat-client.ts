@@ -7,7 +7,7 @@ import type {
   LocalAssistantThinkingLevel,
   LocalAssistantThread,
 } from './local-assistant-types';
-import type { LocalAssistantTool } from './workspace-tools';
+import { workspaceHandle, type LocalAssistantTool } from './workspace-tools';
 
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
 const MAX_CONTEXT_MESSAGES = 100;
@@ -187,6 +187,7 @@ export async function runCodexChat(input: {
   executeTool(
     name: string,
     args: Record<string, unknown>,
+    onUpdate?: (result: { text: string; details: unknown }) => void | Promise<void>,
   ): Promise<{ text: string; details: unknown }>;
   onMessages(messages: LocalAssistantMessage[]): Promise<void>;
   onStreamingMessages?(messages: LocalAssistantMessage[]): Promise<void> | void;
@@ -194,13 +195,16 @@ export async function runCodexChat(input: {
   let messages = [...input.thread.messages];
   let items = historicalInput(messages);
   for (let step = 0; step < 8; step += 1) {
-    const target = input.thread.workspaceTarget;
+    const targets = input.thread.workspaceTargets;
     const instructions = [
       'You are the coding assistant running directly on an Android phone in Drone Hub.',
       'Be concise, inspect files before editing, and use baseHash when overwriting a file you read.',
-      target
-        ? `The selected workspace is root ${target.rootId} on device ${target.targetDeviceId}. Use the available tools for it.`
-        : 'No workspace is selected. Explain that file tools require a remote workspace when relevant.',
+      targets.length > 0
+        ? `This thread can use these remote workspaces: ${targets.map(workspaceHandle).join(', ')}. Use only the available tools and their permitted workspaces.`
+        : 'No workspace is selected. Explain that file tools require remote workspace access when relevant.',
+      targets.length > 1
+        ? 'Use list_targets to inspect targets, set_target before a sequence of calls, or pass target on an individual filesystem or Bash call.'
+        : '',
     ].join('\n');
     const preview = newMessage({ role: 'assistant', content: [] });
     let streamingThinking = '';
@@ -242,23 +246,32 @@ export async function runCodexChat(input: {
     for (const call of parsed.calls.slice(0, 8)) {
       let result: { text: string; details: unknown };
       let error: Error | null = null;
+      const toolResult = newMessage({
+        role: 'toolResult',
+        content: '',
+        toolName: call.name,
+        toolCallId: call.displayId,
+      });
       try {
-        result = await input.executeTool(call.name, call.arguments);
+        result = await input.executeTool(call.name, call.arguments, (update) =>
+          input.onStreamingMessages?.([
+            ...messages,
+            { ...toolResult, content: update.text, details: update.details },
+          ]),
+        );
       } catch (nextError: any) {
         error = nextError instanceof Error ? nextError : new Error(String(nextError));
         result = { text: error.message, details: null };
       }
       messages = [
         ...messages,
-        newMessage({
-          role: 'toolResult',
+        {
+          ...toolResult,
           content: result.text,
-          toolName: call.name,
-          toolCallId: call.displayId,
           isError: Boolean(error),
           errorMessage: error?.message,
           details: result.details,
-        }),
+        },
       ];
       items.push({
         type: 'function_call_output',

@@ -35,14 +35,15 @@ export class DeviceMeshAuditStore {
       operation: request.operation,
       outcome,
       errorCode,
-      resource: actor
-        ? {
-            assistantHomeDeviceId: String(actor.assistantHomeDeviceId ?? ''),
-            threadId: String(actor.threadId ?? ''),
-            rootId: String(actor.rootId ?? ''),
-            path: String(payload.path ?? '').slice(0, 500),
-          }
-        : null,
+      resource:
+        actor || payload.workspaceId
+          ? {
+              assistantHomeDeviceId: String(actor?.assistantHomeDeviceId ?? request.sourceDeviceId),
+              threadId: String(actor?.threadId ?? ''),
+              rootId: String(actor?.rootId ?? payload.workspaceId ?? ''),
+              path: String(payload.path ?? '').slice(0, 500),
+            }
+          : null,
     });
     this.entries = this.entries.slice(0, 500);
     const snapshot = this.entries;

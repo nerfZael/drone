@@ -76,7 +76,6 @@ export class DeviceMeshStore {
       state.devices[device.id] = current
         ? {
             ...device,
-            name: current.name,
             grants: current.grants,
             endpoints: signedRoute ? current.endpoints : device.endpoints,
           }

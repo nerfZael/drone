@@ -45,7 +45,7 @@ function PermissionGrid({
   return (
     <div className="grid gap-3 md:grid-cols-2">
       {capabilities
-        .filter((capability) => capability.id !== 'device-core')
+        .filter((capability) => capability.id !== 'device-core' && capability.id !== 'workspace')
         .map((capability) => (
           <div
             key={capability.id}
@@ -131,9 +131,7 @@ function DeviceCard({
               </span>
             ) : null}
           </div>
-          <div className="mt-1 font-mono text-[10px] text-[var(--muted-dim)]">
-            {device.id} · {device.platform}
-          </div>
+          <div className="mt-1 text-[10px] text-[var(--muted-dim)]">{device.platform}</div>
         </div>
         <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted)]">
           {connected || isSelf ? 'Reachable' : 'Offline'}
@@ -367,9 +365,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                 <h3 className="mt-1 text-[15px] font-semibold text-[var(--fg)]">
                   {pending.device.name}
                 </h3>
-                <div className="font-mono text-[10px] text-[var(--muted-dim)]">
-                  {pending.device.id} · {pending.device.platform}
-                </div>
+                <div className="text-[10px] text-[var(--muted-dim)]">{pending.device.platform}</div>
               </div>
               <div className="text-[11px] text-[var(--muted)]">Default: deny all controls</div>
             </div>

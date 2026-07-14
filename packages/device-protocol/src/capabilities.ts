@@ -45,7 +45,18 @@ export const ASSISTANT_THREADS_CAPABILITY: CapabilityDescriptor = {
 export const WORKSPACE_CAPABILITY: CapabilityDescriptor = {
   id: 'workspace',
   version: 1,
-  operations: ['files.list', 'files.read', 'files.search', 'files.write'],
+  operations: [
+    'workspaces.list',
+    'files.list',
+    'files.read',
+    'files.search',
+    'files.write',
+    'commands.run',
+    'commands.start',
+    'commands.status',
+    'commands.output',
+    'commands.cancel',
+  ],
 };
 
 export const PROVIDER_CREDENTIALS_CAPABILITY: CapabilityDescriptor = {

@@ -78,4 +78,53 @@ describe('device membership synchronization', () => {
     expect(await synchronizer.acceptMembership(event)).toBe(true);
     expect((await store.read()).devices[peer.id].administrator).toBe(false);
   });
+
+  test('propagates display names while rejecting membership name collisions', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-membership-names-'));
+    tempDirs.push(directory);
+    const local = identity('Local');
+    const peer = identity('Peer');
+    const store = new DeviceMeshStore(path.join(directory, 'state.json'), local);
+    await store.read();
+    const addedAt = new Date(Date.now() - 10_000).toISOString();
+    const peerRecord: MeshDevice = {
+      id: peer.id,
+      name: peer.name,
+      platform: peer.platform,
+      publicKey: peer.publicKey,
+      administrator: false,
+      grants: [],
+      endpoints: [],
+      revokedAt: null,
+      addedAt,
+      updatedAt: addedAt,
+    };
+    await store.update((state) => {
+      state.devices[peer.id] = peerRecord;
+    });
+    const membership = (name: string, updatedAt: string) => {
+      const unsigned = {
+        type: 'mesh.membership',
+        version: 1,
+        issuerDeviceId: peer.id,
+        issuedAt: new Date().toISOString(),
+        devices: [{ ...peerRecord, name, updatedAt }],
+      };
+      return {
+        ...unsigned,
+        signature: signDeviceText(peer, `drone-membership-v1\n${canonicalJson(unsigned)}`),
+      };
+    };
+    const synchronizer = new DeviceMembershipSynchronizer(local, store);
+    expect(await synchronizer.acceptMembership(membership('Local', new Date().toISOString()))).toBe(
+      false,
+    );
+    expect((await store.read()).devices[peer.id].name).toBe('Peer');
+    expect(
+      await synchronizer.acceptMembership(
+        membership('Renamed peer', new Date(Date.now() + 1_000).toISOString()),
+      ),
+    ).toBe(true);
+    expect((await store.read()).devices[peer.id].name).toBe('Renamed peer');
+  });
 });

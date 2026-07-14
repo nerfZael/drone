@@ -15,7 +15,7 @@ function required(value: unknown, label: string): string {
   return result;
 }
 
-function compactThread(thread: any, workspaceTarget: unknown) {
+function compactThread(thread: any, workspaceTargets: unknown[]) {
   return {
     id: String(thread?.id ?? ''),
     title: String(thread?.title ?? 'Assistant thread'),
@@ -27,7 +27,8 @@ function compactThread(thread: any, workspaceTarget: unknown) {
     model: String(thread?.model ?? ''),
     thinkingLevel: String(thread?.thinkingLevel ?? ''),
     messageCount: Number(thread?.messageCount ?? 0),
-    workspaceTarget,
+    workspaceTarget: workspaceTargets[0] ?? null,
+    workspaceTargets,
   };
 }
 
@@ -101,7 +102,7 @@ export function createAssistantThreadsCapability(
   policies: CrossDeviceAssistantPolicyStore,
 ): CapabilityHandler {
   const withTarget = async (thread: any) =>
-    compactThread(thread, await policies.homeTarget(String(thread?.id ?? '')));
+    compactThread(thread, await policies.homeTargets(String(thread?.id ?? '')));
 
   return {
     descriptor: ASSISTANT_THREADS_CAPABILITY,

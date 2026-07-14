@@ -1,74 +1,234 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Button, ErrorBanner, Label } from '../components/Ui';
+import { ActivityIndicator, Pressable, StyleSheet, Text, View } from 'react-native';
+import Check from 'lucide-react-native/icons/check';
+import ChevronDown from 'lucide-react-native/icons/chevron-down';
+import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import { Button, ConfirmDialog, ErrorBanner, Label } from '../components/Ui';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { useLocalAssistant } from './LocalAssistantContext';
 import type { LocalAssistantThread, LocalWorkspaceTarget } from './local-assistant-types';
 
-function Toggle({ label, active, onPress }: { label: string; active: boolean; onPress(): void }) {
+type RemoteWorkspace = {
+  id: string;
+  name: string;
+  read: boolean;
+  write: boolean;
+  execute: boolean;
+};
+
+type DeviceWorkspaces = {
+  id: string;
+  name: string;
+  connected: boolean;
+  loading: boolean;
+  error: string | null;
+  workspaces: RemoteWorkspace[];
+};
+
+function targetKey(target: Pick<LocalWorkspaceTarget, 'targetDeviceId' | 'workspaceId'>): string {
+  return `${target.targetDeviceId}\0${target.workspaceId}`;
+}
+
+function targetSignature(target: LocalWorkspaceTarget | undefined): string {
+  if (!target) return '';
+  return `${targetKey(target)}:${Number(target.read)}${Number(target.write)}${Number(target.execute)}`;
+}
+
+function sortedTargets(targets: LocalWorkspaceTarget[]): LocalWorkspaceTarget[] {
+  return [...targets].sort((left, right) => targetKey(left).localeCompare(targetKey(right)));
+}
+
+function changedTargetCount(saved: LocalWorkspaceTarget[], draft: LocalWorkspaceTarget[]): number {
+  const before = new Map(saved.map((target) => [targetKey(target), targetSignature(target)]));
+  const after = new Map(draft.map((target) => [targetKey(target), targetSignature(target)]));
+  return new Set([...before.keys(), ...after.keys()]).size === 0
+    ? 0
+    : [...new Set([...before.keys(), ...after.keys()])].filter(
+        (key) => before.get(key) !== after.get(key),
+      ).length;
+}
+
+function PermissionToggle({
+  label,
+  checked,
+  disabled,
+  onPress,
+}: {
+  label: string;
+  checked: boolean;
+  disabled?: boolean;
+  onPress(): void;
+}) {
   return (
-    <Pressable onPress={onPress} style={[styles.toggle, active && styles.toggleActive]}>
-      <Text style={[styles.toggleText, active && styles.toggleTextActive]}>{label}</Text>
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked, disabled }}
+      disabled={disabled}
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.permission,
+        checked && styles.permissionChecked,
+        disabled && styles.permissionDisabled,
+        pressed && styles.pressed,
+      ]}
+    >
+      <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
+        {checked ? <Check color={colors.crust} size={10} strokeWidth={3} /> : null}
+      </View>
+      <Text style={[styles.permissionText, checked && styles.permissionTextChecked]}>{label}</Text>
     </Pressable>
   );
 }
 
 export function LocalWorkspaceEditor({
   thread,
-  onClose,
+  onRequestClose,
+  onApplied,
+  onDirtyChange,
 }: {
   thread: LocalAssistantThread;
-  onClose(): void;
+  onRequestClose(): void;
+  onApplied(): void;
+  onDirtyChange(dirty: boolean): void;
 }) {
   const mesh = useMesh();
   const assistant = useLocalAssistant();
-  const availableDevices = mesh.devices.filter(
-    (device) =>
-      device.id !== mesh.identity?.id &&
-      !device.revokedAt &&
-      (mesh.profile?.capabilitiesByDevice[device.id] ?? []).some(
-        (capability) => capability.id === 'workspace',
-      ),
+  const [draft, setDraft] = React.useState(() => sortedTargets(thread.workspaceTargets));
+  const [devices, setDevices] = React.useState<DeviceWorkspaces[]>([]);
+  const [expanded, setExpanded] = React.useState<Set<string>>(
+    () => new Set(thread.workspaceTargets.map((target) => target.targetDeviceId)),
   );
-  const initial = thread.workspaceTarget;
-  const [deviceId, setDeviceId] = React.useState(initial?.targetDeviceId ?? '');
-  const [rootId, setRootId] = React.useState(initial?.rootId ?? '');
-  const [read, setRead] = React.useState(initial?.read ?? true);
-  const [write, setWrite] = React.useState(initial?.write ?? false);
   const [busy, setBusy] = React.useState(false);
+  const [confirmApply, setConfirmApply] = React.useState(false);
+  const [confirmDiscard, setConfirmDiscard] = React.useState(false);
+  const [reload, setReload] = React.useState(0);
   const [error, setError] = React.useState<string | null>(null);
+  const changes = changedTargetCount(thread.workspaceTargets, draft);
+  const dirty = changes > 0;
+  const availableDevices = React.useMemo(
+    () =>
+      mesh.devices.filter(
+        (device) =>
+          device.id !== mesh.identity?.id &&
+          !device.revokedAt &&
+          (mesh.profile?.capabilitiesByDevice[device.id] ?? []).some(
+            (capability) => capability.id === 'workspace',
+          ),
+      ),
+    [mesh.devices, mesh.identity?.id, mesh.profile?.capabilitiesByDevice],
+  );
+  const availableKey = JSON.stringify(
+    availableDevices
+      .map((device) => ({
+        id: device.id,
+        name: device.name,
+        connected: mesh.connectedDeviceIds.includes(device.id),
+      }))
+      .sort((left, right) => left.id.localeCompare(right.id)),
+  );
+  const discoveredKeys = new Set(
+    devices.flatMap((device) =>
+      device.workspaces.map((workspace) => `${device.id}\0${workspace.id}`),
+    ),
+  );
+  const unavailableTargets = draft.filter((target) => {
+    const device = devices.find((candidate) => candidate.id === target.targetDeviceId);
+    if (!device)
+      return !availableDevices.some((candidate) => candidate.id === target.targetDeviceId);
+    return !device.loading && !device.error && !discoveredKeys.has(targetKey(target));
+  });
 
-  const save = async () => {
-    if (!deviceId || !rootId.trim()) {
-      setError('Choose a workspace device and enter its configured root ID.');
-      return;
-    }
-    setBusy(true);
-    setError(null);
-    try {
-      const target: LocalWorkspaceTarget = {
-        targetDeviceId: deviceId,
-        rootId: rootId.trim(),
-        read: read || write,
-        write,
+  React.useEffect(() => onDirtyChange(dirty), [dirty, onDirtyChange]);
+  React.useEffect(() => () => onDirtyChange(false), [onDirtyChange]);
+
+  React.useEffect(() => {
+    let active = true;
+    setDevices(
+      availableDevices.map((device) => ({
+        id: device.id,
+        name: device.name,
+        connected: mesh.connectedDeviceIds.includes(device.id),
+        loading: true,
+        error: null,
+        workspaces: [],
+      })),
+    );
+    void Promise.all(
+      availableDevices.map(async (device) => {
+        try {
+          const result = await mesh.request(device.id, 'workspace', 'workspaces.list', {});
+          const workspaces = (Array.isArray(result?.workspaces) ? result.workspaces : [])
+            .filter((workspace: any) => workspace?.id && workspace?.name)
+            .map((workspace: any) => ({
+              id: String(workspace.id),
+              name: String(workspace.name),
+              read: workspace.read === true,
+              write: workspace.write === true,
+              execute: workspace.execute === true,
+            }));
+          if (!active) return;
+          setDevices((current) =>
+            current.map((item) =>
+              item.id === device.id ? { ...item, loading: false, workspaces } : item,
+            ),
+          );
+        } catch (nextError: any) {
+          if (!active) return;
+          setDevices((current) =>
+            current.map((item) =>
+              item.id === device.id
+                ? { ...item, loading: false, error: nextError?.message ?? String(nextError) }
+                : item,
+            ),
+          );
+        }
+      }),
+    );
+    return () => {
+      active = false;
+    };
+  }, [availableKey, mesh.request, reload]);
+
+  const updatePermission = (
+    device: DeviceWorkspaces,
+    workspace: RemoteWorkspace,
+    permission: 'read' | 'write' | 'execute',
+  ) => {
+    const key = `${device.id}\0${workspace.id}`;
+    setDraft((current) => {
+      const existing = current.find((target) => targetKey(target) === key) ?? {
+        targetDeviceId: device.id,
+        deviceName: device.name,
+        workspaceId: workspace.id,
+        workspaceName: workspace.name,
+        read: false,
+        write: false,
+        execute: false,
       };
-      await assistant.updateThread(thread.id, { workspaceTarget: target });
-      onClose();
-    } catch (nextError: any) {
-      setError(nextError?.message ?? String(nextError));
-    } finally {
-      setBusy(false);
-    }
+      let next = { ...existing, deviceName: device.name, workspaceName: workspace.name };
+      if (permission === 'read') {
+        next = next.read ? { ...next, read: false, write: false } : { ...next, read: true };
+      } else if (permission === 'write') {
+        next = next.write ? { ...next, write: false } : { ...next, read: true, write: true };
+      } else {
+        next = { ...next, execute: !next.execute };
+      }
+      const rest = current.filter((target) => targetKey(target) !== key);
+      return sortedTargets(next.read || next.write || next.execute ? [...rest, next] : rest);
+    });
   };
 
-  const remove = async () => {
+  const apply = async () => {
     setBusy(true);
     setError(null);
     try {
-      await assistant.updateThread(thread.id, { workspaceTarget: null });
-      onClose();
+      await assistant.updateThread(thread.id, { workspaceTargets: draft });
+      onDirtyChange(false);
+      setConfirmApply(false);
+      onApplied();
     } catch (nextError: any) {
+      setConfirmApply(false);
       setError(nextError?.message ?? String(nextError));
     } finally {
       setBusy(false);
@@ -76,154 +236,312 @@ export function LocalWorkspaceEditor({
   };
 
   return (
-    <View style={styles.editor}>
-      <View style={styles.head}>
-        <View style={styles.headCopy}>
-          <Label>Remote workspace</Label>
-          <Text style={styles.title}>Bind this phone thread</Text>
+    <View style={styles.page}>
+      <View style={styles.heading}>
+        <View style={styles.headingCopy}>
+          <Label>Thread access</Label>
+          <Text style={styles.title}>Devices and workspaces</Text>
+          <Text style={styles.body}>
+            This thread starts with no access. Choose a subset of the workspaces each destination
+            has already granted to this phone.
+          </Text>
         </View>
-        <Pressable onPress={onClose} hitSlop={10}>
-          <Text style={styles.close}>×</Text>
-        </Pressable>
-      </View>
-      <Text style={styles.body}>
-        On the destination Hub, grant this phone workspace operations and add a matching rule for
-        the phone device ID, thread ID, root, and access level.
-      </Text>
-      <View style={styles.identityBlock}>
-        <Text style={styles.identityLabel}>PHONE DEVICE</Text>
-        <Text selectable style={styles.identityValue}>
-          {mesh.identity?.id}
-        </Text>
-        <Text style={styles.identityLabel}>THREAD</Text>
-        <Text selectable style={styles.identityValue}>
-          {thread.id}
-        </Text>
-      </View>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.deviceChoices}
-      >
-        {availableDevices.map((device) => (
-          <Pressable
-            key={device.id}
-            onPress={() => setDeviceId(device.id)}
-            style={[styles.deviceChoice, deviceId === device.id && styles.deviceChoiceActive]}
-          >
-            <View
-              style={[
-                styles.deviceDot,
-                mesh.connectedDeviceIds.includes(device.id) && styles.deviceDotOnline,
-              ]}
-            />
-            <Text style={styles.deviceChoiceText}>{device.name}</Text>
+        <View style={styles.headingActions}>
+          <Pressable accessibilityRole="button" onPress={() => setReload((value) => value + 1)}>
+            <Text style={styles.refresh}>Refresh</Text>
           </Pressable>
-        ))}
-      </ScrollView>
-      {availableDevices.length === 0 ? (
-        <Text style={styles.warning}>
-          No device advertises the workspace capability. Refresh Devices after its Hub connects.
-        </Text>
-      ) : null}
-      <TextInput
-        value={rootId}
-        onChangeText={setRootId}
-        autoCapitalize="none"
-        autoCorrect={false}
-        placeholder="Workspace root ID, for example main-project"
-        placeholderTextColor={colors.muted}
-        style={styles.rootInput}
-      />
-      <View style={styles.accessRow}>
-        <Toggle label="READ" active={read || write} onPress={() => !write && setRead(!read)} />
-        <Toggle
-          label="WRITE"
-          active={write}
-          onPress={() => {
-            setWrite(!write);
-            if (!write) setRead(true);
-          }}
-        />
+          <Pressable accessibilityLabel="Return to chat" onPress={onRequestClose} hitSlop={10}>
+            <Text style={styles.close}>×</Text>
+          </Pressable>
+        </View>
       </View>
+
       <ErrorBanner message={error} />
-      <View style={styles.actions}>
-        <Button loading={busy} onPress={() => void save()} style={styles.save}>
-          Use this workspace
-        </Button>
-        {thread.workspaceTarget ? (
-          <Button disabled={busy} tone="danger" onPress={() => void remove()}>
-            Remove
-          </Button>
+      <View style={styles.deviceList}>
+        {devices.map((device) => {
+          const open = expanded.has(device.id);
+          const selectedCount = draft.filter(
+            (target) => target.targetDeviceId === device.id,
+          ).length;
+          const Disclosure = open ? ChevronDown : ChevronRight;
+          return (
+            <View key={device.id}>
+              <Pressable
+                accessibilityRole="button"
+                accessibilityState={{ expanded: open }}
+                onPress={() =>
+                  setExpanded((current) => {
+                    const next = new Set(current);
+                    if (next.has(device.id)) next.delete(device.id);
+                    else next.add(device.id);
+                    return next;
+                  })
+                }
+                style={({ pressed }) => [
+                  styles.deviceRow,
+                  open && styles.deviceRowOpen,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <View style={[styles.deviceDot, device.connected && styles.deviceDotOnline]} />
+                <View style={styles.deviceCopy}>
+                  <Text style={styles.deviceName}>{device.name}</Text>
+                  <Text style={styles.deviceMeta}>
+                    {device.connected ? 'Online' : 'Offline'}
+                    {selectedCount ? ` · ${selectedCount} selected` : ''}
+                  </Text>
+                </View>
+                {device.loading ? (
+                  <ActivityIndicator color={colors.accent} size="small" />
+                ) : (
+                  <Disclosure color={colors.muted} size={15} strokeWidth={2} />
+                )}
+              </Pressable>
+              {open ? (
+                <View style={styles.workspacePanel}>
+                  {device.error ? <Text style={styles.warning}>{device.error}</Text> : null}
+                  {!device.loading && !device.error && device.workspaces.length === 0 ? (
+                    <Text style={styles.emptyText}>
+                      This device has not granted any workspace to this phone.
+                    </Text>
+                  ) : null}
+                  {device.workspaces.map((workspace) => {
+                    const selected = draft.find(
+                      (target) =>
+                        target.targetDeviceId === device.id && target.workspaceId === workspace.id,
+                    );
+                    const saved = thread.workspaceTargets.find(
+                      (target) =>
+                        target.targetDeviceId === device.id && target.workspaceId === workspace.id,
+                    );
+                    const changed = targetSignature(selected) !== targetSignature(saved);
+                    return (
+                      <View
+                        key={workspace.id}
+                        style={[styles.workspaceRow, changed && styles.workspaceRowChanged]}
+                      >
+                        <View style={styles.workspaceCopy}>
+                          <Text style={styles.workspaceName}>{workspace.name}</Text>
+                          <Text style={styles.workspaceMeta}>
+                            Destination allows{' '}
+                            {[
+                              workspace.read && 'read',
+                              workspace.write && 'write',
+                              workspace.execute && 'commands',
+                            ]
+                              .filter(Boolean)
+                              .join(', ')}
+                            {changed ? ' · changed' : ''}
+                          </Text>
+                        </View>
+                        <View style={styles.permissions}>
+                          <PermissionToggle
+                            label="READ"
+                            checked={selected?.read === true}
+                            disabled={!workspace.read}
+                            onPress={() => updatePermission(device, workspace, 'read')}
+                          />
+                          <PermissionToggle
+                            label="WRITE"
+                            checked={selected?.write === true}
+                            disabled={!workspace.write}
+                            onPress={() => updatePermission(device, workspace, 'write')}
+                          />
+                          <PermissionToggle
+                            label="RUN"
+                            checked={selected?.execute === true}
+                            disabled={!workspace.execute}
+                            onPress={() => updatePermission(device, workspace, 'execute')}
+                          />
+                        </View>
+                      </View>
+                    );
+                  })}
+                </View>
+              ) : null}
+            </View>
+          );
+        })}
+        {devices.length === 0 ? (
+          <View style={styles.empty}>
+            <Text style={styles.emptyText}>
+              No paired device advertises workspace access. Configure a workspace on a destination
+              Hub, then refresh Devices.
+            </Text>
+          </View>
         ) : null}
       </View>
+
+      {unavailableTargets.length > 0 ? (
+        <View style={styles.unavailable}>
+          <Text style={styles.warning}>No longer granted by the destination</Text>
+          {unavailableTargets.map((target) => (
+            <View key={targetKey(target)} style={styles.unavailableRow}>
+              <Text style={styles.unavailableName}>
+                {target.deviceName} / {target.workspaceName}
+              </Text>
+              <Pressable
+                onPress={() =>
+                  setDraft((current) =>
+                    current.filter((candidate) => targetKey(candidate) !== targetKey(target)),
+                  )
+                }
+              >
+                <Text style={styles.removeText}>Remove</Text>
+              </Pressable>
+            </View>
+          ))}
+        </View>
+      ) : null}
+
+      <View style={styles.commandWarning}>
+        <Text style={styles.commandWarningText}>
+          RUN starts Bash in the workspace folder. Commands are host access and can leave that
+          folder. Output streams back from a cancellable job with a 30-minute default timeout.
+        </Text>
+      </View>
+
+      {dirty ? (
+        <View style={styles.unsavedBanner}>
+          <Text style={styles.unsavedText}>
+            {changes} unsaved {changes === 1 ? 'change' : 'changes'}
+          </Text>
+          <Pressable
+            onPress={() => setConfirmDiscard(true)}
+            style={({ pressed }) => pressed && styles.pressed}
+          >
+            <Text style={styles.discardText}>Discard</Text>
+          </Pressable>
+        </View>
+      ) : null}
+      <Button disabled={!dirty} onPress={() => setConfirmApply(true)}>
+        Apply access changes
+      </Button>
+
+      <ConfirmDialog
+        visible={confirmApply}
+        title="Apply thread access changes?"
+        message={`Update ${changes} workspace ${changes === 1 ? 'selection' : 'selections'} for “${thread.title}”?`}
+        confirmLabel="Apply changes"
+        busy={busy}
+        onCancel={() => setConfirmApply(false)}
+        onConfirm={() => void apply()}
+      />
+      <ConfirmDialog
+        visible={confirmDiscard}
+        title="Discard access changes?"
+        message="Restore this thread’s last saved workspace access?"
+        confirmLabel="Discard changes"
+        destructive
+        onCancel={() => setConfirmDiscard(false)}
+        onConfirm={() => {
+          setDraft(sortedTargets(thread.workspaceTargets));
+          setConfirmDiscard(false);
+        }}
+      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  editor: {
-    borderRadius: 18,
+  page: { gap: 12 },
+  heading: { flexDirection: 'row', alignItems: 'flex-start', paddingHorizontal: 2 },
+  headingCopy: { flex: 1 },
+  headingActions: { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  refresh: { color: colors.accent, fontSize: 10, fontWeight: '800' },
+  title: { color: colors.text, fontSize: 21, fontWeight: '800', marginTop: 5 },
+  body: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 7 },
+  close: { color: colors.muted, fontSize: 25 },
+  deviceList: { gap: 7 },
+  deviceRow: {
+    minHeight: 58,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 11,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panel,
-    padding: 16,
-    gap: 13,
   },
-  head: { flexDirection: 'row', alignItems: 'flex-start' },
-  headCopy: { flex: 1 },
-  title: { color: colors.text, fontSize: 20, fontWeight: '800', marginTop: 5 },
-  close: { color: colors.muted, fontSize: 25 },
-  body: { color: colors.muted, fontSize: 12, lineHeight: 18 },
-  identityBlock: { borderRadius: 12, backgroundColor: colors.background, padding: 11, gap: 4 },
-  identityLabel: {
-    color: colors.warning,
-    fontSize: 7,
-    fontWeight: '900',
-    letterSpacing: 1,
-    marginTop: 3,
+  deviceRowOpen: { borderColor: colors.accentBorder, backgroundColor: colors.accentWash },
+  deviceDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.subtle },
+  deviceDotOnline: { backgroundColor: colors.online },
+  deviceCopy: { flex: 1 },
+  deviceName: { color: colors.text, fontSize: 14, fontWeight: '800' },
+  deviceMeta: { color: colors.muted, fontSize: 9, fontWeight: '700', marginTop: 3 },
+  workspacePanel: {
+    marginTop: -1,
+    gap: 8,
+    padding: 10,
+    borderWidth: 1,
+    borderTopWidth: 0,
+    borderColor: colors.accentBorder,
+    borderBottomLeftRadius: 6,
+    borderBottomRightRadius: 6,
+    backgroundColor: colors.background,
   },
-  identityValue: { color: colors.muted, fontSize: 9, fontFamily: 'monospace' },
-  deviceChoices: { gap: 7 },
-  deviceChoice: {
+  workspaceRow: { gap: 9, padding: 10, borderRadius: 5, backgroundColor: colors.panel },
+  workspaceRowChanged: { borderWidth: 1, borderColor: colors.warningBorder },
+  workspaceCopy: { flex: 1 },
+  workspaceName: { color: colors.text, fontSize: 12, fontWeight: '800' },
+  workspaceMeta: { color: colors.muted, fontSize: 9, marginTop: 3 },
+  permissions: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  permission: {
+    minHeight: 30,
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 5,
+    paddingHorizontal: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.border,
+  },
+  permissionChecked: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
+  permissionDisabled: { opacity: 0.3 },
+  checkbox: {
+    width: 13,
+    height: 13,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: colors.borderStrong,
+  },
+  checkboxChecked: { borderColor: colors.accent, backgroundColor: colors.accent },
+  permissionText: { color: colors.muted, fontSize: 8, fontWeight: '900', letterSpacing: 0.6 },
+  permissionTextChecked: { color: colors.text },
+  warning: { color: colors.warning, fontSize: 10, lineHeight: 15 },
+  unavailable: {
     gap: 7,
-    height: 39,
-    paddingHorizontal: 11,
-    borderRadius: 11,
-    backgroundColor: colors.background,
-    borderColor: colors.border,
+    padding: 10,
+    borderRadius: 5,
     borderWidth: 1,
+    borderColor: colors.warningBorder,
   },
-  deviceChoiceActive: { borderColor: colors.accent, backgroundColor: colors.accentDark },
-  deviceChoiceText: { color: colors.text, fontSize: 11, fontWeight: '700' },
-  deviceDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.muted },
-  deviceDotOnline: { backgroundColor: colors.online },
-  warning: { color: colors.warning, fontSize: 11, lineHeight: 16 },
-  rootInput: {
-    minHeight: 46,
-    borderRadius: 12,
-    borderColor: colors.border,
+  unavailableRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  unavailableName: { flex: 1, color: colors.muted, fontSize: 10 },
+  removeText: { color: colors.danger, fontSize: 10, fontWeight: '800' },
+  empty: { padding: 18, borderRadius: 6, borderWidth: 1, borderColor: colors.border },
+  emptyText: { color: colors.muted, fontSize: 10, lineHeight: 16 },
+  commandWarning: {
+    padding: 10,
+    borderRadius: 5,
     borderWidth: 1,
-    backgroundColor: colors.background,
-    color: colors.text,
-    paddingHorizontal: 12,
-    fontSize: 12,
+    borderColor: colors.warningBorder,
+    backgroundColor: colors.warningDark,
   },
-  accessRow: { flexDirection: 'row', gap: 8 },
-  toggle: {
-    height: 36,
-    minWidth: 72,
+  commandWarningText: { color: colors.warning, fontSize: 10, lineHeight: 15 },
+  unsavedBanner: {
+    minHeight: 38,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 10,
-    borderColor: colors.border,
+    justifyContent: 'space-between',
+    paddingHorizontal: 10,
+    borderRadius: 5,
     borderWidth: 1,
+    borderColor: colors.warningBorder,
+    backgroundColor: colors.warningDark,
   },
-  toggleActive: { backgroundColor: colors.accentDark, borderColor: colors.accent },
-  toggleText: { color: colors.muted, fontSize: 9, fontWeight: '900', letterSpacing: 1 },
-  toggleTextActive: { color: colors.accent },
-  actions: { gap: 8 },
-  save: { flex: 1 },
+  unsavedText: { color: colors.warning, fontSize: 10, fontWeight: '800' },
+  discardText: { color: colors.text, fontSize: 10, fontWeight: '800' },
+  pressed: { opacity: 0.72 },
 });

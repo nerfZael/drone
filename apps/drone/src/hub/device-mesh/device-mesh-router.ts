@@ -7,6 +7,7 @@ import {
   parseSignedCapabilityRequest,
   socketAuthSigningText,
   socketServerAuthSigningText,
+  WORKSPACE_CAPABILITY,
   type CapabilityResponse,
   type SignedCapabilityRequest,
 } from '@drone/device-protocol';
@@ -130,8 +131,9 @@ export class DeviceMeshRouter {
     capability: string,
     operation: string,
     payload: unknown,
+    signal?: AbortSignal,
   ): Promise<unknown> {
-    return await this.requestClient.request(targetDeviceId, capability, operation, payload);
+    return await this.requestClient.request(targetDeviceId, capability, operation, payload, signal);
   }
 
   async broadcastMembership(): Promise<void> {
@@ -350,6 +352,7 @@ export class DeviceMeshRouter {
       const revokedDeviceId = await this.membership.acceptRevocation(message);
       if (revokedDeviceId) {
         this.disconnect(revokedDeviceId);
+        await this.capabilities.revokeDevice(revokedDeviceId);
         for (const peer of this.connections.values()) {
           if (peer.ws !== connection.ws) send(peer.ws, message);
         }
@@ -520,6 +523,8 @@ export class DeviceMeshRouter {
       return await this.denied(request, 'INVALID_SIGNATURE', 'request signature is invalid');
     }
     if (
+      // Workspace access is scoped by source device and workspace root inside its handler.
+      request.capability !== WORKSPACE_CAPABILITY.id &&
       !isGranted(source.grants, request.capability, request.capabilityVersion, request.operation)
     ) {
       return await this.denied(

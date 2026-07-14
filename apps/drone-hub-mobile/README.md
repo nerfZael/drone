@@ -28,16 +28,28 @@ process. It does not ask another Hub to host the thread.
 1. In the mobile **Settings** tab, choose either an OpenAI API key or a copied Codex subscription
    login and select a model. Credentials are kept in Android secure storage and are sent only to
    the selected OpenAI model service.
-2. Create a phone thread and open **Access**.
-3. Select a connected device that advertises the `workspace` capability, enter a root ID, and
-   choose read or write access.
-4. On that destination Hub, grant this phone the matching workspace operations. In its
-   cross-device assistant policy, add the displayed phone device ID, mobile thread ID, root ID,
-   and the same read/write level.
+2. On a destination Hub, open **Settings → Device mesh → Workspaces**, choose one or more local
+   folders, and grant this phone Read, Write, or Run commands access to each folder.
+3. Create a phone thread and open **Access**. Expand a device and select any subset of the named
+   workspaces and permissions it granted to the phone.
+4. Apply the thread access changes. New threads start with no workspace access, and each thread can
+   select multiple workspaces across multiple devices without copying IDs.
 
-Both checks are required. A generic device grant cannot bypass the exact thread rule on the
-workspace device. Phone conversations are bounded and stored in the app's private local storage;
-provider credentials are stored separately in Secure Store.
+The destination's device-to-workspace grant is the maximum access. The phone narrows that grant for
+each thread before exposing model tools. **Run commands** starts Bash in the workspace folder but is
+host access and is not confined to that folder. Bash runs as an asynchronous destination-owned job:
+the phone receives a job handle immediately, consumes output incrementally, and sends an explicit
+cancel operation when a run is stopped. Commands default to a 30-minute timeout and are capped at
+one hour. Phone conversations are bounded and stored in the
+app's private local storage; provider credentials are stored separately in Secure Store.
+
+Phone-hosted assistants use the browser-safe Blip workspace target catalog and the same
+`list_targets`, `set_target`, per-call target, filesystem capability, and Bash target semantics as
+Hub-hosted assistants. The complete `@blip/core` session runtime is not yet used on Android because
+its current entry point depends on Node-only filesystem, process, child-process, and crypto modules.
+The Android provider loop and persistence adapter therefore remain React Native implementations;
+target selection and mesh workspace execution are shared. This boundary should remain explicit
+until Blip exposes a fully platform-neutral agent/session core.
 
 The phone commits complete model responses because streaming fetch behavior varies across React
 Native versions. Codex SSE is buffered until the response completes. Stop cancels an active model

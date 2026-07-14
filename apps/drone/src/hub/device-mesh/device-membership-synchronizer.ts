@@ -1,4 +1,4 @@
-import { canonicalJson } from '@drone/device-protocol';
+import { canonicalJson, type MeshDevice } from '@drone/device-protocol';
 import {
   deviceIdForPublicKey,
   signDeviceText,
@@ -86,36 +86,53 @@ export class DeviceMembershipSynchronizer {
       )
     )
       return false;
-    let changed = false;
+    const candidates: MeshDevice[] = [];
+    const candidateIds = new Set<string>();
     for (const raw of event.devices.slice(0, 200)) {
       if (!issuer.administrator && raw?.id !== issuer.id) continue;
       const publicKey = raw?.publicKey as JsonWebKey;
       if (!publicKey || deviceIdForPublicKey(publicKey) !== raw?.id) continue;
       const updatedAt = safeUpdatedAt(raw.updatedAt);
       if (!updatedAt) continue;
+      const name = String(raw.name ?? '')
+        .trim()
+        .slice(0, 80);
+      if (!name || candidateIds.has(raw.id)) return false;
+      candidateIds.add(raw.id);
       const current = state.devices[raw.id];
-      changed =
-        (await this.store.upsertDiscoveredDevice({
-          id: raw.id,
-          name: String(raw.name ?? raw.id).slice(0, 80),
-          platform: ['desktop', 'server', 'android'].includes(raw.platform)
-            ? raw.platform
-            : 'unknown',
-          publicKey,
-          administrator: issuer.administrator
-            ? raw.administrator === true
-            : current?.administrator === true,
-          grants: [],
-          endpoints: Array.isArray(raw.endpoints)
-            ? raw.endpoints
-                .map(safeEndpoint)
-                .filter((item: string | null): item is string => Boolean(item))
-                .slice(0, 4)
-            : [],
-          revokedAt: null,
-          addedAt: String(raw.addedAt ?? new Date().toISOString()),
-          updatedAt,
-        })) || changed;
+      candidates.push({
+        id: raw.id,
+        name,
+        platform: ['desktop', 'server', 'android'].includes(raw.platform)
+          ? raw.platform
+          : 'unknown',
+        publicKey,
+        administrator: issuer.administrator
+          ? raw.administrator === true
+          : current?.administrator === true,
+        grants: [],
+        endpoints: Array.isArray(raw.endpoints)
+          ? raw.endpoints
+              .map(safeEndpoint)
+              .filter((item: string | null): item is string => Boolean(item))
+              .slice(0, 4)
+          : [],
+        revokedAt: null,
+        addedAt: String(raw.addedAt ?? new Date().toISOString()),
+        updatedAt,
+      });
+    }
+    const projectedNames = new Map(
+      Object.values(state.devices)
+        .filter((device) => !device.revokedAt)
+        .map((device) => [device.id, device.name.trim().toLowerCase()]),
+    );
+    for (const candidate of candidates)
+      projectedNames.set(candidate.id, candidate.name.toLowerCase());
+    if (new Set(projectedNames.values()).size !== projectedNames.size) return false;
+    let changed = false;
+    for (const candidate of candidates) {
+      changed = (await this.store.upsertDiscoveredDevice(candidate)) || changed;
     }
     return changed;
   }

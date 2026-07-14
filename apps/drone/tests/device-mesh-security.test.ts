@@ -206,11 +206,50 @@ describe('device mesh signatures', () => {
         state.devices[remote.id]!.administrator = false;
       });
       await expect(
-        capability.invoke('device.access.update-self', { grants: [] }, {
-          ...context,
-          sourceDevice: { ...remoteDevice, administrator: false },
-        }),
+        capability.invoke(
+          'device.access.update-self',
+          { grants: [] },
+          {
+            ...context,
+            sourceDevice: { ...remoteDevice, administrator: false },
+          },
+        ),
       ).rejects.toThrow('administrator access is required');
+    } finally {
+      await fs.rm(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('requires active devices to have unique display names', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-device-name-test-'));
+    try {
+      const self = identity('device_self');
+      const remote = identity('device_phone');
+      const store = new DeviceMeshStore(path.join(directory, 'state.json'), self);
+      await store.read();
+      const at = new Date().toISOString();
+      const remoteDevice = {
+        id: remote.id,
+        name: 'Phone',
+        platform: remote.platform,
+        publicKey: remote.publicKey,
+        administrator: false,
+        grants: [],
+        endpoints: [],
+        revokedAt: null,
+        addedAt: at,
+        updatedAt: at,
+      } as const;
+      await store.upsertDiscoveredDevice(remoteDevice);
+      const capability = createDeviceCoreCapability(store, () => []);
+      await expect(
+        capability.invoke(
+          'device.rename-self',
+          { name: self.name.toUpperCase() },
+          { sourceDevice: remoteDevice, requestId: 'request-rename' },
+        ),
+      ).rejects.toMatchObject({ code: 'DUPLICATE_DEVICE_NAME' });
+      expect((await store.read()).devices[remote.id]?.name).toBe('Phone');
     } finally {
       await fs.rm(directory, { recursive: true, force: true });
     }

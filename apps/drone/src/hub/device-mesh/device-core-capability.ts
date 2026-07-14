@@ -1,4 +1,4 @@
-import { DEVICE_CORE_CAPABILITY } from '@drone/device-protocol';
+import { DEVICE_CORE_CAPABILITY, WORKSPACE_CAPABILITY } from '@drone/device-protocol';
 import type { DeviceMeshStore } from './device-mesh-store';
 import type { CapabilityHandler } from './device-mesh-types';
 
@@ -7,16 +7,18 @@ function payloadObject(value: unknown): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
-function normalizedGrants(
-  value: unknown,
-  capabilities: CapabilityHandler['descriptor'][],
-) {
+function normalizedGrants(value: unknown, capabilities: CapabilityHandler['descriptor'][]) {
   if (!Array.isArray(value)) return [];
   const descriptors = new Map(capabilities.map((descriptor) => [descriptor.id, descriptor]));
   return value.flatMap((raw: any) => {
     const capability = String(raw?.capability ?? '').trim();
     const descriptor = descriptors.get(capability);
-    if (!descriptor || descriptor.id === DEVICE_CORE_CAPABILITY.id) return [];
+    if (
+      !descriptor ||
+      descriptor.id === DEVICE_CORE_CAPABILITY.id ||
+      descriptor.id === WORKSPACE_CAPABILITY.id
+    )
+      return [];
     if (Number(raw?.version) !== descriptor.version || !Array.isArray(raw?.operations)) return [];
     const operations = [
       ...new Set<string>(
@@ -25,15 +27,14 @@ function normalizedGrants(
           .filter((operation: string) => descriptor.operations.includes(operation)),
       ),
     ];
-    return operations.length > 0
-      ? [{ capability, version: descriptor.version, operations }]
-      : [];
+    return operations.length > 0 ? [{ capability, version: descriptor.version, operations }] : [];
   });
 }
 
 export function createDeviceCoreCapability(
   store: DeviceMeshStore,
   listCapabilities: () => CapabilityHandler['descriptor'][],
+  onMembershipChange: () => void | Promise<void> = () => undefined,
 ): CapabilityHandler {
   return {
     descriptor: DEVICE_CORE_CAPABILITY,
@@ -66,9 +67,25 @@ export function createDeviceCoreCapability(
           const source = state.devices[context.sourceDevice.id];
           if (!source || source.revokedAt)
             throw Object.assign(new Error('device is not active'), { code: 'DEVICE_REVOKED' });
+          if (
+            Object.values(state.devices).some(
+              (device) =>
+                device.id !== source.id &&
+                !device.revokedAt &&
+                device.name.trim().toLowerCase() === name.toLowerCase(),
+            )
+          )
+            throw Object.assign(new Error('device names must be unique in this network'), {
+              code: 'DUPLICATE_DEVICE_NAME',
+            });
           source.name = name;
           source.updatedAt = new Date().toISOString();
         });
+        try {
+          await onMembershipChange();
+        } catch {
+          // The rename is already durable; a later membership sync can propagate it.
+        }
         return { name };
       }
       if (operation === 'device.access.update-self') {

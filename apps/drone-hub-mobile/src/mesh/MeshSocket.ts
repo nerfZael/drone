@@ -24,7 +24,11 @@ type PendingRequest = {
   reject(error: Error): void;
   timer: ReturnType<typeof setTimeout>;
   targetDeviceId: string;
+  signal?: AbortSignal;
+  onAbort?: () => void;
 };
+
+const MAX_REQUEST_BYTES = 240 * 1024;
 
 export class MeshSocket {
   private socket: WebSocket | null = null;
@@ -102,7 +106,10 @@ export class MeshSocket {
     capability: string,
     operation: string,
     payload: unknown,
+    signal?: AbortSignal,
   ): Promise<unknown> {
+    if (signal?.aborted)
+      throw Object.assign(new Error('Mesh request cancelled'), { name: 'AbortError' });
     const socket = this.socket;
     if (!this.ready || !socket || socket.readyState !== WebSocket.OPEN)
       throw new Error('No mesh connection is available');
@@ -129,16 +136,37 @@ export class MeshSocket {
       ...unsigned,
       signature: await this.identity.sign(capabilityRequestSigningText(unsigned)),
     };
+    const serialized = JSON.stringify(request);
+    const requestBytes =
+      typeof TextEncoder === 'undefined'
+        ? serialized.length * 3
+        : new TextEncoder().encode(serialized).byteLength;
+    if (requestBytes > MAX_REQUEST_BYTES) throw new Error('Mesh request is too large');
     return await new Promise((resolve, reject) => {
+      const onAbort = () => {
+        clearTimeout(timer);
+        this.pending.delete(request.requestId);
+        reject(Object.assign(new Error('Mesh request cancelled'), { name: 'AbortError' }));
+      };
       const timer = setTimeout(() => {
+        signal?.removeEventListener('abort', onAbort);
         this.pending.delete(request.requestId);
         reject(new Error('The target did not respond in time'));
       }, 30_000);
-      this.pending.set(request.requestId, { resolve, reject, timer, targetDeviceId });
+      this.pending.set(request.requestId, {
+        resolve,
+        reject,
+        timer,
+        targetDeviceId,
+        signal,
+        onAbort,
+      });
+      signal?.addEventListener('abort', onAbort, { once: true });
       try {
-        socket.send(JSON.stringify(request));
+        socket.send(serialized);
       } catch (error) {
         clearTimeout(timer);
+        signal?.removeEventListener('abort', onAbort);
         this.pending.delete(request.requestId);
         reject(error instanceof Error ? error : new Error(String(error)));
       }
@@ -220,6 +248,7 @@ export class MeshSocket {
     )
       return;
     clearTimeout(pending.timer);
+    pending.signal?.removeEventListener('abort', pending.onAbort!);
     this.pending.delete(response.requestId);
     if (response.ok) pending.resolve(response.result);
     else
@@ -233,6 +262,7 @@ export class MeshSocket {
   private rejectPending(message: string): void {
     for (const request of this.pending.values()) {
       clearTimeout(request.timer);
+      request.signal?.removeEventListener('abort', request.onAbort!);
       request.reject(new Error(message));
     }
     this.pending.clear();

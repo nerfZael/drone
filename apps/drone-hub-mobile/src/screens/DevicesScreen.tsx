@@ -16,10 +16,7 @@ import Network from 'lucide-react-native/icons/network';
 import Smartphone from 'lucide-react-native/icons/smartphone';
 import type { CapabilityDescriptor, CapabilityGrant, MeshDevice } from '@drone/device-protocol';
 import { Button, ConfirmDialog, ErrorBanner, textStyles } from '../components/Ui';
-import {
-  currentDeviceFirst,
-  permissionChangeCount,
-} from '../devices/device-permissions-model';
+import { currentDeviceFirst, permissionChangeCount } from '../devices/device-permissions-model';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 
@@ -96,10 +93,12 @@ export function DevicesScreen() {
         mesh.request(device.id, 'device-core', 'device.describe'),
         mesh.request(device.id, 'device-core', 'devices.list'),
       ]);
-      const nextCapabilities = (Array.isArray(description?.capabilities)
-        ? description.capabilities
-        : []
-      ).filter((capability: CapabilityDescriptor) => capability.id !== 'device-core');
+      const nextCapabilities = (
+        Array.isArray(description?.capabilities) ? description.capabilities : []
+      ).filter(
+        (capability: CapabilityDescriptor) =>
+          capability.id !== 'device-core' && capability.id !== 'workspace',
+      );
       const phone = (Array.isArray(listing?.devices) ? listing.devices : []).find(
         (item: MeshDevice) => item.id === mesh.identity?.id,
       ) as MeshDevice | undefined;
@@ -169,163 +168,172 @@ export function DevicesScreen() {
           />
         }
       >
-      <ErrorBanner message={error ?? mesh.error} />
-      <View style={styles.list}>
-        {orderedDevices.map((device) => {
-          const self = device.id === mesh.identity?.id;
-          const connected = self || mesh.connectedDeviceIds.includes(device.id);
-          const selected = device.id === selectedDeviceId;
-          const expanded = selected && permissionsExpanded;
-          const DeviceIcon = self || /android|ios|phone/i.test(device.platform)
-            ? Smartphone
-            : Laptop;
-          const Disclosure = expanded ? ChevronDown : ChevronRight;
-          return (
-            <View key={device.id}>
-              <Pressable
-                accessibilityRole={self ? undefined : 'button'}
-                accessibilityLabel={self ? undefined : `Configure access on ${device.name}`}
-                accessibilityState={self ? undefined : { expanded }}
-                disabled={self}
-                onPress={() => chooseDevice(device)}
-                style={({ pressed }) => [
-                  styles.deviceCard,
-                  connected && styles.connectedCard,
-                  selected && styles.selectedCard,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <View style={[styles.deviceIcon, connected && styles.deviceIconConnected]}>
-                  <DeviceIcon
-                    color={connected ? colors.online : colors.muted}
-                    size={18}
-                    strokeWidth={2}
-                  />
-                </View>
-                <View style={styles.deviceCopy}>
-                  <View style={styles.nameRow}>
-                    <Text numberOfLines={1} style={styles.deviceName}>
-                      {device.name}
-                    </Text>
-                    {self ? <Text style={styles.self}>THIS PHONE</Text> : null}
+        <ErrorBanner message={error ?? mesh.error} />
+        <View style={styles.list}>
+          {orderedDevices.map((device) => {
+            const self = device.id === mesh.identity?.id;
+            const connected = self || mesh.connectedDeviceIds.includes(device.id);
+            const selected = device.id === selectedDeviceId;
+            const expanded = selected && permissionsExpanded;
+            const DeviceIcon =
+              self || /android|ios|phone/i.test(device.platform) ? Smartphone : Laptop;
+            const Disclosure = expanded ? ChevronDown : ChevronRight;
+            return (
+              <View key={device.id}>
+                <Pressable
+                  accessibilityRole={self ? undefined : 'button'}
+                  accessibilityLabel={self ? undefined : `Configure access on ${device.name}`}
+                  accessibilityState={self ? undefined : { expanded }}
+                  disabled={self}
+                  onPress={() => chooseDevice(device)}
+                  style={({ pressed }) => [
+                    styles.deviceCard,
+                    connected && styles.connectedCard,
+                    selected && styles.selectedCard,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <View style={[styles.deviceIcon, connected && styles.deviceIconConnected]}>
+                    <DeviceIcon
+                      color={connected ? colors.online : colors.muted}
+                      size={18}
+                      strokeWidth={2}
+                    />
                   </View>
-                  <Text numberOfLines={1} style={[textStyles.mono, styles.deviceId]}>
-                    {device.id}
-                  </Text>
-                </View>
-                <View style={styles.status}>
-                  <View style={[styles.dot, connected && styles.dotConnected]} />
-                  <Text style={[styles.statusText, connected && styles.statusTextConnected]}>
-                    {connected ? 'Online' : 'Offline'}
-                  </Text>
-                </View>
-                {!self ? <Disclosure color={colors.muted} size={15} strokeWidth={2} /> : null}
-              </Pressable>
-
-              {expanded ? (
-                <View style={styles.permissionPanel}>
-                  {permissionsLoading ? (
-                    <View style={styles.loading}>
-                      <ActivityIndicator color={colors.accent} size="small" />
-                      <Text style={styles.loadingText}>Loading permissions…</Text>
+                  <View style={styles.deviceCopy}>
+                    <View style={styles.nameRow}>
+                      <Text numberOfLines={1} style={styles.deviceName}>
+                        {device.name}
+                      </Text>
+                      {self ? <Text style={styles.self}>THIS PHONE</Text> : null}
                     </View>
-                  ) : (
-                    <>
-                      {!canEditAccess ? (
-                        <Text style={styles.permissionHint}>
-                          This phone can view its access here, but administrator access is required
-                          to change it.
-                        </Text>
-                      ) : null}
-                      {capabilities.map((capability) => (
-                        <View key={capability.id} style={styles.capability}>
-                          <Text style={styles.capabilityName}>{capability.id}</Text>
-                          <View style={styles.operations}>
-                            {capability.operations.map((operation) => {
-                              const key = `${capability.id}:${operation}`;
-                              const enabled = selectedOperations.has(key);
-                              const changed = enabled !== savedOperations.has(key);
-                              return (
-                                <Pressable
-                                  key={key}
-                                  accessibilityRole="checkbox"
-                                  accessibilityState={{ checked: enabled, disabled: !canEditAccess }}
-                                  disabled={!canEditAccess}
-                                  onPress={() =>
-                                    setSelectedOperations((current) => {
-                                      const next = new Set(current);
-                                      if (next.has(key)) next.delete(key);
-                                      else next.add(key);
-                                      return next;
-                                    })
-                                  }
-                                  style={({ pressed }) => [
-                                    styles.operation,
-                                    enabled && styles.operationEnabled,
-                                    changed && styles.operationChanged,
-                                    pressed && styles.pressed,
-                                  ]}
-                                >
-                                  <View style={[styles.checkbox, enabled && styles.checkboxEnabled]}>
-                                    {enabled ? (
-                                      <Check color={colors.crust} size={11} strokeWidth={3} />
-                                    ) : null}
-                                  </View>
-                                  <Text style={[styles.operationText, enabled && styles.operationTextEnabled]}>
-                                    {operation}
-                                  </Text>
-                                  {changed ? <View style={styles.changedDot} /> : null}
-                                </Pressable>
-                              );
-                            })}
+                    <Text numberOfLines={1} style={[textStyles.mono, styles.deviceId]}>
+                      {device.platform}
+                    </Text>
+                  </View>
+                  <View style={styles.status}>
+                    <View style={[styles.dot, connected && styles.dotConnected]} />
+                    <Text style={[styles.statusText, connected && styles.statusTextConnected]}>
+                      {connected ? 'Online' : 'Offline'}
+                    </Text>
+                  </View>
+                  {!self ? <Disclosure color={colors.muted} size={15} strokeWidth={2} /> : null}
+                </Pressable>
+
+                {expanded ? (
+                  <View style={styles.permissionPanel}>
+                    {permissionsLoading ? (
+                      <View style={styles.loading}>
+                        <ActivityIndicator color={colors.accent} size="small" />
+                        <Text style={styles.loadingText}>Loading permissions…</Text>
+                      </View>
+                    ) : (
+                      <>
+                        {!canEditAccess ? (
+                          <Text style={styles.permissionHint}>
+                            This phone can view its access here, but administrator access is
+                            required to change it.
+                          </Text>
+                        ) : null}
+                        {capabilities.map((capability) => (
+                          <View key={capability.id} style={styles.capability}>
+                            <Text style={styles.capabilityName}>{capability.id}</Text>
+                            <View style={styles.operations}>
+                              {capability.operations.map((operation) => {
+                                const key = `${capability.id}:${operation}`;
+                                const enabled = selectedOperations.has(key);
+                                const changed = enabled !== savedOperations.has(key);
+                                return (
+                                  <Pressable
+                                    key={key}
+                                    accessibilityRole="checkbox"
+                                    accessibilityState={{
+                                      checked: enabled,
+                                      disabled: !canEditAccess,
+                                    }}
+                                    disabled={!canEditAccess}
+                                    onPress={() =>
+                                      setSelectedOperations((current) => {
+                                        const next = new Set(current);
+                                        if (next.has(key)) next.delete(key);
+                                        else next.add(key);
+                                        return next;
+                                      })
+                                    }
+                                    style={({ pressed }) => [
+                                      styles.operation,
+                                      enabled && styles.operationEnabled,
+                                      changed && styles.operationChanged,
+                                      pressed && styles.pressed,
+                                    ]}
+                                  >
+                                    <View
+                                      style={[styles.checkbox, enabled && styles.checkboxEnabled]}
+                                    >
+                                      {enabled ? (
+                                        <Check color={colors.crust} size={11} strokeWidth={3} />
+                                      ) : null}
+                                    </View>
+                                    <Text
+                                      style={[
+                                        styles.operationText,
+                                        enabled && styles.operationTextEnabled,
+                                      ]}
+                                    >
+                                      {operation}
+                                    </Text>
+                                    {changed ? <View style={styles.changedDot} /> : null}
+                                  </Pressable>
+                                );
+                              })}
+                            </View>
                           </View>
-                        </View>
-                      ))}
-                      {permissionsDirty ? (
-                        <View style={styles.unsavedBanner}>
-                          <View style={styles.unsavedCopy}>
-                            <View style={styles.unsavedDot} />
-                            <Text style={styles.unsavedText}>
-                              {changes} unsaved {changes === 1 ? 'change' : 'changes'}
-                            </Text>
+                        ))}
+                        {permissionsDirty ? (
+                          <View style={styles.unsavedBanner}>
+                            <View style={styles.unsavedCopy}>
+                              <View style={styles.unsavedDot} />
+                              <Text style={styles.unsavedText}>
+                                {changes} unsaved {changes === 1 ? 'change' : 'changes'}
+                              </Text>
+                            </View>
+                            <Pressable
+                              accessibilityRole="button"
+                              onPress={() => setSelectedOperations(new Set(savedOperations))}
+                              style={({ pressed }) => [
+                                styles.discardInline,
+                                pressed && styles.pressed,
+                              ]}
+                            >
+                              <Text style={styles.discardInlineText}>Discard</Text>
+                            </Pressable>
                           </View>
-                          <Pressable
-                            accessibilityRole="button"
-                            onPress={() => setSelectedOperations(new Set(savedOperations))}
-                            style={({ pressed }) => [
-                              styles.discardInline,
-                              pressed && styles.pressed,
-                            ]}
-                          >
-                            <Text style={styles.discardInlineText}>Discard</Text>
-                          </Pressable>
-                        </View>
-                      ) : null}
-                      <Button
-                        disabled={
-                          !canEditAccess || capabilities.length === 0 || !permissionsDirty
-                        }
-                        loading={permissionsSaving}
-                        onPress={() => setConfirmSave(true)}
-                        style={styles.saveButton}
-                      >
-                        Save permissions
-                      </Button>
-                    </>
-                  )}
-                </View>
-              ) : null}
+                        ) : null}
+                        <Button
+                          disabled={
+                            !canEditAccess || capabilities.length === 0 || !permissionsDirty
+                          }
+                          loading={permissionsSaving}
+                          onPress={() => setConfirmSave(true)}
+                          style={styles.saveButton}
+                        >
+                          Save permissions
+                        </Button>
+                      </>
+                    )}
+                  </View>
+                ) : null}
+              </View>
+            );
+          })}
+          {mesh.devices.length === 0 ? (
+            <View style={styles.empty}>
+              <Network color={colors.subtle} size={28} strokeWidth={1.6} />
+              <Text style={styles.emptyTitle}>No trusted devices yet</Text>
+              <Text style={styles.emptyBody}>Pull to refresh after pairing a Drone Hub.</Text>
             </View>
-          );
-        })}
-        {mesh.devices.length === 0 ? (
-          <View style={styles.empty}>
-            <Network color={colors.subtle} size={28} strokeWidth={1.6} />
-            <Text style={styles.emptyTitle}>No trusted devices yet</Text>
-            <Text style={styles.emptyBody}>Pull to refresh after pairing a Drone Hub.</Text>
-          </View>
-        ) : null}
-      </View>
+          ) : null}
+        </View>
       </ScrollView>
       <ConfirmDialog
         visible={confirmSave}

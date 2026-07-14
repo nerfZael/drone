@@ -3,6 +3,7 @@ import type http from 'node:http';
 import QRCode from 'qrcode';
 import {
   parsePairingPayload,
+  WORKSPACE_CAPABILITY,
   type CapabilityGrant,
   type DevicePublicIdentity,
   type MeshDevice,
@@ -116,6 +117,7 @@ function normalizeGrants(value: unknown, capabilities: CapabilityRegistry): Capa
     const descriptor = descriptors.get(capability);
     if (
       !descriptor ||
+      descriptor.id === WORKSPACE_CAPABILITY.id ||
       Number(raw?.version) !== descriptor.version ||
       !Array.isArray(raw?.operations)
     )
@@ -452,6 +454,15 @@ export class DeviceMeshHttp {
       if (!pending || pending.rejectedAt) throw new Error('pending device not found');
       const at = new Date().toISOString();
       const existing = state.devices[pending.device.id];
+      if (
+        Object.values(state.devices).some(
+          (item) =>
+            item.id !== pending.device.id &&
+            !item.revokedAt &&
+            item.name.trim().toLowerCase() === pending.device.name.trim().toLowerCase(),
+        )
+      )
+        throw new Error('device names must be unique; rename the joining device and try again');
       const device: MeshDevice = {
         ...pending.device,
         administrator: body.administrator === true,
@@ -497,8 +508,19 @@ export class DeviceMeshHttp {
       if (deviceId === state.selfDeviceId && Array.isArray(body.endpoints)) {
         throw new Error('configure this device endpoint through secure mesh ingress');
       }
-      if (typeof body.name === 'string' && body.name.trim())
-        current.name = body.name.trim().slice(0, 80);
+      if (typeof body.name === 'string' && body.name.trim()) {
+        const name = body.name.trim().slice(0, 80);
+        if (
+          Object.values(state.devices).some(
+            (item) =>
+              item.id !== current.id &&
+              !item.revokedAt &&
+              item.name.trim().toLowerCase() === name.toLowerCase(),
+          )
+        )
+          throw new Error('device names must be unique in this network');
+        current.name = name;
+      }
       if (typeof body.administrator === 'boolean') current.administrator = body.administrator;
       if (Array.isArray(body.grants))
         current.grants = normalizeGrants(body.grants, this.capabilities);
@@ -521,6 +543,7 @@ export class DeviceMeshHttp {
       device.updatedAt = device.revokedAt;
     });
     this.router.disconnect(deviceId);
+    await this.capabilities.revokeDevice(deviceId);
     await this.router.broadcastRevocation(deviceId);
     json(response, 200, { ok: true });
   }

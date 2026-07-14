@@ -1,4 +1,4 @@
-import { WORKSPACE_CAPABILITY } from '@drone/device-protocol';
+import { runWorkspaceCommandJob, WORKSPACE_CAPABILITY } from '@drone/device-protocol';
 import type { HomeWorkspaceTarget } from './policy-types';
 
 type MeshRequest = (
@@ -6,6 +6,7 @@ type MeshRequest = (
   capability: string,
   operation: string,
   payload: unknown,
+  signal?: AbortSignal,
 ) => Promise<any>;
 
 const OPERATIONS: Record<string, string> = {
@@ -13,6 +14,7 @@ const OPERATIONS: Record<string, string> = {
   read_file: 'files.read',
   search_files: 'files.search',
   write_file: 'files.write',
+  bash: 'commands.run',
 };
 
 export class RemoteWorkspaceTarget {
@@ -21,7 +23,9 @@ export class RemoteWorkspaceTarget {
     kind: 'remote-device';
     label: string;
     rootLabel: string;
-    capabilities: Array<'files.list' | 'files.read' | 'files.search' | 'files.write'>;
+    capabilities: Array<
+      'files.list' | 'files.read' | 'files.search' | 'files.write' | 'shell.execute'
+    >;
   };
 
   constructor(
@@ -34,36 +38,58 @@ export class RemoteWorkspaceTarget {
     this.descriptor = {
       id: `remote:${policy.targetDeviceId}:${policy.rootId}`,
       kind: 'remote-device',
-      label: `${targetDeviceName} · ${policy.rootId}`,
-      rootLabel: policy.rootId,
+      label: `${targetDeviceName} · ${policy.workspaceName}`,
+      rootLabel: policy.workspaceName,
       capabilities: [
         ...(policy.read ? (['files.list', 'files.read', 'files.search'] as const) : []),
         ...(policy.write ? (['files.write'] as const) : []),
+        ...(policy.execute ? (['shell.execute'] as const) : []),
       ],
     };
   }
 
-  async execute(call: { tool: string; args: Record<string, unknown> }): Promise<any> {
+  async execute(call: {
+    tool: string;
+    args: Record<string, unknown>;
+    signal?: AbortSignal;
+    onUpdate?: (result: any) => void;
+  }): Promise<any> {
     const operation = OPERATIONS[call.tool];
     if (!operation)
       throw Object.assign(new Error(`remote workspace does not support ${call.tool}`), {
         code: 'UNSUPPORTED_OPERATION',
       });
-    const result = await this.request(
-      this.policy.targetDeviceId,
-      WORKSPACE_CAPABILITY.id,
-      operation,
-      {
-        ...call.args,
-        actor: {
-          assistantHomeDeviceId: this.homeDeviceId,
-          threadId: this.threadId,
-          rootId: this.policy.rootId,
-          read: this.policy.read,
-          write: this.policy.write,
-        },
-      },
-    );
+    const result =
+      call.tool === 'bash'
+        ? await runWorkspaceCommandJob({
+            workspaceId: this.policy.rootId,
+            command: String(call.args.command ?? ''),
+            timeoutMs: typeof call.args.timeoutMs === 'number' ? call.args.timeoutMs : undefined,
+            signal: call.signal,
+            request: (nextOperation, payload, signal) =>
+              this.request(
+                this.policy.targetDeviceId,
+                WORKSPACE_CAPABILITY.id,
+                nextOperation,
+                payload,
+                signal,
+              ),
+            onOutput: (update) =>
+              call.onUpdate?.({
+                content: [{ type: 'text', text: update.text }],
+                details: { ...update.job, streaming: true },
+              }),
+          })
+        : await this.request(
+            this.policy.targetDeviceId,
+            WORKSPACE_CAPABILITY.id,
+            operation,
+            {
+              ...call.args,
+              workspaceId: this.policy.rootId,
+            },
+            call.signal,
+          );
     return {
       content: [{ type: 'text', text: String(result?.text ?? '') }],
       details: {
