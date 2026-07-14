@@ -4,9 +4,12 @@
 
 `createBlipSession()` creates a long-lived session around an injected `SessionRepository`, model, tool providers, prompt provider, preflight hook, and event sink. The handle supports `prompt`, `steer`, `enqueue`, `abort`, `compact`, `delete`, and `waitForIdle`.
 
-`runBlipTask()` is the file-backed local compatibility wrapper used by the CLI. It now supplies `SessionStore`, local profile tools, the CLI prompt, and local file telemetry to the same embedded runtime.
+`runBlipTask()` is the Node file-backed compatibility wrapper used by the CLI. It supplies
+`SessionStore`, local profile tools, and local file telemetry. The CLI separately injects its own
+prompt provider.
 
-`SessionRepository` is the persistence boundary. `SessionStore` is its current file-backed implementation; Drone Hub will supply its own implementation in a later phase.
+`SessionRepository` is the persistence boundary. `SessionStore` is the Node file-backed
+implementation; Drone Hub and Android supply host-specific implementations.
 
 Blip uses **session** as the canonical persisted unit of work.
 
@@ -45,8 +48,8 @@ interface BlipSessionState {
   workspaceRoot: string;
   modelProvider: string;
   modelId: string;
-  permissionMode: "read-only" | "workspace-write" | "full-access";
-  toolProfile: "local-trusted-write" | "read-only" | "no-shell-workspace-write";
+  permissionMode: 'read-only' | 'workspace-write' | 'full-access';
+  toolProfile: 'local-trusted-write' | 'read-only' | 'no-shell-workspace-write';
   loadedSkills: string[];
   transcriptPath: string;
   compactedSummary?: string;
@@ -77,21 +80,28 @@ Compaction does not delete earlier transcript entries.
 
 Implemented session flags:
 
-| Command | Behavior |
-| --- | --- |
-| `blip "task"` | Starts a new session. |
-| `blip --continue "task"` | Uses the latest session for the workspace, or starts a new one if none exists. |
-| `blip --resume "task"` | Same current behavior as `--continue`. |
-| `blip --session <id> "task"` | Loads an exact session id. |
-| `blip --fork <id> "task"` | Creates a new session seeded with the source transcript and records `parentSessionId`. |
-| `blip --list-sessions` | Lists sessions for the workspace. |
-| `blip --compact [--session <id>]` | Runs compaction on the selected or latest session. |
+| Command                           | Behavior                                                                               |
+| --------------------------------- | -------------------------------------------------------------------------------------- |
+| `blip "task"`                     | Starts a new session.                                                                  |
+| `blip --continue "task"`          | Uses the latest session for the workspace, or starts a new one if none exists.         |
+| `blip --resume "task"`            | Same current behavior as `--continue`.                                                 |
+| `blip --session <id> "task"`      | Loads an exact session id.                                                             |
+| `blip --fork <id> "task"`         | Creates a new session seeded with the source transcript and records `parentSessionId`. |
+| `blip --list-sessions`            | Lists sessions for the workspace.                                                      |
+| `blip --compact [--session <id>]` | Runs compaction on the selected or latest session.                                     |
 
 `--continue`, `--resume`, `--session`, and `--fork` are mutually exclusive for task runs.
+
+## Android Persistence
+
+Android stores a bounded visible-message projection for rendering and a separate complete Blip
+session per thread. Transcript entries are written as immutable chunks in the app's private document
+directory, while a small state file is atomically replaced. Its React Native repository restores
+compaction summaries and retained message boundaries, while legacy threads migrate their previously
+saved visible history when they are next used.
 
 ## Current Gaps
 
 - `--resume` does not yet provide an interactive picker; it behaves like latest-session resume.
 - `forkedFromEntryId` exists in the schema but the CLI does not expose a way to fork from a specific transcript entry.
 - There is no in-place session tree navigation.
-- `SessionStore` is the only included repository implementation; Drone Hub does not yet supply its own.

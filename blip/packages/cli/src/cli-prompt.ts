@@ -1,6 +1,6 @@
-import { readFile } from "node:fs/promises";
-import path from "node:path";
-import type { ToolProfile } from "@blip/tools";
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import type { ToolProfile } from '@blip/tools';
 
 const IDENTITY = `You are Blip, a pragmatic CLI coding agent.
 
@@ -28,13 +28,13 @@ const PATCH_RULES = `Patch rules:
 - For local CLI cleanup or generated content, bash may be used when the active profile exposes it.`;
 
 function toolRules(profile: ToolProfile): string {
-  if (profile === "local-trusted-write") {
+  if (profile === 'local-trusted-write') {
     return `Tool profile: local-trusted-write.
 Available tools are intentionally small: bash, apply_patch, read_file, search_files, and list_files.
 Use bash for git status, simple file moves/deletes/directories, package scripts, tests, and builds.
 Use read_file/search_files/list_files when structured bounded output is clearer than shell output.`;
   }
-  if (profile === "read-only") {
+  if (profile === 'read-only') {
     return `Tool profile: read-only.
 Only inspection tools are available. Do not try to mutate files. Bash is unavailable.`;
   }
@@ -50,18 +50,30 @@ function permissionRules(): string {
 - Bash has no OS sandbox in v1 and is only available in trusted local write sessions.`;
 }
 
-async function readOptional(pathname: string): Promise<string | undefined> {
+async function readWorkspaceInstructions(workspaceRoot: string): Promise<string | undefined> {
   try {
-    const text = await readFile(pathname, "utf8");
+    const text = await readFile(path.join(workspaceRoot, 'AGENTS.md'), 'utf8');
     return text.trim() ? text : undefined;
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined;
     throw error;
   }
 }
 
-export async function assembleSystemPrompt(input: { workspaceRoot: string; toolProfile: ToolProfile }): Promise<string> {
-  const repoInstructions = await readOptional(path.join(input.workspaceRoot, "AGENTS.md"));
-  const sections = [IDENTITY, WORKFLOW, toolRules(input.toolProfile), PATCH_RULES, permissionRules(), repoInstructions ? `Repository instructions from AGENTS.md:\n${repoInstructions}` : undefined];
-  return sections.filter(Boolean).join("\n\n");
+/** CLI policy: compose the Blip coding-agent prompt and opt into root AGENTS.md instructions. */
+export async function assembleCliSystemPrompt(input: {
+  workspaceRoot: string;
+  toolProfile: ToolProfile;
+}): Promise<string> {
+  const repoInstructions = await readWorkspaceInstructions(input.workspaceRoot);
+  return [
+    IDENTITY,
+    WORKFLOW,
+    toolRules(input.toolProfile),
+    PATCH_RULES,
+    permissionRules(),
+    repoInstructions ? `Repository instructions from AGENTS.md:\n${repoInstructions}` : undefined,
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }

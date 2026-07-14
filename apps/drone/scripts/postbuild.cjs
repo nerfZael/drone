@@ -72,13 +72,27 @@ async function removeFileBestEffort(targetPath) {
 async function assertBlipBundleHasErrorDetails(root) {
   const bundlePath = path.join(root, 'dist', 'blip.js');
   const content = await fs.readFile(bundlePath, 'utf8');
-  if (!content.includes('finishedStatus === "error"') || !content.includes('Blip finished: ${') || !content.includes('detail')) {
+  if (
+    !content.includes('finishedStatus === "error"') ||
+    !content.includes('Blip finished: ${') ||
+    !content.includes('detail')
+  ) {
     throw new Error(`stale Blip bundle: ${bundlePath} is missing detailed error rendering`);
   }
 }
 
 async function copyDesktopVoiceVoskModel(root) {
-  const source = path.resolve(root, '..', 'voice-stream', 'android', 'app', 'src', 'main', 'assets', 'model-en-us');
+  const source = path.resolve(
+    root,
+    '..',
+    'voice-stream',
+    'android',
+    'app',
+    'src',
+    'main',
+    'assets',
+    'model-en-us',
+  );
   const target = path.join(root, 'dist', 'assets', 'vosk-model-en-us');
   try {
     await fs.access(path.join(source, 'am', 'final.mdl'));
@@ -93,6 +107,8 @@ async function copyDesktopVoiceVoskModel(root) {
 async function ensureBlipBundleDependenciesBuilt(root) {
   const repoRoot = path.resolve(root, '../..');
   runOrThrow('bun', workspaceBuildArgs('@mariozechner/pi-ai'), { cwd: repoRoot });
+  runOrThrow('bun', workspaceBuildArgs('@mariozechner/pi-agent-core'), { cwd: repoRoot });
+  runOrThrow('bun', workspaceBuildArgs('@blip/workspace'), { cwd: repoRoot });
   runOrThrow('bun', workspaceBuildArgs('@blip/tools'), { cwd: repoRoot });
   runOrThrow('bun', workspaceBuildArgs('@blip/core'), { cwd: repoRoot });
 }
@@ -112,7 +128,9 @@ async function copyBuiltDroneHubUi(root) {
   try {
     await fs.access(path.join(source, 'index.html'));
   } catch {
-    console.warn(`Drone Hub UI bundle not found at ${source}; run \`bun run --filter drone-hub build\` before publishing the drone package.`);
+    console.warn(
+      `Drone Hub UI bundle not found at ${source}; run \`bun run --filter drone-hub build\` before publishing the drone package.`,
+    );
     return;
   }
   await fs.rm(target, { recursive: true, force: true });

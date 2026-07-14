@@ -14,11 +14,15 @@ import type {
   LocalAssistantThread,
   LocalWorkspaceTarget,
 } from './local-assistant-types';
-import { runOpenAiChat } from './openai-chat-client';
-import { runCodexChat } from './codex-chat-client';
 import { readLocalAssistantCodexAuth } from './local-assistant-codex-auth';
 import { nextAssistantThreadTitle } from './next-assistant-thread-title';
 import { createWorkspaceToolRuntime } from './workspace-tools';
+import { runMobileBlip } from './run-mobile-blip';
+import {
+  deleteLocalBlipSessionSnapshot,
+  loadLocalBlipSessionSnapshot,
+  saveLocalBlipSessionSnapshot,
+} from './local-blip-storage';
 
 type LocalAssistantContextValue = {
   threads: LocalAssistantThread[];
@@ -135,6 +139,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       if (abortRef.current?.threadId === threadId) abortRef.current.controller.abort();
       const next = threadsRef.current.filter((thread) => thread.id !== threadId);
       await replaceThreads(next);
+      await deleteLocalBlipSessionSnapshot(threadId);
       setActiveThreadId((current) => (current === threadId ? (next[0]?.id ?? '') : current));
     },
     [replaceThreads],
@@ -173,9 +178,10 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       if (abortRef.current) throw new Error('Another phone assistant run is already active');
       const current = threadsRef.current.find((thread) => thread.id === threadId);
       if (!current) throw new Error('Local assistant thread was not found');
-      const [apiKey, settings] = await Promise.all([
+      const [apiKey, settings, sessionSnapshot] = await Promise.all([
         readLocalAssistantApiKey(),
         loadLocalAssistantSettings(),
+        loadLocalBlipSessionSnapshot(current),
       ]);
       if (settings.provider === 'openai' && !apiKey)
         throw new Error('Add an OpenAI API key in Settings before sending a prompt');
@@ -196,23 +202,15 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       await replaceThread(running);
       try {
         const workspaceRuntime = createWorkspaceToolRuntime(running, mesh.request);
-        const runInput = {
-          model: running.model,
-          thinkingLevel: running.thinkingLevel,
+        const messages = await runMobileBlip({
+          provider: settings.provider,
+          apiKey,
+          codexAuth: settings.provider === 'codex' ? await readLocalAssistantCodexAuth() : null,
+          prompt,
           thread: running,
-          tools: workspaceRuntime.tools,
+          history: current.messages,
+          workspaceRuntime,
           signal: controller.signal,
-          executeTool: async (
-            name: string,
-            args: Record<string, unknown>,
-            onUpdate?: (result: { text: string; details: unknown }) => void | Promise<void>,
-          ) =>
-            await workspaceRuntime.execute({
-              name,
-              args,
-              signal: controller.signal,
-              onOutput: onUpdate,
-            }),
           onMessages: async (messages: LocalAssistantMessage[]) => {
             running = {
               ...running,
@@ -233,14 +231,11 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
             threadsRef.current = next;
             setThreads(next);
           },
-        };
-        const messages =
-          settings.provider === 'codex'
-            ? await runCodexChat({
-                ...runInput,
-                auth: await readLocalAssistantCodexAuth(),
-              })
-            : await runOpenAiChat({ ...runInput, apiKey });
+          sessionSnapshot,
+          onSessionSnapshot: (snapshot, startIndex, appendedEntries) =>
+            saveLocalBlipSessionSnapshot(threadId, snapshot, startIndex, appendedEntries),
+          onDeleteSession: () => deleteLocalBlipSessionSnapshot(threadId),
+        });
         running = {
           ...running,
           messages: boundLocalAssistantMessages(messages),

@@ -2,11 +2,13 @@
 
 These docs describe the Blip implementation in this repository.
 
-Blip is a local CLI coding agent built from three workspace packages:
+Blip is a portable session runtime with platform-specific hosts:
 
-- `@blip/tools`: workspace-safe tools and tool profiles.
-- `@blip/core`: sessions, runtime events, prompt assembly, and compaction.
-- `@blip/cli`: the command-line interface.
+- `@blip/core`: platform-neutral sessions, events, persistence contracts, and compaction.
+- `@blip/core/node`: explicit Node storage, local runtime, Git, and process diagnostics.
+- `@blip/workspace`: platform-neutral workspace target contracts and selection.
+- `@blip/tools`: Node local coding tools and workspace-tool composition.
+- `@blip/cli`: the Node CLI host and its prompt/instruction policy.
 
 ## Core Documents
 
@@ -18,6 +20,7 @@ Blip is a local CLI coding agent built from three workspace packages:
 - [Runtime Events And JSONL](runtime-events.md)
 - [Sessions](sessions.md)
 - [Context Compaction](compaction.md)
+- [Platform Boundaries](platform-boundaries.md)
 
 ## Tool Documents
 

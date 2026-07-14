@@ -1,10 +1,17 @@
 import type { AssistantMessage } from '@drone/assistant-chat';
+import type { BlipSessionState, TranscriptEntry } from '@blip/core';
 import type { LocalAssistantThinkingLevel } from './local-assistant-model';
 export type { LocalAssistantThinkingLevel } from './local-assistant-model';
 
 export type LocalAssistantMessage = AssistantMessage & {
   id: string;
   createdAt: string;
+};
+
+export type LocalBlipSessionSnapshot = {
+  version: 1;
+  state: BlipSessionState;
+  transcript: TranscriptEntry[];
 };
 
 export type LocalWorkspaceTarget = {

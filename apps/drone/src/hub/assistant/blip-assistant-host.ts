@@ -4,7 +4,7 @@ import type { BlipPromptInput, BlipRuntimeEvent, BlipSessionHandle, BlipToolPref
 import type { BlipHistoryPage } from '@blip/protocol';
 
 import { HubSessionRepository } from './hub-session-repository';
-import { loadBlipRuntime } from './blip-runtime-loader';
+import { loadBlipNodeRuntime, loadBlipRuntime } from './blip-runtime-loader';
 
 export type BlipAssistantThreadConfiguration = {
   provider: string;
@@ -206,12 +206,15 @@ export class BlipAssistantHost {
   }
 
   private async createHandle(threadId: string): Promise<BlipSessionHandle> {
-    const runtime = await loadBlipRuntime();
+    const [runtime, nodeRuntime] = await Promise.all([
+      loadBlipRuntime(),
+      loadBlipNodeRuntime(),
+    ]);
     const config = await this.configuration(threadId);
     let handle: BlipSessionHandle | undefined;
     try {
       const provider = config.provider === 'codex' ? 'openai-codex' : config.provider;
-      const model = runtime.resolveBlipModel(provider, config.model);
+      const model = nodeRuntime.resolveBlipModel(provider, config.model);
       const sessionId = await this.repository.sessionIdForThread(threadId);
       handle = await runtime.createBlipSession({
         workspaceRoot: 'drone-hub',

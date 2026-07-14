@@ -1,11 +1,14 @@
-import * as Crypto from 'expo-crypto';
-import { messageText, toolCalls } from '@drone/assistant-chat';
-import type {
-  LocalAssistantMessage,
-  LocalAssistantThinkingLevel,
-  LocalAssistantThread,
-} from './local-assistant-types';
-import { workspaceHandle, type LocalAssistantTool } from './workspace-tools';
+import type { StreamFn } from '@mariozechner/pi-agent-core/portable';
+import {
+  AssistantMessageEventStream,
+  type AssistantMessage,
+  type Context,
+  type Message,
+  type Model,
+  type SimpleStreamOptions,
+  type ToolCall,
+  type Usage,
+} from '@mariozechner/pi-ai/agent-core';
 
 type ProviderToolCall = {
   id: string;
@@ -18,57 +21,52 @@ type ProviderMessage =
   | { role: 'assistant'; content: string | null; tool_calls?: ProviderToolCall[] }
   | { role: 'tool'; content: string; tool_call_id: string };
 
-const MAX_CONTEXT_MESSAGES = 100;
-const MAX_CONTEXT_CHARACTERS = 600_000;
+const EMPTY_USAGE: Usage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
 
-function boundedContext(messages: LocalAssistantMessage[]): LocalAssistantMessage[] {
-  let start = Math.max(0, messages.length - MAX_CONTEXT_MESSAGES);
-  let characters = 0;
-  for (let index = messages.length - 1; index >= start; index -= 1) {
-    characters += JSON.stringify(messages[index]).length;
-    if (characters > MAX_CONTEXT_CHARACTERS) {
-      start = index + 1;
-      break;
-    }
-  }
-  while (start < messages.length && messages[start].role !== 'user') start += 1;
-  return messages.slice(start);
+function contentText(content: Message['content']): string {
+  if (typeof content === 'string') return content;
+  return content
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .filter(Boolean)
+    .join('\n');
 }
 
-function providerMessages(messages: LocalAssistantMessage[]): ProviderMessage[] {
-  return boundedContext(messages).map((message): ProviderMessage => {
-    if (message.role === 'user') return { role: 'user', content: messageText(message) };
+function providerMessages(context: Context): ProviderMessage[] {
+  return context.messages.map((message): ProviderMessage => {
+    if (message.role === 'user') return { role: 'user', content: contentText(message.content) };
     if (message.role === 'toolResult') {
       return {
         role: 'tool',
-        content: messageText(message),
-        tool_call_id: String(message.toolCallId ?? ''),
+        content: contentText(message.content),
+        tool_call_id: message.toolCallId,
       };
     }
-    const calls = toolCalls(message);
+    const calls = message.content.filter((part): part is ToolCall => part.type === 'toolCall');
     return {
       role: 'assistant',
-      content: messageText(message) || null,
+      content:
+        message.content
+          .map((part) => (part.type === 'text' ? part.text : ''))
+          .filter(Boolean)
+          .join('\n') || null,
       ...(calls.length > 0
         ? {
             tool_calls: calls.map((call) => ({
               id: call.id,
               type: 'function' as const,
-              function: { name: call.name, arguments: JSON.stringify(call.args) },
+              function: { name: call.name, arguments: JSON.stringify(call.arguments) },
             })),
           }
         : {}),
     };
   });
-}
-
-function responseText(content: unknown): string {
-  if (typeof content === 'string') return content.slice(0, 48_000);
-  if (!Array.isArray(content)) return '';
-  return content
-    .map((part: any) => String(part?.text ?? ''))
-    .join('\n')
-    .slice(0, 48_000);
 }
 
 function toolArguments(value: unknown): Record<string, unknown> {
@@ -80,117 +78,106 @@ function toolArguments(value: unknown): Record<string, unknown> {
   }
 }
 
-function newMessage(
-  message: Omit<LocalAssistantMessage, 'id' | 'createdAt'>,
-): LocalAssistantMessage {
+function usage(value: any): Usage {
+  const input = Number(value?.prompt_tokens) || 0;
+  const output = Number(value?.completion_tokens) || 0;
   return {
-    ...message,
-    id: Crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
+    ...EMPTY_USAGE,
+    input,
+    output,
+    totalTokens: Number(value?.total_tokens) || input + output,
   };
 }
 
-export async function runOpenAiChat(input: {
-  apiKey: string;
-  model: string;
-  thinkingLevel: LocalAssistantThinkingLevel;
-  thread: LocalAssistantThread;
-  tools: LocalAssistantTool[];
-  signal: AbortSignal;
-  executeTool(
-    name: string,
-    args: Record<string, unknown>,
-    onUpdate?: (result: { text: string; details: unknown }) => void | Promise<void>,
-  ): Promise<{ text: string; details: unknown }>;
-  onMessages(messages: LocalAssistantMessage[]): Promise<void>;
-  onStreamingMessages?(messages: LocalAssistantMessage[]): Promise<void> | void;
-}): Promise<LocalAssistantMessage[]> {
-  let messages = [...input.thread.messages];
-  for (let step = 0; step < 8; step += 1) {
-    const targets = input.thread.workspaceTargets;
-    const developer = [
-      'You are the coding assistant running directly on an Android phone in Drone Hub.',
-      'Be concise, inspect files before editing, and use baseHash when overwriting a file you read.',
-      targets.length > 0
-        ? `This thread can use these remote workspaces: ${targets.map(workspaceHandle).join(', ')}. Use only the available tools and their permitted workspaces.`
-        : 'No workspace is selected. Explain that file tools require remote workspace access when relevant.',
-      targets.length > 1
-        ? 'Use list_targets to inspect targets, set_target before a sequence of calls, or pass target on an individual filesystem or Bash call.'
-        : '',
-    ].join('\n');
-    const response = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${input.apiKey}`,
-        'Content-Type': 'application/json',
-      },
-      signal: input.signal,
-      body: JSON.stringify({
-        model: input.model,
-        ...(input.thinkingLevel !== 'off' ? { reasoning_effort: input.thinkingLevel } : {}),
-        messages: [{ role: 'developer', content: developer }, ...providerMessages(messages)],
-        ...(input.tools.length > 0 ? { tools: input.tools, tool_choice: 'auto' } : {}),
-      }),
-    });
-    const body: any = await response.json().catch(() => ({}));
-    if (!response.ok)
-      throw new Error(String(body?.error?.message ?? `OpenAI request failed (${response.status})`));
-    const choice = body?.choices?.[0]?.message;
-    if (!choice) throw new Error('OpenAI returned no assistant message');
-    const calls: ProviderToolCall[] = Array.isArray(choice.tool_calls)
-      ? choice.tool_calls.slice(0, 8)
-      : [];
-    const assistant = newMessage({
-      role: 'assistant',
-      content: [
-        ...(responseText(choice.content)
-          ? [{ type: 'text', text: responseText(choice.content) }]
-          : []),
-        ...calls.map((call) => ({
-          type: 'toolCall',
-          id: String(call.id),
-          name: String(call.function?.name ?? ''),
-          arguments: toolArguments(call.function?.arguments),
-        })),
-      ],
-    });
-    messages = [...messages, assistant];
-    await input.onMessages(messages);
-    if (calls.length === 0) return messages;
+function assistantMessage(
+  model: Model<any>,
+  content: AssistantMessage['content'],
+  stopReason: AssistantMessage['stopReason'],
+  input?: { usage?: unknown; errorMessage?: string },
+): AssistantMessage {
+  return {
+    role: 'assistant',
+    content,
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: usage(input?.usage),
+    stopReason,
+    errorMessage: input?.errorMessage,
+    timestamp: Date.now(),
+  };
+}
 
-    for (const call of calls) {
-      let result: { text: string; details: unknown };
-      let error: Error | null = null;
-      const toolResult = newMessage({
-        role: 'toolResult',
-        content: '',
-        toolName: String(call.function?.name ?? ''),
-        toolCallId: String(call.id),
-      });
+export function createOpenAiMobileStream(apiKey: string): StreamFn {
+  return (
+    model: Model<any>,
+    context: Context,
+    options?: SimpleStreamOptions,
+  ): AssistantMessageEventStream => {
+    const stream = new AssistantMessageEventStream();
+    void (async () => {
       try {
-        const args = toolArguments(call.function?.arguments);
-        result = await input.executeTool(String(call.function?.name ?? ''), args, (update) =>
-          input.onStreamingMessages?.([
-            ...messages,
-            { ...toolResult, content: update.text, details: update.details },
-          ]),
-        );
-      } catch (nextError: any) {
-        error = nextError instanceof Error ? nextError : new Error(String(nextError));
-        result = { text: error.message, details: null };
+        const response = await fetch('https://api.openai.com/v1/chat/completions', {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+          signal: options?.signal,
+          body: JSON.stringify({
+            model: model.id,
+            ...(options?.reasoning ? { reasoning_effort: options.reasoning } : {}),
+            messages: [
+              ...(context.systemPrompt
+                ? [{ role: 'developer' as const, content: context.systemPrompt }]
+                : []),
+              ...providerMessages(context),
+            ],
+            ...(context.tools?.length
+              ? {
+                  tools: context.tools.map((tool) => ({
+                    type: 'function',
+                    function: {
+                      name: tool.name,
+                      description: tool.description,
+                      parameters: tool.parameters,
+                    },
+                  })),
+                  tool_choice: 'auto',
+                }
+              : {}),
+          }),
+        });
+        const body: any = await response.json().catch(() => ({}));
+        if (!response.ok)
+          throw new Error(
+            String(body?.error?.message ?? `OpenAI request failed (${response.status})`),
+          );
+        const choice = body?.choices?.[0];
+        if (!choice?.message) throw new Error('OpenAI returned no assistant message');
+        const calls: ProviderToolCall[] = Array.isArray(choice.message.tool_calls)
+          ? choice.message.tool_calls
+          : [];
+        const text =
+          typeof choice.message.content === 'string' ? choice.message.content.slice(0, 48_000) : '';
+        const content: AssistantMessage['content'] = [
+          ...(text ? [{ type: 'text' as const, text }] : []),
+          ...calls.map((call) => ({
+            type: 'toolCall' as const,
+            id: String(call.id),
+            name: String(call.function?.name ?? ''),
+            arguments: toolArguments(call.function?.arguments),
+          })),
+        ];
+        const stopReason =
+          calls.length > 0 ? 'toolUse' : choice.finish_reason === 'length' ? 'length' : 'stop';
+        const message = assistantMessage(model, content, stopReason, { usage: body.usage });
+        stream.push({ type: 'done', reason: stopReason, message });
+      } catch (error: any) {
+        const aborted = options?.signal?.aborted || error?.name === 'AbortError';
+        const message = assistantMessage(model, [], aborted ? 'aborted' : 'error', {
+          errorMessage: aborted ? 'Assistant run was stopped' : (error?.message ?? String(error)),
+        });
+        stream.push({ type: 'error', reason: aborted ? 'aborted' : 'error', error: message });
       }
-      messages = [
-        ...messages,
-        {
-          ...toolResult,
-          content: result.text,
-          isError: Boolean(error),
-          errorMessage: error?.message,
-          details: result.details,
-        },
-      ];
-      await input.onMessages(messages);
-    }
-  }
-  throw new Error('The assistant reached the eight-step tool limit');
+    })();
+    return stream;
+  };
 }

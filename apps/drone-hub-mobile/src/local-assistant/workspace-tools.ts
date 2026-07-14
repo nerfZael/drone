@@ -3,7 +3,8 @@ import {
   type WorkspaceCapability,
   type WorkspaceTarget,
   type WorkspaceTargetCall,
-} from '@blip/tools/workspace-target-catalog';
+} from '@blip/workspace';
+import { createPortableId } from '@blip/core';
 import { runWorkspaceCommandJob } from '@drone/device-protocol';
 import type { LocalAssistantThread, LocalWorkspaceTarget } from './local-assistant-types';
 
@@ -303,7 +304,7 @@ export class MobileWorkspaceToolRuntime {
         );
       const { target: _target, workspace: _workspace, ...args } = input.args;
       const result = await invocation.target.execute({
-        callId: `mobile_${Date.now()}`,
+        callId: `mobile_${createPortableId()}`,
         tool: name,
         args,
         signal: input.signal,

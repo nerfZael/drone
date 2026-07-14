@@ -1,67 +1,79 @@
-import * as Crypto from 'expo-crypto';
-import { messageText } from '@drone/assistant-chat';
+import { createPortableId } from '@blip/core';
+import type { StreamFn } from '@mariozechner/pi-agent-core/portable';
+import {
+  AssistantMessageEventStream,
+  type AssistantMessage,
+  type Context,
+  type Message,
+  type Model,
+  type SimpleStreamOptions,
+  type ToolCall,
+  type Usage,
+} from '@mariozechner/pi-ai/agent-core';
 import type { LocalCodexAuth } from './codex-auth-format';
 import { consumeCodexSseResponse } from './codex-sse';
-import type {
-  LocalAssistantMessage,
-  LocalAssistantThinkingLevel,
-  LocalAssistantThread,
-} from './local-assistant-types';
-import { workspaceHandle, type LocalAssistantTool } from './workspace-tools';
 
 const CODEX_RESPONSES_URL = 'https://chatgpt.com/backend-api/codex/responses';
-const MAX_CONTEXT_MESSAGES = 100;
-const MAX_CONTEXT_CHARACTERS = 600_000;
-
-type CodexToolCall = {
-  callId: string;
-  itemId: string;
-  displayId: string;
-  name: string;
-  arguments: Record<string, unknown>;
+const EMPTY_USAGE: Usage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 };
 
-function boundedContext(messages: LocalAssistantMessage[]): LocalAssistantMessage[] {
-  let start = Math.max(0, messages.length - MAX_CONTEXT_MESSAGES);
-  let characters = 0;
-  for (let index = messages.length - 1; index >= start; index -= 1) {
-    characters += JSON.stringify(messages[index]).length;
-    if (characters > MAX_CONTEXT_CHARACTERS) {
-      start = index + 1;
-      break;
-    }
-  }
-  while (start < messages.length && messages[start].role !== 'user') start += 1;
-  return messages.slice(start);
+function contentText(content: Message['content']): string {
+  if (typeof content === 'string') return content;
+  return content
+    .map((part) => (part.type === 'text' ? part.text : ''))
+    .filter(Boolean)
+    .join('\n');
 }
 
-function historicalInput(messages: LocalAssistantMessage[]): any[] {
-  return boundedContext(messages).flatMap((message, index) => {
-    const content = messageText(message).trim();
-    if (!content || message.role === 'toolResult') return [];
+function codexCallId(value: string): string {
+  return value.split('|', 1)[0] || value;
+}
+
+function codexInput(context: Context): any[] {
+  return context.messages.flatMap((message) => {
     if (message.role === 'user') {
-      return [{ role: 'user', content: [{ type: 'input_text', text: content }] }];
+      const text = contentText(message.content);
+      return text ? [{ role: 'user', content: [{ type: 'input_text', text }] }] : [];
     }
-    return [
-      {
+    if (message.role === 'toolResult') {
+      return [
+        {
+          type: 'function_call_output',
+          call_id: codexCallId(message.toolCallId),
+          output: contentText(message.content),
+        },
+      ];
+    }
+    const items: any[] = [];
+    const text = message.content
+      .map((part) => (part.type === 'text' ? part.text : ''))
+      .filter(Boolean)
+      .join('');
+    if (text) {
+      items.push({
         type: 'message',
-        id: `msg_history_${index}`,
         role: 'assistant',
         status: 'completed',
-        content: [{ type: 'output_text', text: content, annotations: [] }],
-      },
-    ];
+        content: [{ type: 'output_text', text, annotations: [] }],
+      });
+    }
+    for (const part of message.content) {
+      if (part.type !== 'toolCall') continue;
+      items.push({
+        type: 'function_call',
+        call_id: codexCallId(part.id),
+        name: part.name,
+        arguments: JSON.stringify(part.arguments),
+      });
+    }
+    return items;
   });
-}
-
-function newMessage(
-  message: Omit<LocalAssistantMessage, 'id' | 'createdAt'>,
-): LocalAssistantMessage {
-  return {
-    ...message,
-    id: Crypto.randomUUID(),
-    createdAt: new Date().toISOString(),
-  };
 }
 
 function toolArguments(value: unknown): Record<string, unknown> {
@@ -73,15 +85,9 @@ function toolArguments(value: unknown): Record<string, unknown> {
   }
 }
 
-function responseContent(response: any): {
-  content: Array<{ type: string; [key: string]: unknown }>;
-  calls: CodexToolCall[];
-  output: any[];
-} {
-  const output = Array.isArray(response?.output) ? response.output : [];
-  const content: Array<{ type: string; [key: string]: unknown }> = [];
-  const calls: CodexToolCall[] = [];
-  for (const item of output) {
+function responseContent(response: any): AssistantMessage['content'] {
+  const content: AssistantMessage['content'] = [];
+  for (const item of Array.isArray(response?.output) ? response.output : []) {
     if (item?.type === 'reasoning') {
       const thinking = (Array.isArray(item.summary) ? item.summary : [])
         .map((part: any) => String(part?.text ?? ''))
@@ -101,185 +107,152 @@ function responseContent(response: any): {
     }
     if (item?.type !== 'function_call') continue;
     const callId = String(item.call_id ?? '').trim();
-    const itemId = String(item.id ?? '').trim();
     const name = String(item.name ?? '').trim();
-    if (!callId || !name) continue;
-    const args = toolArguments(item.arguments);
-    const displayId = itemId ? `${callId}|${itemId}` : callId;
-    calls.push({ callId, itemId, displayId, name, arguments: args });
-    content.push({ type: 'toolCall', id: displayId, name, arguments: args });
-  }
-  return { content, calls, output };
-}
-
-async function requestCodex(input: {
-  auth: LocalCodexAuth;
-  model: string;
-  thinkingLevel: LocalAssistantThinkingLevel;
-  threadId: string;
-  instructions: string;
-  items: any[];
-  tools: LocalAssistantTool[];
-  signal: AbortSignal;
-  onEvent?: (event: any) => Promise<void> | void;
-}): Promise<any> {
-  const response = await fetch(CODEX_RESPONSES_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${input.auth.accessToken}`,
-      'ChatGPT-Account-ID': input.auth.accountId,
-      originator: 'codex_cli_rs',
-      accept: 'text/event-stream',
-      'content-type': 'application/json',
-      session_id: input.threadId,
-      'x-client-request-id': Crypto.randomUUID(),
-    },
-    signal: input.signal,
-    body: JSON.stringify({
-      model: input.model,
-      store: false,
-      stream: true,
-      instructions: input.instructions,
-      input: input.items,
-      text: { verbosity: 'low' },
-      reasoning: {
-        effort: input.thinkingLevel === 'off' ? 'none' : input.thinkingLevel,
-        summary: 'auto',
-      },
-      include: ['reasoning.encrypted_content'],
-      prompt_cache_key: input.threadId.slice(0, 64),
-      tool_choice: 'auto',
-      parallel_tool_calls: true,
-      ...(input.tools.length > 0
-        ? {
-            tools: input.tools.map((tool) => ({
-              type: 'function',
-              name: tool.function.name,
-              description: tool.function.description,
-              parameters: tool.function.parameters,
-              strict: null,
-            })),
-          }
-        : {}),
-    }),
-  });
-  if (!response.ok) {
-    const raw = await response.text();
-    let message = '';
-    try {
-      const body = JSON.parse(raw);
-      message = String(body?.error?.message ?? body?.detail ?? '');
-    } catch {
-      message = raw.slice(0, 500);
-    }
-    throw new Error(message || `Codex request failed (${response.status})`);
-  }
-  return await consumeCodexSseResponse(response, input.onEvent);
-}
-
-export async function runCodexChat(input: {
-  auth: LocalCodexAuth;
-  model: string;
-  thinkingLevel: LocalAssistantThinkingLevel;
-  thread: LocalAssistantThread;
-  tools: LocalAssistantTool[];
-  signal: AbortSignal;
-  executeTool(
-    name: string,
-    args: Record<string, unknown>,
-    onUpdate?: (result: { text: string; details: unknown }) => void | Promise<void>,
-  ): Promise<{ text: string; details: unknown }>;
-  onMessages(messages: LocalAssistantMessage[]): Promise<void>;
-  onStreamingMessages?(messages: LocalAssistantMessage[]): Promise<void> | void;
-}): Promise<LocalAssistantMessage[]> {
-  let messages = [...input.thread.messages];
-  let items = historicalInput(messages);
-  for (let step = 0; step < 8; step += 1) {
-    const targets = input.thread.workspaceTargets;
-    const instructions = [
-      'You are the coding assistant running directly on an Android phone in Drone Hub.',
-      'Be concise, inspect files before editing, and use baseHash when overwriting a file you read.',
-      targets.length > 0
-        ? `This thread can use these remote workspaces: ${targets.map(workspaceHandle).join(', ')}. Use only the available tools and their permitted workspaces.`
-        : 'No workspace is selected. Explain that file tools require remote workspace access when relevant.',
-      targets.length > 1
-        ? 'Use list_targets to inspect targets, set_target before a sequence of calls, or pass target on an individual filesystem or Bash call.'
-        : '',
-    ].join('\n');
-    const preview = newMessage({ role: 'assistant', content: [] });
-    let streamingThinking = '';
-    let streamingText = '';
-    const response = await requestCodex({
-      auth: input.auth,
-      model: input.model,
-      thinkingLevel: input.thinkingLevel,
-      threadId: input.thread.id,
-      instructions,
-      items,
-      tools: input.tools,
-      signal: input.signal,
-      onEvent: async (event) => {
-        const type = String(event?.type ?? '');
-        if (type === 'response.reasoning_summary_text.delta') {
-          streamingThinking += String(event?.delta ?? '');
-        } else if (type === 'response.output_text.delta') {
-          streamingText += String(event?.delta ?? '');
-        } else {
-          return;
-        }
-        const content = [
-          ...(streamingThinking
-            ? [{ type: 'thinking', thinking: streamingThinking.slice(-48_000) }]
-            : []),
-          ...(streamingText ? [{ type: 'text', text: streamingText.slice(-48_000) }] : []),
-        ];
-        await input.onStreamingMessages?.([...messages, { ...preview, content }]);
-      },
-    });
-    const parsed = responseContent(response);
-    const assistant = newMessage({ role: 'assistant', content: parsed.content });
-    messages = [...messages, assistant];
-    await input.onMessages(messages);
-    items = [...items, ...parsed.output];
-    if (parsed.calls.length === 0) return messages;
-
-    for (const call of parsed.calls.slice(0, 8)) {
-      let result: { text: string; details: unknown };
-      let error: Error | null = null;
-      const toolResult = newMessage({
-        role: 'toolResult',
-        content: '',
-        toolName: call.name,
-        toolCallId: call.displayId,
+    if (callId && name)
+      content.push({
+        type: 'toolCall',
+        id: callId,
+        name,
+        arguments: toolArguments(item.arguments),
       });
-      try {
-        result = await input.executeTool(call.name, call.arguments, (update) =>
-          input.onStreamingMessages?.([
-            ...messages,
-            { ...toolResult, content: update.text, details: update.details },
-          ]),
+  }
+  return content;
+}
+
+function usage(value: any): Usage {
+  const input = Number(value?.input_tokens) || 0;
+  const output = Number(value?.output_tokens) || 0;
+  return { ...EMPTY_USAGE, input, output, totalTokens: input + output };
+}
+
+function assistantMessage(
+  model: Model<any>,
+  content: AssistantMessage['content'],
+  stopReason: AssistantMessage['stopReason'],
+  input?: { usage?: unknown; errorMessage?: string },
+): AssistantMessage {
+  return {
+    role: 'assistant',
+    content,
+    api: model.api,
+    provider: model.provider,
+    model: model.id,
+    usage: usage(input?.usage),
+    stopReason,
+    errorMessage: input?.errorMessage,
+    timestamp: Date.now(),
+  };
+}
+
+export function createCodexMobileStream(auth: LocalCodexAuth, threadId: string): StreamFn {
+  return (
+    model: Model<any>,
+    context: Context,
+    options?: SimpleStreamOptions,
+  ): AssistantMessageEventStream => {
+    const stream = new AssistantMessageEventStream();
+    void (async () => {
+      let streamingThinking = '';
+      let streamingText = '';
+      const partial = () =>
+        assistantMessage(
+          model,
+          [
+            ...(streamingThinking
+              ? [{ type: 'thinking' as const, thinking: streamingThinking.slice(-48_000) }]
+              : []),
+            ...(streamingText
+              ? [{ type: 'text' as const, text: streamingText.slice(-48_000) }]
+              : []),
+          ],
+          'stop',
         );
-      } catch (nextError: any) {
-        error = nextError instanceof Error ? nextError : new Error(String(nextError));
-        result = { text: error.message, details: null };
+      try {
+        stream.push({ type: 'start', partial: partial() });
+        const response = await fetch(CODEX_RESPONSES_URL, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${auth.accessToken}`,
+            'ChatGPT-Account-ID': auth.accountId,
+            originator: 'codex_cli_rs',
+            accept: 'text/event-stream',
+            'content-type': 'application/json',
+            session_id: threadId,
+            'x-client-request-id': createPortableId(),
+          },
+          signal: options?.signal,
+          body: JSON.stringify({
+            model: model.id,
+            store: false,
+            stream: true,
+            instructions: context.systemPrompt,
+            input: codexInput(context),
+            text: { verbosity: 'low' },
+            reasoning: {
+              effort: options?.reasoning ?? 'none',
+              summary: 'auto',
+            },
+            include: ['reasoning.encrypted_content'],
+            prompt_cache_key: threadId.slice(0, 64),
+            tool_choice: 'auto',
+            parallel_tool_calls: true,
+            ...(context.tools?.length
+              ? {
+                  tools: context.tools.map((tool) => ({
+                    type: 'function',
+                    name: tool.name,
+                    description: tool.description,
+                    parameters: tool.parameters,
+                    strict: null,
+                  })),
+                }
+              : {}),
+          }),
+        });
+        if (!response.ok) {
+          const raw = await response.text();
+          let message = '';
+          try {
+            const body = JSON.parse(raw);
+            message = String(body?.error?.message ?? body?.detail ?? '');
+          } catch {
+            message = raw.slice(0, 500);
+          }
+          throw new Error(message || `Codex request failed (${response.status})`);
+        }
+        const body = await consumeCodexSseResponse(response, (event) => {
+          const type = String(event?.type ?? '');
+          if (type === 'response.reasoning_summary_text.delta') {
+            streamingThinking += String(event?.delta ?? '');
+            stream.push({
+              type: 'thinking_delta',
+              contentIndex: 0,
+              delta: String(event?.delta ?? ''),
+              partial: partial(),
+            });
+          } else if (type === 'response.output_text.delta') {
+            streamingText += String(event?.delta ?? '');
+            stream.push({
+              type: 'text_delta',
+              contentIndex: streamingThinking ? 1 : 0,
+              delta: String(event?.delta ?? ''),
+              partial: partial(),
+            });
+          }
+        });
+        const content = responseContent(body);
+        const calls = content.filter((part): part is ToolCall => part.type === 'toolCall');
+        const stopReason = calls.length > 0 ? 'toolUse' : 'stop';
+        const message = assistantMessage(model, content, stopReason, { usage: body?.usage });
+        stream.push({ type: 'done', reason: stopReason, message });
+      } catch (error: any) {
+        const aborted = options?.signal?.aborted || error?.name === 'AbortError';
+        const message = assistantMessage(model, [], aborted ? 'aborted' : 'error', {
+          errorMessage: aborted ? 'Assistant run was stopped' : (error?.message ?? String(error)),
+        });
+        stream.push({ type: 'error', reason: aborted ? 'aborted' : 'error', error: message });
       }
-      messages = [
-        ...messages,
-        {
-          ...toolResult,
-          content: result.text,
-          isError: Boolean(error),
-          errorMessage: error?.message,
-          details: result.details,
-        },
-      ];
-      items.push({
-        type: 'function_call_output',
-        call_id: call.callId,
-        output: result.text,
-      });
-      await input.onMessages(messages);
-    }
-  }
-  throw new Error('The assistant reached the eight-step tool limit');
+    })();
+    return stream;
+  };
 }

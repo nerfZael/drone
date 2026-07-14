@@ -40,21 +40,26 @@ each thread before exposing model tools. **Run commands** starts Bash in the wor
 host access and is not confined to that folder. Bash runs as an asynchronous destination-owned job:
 the phone receives a job handle immediately, consumes output incrementally, and sends an explicit
 cancel operation when a run is stopped. Commands default to a 30-minute timeout and are capped at
-one hour. Phone conversations are bounded and stored in the
-app's private local storage; provider credentials are stored separately in Secure Store.
+one hour. The bounded conversation projection used by the UI remains in AsyncStorage; the complete
+Blip transcript is stored as append-only chunks in the app's private document directory so it is not
+subject to AsyncStorage's database ceiling. Provider credentials are stored separately in Secure
+Store.
 
-Phone-hosted assistants use the browser-safe Blip workspace target catalog and the same
-`list_targets`, `set_target`, per-call target, filesystem capability, and Bash target semantics as
-Hub-hosted assistants. The complete `@blip/core` session runtime is not yet used on Android because
-its current entry point depends on Node-only filesystem, process, child-process, and crypto modules.
-The Android provider loop and persistence adapter therefore remain React Native implementations;
-target selection and mesh workspace execution are shared. This boundary should remain explicit
-until Blip exposes a fully platform-neutral agent/session core.
+Phone-hosted assistants run the same portable `@blip/core` session lifecycle as Hub-hosted
+assistants, including tool turns, progress events, cancellation, and workspace target semantics.
+`@blip/workspace` supplies the shared browser-safe target catalog. Android injects a React Native
+session repository plus OpenAI and Codex HTTP/SSE transports; Node storage, local filesystem tools,
+Git/process diagnostics, and CLI prompt policy are not bundled.
 
-The phone commits complete model responses because streaming fetch behavior varies across React
-Native versions. Codex SSE is buffered until the response completes. Stop cancels an active model
-request immediately, but an already-sent mesh file operation may take until its normal timeout to
-return.
+The React Native repository persists session metadata, runtime events, messages, and compaction
+checkpoints per thread. Writes add immutable transcript chunks and atomically replace only the small
+state file. Existing threads without a Blip snapshot migrate their saved UI history on the next
+prompt. Automatic compaction uses the same injected model transport as normal assistant turns and
+restores its latest summary and retained-message boundary after an app restart.
+
+Codex response text streams through the React Native transport into Blip session events. The OpenAI
+Chat Completions transport currently commits each model response as a unit. Stop aborts the Blip
+session, its model request, and active cancellable mesh command jobs.
 
 Cross-device assistant thread lists refresh whenever their tab opens. While connected, authorized
 thread-change notifications travel over the existing authenticated mesh WebSocket and trigger a

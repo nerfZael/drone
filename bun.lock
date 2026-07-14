@@ -1,6 +1,5 @@
 {
   "lockfileVersion": 1,
-  "configVersion": 0,
   "workspaces": {
     "": {
       "name": "drone-monorepo",
@@ -100,8 +99,12 @@
       "name": "drone-hub-mobile",
       "version": "0.1.0",
       "dependencies": {
+        "@blip/core": "workspace:*",
+        "@blip/workspace": "workspace:*",
         "@drone/assistant-chat": "workspace:*",
         "@drone/device-protocol": "workspace:*",
+        "@mariozechner/pi-agent-core": "workspace:*",
+        "@mariozechner/pi-ai": "workspace:*",
         "@noble/curves": "^2.2.0",
         "@noble/hashes": "^2.2.0",
         "@react-native-async-storage/async-storage": "2.2.0",
@@ -109,6 +112,7 @@
         "expo": "^57.0.4",
         "expo-camera": "^57.0.1",
         "expo-crypto": "^57.0.0",
+        "expo-file-system": "~57.0.0",
         "expo-secure-store": "^57.0.0",
         "expo-status-bar": "^57.0.0",
         "lucide-react-native": "^1.24.0",
@@ -282,12 +286,24 @@
       "name": "@blip/tools",
       "version": "0.1.0",
       "dependencies": {
+        "@blip/workspace": "workspace:*",
         "@mariozechner/pi-agent-core": "workspace:*",
         "@mariozechner/pi-ai": "workspace:*",
       },
       "devDependencies": {
         "@types/node": "^24.3.0",
         "tsx": "^4.20.5",
+        "typescript": "^5.7.3",
+      },
+    },
+    "blip/packages/workspace": {
+      "name": "@blip/workspace",
+      "version": "0.1.0",
+      "dependencies": {
+        "@mariozechner/pi-agent-core": "workspace:*",
+      },
+      "devDependencies": {
+        "@types/node": "^24.3.0",
         "typescript": "^5.7.3",
       },
     },
@@ -639,6 +655,8 @@
     "@blip/protocol": ["@blip/protocol@workspace:blip/packages/protocol"],
 
     "@blip/tools": ["@blip/tools@workspace:blip/packages/tools"],
+
+    "@blip/workspace": ["@blip/workspace@workspace:blip/packages/workspace"],
 
     "@braintree/sanitize-url": ["@braintree/sanitize-url@6.0.2", "", {}, "sha512-Tbsj02wXCbqGmzdnXNk0SOF19ChhRU70BsroIi4Pm6Ehp56in6vch94mfbdQ17DozxkL3BAVjbZ4Qc1a0HFRAg=="],
 

@@ -9,13 +9,18 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
+    },
+    "./node": {
+      "types": "./dist/node.d.ts",
+      "import": "./dist/node.js"
     }
   },
   "files": [
     "dist"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node scripts/check-portable-entry.mjs",
+    "check:portable": "node scripts/check-portable-entry.mjs",
     "dev": "tsx src/index.ts",
     "test": "bun test tests"
   },

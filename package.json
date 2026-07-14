@@ -21,7 +21,7 @@
     "smoke:docker": "node scripts/smoke/smoke-docker-all.cjs",
     "dvm": "bun run --filter dvm dev --",
     "drone": "bun run --filter drone dev --",
-    "blip": "bun run --filter @blip/tools build && bun run --filter @blip/core build && bun run --filter @blip/cli dev -- --workspace \"$PWD\"",
+    "blip": "bun run --filter @mariozechner/pi-ai build && bun run --filter @mariozechner/pi-agent-core build && bun run --filter @blip/workspace build && bun run --filter @blip/tools build && bun run --filter @blip/core build && bun run --filter @blip/cli dev -- --workspace \"$PWD\"",
     "drone-hub": "bun run --filter drone-hub dev",
     "apk": "bun run drone:mobile:android:install",
     "drone-hub:app": "bun run --filter drone-hub build && bun run --filter drone build && node apps/drone/dist/cli.js hub app --static-ui-dir apps/drone-hub/dist",

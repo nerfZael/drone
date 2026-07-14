@@ -1,12 +1,13 @@
 # Prompts And Instructions
 
-Blip assembles one system prompt for each run in `assembleSystemPrompt()`.
+The Blip session core accepts an injected prompt provider and does not discover instruction files.
+The CLI assembles its system prompt in `blip/packages/cli/src/cli-prompt.ts`.
 
-The prompt is intentionally small and explicit. It is not built from a plugin system or a hierarchy of prompt resources.
+The CLI prompt is intentionally small and explicit. It is not built from a plugin system or a hierarchy of prompt resources.
 
 ## Current Prompt Layers
 
-The system prompt currently includes:
+The CLI system prompt currently includes:
 
 1. Blip identity and basic coding-agent behavior.
 2. Workflow rules.
@@ -19,7 +20,8 @@ Compaction summaries are not injected into the system prompt. They are added to 
 
 ## Repository Instructions
 
-Blip currently reads only the workspace-root `AGENTS.md`.
+The Blip CLI currently reads only the workspace-root `AGENTS.md`. Other Blip hosts own their prompt
+policy and do not inherit this behavior implicitly.
 
 If the file does not exist, the prompt simply omits repository instructions. If it exists and is non-empty, Blip appends it under:
 

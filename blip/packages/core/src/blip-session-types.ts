@@ -3,12 +3,13 @@ import type {
   AgentMessage,
   AgentTool,
   ThinkingLevel,
-} from "@mariozechner/pi-agent-core";
-import type { ImageContent, Model } from "@mariozechner/pi-ai";
-import type { PermissionMode, ToolProfile } from "@blip/tools";
-import type { CompactionSettings } from "./compaction.js";
-import type { SessionRepository } from "./session-repository.js";
-import type { BlipRuntimeEvent, BlipSessionState } from "./types.js";
+} from '@mariozechner/pi-agent-core';
+import type { ImageContent, Model } from '@mariozechner/pi-ai';
+import type { PermissionMode, ToolProfile } from '@blip/tools';
+import type { CompactionSettings } from './compaction.js';
+import type { SessionRepository } from './session-repository.js';
+import type { BlipRuntimeEvent, BlipSessionState } from './types.js';
+import type { BlipRuntimeDiagnostics } from './platform.js';
 
 export type BlipEventSink = (event: BlipRuntimeEvent) => Promise<void> | void;
 
@@ -37,9 +38,7 @@ export interface BlipToolProvider {
 
 export type BlipPromptProvider = (context: BlipSessionContext) => Promise<string> | string;
 
-export type BlipToolPreflightDecision =
-  | { status: "allow" }
-  | { status: "deny"; reason: string };
+export type BlipToolPreflightDecision = { status: 'allow' } | { status: 'deny'; reason: string };
 
 export interface BlipToolPreflightRequest {
   session: BlipSessionState;
@@ -71,9 +70,10 @@ export interface CreateBlipSessionOptions {
   tools?: AgentTool<any>[];
   toolProviders?: BlipToolProvider[];
   promptProvider?: BlipPromptProvider;
-  transformContext?: AgentOptions["transformContext"];
-  convertToLlm?: AgentOptions["convertToLlm"];
-  onResponse?: AgentOptions["onResponse"];
+  transformContext?: AgentOptions['transformContext'];
+  convertToLlm?: AgentOptions['convertToLlm'];
+  onResponse?: AgentOptions['onResponse'];
+  streamFn?: AgentOptions['streamFn'];
   permissionPreflight?: BlipToolPreflight;
   eventSink?: BlipEventSink;
   compactionSettings?: CompactionSettings;
@@ -81,6 +81,7 @@ export interface CreateBlipSessionOptions {
   beforePrompt?: (context: BlipPromptLifecycleContext) => Promise<void> | void;
   afterPrompt?: (context: BlipPromptLifecycleContext) => Promise<void> | void;
   processExitDiagnosticsDelayMs?: number;
+  runtimeDiagnostics?: () => BlipRuntimeDiagnostics;
 }
 
 export interface BlipSessionHandle {

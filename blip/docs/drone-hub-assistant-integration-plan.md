@@ -114,16 +114,23 @@ Owns the headless agent runtime:
 
 It must not know what a drone, host target, assistant artifact, Hub approval, UI thread, or voice source is.
 
+The root export is platform-neutral. File-backed storage, local Git/tool setup, and process
+diagnostics are available only from the explicit `@blip/core/node` entry point.
+
 ### `blip/packages/tools` (`@blip/tools`)
 
-Owns the shared coding-tool vocabulary and target-neutral contracts:
+Owns Node local coding-tool implementations and agent-tool composition:
 
 - Tool names, schemas, result envelopes, and error categories.
-- `WorkspaceTarget` and capability interfaces.
 - Shared path validation, patch parsing, truncation, and telemetry helpers.
 - Contract tests that every target implementation must pass.
 
 It must not contain host, drone, connected-device, or assistant-artifact implementations. A reusable local filesystem adapter may remain here; CLI-specific local setup belongs in `@blip/cli`.
+
+### `blip/packages/workspace` (`@blip/workspace`)
+
+Owns the platform-neutral `WorkspaceTarget`, capability, catalog, and active-target contracts. It has
+no filesystem or process implementation and is shared by Node and React Native hosts.
 
 ### `blip/packages/cli` (`@blip/cli`)
 

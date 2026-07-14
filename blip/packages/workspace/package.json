@@ -1,7 +1,7 @@
 {
-  "name": "@blip/tools",
+  "name": "@blip/workspace",
   "version": "0.1.0",
-  "description": "Blip coding-agent tools",
+  "description": "Platform-neutral Blip workspace target contracts",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
@@ -9,10 +9,6 @@
     ".": {
       "types": "./dist/index.d.ts",
       "import": "./dist/index.js"
-    },
-    "./workspace-target-catalog": {
-      "types": "./dist/workspace-target-catalog.d.ts",
-      "import": "./dist/workspace-target-catalog.js"
     }
   },
   "files": [
@@ -20,17 +16,13 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "dev": "tsx src/index.ts",
     "test": "bun test tests"
   },
   "dependencies": {
-    "@blip/workspace": "workspace:*",
-    "@mariozechner/pi-ai": "workspace:*",
     "@mariozechner/pi-agent-core": "workspace:*"
   },
   "devDependencies": {
     "@types/node": "^24.3.0",
-    "typescript": "^5.7.3",
-    "tsx": "^4.20.5"
+    "typescript": "^5.7.3"
   }
 }
