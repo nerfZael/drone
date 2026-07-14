@@ -13,7 +13,20 @@ function requiredText(value: unknown, label: string): string {
   return result;
 }
 
-function droneSummary(drone: any) {
+function firstText(...values: unknown[]): string {
+  for (const value of values) {
+    const result = String(value ?? '').trim();
+    if (result) return result;
+  }
+  return '';
+}
+
+export function deviceMeshDroneSummary(drone: any) {
+  const chats = Array.isArray(drone?.chats)
+    ? drone.chats
+    : drone?.chats && typeof drone.chats === 'object'
+      ? Object.keys(drone.chats)
+      : [];
   return {
     id: String(drone?.id ?? drone?.name ?? ''),
     name: String(drone?.name ?? drone?.id ?? ''),
@@ -21,6 +34,22 @@ function droneSummary(drone: any) {
     phase: String(drone?.phase ?? drone?.hub?.phase ?? ''),
     status: String(drone?.status ?? ''),
     group: drone?.group ?? null,
+    repoPath: firstText(
+      drone?.repoPath,
+      drone?.repositoryPath,
+      drone?.repo?.path,
+      drone?.repo?.hostPath,
+      drone?.repo?.dest,
+    ),
+    fleetParentId: String(drone?.fleetParentId ?? '').trim() || null,
+    chats: chats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean),
+    busyChats: Array.isArray(drone?.busyChats)
+      ? drone.busyChats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean)
+      : [],
+    createdAt: String(drone?.createdAt ?? ''),
+    lastActivityAt: String(drone?.lastActivityAt ?? ''),
+    statusOk: drone?.statusOk !== false,
+    statusError: String(drone?.statusError ?? '').trim() || null,
   };
 }
 
@@ -31,7 +60,18 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
       const payload = object(rawPayload);
       if (operation === 'drones.list') {
         const result = await localHubRequest(access, '/api/drones');
-        return { drones: Array.isArray(result.drones) ? result.drones.map(droneSummary) : [] };
+        const drones: ReturnType<typeof deviceMeshDroneSummary>[] = Array.isArray(result.drones)
+          ? result.drones.map(deviceMeshDroneSummary)
+          : [];
+        return {
+          schemaVersion: 2,
+          drones,
+          repoPathByDroneId: Object.fromEntries(
+            drones
+              .map((drone) => [drone.id, drone.repoPath] as const)
+              .filter(([droneId, repoPath]) => Boolean(droneId && repoPath)),
+          ),
+        };
       }
 
       if (operation === 'drone.create.container' || operation === 'drone.create.host') {

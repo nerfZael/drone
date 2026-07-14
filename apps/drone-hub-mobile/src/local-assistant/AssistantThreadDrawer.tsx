@@ -17,9 +17,18 @@ import Plane from 'lucide-react-native/icons/plane';
 import Plus from 'lucide-react-native/icons/plus';
 import Settings from 'lucide-react-native/icons/settings';
 import X from 'lucide-react-native/icons/x';
+import ChevronDown from 'lucide-react-native/icons/chevron-down';
+import ChevronRight from 'lucide-react-native/icons/chevron-right';
+import FolderGit2 from 'lucide-react-native/icons/folder-git-2';
 import { colors } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { assistantThreadsNewestFirst } from './latest-assistant-thread';
+import {
+  buildMobileDroneRepoGroups,
+  type MobileDroneGroupFolder,
+  type MobileDroneSummary,
+  type MobileDroneTreeNode,
+} from '../drones/drone-sidebar-model';
 
 export function assistantDrawerWidth(windowWidth: number): number {
   return Math.min(windowWidth * 0.86, 380);
@@ -47,6 +56,148 @@ function navigationIcon(id: string) {
   return MessageCircle;
 }
 
+function DrawerDroneNode({
+  node,
+  depth,
+  activeDroneId,
+  activeChatName,
+  onSelect,
+}: {
+  node: MobileDroneTreeNode;
+  depth: number;
+  activeDroneId: string;
+  activeChatName: string;
+  onSelect(droneId: string, chatName: string): void;
+}) {
+  const { drone } = node;
+  const chats = drone.chats.length > 0 ? drone.chats : ['default'];
+  const selected = drone.id === activeDroneId;
+  const selectedChat = selected && chats.includes(activeChatName) ? activeChatName : chats[0]!;
+  return (
+    <View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ selected }}
+        accessibilityLabel={`Open ${drone.name} chat`}
+        onPress={() => onSelect(drone.id, selectedChat)}
+        style={({ pressed }) => [
+          styles.droneRow,
+          { paddingLeft: 10 + depth * 16 },
+          selected && styles.droneRowActive,
+          pressed && styles.pressed,
+        ]}
+      >
+        <Text numberOfLines={1} style={[styles.droneName, selected && styles.activeText]}>
+          {drone.name}
+        </Text>
+      </Pressable>
+      {chats.length > 1 ? (
+        <View style={styles.chatList}>
+          {chats.map((chatName) => {
+            const active = selected && chatName === activeChatName;
+            const busy = drone.busyChats.includes(chatName);
+            return (
+              <Pressable
+                key={chatName}
+                accessibilityRole="button"
+                accessibilityState={{ selected: active }}
+                onPress={() => onSelect(drone.id, chatName)}
+                style={({ pressed }) => [
+                  styles.chatRow,
+                  { paddingLeft: 28 + depth * 16 },
+                  active && styles.chatRowActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <MessageCircle
+                  color={active ? colors.accent : colors.muted}
+                  size={13}
+                  strokeWidth={1.8}
+                />
+                <Text numberOfLines={1} style={[styles.chatName, active && styles.activeText]}>
+                  {chatName}
+                </Text>
+                {busy ? <View style={styles.chatBusy} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+      ) : null}
+      {node.children.map((child) => (
+        <DrawerDroneNode
+          key={child.drone.id}
+          node={child}
+          depth={depth + 1}
+          activeDroneId={activeDroneId}
+          activeChatName={activeChatName}
+          onSelect={onSelect}
+        />
+      ))}
+    </View>
+  );
+}
+
+function DrawerDroneFolder({
+  folder,
+  depth,
+  activeDroneId,
+  activeChatName,
+  onSelect,
+}: {
+  folder: MobileDroneGroupFolder;
+  depth: number;
+  activeDroneId: string;
+  activeChatName: string;
+  onSelect(droneId: string, chatName: string): void;
+}) {
+  const [collapsed, setCollapsed] = React.useState(false);
+  const Chevron = collapsed ? ChevronRight : ChevronDown;
+  return (
+    <View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityState={{ expanded: !collapsed }}
+        onPress={() => setCollapsed((current) => !current)}
+        style={({ pressed }) => [
+          styles.groupRow,
+          { paddingLeft: 20 + depth * 14 },
+          pressed && styles.pressed,
+        ]}
+      >
+        <Chevron color={colors.muted} size={13} strokeWidth={2} />
+        <Text numberOfLines={1} style={styles.groupName}>
+          {folder.label}
+        </Text>
+        <Text style={styles.repoCount}>{folder.droneCount}</Text>
+      </Pressable>
+      {!collapsed ? (
+        <>
+          {folder.roots.map((node) => (
+            <DrawerDroneNode
+              key={node.drone.id}
+              node={node}
+              depth={depth + 1}
+              activeDroneId={activeDroneId}
+              activeChatName={activeChatName}
+              onSelect={onSelect}
+            />
+          ))}
+          {folder.children.map((child) => (
+            <DrawerDroneFolder
+              key={child.id}
+              folder={child}
+              depth={depth + 1}
+              activeDroneId={activeDroneId}
+              activeChatName={activeChatName}
+              onSelect={onSelect}
+            />
+          ))}
+        </>
+      ) : null}
+    </View>
+  );
+}
+
 export function AssistantThreadDrawer({
   open,
   title,
@@ -58,9 +209,15 @@ export function AssistantThreadDrawer({
   navigationItems,
   canCreate = true,
   showThreads = true,
+  showDrones = false,
+  drones = [],
+  activeDroneId = '',
+  activeChatName = 'default',
+  dronesLoading = false,
   onClose,
   onSelect,
   onCreate,
+  onSelectDroneChat,
 }: {
   open: boolean;
   title: string;
@@ -72,9 +229,15 @@ export function AssistantThreadDrawer({
   navigationItems: AppDrawerNavigationItem[];
   canCreate?: boolean;
   showThreads?: boolean;
+  showDrones?: boolean;
+  drones?: MobileDroneSummary[];
+  activeDroneId?: string;
+  activeChatName?: string;
+  dronesLoading?: boolean;
   onClose(): void;
   onSelect(threadId: string): void;
   onCreate(): void;
+  onSelectDroneChat?(droneId: string, chatName: string): void;
 }) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
@@ -145,6 +308,8 @@ export function AssistantThreadDrawer({
     [closedX, drawerWidth, offset, onClose],
   );
   const orderedThreads = React.useMemo(() => assistantThreadsNewestFirst(threads), [threads]);
+  const droneGroups = React.useMemo(() => buildMobileDroneRepoGroups(drones), [drones]);
+  const [collapsedRepos, setCollapsedRepos] = React.useState<Record<string, boolean>>({});
   const backdropOpacity = offset.interpolate({
     inputRange: [closedX, 0],
     outputRange: [0, 1],
@@ -270,6 +435,88 @@ export function AssistantThreadDrawer({
                 ) : null}
               </ScrollView>
             </>
+          ) : showDrones ? (
+            <>
+              <View style={styles.threadSectionHead}>
+                <View style={styles.threadSectionCopy}>
+                  <Text style={[styles.sectionLabel, styles.threadSectionLabel]}>DRONES</Text>
+                  <Text numberOfLines={1} style={styles.threadSectionTitle}>
+                    {title}
+                  </Text>
+                </View>
+                {dronesLoading ? (
+                  <ActivityIndicator color={colors.accent} size="small" />
+                ) : (
+                  <Text style={styles.droneCount}>{drones.length}</Text>
+                )}
+              </View>
+              <ScrollView style={styles.scroll} contentContainerStyle={styles.droneList}>
+                {droneGroups.map((group) => {
+                  const collapsed = collapsedRepos[group.id] === true;
+                  const Chevron = collapsed ? ChevronRight : ChevronDown;
+                  return (
+                    <View key={group.id} style={styles.repoGroup}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityState={{ expanded: !collapsed }}
+                        onPress={() =>
+                          setCollapsedRepos((current) => ({
+                            ...current,
+                            [group.id]: !current[group.id],
+                          }))
+                        }
+                        style={({ pressed }) => [styles.repoRow, pressed && styles.pressed]}
+                      >
+                        <Chevron color={colors.muted} size={14} strokeWidth={2} />
+                        <FolderGit2 color={colors.accent} size={15} strokeWidth={1.9} />
+                        <View style={styles.repoCopy}>
+                          <Text numberOfLines={1} style={styles.repoName}>
+                            {group.label}
+                          </Text>
+                          {group.repoPath ? (
+                            <Text numberOfLines={1} style={styles.repoPath}>
+                              {group.repoPath}
+                            </Text>
+                          ) : null}
+                        </View>
+                        <Text style={styles.repoCount}>{group.droneCount}</Text>
+                      </Pressable>
+                      {!collapsed
+                        ? [
+                            ...group.roots.map((node) => (
+                              <DrawerDroneNode
+                                key={node.drone.id}
+                                node={node}
+                                depth={0}
+                                activeDroneId={activeDroneId}
+                                activeChatName={activeChatName}
+                                onSelect={(droneId, chatName) =>
+                                  onSelectDroneChat?.(droneId, chatName)
+                                }
+                              />
+                            )),
+                            ...group.folders.map((folder) => (
+                              <DrawerDroneFolder
+                                key={folder.id}
+                                folder={folder}
+                                depth={0}
+                                activeDroneId={activeDroneId}
+                                activeChatName={activeChatName}
+                                onSelect={(droneId, chatName) =>
+                                  onSelectDroneChat?.(droneId, chatName)
+                                }
+                              />
+                            )),
+                          ]
+                        : null}
+                    </View>
+                  );
+                })}
+                {!dronesLoading && drones.length === 0 ? (
+                  <Text style={styles.empty}>No drones are available on this device.</Text>
+                ) : null}
+              </ScrollView>
+            </>
           ) : (
             <View style={styles.drawerFill} />
           )}
@@ -373,6 +620,58 @@ const styles = StyleSheet.create({
   threadTitle: { color: colors.muted, fontSize: 13, lineHeight: 17, fontWeight: '700' },
   activeText: { color: colors.accent, fontWeight: '800' },
   empty: { color: colors.muted, fontSize: 12, lineHeight: 18, padding: 12 },
+  droneCount: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '800',
+    minWidth: 30,
+    textAlign: 'center',
+  },
+  droneList: { paddingHorizontal: 10, paddingBottom: 24 },
+  repoGroup: { marginBottom: 5 },
+  repoRow: {
+    minHeight: 46,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 7,
+    borderRadius: 8,
+  },
+  repoCopy: { flex: 1, minWidth: 0 },
+  repoName: { color: colors.text, fontSize: 12, fontWeight: '800' },
+  repoPath: { color: colors.muted, fontSize: 8, fontFamily: 'monospace', marginTop: 1 },
+  repoCount: { color: colors.muted, fontSize: 9, fontWeight: '800' },
+  droneRow: {
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingRight: 7,
+    borderRadius: 7,
+  },
+  droneRowActive: { backgroundColor: colors.panel },
+  droneName: { color: colors.text, fontSize: 12, fontWeight: '700', flex: 1 },
+  groupRow: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingRight: 8,
+    borderRadius: 6,
+  },
+  groupName: { color: colors.muted, fontSize: 11, fontWeight: '800', flex: 1 },
+  chatList: { gap: 1 },
+  chatRow: {
+    minHeight: 31,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingRight: 8,
+    borderRadius: 6,
+  },
+  chatRowActive: { backgroundColor: colors.panel },
+  chatName: { color: colors.muted, fontSize: 11, fontFamily: 'monospace', flex: 1 },
+  chatBusy: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.warning },
   drawerFill: { flex: 1 },
   pressed: { opacity: 0.65 },
 });

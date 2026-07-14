@@ -196,6 +196,10 @@ drone hub stop
 drone hub restart
 ```
 
+The Electron desktop window connects to the same detached Hub daemon. Closing or quitting the
+window leaves the Hub API and device mesh running so paired mobile devices remain reachable; use
+`drone hub stop` when you explicitly want to stop the background service.
+
 The full Hub API binds to `127.0.0.1` by default. Container drones get a separate authenticated
 MCP-only listener, projected as `http://host.docker.internal:8788/mcp` by default. On Linux Docker
 hosts, that MCP listener binds to the Docker bridge address `172.17.0.1` by default; use

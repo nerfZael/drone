@@ -98,10 +98,12 @@ async function ensureBlipBundleDependenciesBuilt(root) {
 }
 
 async function copyDroneHubElectronMain(root) {
-  const source = path.join(root, 'desktop', 'hub-electron-main.cjs');
-  const target = path.join(root, 'dist', 'hub-electron-main.cjs');
-  await fs.copyFile(source, target);
-  await chmodExecutableBestEffort(target);
+  for (const filename of ['hub-electron-main.cjs', 'hub-electron-launch.cjs']) {
+    const source = path.join(root, 'desktop', filename);
+    const target = path.join(root, 'dist', filename);
+    await fs.copyFile(source, target);
+    await chmodExecutableBestEffort(target);
+  }
 }
 
 async function copyBuiltDroneHubUi(root) {

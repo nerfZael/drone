@@ -166,11 +166,15 @@ export function MobileAssistantTranscript({
   running = false,
   currentReasoning = '',
   loading = false,
+  emptyTitle = 'The assistant lives here.',
+  emptyBody = 'Ask a question, or attach a remote workspace and let this phone inspect and edit it.',
 }: {
   messages: AssistantMessage[];
   running?: boolean;
   currentReasoning?: string;
   loading?: boolean;
+  emptyTitle?: string;
+  emptyBody?: string;
 }) {
   const items = React.useMemo(() => renderItemsFromMessages(messages), [messages]);
   if (loading) {
@@ -188,9 +192,9 @@ export function MobileAssistantTranscript({
     if (message.role !== 'assistant') return false;
     return Boolean(
       visibleMessageText(message).trim() ||
-        messageImageParts(message).length > 0 ||
-        attachments(message).length > 0 ||
-        message.errorMessage,
+      messageImageParts(message).length > 0 ||
+      attachments(message).length > 0 ||
+      message.errorMessage,
     );
   });
   if (items.length === 0 && !running) {
@@ -199,10 +203,8 @@ export function MobileAssistantTranscript({
         <View style={styles.emptyOrbit}>
           <View style={styles.emptyCore} />
         </View>
-        <Text style={styles.emptyTitle}>The assistant lives here.</Text>
-        <Text style={styles.emptyBody}>
-          Ask a question, or attach a remote workspace and let this phone inspect and edit it.
-        </Text>
+        <Text style={styles.emptyTitle}>{emptyTitle}</Text>
+        <Text style={styles.emptyBody}>{emptyBody}</Text>
       </View>
     );
   }

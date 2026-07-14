@@ -68,9 +68,7 @@ function Shell() {
           setAppDrawerOpen(true);
         },
         onPanResponderMove: (_event, gesture) => {
-          drawerOffset.setValue(
-            Math.min(0, -drawerWidthRef.current + Math.max(0, gesture.dx)),
-          );
+          drawerOffset.setValue(Math.min(0, -drawerWidthRef.current + Math.max(0, gesture.dx)));
         },
         onPanResponderRelease: (_event, gesture) => {
           const shouldOpen = gesture.dx >= drawerWidthRef.current * 0.3 || gesture.vx >= 0.45;
@@ -162,7 +160,13 @@ function Shell() {
   ) : tab === 'settings' ? (
     <SettingsScreen tab={settingsTab} onTabChange={setSettingsTab} onPair={openPairing} />
   ) : tab === 'drones' ? (
-    <DronesScreen />
+    <DronesScreen
+      drawerOpen={appDrawerOpen}
+      drawerOffset={drawerOffset}
+      navigationItems={navigationItems}
+      openingGestureActive={openingGestureActive}
+      onDrawerOpenChange={setAppDrawerOpen}
+    />
   ) : tab === 'assistant' ? (
     <AssistantHomeScreen
       drawerOpen={appDrawerOpen}
@@ -182,7 +186,7 @@ function Shell() {
       edges={['top', 'right', 'bottom', 'left']}
       {...drawerPanResponder.panHandlers}
     >
-      {mesh.profile && (tab !== 'assistant' || pairingVisible) ? (
+      {mesh.profile && ((tab !== 'assistant' && tab !== 'drones') || pairingVisible) ? (
         <AssistantThreadDrawer
           open={appDrawerOpen}
           title=""
