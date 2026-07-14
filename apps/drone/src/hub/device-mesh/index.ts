@@ -96,6 +96,20 @@ export async function createDeviceMeshService(options: {
         payload,
         'threads.list',
       ),
+    broadcastDroneListChange: (payload: Record<string, any>) =>
+      router.broadcastCapabilityEvent(
+        'drone-control',
+        'drones.changed',
+        payload,
+        'drones.list',
+      ),
+    broadcastDroneChatChange: (payload: Record<string, any>) =>
+      router.broadcastCapabilityEvent(
+        'drone-control',
+        'chat.changed',
+        payload,
+        'chat.read',
+      ),
     remoteWorkspaceTarget: async (threadId: string) => {
       const policy = await assistantPolicies.homeTarget(threadId);
       if (!policy) return null;

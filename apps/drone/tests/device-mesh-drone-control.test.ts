@@ -72,4 +72,52 @@ describe('device mesh drone summaries', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test('forwards chat model discovery and updates', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      requests.push({
+        url: String(input),
+        method: String(init?.method ?? 'GET'),
+        body: String(init?.body ?? ''),
+      });
+      return new Response(
+        JSON.stringify(
+          String(input).includes('/models')
+            ? { ok: true, models: [{ id: 'gpt-5', label: 'GPT-5' }], source: 'live' }
+            : { ok: true },
+        ),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('chat.models', {
+          droneId: 'drone one',
+          chatName: 'default',
+          refresh: true,
+        }),
+      ).resolves.toMatchObject({
+        models: [{ id: 'gpt-5', label: 'GPT-5' }],
+        source: 'live',
+      });
+      await capability.invoke('chat.update', {
+        droneId: 'drone one',
+        chatName: 'default',
+        model: 'gpt-5',
+      });
+      expect(requests.map((request) => request.url)).toEqual([
+        'http://127.0.0.1:7777/api/drones/drone%20one/chats/default/models?refresh=1',
+        'http://127.0.0.1:7777/api/drones/drone%20one/chats/default/config',
+      ]);
+      expect(requests[1]).toMatchObject({ method: 'POST', body: '{"model":"gpt-5"}' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

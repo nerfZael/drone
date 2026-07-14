@@ -1,11 +1,5 @@
 import React from 'react';
-import {
-  Pressable,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import ArrowUp from 'lucide-react-native/icons/arrow-up';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import Mic from 'lucide-react-native/icons/mic';
@@ -82,6 +76,7 @@ export function AssistantComposer({
   sending = false,
   editable = true,
   maxLength = 32_000,
+  placeholder = 'Ask the assistant…',
 }: {
   value: string;
   onChangeText(value: string): void;
@@ -94,6 +89,7 @@ export function AssistantComposer({
   sending?: boolean;
   editable?: boolean;
   maxLength?: number;
+  placeholder?: string;
 }) {
   const [focused, setFocused] = React.useState(false);
   const expanded = focused || Boolean(value.trim()) || running;
@@ -112,7 +108,7 @@ export function AssistantComposer({
           editable={editable && !running}
           multiline
           maxLength={maxLength}
-          placeholder="Ask the assistant…"
+          placeholder={placeholder}
           placeholderTextColor={colors.muted}
           textAlignVertical="top"
           style={[styles.input, expanded && styles.inputExpanded]}

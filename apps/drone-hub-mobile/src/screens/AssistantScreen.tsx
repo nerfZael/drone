@@ -1,10 +1,11 @@
 import React from 'react';
-import { Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { latestThinkingText, type AssistantMessage } from '@drone/assistant-chat';
 import { Card, ErrorBanner, textStyles } from '../components/Ui';
 import {
   AssistantThreadDrawer,
   type AppDrawerNavigationItem,
+  type DrawerDevicePickerItem,
 } from '../local-assistant/AssistantThreadDrawer';
 import { AssistantComposer } from '../local-assistant/AssistantComposer';
 import { MobileAssistantTranscript } from '../local-assistant/LocalAssistantTranscript';
@@ -15,6 +16,8 @@ import {
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { latestAssistantThread } from '../local-assistant/latest-assistant-thread';
+import { useLatestMessageScroll } from '../local-assistant/use-latest-message-scroll';
+import type { AssistantAppHeaderState } from './AssistantHomeScreen';
 
 type Thread = {
   id: string;
@@ -66,12 +69,20 @@ export function AssistantScreen({
   navigationItems,
   openingGestureActive,
   onDrawerOpenChange,
+  homeId,
+  devicePickerItems,
+  onDeviceChange,
+  onHeaderChange,
 }: {
   drawerOpen: boolean;
   drawerOffset: Animated.Value;
   navigationItems: AppDrawerNavigationItem[];
   openingGestureActive: boolean;
   onDrawerOpenChange(open: boolean): void;
+  homeId: string;
+  devicePickerItems: DrawerDevicePickerItem[];
+  onDeviceChange(deviceId: string): void;
+  onHeaderChange(header: AssistantAppHeaderState | null): void;
 }) {
   const mesh = useMesh();
   const homes = mesh.devices.filter(
@@ -82,7 +93,8 @@ export function AssistantScreen({
         (capability) => capability.id === 'assistant-threads',
       ),
   );
-  const [homeId, setHomeId] = React.useState(homes[0]?.id ?? '');
+  const homeSupportsAssistant = homes.some((device) => device.id === homeId);
+  const homeConnected = mesh.connectedDeviceIds.includes(homeId);
   const [threads, setThreads] = React.useState<Thread[]>([]);
   const [models, setModels] = React.useState<AssistantModelChoice[]>([]);
   const [selectedId, setSelectedId] = React.useState('');
@@ -94,31 +106,62 @@ export function AssistantScreen({
   const [modelOpen, setModelOpen] = React.useState(false);
   const [modelBusy, setModelBusy] = React.useState(false);
   const realtimeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const transcriptScroll = React.useRef<ScrollView | null>(null);
+  const homeIdRef = React.useRef(homeId);
+  const threadListVersion = React.useRef(0);
+  const threadReadVersion = React.useRef(0);
+  const runVersion = React.useRef(0);
+  const busyVersion = React.useRef(0);
+  const modelRequestVersion = React.useRef(0);
+  homeIdRef.current = homeId;
 
   React.useEffect(() => {
-    if (!homes.some((device) => device.id === homeId)) setHomeId(homes[0]?.id ?? '');
-  }, [homeId, homes]);
+    threadListVersion.current += 1;
+    threadReadVersion.current += 1;
+    runVersion.current += 1;
+    busyVersion.current += 1;
+    modelRequestVersion.current += 1;
+    setThreads([]);
+    setModels([]);
+    setSelectedId('');
+    setEntries([]);
+    setStreamingMessages([]);
+    setPrompt('');
+    setBusy('');
+    setError(null);
+    setModelOpen(false);
+    setModelBusy(false);
+  }, [homeId]);
 
   const run = async (key: string, task: () => Promise<void>) => {
+    const requestVersion = ++runVersion.current;
+    const busyRequestVersion = ++busyVersion.current;
     setBusy(key);
     setError(null);
     try {
       await task();
     } catch (nextError: any) {
-      setError(nextError?.message ?? String(nextError));
+      if (runVersion.current === requestVersion)
+        setError(nextError?.message ?? String(nextError));
     } finally {
-      setBusy('');
+      if (busyVersion.current === busyRequestVersion) setBusy('');
     }
   };
 
   const loadThreads = React.useCallback(
     async (quiet = false) => {
-      if (!homeId) return;
+      if (!homeId || !homeSupportsAssistant || homeIdRef.current !== homeId) return;
+      const destinationId = homeId;
+      const requestVersion = ++threadListVersion.current;
+      const busyRequestVersion = quiet ? 0 : ++busyVersion.current;
       if (!quiet) setBusy('threads');
       setError(null);
       try {
-        const result = await mesh.request(homeId, 'assistant-threads', 'threads.list');
+        const result = await mesh.request(destinationId, 'assistant-threads', 'threads.list');
+        if (
+          homeIdRef.current !== destinationId ||
+          threadListVersion.current !== requestVersion
+        )
+          return;
         const nextThreads = Array.isArray(result?.threads) ? result.threads : [];
         setThreads(nextThreads);
         if (Array.isArray(result?.models)) setModels(result.models);
@@ -126,17 +169,30 @@ export function AssistantScreen({
           nextThreads.some((thread: Thread) => thread.id === current) ? current : '',
         );
       } catch (nextError: any) {
-        setError(nextError?.message ?? String(nextError));
+        if (
+          homeIdRef.current === destinationId &&
+          threadListVersion.current === requestVersion
+        )
+          setError(nextError?.message ?? String(nextError));
       } finally {
-        if (!quiet) setBusy('');
+        if (
+          !quiet &&
+          homeIdRef.current === destinationId &&
+          threadListVersion.current === requestVersion &&
+          busyVersion.current === busyRequestVersion
+        )
+          setBusy('');
       }
     },
-    [homeId, mesh.request],
+    [homeId, homeSupportsAssistant, mesh.request],
   );
 
   const openThread = React.useCallback(
     async (threadId: string, quiet = false) => {
-      if (!homeId) return;
+      if (!homeId || !homeSupportsAssistant || homeIdRef.current !== homeId) return;
+      const destinationId = homeId;
+      const requestVersion = ++threadReadVersion.current;
+      const busyRequestVersion = quiet ? 0 : ++busyVersion.current;
       if (!quiet) {
         setBusy('thread');
         setEntries([]);
@@ -145,7 +201,14 @@ export function AssistantScreen({
       setError(null);
       setSelectedId(threadId);
       try {
-        const result = await mesh.request(homeId, 'assistant-threads', 'thread.get', { threadId });
+        const result = await mesh.request(destinationId, 'assistant-threads', 'thread.get', {
+          threadId,
+        });
+        if (
+          homeIdRef.current !== destinationId ||
+          threadReadVersion.current !== requestVersion
+        )
+          return;
         const nextEntries = Array.isArray(result?.history?.entries) ? result.history.entries : [];
         const nextStreaming = Array.isArray(result?.streamingMessages)
           ? result.streamingMessages
@@ -162,25 +225,42 @@ export function AssistantScreen({
             current.map((item) => (item.id === threadId ? result.thread : item)),
           );
       } catch (nextError: any) {
-        setError(nextError?.message ?? String(nextError));
+        if (
+          homeIdRef.current === destinationId &&
+          threadReadVersion.current === requestVersion
+        )
+          setError(nextError?.message ?? String(nextError));
       } finally {
-        if (!quiet) setBusy('');
+        if (
+          !quiet &&
+          homeIdRef.current === destinationId &&
+          threadReadVersion.current === requestVersion &&
+          busyVersion.current === busyRequestVersion
+        )
+          setBusy('');
       }
     },
-    [homeId, mesh.request],
+    [homeId, homeSupportsAssistant, mesh.request],
   );
 
   const createThread = () =>
     run('create', async () => {
-      const result = await mesh.request(homeId, 'assistant-threads', 'thread.create', {});
+      const destinationId = homeId;
+      const result = await mesh.request(
+        destinationId,
+        'assistant-threads',
+        'thread.create',
+        {},
+      );
+      if (homeIdRef.current !== destinationId) return;
       await loadThreads(true);
       if (result?.thread?.id) await openThread(result.thread.id);
     });
 
   React.useEffect(() => {
-    if (!homeId) return;
+    if (!homeId || !homeSupportsAssistant || !homeConnected) return;
     void loadThreads();
-  }, [homeId, loadThreads]);
+  }, [homeConnected, homeId, homeSupportsAssistant, loadThreads]);
 
   React.useEffect(() => {
     if (selectedId || threads.length === 0) return;
@@ -189,38 +269,41 @@ export function AssistantScreen({
   }, [openThread, selectedId, threads]);
 
   React.useEffect(() => {
-    if (!homeId) return;
-    return mesh.subscribe('assistant-threads', 'threads.changed', (event) => {
+    if (!homeId || !homeSupportsAssistant) return;
+    const unsubscribe = mesh.subscribe('assistant-threads', 'threads.changed', (event) => {
       if (event.sourceDeviceId !== homeId) return;
-      if (realtimeTimer.current) clearTimeout(realtimeTimer.current);
+      if (realtimeTimer.current) return;
       realtimeTimer.current = setTimeout(() => {
+        realtimeTimer.current = null;
         void loadThreads(true);
-        if (selectedId && (!event.payload?.threadId || event.payload.threadId === selectedId))
-          void openThread(selectedId, true);
+        if (selectedId) void openThread(selectedId, true);
       }, 250);
     });
-  }, [homeId, loadThreads, mesh.subscribe, openThread, selectedId]);
-
-  React.useEffect(
-    () => () => {
+    return () => {
+      unsubscribe();
       if (realtimeTimer.current) clearTimeout(realtimeTimer.current);
-    },
-    [],
-  );
+      realtimeTimer.current = null;
+    };
+  }, [homeId, homeSupportsAssistant, loadThreads, mesh.subscribe, openThread, selectedId]);
 
   const sendPrompt = () =>
     run('prompt', async () => {
-      await mesh.request(homeId, 'assistant-threads', 'thread.prompt', {
-        threadId: selectedId,
+      const destinationId = homeId;
+      const threadId = selectedId;
+      await mesh.request(destinationId, 'assistant-threads', 'thread.prompt', {
+        threadId,
         prompt,
       });
+      if (homeIdRef.current !== destinationId) return;
       setThreads((current) =>
         current.map((thread) =>
-          thread.id === selectedId ? { ...thread, status: 'running' } : thread,
+          thread.id === threadId ? { ...thread, status: 'running' } : thread,
         ),
       );
       setPrompt('');
-      setTimeout(() => void openThread(selectedId, true), 1500);
+      setTimeout(() => {
+        if (homeIdRef.current === destinationId) void openThread(threadId, true);
+      }, 1500);
     });
 
   const selected = threads.find((thread) => thread.id === selectedId);
@@ -236,6 +319,7 @@ export function AssistantScreen({
     () => [...historyMessages, ...streamingMessages],
     [historyMessages, streamingMessages],
   );
+  const latestMessageScroll = useLatestMessageScroll(selectedId);
   const streamingAssistant = streamingMessages.find((message) => message.role === 'assistant');
   const running = Boolean(
     streamingMessages.length > 0 ||
@@ -258,42 +342,41 @@ export function AssistantScreen({
       ?.name ||
     selected?.model ||
     'Model';
+  const activeHome = homes.find((home) => home.id === homeId);
+
+  React.useEffect(() => {
+    onHeaderChange(
+      selected
+        ? {
+            title: selected.title,
+            subtitle: `${selected.workspaceTarget ? `${selected.workspaceTarget.rootId} · ${selected.workspaceTarget.write ? 'read/write' : 'read-only'}` : 'Home device only'}${activeHome ? ` · ${activeHome.name}` : ''}`,
+            statusTone: selected.error
+              ? 'error'
+              : mesh.connectedDeviceIds.includes(homeId)
+                ? 'online'
+                : 'muted',
+          }
+        : null,
+    );
+  }, [
+    activeHome?.name,
+    homeId,
+    mesh.connectedDeviceIds,
+    onHeaderChange,
+    selected?.id,
+    selected?.error,
+    selected?.title,
+    selected?.workspaceTarget,
+  ]);
+  React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
   return (
     <View style={styles.page}>
-      <View style={styles.homeBar}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.homes}
-        >
-          {homes.map((home) => (
-            <Pressable
-              key={home.id}
-              onPress={() => {
-                setHomeId(home.id);
-                setThreads([]);
-                setSelectedId('');
-                setEntries([]);
-                setStreamingMessages([]);
-              }}
-              style={[styles.home, home.id === homeId && styles.homeActive]}
-            >
-              <View
-                style={[styles.dot, mesh.connectedDeviceIds.includes(home.id) && styles.dotOnline]}
-              />
-              <Text style={[styles.homeText, home.id === homeId && styles.homeTextActive]}>
-                {home.name}
-              </Text>
-            </Pressable>
-          ))}
-        </ScrollView>
-      </View>
-      {homes.length === 0 ? (
+      {!homeSupportsAssistant ? (
         <Card style={styles.insetCard}>
           <Text style={textStyles.body}>
-            No assistant host is advertised yet. Refresh Devices after connecting to a compatible
-            Hub.
+            {mesh.devices.find((device) => device.id === homeId)?.name ?? 'This device'} does not
+            provide remote assistant threads. Choose this phone or a compatible Hub from the menu.
           </Text>
         </Card>
       ) : null}
@@ -308,10 +391,13 @@ export function AssistantScreen({
         threads={threads}
         activeThreadId={selectedId}
         creating={busy === 'create'}
-        canCreate={Boolean(homeId)}
+        canCreate={homeSupportsAssistant}
         offset={drawerOffset}
         openingGestureActive={openingGestureActive}
         navigationItems={navigationItems}
+        devicePickerItems={devicePickerItems}
+        activeDeviceId={homeId}
+        onSelectDevice={onDeviceChange}
         onClose={() => onDrawerOpenChange(false)}
         onSelect={(threadId) => {
           onDrawerOpenChange(false);
@@ -324,24 +410,15 @@ export function AssistantScreen({
       />
       {selected ? (
         <>
-          <View style={styles.threadHead}>
-            <View style={styles.threadCopy}>
-              <Text numberOfLines={1} style={styles.transcriptTitle}>
-                {selected.title}
-              </Text>
-              <Text numberOfLines={1} style={styles.threadRoute}>
-                {selected.workspaceTarget
-                  ? `${selected.workspaceTarget.rootId} · ${selected.workspaceTarget.write ? 'read/write' : 'read-only'}`
-                  : 'Home device only'}
-              </Text>
-            </View>
-          </View>
           <ScrollView
-            ref={transcriptScroll}
+            ref={latestMessageScroll.ref}
             style={styles.transcript}
             contentContainerStyle={styles.entries}
             keyboardShouldPersistTaps="handled"
-            onContentSizeChange={() => transcriptScroll.current?.scrollToEnd({ animated: true })}
+            onLayout={latestMessageScroll.onLayout}
+            onContentSizeChange={latestMessageScroll.onContentSizeChange}
+            onScroll={latestMessageScroll.onScroll}
+            scrollEventThrottle={16}
           >
             <MobileAssistantTranscript
               messages={transcriptMessages}
@@ -378,24 +455,41 @@ export function AssistantScreen({
             onClose={() => setModelOpen(false)}
             onSelect={(choice, selection) =>
               void (async () => {
+                const destinationId = homeId;
+                const threadId = selected.id;
+                const requestVersion = ++modelRequestVersion.current;
                 setModelBusy(true);
                 setError(null);
                 try {
-                  const result = await mesh.request(homeId, 'assistant-threads', 'thread.update', {
-                    threadId: selected.id,
-                    provider: choice.provider,
-                    model: choice.id,
-                    thinkingLevel: choice.thinkingLevel,
-                  });
+                  const result = await mesh.request(
+                    destinationId,
+                    'assistant-threads',
+                    'thread.update',
+                    {
+                      threadId,
+                      provider: choice.provider,
+                      model: choice.id,
+                      thinkingLevel: choice.thinkingLevel,
+                    },
+                  );
+                  if (
+                    homeIdRef.current !== destinationId ||
+                    modelRequestVersion.current !== requestVersion
+                  )
+                    return;
                   if (result?.thread)
                     setThreads((current) =>
-                      current.map((thread) => (thread.id === selected.id ? result.thread : thread)),
+                      current.map((thread) => (thread.id === threadId ? result.thread : thread)),
                     );
                   if (selection === 'reasoning') setModelOpen(false);
                 } catch (nextError: any) {
-                  setError(nextError?.message ?? String(nextError));
+                  if (
+                    homeIdRef.current === destinationId &&
+                    modelRequestVersion.current === requestVersion
+                  )
+                    setError(nextError?.message ?? String(nextError));
                 } finally {
-                  setModelBusy(false);
+                  if (modelRequestVersion.current === requestVersion) setModelBusy(false);
                 }
               })()
             }
@@ -408,45 +502,8 @@ export function AssistantScreen({
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
-  homeBar: {
-    minHeight: 52,
-    justifyContent: 'center',
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  homes: { gap: 8, paddingHorizontal: 12, alignItems: 'center' },
   inset: { marginHorizontal: 12 },
   insetCard: { margin: 12 },
-  home: {
-    flexDirection: 'row',
-    gap: 7,
-    alignItems: 'center',
-    paddingHorizontal: 12,
-    height: 38,
-    borderRadius: 20,
-    backgroundColor: colors.panel,
-    borderColor: colors.border,
-    borderWidth: 1,
-  },
-  homeActive: { borderColor: colors.accent, backgroundColor: colors.accentDark },
-  homeText: { color: colors.muted, fontWeight: '700', fontSize: 12 },
-  homeTextActive: { color: colors.text },
-  dot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#53676d' },
-  dotOnline: { backgroundColor: colors.online },
-  threadHead: {
-    minHeight: 62,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-    paddingHorizontal: 14,
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
-    backgroundColor: colors.panel,
-  },
-  threadCopy: { flex: 1, minWidth: 0 },
-  transcriptTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
-  threadRoute: { color: colors.muted, fontSize: 9, fontWeight: '700', marginTop: 5 },
   transcript: { flex: 1 },
   entries: { flexGrow: 1, paddingVertical: 10 },
 });

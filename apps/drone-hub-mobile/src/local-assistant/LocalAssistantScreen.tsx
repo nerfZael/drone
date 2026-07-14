@@ -1,6 +1,6 @@
 import React from 'react';
 import { latestThinkingText } from '@drone/assistant-chat';
-import { Alert, Animated, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, ErrorBanner, Label, textStyles } from '../components/Ui';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
@@ -10,6 +10,7 @@ import { LocalWorkspaceEditor } from './LocalWorkspaceEditor';
 import {
   AssistantThreadDrawer,
   type AppDrawerNavigationItem,
+  type DrawerDevicePickerItem,
 } from './AssistantThreadDrawer';
 import { AssistantModelPicker } from './AssistantModelPicker';
 import { AssistantComposer } from './AssistantComposer';
@@ -19,6 +20,8 @@ import {
   localAssistantModelOptions,
   normalizeLocalAssistantThinkingLevel,
 } from './local-assistant-model';
+import type { AssistantAppHeaderState } from '../screens/AssistantHomeScreen';
+import { useLatestMessageScroll } from './use-latest-message-scroll';
 
 export function LocalAssistantScreen({
   drawerOpen,
@@ -26,12 +29,20 @@ export function LocalAssistantScreen({
   navigationItems,
   openingGestureActive,
   onDrawerOpenChange,
+  activeDeviceId,
+  devicePickerItems,
+  onDeviceChange,
+  onHeaderChange,
 }: {
   drawerOpen: boolean;
   drawerOffset: Animated.Value;
   navigationItems: AppDrawerNavigationItem[];
   openingGestureActive: boolean;
   onDrawerOpenChange(open: boolean): void;
+  activeDeviceId: string;
+  devicePickerItems: DrawerDevicePickerItem[];
+  onDeviceChange(deviceId: string): void;
+  onHeaderChange(header: AssistantAppHeaderState | null): void;
 }) {
   const mesh = useMesh();
   const assistant = useLocalAssistant();
@@ -40,8 +51,8 @@ export function LocalAssistantScreen({
   const [modelOpen, setModelOpen] = React.useState(false);
   const [localProvider, setLocalProvider] = React.useState<'openai' | 'codex'>('openai');
   const [error, setError] = React.useState<string | null>(null);
-  const scroll = React.useRef<ScrollView | null>(null);
   const thread = assistant.threads.find((item) => item.id === assistant.activeThreadId) ?? null;
+  const latestMessageScroll = useLatestMessageScroll(thread?.id ?? '');
   const running = assistant.runningThreadId === thread?.id;
   const lastUserIndex =
     thread?.messages.reduce(
@@ -94,6 +105,58 @@ export function LocalAssistantScreen({
       setError(nextError?.message ?? String(nextError));
     }
   };
+  const toggleAccess = React.useCallback(() => setSettingsOpen((value) => !value), []);
+  const deleteActionRef = React.useRef<() => void>(() => {});
+  deleteActionRef.current = () => {
+    if (!thread) return;
+    Alert.alert('Delete phone thread?', 'Its local conversation will be removed.', [
+      { text: 'Cancel', style: 'cancel' },
+      {
+        text: 'Delete',
+        style: 'destructive',
+        onPress: () => void runAction(() => assistant.deleteThread(thread.id)),
+      },
+    ]);
+  };
+  const deleteFromHeader = React.useCallback(() => deleteActionRef.current(), []);
+
+  React.useEffect(() => {
+    onHeaderChange(
+      thread
+        ? {
+            title: thread.title,
+            subtitle: targetDevice
+              ? `${targetDevice.name} / ${thread.workspaceTarget?.rootId}`
+              : 'Phone only · no workspace',
+            statusTone:
+              thread.status === 'error' || thread.error
+                ? 'error'
+                : targetDevice && mesh.connectedDeviceIds.includes(targetDevice.id)
+                  ? 'online'
+                  : 'muted',
+            accessOpen: settingsOpen,
+            accessDisabled: running,
+            onToggleAccess: toggleAccess,
+            onDelete: deleteFromHeader,
+          }
+        : null,
+    );
+  }, [
+    deleteFromHeader,
+    mesh.connectedDeviceIds,
+    onHeaderChange,
+    running,
+    settingsOpen,
+    targetDevice?.id,
+    targetDevice?.name,
+    thread?.id,
+    thread?.error,
+    thread?.status,
+    thread?.title,
+    thread?.workspaceTarget?.rootId,
+    toggleAccess,
+  ]);
+  React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
   if (assistant.loading)
     return (
@@ -106,6 +169,9 @@ export function LocalAssistantScreen({
           offset={drawerOffset}
           openingGestureActive={openingGestureActive}
           navigationItems={navigationItems}
+          devicePickerItems={devicePickerItems}
+          activeDeviceId={activeDeviceId}
+          onSelectDevice={onDeviceChange}
           onClose={() => onDrawerOpenChange(false)}
           onSelect={(threadId) => {
             assistant.selectThread(threadId);
@@ -129,6 +195,9 @@ export function LocalAssistantScreen({
           offset={drawerOffset}
           openingGestureActive={openingGestureActive}
           navigationItems={navigationItems}
+          devicePickerItems={devicePickerItems}
+          activeDeviceId={activeDeviceId}
+          onSelectDevice={onDeviceChange}
           onClose={() => onDrawerOpenChange(false)}
           onSelect={(threadId) => {
             assistant.selectThread(threadId);
@@ -166,6 +235,9 @@ export function LocalAssistantScreen({
         offset={drawerOffset}
         openingGestureActive={openingGestureActive}
         navigationItems={navigationItems}
+        devicePickerItems={devicePickerItems}
+        activeDeviceId={activeDeviceId}
+        onSelectDevice={onDeviceChange}
         onClose={() => onDrawerOpenChange(false)}
         onSelect={(threadId) => {
           assistant.selectThread(threadId);
@@ -178,43 +250,6 @@ export function LocalAssistantScreen({
           })
         }
       />
-      <View style={styles.conversationHead}>
-        <View style={styles.conversationCopy}>
-          <Text numberOfLines={1} style={styles.conversationTitle}>
-            {thread.title}
-          </Text>
-          <View style={styles.routeLine}>
-            <View style={[styles.routeDot, targetDevice && styles.routeDotActive]} />
-            <Text numberOfLines={1} style={styles.routeLabel}>
-              {targetDevice
-                ? `${targetDevice.name} / ${thread.workspaceTarget?.rootId}`
-                : 'Phone only · no workspace'}
-            </Text>
-          </View>
-        </View>
-        <Pressable
-          disabled={running}
-          onPress={() => setSettingsOpen((value) => !value)}
-          style={[styles.headerAction, running && styles.disabled]}
-        >
-          <Text style={styles.headerActionText}>{settingsOpen ? 'CHAT' : 'ACCESS'}</Text>
-        </Pressable>
-        <Pressable
-          onPress={() =>
-            Alert.alert('Delete phone thread?', 'Its local conversation will be removed.', [
-              { text: 'Cancel', style: 'cancel' },
-              {
-                text: 'Delete',
-                style: 'destructive',
-                onPress: () => void runAction(() => assistant.deleteThread(thread.id)),
-              },
-            ])
-          }
-          style={styles.deleteAction}
-        >
-          <Text style={styles.deleteActionText}>×</Text>
-        </Pressable>
-      </View>
       {settingsOpen ? (
         <ScrollView contentContainerStyle={styles.editorScroll} keyboardShouldPersistTaps="handled">
           <LocalWorkspaceEditor thread={thread} onClose={() => setSettingsOpen(false)} />
@@ -222,11 +257,14 @@ export function LocalAssistantScreen({
       ) : (
         <>
           <ScrollView
-            ref={scroll}
+            ref={latestMessageScroll.ref}
             style={styles.transcript}
             contentContainerStyle={styles.transcriptContent}
             keyboardShouldPersistTaps="handled"
-            onContentSizeChange={() => scroll.current?.scrollToEnd({ animated: true })}
+            onLayout={latestMessageScroll.onLayout}
+            onContentSizeChange={latestMessageScroll.onContentSizeChange}
+            onScroll={latestMessageScroll.onScroll}
+            scrollEventThrottle={16}
           >
             <LocalAssistantTranscript
               thread={thread}
@@ -281,34 +319,6 @@ const styles = StyleSheet.create({
     letterSpacing: -1.1,
   },
   welcomeBody: { color: colors.muted, fontSize: 15, lineHeight: 23, marginBottom: 8 },
-  conversationHead: {
-    minHeight: 62,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    borderBottomColor: colors.border,
-    borderBottomWidth: 1,
-    backgroundColor: colors.panel,
-  },
-  conversationCopy: { flex: 1, minWidth: 0 },
-  conversationTitle: { color: colors.text, fontSize: 15, fontWeight: '800' },
-  routeLine: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 5 },
-  routeDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.muted },
-  routeDotActive: { backgroundColor: colors.online },
-  routeLabel: { color: colors.muted, fontSize: 9, fontWeight: '700', flex: 1 },
-  headerAction: {
-    height: 32,
-    paddingHorizontal: 10,
-    justifyContent: 'center',
-    borderRadius: 9,
-    borderColor: colors.border,
-    borderWidth: 1,
-  },
-  headerActionText: { color: colors.accent, fontSize: 8, fontWeight: '900', letterSpacing: 1 },
-  disabled: { opacity: 0.4 },
-  deleteAction: { width: 32, height: 32, justifyContent: 'center', alignItems: 'center' },
-  deleteActionText: { color: colors.muted, fontSize: 22 },
   transcript: { flex: 1 },
   transcriptContent: { flexGrow: 1, padding: 14, paddingBottom: 20 },
   editorScroll: { padding: 14 },

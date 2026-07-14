@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  ActivityIndicator,
   Animated,
   KeyboardAvoidingView,
   Platform,
@@ -10,18 +11,26 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import RefreshCw from 'lucide-react-native/icons/refresh-cw';
+import MessageCircle from 'lucide-react-native/icons/message-circle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Button, Card, ErrorBanner, Label, textStyles } from '../components/Ui';
-import { DroneChatComposer, DroneChatTranscript } from '../drones/DroneChatView';
 import {
   AssistantThreadDrawer,
   type AppDrawerNavigationItem,
+  type DrawerDevicePickerItem,
 } from '../local-assistant/AssistantThreadDrawer';
+import { AssistantComposer } from '../local-assistant/AssistantComposer';
+import {
+  AssistantModelPicker,
+  type AssistantModelChoice,
+} from '../local-assistant/AssistantModelPicker';
+import { MobileAssistantTranscript } from '../local-assistant/LocalAssistantTranscript';
+import { useLatestMessageScroll } from '../local-assistant/use-latest-message-scroll';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import {
   mobileRepoLabel,
+  mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneListPayload,
   normalizeMobileDroneTurns,
   type MobileDroneSummary,
@@ -29,22 +38,35 @@ import {
 
 const APP_HEADER_HEIGHT = 54;
 
+export type DronesAppHeaderState = {
+  title: string;
+  subtitle: string;
+  statusOk: boolean;
+};
+
 export function DronesScreen({
   drawerOpen,
   drawerOffset,
   navigationItems,
   openingGestureActive,
   onDrawerOpenChange,
+  onHeaderChange,
+  selectedDeviceId,
+  devicePickerItems,
+  onDeviceChange,
 }: {
   drawerOpen: boolean;
   drawerOffset: Animated.Value;
   navigationItems: AppDrawerNavigationItem[];
   openingGestureActive: boolean;
   onDrawerOpenChange(open: boolean): void;
+  onHeaderChange(header: DronesAppHeaderState | null): void;
+  selectedDeviceId: string;
+  devicePickerItems: DrawerDevicePickerItem[];
+  onDeviceChange(deviceId: string): void;
 }) {
   const mesh = useMesh();
   const insets = useSafeAreaInsets();
-  const transcriptRef = React.useRef<ScrollView>(null);
   const targets = mesh.devices.filter(
     (device) =>
       device.id !== mesh.identity?.id &&
@@ -53,50 +75,88 @@ export function DronesScreen({
         (capability) => capability.id === 'drone-control',
       ),
   );
-  const [targetId, setTargetId] = React.useState(targets[0]?.id ?? '');
+  const targetId = selectedDeviceId;
+  const targetSupportsDrones = targets.some((target) => target.id === targetId);
+  const targetConnected = mesh.connectedDeviceIds.includes(targetId);
   const [drones, setDrones] = React.useState<MobileDroneSummary[]>([]);
   const [selected, setSelected] = React.useState<MobileDroneSummary | null>(null);
   const [chats, setChats] = React.useState<string[]>([]);
   const [chatName, setChatName] = React.useState('default');
   const [chatModel, setChatModel] = React.useState('');
+  const [chatModelProvider, setChatModelProvider] = React.useState('drone');
+  const [chatModels, setChatModels] = React.useState<AssistantModelChoice[]>([]);
+  const [modelOpen, setModelOpen] = React.useState(false);
+  const [modelBusy, setModelBusy] = React.useState(false);
   const [turns, setTurns] = React.useState<any[]>([]);
   const [prompt, setPrompt] = React.useState('');
   const [createName, setCreateName] = React.useState('');
   const [busy, setBusy] = React.useState('');
   const [error, setError] = React.useState<string | null>(null);
   const targetIdRef = React.useRef(targetId);
+  const selectedRef = React.useRef(selected);
+  const chatNameRef = React.useRef(chatName);
+  const realtimeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const droneListVersion = React.useRef(0);
+  const chatReadVersion = React.useRef(0);
+  const openDroneVersion = React.useRef(0);
+  const runVersion = React.useRef(0);
+  const busyVersion = React.useRef(0);
+  const modelRequestVersion = React.useRef(0);
+  const readChatRef = React.useRef<(droneId: string, chatName: string) => Promise<void>>(
+    async () => {},
+  );
   targetIdRef.current = targetId;
-
-  React.useEffect(() => {
-    if (!targets.some((target) => target.id === targetId)) setTargetId(targets[0]?.id ?? '');
-  }, [targetId, targets]);
+  selectedRef.current = selected;
+  chatNameRef.current = chatName;
 
   const run = async (key: string, task: () => Promise<void>) => {
+    const requestVersion = ++runVersion.current;
+    const busyRequestVersion = ++busyVersion.current;
     setBusy(key);
     setError(null);
     try {
       await task();
     } catch (nextError: any) {
-      setError(nextError?.message ?? String(nextError));
+      if (runVersion.current === requestVersion)
+        setError(nextError?.message ?? String(nextError));
     } finally {
-      setBusy('');
+      if (busyVersion.current === busyRequestVersion) setBusy('');
     }
   };
 
   const loadDrones = React.useCallback(
     async (quiet = false) => {
-      if (!targetId) return;
+      if (!targetId || !targetSupportsDrones) return;
+      const requestVersion = ++droneListVersion.current;
+      const busyRequestVersion = quiet ? 0 : ++busyVersion.current;
       if (!quiet) setBusy('drones');
       setError(null);
       try {
         const result = await mesh.request(targetId, 'drone-control', 'drones.list');
-        if (targetIdRef.current !== targetId) return;
+        if (targetIdRef.current !== targetId || droneListVersion.current !== requestVersion) return;
         const normalized = normalizeMobileDroneListPayload(result);
         const nextDrones = normalized.drones;
         setDrones(nextDrones);
-        setSelected((current) =>
-          current ? (nextDrones.find((drone) => drone.id === current.id) ?? null) : null,
-        );
+        const currentSelected = selectedRef.current;
+        const nextSelected = currentSelected
+          ? (nextDrones.find((drone) => drone.id === currentSelected.id) ?? null)
+          : null;
+        setSelected(nextSelected);
+        if (nextSelected) {
+          const nextChats = nextSelected.chats.length > 0 ? nextSelected.chats : ['default'];
+          setChats(nextChats);
+          if (!nextChats.includes(chatNameRef.current)) {
+            const fallbackChat = nextChats[0] ?? 'default';
+            setChatName(fallbackChat);
+            setChatModel('');
+            setChatModels([]);
+            setTurns([]);
+            void readChatRef.current(nextSelected.id, fallbackChat).catch((nextError: any) => {
+              if (targetIdRef.current === targetId)
+                setError(nextError?.message ?? String(nextError));
+            });
+          }
+        }
         if (
           normalized.schemaVersion !== 2 &&
           nextDrones.length > 0 &&
@@ -107,69 +167,168 @@ export function DronesScreen({
           );
         }
       } catch (nextError: any) {
-        setError(nextError?.message ?? String(nextError));
+        if (targetIdRef.current === targetId && droneListVersion.current === requestVersion)
+          setError(nextError?.message ?? String(nextError));
       } finally {
-        if (!quiet) setBusy('');
+        if (
+          !quiet &&
+          targetIdRef.current === targetId &&
+          droneListVersion.current === requestVersion &&
+          busyVersion.current === busyRequestVersion
+        )
+          setBusy('');
       }
     },
-    [mesh.request, targetId],
+    [mesh.request, targetId, targetSupportsDrones],
   );
 
   React.useEffect(() => {
     setDrones([]);
     setSelected(null);
+    setChats([]);
+    setChatName('default');
     setChatModel('');
+    setChatModelProvider('drone');
+    setChatModels([]);
     setTurns([]);
-    if (targetId) void loadDrones();
-  }, [loadDrones, targetId]);
+    setPrompt('');
+    setCreateName('');
+    setBusy('');
+    setError(null);
+    setModelOpen(false);
+    setModelBusy(false);
+    droneListVersion.current += 1;
+    chatReadVersion.current += 1;
+    openDroneVersion.current += 1;
+    runVersion.current += 1;
+    busyVersion.current += 1;
+    modelRequestVersion.current += 1;
+  }, [targetId, targetSupportsDrones]);
+  React.useEffect(() => {
+    if (targetConnected && targetSupportsDrones) void loadDrones();
+  }, [loadDrones, targetConnected, targetSupportsDrones]);
 
   const openDrone = (drone: MobileDroneSummary, requestedChat?: string) =>
     run('chats', async () => {
       const destinationId = targetId;
+      const requestVersion = ++openDroneVersion.current;
+      const knownChats = drone.chats.length > 0 ? drone.chats : ['default'];
+      const knownChat =
+        requestedChat && knownChats.includes(requestedChat)
+          ? requestedChat
+          : (knownChats[0] ?? 'default');
       setSelected(drone);
+      setChats(knownChats);
+      setChatName(knownChat);
+      setChatModel('');
+      setChatModels([]);
+      setTurns([]);
       const result = await mesh.request(destinationId, 'drone-control', 'chats.list', {
         droneId: drone.id,
       });
-      if (targetIdRef.current !== destinationId) return;
-      const nextChats =
-        Array.isArray(result?.chats) && result.chats.length > 0
-          ? result.chats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean)
-          : drone.chats;
+      if (
+        targetIdRef.current !== destinationId ||
+        openDroneVersion.current !== requestVersion
+      )
+        return;
+      const listedChats: string[] = Array.isArray(result?.chats)
+        ? result.chats
+            .map((chat: unknown) => String(chat ?? '').trim())
+            .filter((chat: string) => Boolean(chat))
+        : [];
+      const nextChats = listedChats.length > 0 ? [...new Set(listedChats)] : drone.chats;
       const nextChat =
         requestedChat && nextChats.includes(requestedChat)
           ? requestedChat
           : (nextChats[0] ?? 'default');
       setChats(nextChats);
       setChatName(nextChat);
-      setChatModel('');
-      setTurns([]);
-      const chat = await mesh.request(destinationId, 'drone-control', 'chat.read', {
-        droneId: drone.id,
-        chatName: nextChat,
-      });
-      if (targetIdRef.current !== destinationId) return;
-      setChatModel(String(chat?.model ?? '').trim());
-      setTurns(Array.isArray(chat?.turns) ? chat.turns : []);
+      await readChat(drone.id, nextChat);
     });
 
   const readChat = async (droneId: string, nextChat: string) => {
     const destinationId = targetId;
+    const requestVersion = ++chatReadVersion.current;
     const result = await mesh.request(destinationId, 'drone-control', 'chat.read', {
       droneId,
       chatName: nextChat,
     });
-    if (targetIdRef.current !== destinationId) return;
+    if (
+      targetIdRef.current !== destinationId ||
+      chatReadVersion.current !== requestVersion
+    )
+      return;
     setChatModel(String(result?.model ?? '').trim());
+    setChatModelProvider(
+      String(result?.agent?.id ?? result?.agent?.kind ?? 'drone').trim() || 'drone',
+    );
     setTurns(Array.isArray(result?.turns) ? result.turns : []);
   };
 
-  const loadChat = () => selected && run('chat', async () => await readChat(selected.id, chatName));
+  const loadDronesRef = React.useRef(loadDrones);
+  loadDronesRef.current = loadDrones;
+  readChatRef.current = readChat;
+
+  React.useEffect(() => {
+    if (!targetId || !targetSupportsDrones) return;
+    let dronesChanged = false;
+    let chatChanged = false;
+    const flush = () => {
+      realtimeTimer.current = null;
+      if (dronesChanged) void loadDronesRef.current(true);
+      if (chatChanged) {
+        const activeDrone = selectedRef.current;
+        const activeChat = chatNameRef.current;
+        if (activeDrone)
+          void readChatRef
+            .current(activeDrone.id, activeChat)
+            .catch((nextError: any) => {
+              if (targetIdRef.current === targetId)
+                setError(nextError?.message ?? String(nextError));
+            });
+      }
+      dronesChanged = false;
+      chatChanged = false;
+    };
+    const schedule = () => {
+      if (realtimeTimer.current) return;
+      realtimeTimer.current = setTimeout(flush, 150);
+    };
+    const unsubscribeDrones = mesh.subscribe('drone-control', 'drones.changed', (event) => {
+      if (event.sourceDeviceId !== targetId) return;
+      dronesChanged = true;
+      schedule();
+    });
+    const unsubscribeChat = mesh.subscribe('drone-control', 'chat.changed', (event) => {
+      if (event.sourceDeviceId !== targetId) return;
+      dronesChanged = true;
+      const activeDrone = selectedRef.current;
+      const activeChat = chatNameRef.current;
+      const eventDroneId = String(event.payload?.droneId ?? '').trim();
+      const eventChatName = String(event.payload?.chatName ?? '').trim();
+      if (
+        activeDrone &&
+        (!eventDroneId || eventDroneId === activeDrone.id) &&
+        (!eventChatName || eventChatName === activeChat)
+      ) {
+        chatChanged = true;
+      }
+      schedule();
+    });
+    return () => {
+      unsubscribeDrones();
+      unsubscribeChat();
+      if (realtimeTimer.current) clearTimeout(realtimeTimer.current);
+      realtimeTimer.current = null;
+    };
+  }, [mesh.subscribe, targetId, targetSupportsDrones]);
 
   const selectChat = (nextChat: string) =>
     selected &&
     run('chat', async () => {
       setChatName(nextChat);
       setChatModel('');
+      setChatModels([]);
       setTurns([]);
       await readChat(selected.id, nextChat);
     });
@@ -177,21 +336,27 @@ export function DronesScreen({
   const sendPrompt = () =>
     selected &&
     run('prompt', async () => {
-      await mesh.request(targetId, 'drone-control', 'chat.prompt', {
-        droneId: selected.id,
-        chatName,
+      const destinationId = targetId;
+      const droneId = selected.id;
+      const activeChat = chatName;
+      await mesh.request(destinationId, 'drone-control', 'chat.prompt', {
+        droneId,
+        chatName: activeChat,
         prompt,
       });
+      if (targetIdRef.current !== destinationId) return;
       setPrompt('');
-      await readChat(selected.id, chatName);
+      await readChat(droneId, activeChat);
       await loadDrones(true);
     });
 
   const createDrone = (runtime: 'host' | 'container') =>
     run(`create-${runtime}`, async () => {
-      await mesh.request(targetId, 'drone-control', `drone.create.${runtime}`, {
+      const destinationId = targetId;
+      await mesh.request(destinationId, 'drone-control', `drone.create.${runtime}`, {
         name: createName || undefined,
       });
+      if (targetIdRef.current !== destinationId) return;
       setCreateName('');
       await loadDrones();
     });
@@ -199,53 +364,139 @@ export function DronesScreen({
   const stopChat = () =>
     selected &&
     run('stop', async () => {
-      await mesh.request(targetId, 'drone-control', 'chat.stop', {
-        droneId: selected.id,
-        chatName,
+      const destinationId = targetId;
+      const droneId = selected.id;
+      const activeChat = chatName;
+      await mesh.request(destinationId, 'drone-control', 'chat.stop', {
+        droneId,
+        chatName: activeChat,
       });
-      await readChat(selected.id, chatName);
+      if (targetIdRef.current !== destinationId) return;
+      await readChat(droneId, activeChat);
       await loadDrones(true);
     });
 
   const normalizedTurns = React.useMemo(() => normalizeMobileDroneTurns(turns), [turns]);
+  const transcriptMessages = React.useMemo(
+    () => mobileDroneTurnsToAssistantMessages(turns),
+    [turns],
+  );
+  const latestMessageScroll = useLatestMessageScroll(
+    selected ? `${selected.id}:${chatName}` : '',
+  );
   const latestModel = [...normalizedTurns].reverse().find((turn) => turn.model)?.model;
   const running =
     busy === 'prompt' ||
     busy === 'stop' ||
     Boolean(selected?.busyChats.some((chat) => chat === chatName));
-  const activeTarget = targets.find((target) => target.id === targetId);
+  const activeTarget = mesh.devices.find((target) => target.id === targetId);
+  const displayedModel = chatModel || latestModel || 'Model';
+  const visibleChats = chats.length > 0 ? chats : [chatName];
+  React.useEffect(() => {
+    onHeaderChange(
+      selected
+        ? {
+            title: selected.name,
+            subtitle: `${mobileRepoLabel(selected.repoPath)} · ${selected.runtime}${activeTarget ? ` · ${activeTarget.name}` : ''}`,
+            statusOk: selected.statusOk !== false,
+          }
+        : null,
+    );
+  }, [
+    activeTarget?.name,
+    onHeaderChange,
+    selected?.id,
+    selected?.name,
+    selected?.repoPath,
+    selected?.runtime,
+    selected?.statusOk,
+  ]);
+  React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
-  const targetStrip = (
-    <View style={styles.targetStrip}>
-      <ScrollView
-        horizontal
-        showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.targets}
-      >
-        {targets.map((target) => (
-          <Pressable
-            key={target.id}
-            onPress={() => {
-              setTargetId(target.id);
-              setDrones([]);
-              setSelected(null);
-            }}
-            style={[styles.target, target.id === targetId && styles.targetActive]}
-          >
-            <View
-              style={[
-                styles.targetDot,
-                mesh.connectedDeviceIds.includes(target.id) && styles.targetDotOnline,
-              ]}
-            />
-            <Text style={[styles.targetText, target.id === targetId && styles.targetTextActive]}>
-              {target.name}
-            </Text>
-          </Pressable>
-        ))}
-      </ScrollView>
-    </View>
-  );
+  const openModelPicker = async () => {
+    if (!selected || running) return;
+    const destinationId = targetId;
+    const droneId = selected.id;
+    const activeChat = chatName;
+    const requestVersion = ++modelRequestVersion.current;
+    setModelOpen(true);
+    setModelBusy(true);
+    setError(null);
+    try {
+      const result = await mesh.request(destinationId, 'drone-control', 'chat.models', {
+        droneId,
+        chatName: activeChat,
+        refresh: true,
+      });
+      if (
+        targetIdRef.current !== destinationId ||
+        selectedRef.current?.id !== droneId ||
+        chatNameRef.current !== activeChat ||
+        modelRequestVersion.current !== requestVersion
+      )
+        return;
+      const provider =
+        String(result?.agent?.id ?? result?.agent?.kind ?? chatModelProvider).trim() || 'drone';
+      setChatModelProvider(provider);
+      const options = (Array.isArray(result?.models) ? result.models : [])
+        .map(
+          (model: any): AssistantModelChoice => ({
+            provider,
+            id: String(model?.id ?? '').trim(),
+            name: String(model?.label ?? model?.name ?? model?.id ?? '').trim(),
+          }),
+        )
+        .filter((model: AssistantModelChoice) => Boolean(model.id));
+      setChatModels(options);
+      const configuredModel = String(result?.model ?? '').trim();
+      if (configuredModel) setChatModel(configuredModel);
+      const discoveryError = String(result?.error ?? '').trim();
+      if (discoveryError && options.length === 0) setError(discoveryError);
+    } catch (nextError: any) {
+      if (
+        targetIdRef.current === destinationId &&
+        modelRequestVersion.current === requestVersion
+      )
+        setError(nextError?.message ?? String(nextError));
+    } finally {
+      if (modelRequestVersion.current === requestVersion) setModelBusy(false);
+    }
+  };
+
+  const updateChatModel = async (choice: AssistantModelChoice) => {
+    if (!selected) return;
+    const destinationId = targetId;
+    const droneId = selected.id;
+    const activeChat = chatName;
+    const requestVersion = ++modelRequestVersion.current;
+    setModelBusy(true);
+    setError(null);
+    try {
+      await mesh.request(destinationId, 'drone-control', 'chat.update', {
+        droneId,
+        chatName: activeChat,
+        model: choice.id,
+      });
+      if (
+        targetIdRef.current !== destinationId ||
+        selectedRef.current?.id !== droneId ||
+        chatNameRef.current !== activeChat ||
+        modelRequestVersion.current !== requestVersion
+      )
+        return;
+      setChatModelProvider(choice.provider);
+      setChatModel(choice.id);
+      setModelOpen(false);
+    } catch (nextError: any) {
+      if (
+        targetIdRef.current === destinationId &&
+        modelRequestVersion.current === requestVersion
+      )
+        setError(nextError?.message ?? String(nextError));
+    } finally {
+      if (modelRequestVersion.current === requestVersion) setModelBusy(false);
+    }
+  };
 
   return (
     <View style={styles.screen}>
@@ -263,9 +514,16 @@ export function DronesScreen({
         activeDroneId={selected?.id ?? ''}
         activeChatName={chatName}
         dronesLoading={busy === 'drones'}
+        devicePickerItems={devicePickerItems}
+        activeDeviceId={targetId}
         onClose={() => onDrawerOpenChange(false)}
         onSelect={() => {}}
         onCreate={() => {}}
+        onSelectDevice={(deviceId) => {
+          onDeviceChange(deviceId);
+          setDrones([]);
+          setSelected(null);
+        }}
         onSelectDroneChat={(droneId, nextChat) => {
           const drone = drones.find((item) => item.id === droneId);
           if (!drone) return;
@@ -280,95 +538,99 @@ export function DronesScreen({
       >
         {selected ? (
           <View style={styles.chatWorkspace}>
-            {targetStrip}
-            <View style={styles.chatHeader}>
-              <View style={styles.chatIdentity}>
-                <View style={styles.chatTitleRow}>
-                  <View
-                    style={[
-                      styles.chatStatus,
-                      selected.statusOk !== false && styles.chatStatusOnline,
-                    ]}
-                  />
-                  <Text numberOfLines={1} style={styles.chatTitle}>
-                    {selected.name}
-                  </Text>
-                </View>
-                <Text numberOfLines={1} style={styles.chatSubtitle}>
-                  {mobileRepoLabel(selected.repoPath)} · {selected.runtime}
-                  {activeTarget ? ` · ${activeTarget.name}` : ''}
-                </Text>
+            {visibleChats.length > 1 ? (
+              <View style={styles.chatTabsFrame}>
+                <ScrollView
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  contentContainerStyle={styles.chats}
+                >
+                  {visibleChats.map((chat) => {
+                    const active = chat === chatName;
+                    const chatBusy = selected.busyChats.includes(chat);
+                    return (
+                      <Pressable
+                        key={chat}
+                        accessibilityRole="tab"
+                        accessibilityState={{ selected: active }}
+                        onPress={() => !active && void selectChat(chat)}
+                        style={({ pressed }) => [
+                          styles.chatTab,
+                          active && styles.chatTabActive,
+                          pressed && styles.chatTabPressed,
+                        ]}
+                      >
+                        <MessageCircle
+                          color={active ? colors.accent : colors.muted}
+                          size={13}
+                          strokeWidth={active ? 2.2 : 1.8}
+                        />
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.chatText, active && styles.chatTextActive]}
+                        >
+                          {chat}
+                        </Text>
+                        {chatBusy ? (
+                          <ActivityIndicator color={colors.warning} size="small" />
+                        ) : null}
+                      </Pressable>
+                    );
+                  })}
+                </ScrollView>
               </View>
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Refresh transcript"
-                accessibilityState={{ disabled: busy === 'chat' }}
-                disabled={busy === 'chat'}
-                onPress={() => void loadChat()}
-                style={({ pressed }) => [
-                  styles.refreshButton,
-                  busy === 'chat' && styles.controlDisabled,
-                  pressed && styles.controlPressed,
-                ]}
-              >
-                <RefreshCw color={colors.muted} size={16} strokeWidth={1.8} />
-              </Pressable>
-            </View>
-            <View style={styles.chatTabsFrame}>
-              <ScrollView
-                horizontal
-                showsHorizontalScrollIndicator={false}
-                contentContainerStyle={styles.chats}
-              >
-                {(chats.length > 0 ? chats : [chatName]).map((chat) => (
-                  <Pressable
-                    key={chat}
-                    onPress={() => chat !== chatName && void selectChat(chat)}
-                    style={[styles.chatTab, chat === chatName && styles.chatTabActive]}
-                  >
-                    <Text
-                      numberOfLines={1}
-                      style={[styles.chatText, chat === chatName && styles.chatTextActive]}
-                    >
-                      {chat}
-                    </Text>
-                  </Pressable>
-                ))}
-              </ScrollView>
-            </View>
+            ) : null}
             {error ? (
               <View style={styles.chatError}>
                 <ErrorBanner message={error} />
               </View>
             ) : null}
             <ScrollView
-              ref={transcriptRef}
+              ref={latestMessageScroll.ref}
               style={styles.transcriptScroll}
               contentContainerStyle={styles.transcriptContent}
               keyboardDismissMode="interactive"
               keyboardShouldPersistTaps="handled"
-              onContentSizeChange={() => transcriptRef.current?.scrollToEnd({ animated: false })}
+              onLayout={latestMessageScroll.onLayout}
+              onContentSizeChange={latestMessageScroll.onContentSizeChange}
+              onScroll={latestMessageScroll.onScroll}
+              scrollEventThrottle={16}
             >
-              <DroneChatTranscript
-                turns={normalizedTurns}
+              <MobileAssistantTranscript
+                messages={transcriptMessages}
                 loading={busy === 'chats' || busy === 'chat'}
                 running={running}
+                currentReasoning={running ? (normalizedTurns.at(-1)?.reasoning ?? '') : ''}
+                emptyTitle="This drone chat is ready."
+                emptyBody="Send a prompt to start the conversation."
+                assistantLabel="Agent"
               />
             </ScrollView>
-            <DroneChatComposer
+            <AssistantComposer
               value={prompt}
-              chatName={chatName}
-              model={latestModel || chatModel}
-              sending={busy === 'prompt'}
-              running={running}
               onChangeText={setPrompt}
               onSend={() => void sendPrompt()}
               onStop={() => void stopChat()}
+              onOpenModel={() => void openModelPicker()}
+              modelLabel={displayedModel}
+              placeholder={`Message ${selected.name}…`}
+              sending={busy === 'prompt'}
+              running={running}
+              editable={!running}
+            />
+            <AssistantModelPicker
+              open={modelOpen}
+              currentProvider={chatModelProvider}
+              currentModel={chatModel || latestModel || ''}
+              options={chatModels}
+              busy={modelBusy}
+              showReasoning={false}
+              onClose={() => setModelOpen(false)}
+              onSelect={(choice) => void updateChatModel(choice)}
             />
           </View>
         ) : (
           <View style={styles.landing}>
-            {targetStrip}
             <ScrollView contentContainerStyle={styles.page} keyboardShouldPersistTaps="handled">
               <View>
                 <Label>Drone control</Label>
@@ -378,19 +640,16 @@ export function DronesScreen({
                   DroneHub menu.
                 </Text>
               </View>
-              {targets.length === 0 ? (
+              {!targetSupportsDrones ? (
                 <Card>
                   <Text style={textStyles.body}>
-                    No destination devices are known yet. Pair a Hub first.
+                    {activeTarget
+                      ? `${activeTarget.name} does not provide drone control. Choose a Drone Hub device from the menu.`
+                      : 'Choose a connected Drone Hub device from the menu.'}
                   </Text>
                 </Card>
               ) : null}
               <ErrorBanner message={error} />
-              {targetId ? (
-                <Button onPress={() => void loadDrones()} loading={busy === 'drones'}>
-                  Refresh drones
-                </Button>
-              ) : null}
               {drones.length > 0 ? (
                 <Card>
                   <Label>Available</Label>
@@ -402,7 +661,7 @@ export function DronesScreen({
                   </Text>
                 </Card>
               ) : null}
-              {targetId ? (
+              {targetSupportsDrones ? (
                 <Card>
                   <Label>Create</Label>
                   <Text style={[textStyles.heading, styles.createTitle]}>
@@ -448,79 +707,34 @@ const styles = StyleSheet.create({
   landing: { flex: 1 },
   page: { padding: 20, gap: 14 },
   title: { marginTop: 6, marginBottom: 8 },
-  targetStrip: {
-    flexShrink: 0,
-    minHeight: 51,
+  chatWorkspace: { flex: 1, backgroundColor: colors.background },
+  chatTabsFrame: {
+    minHeight: 49,
     justifyContent: 'center',
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  targets: { gap: 8, paddingHorizontal: 12, paddingVertical: 7 },
-  target: {
+  chats: { gap: 7, paddingHorizontal: 12, paddingVertical: 8 },
+  chatTab: {
+    minHeight: 32,
+    maxWidth: 190,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 7,
-    paddingHorizontal: 12,
-    height: 38,
-    borderRadius: 20,
-    backgroundColor: colors.panel,
-    borderColor: colors.border,
-    borderWidth: 1,
-  },
-  targetActive: { borderColor: colors.accent, backgroundColor: colors.accentDark },
-  targetDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#53676d' },
-  targetDotOnline: { backgroundColor: colors.online },
-  targetText: { color: colors.muted, fontSize: 12, fontWeight: '700' },
-  targetTextActive: { color: colors.text },
-  chatWorkspace: { flex: 1, backgroundColor: colors.background },
-  chatHeader: {
-    minHeight: 62,
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    gap: 12,
-    backgroundColor: colors.panel,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-  },
-  chatIdentity: { flex: 1, minWidth: 0 },
-  chatTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  chatStatus: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.danger },
-  chatStatusOnline: { backgroundColor: colors.online },
-  chatTitle: { flexShrink: 1, color: colors.text, fontSize: 15, fontWeight: '800' },
-  chatSubtitle: {
-    color: colors.muted,
-    fontSize: 9,
-    fontFamily: 'monospace',
-    marginTop: 4,
-    marginLeft: 15,
-    textTransform: 'uppercase',
-    letterSpacing: 0.45,
-  },
-  refreshButton: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 9,
+    paddingHorizontal: 11,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.panelRaised,
-  },
-  controlDisabled: { opacity: 0.4 },
-  controlPressed: { opacity: 0.7 },
-  chatTabsFrame: {
-    minHeight: 39,
-    justifyContent: 'center',
     backgroundColor: colors.panel,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
-  chats: { gap: 5, paddingHorizontal: 12, paddingVertical: 5 },
-  chatTab: { minHeight: 28, justifyContent: 'center', paddingHorizontal: 11, borderRadius: 7 },
-  chatTabActive: { backgroundColor: colors.accentDark },
-  chatText: { color: colors.muted, fontSize: 10, fontWeight: '700' },
+  chatTabActive: {
+    borderColor: '#315b5d',
+    backgroundColor: colors.accentDark,
+  },
+  chatTabPressed: { opacity: 0.72 },
+  chatText: { flexShrink: 1, color: colors.muted, fontSize: 10, fontWeight: '800' },
   chatTextActive: { color: colors.accent },
   chatError: { paddingHorizontal: 12, paddingTop: 9 },
   transcriptScroll: { flex: 1 },

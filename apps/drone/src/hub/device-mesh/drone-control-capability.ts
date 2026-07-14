@@ -107,6 +107,27 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
           model: result.model ?? null,
         };
       }
+      if (operation === 'chat.models') {
+        const refresh = payload.refresh === true ? '?refresh=1' : '';
+        const result = await localHubRequest(access, `${chatPath}/models${refresh}`);
+        return {
+          droneId,
+          chatName,
+          agent: result.agent ?? null,
+          model: result.model ?? null,
+          models: Array.isArray(result.models) ? result.models : [],
+          source: result.source ?? 'none',
+          discoveredAt: result.discoveredAt ?? null,
+          error: result.error ?? null,
+        };
+      }
+      if (operation === 'chat.update') {
+        const model = payload.model == null ? null : String(payload.model).trim();
+        return await localHubRequest(access, `${chatPath}/config`, {
+          method: 'POST',
+          body: JSON.stringify({ model: model || null }),
+        });
+      }
       if (operation === 'chat.prompt') {
         const prompt = requiredText(payload.prompt, 'prompt');
         return await localHubRequest(access, `${chatPath}/prompt`, {

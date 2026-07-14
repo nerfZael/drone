@@ -19,9 +19,10 @@ import {
   type AssistantToolRenderItem,
 } from '@drone/assistant-chat';
 import { colors } from '../theme';
+import { NativeMarkdown } from './NativeMarkdown';
 import type { LocalAssistantThread } from './local-assistant-types';
 
-function TypingDots() {
+function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
   const dots = React.useRef([
     new Animated.Value(1),
     new Animated.Value(1),
@@ -53,7 +54,7 @@ function TypingDots() {
   }, [dots]);
 
   return (
-    <View accessibilityLabel="Assistant is working" style={styles.typingDots}>
+    <View accessibilityLabel={label} style={styles.typingDots}>
       {dots.map((opacity, index) => (
         <Animated.View key={index} style={[styles.typingDot, { opacity }]} />
       ))}
@@ -66,7 +67,9 @@ function ToolRow({ item }: { item: AssistantToolRenderItem }) {
   const pending = !item.result;
   const [open, setOpen] = React.useState(false);
   const args = item.call?.args;
-  const result = item.result ? messageText(item.result).trim() : '';
+  const result = item.result
+    ? messageText(item.result).trim() || String(item.result.errorMessage ?? '').trim()
+    : '';
   return (
     <Pressable
       onPress={() => setOpen((value) => !value)}
@@ -168,6 +171,7 @@ export function MobileAssistantTranscript({
   loading = false,
   emptyTitle = 'The assistant lives here.',
   emptyBody = 'Ask a question, or attach a remote workspace and let this phone inspect and edit it.',
+  assistantLabel = 'Assistant',
 }: {
   messages: AssistantMessage[];
   running?: boolean;
@@ -175,6 +179,7 @@ export function MobileAssistantTranscript({
   loading?: boolean;
   emptyTitle?: string;
   emptyBody?: string;
+  assistantLabel?: string;
 }) {
   const items = React.useMemo(() => renderItemsFromMessages(messages), [messages]);
   if (loading) {
@@ -224,9 +229,10 @@ export function MobileAssistantTranscript({
         const assistant = item.message.role === 'assistant';
         return (
           <View key={item.key} style={[styles.message, user && styles.userMessage]}>
-            {assistant ? <Text style={styles.assistantHeading}>Assistant</Text> : null}
-            {text ? (
-              <Text selectable style={styles.messageText}>
+            {text && assistant ? (
+              <NativeMarkdown text={text} />
+            ) : text ? (
+              <Text selectable style={[styles.messageText, user && styles.userMessageText]}>
                 {text}
               </Text>
             ) : null}
@@ -268,17 +274,17 @@ export function MobileAssistantTranscript({
       {running ? (
         currentReasoning.trim() ? (
           <View style={styles.reasoning}>
-            {!assistantStarted ? <Text style={styles.assistantHeading}>Assistant</Text> : null}
+            {!assistantStarted ? <Text style={styles.messageRole}>{assistantLabel}</Text> : null}
             <View style={styles.reasoningHead}>
-              <TypingDots />
+              <TypingDots label={`${assistantLabel} is working`} />
               <Text style={styles.reasoningLabel}>Reasoning</Text>
             </View>
             <Text style={styles.reasoningText}>{currentReasoning.trim()}</Text>
           </View>
         ) : (
           <View style={styles.waiting}>
-            {!assistantStarted ? <Text style={styles.assistantHeading}>Assistant</Text> : null}
-            <TypingDots />
+            {!assistantStarted ? <Text style={styles.messageRole}>{assistantLabel}</Text> : null}
+            <TypingDots label={`${assistantLabel} is working`} />
           </View>
         )
       ) : null}
@@ -305,8 +311,8 @@ export function LocalAssistantTranscript({
 }
 
 const styles = StyleSheet.create({
-  messages: { gap: 2 },
-  message: { width: '100%', paddingHorizontal: 12, paddingVertical: 12 },
+  messages: { gap: 0 },
+  message: { width: '100%', paddingHorizontal: 14, paddingVertical: 13 },
   userMessage: {
     width: 'auto',
     maxWidth: '86%',
@@ -319,11 +325,14 @@ const styles = StyleSheet.create({
     borderRadius: 14,
   },
   messageText: { color: colors.text, fontSize: 14, lineHeight: 21 },
-  assistantHeading: {
+  userMessageText: { textAlign: 'right' },
+  messageRole: {
     color: colors.muted,
-    fontSize: 11,
-    fontWeight: '800',
-    marginBottom: 7,
+    fontSize: 9,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    marginBottom: 8,
   },
   messageError: { color: colors.danger, fontSize: 13, lineHeight: 19, marginTop: 5 },
   images: { gap: 8, marginTop: 9 },

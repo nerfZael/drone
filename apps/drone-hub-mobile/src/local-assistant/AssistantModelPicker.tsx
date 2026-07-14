@@ -1,5 +1,13 @@
 import React from 'react';
-import { Modal, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  ActivityIndicator,
+  Modal,
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
@@ -33,6 +41,7 @@ export function AssistantModelPicker({
   currentThinkingLevel,
   options,
   busy,
+  showReasoning = true,
   onClose,
   onSelect,
 }: {
@@ -42,14 +51,15 @@ export function AssistantModelPicker({
   currentThinkingLevel?: string;
   options: AssistantModelChoice[];
   busy?: boolean;
+  showReasoning?: boolean;
   onClose(): void;
   onSelect(choice: AssistantModelChoice, selection: 'model' | 'reasoning'): void;
 }) {
   const insets = useSafeAreaInsets();
   const [modelsOpen, setModelsOpen] = React.useState(false);
   React.useEffect(() => {
-    if (open) setModelsOpen(false);
-  }, [currentModel, open]);
+    if (open) setModelsOpen(!showReasoning);
+  }, [currentModel, open, showReasoning]);
   const choices = options.some(
     (option) =>
       option.provider === currentProvider &&
@@ -120,29 +130,31 @@ export function AssistantModelPicker({
         <View style={[styles.sheet, { marginBottom: Math.max(insets.bottom + 6, 12) }]}>
           <View style={styles.handle} />
           <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>Reasoning</Text>
+            <Text style={styles.sectionTitle}>{showReasoning ? 'Reasoning' : 'Model'}</Text>
             <Pressable onPress={onClose} style={styles.close}>
               <X color={colors.muted} size={19} strokeWidth={2} />
             </Pressable>
           </View>
-          <View style={styles.reasoningList}>
-            {visibleReasoning.map((level) => {
-              const active = level === selectedReasoning;
-              return (
-                <Pressable
-                  key={level}
-                  disabled={busy}
-                  onPress={() => selectReasoning(level)}
-                  style={[styles.reasoningChoice, active && styles.choiceActive]}
-                >
-                  <Text style={[styles.reasoningName, active && styles.activeText]}>
-                    {level === 'off' ? 'Off' : `${level[0].toUpperCase()}${level.slice(1)}`}
-                  </Text>
-                  {active ? <Check color={colors.accent} size={14} strokeWidth={2.8} /> : null}
-                </Pressable>
-              );
-            })}
-          </View>
+          {showReasoning ? (
+            <View style={styles.reasoningList}>
+              {visibleReasoning.map((level) => {
+                const active = level === selectedReasoning;
+                return (
+                  <Pressable
+                    key={level}
+                    disabled={busy}
+                    onPress={() => selectReasoning(level)}
+                    style={[styles.reasoningChoice, active && styles.choiceActive]}
+                  >
+                    <Text style={[styles.reasoningName, active && styles.activeText]}>
+                      {level === 'off' ? 'Off' : `${level[0].toUpperCase()}${level.slice(1)}`}
+                    </Text>
+                    {active ? <Check color={colors.accent} size={14} strokeWidth={2.8} /> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+          ) : null}
           <Pressable onPress={() => setModelsOpen((value) => !value)} style={styles.modelToggle}>
             <View style={styles.choiceCopy}>
               <Text style={styles.modelToggleTitle}>Model</Text>
@@ -158,24 +170,35 @@ export function AssistantModelPicker({
           </Pressable>
           {modelsOpen ? (
             <ScrollView style={styles.scroll} contentContainerStyle={styles.list}>
-              {models.map((choice) => {
-                const active = choice.provider === currentProvider && choice.id === currentModel;
-                return (
-                  <Pressable
-                    key={`${choice.provider}:${choice.id}`}
-                    disabled={busy}
-                    onPress={() => selectModel(choice)}
-                    style={[styles.choice, active && styles.choiceActive]}
-                  >
-                    <View style={styles.choiceCopy}>
-                      <Text style={[styles.choiceName, active && styles.activeText]}>
-                        {choice.name || choice.id}
-                      </Text>
-                    </View>
-                    {active ? <Check color={colors.accent} size={16} strokeWidth={2.8} /> : null}
-                  </Pressable>
-                );
-              })}
+              {busy ? (
+                <View style={styles.modelState}>
+                  <ActivityIndicator color={colors.accent} size="small" />
+                  <Text style={styles.modelStateText}>Discovering models…</Text>
+                </View>
+              ) : models.length === 0 ? (
+                <View style={styles.modelState}>
+                  <Text style={styles.modelStateText}>No models are available for this chat.</Text>
+                </View>
+              ) : (
+                models.map((choice) => {
+                  const active = choice.provider === currentProvider && choice.id === currentModel;
+                  return (
+                    <Pressable
+                      key={`${choice.provider}:${choice.id}`}
+                      disabled={busy}
+                      onPress={() => selectModel(choice)}
+                      style={[styles.choice, active && styles.choiceActive]}
+                    >
+                      <View style={styles.choiceCopy}>
+                        <Text style={[styles.choiceName, active && styles.activeText]}>
+                          {choice.name || choice.id}
+                        </Text>
+                      </View>
+                      {active ? <Check color={colors.accent} size={16} strokeWidth={2.8} /> : null}
+                    </Pressable>
+                  );
+                })
+              )}
             </ScrollView>
           ) : null}
         </View>
@@ -219,6 +242,15 @@ const styles = StyleSheet.create({
   close: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
   scroll: { flexGrow: 0 },
   list: { paddingHorizontal: 12, paddingBottom: 8, gap: 5 },
+  modelState: {
+    minHeight: 70,
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexDirection: 'row',
+    gap: 9,
+    paddingHorizontal: 12,
+  },
+  modelStateText: { color: colors.muted, fontSize: 11, textAlign: 'center' },
   reasoningList: {
     flexDirection: 'row',
     paddingHorizontal: 10,

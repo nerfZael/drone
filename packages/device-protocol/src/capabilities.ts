@@ -13,6 +13,8 @@ export const DRONE_CONTROL_CAPABILITY: CapabilityDescriptor = {
     'drones.list',
     'chats.list',
     'chat.read',
+    'chat.models',
+    'chat.update',
     'chat.prompt',
     'chat.stop',
     'drone.create.container',

@@ -7,11 +7,24 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import type { AppDrawerNavigationItem } from '../local-assistant/AssistantThreadDrawer';
+import type {
+  AppDrawerNavigationItem,
+  DrawerDevicePickerItem,
+} from '../local-assistant/AssistantThreadDrawer';
 import { LocalAssistantScreen } from '../local-assistant/LocalAssistantScreen';
 import { AssistantScreen } from './AssistantScreen';
 
 export type AssistantLocation = 'phone' | 'devices';
+
+export type AssistantAppHeaderState = {
+  title: string;
+  subtitle: string;
+  statusTone: 'online' | 'muted' | 'error';
+  accessOpen?: boolean;
+  accessDisabled?: boolean;
+  onToggleAccess?(): void;
+  onDelete?(): void;
+};
 
 const APP_HEADER_HEIGHT = 54;
 
@@ -22,6 +35,10 @@ export function AssistantHomeScreen({
   openingGestureActive,
   onDrawerOpenChange,
   location,
+  activeDeviceId,
+  devicePickerItems,
+  onDeviceChange,
+  onHeaderChange,
 }: {
   drawerOpen: boolean;
   drawerOffset: Animated.Value;
@@ -29,6 +46,10 @@ export function AssistantHomeScreen({
   openingGestureActive: boolean;
   onDrawerOpenChange(open: boolean): void;
   location: AssistantLocation;
+  activeDeviceId: string;
+  devicePickerItems: DrawerDevicePickerItem[];
+  onDeviceChange(deviceId: string): void;
+  onHeaderChange(header: AssistantAppHeaderState | null): void;
 }) {
   const insets = useSafeAreaInsets();
   return (
@@ -45,6 +66,10 @@ export function AssistantHomeScreen({
             navigationItems={navigationItems}
             openingGestureActive={openingGestureActive}
             onDrawerOpenChange={onDrawerOpenChange}
+            activeDeviceId={activeDeviceId}
+            devicePickerItems={devicePickerItems}
+            onDeviceChange={onDeviceChange}
+            onHeaderChange={onHeaderChange}
           />
         ) : (
           <AssistantScreen
@@ -53,6 +78,10 @@ export function AssistantHomeScreen({
             navigationItems={navigationItems}
             openingGestureActive={openingGestureActive}
             onDrawerOpenChange={onDrawerOpenChange}
+            homeId={activeDeviceId}
+            devicePickerItems={devicePickerItems}
+            onDeviceChange={onDeviceChange}
+            onHeaderChange={onHeaderChange}
           />
         )}
       </View>

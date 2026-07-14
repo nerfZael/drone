@@ -78,10 +78,35 @@ describe('mobile drone sidebar model', () => {
     ]);
 
     expect(buildMobileDroneRepoGroups(drones)[0]?.roots.map((node) => node.drone.id)).toEqual([
-      'orphan',
       'a',
       'b',
+      'orphan',
     ]);
+  });
+
+  test('matches Remote Hub ordering with newest drones first inside each tree level', () => {
+    const drones = normalizeMobileDrones([
+      { id: 'old', name: 'Old', repoPath: '/repo', createdAt: '2026-01-01T00:00:00Z' },
+      { id: 'parent', name: 'Parent', repoPath: '/repo', createdAt: '2026-02-01T00:00:00Z' },
+      {
+        id: 'new-child',
+        name: 'New child',
+        repoPath: '/repo',
+        fleetParentId: 'parent',
+        createdAt: '2026-04-01T00:00:00Z',
+      },
+      {
+        id: 'old-child',
+        name: 'Old child',
+        repoPath: '/repo',
+        fleetParentId: 'parent',
+        createdAt: '2026-03-01T00:00:00Z',
+      },
+    ]);
+
+    const roots = buildMobileDroneRepoGroups(drones)[0]!.roots;
+    expect(roots.map((node) => node.drone.id)).toEqual(['parent', 'old']);
+    expect(roots[0]!.children.map((node) => node.drone.id)).toEqual(['new-child', 'old-child']);
   });
 
   test('projects each drone turn into the shared user and assistant transcript model', () => {
@@ -100,6 +125,24 @@ describe('mobile drone sidebar model', () => {
         errorMessage: 'Agent failed',
       },
     ]);
+  });
+
+  test('keeps drone prompt attachments in the shared assistant presentation', () => {
+    expect(
+      mobileDroneTurnsToAssistantMessages([
+        {
+          prompt: 'Review this',
+          attachments: [{ name: 'plan.md', mime: 'text/markdown', size: 42 }],
+          output: 'Looks good',
+        },
+      ])[0],
+    ).toEqual({
+      role: 'user',
+      content: 'Review this',
+      details: {
+        attachments: [{ name: 'plan.md', mime: 'text/markdown', size: 42 }],
+      },
+    });
   });
 
   test('normalizes DroneHub transcript metadata for the native chat presentation', () => {

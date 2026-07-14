@@ -152,13 +152,31 @@ function hasValidParent(drone: MobileDroneSummary, byId: Map<string, MobileDrone
   return true;
 }
 
+function droneCreatedAtMs(drone: MobileDroneSummary): number | null {
+  const value = Date.parse(String(drone.createdAt ?? '').trim());
+  return Number.isFinite(value) ? value : null;
+}
+
+export function compareMobileDronesByNewestFirst(
+  left: MobileDroneSummary,
+  right: MobileDroneSummary,
+): number {
+  const leftMs = droneCreatedAtMs(left);
+  const rightMs = droneCreatedAtMs(right);
+  if (leftMs == null && rightMs != null) return 1;
+  if (leftMs != null && rightMs == null) return -1;
+  if (leftMs != null && rightMs != null && leftMs !== rightMs) return rightMs - leftMs;
+  return left.name.localeCompare(right.name) || left.id.localeCompare(right.id);
+}
+
 function buildGroupTree(drones: MobileDroneSummary[]): MobileDroneTreeNode[] {
-  const byId = new Map(drones.map((drone) => [drone.id, drone]));
+  const orderedDrones = drones.slice().sort(compareMobileDronesByNewestFirst);
+  const byId = new Map(orderedDrones.map((drone) => [drone.id, drone]));
   const nodes = new Map<string, MobileDroneTreeNode>(
-    drones.map((drone) => [drone.id, { drone, children: [] }]),
+    orderedDrones.map((drone) => [drone.id, { drone, children: [] }]),
   );
   const roots: MobileDroneTreeNode[] = [];
-  for (const drone of drones) {
+  for (const drone of orderedDrones) {
     const node = nodes.get(drone.id)!;
     if (hasValidParent(drone, byId)) nodes.get(drone.fleetParentId!)!.children.push(node);
     else roots.push(node);
@@ -252,9 +270,15 @@ export function buildMobileDroneRepoGroups(drones: MobileDroneSummary[]): Mobile
 
 export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMessage[] {
   return normalizeMobileDroneTurns(raw).flatMap((turn): AssistantMessage[] => {
-    const { prompt, output, error } = turn;
+    const { prompt, output, error, attachments } = turn;
     const messages: AssistantMessage[] = [];
-    if (prompt) messages.push({ role: 'user', content: prompt });
+    if (prompt || attachments.length > 0) {
+      messages.push({
+        role: 'user',
+        ...(prompt ? { content: prompt } : {}),
+        ...(attachments.length > 0 ? { details: { attachments } } : {}),
+      });
+    }
     if (output || error) {
       messages.push(
         !turn.ok && error
