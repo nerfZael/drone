@@ -153,8 +153,8 @@ function LinkedPullRequestCard({
   const footerMessage = actionError ?? (loadError ? `Status unavailable: ${loadError}` : null);
 
   return (
-    <section className="overflow-hidden rounded-md border border-[rgba(167,139,250,.2)] bg-[rgba(5,8,15,.24)] shadow-[inset_3px_0_0_rgba(167,139,250,.38)]">
-      <div className="flex flex-col items-start gap-3 px-3 py-2.5 sm:flex-row">
+    <section className="border-l-2 border-[rgba(167,139,250,.32)] pl-3">
+      <div className="flex flex-col items-start gap-3 py-1 pr-1 sm:flex-row">
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -243,7 +243,7 @@ function LinkedPullRequestCard({
       {footerMessage ? (
         <div
           role="alert"
-          className="border-t border-[var(--border-subtle)] px-3 py-1.5 text-[9px] text-[var(--red)]"
+          className="mt-1 py-1 text-[9px] text-[var(--red)]"
         >
           {footerMessage}
         </div>
