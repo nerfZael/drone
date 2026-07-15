@@ -670,9 +670,9 @@ function assertValidPullNumber(pullNumberRaw: number): number {
   return pullNumber;
 }
 
-function graphqlStatesForListState(state: GithubPullRequestListState): string[] {
-  if (state === 'closed') return ['CLOSED'];
-  if (state === 'all') return ['OPEN', 'CLOSED'];
+export function githubPullRequestGraphqlStatesForList(state: GithubPullRequestListState): string[] {
+  if (state === 'closed') return ['CLOSED', 'MERGED'];
+  if (state === 'all') return ['OPEN', 'CLOSED', 'MERGED'];
   return ['OPEN'];
 }
 
@@ -732,7 +732,7 @@ async function listGithubPullRequestsViaGraphql(opts: {
     variables: {
       owner: opts.repo.owner,
       repo: opts.repo.repo,
-      states: graphqlStatesForListState(opts.state),
+      states: githubPullRequestGraphqlStatesForList(opts.state),
       first: 100,
     },
   });
