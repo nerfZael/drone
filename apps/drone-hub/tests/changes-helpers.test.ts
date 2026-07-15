@@ -5,6 +5,7 @@ import {
   entryPathExistsInCurrentTree,
   estimateExplorerSidebarWidth,
   flattenVisibleExplorerRows,
+  pullRequestStateBadge,
   resolveExplorerSidebarWidthBounds,
   scopedChangesStateKey,
   sameRepoChangesPayload,
@@ -125,6 +126,12 @@ describe('changes explorer tree', () => {
 });
 
 describe('changes file actions', () => {
+  test('uses the shared GitHub state colors for open and merged pull requests', () => {
+    expect(pullRequestStateBadge('open')?.className).toContain('green');
+    expect(pullRequestStateBadge('merged')?.className).toContain('accent');
+    expect(pullRequestStateBadge('closed')?.className).toContain('red');
+  });
+
   test('scopes cached state keys by drone identity', () => {
     expect(scopedChangesStateKey('drone-a', 'wt\u0000unstaged\u0000src/app.ts')).toBe('drone-a\u0000wt\u0000unstaged\u0000src/app.ts');
     expect(scopedChangesStateKey('drone-b', 'wt\u0000unstaged\u0000src/app.ts')).toBe('drone-b\u0000wt\u0000unstaged\u0000src/app.ts');
