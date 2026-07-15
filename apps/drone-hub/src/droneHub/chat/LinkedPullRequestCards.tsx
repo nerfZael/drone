@@ -1,4 +1,5 @@
 import React from 'react';
+import { githubPullRequestMatchesRepo } from '@drone/assistant-chat';
 import { invalidateHeaderRepoPullRequestSummaryCache } from '../app/HeaderPullRequestShortcuts';
 import { requestJson } from '../http';
 import {
@@ -28,14 +29,6 @@ export type LinkedPullRequestContext = {
   openPullRequestsError: string | null;
 };
 
-function repoMatches(link: GithubPullRequestLink, github: { owner: string; repo: string } | null | undefined): boolean | null {
-  if (!github) return null;
-  return (
-    String(github.owner ?? '').trim().toLowerCase() === link.owner &&
-    String(github.repo ?? '').trim().toLowerCase() === link.repo
-  );
-}
-
 function openRequest(link: GithubPullRequestLink, onOpenLink: ((href: string) => boolean) | undefined): void {
   if (onOpenLink?.(link.href)) return;
   window.open(link.href, '_blank', 'noopener,noreferrer');
@@ -49,7 +42,8 @@ function LinkedPullRequestCard({
   sameRepo,
   context,
   anyActionBusy,
-  onActionBusyChange,
+  onActionBegin,
+  onActionEnd,
   onOpenLink,
 }: {
   link: GithubPullRequestLink;
@@ -59,7 +53,8 @@ function LinkedPullRequestCard({
   sameRepo: boolean | null;
   context: LinkedPullRequestContext;
   anyActionBusy: boolean;
-  onActionBusyChange: (busy: boolean) => void;
+  onActionBegin: () => boolean;
+  onActionEnd: () => void;
   onOpenLink?: (href: string) => boolean;
 }) {
   const [busyAction, setBusyAction] = React.useState<'merge' | 'close' | null>(null);
@@ -79,8 +74,8 @@ function LinkedPullRequestCard({
 
   const finishAction = React.useCallback(() => {
     setBusyAction(null);
-    onActionBusyChange(false);
-  }, [onActionBusyChange]);
+    onActionEnd();
+  }, [onActionEnd]);
 
   const mergePullRequest = React.useCallback(async () => {
     if (!pullRequest || !canManage || blockedReason || busyAction || anyActionBusy) return;
@@ -88,8 +83,8 @@ function LinkedPullRequestCard({
     const verb = forceReason ? 'Force merge' : 'Merge';
     const forceLabel = forceReason ? ` Checks currently report: ${forceReason}.` : '';
     if (!window.confirm(`${verb} PR #${pullRequest.number} into ${pullRequest.baseRefName || 'base'} using "${method}"?${forceLabel}`)) return;
+    if (!onActionBegin()) return;
     setBusyAction('merge');
-    onActionBusyChange(true);
     setActionError(null);
     setActionNotice(null);
     try {
@@ -113,13 +108,13 @@ function LinkedPullRequestCard({
     } finally {
       finishAction();
     }
-  }, [anyActionBusy, blockedReason, busyAction, canManage, context.droneId, context.repoPath, finishAction, forceReason, onActionBusyChange, pullRequest]);
+  }, [anyActionBusy, blockedReason, busyAction, canManage, context.droneId, context.repoPath, finishAction, forceReason, onActionBegin, pullRequest]);
 
   const closePullRequest = React.useCallback(async () => {
     if (!pullRequest || !canManage || busyAction || anyActionBusy) return;
     if (!window.confirm(`Close PR #${pullRequest.number} without merging?`)) return;
+    if (!onActionBegin()) return;
     setBusyAction('close');
-    onActionBusyChange(true);
     setActionError(null);
     setActionNotice(null);
     try {
@@ -139,7 +134,7 @@ function LinkedPullRequestCard({
     } finally {
       finishAction();
     }
-  }, [anyActionBusy, busyAction, canManage, context.droneId, context.repoPath, finishAction, onActionBusyChange, pullRequest]);
+  }, [anyActionBusy, busyAction, canManage, context.droneId, context.repoPath, finishAction, onActionBegin, pullRequest]);
 
   const statusLabel = pullRequest
     ? state || 'Unknown'
@@ -256,7 +251,7 @@ function findPullRequest(
   link: GithubPullRequestLink,
   data: Extract<RepoPullRequestsPayload, { ok: true }> | null,
 ): RepoPullRequestSummary | null {
-  if (repoMatches(link, data?.github) !== true) return null;
+  if (githubPullRequestMatchesRepo(link, data?.github) !== true) return null;
   return data?.pullRequests.find((candidate) => Number(candidate.number) === link.pullNumber) ?? null;
 }
 
@@ -278,12 +273,23 @@ function LinkedPullRequestCardsContent({
   className?: string;
 }) {
   const [anyActionBusy, setAnyActionBusy] = React.useState(false);
+  const anyActionBusyRef = React.useRef(false);
+  const beginAction = React.useCallback(() => {
+    if (anyActionBusyRef.current) return false;
+    anyActionBusyRef.current = true;
+    setAnyActionBusy(true);
+    return true;
+  }, []);
+  const endAction = React.useCallback(() => {
+    anyActionBusyRef.current = false;
+    setAnyActionBusy(false);
+  }, []);
 
   return (
     <div className={`mt-3 flex flex-col gap-2 ${className ?? ''}`} aria-label="Pull requests linked in this message">
       {links.map((link) => {
-        const openRepoMatch = repoMatches(link, context.openPullRequestsData?.github);
-        const sameRepo = openRepoMatch ?? repoMatches(link, allData?.github);
+        const openRepoMatch = githubPullRequestMatchesRepo(link, context.openPullRequestsData?.github);
+        const sameRepo = openRepoMatch ?? githubPullRequestMatchesRepo(link, allData?.github);
         const pullRequest = findPullRequest(link, context.openPullRequestsData) ?? findPullRequest(link, allData);
         return (
           <LinkedPullRequestCard
@@ -295,7 +301,8 @@ function LinkedPullRequestCardsContent({
             sameRepo={sameRepo}
             context={context}
             anyActionBusy={anyActionBusy}
-            onActionBusyChange={setAnyActionBusy}
+            onActionBegin={beginAction}
+            onActionEnd={endAction}
             onOpenLink={onOpenLink}
           />
         );
@@ -346,7 +353,7 @@ export function LinkedPullRequestCards({
     context.openPullRequestsData &&
       links.some(
         (link) =>
-          repoMatches(link, context.openPullRequestsData?.github) === true &&
+          githubPullRequestMatchesRepo(link, context.openPullRequestsData?.github) === true &&
           !findPullRequest(link, context.openPullRequestsData),
       ),
   );

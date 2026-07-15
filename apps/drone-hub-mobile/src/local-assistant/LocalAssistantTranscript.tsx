@@ -22,6 +22,8 @@ import { colors } from '../theme';
 import { NativeMarkdown } from './NativeMarkdown';
 import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
 import type { LocalAssistantThread } from './local-assistant-types';
+import { LinkedPullRequestAttachments } from '../drones/LinkedPullRequestAttachment';
+import type { MobileLinkedPullRequestContext } from '../drones/use-drone-linked-pull-requests';
 
 function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
   const dots = React.useRef([
@@ -315,6 +317,7 @@ export function MobileAssistantTranscript({
   emptyTitle = 'The assistant lives here.',
   emptyBody = 'Ask a question, or attach a remote workspace and let this phone inspect and edit it.',
   assistantLabel = 'Assistant',
+  linkedPullRequests,
 }: {
   messages: AssistantMessage[];
   running?: boolean;
@@ -323,6 +326,7 @@ export function MobileAssistantTranscript({
   emptyTitle?: string;
   emptyBody?: string;
   assistantLabel?: string;
+  linkedPullRequests?: MobileLinkedPullRequestContext;
 }) {
   const items = React.useMemo(() => renderItemsFromMessages(messages), [messages]);
   const [visibleMessageTimestamps, setVisibleMessageTimestamps] = React.useState<Set<string>>(
@@ -387,7 +391,10 @@ export function MobileAssistantTranscript({
         const content = (
           <>
             {text && assistant ? (
-              <NativeMarkdown text={text} />
+              <>
+                <NativeMarkdown text={text} />
+                <LinkedPullRequestAttachments text={text} context={linkedPullRequests} />
+              </>
             ) : text ? (
               <Text selectable style={[styles.messageText, user && styles.userMessageText]}>
                 {text}
