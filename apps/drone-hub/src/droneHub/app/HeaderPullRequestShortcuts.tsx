@@ -2,14 +2,13 @@ import React from 'react';
 import { requestJson } from '../http';
 import type {
   RepoPullRequestClosePayload,
-  RepoPullRequestMergeMethod,
   RepoPullRequestMergePayload,
   RepoPullRequestSummary,
   RepoPullRequestsPayload,
 } from '../types';
-import { profileStorageKey } from '../../profile-storage';
+import { readPullRequestMergeMethod } from '../pullRequests/pull-request-preferences';
+import { PullRequestStatusBadgeStrip } from '../pullRequests/pull-request-ui';
 
-const PR_MERGE_METHOD_STORAGE_KEY = profileStorageKey('droneHub.prMergeMethod');
 const HEADER_REPO_PR_CACHE_TTL_MS = 12_000;
 const HEADER_REPO_PR_POLL_INTERVAL_MS = 20_000;
 
@@ -266,80 +265,11 @@ export function useHeaderRepoPullRequestSummary({
   return React.useMemo(() => ({ ...snapshot, refresh }), [refresh, snapshot]);
 }
 
-function headerPrMergeMethod(): RepoPullRequestMergeMethod {
-  try {
-    const raw = String(localStorage.getItem(PR_MERGE_METHOD_STORAGE_KEY) ?? '')
-      .trim()
-      .toLowerCase();
-    if (raw === 'squash' || raw === 'rebase' || raw === 'merge') return raw;
-  } catch {
-    // ignore
-  }
-  return 'merge';
-}
-
 function shortPrTitle(raw: string, maxLen: number = 34): string {
   const text = String(raw ?? '').trim();
   if (!text) return '-';
   if (text.length <= maxLen) return text;
   return `${text.slice(0, maxLen - 1)}...`;
-}
-
-function repoPullRequestStatusBadges(pr: RepoPullRequestSummary): Array<{ key: string; label: string; className: string }> {
-  const out: Array<{ key: string; label: string; className: string }> = [];
-  if (pr.draft) {
-    out.push({
-      key: 'draft',
-      label: 'Draft',
-      className: 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
-    });
-  }
-  if (pr.checksState === 'failing') {
-    out.push({
-      key: 'checks_failing',
-      label: 'Checks failing',
-      className: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
-    });
-  } else if (pr.checksState === 'pending') {
-    out.push({
-      key: 'checks_pending',
-      label: 'Checks pending',
-      className: 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
-    });
-  }
-  if (pr.reviewState === 'approved') {
-    out.push({
-      key: 'approved',
-      label: 'Approved',
-      className: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
-    });
-  }
-  if (pr.hasMergeConflicts) {
-    out.push({
-      key: 'merge_conflict',
-      label: 'Merge conflict',
-      className: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
-    });
-  }
-  return out;
-}
-
-function PullRequestStatusBadgeStrip({ pullRequest, limit = 4 }: { pullRequest: RepoPullRequestSummary; limit?: number }) {
-  const badges = repoPullRequestStatusBadges(pullRequest).slice(0, Math.max(1, Math.floor(limit)));
-  if (badges.length === 0) return null;
-  return (
-    <span className="inline-flex items-center gap-1 flex-wrap">
-      {badges.map((badge) => (
-        <span
-          key={`pr-badge-${pullRequest.number}-${badge.key}`}
-          className={`inline-flex items-center rounded border px-1 py-[1px] text-[9px] leading-none ${badge.className}`}
-          title={badge.label}
-        >
-          {badge.label}
-        </span>
-      ))}
-    </span>
-  );
 }
 
 export function HeaderPullRequestShortcuts({
@@ -383,7 +313,7 @@ export function HeaderPullRequestShortcuts({
     const prNumber = Number(firstPr.number);
     if (!Number.isFinite(prNumber) || prNumber <= 0) return;
     if (busyAction) return;
-    const method = headerPrMergeMethod();
+    const method = readPullRequestMergeMethod();
     if (!window.confirm(`Merge PR #${prNumber} using "${method}"?`)) return;
     setBusyAction({ kind: 'merge', prNumber });
     setActionError(null);
@@ -453,7 +383,7 @@ export function HeaderPullRequestShortcuts({
           <span className="font-mono pt-[1px]">#{pr.number}</span>
           <span className="min-w-0 flex-1 flex flex-col gap-0.5">
             <span className="truncate">{shortPrTitle(pr.title)}</span>
-            <PullRequestStatusBadgeStrip pullRequest={pr} limit={3} />
+            <PullRequestStatusBadgeStrip pullRequest={pr} limit={3} compact />
           </span>
         </button>
       ))}

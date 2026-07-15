@@ -5,6 +5,7 @@ import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import type { MarkdownFileReference } from './MarkdownMessage';
 import { RelativeTimeText } from './RelativeTimeText';
 import { fillMissingPromptLoopRunRows, type PromptLoopRunRow } from './prompt-loop-run-rows';
+import { LinkedPullRequestCards, type LinkedPullRequestContext } from './LinkedPullRequestCards';
 
 const PROMPT_PREVIEW_MAX_CHARS = 220;
 
@@ -117,6 +118,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
   pendingRuns = [],
   onOpenFileReference,
   onOpenLink,
+  linkedPullRequestContext,
   headerBadgeLabel,
   headerBadgeTone = 'running',
   headerActions,
@@ -126,6 +128,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
   pendingRuns?: PendingPrompt[];
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
+  linkedPullRequestContext?: LinkedPullRequestContext;
   headerBadgeLabel?: string;
   headerBadgeTone?: 'running' | 'queued' | 'failed';
   headerActions?: React.ReactNode;
@@ -350,6 +353,11 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
                             onOpenFileReference={onOpenFileReference}
                             onOpenLink={onOpenLink}
                           />
+                          <LinkedPullRequestCards
+                            text={row.output}
+                            context={linkedPullRequestContext}
+                            onOpenLink={onOpenLink}
+                          />
                         </td>
                       </tr>
                     ) : null}
@@ -390,6 +398,11 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
               fadeTo={latestSummary.fadeTo}
               className={latestSummary.outputClassName ?? ''}
               onOpenFileReference={onOpenFileReference}
+              onOpenLink={onOpenLink}
+            />
+            <LinkedPullRequestCards
+              text={latestSummary.output}
+              context={linkedPullRequestContext}
               onOpenLink={onOpenLink}
             />
           </div>

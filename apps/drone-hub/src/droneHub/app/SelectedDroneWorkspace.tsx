@@ -70,9 +70,9 @@ import {
   formatAgentModelMetadata,
   formatBytes,
   latestTranscriptRuntime,
-  parseGithubPullRequestHref,
   resolveDisplayedChatModel,
 } from './selected-drone-workspace-utils';
+import { parseGithubPullRequestHref } from '../chat/github-pull-request-links';
 import { useHeaderRepoPullRequestSummary } from './HeaderPullRequestShortcuts';
 import { useFleetAssignmentDropState } from './use-fleet-assignment-drop-state';
 import {
@@ -1011,6 +1011,26 @@ export function SelectedDroneWorkspace({
     repoAttached: currentDroneRepoAttached,
     disabled: isDroneStartingOrSeeding(currentDrone.hubPhase),
   });
+  const linkedPullRequestContext = React.useMemo(
+    () => ({
+      droneId: currentDrone.id,
+      repoPath: currentDroneRepoPath,
+      repoAttached: currentDroneRepoAttached,
+      disabled: isDroneStartingOrSeeding(currentDrone.hubPhase),
+      openPullRequestsData: pullRequestSummary.pullRequestsData,
+      openPullRequestsLoading: pullRequestSummary.loading,
+      openPullRequestsError: pullRequestSummary.error,
+    }),
+    [
+      currentDrone.hubPhase,
+      currentDrone.id,
+      currentDroneRepoAttached,
+      currentDroneRepoPath,
+      pullRequestSummary.error,
+      pullRequestSummary.loading,
+      pullRequestSummary.pullRequestsData,
+    ],
+  );
   const openPullRequestCount = React.useMemo(() => {
     const count = Number(pullRequestSummary.pullRequestsData?.count ?? 0);
     return Number.isFinite(count) && count > 0 ? Math.floor(count) : 0;
@@ -2187,6 +2207,7 @@ export function SelectedDroneWorkspace({
                               headerError={runningGroup ? stopPromptAutomationError : null}
                               onOpenFileReference={onOpenMarkdownFileReference}
                               onOpenLink={tryOpenMarkdownPullRequest}
+                              linkedPullRequestContext={linkedPullRequestContext}
                             />
                           );
                         }
@@ -2206,6 +2227,7 @@ export function SelectedDroneWorkspace({
                             onHoverAgentMessage={handleAgentMessageHover}
                             onOpenFileReference={onOpenMarkdownFileReference}
                             onOpenLink={tryOpenMarkdownPullRequest}
+                            linkedPullRequestContext={linkedPullRequestContext}
                             droneId={currentDrone.id}
                             droneHomePath={currentDroneHomePath}
                             showRoleIcons={false}
@@ -2246,6 +2268,7 @@ export function SelectedDroneWorkspace({
                             headerError={runningGroup ? stopPromptAutomationError : null}
                             onOpenFileReference={onOpenMarkdownFileReference}
                             onOpenLink={tryOpenMarkdownPullRequest}
+                            linkedPullRequestContext={linkedPullRequestContext}
                           />
                         );
                       }
