@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  formatMobileVoiceDuration,
   mergeMobileDraftWithVoiceTranscript,
   mobileVoiceStatusLabel,
   resolveMobileGroqTranscriptionResponse,
@@ -9,9 +10,21 @@ describe('mobile voice transcription', () => {
   test('appends a transcript to an existing draft like the desktop composer', () => {
     expect(mergeMobileDraftWithVoiceTranscript('', '  hello world  ')).toBe('hello world');
     expect(mergeMobileDraftWithVoiceTranscript('typed draft  ', 'voice text')).toBe(
-      'typed draft\nvoice text',
+      'typed draft voice text',
     );
+    expect(
+      mergeMobileDraftWithVoiceTranscript(
+        mergeMobileDraftWithVoiceTranscript('typed draft', 'first segment'),
+        'second segment',
+      ),
+    ).toBe('typed draft first segment second segment');
     expect(mergeMobileDraftWithVoiceTranscript('typed draft', '   ')).toBe('typed draft');
+  });
+
+  test('formats the elapsed recording time', () => {
+    expect(formatMobileVoiceDuration(0)).toBe('0:00');
+    expect(formatMobileVoiceDuration(9_999)).toBe('0:09');
+    expect(formatMobileVoiceDuration(65_400)).toBe('1:05');
   });
 
   test('uses the desktop recording state labels', () => {

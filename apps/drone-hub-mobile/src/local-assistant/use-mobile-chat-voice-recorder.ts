@@ -5,6 +5,7 @@ import {
   requestRecordingPermissionsAsync,
   setAudioModeAsync,
   useAudioRecorder,
+  useAudioRecorderState,
   type AudioRecorder,
   type RecordingStatus,
 } from 'expo-audio';
@@ -75,6 +76,7 @@ export function useMobileChatVoiceRecorder({
     [onError],
   );
   const recorder = useAudioRecorder(MOBILE_VOICE_RECORDING_OPTIONS, handleNativeStatus);
+  const recorderState = useAudioRecorderState(recorder, 250);
 
   const setStatusValue = React.useCallback((next: MobileVoiceRecordingStatus) => {
     statusRef.current = next;
@@ -271,6 +273,7 @@ export function useMobileChatVoiceRecorder({
 
   return {
     status,
+    durationMillis: status === 'starting' || status === 'idle' ? 0 : recorderState.durationMillis,
     startRecording,
     toggleRecordingPause,
     discardRecording,

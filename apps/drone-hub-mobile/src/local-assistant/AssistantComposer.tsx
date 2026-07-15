@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Keyboard, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import ArrowUp from 'lucide-react-native/icons/arrow-up';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import Mic from 'lucide-react-native/icons/mic';
@@ -10,6 +10,7 @@ import Square from 'lucide-react-native/icons/square';
 import X from 'lucide-react-native/icons/x';
 import { colors } from '../theme';
 import {
+  formatMobileVoiceDuration,
   mergeMobileDraftWithVoiceTranscript,
   mobileVoiceStatusLabel,
 } from './mobile-voice-transcription-model';
@@ -151,6 +152,7 @@ export function AssistantComposer({
 }) {
   const inputRef = React.useRef<TextInput>(null);
   const valueRef = React.useRef(value);
+  const suppressInputFocusRef = React.useRef(false);
   const voiceActionTokenRef = React.useRef(0);
   const [focused, setFocused] = React.useState(false);
   const [voiceError, setVoiceError] = React.useState('');
@@ -161,12 +163,15 @@ export function AssistantComposer({
   );
   const {
     status: voiceStatus,
+    durationMillis: voiceDurationMillis,
     startRecording,
     toggleRecordingPause,
     discardRecording,
     stopRecordingForTranscript,
   } = useMobileChatVoiceRecorder({ onError: handleVoiceError });
   const voiceActive = voiceStatus !== 'idle';
+  const voiceActiveRef = React.useRef(voiceActive);
+  voiceActiveRef.current = voiceActive;
   const voiceCanPauseOrStop = voiceStatus === 'recording' || voiceStatus === 'paused';
   const expanded =
     focused || Boolean(value.trim()) || running || voiceActive || Boolean(voiceError);
@@ -180,6 +185,7 @@ export function AssistantComposer({
   const reasoning = assistantReasoningName(String(reasoningLabel ?? '').trim());
   const model = compactAssistantModelName(modelLabel);
   const voiceStatusText = mobileVoiceStatusLabel(voiceStatus);
+  const voiceDurationText = formatMobileVoiceDuration(voiceDurationMillis);
 
   React.useEffect(() => {
     valueRef.current = value;
@@ -187,9 +193,18 @@ export function AssistantComposer({
 
   React.useEffect(() => {
     if (!focusKey) return;
-    const frame = requestAnimationFrame(() => inputRef.current?.focus());
+    const frame = requestAnimationFrame(() => {
+      if (!suppressInputFocusRef.current && !voiceActiveRef.current) inputRef.current?.focus();
+    });
     return () => cancelAnimationFrame(frame);
   }, [focusKey]);
+
+  React.useEffect(() => {
+    if (!voiceActive) return;
+    inputRef.current?.blur();
+    setFocused(false);
+    Keyboard.dismiss();
+  }, [voiceActive]);
 
   React.useEffect(() => {
     voiceActionTokenRef.current += 1;
@@ -220,6 +235,22 @@ export function AssistantComposer({
     void discardRecording();
   }, [discardRecording]);
 
+  const beginVoiceRecording = React.useCallback(async () => {
+    suppressInputFocusRef.current = true;
+    inputRef.current?.blur();
+    setFocused(false);
+    Keyboard.dismiss();
+    try {
+      await startRecording();
+    } finally {
+      requestAnimationFrame(() => {
+        inputRef.current?.blur();
+        Keyboard.dismiss();
+        suppressInputFocusRef.current = false;
+      });
+    }
+  }, [startRecording]);
+
   const stopVoiceAndAppend = React.useCallback(async (): Promise<string | null> => {
     if (!voiceCanPauseOrStop || voiceActionInFlight) return null;
     const token = voiceActionTokenRef.current + 1;
@@ -244,7 +275,10 @@ export function AssistantComposer({
 
   const stopVoiceAndFillDraft = React.useCallback(async () => {
     const nextDraft = await stopVoiceAndAppend();
-    if (nextDraft) requestAnimationFrame(() => inputRef.current?.focus());
+    if (nextDraft) {
+      suppressInputFocusRef.current = false;
+      requestAnimationFrame(() => inputRef.current?.focus());
+    }
   }, [stopVoiceAndAppend]);
 
   const changeText = React.useCallback(
@@ -276,9 +310,17 @@ export function AssistantComposer({
           ref={inputRef}
           value={value}
           onChangeText={changeText}
-          onFocus={() => setFocused(true)}
+          onFocus={() => {
+            if (suppressInputFocusRef.current || voiceActive) {
+              inputRef.current?.blur();
+              Keyboard.dismiss();
+              return;
+            }
+            setFocused(true);
+          }}
           onBlur={() => setFocused(false)}
-          editable={editable && (!running || queueWhileRunning)}
+          editable={editable && (!running || queueWhileRunning) && !voiceActive}
+          showSoftInputOnFocus={!voiceActive}
           multiline
           maxLength={maxLength}
           placeholder={placeholder}
@@ -297,7 +339,7 @@ export function AssistantComposer({
             accessibilityState={{ disabled: !editable || sending }}
             disabled={!editable || sending}
             hitSlop={6}
-            onPress={() => void startRecording()}
+            onPress={() => void beginVoiceRecording()}
             style={({ pressed }) => [
               styles.collapsedVoiceButton,
               (!editable || sending) && styles.disabled,
@@ -309,13 +351,31 @@ export function AssistantComposer({
         ) : null}
         {voiceError || voiceStatusText ? (
           <View style={styles.voiceFeedback}>
-            <Text
-              accessibilityLiveRegion="polite"
-              numberOfLines={2}
-              style={[styles.voiceFeedbackText, voiceError && styles.voiceFeedbackError]}
-            >
-              {voiceError || voiceStatusText}
-            </Text>
+            {voiceError ? (
+              <Text
+                accessibilityLiveRegion="polite"
+                numberOfLines={2}
+                style={[styles.voiceFeedbackText, styles.voiceFeedbackError]}
+              >
+                {voiceError}
+              </Text>
+            ) : (
+              <View style={styles.voiceStatusRow}>
+                <View
+                  style={[
+                    styles.voiceStatusDot,
+                    voiceStatus === 'paused' && styles.voiceStatusDotPaused,
+                    voiceStatus === 'transcribing' && styles.voiceStatusDotTranscribing,
+                  ]}
+                />
+                <Text accessibilityLiveRegion="polite" style={styles.voiceFeedbackText}>
+                  {voiceStatusText}
+                </Text>
+                <Text accessibilityLabel={`${voiceDurationText} elapsed`} style={styles.voiceTimer}>
+                  {voiceDurationText}
+                </Text>
+              </View>
+            )}
           </View>
         ) : null}
         {expanded ? (
@@ -345,20 +405,20 @@ export function AssistantComposer({
                   label="Record voice message"
                   icon={Mic}
                   disabled={!editable || running || sending}
-                  onPress={() => void startRecording()}
+                  onPress={() => void beginVoiceRecording()}
                 />
               </>
             ) : (
               <>
+                <VoiceIconButton
+                  label="Discard recording"
+                  icon={X}
+                  tone="danger"
+                  disabled={voiceStatus === 'transcribing' || voiceActionInFlight}
+                  onPress={discardVoice}
+                />
                 <View style={styles.controlSpacer} />
-                <View style={styles.voiceControls}>
-                  <VoiceIconButton
-                    label="Discard recording"
-                    icon={X}
-                    tone="danger"
-                    disabled={voiceStatus === 'transcribing' || voiceActionInFlight}
-                    onPress={discardVoice}
-                  />
+                <View style={styles.voicePrimaryControls}>
                   <VoiceIconButton
                     label={voiceStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
                     icon={voiceStatus === 'paused' ? Play : Pause}
@@ -451,6 +511,10 @@ const styles = StyleSheet.create({
   },
   controlSpacer: { flex: 1 },
   voiceFeedback: { paddingHorizontal: 12, paddingTop: 5 },
+  voiceStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
+  voiceStatusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.danger },
+  voiceStatusDotPaused: { backgroundColor: colors.warning },
+  voiceStatusDotTranscribing: { backgroundColor: colors.accent },
   voiceFeedbackText: {
     color: colors.accent,
     fontSize: 10,
@@ -458,11 +522,18 @@ const styles = StyleSheet.create({
     letterSpacing: 0.25,
   },
   voiceFeedbackError: { color: colors.danger, fontWeight: '700', letterSpacing: 0 },
-  voiceControls: { flexDirection: 'row', alignItems: 'center', gap: 5 },
+  voiceTimer: {
+    color: colors.text,
+    fontFamily: 'monospace',
+    fontSize: 11,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  voicePrimaryControls: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   voiceButton: {
-    width: 30,
-    height: 30,
-    borderRadius: 5,
+    width: 38,
+    height: 38,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,

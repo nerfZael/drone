@@ -16,7 +16,17 @@ export function mergeMobileDraftWithVoiceTranscript(
   if (!cleanTranscript) return draft;
   const cleanDraft = draft.trimEnd();
   if (!cleanDraft) return cleanTranscript;
-  return `${cleanDraft}\n${cleanTranscript}`;
+  return `${cleanDraft} ${cleanTranscript}`;
+}
+
+export function formatMobileVoiceDuration(durationMillis: number): string {
+  const milliseconds = Number(durationMillis);
+  const totalSeconds = Number.isFinite(milliseconds)
+    ? Math.max(0, Math.floor(milliseconds / 1000))
+    : 0;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 export function mobileVoiceStatusLabel(status: MobileVoiceRecordingStatus): string {
