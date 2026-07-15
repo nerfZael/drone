@@ -131,6 +131,12 @@ export function AssistantComposer({
   sending = false,
   editable = true,
   queueWhileRunning = false,
+  showAttachments = true,
+  sendLabel,
+  sendPlacement = 'controls',
+  footer,
+  onInputFocus,
+  onInputBlur,
   maxLength = 32_000,
   placeholder = 'Ask the assistant…',
 }: {
@@ -147,6 +153,12 @@ export function AssistantComposer({
   sending?: boolean;
   editable?: boolean;
   queueWhileRunning?: boolean;
+  showAttachments?: boolean;
+  sendLabel?: string;
+  sendPlacement?: 'controls' | 'below';
+  footer?: any;
+  onInputFocus?(target: number): void;
+  onInputBlur?(): void;
   maxLength?: number;
   placeholder?: string;
 }) {
@@ -194,10 +206,23 @@ export function AssistantComposer({
   React.useEffect(() => {
     if (!focusKey) return;
     const frame = requestAnimationFrame(() => {
-      if (!suppressInputFocusRef.current && !voiceActiveRef.current) inputRef.current?.focus();
+      if (valueRef.current.trim() && !suppressInputFocusRef.current && !voiceActiveRef.current)
+        inputRef.current?.focus();
     });
     return () => cancelAnimationFrame(frame);
   }, [focusKey]);
+
+  React.useEffect(() => {
+    if (valueRef.current.trim()) return;
+    suppressInputFocusRef.current = true;
+    inputRef.current?.blur();
+    setFocused(false);
+    Keyboard.dismiss();
+    const frame = requestAnimationFrame(() => {
+      suppressInputFocusRef.current = false;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [voiceResetKey]);
 
   React.useEffect(() => {
     if (!voiceActive) return;
@@ -310,15 +335,19 @@ export function AssistantComposer({
           ref={inputRef}
           value={value}
           onChangeText={changeText}
-          onFocus={() => {
+          onFocus={(event) => {
             if (suppressInputFocusRef.current || voiceActive) {
               inputRef.current?.blur();
               Keyboard.dismiss();
               return;
             }
             setFocused(true);
+            onInputFocus?.(event.nativeEvent.target);
           }}
-          onBlur={() => setFocused(false)}
+          onBlur={() => {
+            setFocused(false);
+            onInputBlur?.();
+          }}
           editable={editable && (!running || queueWhileRunning) && !voiceActive}
           showSoftInputOnFocus={!voiceActive}
           multiline
@@ -329,25 +358,41 @@ export function AssistantComposer({
           style={[
             styles.input,
             expanded && styles.inputExpanded,
-            !expanded && styles.inputWithCollapsedVoice,
+            !expanded &&
+              (showAttachments
+                ? styles.inputWithCollapsedVoice
+                : styles.inputWithCollapsedVoiceOnly),
           ]}
         />
         {!expanded ? (
-          <Pressable
-            accessibilityRole="button"
-            accessibilityLabel="Record voice message"
-            accessibilityState={{ disabled: !editable || sending }}
-            disabled={!editable || sending}
-            hitSlop={6}
-            onPress={() => void beginVoiceRecording()}
-            style={({ pressed }) => [
-              styles.collapsedVoiceButton,
-              (!editable || sending) && styles.disabled,
-              pressed && styles.pressed,
-            ]}
-          >
-            <Mic color={colors.text} size={17} strokeWidth={2.1} />
-          </Pressable>
+          <>
+            {showAttachments ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Add attachment — coming soon"
+                hitSlop={6}
+                onPress={() => {}}
+                style={({ pressed }) => [styles.collapsedAddButton, pressed && styles.pressed]}
+              >
+                <Plus color={colors.text} size={17} strokeWidth={2.1} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel="Record voice message"
+              accessibilityState={{ disabled: !editable || sending }}
+              disabled={!editable || sending}
+              hitSlop={6}
+              onPress={() => void beginVoiceRecording()}
+              style={({ pressed }) => [
+                styles.collapsedVoiceButton,
+                (!editable || sending) && styles.disabled,
+                pressed && styles.pressed,
+              ]}
+            >
+              <Mic color={colors.text} size={17} strokeWidth={2.1} />
+            </Pressable>
+          </>
         ) : null}
         {voiceError || voiceStatusText ? (
           <View style={styles.voiceFeedback}>
@@ -382,7 +427,9 @@ export function AssistantComposer({
           <View style={styles.controls}>
             {voiceStatus === 'idle' ? (
               <>
-                <IconButton label="Add attachment — coming soon" icon={Plus} onPress={() => {}} />
+                {showAttachments ? (
+                  <IconButton label="Add attachment — coming soon" icon={Plus} onPress={() => {}} />
+                ) : null}
                 <View style={styles.controlSpacer} />
                 <Pressable
                   accessibilityRole="button"
@@ -439,18 +486,55 @@ export function AssistantComposer({
             {running && onStop ? (
               <IconButton label="Stop assistant" icon={Square} onPress={onStop} />
             ) : null}
-            {!running || queueWhileRunning ? (
-              <IconButton
-                label="Send message"
-                icon={ArrowUp}
-                accent
-                disabled={!canSend}
-                onPress={() => void send()}
-              />
+            {sendPlacement === 'controls' && (!running || queueWhileRunning) ? (
+              sendLabel ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={sendLabel}
+                  accessibilityState={{ disabled: !canSend }}
+                  disabled={!canSend}
+                  onPress={() => void send()}
+                  style={({ pressed }) => [
+                    styles.sendButton,
+                    !canSend && styles.disabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Text numberOfLines={1} style={styles.sendButtonText}>
+                    {sendLabel}
+                  </Text>
+                  <ArrowUp color={colors.crust} size={15} strokeWidth={2.7} />
+                </Pressable>
+              ) : (
+                <IconButton
+                  label="Send message"
+                  icon={ArrowUp}
+                  accent
+                  disabled={!canSend}
+                  onPress={() => void send()}
+                />
+              )
             ) : null}
           </View>
         ) : null}
       </View>
+      {footer ? <View style={styles.footer}>{footer}</View> : null}
+      {sendPlacement === 'below' && (!running || queueWhileRunning) ? (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={sendLabel || 'Send message'}
+          accessibilityState={{ disabled: !canSend }}
+          disabled={!canSend}
+          onPress={() => void send()}
+          style={({ pressed }) => [
+            styles.sendButtonBelow,
+            !canSend && styles.disabled,
+            pressed && styles.pressed,
+          ]}
+        >
+          <Text style={styles.sendButtonBelowText}>{sendLabel || 'Send message'}</Text>
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -487,7 +571,18 @@ const styles = StyleSheet.create({
     paddingBottom: 11,
   },
   inputExpanded: { minHeight: 44, paddingTop: 12, paddingBottom: 0 },
-  inputWithCollapsedVoice: { paddingRight: 54 },
+  inputWithCollapsedVoice: { paddingLeft: 54, paddingRight: 54 },
+  inputWithCollapsedVoiceOnly: { paddingLeft: 16, paddingRight: 54 },
+  collapsedAddButton: {
+    position: 'absolute',
+    left: 9,
+    top: 9,
+    width: 34,
+    height: 34,
+    borderRadius: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   collapsedVoiceButton: {
     position: 'absolute',
     right: 9,
@@ -497,9 +592,6 @@ const styles = StyleSheet.create({
     borderRadius: 5,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surface1,
   },
   controls: {
     minHeight: 47,
@@ -510,7 +602,7 @@ const styles = StyleSheet.create({
     paddingBottom: 9,
   },
   controlSpacer: { flex: 1 },
-  voiceFeedback: { paddingHorizontal: 12, paddingTop: 5 },
+  voiceFeedback: { paddingHorizontal: 12, paddingTop: 5, paddingBottom: 8 },
   voiceStatusRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   voiceStatusDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.danger },
   voiceStatusDotPaused: { backgroundColor: colors.warning },
@@ -554,6 +646,41 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface1,
   },
   iconButtonAccent: { borderColor: colors.accent, backgroundColor: colors.accent },
+  sendButton: {
+    minHeight: 32,
+    maxWidth: 154,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+    paddingHorizontal: 10,
+    borderRadius: 5,
+    backgroundColor: colors.accent,
+  },
+  sendButtonText: {
+    flexShrink: 1,
+    color: colors.crust,
+    fontSize: 10,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.25,
+  },
+  sendButtonBelow: {
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    borderRadius: 8,
+    backgroundColor: colors.accent,
+  },
+  sendButtonBelowText: {
+    color: colors.crust,
+    fontSize: 12,
+    fontWeight: '900',
+    textTransform: 'uppercase',
+    letterSpacing: 0.45,
+  },
+  footer: { paddingTop: 10, paddingBottom: 10 },
   modelControl: {
     minHeight: 32,
     maxWidth: '58%',
@@ -561,8 +688,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 4,
     paddingHorizontal: 8,
-    borderRadius: 5,
-    backgroundColor: colors.accentWash,
   },
   modelLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', flexShrink: 1 },
   disabled: { opacity: 0.4 },

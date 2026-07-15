@@ -1,8 +1,9 @@
 import React from 'react';
-import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import Bot from 'lucide-react-native/icons/bot';
 import Link2 from 'lucide-react-native/icons/link-2';
 import Smartphone from 'lucide-react-native/icons/smartphone';
+import { TopTabs, type TopTabOption } from '../components/TopTabs';
 import { Button, Card, ConfirmDialog, ErrorBanner, Label, textStyles } from '../components/Ui';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
@@ -10,10 +11,10 @@ import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSet
 
 export type SettingsTab = 'assistant' | 'devices' | 'pairing';
 
-const SETTINGS_TABS: Array<{ id: SettingsTab; label: string; icon: typeof Bot }> = [
-  { id: 'assistant', label: 'Assistant', icon: Bot },
-  { id: 'devices', label: 'Devices', icon: Smartphone },
-  { id: 'pairing', label: 'Pairing', icon: Link2 },
+const SETTINGS_TABS: Array<TopTabOption<SettingsTab>> = [
+  { value: 'assistant', label: 'Assistant', icon: Bot },
+  { value: 'devices', label: 'Devices', icon: Smartphone },
+  { value: 'pairing', label: 'Pairing', icon: Link2 },
 ];
 
 export function SettingsScreen({
@@ -75,28 +76,7 @@ export function SettingsScreen({
 
   return (
     <View style={styles.shell}>
-      <View style={styles.tabs}>
-        {SETTINGS_TABS.map((item) => {
-          const active = item.id === tab;
-          const Icon = item.icon;
-          return (
-            <Pressable
-              key={item.id}
-              accessibilityRole="tab"
-              accessibilityState={{ selected: active }}
-              onPress={() => onTabChange(item.id)}
-              style={[styles.tab, active && styles.tabActive]}
-            >
-              <Icon
-                color={active ? colors.accent : colors.muted}
-                size={14}
-                strokeWidth={active ? 2.4 : 2}
-              />
-              <Text style={[styles.tabText, active && styles.tabTextActive]}>{item.label}</Text>
-            </Pressable>
-          );
-        })}
-      </View>
+      <TopTabs value={tab} options={SETTINGS_TABS} onChange={onTabChange} />
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
         <ErrorBanner message={error ?? mesh.error} />
         {tab === 'assistant' ? (
@@ -219,30 +199,6 @@ export function SettingsScreen({
 
 const styles = StyleSheet.create({
   shell: { flex: 1 },
-  tabs: {
-    flexDirection: 'row',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingVertical: 8,
-    borderBottomWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.panel,
-  },
-  tab: {
-    flex: 1,
-    minHeight: 38,
-    flexDirection: 'row',
-    gap: 6,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: 'transparent',
-    backgroundColor: 'transparent',
-  },
-  tabActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
-  tabText: { color: colors.muted, fontSize: 10, fontWeight: '800' },
-  tabTextActive: { color: colors.accentAlt },
   page: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 28, gap: 10 },
   flatCard: {
     borderRadius: 6,

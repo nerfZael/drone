@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   ActivityIndicator,
+  Keyboard,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -10,9 +11,10 @@ import {
 } from 'react-native';
 import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
-import Plus from 'lucide-react-native/icons/plus';
-import RotateCw from 'lucide-react-native/icons/rotate-cw';
+import ChevronUp from 'lucide-react-native/icons/chevron-up';
 import { ErrorBanner, Label } from '../components/Ui';
+import { TopTabs } from '../components/TopTabs';
+import { AssistantComposer } from '../local-assistant/AssistantComposer';
 import {
   AssistantModelPicker,
   type AssistantModelChoice,
@@ -71,16 +73,18 @@ export type MobileDroneCreateDefaults = {
 function Segmented<T extends string>({
   value,
   options,
+  label,
   disabled,
   onChange,
 }: {
   value: T;
   options: Array<{ value: T; label: string }>;
+  label?: string;
   disabled?: boolean;
   onChange(value: T): void;
 }) {
-  return (
-    <View style={[styles.segmented, disabled && styles.disabled]}>
+  const control = (
+    <View style={[styles.segmented, !label && disabled && styles.disabled]}>
       {options.map((option) => {
         const active = option.value === value;
         return (
@@ -102,6 +106,13 @@ function Segmented<T extends string>({
           </Pressable>
         );
       })}
+    </View>
+  );
+  if (!label) return control;
+  return (
+    <View style={[styles.labeledSegmented, disabled && styles.disabled]}>
+      <Text style={styles.segmentedLabel}>{label}:</Text>
+      {control}
     </View>
   );
 }
@@ -138,6 +149,37 @@ function Toggle({
       <View style={[styles.switchTrack, value && styles.switchTrackActive]}>
         <View style={[styles.switchThumb, value && styles.switchThumbActive]} />
       </View>
+    </Pressable>
+  );
+}
+
+function CompactCheckbox({
+  label,
+  value,
+  disabled,
+  onChange,
+}: {
+  label: string;
+  value: boolean;
+  disabled?: boolean;
+  onChange(value: boolean): void;
+}) {
+  return (
+    <Pressable
+      accessibilityRole="checkbox"
+      accessibilityState={{ checked: value, disabled }}
+      disabled={disabled}
+      onPress={() => onChange(!value)}
+      style={({ pressed }) => [
+        styles.compactCheckbox,
+        disabled && styles.disabled,
+        pressed && styles.pressed,
+      ]}
+    >
+      <View style={[styles.checkboxBox, value && styles.checkboxBoxActive]}>
+        {value ? <Check color={colors.crust} size={12} strokeWidth={3} /> : null}
+      </View>
+      <Text style={[styles.compactCheckboxText, value && styles.activeText]}>{label}</Text>
     </Pressable>
   );
 }
@@ -180,20 +222,20 @@ function SelectionRow({
 }
 
 export function NewDroneScreen({
-  deviceName,
   repos,
   loadingOptions,
   busy,
+  draft,
   requestError,
   initialValues,
   onDetectModels,
   onLoadRepoBranches,
   onCreate,
 }: {
-  deviceName: string;
   repos: MobileDroneCreateRepo[];
   loadingOptions: boolean;
   busy: boolean;
+  draft: boolean;
   requestError: string | null;
   initialValues?: MobileDroneCreateDefaults;
   onDetectModels(
@@ -211,12 +253,13 @@ export function NewDroneScreen({
     initialValues?.runtime ?? 'container',
   );
   const [persistVolume, setPersistVolume] = React.useState(false);
-  const [draft, setDraft] = React.useState(false);
   const [name, setName] = React.useState('');
   const [group, setGroup] = React.useState(initialValues?.group ?? '');
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
   const [agent, setAgent] = React.useState<MobileBuiltinAgentId>(
     initialValues?.agent ?? 'cursor',
   );
+  const [agentPickerOpen, setAgentPickerOpen] = React.useState(false);
   const [agentPermissionMode, setAgentPermissionMode] =
     React.useState<MobileDroneAgentPermissionMode>(
       initialValues?.agentPermissionMode ?? 'full-access',
@@ -240,6 +283,8 @@ export function NewDroneScreen({
   const [formError, setFormError] = React.useState<string | null>(null);
   const modelRequestId = React.useRef(0);
   const branchRequestId = React.useRef(0);
+  const pageRef = React.useRef<ScrollView>(null);
+  const composerFocusedRef = React.useRef(false);
   const selectedRepo = repos.find((repo) => repo.path === repoPath) ?? null;
   const readOnlySupported = agent === 'codex' || agent === 'blip';
   const selectedModel = models.find((option) => option.id === model) ?? null;
@@ -257,6 +302,17 @@ export function NewDroneScreen({
       ),
     [agent, models],
   );
+
+  const scrollMessageIntoView = React.useCallback(() => {
+    requestAnimationFrame(() => pageRef.current?.scrollToEnd({ animated: true }));
+  }, []);
+
+  React.useEffect(() => {
+    const subscription = Keyboard.addListener('keyboardDidShow', () => {
+      if (composerFocusedRef.current) scrollMessageIntoView();
+    });
+    return () => subscription.remove();
+  }, [scrollMessageIntoView]);
 
   const detectModels = React.useCallback(
     async (refresh = false) => {
@@ -346,8 +402,19 @@ export function NewDroneScreen({
     setBranchPickerOpen(false);
   };
 
-  const submit = async () => {
-    const prompt = initialMessage.trim();
+  const chooseAgent = (nextAgent: MobileBuiltinAgentId) => {
+    if (nextAgent !== agent) {
+      modelRequestId.current += 1;
+      setModels([]);
+      setModel('');
+      setReasoning('');
+      setAgent(nextAgent);
+    }
+    setAgentPickerOpen(false);
+  };
+
+  const submit = async (promptOverride?: string) => {
+    const prompt = String(promptOverride ?? initialMessage).trim();
     if (mode === 'with-chat' && !prompt) {
       setFormError('Add a first message, or choose Create empty drone.');
       return;
@@ -388,224 +455,73 @@ export function NewDroneScreen({
 
   return (
     <ScrollView
+      ref={pageRef}
       style={styles.page}
-      contentContainerStyle={styles.pageContent}
+      contentContainerStyle={[
+        styles.pageContent,
+        mode === 'with-chat' && styles.pageContentWithChat,
+      ]}
       keyboardShouldPersistTaps="handled"
+      keyboardDismissMode="interactive"
+      automaticallyAdjustKeyboardInsets
     >
-      <View style={styles.intro}>
-        <View style={styles.introMark}>
-          <Plus color={colors.accent} size={21} strokeWidth={2.2} />
-        </View>
-        <View style={styles.introCopy}>
-          <Text style={styles.title}>New drone</Text>
-          <Text style={styles.subtitle}>Create on {deviceName}</Text>
-        </View>
-      </View>
+      <TopTabs<MobileDroneCreateMode>
+        value={mode}
+        disabled={busy}
+        style={styles.modeTabsFullBleed}
+        options={[
+          { value: 'with-chat', label: 'Start with chat' },
+          { value: 'without-chat', label: 'Empty drone' },
+        ]}
+        onChange={(value) => {
+          setMode(value);
+          if (value === 'without-chat') {
+            setAgentPickerOpen(false);
+            setModelPickerOpen(false);
+          }
+        }}
+      />
 
       <ErrorBanner message={formError ?? requestError} />
 
       <View style={styles.section}>
-        <Label>Mode</Label>
-        <Segmented<MobileDroneCreateMode>
-          value={mode}
-          onChange={setMode}
-          disabled={busy}
-          options={[
-            { value: 'with-chat', label: 'Start with chat' },
-            { value: 'without-chat', label: 'Empty drone' },
-          ]}
-        />
-        <Text style={styles.helper}>
-          {mode === 'with-chat'
-            ? 'Creates the runtime and starts its default chat with your first message.'
-            : 'Creates only the runtime. You can start chats later.'}
-        </Text>
-      </View>
-
-      <View style={styles.section}>
-        <Label>Runtime</Label>
-        <Segmented<MobileDroneCreateRuntime>
-          value={runtime}
-          onChange={(value) => {
-            if (value !== runtime) {
-              modelRequestId.current += 1;
-              setModels([]);
-              setModel('');
-              setReasoning('');
-            }
-            setRuntime(value);
-            if (value === 'host') setBranchSource('host');
-          }}
-          disabled={busy}
-          options={[
-            { value: 'container', label: 'Container' },
-            { value: 'host', label: 'Host' },
-          ]}
-        />
+        <View style={styles.runtimeRow}>
+          <View style={styles.runtimeControl}>
+            <Label>Runtime</Label>
+            <Segmented<MobileDroneCreateRuntime>
+              value={runtime}
+              onChange={(value) => {
+                if (value !== runtime) {
+                  modelRequestId.current += 1;
+                  setModels([]);
+                  setModel('');
+                  setReasoning('');
+                }
+                setRuntime(value);
+                if (value === 'host') setBranchSource('host');
+              }}
+              disabled={busy}
+              options={[
+                { value: 'container', label: 'Container' },
+                { value: 'host', label: 'Host' },
+              ]}
+            />
+          </View>
+          {runtime === 'container' ? (
+            <CompactCheckbox
+              label="Persist volume"
+              value={persistVolume}
+              disabled={busy}
+              onChange={setPersistVolume}
+            />
+          ) : null}
+        </View>
         <Text style={styles.helper}>
           {runtime === 'host'
             ? 'Runs directly on the selected Drone Hub device.'
             : 'Runs inside a managed container.'}
         </Text>
-        {runtime === 'container' ? (
-          <Toggle
-            label="Persist volume"
-            detail="Mount /dvm-data on a Docker volume."
-            value={persistVolume}
-            disabled={busy}
-            onChange={setPersistVolume}
-          />
-        ) : null}
-        <Toggle
-          label="Create as draft"
-          detail="Queue messages until the drone is published."
-          value={draft}
-          disabled={busy}
-          onChange={setDraft}
-        />
       </View>
-
-      <View style={styles.section}>
-        <Label>Details</Label>
-        <Text style={styles.fieldTitle}>Name</Text>
-        <TextInput
-          value={name}
-          onChangeText={setName}
-          editable={!busy}
-          placeholder="Optional name"
-          placeholderTextColor={colors.subtle}
-          autoCapitalize="none"
-          style={[styles.input, styles.monoInput]}
-        />
-        <Text style={styles.fieldTitle}>Group</Text>
-        <TextInput
-          value={group}
-          onChangeText={setGroup}
-          editable={!busy}
-          placeholder="Optional group"
-          placeholderTextColor={colors.subtle}
-          autoCapitalize="none"
-          style={styles.input}
-        />
-      </View>
-
-      {mode === 'with-chat' ? (
-        <View style={styles.section}>
-          <Label>Agent</Label>
-          <View style={styles.agentGrid}>
-            {AGENTS.map((option) => {
-              const active = option.id === agent;
-              return (
-                <Pressable
-                  key={option.id}
-                  disabled={busy}
-                  onPress={() => {
-                    if (option.id !== agent) {
-                      modelRequestId.current += 1;
-                      setModels([]);
-                      setModel('');
-                      setReasoning('');
-                    }
-                    setAgent(option.id);
-                  }}
-                  style={({ pressed }) => [
-                    styles.agentChoice,
-                    active && styles.agentChoiceActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text style={[styles.agentChoiceText, active && styles.activeText]}>
-                    {option.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          <Text style={styles.fieldTitle}>Access</Text>
-          <Segmented<MobileDroneAgentPermissionMode>
-            value={agentPermissionMode}
-            onChange={setAgentPermissionMode}
-            disabled={busy}
-            options={
-              [
-                { value: 'full-access', label: 'Full access' },
-                { value: 'read-only', label: 'Read only' },
-              ].filter((option) => option.value !== 'read-only' || readOnlySupported) as Array<{
-                value: MobileDroneAgentPermissionMode;
-                label: string;
-              }>
-            }
-          />
-          {!readOnlySupported ? (
-            <Text style={styles.helper}>Read-only access is available for Codex and Blip.</Text>
-          ) : null}
-          <Text style={styles.fieldTitle}>Model</Text>
-          <View style={styles.modelRow}>
-            <Pressable
-              accessibilityRole="button"
-              disabled={busy}
-              onPress={() => setModelPickerOpen(true)}
-              style={({ pressed }) => [styles.pickerTrigger, styles.modelTrigger, pressed && styles.pressed]}
-            >
-              <View style={styles.selectionCopy}>
-                <Text numberOfLines={1} style={styles.pickerValue}>
-                  {selectedModel?.label || model || (modelsLoading ? 'Detecting models…' : 'Default model')}
-                </Text>
-                {reasoning ? <Text style={styles.selectionDetail}>Reasoning: {reasoning}</Text> : null}
-              </View>
-              {modelsLoading ? (
-                <ActivityIndicator color={colors.accent} size="small" />
-              ) : (
-                <ChevronDown color={colors.muted} size={17} strokeWidth={2} />
-              )}
-            </Pressable>
-            <Pressable
-              accessibilityLabel="Refresh detected models"
-              disabled={busy || modelsLoading}
-              onPress={() => void detectModels(true)}
-              style={({ pressed }) => [styles.refreshButton, pressed && styles.pressed]}
-            >
-              <RotateCw color={colors.muted} size={16} strokeWidth={2} />
-            </Pressable>
-          </View>
-          {model ? (
-            <Pressable
-              disabled={busy}
-              onPress={() => { setModel(''); setReasoning(''); }}
-              style={({ pressed }) => pressed && styles.pressed}
-            >
-              <Text style={styles.inlineAction}>Use agent default</Text>
-            </Pressable>
-          ) : null}
-          {modelsError ? <Text style={styles.errorText}>{modelsError}</Text> : null}
-          {!modelsLoading && models.length === 0 ? (
-            <TextInput
-              value={model}
-              onChangeText={setModel}
-              editable={!busy}
-              placeholder="Enter a model manually"
-              placeholderTextColor={colors.subtle}
-              autoCapitalize="none"
-              autoCorrect={false}
-              style={[styles.input, styles.monoInput]}
-            />
-          ) : null}
-          <AssistantModelPicker
-            open={modelPickerOpen}
-            currentProvider={agent}
-            currentModel={model}
-            currentThinkingLevel={reasoning}
-            options={modelChoices}
-            busy={modelsLoading}
-            showReasoning={Boolean(selectedModel?.reasoningLevels.length)}
-            onClose={() => setModelPickerOpen(false)}
-            onSelect={(choice, selection) => {
-              if (selection === 'model') setModel(choice.id);
-              if (choice.thinkingLevel) setReasoning(choice.thinkingLevel);
-            }}
-          />
-        </View>
-      ) : null}
 
       <View style={styles.section}>
         <Label>Repo</Label>
@@ -633,12 +549,11 @@ export function NewDroneScreen({
           {loadingOptions ? (
             <ActivityIndicator color={colors.accent} size="small" />
           ) : (
-            <ChevronDown
-              color={colors.muted}
-              size={17}
-              strokeWidth={2}
-              style={{ transform: [{ rotate: repoPickerOpen ? '180deg' : '0deg' }] }}
-            />
+            repoPickerOpen ? (
+              <ChevronUp color={colors.muted} size={17} strokeWidth={2} />
+            ) : (
+              <ChevronDown color={colors.muted} size={17} strokeWidth={2} />
+            )
           )}
         </Pressable>
         {repoPickerOpen ? (
@@ -741,79 +656,273 @@ export function NewDroneScreen({
         ) : null}
       </View>
 
-      {mode === 'with-chat' ? (
-        <View style={styles.section}>
-          <Label>First message</Label>
-          <TextInput
-            value={initialMessage}
-            onChangeText={setInitialMessage}
-            editable={!busy}
-            multiline
-            textAlignVertical="top"
-            placeholder="Tell this drone what to do…"
-            placeholderTextColor={colors.subtle}
-            style={[styles.input, styles.messageInput]}
-          />
-        </View>
-      ) : null}
+      <View style={styles.section}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ expanded: detailsOpen }}
+          onPress={() => setDetailsOpen((open) => !open)}
+          style={({ pressed }) => [styles.accordionHeader, pressed && styles.pressed]}
+        >
+          <View style={styles.accordionCopy}>
+            <Text style={styles.accordionTitle}>Name & group</Text>
+            <Text numberOfLines={1} style={styles.accordionSummary}>
+              {name.trim() || group.trim()
+                ? [name.trim() || 'Automatic name', group.trim()].filter(Boolean).join(' · ')
+                : 'Optional details'}
+            </Text>
+          </View>
+          {detailsOpen ? (
+            <ChevronUp color={colors.muted} size={17} strokeWidth={2} />
+          ) : (
+            <ChevronDown color={colors.muted} size={17} strokeWidth={2} />
+          )}
+        </Pressable>
+        {detailsOpen ? (
+          <View style={styles.accordionBody}>
+            <Text style={styles.fieldTitle}>Name</Text>
+            <TextInput
+              value={name}
+              onChangeText={setName}
+              editable={!busy}
+              placeholder="Automatic name"
+              placeholderTextColor={colors.subtle}
+              autoCapitalize="none"
+              style={[styles.input, styles.monoInput]}
+            />
+            <Text style={styles.fieldTitle}>Group</Text>
+            <TextInput
+              value={group}
+              onChangeText={setGroup}
+              editable={!busy}
+              placeholder="No group"
+              placeholderTextColor={colors.subtle}
+              autoCapitalize="none"
+              style={styles.input}
+            />
+          </View>
+        ) : null}
+      </View>
 
-      <Pressable
-        accessibilityRole="button"
-        accessibilityState={{ disabled: busy }}
-        disabled={busy}
-        onPress={() => void submit()}
-        style={({ pressed }) => [styles.submit, busy && styles.disabled, pressed && styles.pressed]}
-      >
-        {busy ? <ActivityIndicator color={colors.crust} size="small" /> : null}
-        <Text style={styles.submitText}>
-          {busy ? 'Creating…' : mode === 'with-chat' ? 'Create & start chat' : 'Create drone'}
-        </Text>
-      </Pressable>
+      {mode === 'with-chat' ? (
+        <View style={[styles.section, styles.messageSection]}>
+          <View style={styles.composerWrap}>
+            <AssistantComposer
+              voiceResetKey={`new-drone:${mode}`}
+              value={initialMessage}
+              onChangeText={setInitialMessage}
+              onSend={(promptOverride) => void submit(promptOverride)}
+              onOpenModel={() => setModelPickerOpen(true)}
+              modelLabel={
+                selectedModel?.label ||
+                model ||
+                (modelsLoading ? 'Detecting models…' : 'Default model')
+              }
+              reasoningLabel={reasoning}
+              placeholder="Tell this drone what to do…"
+              sending={busy}
+              editable={!busy}
+              showAttachments={false}
+              sendLabel={busy ? 'Creating…' : 'Create & start chat'}
+              sendPlacement="below"
+              footer={
+                <>
+                  <View style={styles.composerConfigRow}>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Choose agent"
+                      accessibilityState={{ expanded: agentPickerOpen, disabled: busy }}
+                      disabled={busy}
+                      onPress={() => setAgentPickerOpen((open) => !open)}
+                      style={({ pressed }) => [
+                        styles.agentPickerTrigger,
+                        styles.agentPickerInline,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <View style={styles.agentPickerValue}>
+                        <Text numberOfLines={1} style={styles.agentPickerText}>
+                          {AGENTS.find((option) => option.id === agent)?.label ?? agent}
+                        </Text>
+                      </View>
+                      {agentPickerOpen ? (
+                        <ChevronUp color={colors.accent} size={17} strokeWidth={2.2} />
+                      ) : (
+                        <ChevronDown color={colors.accent} size={17} strokeWidth={2.2} />
+                      )}
+                    </Pressable>
+                    <Segmented<MobileDroneAgentPermissionMode>
+                      label="Access"
+                      value={agentPermissionMode}
+                      onChange={setAgentPermissionMode}
+                      disabled={busy}
+                      options={
+                        [
+                          { value: 'full-access', label: 'Full' },
+                          { value: 'read-only', label: 'Read only' },
+                        ].filter(
+                          (option) => option.value !== 'read-only' || readOnlySupported,
+                        ) as Array<{
+                          value: MobileDroneAgentPermissionMode;
+                          label: string;
+                        }>
+                      }
+                    />
+                  </View>
+                  {agentPickerOpen ? (
+                    <View accessibilityRole="radiogroup" style={styles.agentOptions}>
+                      {AGENTS.map((option) => {
+                        const active = option.id === agent;
+                        return (
+                          <Pressable
+                            key={option.id}
+                            accessibilityRole="radio"
+                            accessibilityState={{ checked: active, disabled: busy }}
+                            disabled={busy}
+                            onPress={() => chooseAgent(option.id)}
+                            style={({ pressed }) => [
+                              styles.agentOption,
+                              active && styles.agentOptionActive,
+                              pressed && styles.pressed,
+                            ]}
+                          >
+                            <View style={[styles.radioRing, active && styles.radioRingActive]}>
+                              {active ? <View style={styles.radioDot} /> : null}
+                            </View>
+                            <Text style={[styles.agentOptionText, active && styles.activeText]}>
+                              {option.label}
+                            </Text>
+                          </Pressable>
+                        );
+                      })}
+                    </View>
+                  ) : null}
+                  {!readOnlySupported ? (
+                    <Text style={styles.helper}>
+                      Read-only access is available for Codex and Blip.
+                    </Text>
+                  ) : null}
+                  {modelsError ? (
+                    <View style={styles.inlineNotice}>
+                      <Text style={[styles.errorText, styles.inlineNoticeText]}>{modelsError}</Text>
+                      <Pressable
+                        disabled={busy || modelsLoading}
+                        onPress={() => void detectModels(true)}
+                        style={({ pressed }) => pressed && styles.pressed}
+                      >
+                        <Text style={styles.inlineAction}>Retry models</Text>
+                      </Pressable>
+                    </View>
+                  ) : null}
+                  <AssistantModelPicker
+                    open={modelPickerOpen}
+                    currentProvider={agent}
+                    currentModel={model}
+                    currentThinkingLevel={reasoning}
+                    options={modelChoices}
+                    busy={modelsLoading}
+                    showReasoning={Boolean(selectedModel?.reasoningLevels.length)}
+                    onClose={() => setModelPickerOpen(false)}
+                    onSelect={(choice, selection) => {
+                      if (selection === 'model') setModel(choice.id);
+                      if (choice.thinkingLevel) setReasoning(choice.thinkingLevel);
+                    }}
+                  />
+                </>
+              }
+              onInputFocus={() => {
+                composerFocusedRef.current = true;
+                setAgentPickerOpen(false);
+                scrollMessageIntoView();
+              }}
+              onInputBlur={() => {
+                composerFocusedRef.current = false;
+              }}
+            />
+          </View>
+        </View>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityState={{ disabled: busy }}
+          disabled={busy}
+          onPress={() => void submit()}
+          style={({ pressed }) => [
+            styles.submit,
+            busy && styles.disabled,
+            pressed && styles.pressed,
+          ]}
+        >
+          {busy ? <ActivityIndicator color={colors.crust} size="small" /> : null}
+          <Text style={styles.submitText}>{busy ? 'Creating…' : 'Create drone'}</Text>
+        </Pressable>
+      )}
     </ScrollView>
   );
 }
 
 const styles = StyleSheet.create({
   page: { flex: 1, backgroundColor: colors.background },
-  pageContent: { paddingHorizontal: 18, paddingTop: 18, paddingBottom: 36, gap: 4 },
-  intro: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingBottom: 18 },
-  introMark: {
-    width: 38,
-    height: 38,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    backgroundColor: colors.accentDark,
-    borderWidth: 1,
-    borderColor: colors.accentBorder,
+  pageContent: { flexGrow: 1, paddingHorizontal: 18, paddingTop: 0, paddingBottom: 36 },
+  pageContentWithChat: { paddingBottom: 12 },
+  modeTabsFullBleed: {
+    marginHorizontal: -18,
+    marginBottom: 4,
   },
-  introCopy: { flex: 1, minWidth: 0 },
-  title: { color: colors.textStrong, fontSize: 20, fontWeight: '800', letterSpacing: -0.4 },
-  subtitle: { color: colors.muted, fontSize: 11, marginTop: 3 },
   section: {
-    paddingVertical: 17,
+    paddingVertical: 10,
     gap: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
   },
   segmented: {
     flexDirection: 'row',
     alignSelf: 'flex-start',
-    padding: 3,
-    borderWidth: 1,
-    borderColor: colors.border,
     borderRadius: 7,
     backgroundColor: colors.panel,
+    overflow: 'hidden',
   },
-  segment: { minHeight: 34, justifyContent: 'center', paddingHorizontal: 13, borderRadius: 5 },
+  segment: {
+    minHeight: 34,
+    justifyContent: 'center',
+    paddingHorizontal: 13,
+  },
   segmentActive: {
-    backgroundColor: colors.accentDark,
-    borderWidth: 1,
-    borderColor: colors.accentBorder,
+    backgroundColor: colors.accent,
   },
-  segmentText: { color: colors.muted, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
-  segmentTextActive: { color: colors.accent },
+  segmentText: { color: colors.text, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
+  segmentTextActive: { color: colors.crust },
+  labeledSegmented: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  segmentedLabel: {
+    color: colors.accent,
+    fontSize: 9,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.45,
+  },
   helper: { color: colors.muted, fontSize: 11, lineHeight: 16 },
+  runtimeRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    justifyContent: 'space-between',
+    gap: 14,
+  },
+  runtimeControl: { gap: 10 },
+  compactCheckbox: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    paddingHorizontal: 2,
+  },
+  checkboxBox: {
+    width: 17,
+    height: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 4,
+    borderWidth: 1.5,
+    borderColor: colors.accent,
+  },
+  checkboxBoxActive: { backgroundColor: colors.accent },
+  compactCheckboxText: { color: colors.text, fontSize: 10, fontWeight: '800' },
   toggleRow: {
     minHeight: 49,
     flexDirection: 'row',
@@ -851,18 +960,46 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
   },
   monoInput: { fontFamily: 'monospace' },
-  agentGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 7 },
-  agentChoice: {
-    minHeight: 36,
-    justifyContent: 'center',
-    paddingHorizontal: 11,
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 6,
-    backgroundColor: colors.panel,
+  composerConfigRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  agentChoiceActive: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
-  agentChoiceText: { color: colors.muted, fontSize: 11, fontWeight: '700' },
+  agentPickerTrigger: {
+    minHeight: 34,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 10,
+    borderRadius: 7,
+    backgroundColor: colors.accentDark,
+  },
+  agentPickerInline: { flex: 1, minWidth: 130 },
+  agentPickerValue: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10 },
+  agentPickerText: { flexShrink: 1, color: colors.textStrong, fontSize: 12, fontWeight: '800' },
+  agentOptions: { overflow: 'hidden', borderRadius: 7, backgroundColor: colors.panel },
+  agentOption: {
+    minHeight: 44,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    paddingHorizontal: 13,
+  },
+  agentOptionActive: { backgroundColor: colors.accentWash },
+  agentOptionText: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  radioRing: {
+    width: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: colors.overlay0,
+  },
+  radioRingActive: { borderColor: colors.accent },
+  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent },
   activeText: { color: colors.accent },
   pickerTrigger: {
     minHeight: 48,
@@ -876,18 +1013,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.panel,
   },
   pickerValue: { color: colors.text, fontSize: 12, fontWeight: '800' },
-  modelRow: { flexDirection: 'row', alignItems: 'stretch', gap: 8 },
-  modelTrigger: { flex: 1 },
-  refreshButton: {
-    width: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 7,
-    backgroundColor: colors.panel,
-  },
   inlineAction: { color: colors.accent, fontSize: 11, fontWeight: '700' },
+  inlineNotice: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  inlineNoticeText: { flex: 1 },
   pickerOptions: { borderLeftWidth: 1, borderLeftColor: colors.accentBorder, paddingLeft: 9 },
   selectionRow: {
     minHeight: 48,
@@ -904,7 +1032,19 @@ const styles = StyleSheet.create({
   selectionDetail: { color: colors.muted, fontSize: 9, fontFamily: 'monospace', marginTop: 3 },
   branchBlock: { gap: 10, paddingTop: 7 },
   errorText: { color: colors.danger, fontSize: 11, lineHeight: 16 },
-  messageInput: { minHeight: 112, maxHeight: 220 },
+  accordionHeader: {
+    minHeight: 54,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 6,
+  },
+  accordionCopy: { flex: 1, minWidth: 0 },
+  accordionTitle: { color: colors.text, fontSize: 12, fontWeight: '800' },
+  accordionSummary: { color: colors.muted, fontSize: 10, marginTop: 3 },
+  accordionBody: { gap: 9, paddingTop: 4 },
+  messageSection: { flexGrow: 1, justifyContent: 'flex-end', paddingBottom: 0 },
+  composerWrap: { marginHorizontal: -9, marginBottom: -9 },
   submit: {
     minHeight: 48,
     flexDirection: 'row',

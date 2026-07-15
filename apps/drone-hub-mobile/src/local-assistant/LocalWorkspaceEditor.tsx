@@ -68,7 +68,6 @@ function PermissionToggle({
       onPress={onPress}
       style={({ pressed }) => [
         styles.permission,
-        checked && styles.permissionChecked,
         disabled && styles.permissionDisabled,
         pressed && styles.pressed,
       ]}
@@ -408,7 +407,7 @@ export function LocalWorkspaceEditor({
         </View>
       ) : null}
       <Button disabled={!dirty} onPress={() => setConfirmApply(true)}>
-        Apply access changes
+        Apply Changes
       </Button>
 
       <ConfirmDialog
@@ -464,18 +463,17 @@ const styles = StyleSheet.create({
   deviceName: { color: colors.text, fontSize: 14, fontWeight: '800' },
   deviceMeta: { color: colors.muted, fontSize: 9, fontWeight: '700', marginTop: 3 },
   workspacePanel: {
-    marginTop: -1,
-    gap: 8,
-    padding: 10,
-    borderWidth: 1,
-    borderTopWidth: 0,
-    borderColor: colors.accentBorder,
-    borderBottomLeftRadius: 6,
-    borderBottomRightRadius: 6,
-    backgroundColor: colors.background,
+    paddingHorizontal: 12,
+    paddingBottom: 5,
   },
-  workspaceRow: { gap: 9, padding: 10, borderRadius: 5, backgroundColor: colors.panel },
-  workspaceRowChanged: { borderWidth: 1, borderColor: colors.warningBorder },
+  workspaceRow: {
+    gap: 9,
+    paddingHorizontal: 2,
+    paddingVertical: 12,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
+  },
+  workspaceRowChanged: { borderLeftWidth: 2, borderLeftColor: colors.warning, paddingLeft: 8 },
   workspaceCopy: { flex: 1 },
   workspaceName: { color: colors.text, fontSize: 12, fontWeight: '800' },
   workspaceMeta: { color: colors.muted, fontSize: 9, marginTop: 3 },
@@ -485,12 +483,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 5,
-    paddingHorizontal: 8,
-    borderRadius: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
+    paddingHorizontal: 4,
   },
-  permissionChecked: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
   permissionDisabled: { opacity: 0.3 },
   checkbox: {
     width: 13,

@@ -56,6 +56,9 @@ const APP_HEADER_HEIGHT = 58;
 export type DronesAppHeaderState = {
   title: string;
   subtitle: string;
+  draft?: boolean;
+  draftDisabled?: boolean;
+  onToggleDraft?(): void;
   onNewDrone?(): void;
   onNewChat?(): void;
   onDelete?(): void;
@@ -133,6 +136,7 @@ export function DronesScreen({
     null,
   );
   const [newDroneScreenVersion, setNewDroneScreenVersion] = React.useState(0);
+  const [newDroneDraft, setNewDroneDraft] = React.useState(false);
   const [composerFocusKey, setComposerFocusKey] = React.useState('');
   const targetIdRef = React.useRef(targetId);
   const selectedRef = React.useRef(selected);
@@ -144,6 +148,7 @@ export function DronesScreen({
   const runVersion = React.useRef(0);
   const busyVersion = React.useRef(0);
   const modelRequestVersion = React.useRef(0);
+  const chatTabsRef = React.useRef<ScrollView>(null);
   const createModelCatalogCache = React.useRef(new Map<string, MobileDroneCreateModel[]>());
   const createRepoBranchesCache = React.useRef(new Map<string, MobileDroneCreateRepo>());
   const readChatRef = React.useRef<(droneId: string, chatName: string) => Promise<void>>(
@@ -222,10 +227,7 @@ export function DronesScreen({
             const optionsResult = await mesh.request(targetId, 'drone-control', 'drones.list', {
               includeCreateOptions: true,
             });
-            if (
-              targetIdRef.current !== targetId ||
-              droneListVersion.current !== requestVersion
-            )
+            if (targetIdRef.current !== targetId || droneListVersion.current !== requestVersion)
               return;
             const options = normalizeMobileDroneListPayload(optionsResult);
             setCreateRepos(
@@ -234,10 +236,7 @@ export function DronesScreen({
               ),
             );
           } catch (nextError: any) {
-            if (
-              targetIdRef.current === targetId &&
-              droneListVersion.current === requestVersion
-            ) {
+            if (targetIdRef.current === targetId && droneListVersion.current === requestVersion) {
               setError(
                 `Drones loaded, but creation options are unavailable: ${nextError?.message ?? String(nextError)}`,
               );
@@ -290,6 +289,7 @@ export function DronesScreen({
     setDeleteCandidate(null);
     setDeleting(false);
     setNewDroneDefaults(null);
+    setNewDroneDraft(false);
     setNewDroneScreenVersion((value) => value + 1);
     setComposerFocusKey('');
     droneListVersion.current += 1;
@@ -613,6 +613,7 @@ export function DronesScreen({
 
   const openNewDroneScreen = (defaults: MobileDroneCreateDefaults | null = null) => {
     setNewDroneDefaults(defaults);
+    setNewDroneDraft(false);
     setNewDroneScreenVersion((value) => value + 1);
     setSelected(null);
     setChats([]);
@@ -707,6 +708,12 @@ export function DronesScreen({
   const displayedModel = chatModel || latestModel || 'Model';
   const visibleChats = chats.length > 0 ? chats : [chatName];
   React.useEffect(() => {
+    const frame = requestAnimationFrame(() =>
+      chatTabsRef.current?.scrollToEnd({ animated: false }),
+    );
+    return () => cancelAnimationFrame(frame);
+  }, [selected?.id, visibleChats.length]);
+  React.useEffect(() => {
     onHeaderChange(
       selected
         ? {
@@ -716,7 +723,15 @@ export function DronesScreen({
             onNewChat: () => void createNewChat(),
             onDelete: () => setDeleteCandidate(selected),
           }
-        : null,
+        : targetSupportsDrones
+          ? {
+              title: 'New drone',
+              subtitle: `Create on ${activeTarget?.name ?? 'this device'}`,
+              draft: newDroneDraft,
+              draftDisabled: busy.startsWith('create-'),
+              onToggleDraft: () => setNewDroneDraft((value) => !value),
+            }
+          : null,
     );
   }, [
     activeTarget?.name,
@@ -732,6 +747,9 @@ export function DronesScreen({
     chatReasoning,
     chatName,
     chats,
+    busy,
+    newDroneDraft,
+    targetSupportsDrones,
   ]);
   React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
@@ -874,6 +892,7 @@ export function DronesScreen({
             {visibleChats.length > 1 ? (
               <View style={styles.chatTabsFrame}>
                 <ScrollView
+                  ref={chatTabsRef}
                   horizontal
                   showsHorizontalScrollIndicator={false}
                   contentContainerStyle={styles.chats}
@@ -976,10 +995,10 @@ export function DronesScreen({
         ) : targetSupportsDrones ? (
           <NewDroneScreen
             key={`${targetId}:${newDroneScreenVersion}`}
-            deviceName={activeTarget?.name ?? 'this device'}
             repos={createRepos}
             loadingOptions={meshRouteAvailable && (!dronesLoaded || busy === 'drones')}
             busy={busy.startsWith('create-')}
+            draft={newDroneDraft}
             requestError={error}
             initialValues={newDroneDefaults ?? undefined}
             onDetectModels={detectCreateModels}
@@ -1043,29 +1062,26 @@ const styles = StyleSheet.create({
   unavailableText: { color: colors.muted, fontSize: 14, lineHeight: 21 },
   chatWorkspace: { flex: 1, backgroundColor: colors.background },
   chatTabsFrame: {
-    minHeight: 44,
+    minHeight: 39,
     justifyContent: 'center',
     backgroundColor: colors.background,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  chats: { gap: 5, paddingHorizontal: 10, paddingVertical: 6 },
+  chats: { gap: 3, paddingHorizontal: 10 },
   chatTab: {
-    minHeight: 31,
+    minHeight: 38,
     maxWidth: 190,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 7,
-    paddingHorizontal: 11,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.panelRaised,
+    paddingHorizontal: 10,
+    borderBottomWidth: 2,
+    borderBottomColor: 'transparent',
   },
   chatTabActive: {
-    borderColor: colors.accentBorder,
-    backgroundColor: colors.accentDark,
+    borderBottomColor: colors.accent,
   },
   chatTabPressed: { opacity: 0.72 },
   chatText: { flexShrink: 1, color: colors.muted, fontSize: 10, fontWeight: '800' },

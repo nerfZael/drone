@@ -14,6 +14,9 @@ import MessageCircle from 'lucide-react-native/icons/message-circle';
 import Network from 'lucide-react-native/icons/network';
 import Plus from 'lucide-react-native/icons/plus';
 import Settings from 'lucide-react-native/icons/settings';
+import CircleAlert from 'lucide-react-native/icons/circle-alert';
+import CircleCheck from 'lucide-react-native/icons/circle-check';
+import LoaderCircle from 'lucide-react-native/icons/loader-circle';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
@@ -120,8 +123,7 @@ function DrawerDevicePicker({
   onSelect?(deviceId: string): void;
 }) {
   const [open, setOpen] = React.useState(false);
-  const activeDevice =
-    devices.find((device) => device.id === activeDeviceId) ?? devices[0];
+  const activeDevice = devices.find((device) => device.id === activeDeviceId) ?? devices[0];
   React.useEffect(() => setOpen(false), [activeDeviceId]);
   return (
     <View style={styles.devicePickerSection}>
@@ -130,19 +132,21 @@ function DrawerDevicePicker({
         accessibilityLabel="Choose device"
         accessibilityState={{ expanded: open }}
         onPress={() => setOpen((current) => !current)}
-        style={({ pressed }) => [styles.devicePicker, pressed && styles.pressed]}
+        style={({ pressed }) => [
+          styles.devicePicker,
+          open && styles.devicePickerOpen,
+          pressed && styles.devicePickerPressed,
+        ]}
       >
-        <View
-          style={[styles.deviceDot, activeDevice?.connected && styles.deviceDotOnline]}
-        />
-        <View style={styles.devicePickerCopy}>
+        <View style={[styles.deviceDot, activeDevice?.connected && styles.deviceDotOnline]} />
+        <View style={styles.devicePickerTriggerCopy}>
           <Text numberOfLines={1} style={styles.devicePickerName}>
             {activeDevice?.name ?? 'Choose a device'}
           </Text>
         </View>
         <ChevronDown
-          color={colors.muted}
-          size={15}
+          color={open ? colors.accent : colors.subtle}
+          size={14}
           strokeWidth={2}
           style={{ transform: [{ rotate: open ? '180deg' : '0deg' }] }}
         />
@@ -208,15 +212,7 @@ function QuadDroneIcon({
 }) {
   return (
     <Svg height={size} width={size} viewBox="0 0 16 16" fill="none">
-      <Rect
-        x="5"
-        y="5"
-        width="6"
-        height="6"
-        rx="1"
-        stroke={color}
-        strokeWidth={strokeWidth}
-      />
+      <Rect x="5" y="5" width="6" height="6" rx="1" stroke={color} strokeWidth={strokeWidth} />
       <Line x1="2" y1="2" x2="5" y2="5" stroke={color} strokeWidth={strokeWidth} />
       <Line x1="14" y1="2" x2="11" y2="5" stroke={color} strokeWidth={strokeWidth} />
       <Line x1="2" y1="14" x2="5" y2="11" stroke={color} strokeWidth={strokeWidth} />
@@ -249,14 +245,10 @@ function droneFolderContains(folder: MobileDroneGroupFolder, droneId: string): b
   );
 }
 
-type DroneDisplayState =
-  | 'working'
-  | 'waiting'
-  | 'starting'
-  | 'blocked'
-  | 'offline'
-  | 'idle';
+type DroneDisplayState = 'working' | 'waiting' | 'starting' | 'blocked' | 'offline' | 'idle';
 type SwitchDisplayState = DroneDisplayState | 'done';
+type DroneStateSummary = { working: number; idle: number; issues: number };
+const EMPTY_DRONE_STATE_SUMMARY: DroneStateSummary = { working: 0, idle: 0, issues: 0 };
 
 function droneDisplayState(drone: MobileDroneSummary): DroneDisplayState {
   const rawState = `${drone.phase ?? ''} ${drone.status ?? ''}`.toLowerCase();
@@ -269,21 +261,96 @@ function droneDisplayState(drone: MobileDroneSummary): DroneDisplayState {
   return 'idle';
 }
 
+function addDroneToStateSummary(summary: DroneStateSummary, drone: MobileDroneSummary): void {
+  const state = droneDisplayState(drone);
+  if (state === 'working' || state === 'starting') summary.working += 1;
+  else if (state === 'blocked' || state === 'offline') summary.issues += 1;
+  else summary.idle += 1;
+}
+
+function addDroneNodesToStateSummary(
+  summary: DroneStateSummary,
+  nodes: MobileDroneTreeNode[],
+): void {
+  for (const node of nodes) {
+    addDroneToStateSummary(summary, node.drone);
+    addDroneNodesToStateSummary(summary, node.children);
+  }
+}
+
+function addDroneFoldersToStateSummary(
+  summary: DroneStateSummary,
+  folders: MobileDroneGroupFolder[],
+): void {
+  for (const folder of folders) {
+    addDroneNodesToStateSummary(summary, folder.roots);
+    addDroneFoldersToStateSummary(summary, folder.children);
+  }
+}
+
+function summarizeDrones(drones: MobileDroneSummary[]): DroneStateSummary {
+  const summary = { working: 0, idle: 0, issues: 0 };
+  for (const drone of drones) addDroneToStateSummary(summary, drone);
+  return summary;
+}
+
+function summarizeDroneScope(
+  roots: MobileDroneTreeNode[],
+  folders: MobileDroneGroupFolder[] = [],
+): DroneStateSummary {
+  const summary = { working: 0, idle: 0, issues: 0 };
+  addDroneNodesToStateSummary(summary, roots);
+  addDroneFoldersToStateSummary(summary, folders);
+  return summary;
+}
+
+function DroneStateCounts({
+  summary,
+  compact = false,
+}: {
+  summary: DroneStateSummary;
+  compact?: boolean;
+}) {
+  return (
+    <View style={[styles.fleetStates, compact && styles.fleetStatesCompact]}>
+      {summary.working > 0 ? (
+        <View accessibilityLabel={`${summary.working} working`} style={styles.fleetState}>
+          <LoaderCircle color={colors.warning} size={12} strokeWidth={2.2} />
+          <Text style={[styles.fleetStateText, styles.fleetStateTextWorking]}>
+            {summary.working}
+          </Text>
+        </View>
+      ) : null}
+      {summary.idle > 0 ? (
+        <View accessibilityLabel={`${summary.idle} available`} style={styles.fleetState}>
+          <CircleCheck color={colors.online} size={12} strokeWidth={2.2} />
+          <Text style={[styles.fleetStateText, styles.fleetStateTextIdle]}>{summary.idle}</Text>
+        </View>
+      ) : null}
+      {summary.issues > 0 ? (
+        <View accessibilityLabel={`${summary.issues} with issues`} style={styles.fleetState}>
+          <CircleAlert color={colors.danger} size={12} strokeWidth={2.2} />
+          <Text style={[styles.fleetStateText, styles.fleetStateTextIssue]}>{summary.issues}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function threadDisplayState(thread: DrawerAssistantThread): SwitchDisplayState {
   const rawState = thread.status.trim().toLowerCase();
   if (rawState.includes('error') || rawState.includes('block') || rawState.includes('approval'))
     return 'blocked';
   if (rawState.includes('waiting')) return 'waiting';
-  if (rawState.includes('run') || rawState.includes('work'))
-    return 'working';
+  if (rawState.includes('run') || rawState.includes('work')) return 'working';
   if (rawState.includes('done') || rawState.includes('complete')) return 'done';
   return 'idle';
 }
 
 function switchStateLabel(state: SwitchDisplayState): string {
-  if (state === 'offline') return 'unavailable';
-  if (state === 'idle') return 'ready';
-  return state;
+  if (state === 'offline') return 'Unavailable';
+  if (state === 'idle') return 'Ready';
+  return `${state[0]?.toUpperCase() ?? ''}${state.slice(1)}`;
 }
 
 function switchStateColor(state: SwitchDisplayState): string {
@@ -297,18 +364,72 @@ function switchStateColor(state: SwitchDisplayState): string {
 function SwitchItemState({
   state,
   detail,
+  chatCount,
 }: {
   state: SwitchDisplayState;
   detail?: string;
+  chatCount?: number;
 }) {
   const stateColor = switchStateColor(state);
   return (
     <View style={styles.switchItemMetaRow}>
-      <View style={[styles.switchStateDot, { backgroundColor: stateColor }]} />
+      {state === 'working' ? (
+        <WorkingDots color={stateColor} />
+      ) : (
+        <View style={[styles.switchStateDot, { backgroundColor: stateColor }]} />
+      )}
       <Text numberOfLines={1} style={[styles.switchItemMeta, { color: stateColor }]}>
         {switchStateLabel(state)}
         {detail ? ` · ${detail}` : ''}
       </Text>
+      {chatCount != null && chatCount > 1 ? (
+        <View
+          accessibilityLabel={`${chatCount} ${chatCount === 1 ? 'chat' : 'chats'}`}
+          style={styles.chatCount}
+        >
+          <MessageCircle color={colors.subtle} size={11} strokeWidth={1.9} />
+          <Text style={styles.chatCountText}>{chatCount}</Text>
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function WorkingDots({ color }: { color: string }) {
+  const phase = React.useRef(new Animated.Value(0)).current;
+  React.useEffect(() => {
+    const animation = Animated.loop(
+      Animated.timing(phase, {
+        toValue: 1,
+        duration: 960,
+        useNativeDriver: true,
+      }),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [phase]);
+  const ranges = [
+    [0, 0.16, 0.34, 1],
+    [0, 0.33, 0.51, 1],
+    [0, 0.5, 0.68, 1],
+  ];
+  return (
+    <View accessible={false} style={styles.workingDots}>
+      {ranges.map((inputRange, index) => (
+        <Animated.View
+          key={index}
+          style={[
+            styles.workingDot,
+            {
+              backgroundColor: color,
+              opacity: phase.interpolate({
+                inputRange,
+                outputRange: [0.35, 1, 0.35, 0.35],
+              }),
+            },
+          ]}
+        />
+      ))}
     </View>
   );
 }
@@ -352,10 +473,7 @@ function DrawerDroneNode({
         />
         <View style={styles.switchItemCopy}>
           <View style={styles.switchItemTitleRow}>
-            <Text
-              numberOfLines={1}
-              style={[styles.switchItemTitle, selected && styles.activeText]}
-            >
+            <Text numberOfLines={1} style={[styles.switchItemTitle, selected && styles.activeText]}>
               {drone.name}
             </Text>
             <RelativeMessageTimestamp
@@ -363,41 +481,9 @@ function DrawerDroneNode({
               style={styles.switchItemTime}
             />
           </View>
-          <SwitchItemState state={displayState} detail={drone.runtime} />
+          <SwitchItemState state={displayState} detail={drone.runtime} chatCount={chats.length} />
         </View>
       </Pressable>
-      {chats.length > 1 ? (
-        <View style={styles.chatList}>
-          {chats.map((chatName) => {
-            const active = selected && chatName === activeChatName;
-            const busy = drone.busyChats.includes(chatName);
-            return (
-              <Pressable
-                key={chatName}
-                accessibilityRole="button"
-                accessibilityState={{ selected: active }}
-                onPress={() => onSelect(drone.id, chatName)}
-                style={({ pressed }) => [
-                  styles.chatRow,
-                  { paddingLeft: 28 + depth * 16 },
-                  active && styles.chatRowActive,
-                  pressed && styles.pressed,
-                ]}
-              >
-                <MessageCircle
-                  color={active ? colors.accent : colors.muted}
-                  size={13}
-                  strokeWidth={1.8}
-                />
-                <Text numberOfLines={1} style={[styles.chatName, active && styles.activeText]}>
-                  {chatName}
-                </Text>
-                {busy ? <ActivityIndicator color={colors.warning} size="small" /> : null}
-              </Pressable>
-            );
-          })}
-        </View>
-      ) : null}
       {node.children.length > 0 ? (
         <View style={styles.droneChildren}>
           {node.children.map((child) => (
@@ -430,6 +516,10 @@ function DrawerDroneFolder({
   onSelect(droneId: string, chatName: string): void;
 }) {
   const [collapsed, setCollapsed] = React.useState(false);
+  const stateSummary = React.useMemo(
+    () => summarizeDroneScope(folder.roots, folder.children),
+    [folder],
+  );
   const Chevron = collapsed ? ChevronRight : ChevronDown;
   return (
     <View>
@@ -452,13 +542,17 @@ function DrawerDroneFolder({
         <Text numberOfLines={1} style={styles.groupName}>
           {folder.label}
         </Text>
-        <Text style={styles.repoCount}>{folder.droneCount}</Text>
+        <DroneStateCounts summary={stateSummary} compact />
       </Pressable>
       {!collapsed ? (
         <>
           {folder.entries.map((entry) => (
             <DrawerDroneEntry
-              key={entry.kind === 'drone' ? `drone:${entry.node.drone.id}` : `folder:${entry.folder.id}`}
+              key={
+                entry.kind === 'drone'
+                  ? `drone:${entry.node.drone.id}`
+                  : `folder:${entry.folder.id}`
+              }
               entry={entry}
               depth={depth + 1}
               activeDroneId={activeDroneId}
@@ -633,19 +727,13 @@ function AssistantThreadDrawerView({
     () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
     [droneSidebarOrder, drones],
   );
-  const fleetStatus = React.useMemo(
+  const fleetStatus = React.useMemo(() => summarizeDrones(drones), [drones]);
+  const repoStateSummaries = React.useMemo(
     () =>
-      drones.reduce(
-        (summary, drone) => {
-          const state = droneDisplayState(drone);
-          if (state === 'working' || state === 'starting') summary.working += 1;
-          else if (state === 'blocked' || state === 'offline') summary.issues += 1;
-          else summary.idle += 1;
-          return summary;
-        },
-        { working: 0, issues: 0, idle: 0 },
+      new Map(
+        droneGroups.map((group) => [group.id, summarizeDroneScope(group.roots, group.folders)]),
       ),
-    [drones],
+    [droneGroups],
   );
   const [activeRepoId, setActiveRepoId] = React.useState<string | null>(null);
   const activeRepo = droneGroups.find((group) => group.id === activeRepoId) ?? null;
@@ -701,284 +789,272 @@ function AssistantThreadDrawerView({
             } as any)}
             style={styles.drawerTouchSurface}
           >
-          <View style={styles.header}>
-            <View style={styles.headerCopy}>
-              <Text style={styles.title}>Drone Hub</Text>
-            </View>
-            {devicePickerItems.length > 0 ? (
-              <DrawerDevicePicker
-                devices={devicePickerItems}
-                activeDeviceId={activeDeviceId}
-                onSelect={onSelectDevice}
-              />
-            ) : null}
-          </View>
-          <View style={styles.navigation}>
-            {navigationItems.map((item) => {
-              const Icon = navigationIcon(item.id);
-              return (
-                <Pressable
-                  key={item.id}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: item.active }}
-                  onPress={item.onPress}
-                  style={({ pressed }) => [
-                    styles.navigationItem,
-                    item.active && styles.navigationItemActive,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Icon
-                    color={item.active ? colors.accent : colors.muted}
-                    size={18}
-                    strokeWidth={item.active ? 2.3 : 1.9}
-                  />
-                  <Text
-                    style={[styles.navigationLabel, item.active && styles.navigationLabelActive]}
-                  >
-                    {item.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-          {showThreads ? (
-            <>
-              <View style={styles.sidebarToolbar}>
-                {threadsLoading ? (
-                  <View style={styles.loadingSummary}>
-                    <ActivityIndicator color={colors.accent} size="small" />
-                    <Text style={styles.loadingSummaryText}>Loading threads…</Text>
-                  </View>
-                ) : (
-                  <Text style={styles.sidebarToolbarText}>
-                    {threads.length} {threads.length === 1 ? 'thread' : 'threads'}
-                  </Text>
-                )}
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Create new thread"
-                  disabled={threadsLoading || creating || !canCreate}
-                  onPress={onCreate}
-                  style={({ pressed }) => [
-                    styles.create,
-                    (threadsLoading || !canCreate) && styles.createDisabled,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  {creating ? (
-                    <ActivityIndicator color={colors.accent} size="small" />
-                  ) : (
-                    <Plus color={colors.accent} size={19} strokeWidth={2.2} />
-                  )}
-                </Pressable>
+            <View style={styles.header}>
+              <View style={styles.headerCopy}>
+                <Text style={styles.title}>Drone Hub</Text>
               </View>
-              <ScrollView style={styles.scroll} contentContainerStyle={styles.list}>
-                {orderedThreads.map((thread) => {
-                  const active = thread.id === activeThreadId;
-                  const displayState = threadDisplayState(thread);
-                  return (
-                    <Pressable
-                      key={thread.id}
-                      onPress={() => onSelect(thread.id)}
-                      style={({ pressed }) => [
-                        styles.switchItemRow,
-                        active && styles.switchItemRowActive,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <View style={styles.switchItemCopy}>
-                        <View style={styles.switchItemTitleRow}>
-                          <Text
-                            numberOfLines={1}
-                            style={[styles.switchItemTitle, active && styles.activeText]}
-                          >
-                            {thread.title || 'Untitled thread'}
-                          </Text>
-                          <RelativeMessageTimestamp
-                            timestamp={thread.updatedAt}
-                            style={styles.switchItemTime}
-                          />
-                        </View>
-                        <SwitchItemState state={displayState} detail={thread.model} />
-                      </View>
-                    </Pressable>
-                  );
-                })}
-                {!threadsLoading && threads.length === 0 ? (
-                  <Text style={styles.empty}>
-                    No threads here yet. Create one to start a conversation.
-                  </Text>
-                ) : null}
-              </ScrollView>
-            </>
-          ) : showDrones ? (
-            <>
-              <View style={styles.sidebarToolbar}>
-                {dronesLoading ? (
-                  <View style={styles.loadingSummary}>
-                    <ActivityIndicator color={colors.accent} size="small" />
-                    <Text style={styles.loadingSummaryText}>Loading drones…</Text>
-                  </View>
-                ) : !dronesReachable ? (
-                  <Text numberOfLines={1} style={styles.sidebarToolbarText}>
-                    Device unavailable
-                  </Text>
-                ) : dronesError ? (
-                  <Text numberOfLines={1} style={styles.sidebarToolbarText}>
-                    Could not load drones
-                  </Text>
-                ) : (
-                  <Text numberOfLines={1} style={styles.sidebarToolbarText}>
-                    {drones.length} {drones.length === 1 ? 'drone' : 'drones'} · {droneGroups.length}{' '}
-                    {droneGroups.length === 1 ? 'space' : 'spaces'}
-                  </Text>
-                )}
-                <View style={styles.sidebarToolbarActions}>
-                  <View style={styles.fleetStates}>
-                    {fleetStatus.working > 0 ? (
-                      <View style={styles.fleetState}>
-                        <View style={[styles.fleetStateDot, styles.fleetStateWorking]} />
-                        <Text style={styles.fleetStateText}>{fleetStatus.working}</Text>
-                      </View>
-                    ) : null}
-                    {fleetStatus.idle > 0 ? (
-                      <View style={styles.fleetState}>
-                        <View style={[styles.fleetStateDot, styles.fleetStateIdle]} />
-                        <Text style={styles.fleetStateText}>{fleetStatus.idle}</Text>
-                      </View>
-                    ) : null}
-                    {fleetStatus.issues > 0 ? (
-                      <View style={styles.fleetState}>
-                        <View style={[styles.fleetStateDot, styles.fleetStateIssue]} />
-                        <Text style={styles.fleetStateText}>{fleetStatus.issues}</Text>
-                      </View>
-                    ) : null}
-                  </View>
+              {devicePickerItems.length > 0 ? (
+                <DrawerDevicePicker
+                  devices={devicePickerItems}
+                  activeDeviceId={activeDeviceId}
+                  onSelect={onSelectDevice}
+                />
+              ) : null}
+            </View>
+            <View style={styles.navigation}>
+              {navigationItems.map((item) => {
+                const Icon = navigationIcon(item.id);
+                return (
                   <Pressable
+                    key={item.id}
                     accessibilityRole="button"
-                    accessibilityLabel="Create new drone"
-                    accessibilityState={{ disabled: !onCreateDrone }}
-                    disabled={!onCreateDrone}
-                    onPress={onCreateDrone}
+                    accessibilityState={{ selected: item.active }}
+                    onPress={item.onPress}
                     style={({ pressed }) => [
-                      styles.create,
-                      !onCreateDrone && styles.createDisabled,
+                      styles.navigationItem,
+                      item.active && styles.navigationItemActive,
                       pressed && styles.pressed,
                     ]}
                   >
-                    <Plus color={colors.accent} size={19} strokeWidth={2.2} />
+                    <Icon
+                      color={item.active ? colors.accent : colors.muted}
+                      size={18}
+                      strokeWidth={item.active ? 2.3 : 1.9}
+                    />
+                    <Text
+                      style={[styles.navigationLabel, item.active && styles.navigationLabelActive]}
+                    >
+                      {item.label}
+                    </Text>
+                    {item.active ? <View style={styles.navigationIndicator} /> : null}
+                  </Pressable>
+                );
+              })}
+            </View>
+            {showThreads ? (
+              <>
+                <View style={styles.sidebarToolbar}>
+                  {threadsLoading ? (
+                    <View style={styles.loadingSummary}>
+                      <ActivityIndicator color={colors.accent} size="small" />
+                      <Text style={styles.loadingSummaryText}>Loading threads…</Text>
+                    </View>
+                  ) : (
+                    <Text style={styles.sidebarToolbarText}>
+                      {threads.length} {threads.length === 1 ? 'thread' : 'threads'}
+                    </Text>
+                  )}
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Create new thread"
+                    disabled={threadsLoading || creating || !canCreate}
+                    onPress={onCreate}
+                    style={({ pressed }) => [
+                      styles.create,
+                      (threadsLoading || !canCreate) && styles.createDisabled,
+                      pressed && styles.pressed,
+                    ]}
+                  >
+                    {creating ? (
+                      <ActivityIndicator color={colors.accent} size="small" />
+                    ) : (
+                      <Plus color={colors.accent} size={19} strokeWidth={2.2} />
+                    )}
                   </Pressable>
                 </View>
-              </View>
-              {activeRepo ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Back to repositories"
-                  onPress={() => setActiveRepoId(null)}
-                  style={({ pressed }) => [
-                    styles.repoNavigationHead,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <View style={styles.repoBack}>
-                    <ChevronLeft color={colors.accent} size={18} strokeWidth={2.2} />
-                  </View>
-                  <FolderGit2 color={colors.accent} size={16} strokeWidth={1.9} />
-                  <View style={styles.repoCopy}>
-                    <Text numberOfLines={1} style={styles.repoNavigationTitle}>
-                      {activeRepo.label}
-                    </Text>
-                    {activeRepo.repoPath ? (
-                      <Text numberOfLines={1} style={styles.repoPath}>
-                        {activeRepo.repoPath}
-                      </Text>
-                    ) : null}
-                  </View>
-                </Pressable>
-              ) : null}
-              <ScrollView style={styles.scroll} contentContainerStyle={styles.droneList}>
-                {activeRepo
-                  ? activeRepo.entries.map((entry) => (
-                      <DrawerDroneEntry
-                        key={
-                          entry.kind === 'drone'
-                            ? `drone:${entry.node.drone.id}`
-                            : `folder:${entry.folder.id}`
-                        }
-                        entry={entry}
-                        depth={0}
-                        activeDroneId={activeDroneId}
-                        activeChatName={activeChatName}
-                        onSelect={(droneId, chatName) =>
-                          onSelectDroneChat?.(droneId, chatName)
-                        }
-                      />
-                    ))
-                  : droneGroups.map((group) => (
-                    <View key={group.id} style={styles.repoGroup}>
+                <ScrollView style={styles.scroll} contentContainerStyle={styles.list}>
+                  {orderedThreads.map((thread) => {
+                    const active = thread.id === activeThreadId;
+                    const displayState = threadDisplayState(thread);
+                    return (
                       <Pressable
-                        accessibilityRole="button"
-                        accessibilityLabel={`Open ${group.label} repository`}
-                        onPress={() => setActiveRepoId(group.id)}
+                        key={thread.id}
+                        onPress={() => onSelect(thread.id)}
                         style={({ pressed }) => [
-                          styles.repoRow,
-                          (droneTreeContains(group.roots, activeDroneId) ||
-                            group.folders.some((folder) =>
-                              droneFolderContains(folder, activeDroneId),
-                            )) &&
-                            styles.repoRowActive,
+                          styles.switchItemRow,
+                          active && styles.switchItemRowActive,
                           pressed && styles.pressed,
                         ]}
                       >
-                        <FolderGit2 color={colors.accent} size={15} strokeWidth={1.9} />
-                        <View style={styles.repoCopy}>
-                          <Text numberOfLines={1} style={styles.repoName}>
-                            {group.label}
-                          </Text>
-                          {group.repoPath ? (
-                            <Text numberOfLines={1} style={styles.repoPath}>
-                              {group.repoPath}
+                        <View style={styles.switchItemCopy}>
+                          <View style={styles.switchItemTitleRow}>
+                            <Text
+                              numberOfLines={1}
+                              style={[styles.switchItemTitle, active && styles.activeText]}
+                            >
+                              {thread.title || 'Untitled thread'}
                             </Text>
-                          ) : null}
+                            <RelativeMessageTimestamp
+                              timestamp={thread.updatedAt}
+                              style={styles.switchItemTime}
+                            />
+                          </View>
+                          <SwitchItemState state={displayState} detail={thread.model} />
                         </View>
-                        <Text style={styles.repoCount}>{group.droneCount}</Text>
-                        <ChevronRight color={colors.muted} size={15} strokeWidth={2} />
                       </Pressable>
+                    );
+                  })}
+                  {!threadsLoading && threads.length === 0 ? (
+                    <Text style={styles.empty}>
+                      No threads here yet. Create one to start a conversation.
+                    </Text>
+                  ) : null}
+                </ScrollView>
+              </>
+            ) : showDrones ? (
+              <>
+                <View style={styles.sidebarToolbar}>
+                  {dronesLoading ? (
+                    <View style={styles.loadingSummary}>
+                      <ActivityIndicator color={colors.accent} size="small" />
+                      <Text style={styles.loadingSummaryText}>Loading drones…</Text>
                     </View>
-                  ))}
-                {!dronesLoading && !dronesReachable ? (
-                  <Text style={styles.empty}>
-                    No mesh route is currently available. Connect any paired Hub and try again.
-                  </Text>
-                ) : !dronesLoading && dronesError ? (
-                  <View style={styles.drawerError}>
-                    <Text style={styles.drawerErrorText}>{dronesError}</Text>
-                    {onRetryDrones ? (
-                      <Pressable
-                        accessibilityRole="button"
-                        onPress={onRetryDrones}
-                        style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
-                      >
-                        <Text style={styles.retryText}>Retry</Text>
-                      </Pressable>
-                    ) : null}
+                  ) : !dronesReachable ? (
+                    <Text numberOfLines={1} style={styles.sidebarToolbarText}>
+                      Device unavailable
+                    </Text>
+                  ) : dronesError ? (
+                    <Text numberOfLines={1} style={styles.sidebarToolbarText}>
+                      Could not load drones
+                    </Text>
+                  ) : (
+                    <Text numberOfLines={1} style={styles.sidebarToolbarText}>
+                      {drones.length} {drones.length === 1 ? 'drone' : 'drones'} ·{' '}
+                      {droneGroups.length}{' '}
+                      {droneGroups.length === 1 ? 'repository' : 'repositories'}
+                    </Text>
+                  )}
+                  <View style={styles.sidebarToolbarActions}>
+                    <DroneStateCounts summary={fleetStatus} />
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel="Create new drone"
+                      accessibilityState={{ disabled: !onCreateDrone }}
+                      disabled={!onCreateDrone}
+                      onPress={onCreateDrone}
+                      style={({ pressed }) => [
+                        styles.create,
+                        !onCreateDrone && styles.createDisabled,
+                        pressed && styles.pressed,
+                      ]}
+                    >
+                      <Plus color={colors.accent} size={19} strokeWidth={2.2} />
+                    </Pressable>
                   </View>
-                ) : !dronesLoading && drones.length === 0 ? (
-                  <Text style={styles.empty}>No drones are available on this device.</Text>
+                </View>
+                {activeRepo ? (
+                  <Pressable
+                    accessibilityRole="button"
+                    accessibilityLabel="Back to repositories"
+                    onPress={() => setActiveRepoId(null)}
+                    style={({ pressed }) => [styles.repoNavigationHead, pressed && styles.pressed]}
+                  >
+                    <View style={styles.groupIcon}>
+                      <FolderGit2 color={colors.accent} size={16} strokeWidth={1.9} />
+                      <View style={styles.groupChevron}>
+                        <ChevronLeft color={colors.accent} size={10} strokeWidth={2.3} />
+                      </View>
+                    </View>
+                    <View style={styles.repoCopy}>
+                      <Text numberOfLines={1} style={styles.repoNavigationTitle}>
+                        {activeRepo.label}
+                      </Text>
+                      {activeRepo.repoPath ? (
+                        <Text numberOfLines={1} style={styles.repoPath}>
+                          {activeRepo.repoPath}
+                        </Text>
+                      ) : null}
+                    </View>
+                    <DroneStateCounts
+                      summary={repoStateSummaries.get(activeRepo.id) ?? EMPTY_DRONE_STATE_SUMMARY}
+                      compact
+                    />
+                  </Pressable>
                 ) : null}
-              </ScrollView>
-            </>
-          ) : (
-            <View
-              onStartShouldSetResponder={() => true}
-              onResponderGrant={onDrawerTouchStart}
-              onResponderMove={onDrawerTouchMove}
-              onResponderRelease={settleSwipe}
-              onResponderTerminate={settleSwipe}
-              style={styles.drawerFill}
-            />
-          )}
+                <ScrollView style={styles.scroll} contentContainerStyle={styles.droneList}>
+                  {activeRepo
+                    ? activeRepo.entries.map((entry) => (
+                        <DrawerDroneEntry
+                          key={
+                            entry.kind === 'drone'
+                              ? `drone:${entry.node.drone.id}`
+                              : `folder:${entry.folder.id}`
+                          }
+                          entry={entry}
+                          depth={0}
+                          activeDroneId={activeDroneId}
+                          activeChatName={activeChatName}
+                          onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
+                        />
+                      ))
+                    : droneGroups.map((group) => {
+                        const stateSummary =
+                          repoStateSummaries.get(group.id) ?? EMPTY_DRONE_STATE_SUMMARY;
+                        return (
+                          <View key={group.id} style={styles.repoGroup}>
+                            <Pressable
+                              accessibilityRole="button"
+                              accessibilityLabel={`Open ${group.label} repository`}
+                              onPress={() => setActiveRepoId(group.id)}
+                              style={({ pressed }) => [
+                                styles.repoRow,
+                                (droneTreeContains(group.roots, activeDroneId) ||
+                                  group.folders.some((folder) =>
+                                    droneFolderContains(folder, activeDroneId),
+                                  )) &&
+                                  styles.repoRowActive,
+                                pressed && styles.pressed,
+                              ]}
+                            >
+                              <FolderGit2 color={colors.accent} size={15} strokeWidth={1.9} />
+                              <View style={styles.repoCopy}>
+                                <Text numberOfLines={1} style={styles.repoName}>
+                                  {group.label}
+                                </Text>
+                                {group.repoPath ? (
+                                  <Text numberOfLines={1} style={styles.repoPath}>
+                                    {group.repoPath}
+                                  </Text>
+                                ) : null}
+                              </View>
+                              <DroneStateCounts summary={stateSummary} compact />
+                              <ChevronRight color={colors.muted} size={15} strokeWidth={2} />
+                            </Pressable>
+                          </View>
+                        );
+                      })}
+                  {!dronesLoading && !dronesReachable ? (
+                    <Text style={styles.empty}>
+                      No mesh route is currently available. Connect any paired Hub and try again.
+                    </Text>
+                  ) : !dronesLoading && dronesError ? (
+                    <View style={styles.drawerError}>
+                      <Text style={styles.drawerErrorText}>{dronesError}</Text>
+                      {onRetryDrones ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          onPress={onRetryDrones}
+                          style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+                        >
+                          <Text style={styles.retryText}>Retry</Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  ) : !dronesLoading && drones.length === 0 ? (
+                    <Text style={styles.empty}>No drones are available on this device.</Text>
+                  ) : null}
+                </ScrollView>
+              </>
+            ) : (
+              <View
+                onStartShouldSetResponder={() => true}
+                onResponderGrant={onDrawerTouchStart}
+                onResponderMove={onDrawerTouchMove}
+                onResponderRelease={settleSwipe}
+                onResponderTerminate={settleSwipe}
+                style={styles.drawerFill}
+              />
+            )}
           </View>
         </Animated.View>
       </View>
@@ -1010,10 +1086,10 @@ const styles = StyleSheet.create({
   },
   drawerTouchSurface: { flex: 1 },
   header: {
-    minHeight: 68,
+    minHeight: 64,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
     paddingHorizontal: 14,
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
@@ -1029,36 +1105,39 @@ const styles = StyleSheet.create({
   },
   navigation: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 4,
-    paddingHorizontal: 10,
-    paddingTop: 11,
-    paddingBottom: 10,
+    backgroundColor: colors.panel,
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
   navigationItem: {
     flex: 1,
-    minWidth: 70,
-    minHeight: 54,
+    minWidth: 0,
+    minHeight: 56,
     flexDirection: 'column',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 4,
-    paddingHorizontal: 5,
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'transparent',
+    gap: 3,
+    paddingHorizontal: 2,
+    position: 'relative',
   },
-  navigationItemActive: { backgroundColor: colors.accentDark, borderColor: colors.accentBorder },
+  navigationItemActive: { backgroundColor: colors.accentWash },
   navigationLabel: {
     color: colors.muted,
-    fontSize: 9,
-    fontWeight: '800',
-    letterSpacing: 0.25,
-    textTransform: 'uppercase',
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 0.1,
   },
   navigationLabelActive: { color: colors.accentAlt },
+  navigationIndicator: {
+    position: 'absolute',
+    right: 0,
+    bottom: 0,
+    left: 0,
+    height: 2,
+    borderTopLeftRadius: 2,
+    borderTopRightRadius: 2,
+    backgroundColor: colors.accent,
+  },
   sidebarToolbar: {
     minHeight: 50,
     flexDirection: 'row',
@@ -1115,23 +1194,27 @@ const styles = StyleSheet.create({
   retryText: { color: colors.accent, fontSize: 10, fontWeight: '800' },
   devicePickerSection: {
     position: 'relative',
-    width: 164,
-    maxWidth: '55%',
+    width: '55%',
+    minWidth: 0,
+    maxWidth: 220,
+    alignItems: 'flex-end',
     zIndex: 40,
   },
   devicePicker: {
-    height: 38,
+    minHeight: 44,
+    maxWidth: '100%',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
-    paddingHorizontal: 9,
+    gap: 8,
+    paddingHorizontal: 8,
     borderRadius: 6,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.panel,
+    backgroundColor: 'transparent',
   },
+  devicePickerOpen: { backgroundColor: colors.whiteWash },
+  devicePickerPressed: { backgroundColor: colors.whiteWashSoft },
+  devicePickerTriggerCopy: { flexShrink: 1, minWidth: 0 },
   devicePickerCopy: { flex: 1, minWidth: 0 },
-  devicePickerName: { color: colors.text, fontSize: 11, fontWeight: '800' },
+  devicePickerName: { color: colors.text, fontSize: 12, fontWeight: '700' },
   devicePickerDetail: {
     color: colors.muted,
     fontSize: 8,
@@ -1140,15 +1223,15 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     letterSpacing: 0.45,
   },
-  deviceDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.overlay0 },
+  deviceDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.overlay0 },
   deviceDotOnline: { backgroundColor: colors.online },
   deviceOptions: {
     position: 'absolute',
-    top: 42,
+    top: 46,
     right: 0,
     width: 220,
     maxHeight: 220,
-    borderRadius: 6,
+    borderRadius: 8,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panelRaised,
@@ -1159,18 +1242,18 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 6 },
   },
   deviceOptionsContent: {
-    padding: 4,
+    padding: 5,
     gap: 2,
   },
   deviceOption: {
-    minHeight: 38,
+    minHeight: 44,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 9,
     paddingHorizontal: 10,
-    borderRadius: 4,
+    borderRadius: 5,
   },
-  deviceOptionActive: { backgroundColor: colors.accentDark },
+  deviceOptionActive: { backgroundColor: colors.accentWash },
   deviceOptionName: { color: colors.text, fontSize: 12, fontWeight: '700' },
   repoNavigationHead: {
     minHeight: 56,
@@ -1181,28 +1264,21 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  repoBack: {
-    width: 34,
-    height: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 5,
-  },
   repoNavigationTitle: { color: colors.text, fontSize: 13, fontWeight: '800' },
   fleetStates: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  fleetStatesCompact: { flexShrink: 0, gap: 6 },
   fleetState: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  fleetStateDot: { width: 6, height: 6, borderRadius: 3 },
-  fleetStateWorking: { backgroundColor: colors.warning },
-  fleetStateIdle: { backgroundColor: colors.online },
-  fleetStateIssue: { backgroundColor: colors.danger },
   fleetStateText: { color: colors.muted, fontSize: 9, fontFamily: 'monospace' },
+  fleetStateTextWorking: { color: colors.warning },
+  fleetStateTextIdle: { color: colors.online },
+  fleetStateTextIssue: { color: colors.danger },
   droneList: { paddingHorizontal: 8, paddingBottom: 24 },
   repoGroup: {
     borderBottomWidth: 1,
     borderBottomColor: colors.whiteWash,
   },
   repoRow: {
-    minHeight: 46,
+    minHeight: 56,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 7,
@@ -1213,18 +1289,6 @@ const styles = StyleSheet.create({
   repoCopy: { flex: 1, minWidth: 0 },
   repoName: { color: colors.text, fontSize: 12, fontWeight: '800' },
   repoPath: { color: colors.muted, fontSize: 8, fontFamily: 'monospace', marginTop: 1 },
-  repoCount: {
-    minWidth: 23,
-    color: colors.muted,
-    fontSize: 9,
-    fontWeight: '800',
-    textAlign: 'center',
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: 9,
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-  },
   droneNode: { position: 'relative' },
   switchItemRow: {
     minHeight: 48,
@@ -1265,6 +1329,15 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   switchStateDot: { width: 6, height: 6, borderRadius: 3 },
+  workingDots: { flexDirection: 'row', alignItems: 'center', gap: 2 },
+  workingDot: { width: 4, height: 4, borderRadius: 2 },
+  chatCount: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+    paddingLeft: 2,
+  },
+  chatCountText: { color: colors.subtle, fontSize: 9, fontFamily: 'monospace' },
   droneChildren: {},
   groupRow: {
     minHeight: 34,
@@ -1292,17 +1365,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
   },
   groupName: { color: colors.muted, fontSize: 11, fontWeight: '800', flex: 1 },
-  chatList: { gap: 1 },
-  chatRow: {
-    minHeight: 31,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 7,
-    paddingRight: 8,
-    borderRadius: 3,
-  },
-  chatRowActive: { backgroundColor: colors.panel },
-  chatName: { color: colors.muted, fontSize: 11, fontFamily: 'monospace', flex: 1 },
   drawerFill: { flex: 1 },
   pressed: { opacity: 0.65 },
 });
