@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   canonicalJson,
+  DRONE_CONTROL_CAPABILITY,
   isGranted,
   parsePairingPayload,
   PROVIDER_CREDENTIALS_CAPABILITY,
@@ -36,6 +37,30 @@ describe('device protocol', () => {
         'groq.export',
       ),
     ).toBe(true);
+  });
+
+  test('advertises pull request reads and writes as separate permissions', () => {
+    expect(DRONE_CONTROL_CAPABILITY.operations).toEqual(
+      expect.arrayContaining([
+        'repo.pull-requests.read',
+        'repo.pull-requests.merge',
+        'repo.pull-requests.close',
+      ]),
+    );
+    expect(
+      isGranted(
+        [
+          {
+            capability: 'drone-control',
+            version: 1,
+            operations: ['repo.pull-requests.read'],
+          },
+        ],
+        'drone-control',
+        1,
+        'repo.pull-requests.merge',
+      ),
+    ).toBe(false);
   });
 
   test('public pairing endpoints require a safe HTTPS origin', () => {

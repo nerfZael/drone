@@ -47,6 +47,7 @@ import {
   type MobileDroneSidebarOrder,
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
+import { useDroneLinkedPullRequests } from '../drones/use-drone-linked-pull-requests';
 
 const APP_HEADER_HEIGHT = 58;
 
@@ -552,6 +553,11 @@ export function DronesScreen({
     () => mobileDroneTurnsToAssistantMessages(turns),
     [turns],
   );
+  const linkedPullRequests = useDroneLinkedPullRequests({
+    targetDeviceId: targetId,
+    droneId: selected?.id ?? '',
+    messages: transcriptMessages,
+  });
   const chatLoading = busy === 'chats' || busy === 'chat' || busy === 'create-chat';
   const latestMessageScroll = useLatestMessageScroll(
     selected ? `${selected.id}:${chatName}` : '',
@@ -801,6 +807,7 @@ export function DronesScreen({
                 emptyTitle="This drone chat is ready."
                 emptyBody="Send a prompt to start the conversation."
                 assistantLabel="Agent"
+                linkedPullRequests={linkedPullRequests}
               />
             </ScrollView>
             <AssistantComposer

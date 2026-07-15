@@ -266,4 +266,77 @@ describe('device mesh drone summaries', () => {
       globalThis.fetch = originalFetch;
     }
   });
+
+  test('forwards permission-scoped pull request reads and actions', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string; body: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      requests.push({
+        url: String(input),
+        method: String(init?.method ?? 'GET'),
+        body: String(init?.body ?? ''),
+      });
+      const url = String(input);
+      const body = url.endsWith('/merge')
+        ? { ok: true, number: 596, merged: true }
+        : url.endsWith('/close')
+          ? { ok: true, number: 596, state: 'closed' }
+          : { ok: true, github: { owner: 'nerfzael', repo: 'drone' }, pullRequests: [] };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await capability.invoke('repo.pull-requests.read', {
+        droneId: 'drone one',
+        state: 'all',
+      });
+      await capability.invoke('repo.pull-requests.merge', {
+        droneId: 'drone one',
+        pullNumber: 596,
+        method: 'squash',
+      });
+      await capability.invoke('repo.pull-requests.close', {
+        droneId: 'drone one',
+        pullNumber: 596,
+      });
+
+      expect(requests).toEqual([
+        {
+          url: 'http://127.0.0.1:7777/api/drones/drone%20one/repo/pull-requests?state=all',
+          method: 'GET',
+          body: '',
+        },
+        {
+          url: 'http://127.0.0.1:7777/api/drones/drone%20one/repo/pull-requests/596/merge',
+          method: 'POST',
+          body: '{"method":"squash"}',
+        },
+        {
+          url: 'http://127.0.0.1:7777/api/drones/drone%20one/repo/pull-requests/596/close',
+          method: 'POST',
+          body: '{}',
+        },
+      ]);
+      await expect(
+        capability.invoke('repo.pull-requests.merge', {
+          droneId: 'drone one',
+          pullNumber: 0,
+        }),
+      ).rejects.toThrow('pullNumber must be a positive integer');
+      await expect(
+        capability.invoke('repo.pull-requests.close', {
+          droneId: 'drone one',
+          pullNumber: true,
+        }),
+      ).rejects.toThrow('pullNumber must be a positive integer');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
 });

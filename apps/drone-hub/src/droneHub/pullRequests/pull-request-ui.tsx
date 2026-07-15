@@ -1,4 +1,9 @@
 import React from 'react';
+import {
+  githubPullRequestForceMergeReason,
+  githubPullRequestMergeBlockedReason,
+  githubPullRequestStatusBadges,
+} from '@drone/assistant-chat';
 import type { RepoPullRequestChangeEntry, RepoPullRequestSummary } from '../types';
 
 export function formatTimestamp(iso: string): string {
@@ -51,74 +56,18 @@ export function MetaChip({
   );
 }
 
-function pullRequestStatusBadges(pr: RepoPullRequestSummary): Array<{ key: string; label: string; className: string }> {
-  const out: Array<{ key: string; label: string; className: string }> = [];
-  if (pr.draft) {
-    out.push({
-      key: 'draft',
-      label: 'Draft',
-      className: 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
-    });
-  }
-  if (pr.checksState === 'failing') {
-    out.push({
-      key: 'checks_failing',
-      label: 'Checks failing',
-      className: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
-    });
-  } else if (pr.checksState === 'pending') {
-    out.push({
-      key: 'checks_pending',
-      label: 'Checks pending',
-      className: 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
-    });
-  } else if (pr.checksState === 'success') {
-    out.push({
-      key: 'checks_success',
-      label: 'Checks passed',
-      className: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
-    });
-  }
-  if (pr.reviewState === 'approved') {
-    out.push({
-      key: 'approved',
-      label: 'Approved',
-      className: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
-    });
-  } else if (pr.reviewState === 'changes_requested') {
-    out.push({
-      key: 'changes_requested',
-      label: 'Changes requested',
-      className: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
-    });
-  } else if (pr.reviewState === 'review_required') {
-    out.push({
-      key: 'review_required',
-      label: 'Review required',
-      className: 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
-    });
-  }
-  if (pr.hasMergeConflicts) {
-    out.push({
-      key: 'merge_conflict',
-      label: 'Merge conflict',
-      className: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
-    });
-  }
-  return out;
-}
+const pullRequestBadgeClassNames = {
+  danger: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
+  success: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
+  warning: 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
+} as const;
 
 export function mergeBlockedReason(pr: RepoPullRequestSummary): string | null {
-  if (pr.hasMergeConflicts) return 'merge conflicts detected';
-  if (pr.draft) return 'pull request is in draft state';
-  if (pr.reviewState === 'changes_requested') return 'review has changes requested';
-  return null;
+  return githubPullRequestMergeBlockedReason(pr);
 }
 
 export function forceMergeReason(pr: RepoPullRequestSummary): string | null {
-  if (pr.checksState === 'failing') return 'checks are failing';
-  if (pr.checksState === 'pending') return 'checks are still pending';
-  return null;
+  return githubPullRequestForceMergeReason(pr);
 }
 
 export function PullRequestStatusBadgeStrip({
@@ -130,7 +79,7 @@ export function PullRequestStatusBadgeStrip({
   limit?: number;
   compact?: boolean;
 }) {
-  const allBadges = pullRequestStatusBadges(pullRequest);
+  const allBadges = githubPullRequestStatusBadges(pullRequest);
   const badges = typeof limit === 'number' ? allBadges.slice(0, Math.max(1, Math.floor(limit))) : allBadges;
   if (badges.length === 0) return null;
   return (
@@ -140,7 +89,7 @@ export function PullRequestStatusBadgeStrip({
           key={`pr-badge-${pullRequest.number}-${badge.key}`}
           className={`inline-flex items-center rounded border py-[1px] ${
             compact ? 'px-1 text-[9px] leading-none' : 'px-1.5 text-[10px]'
-          } ${badge.className}`}
+          } ${pullRequestBadgeClassNames[badge.tone]}`}
           title={badge.label}
         >
           {badge.label}

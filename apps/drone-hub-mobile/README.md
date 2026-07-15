@@ -65,6 +65,15 @@ Cross-device assistant thread lists refresh whenever their tab opens. While conn
 thread-change notifications travel over the existing authenticated mesh WebSocket and trigger a
 debounced refresh of the list and the open transcript.
 
+Drone chat messages detect linked GitHub pull requests and can show their state, checks, review,
+conflicts, and full branch names. The destination Hub supplies GitHub status using its existing
+credentials; the phone does not store another GitHub token. Grant
+`drone-control/repo.pull-requests.read` to show live status. Grant
+`drone-control/repo.pull-requests.merge` or `drone-control/repo.pull-requests.close` only when that
+phone should be allowed to change pull requests. The title opens the pull request in the Android
+browser. Open requests refresh while the chat is visible (more often while checks are pending), and
+actions refresh the native attachment immediately.
+
 Each assistant location opens its most recently updated thread. Tap the **Assistant** app header to
 open the shared thread drawer. Phone and cross-device transcripts use the same compact message,
 tool-call, image, attachment, composer, and model-selection presentation. Changing a model on a
