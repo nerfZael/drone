@@ -56,9 +56,6 @@ export type BlipHistoryMessage = {
   toolName?: string;
   details?: unknown;
   timestamp?: number;
-  toolCallId?: string;
-  toolName?: string;
-  details?: unknown;
   isError?: boolean;
   errorMessage?: string;
 };
