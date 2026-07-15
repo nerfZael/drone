@@ -71,7 +71,10 @@ describe('DroneLifecycleRepository', () => {
       database.read((connection) =>
         connection.prepare("SELECT version, name FROM hub_schema_migrations WHERE scope = 'drone-lifecycle'").all(),
       ),
-      [{ version: 1, name: 'canonical drone lifecycle tables' }],
+      [
+        { version: 1, name: 'canonical drone lifecycle tables' },
+        { version: 2, name: 'deleted drone lifecycle tombstones' },
+      ],
     );
   });
 
@@ -93,6 +96,41 @@ describe('DroneLifecycleRepository', () => {
     assert.equal(repository.get('legacy').name, 'canonical name');
     assert.equal(repository.get('later').name, 'created by transitional writer');
     assert.equal(repository.get('later').version, 1);
+  });
+
+  test('never resurrects deleted real, pending, or archived identities during legacy backfill', async () => {
+    useTempDataDir('backfill-tombstones');
+    const repository = await getDroneLifecycleRepository();
+    const archived = realEntry('archived', {
+      archivedAt: '2026-07-02T00:00:00.000Z',
+      deleteAt: '2026-07-03T00:00:00.000Z',
+      archiveRetention: '1d',
+    });
+    const legacy = {
+      drones: { real: realEntry('real') },
+      pending: { pending: realEntry('pending', { phase: 'draft', draft: true }) },
+      archived: { archived },
+    };
+
+    await repository.backfillLegacyInsertOnly(legacy);
+    await repository.delete('real', 'real');
+    await repository.delete('pending', 'pending');
+    await repository.delete('archived', 'archived');
+    await repository.backfillLegacyInsertOnly(legacy);
+
+    assert.equal(repository.get('real'), null);
+    assert.equal(repository.get('pending'), null);
+    assert.equal(repository.get('archived'), null);
+    assert.deepEqual(
+      requireHubDatabase().read((connection) => connection.prepare(`
+        SELECT drone_id, prior_state FROM hub_drone_lifecycle_tombstones ORDER BY drone_id
+      `).all()),
+      [
+        { drone_id: 'archived', prior_state: 'archived' },
+        { drone_id: 'pending', prior_state: 'pending' },
+        { drone_id: 'real', prior_state: 'real' },
+      ],
+    );
   });
 
   test('serializes concurrent patches, rolls failures back, and keeps the queue usable', async () => {

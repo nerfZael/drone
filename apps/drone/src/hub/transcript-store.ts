@@ -947,6 +947,16 @@ export class ChatTranscriptRepository {
       connection.prepare(`INSERT OR IGNORE INTO canonical_drone_chat_tombstones (
         drone_id, deleted_at, reason
       ) VALUES (?, ?, 'drone-deleted')`).run(opts.droneId, new Date().toISOString());
+      if (lifecycle) {
+        connection.prepare(`
+          INSERT INTO hub_drone_lifecycle_tombstones (drone_id, prior_state, deleted_at, reason)
+          VALUES (?, ?, ?, 'permanent-delete')
+          ON CONFLICT(drone_id) DO UPDATE SET
+            prior_state = excluded.prior_state,
+            deleted_at = excluded.deleted_at,
+            reason = excluded.reason
+        `).run(opts.droneId, opts.lifecycleState, new Date().toISOString());
+      }
       connection.prepare('DELETE FROM prompts WHERE drone_id = ?').run(opts.droneId);
       connection.prepare('DELETE FROM canonical_chats WHERE drone_id = ?').run(opts.droneId);
       connection.prepare('DELETE FROM canonical_archived_chats WHERE drone_id = ?').run(opts.droneId);

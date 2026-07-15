@@ -6,12 +6,14 @@ const { afterEach, test } = require('node:test');
 
 const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
+const { loadRegistry, saveRegistry } = require('../../dist/host/registry.js');
 const {
   getPromptQueueRepository,
   resetPromptQueueRepositoryForTests,
 } = require('../../dist/host/prompt-queue-repository.js');
 const { permanentlyDeleteCanonicalDrone } = require('../../dist/hub/drone-deletion-service.js');
 const {
+  deleteCanonicalDroneLifecycle,
   getCanonicalDroneLifecycle,
   upsertCanonicalDroneLifecycle,
 } = require('../../dist/hub/drone-lifecycle-service.js');
@@ -94,10 +96,51 @@ afterEach(async () => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
+test('deleting a pending draft prevents its stale startup prompt from resurrecting the drone', async () => {
+  tempDataDir('pending-draft');
+  const droneId = 'delete-pending-draft';
+  const at = '2026-07-10T09:00:00.000Z';
+  await saveRegistry({
+    version: 2,
+    drones: {},
+    pending: {
+      [droneId]: {
+        id: droneId,
+        name: 'stale-draft',
+        runtime: 'container',
+        phase: 'draft',
+        draft: true,
+        startupQueuedPrompts: [{ id: 'startup-1', chatName: 'default', at, prompt: 'start', state: 'queued' }],
+      },
+    },
+  });
+  assert.equal((await getCanonicalDroneLifecycle(droneId))?.state, 'pending');
+
+  const deleted = await deleteCanonicalDroneLifecycle(droneId, 'pending');
+  assert.equal(deleted?.state, 'pending');
+  assert.equal(countRows('hub_drone_lifecycle_tombstones', droneId), 1);
+  assert.equal((await loadRegistry()).pending?.[droneId], undefined);
+  assert.equal(await getCanonicalDroneLifecycle(droneId), null);
+  assert.equal(countEvents('drone.lifecycle.deleted', droneId), 1);
+});
+
 test('permanent deletion atomically clears every chat aggregate and blocks stale legacy resurrection', async () => {
   tempDataDir('complete');
   const droneId = 'delete-complete';
-  await seedLifecycle('real', droneId);
+  await saveRegistry({
+    version: 2,
+    drones: {
+      [droneId]: {
+        id: droneId,
+        name: droneId,
+        runtime: 'container',
+        containerName: `${droneId}-container`,
+        chats: { default: chat('stale registry chat') },
+      },
+    },
+    pending: {},
+  });
+  assert.equal((await getCanonicalDroneLifecycle(droneId))?.state, 'real');
 
   await upsertChatInStore({
     droneId,
@@ -150,6 +193,8 @@ test('permanent deletion atomically clears every chat aggregate and blocks stale
     'prompts',
   ]) assert.equal(countRows(table, droneId), 0, `${table} should be empty`);
   assert.equal(countRows('canonical_drone_chat_tombstones', droneId), 1);
+  assert.equal(countRows('hub_drone_lifecycle_tombstones', droneId), 1);
+  assert.equal((await loadRegistry()).drones?.[droneId], undefined);
   assert.equal(await getCanonicalDroneLifecycle(droneId), null);
   assert.equal(countEvents('drone.chats.deleted', droneId), 1);
   assert.equal(countEvents('drone.lifecycle.deleted', droneId), 1);
@@ -227,6 +272,7 @@ test('a cleanup failure rolls back lifecycle, chats, prompts, tombstone, and out
   assert.equal(countRows('canonical_chats', droneId), 1);
   assert.equal(countRows('prompts', droneId), 1);
   assert.equal(countRows('canonical_drone_chat_tombstones', droneId), 0);
+  assert.equal(countRows('hub_drone_lifecycle_tombstones', droneId), 0);
   assert.equal(
     requireHubDatabase().read((connection) =>
       Number(connection.prepare('SELECT COUNT(*) AS count FROM hub_outbox').get().count)),
@@ -260,4 +306,5 @@ test('permanent archived-drone deletion uses the same canonical cleanup boundary
   assert.deepEqual(listChatsFromStore({ droneId }).chats, []);
   assert.deepEqual(listArchivedChatsFromStore({ droneId }).archivedChats, []);
   assert.equal(countRows('canonical_drone_chat_tombstones', droneId), 1);
+  assert.equal(countRows('hub_drone_lifecycle_tombstones', droneId), 1);
 });

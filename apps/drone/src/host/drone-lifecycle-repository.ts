@@ -114,6 +114,20 @@ const LIFECYCLE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: 'deleted drone lifecycle tombstones',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE hub_drone_lifecycle_tombstones (
+          drone_id TEXT NOT NULL PRIMARY KEY,
+          prior_state TEXT NOT NULL CHECK (prior_state IN ('real', 'pending', 'archived')),
+          deleted_at TEXT NOT NULL,
+          reason TEXT NOT NULL
+        );
+      `);
+    },
+  },
 ];
 
 const TABLES: Record<CanonicalDroneLifecycleState, string> = {
@@ -188,6 +202,27 @@ function selectById(
 
 function selectAnyById(connection: HubDatabaseConnection, id: string): CanonicalDroneLifecycleRecord | null {
   return selectById(connection, 'real', id) ?? selectById(connection, 'pending', id) ?? selectById(connection, 'archived', id);
+}
+
+function hasLifecycleTombstone(connection: HubDatabaseConnection, id: string): boolean {
+  return Boolean(connection.prepare(
+    'SELECT 1 FROM hub_drone_lifecycle_tombstones WHERE drone_id = ?',
+  ).get(id));
+}
+
+function writeLifecycleTombstone(
+  connection: HubDatabaseConnection,
+  record: CanonicalDroneLifecycleRecord,
+  reason: string,
+): void {
+  connection.prepare(`
+    INSERT INTO hub_drone_lifecycle_tombstones (drone_id, prior_state, deleted_at, reason)
+    VALUES (?, ?, ?, ?)
+    ON CONFLICT(drone_id) DO UPDATE SET
+      prior_state = excluded.prior_state,
+      deleted_at = excluded.deleted_at,
+      reason = excluded.reason
+  `).run(record.id, record.state, new Date().toISOString(), reason);
 }
 
 function nextVersion(connection: HubDatabaseConnection, id: string): number {
@@ -293,21 +328,21 @@ export class DroneLifecycleRepository {
       let inserted = false;
       for (const [key, entry] of Object.entries(registryRaw?.drones ?? {}) as Array<[string, any]>) {
         const id = normalizeId(String(entry?.id ?? key));
-        if (!selectAnyById(connection, id)) {
+        if (!selectAnyById(connection, id) && !hasLifecycleTombstone(connection, id)) {
           writeRecord(connection, 'real', id, entry, now, 1);
           inserted = true;
         }
       }
       for (const [key, entry] of Object.entries(registryRaw?.pending ?? {}) as Array<[string, any]>) {
         const id = normalizeId(String(entry?.id ?? key));
-        if (!selectAnyById(connection, id)) {
+        if (!selectAnyById(connection, id) && !hasLifecycleTombstone(connection, id)) {
           writeRecord(connection, 'pending', id, entry, now, 1);
           inserted = true;
         }
       }
       for (const [key, entry] of Object.entries(registryRaw?.archived ?? {}) as Array<[string, any]>) {
         const id = normalizeId(String(entry?.id ?? key));
-        if (!selectAnyById(connection, id)) {
+        if (!selectAnyById(connection, id) && !hasLifecycleTombstone(connection, id)) {
           writeRecord(connection, 'archived', id, entry, now, 1);
           inserted = true;
         }
@@ -371,6 +406,7 @@ export class DroneLifecycleRepository {
     return this.database.writeTransaction(`delete canonical drone ${id}`, (connection) => {
       const current = state ? selectById(connection, state, id) : selectAnyById(connection, id);
       if (!current) return null;
+      writeLifecycleTombstone(connection, current, 'deleted');
       if (state) connection.prepare(`DELETE FROM ${TABLES[state]} WHERE drone_id = ?`).run(id);
       else for (const table of Object.values(TABLES)) connection.prepare(`DELETE FROM ${table} WHERE drone_id = ?`).run(id);
       return current;
@@ -476,6 +512,7 @@ export class DroneLifecycleRepository {
     return this.database.writeTransaction(`commit ${event.eventType} for drone ${id}`, (connection) => {
       const current = state ? selectById(connection, state, id) : selectAnyById(connection, id);
       if (!current) return null;
+      writeLifecycleTombstone(connection, current, event.eventType);
       if (state) connection.prepare(`DELETE FROM ${TABLES[state]} WHERE drone_id = ?`).run(id);
       else for (const table of Object.values(TABLES)) connection.prepare(`DELETE FROM ${table} WHERE drone_id = ?`).run(id);
       appendHubOutboxEvent(connection, {
@@ -501,6 +538,7 @@ export class DroneLifecycleRepository {
           if (options.ignoreMissing) continue;
           throw new Error(`unknown ${item.state} drone: ${id}`);
         }
+        writeLifecycleTombstone(connection, current, item.event.eventType);
         connection.prepare(`DELETE FROM ${TABLES[item.state]} WHERE drone_id = ?`).run(id);
         appendHubOutboxEvent(connection, {
           ...item.event,
