@@ -52,6 +52,9 @@ export type BlipRuntimeEvent =
 export type BlipHistoryMessage = {
   role: string;
   content: unknown;
+  toolCallId?: string;
+  toolName?: string;
+  details?: unknown;
   timestamp?: number;
   toolCallId?: string;
   toolName?: string;

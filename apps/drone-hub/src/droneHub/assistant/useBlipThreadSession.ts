@@ -176,7 +176,7 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
               content: event.message,
               details: mergeWorkspaceTransferProgress(previous?.details, event.details),
               timestamp: Date.now(),
-            } as BlipHistoryMessage,
+            },
           };
         });
         return;
