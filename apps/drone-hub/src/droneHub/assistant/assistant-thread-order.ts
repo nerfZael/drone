@@ -1,17 +1,15 @@
-export type CreatedAssistantThread = { id: string; createdAt?: string; updatedAt?: string };
+export type CreatedAssistantThread = { id: string; createdAt?: string };
 
 function createdAtMs(thread: CreatedAssistantThread): number {
   const value = Date.parse(String(thread.createdAt ?? ''));
   return Number.isFinite(value) ? value : 0;
 }
 
-export function assistantThreadsNewestFirst<T extends CreatedAssistantThread>(threads: T[]): T[] {
+export function assistantThreadsByCreatedAtNewestFirst<T extends CreatedAssistantThread>(
+  threads: T[],
+): T[] {
   return [...threads].sort((left, right) => {
     const createdDifference = createdAtMs(right) - createdAtMs(left);
     return createdDifference || left.id.localeCompare(right.id);
   });
-}
-
-export function latestAssistantThread<T extends CreatedAssistantThread>(threads: T[]): T | null {
-  return assistantThreadsNewestFirst(threads)[0] ?? null;
 }

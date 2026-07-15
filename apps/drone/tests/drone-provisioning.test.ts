@@ -190,6 +190,7 @@ describe('drone provisioning controller', () => {
               chatName: 'ops',
               agent: { kind: 'builtin', id: 'codex' },
               model: 'gpt-5.4',
+              reasoning: 'high',
             },
             startupQueuedPrompts: [
               {
@@ -234,6 +235,7 @@ describe('drone provisioning controller', () => {
       expect(reg?.drones?.['drone-2']?.chats?.ops).toMatchObject({
         agent: { kind: 'builtin', id: 'codex' },
         model: 'gpt-5.4',
+        reasoning: 'high',
       });
       expect(reg?.drones?.['drone-2']?.chats?.ops?.pendingPrompts).toEqual([
         {
@@ -252,6 +254,8 @@ describe('drone provisioning controller', () => {
           agent: { kind: 'builtin', id: 'codex' },
           setModel: true,
           model: 'gpt-5.4',
+          setReasoning: true,
+          reasoning: 'high',
           setAgentSuggestionEnabled: true,
           agentSuggestionEnabled: false,
         },

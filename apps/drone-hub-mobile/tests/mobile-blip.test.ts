@@ -197,6 +197,88 @@ describe('phone Blip session', () => {
     expect(previews.some((preview) => preview.includes('building…'))).toBe(true);
   });
 
+  test('rejects a silent completion after a tool call while retaining the tool transcript', async () => {
+    const thread: LocalAssistantThread = {
+      id: 'mobile_blip_silent_tool',
+      title: 'Silent tool completion',
+      createdAt: '2026-07-15T00:00:00.000Z',
+      updatedAt: '2026-07-15T00:00:00.000Z',
+      model: 'gpt-test',
+      thinkingLevel: 'low',
+      status: 'running',
+      error: null,
+      workspaceTargets: [
+        {
+          targetDeviceId: 'desktop_1',
+          deviceName: 'Desktop',
+          workspaceId: 'project-a',
+          workspaceName: 'Project A',
+          read: true,
+          write: false,
+          execute: false,
+        },
+      ],
+      messages: [],
+    };
+    let modelCall = 0;
+    globalThis.fetch = (async () => {
+      modelCall += 1;
+      return {
+        ok: true,
+        json: async () =>
+          modelCall === 1
+            ? {
+                choices: [
+                  {
+                    finish_reason: 'tool_calls',
+                    message: {
+                      content: null,
+                      tool_calls: [
+                        {
+                          id: 'call_read',
+                          type: 'function',
+                          function: {
+                            name: 'read_file',
+                            arguments: JSON.stringify({ path: 'README.md' }),
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              }
+            : { choices: [{ finish_reason: 'stop', message: { content: null } }] },
+      } as Response;
+    }) as typeof fetch;
+    let latestMessages: any[] = [];
+
+    await expect(
+      runMobileBlip({
+        provider: 'openai',
+        apiKey: 'test-key',
+        codexAuth: null,
+        prompt: 'Read the README',
+        thread,
+        history: [],
+        workspaceRuntime: createWorkspaceToolRuntime(thread, async () => ({ text: 'hello' })),
+        signal: new AbortController().signal,
+        onMessages: async (messages) => {
+          latestMessages = messages;
+        },
+        onStreamingMessages: () => undefined,
+      }),
+    ).rejects.toThrow('without a final response');
+    expect(latestMessages.map((message) => message.role)).toEqual([
+      'user',
+      'assistant',
+      'toolResult',
+      'assistant',
+    ]);
+    expect(latestMessages.find((message) => message.role === 'toolResult')).toMatchObject({
+      toolName: 'read_file',
+    });
+  });
+
   test('automatically compacts a restored mobile transcript through the injected transport', async () => {
     const thread: LocalAssistantThread = {
       id: 'mobile_blip_compaction',

@@ -35,6 +35,22 @@ function textListMap(value: unknown): Record<string, string[]> {
   );
 }
 
+function optionalText(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  return value.trim() || undefined;
+}
+
+function seedAgent(value: unknown): Record<string, string> | undefined {
+  const agent = object(value);
+  const kind = agent.kind === 'builtin' || agent.kind === 'custom' ? agent.kind : '';
+  const id = optionalText(agent.id);
+  if (!kind || !id) return undefined;
+  if (kind === 'builtin') return { kind, id };
+  const label = optionalText(agent.label);
+  const command = optionalText(agent.command);
+  return label && command ? { kind, id, label, command } : undefined;
+}
+
 export function deviceMeshDroneSummary(drone: any) {
   const chats = Array.isArray(drone?.chats)
     ? drone.chats
@@ -74,6 +90,16 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
     async invoke(operation, rawPayload) {
       const payload = object(rawPayload);
       if (operation === 'drones.list') {
+        const createModelAgent = optionalText(payload.createModelAgent);
+        if (createModelAgent) {
+          const runtime = payload.createModelRuntime === 'host' ? 'host' : 'container';
+          const refresh = payload.refreshCreateModels === true ? '&refresh=1' : '';
+          const createModelCatalog = await localHubRequest(
+            access,
+            `/api/model-catalog?agent=${encodeURIComponent(createModelAgent)}&runtime=${runtime}${refresh}`,
+          );
+          return { schemaVersion: 5, createModelCatalog };
+        }
         const result = await localHubRequest(access, '/api/drones');
         const [reposResult, groupsResult, preferencesResult] = await Promise.all([
           localHubRequest(access, '/api/repos').catch(() => ({})),
@@ -85,8 +111,48 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
           : [];
         const preferences = object(preferencesResult.uiPreferences);
         const groups: unknown[] = Array.isArray(groupsResult.groups) ? groupsResult.groups : [];
+        const repoPaths = textList(
+          Array.isArray(reposResult.repos)
+            ? reposResult.repos.map((repo: unknown) => object(repo).path)
+            : [],
+        );
+        const createRepos =
+          payload.includeCreateOptions === true
+            ? await Promise.all(
+                repoPaths.map(async (path) => {
+                  try {
+                    const result = await localHubRequest(
+                      access,
+                      `/api/repos/branches?repoPath=${encodeURIComponent(path)}`,
+                    );
+                    return {
+                      path,
+                      hostBranch: optionalText(result.hostBranch) ?? null,
+                      remoteBranches: Array.isArray(result.remoteBranches)
+                        ? result.remoteBranches.map((branch: unknown) => {
+                            const entry = object(branch);
+                            return {
+                              name: optionalText(entry.name) ?? '',
+                              remote: optionalText(entry.remote) ?? '',
+                              branch: optionalText(entry.branch) ?? '',
+                            };
+                          })
+                        : [],
+                      branchesError: null,
+                    };
+                  } catch (error: any) {
+                    return {
+                      path,
+                      hostBranch: null,
+                      remoteBranches: [],
+                      branchesError: String(error?.message ?? error ?? 'Failed to load branches.'),
+                    };
+                  }
+                }),
+              )
+            : [];
         return {
-          schemaVersion: 3,
+          schemaVersion: 4,
           drones,
           repoPathByDroneId: Object.fromEntries(
             drones
@@ -94,11 +160,7 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
               .filter(([droneId, repoPath]) => Boolean(droneId && repoPath)),
           ),
           sidebar: {
-            registeredRepoPaths: textList(
-              Array.isArray(reposResult.repos)
-                ? reposResult.repos.map((repo: unknown) => object(repo).path)
-                : [],
-            ),
+            registeredRepoPaths: repoPaths,
             groupCreatedAtByName: Object.fromEntries(
               groups
                 .map((group: unknown) => {
@@ -113,16 +175,45 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
             sidebarDroneOrderByGroup: textListMap(preferences.sidebarDroneOrderByGroup),
             sidebarNodeOrderByParent: textListMap(preferences.sidebarNodeOrderByParent),
           },
+          ...(payload.includeCreateOptions === true
+            ? { createOptions: { repos: createRepos } }
+            : {}),
         };
       }
 
       if (operation === 'drone.create.container' || operation === 'drone.create.host') {
+        const agent = seedAgent(payload.seedAgent);
+        const repoBranchSource = payload.repoBranchSource === 'remote' ? 'remote' : 'host';
         const createPayload = {
-          name: typeof payload.name === 'string' ? payload.name.trim() : undefined,
-          repoPath: typeof payload.repoPath === 'string' ? payload.repoPath.trim() : undefined,
-          seedPrompt:
-            typeof payload.seedPrompt === 'string' ? payload.seedPrompt.trim() : undefined,
+          name: optionalText(payload.name),
+          group: optionalText(payload.group),
+          repoPath: optionalText(payload.repoPath),
           runtime: operation.endsWith('.host') ? 'host' : 'container',
+          ...(payload.draft === true ? { draft: true } : {}),
+          ...(typeof payload.persistVolume === 'boolean'
+            ? { persistVolume: payload.persistVolume }
+            : {}),
+          pullHostBranchBeforeCreate: payload.pullHostBranchBeforeCreate === true,
+          repoBranchSource,
+          ...(repoBranchSource === 'remote'
+            ? { remoteBranch: optionalText(payload.remoteBranch) }
+            : {}),
+          ...(agent ? { seedAgent: agent, seedChat: 'default' } : {}),
+          ...(optionalText(payload.seedModel)
+            ? { seedModel: optionalText(payload.seedModel) }
+            : {}),
+          ...(optionalText(payload.seedReasoning)
+            ? { seedReasoning: optionalText(payload.seedReasoning) }
+            : {}),
+          ...(payload.seedAgentPermissionMode === 'read-only'
+            ? { seedAgentPermissionMode: 'read-only' }
+            : {}),
+          ...(optionalText(payload.seedPrompt)
+            ? {
+                seedPrompt: optionalText(payload.seedPrompt),
+                seedSubmittedAt: optionalText(payload.seedSubmittedAt) ?? new Date().toISOString(),
+              }
+            : {}),
         };
         return await localHubRequest(access, '/api/drones', {
           method: 'POST',
@@ -132,9 +223,26 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
 
       const droneId = requiredText(payload.droneId, 'droneId');
       const encodedDrone = encodeURIComponent(droneId);
+      if (operation === 'drone.delete') {
+        await localHubRequest(access, `/api/drones/${encodedDrone}`, { method: 'DELETE' });
+        return { deleted: true, droneId };
+      }
       if (operation === 'chats.list') {
         const result = await localHubRequest(access, `/api/drones/${encodedDrone}/chats`);
         return { droneId, chats: result.chats ?? [] };
+      }
+      if (operation === 'chat.create') {
+        const chatName = requiredText(payload.name ?? payload.chatName, 'chatName');
+        const copyFrom = optionalText(payload.copyFrom ?? payload.copyFromChat);
+        const result = await localHubRequest(access, `/api/drones/${encodedDrone}/chats`, {
+          method: 'POST',
+          body: JSON.stringify({ name: chatName, ...(copyFrom ? { copyFrom } : {}) }),
+        });
+        return {
+          droneId,
+          chatName: optionalText(result.chat) ?? chatName,
+          chats: Array.isArray(result.chats) ? result.chats : [],
+        };
       }
 
       const chatName = requiredText(payload.chatName ?? 'default', 'chatName');
@@ -147,6 +255,9 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
           turns: result.turns ?? [],
           agent: result.agent ?? null,
           model: result.model ?? null,
+          reasoning: result.reasoning ?? null,
+          agentPermissionMode:
+            result.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
         };
       }
       if (operation === 'chat.models') {

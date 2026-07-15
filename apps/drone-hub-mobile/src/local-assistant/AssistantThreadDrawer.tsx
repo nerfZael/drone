@@ -42,6 +42,7 @@ export type DrawerAssistantThread = {
   id: string;
   title: string;
   status: string;
+  createdAt?: string;
   updatedAt?: string;
   model?: string;
 };
@@ -83,6 +84,7 @@ export type AssistantThreadDrawerProps = {
   onClose(): void;
   onSelect(threadId: string): void;
   onCreate(): void;
+  onCreateDrone?(): void;
   onSelectDroneChat?(droneId: string, chatName: string): void;
   onSelectDevice?(deviceId: string): void;
 };
@@ -340,6 +342,11 @@ function DrawerDroneNode({
           pressed && styles.pressed,
         ]}
       >
+        <QuadDroneIcon
+          color={selected ? colors.accent : colors.muted}
+          size={14}
+          strokeWidth={1.7}
+        />
         <View style={styles.switchItemCopy}>
           <View style={styles.switchItemTitleRow}>
             <Text
@@ -389,7 +396,7 @@ function DrawerDroneNode({
         </View>
       ) : null}
       {node.children.length > 0 ? (
-        <View style={[styles.droneChildren, { marginLeft: 18 + depth * 16 }]}>
+        <View style={styles.droneChildren}>
           {node.children.map((child) => (
             <DrawerDroneNode
               key={child.drone.id}
@@ -429,12 +436,16 @@ function DrawerDroneFolder({
         onPress={() => setCollapsed((current) => !current)}
         style={({ pressed }) => [
           styles.groupRow,
-          { paddingLeft: 20 + depth * 14 },
+          { paddingLeft: 8 + depth * 18 },
           pressed && styles.pressed,
         ]}
       >
-        <Chevron color={colors.muted} size={13} strokeWidth={2} />
-        <Folder color={colors.muted} size={14} strokeWidth={1.8} />
+        <View style={styles.groupIcon}>
+          <Folder color={colors.muted} size={15} strokeWidth={1.8} />
+          <View style={styles.groupChevron}>
+            <Chevron color={colors.muted} size={10} strokeWidth={2.3} />
+          </View>
+        </View>
         <Text numberOfLines={1} style={styles.groupName}>
           {folder.label}
         </Text>
@@ -524,6 +535,7 @@ function AssistantThreadDrawerView({
   onClose,
   onSelect,
   onCreate,
+  onCreateDrone,
   onSelectDroneChat,
   onSelectDevice,
 }: AssistantThreadDrawerProps) {
@@ -832,9 +844,14 @@ function AssistantThreadDrawerView({
                   <Pressable
                     accessibilityRole="button"
                     accessibilityLabel="Create new drone"
-                    accessibilityHint="Coming soon"
-                    onPress={() => {}}
-                    style={({ pressed }) => [styles.create, pressed && styles.pressed]}
+                    accessibilityState={{ disabled: !onCreateDrone }}
+                    disabled={!onCreateDrone}
+                    onPress={onCreateDrone}
+                    style={({ pressed }) => [
+                      styles.create,
+                      !onCreateDrone && styles.createDisabled,
+                      pressed && styles.pressed,
+                    ]}
                   >
                     <Plus color={colors.accent} size={19} strokeWidth={2.2} />
                   </Pressable>
@@ -1205,14 +1222,31 @@ const styles = StyleSheet.create({
     marginTop: 3,
   },
   switchStateDot: { width: 6, height: 6, borderRadius: 3 },
-  droneChildren: { borderLeftWidth: 1, borderLeftColor: colors.border },
+  droneChildren: {},
   groupRow: {
     minHeight: 34,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     paddingRight: 8,
     borderRadius: 3,
+  },
+  groupIcon: {
+    width: 20,
+    height: 20,
+    alignItems: 'flex-end',
+    justifyContent: 'center',
+  },
+  groupChevron: {
+    position: 'absolute',
+    left: -1,
+    top: 5,
+    width: 10,
+    height: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 5,
+    backgroundColor: colors.background,
   },
   groupName: { color: colors.muted, fontSize: 11, fontWeight: '800', flex: 1 },
   chatList: { gap: 1 },

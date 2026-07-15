@@ -5506,6 +5506,8 @@ type DiscoveredModelOption = {
   label: string;
   isDefault?: boolean;
   isCurrent?: boolean;
+  reasoningLevels?: string[];
+  defaultReasoningLevel?: string;
 };
 
 type TranscriptTurn = {
@@ -6914,6 +6916,14 @@ const chatModelDiscoveryCache = new Map<
     error?: string;
   }
 >();
+const latestChatModelDiscoveryByAgent = new Map<
+  string,
+  {
+    atMs: number;
+    models: DiscoveredModelOption[];
+    source: 'live' | 'cache';
+  }
+>();
 const cliModelFlagSupportCache = new Map<string, { atMs: number; supported: boolean }>();
 const PULL_PREVIEW_HOST_MERGE_CACHE_TTL_MS = 25_000;
 const pullPreviewHostMergeCache = new Map<
@@ -7076,12 +7086,68 @@ function modelDiscoveryCacheKey(opts: {
   return `${opts.droneName}::${opts.chatName}::${opts.agent}`;
 }
 
+function normalizeDiscoveredReasoningLevels(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  const levels: string[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    const value =
+      typeof item === 'string'
+        ? item
+        : item && typeof item === 'object'
+          ? ((item as any).reasoning_effort ??
+            (item as any).reasoningEffort ??
+            (item as any).effort ??
+            (item as any).level ??
+            (item as any).name)
+          : '';
+    const level = normalizeChatReasoning(value);
+    if (!level || seen.has(level)) continue;
+    seen.add(level);
+    levels.push(level);
+  }
+  return levels;
+}
+
+function reasoningMetadataFromDiscoveredModel(value: any): {
+  reasoningLevels?: string[];
+  defaultReasoningLevel?: string;
+} {
+  const reasoningLevels = normalizeDiscoveredReasoningLevels(
+    value?.reasoningLevels ??
+      value?.reasoning_levels ??
+      value?.supportedReasoningLevels ??
+      value?.supported_reasoning_levels ??
+      value?.supportedReasoningEfforts ??
+      value?.supported_reasoning_efforts,
+  );
+  const defaultReasoningLevel = normalizeChatReasoning(
+    value?.defaultReasoningLevel ??
+      value?.default_reasoning_level ??
+      value?.defaultReasoningEffort ??
+      value?.default_reasoning_effort,
+  );
+  return {
+    ...(reasoningLevels.length > 0 ? { reasoningLevels } : {}),
+    ...(defaultReasoningLevel ? { defaultReasoningLevel } : {}),
+  };
+}
+
 function parseDiscoveredModelsFromOutput(raw: string): DiscoveredModelOption[] {
   const text = stripAnsiFromCliOutput(raw);
   const out: DiscoveredModelOption[] = [];
   const seen = new Set<string>();
 
-  const add = (idRaw: any, labelRaw?: any, opts?: { isDefault?: boolean; isCurrent?: boolean }) => {
+  const add = (
+    idRaw: any,
+    labelRaw?: any,
+    opts?: {
+      isDefault?: boolean;
+      isCurrent?: boolean;
+      reasoningLevels?: string[];
+      defaultReasoningLevel?: string;
+    },
+  ) => {
     const id = String(idRaw ?? '').trim();
     if (!id) return;
     if (id.length > CHAT_MODEL_MAX_LEN) return;
@@ -7093,6 +7159,10 @@ function parseDiscoveredModelsFromOutput(raw: string): DiscoveredModelOption[] {
       label,
       ...(opts?.isDefault ? { isDefault: true } : {}),
       ...(opts?.isCurrent ? { isCurrent: true } : {}),
+      ...(opts?.reasoningLevels?.length ? { reasoningLevels: opts.reasoningLevels } : {}),
+      ...(opts?.defaultReasoningLevel
+        ? { defaultReasoningLevel: opts.defaultReasoningLevel }
+        : {}),
     });
   };
 
@@ -7118,6 +7188,7 @@ function parseDiscoveredModelsFromOutput(raw: string): DiscoveredModelOption[] {
     add(id, label, {
       isDefault: Boolean((value as any).default),
       isCurrent: Boolean((value as any).current),
+      ...reasoningMetadataFromDiscoveredModel(value),
     });
     const nested = (value as any).models ?? (value as any).items ?? (value as any).data ?? null;
     if (nested) addFromUnknown(nested);
@@ -7184,7 +7255,16 @@ function parseDiscoveredModelsFromOutput(raw: string): DiscoveredModelOption[] {
 function parseCodexModelsCache(raw: string): DiscoveredModelOption[] {
   const out: DiscoveredModelOption[] = [];
   const seen = new Set<string>();
-  const add = (idRaw: any, labelRaw?: any, opts?: { isDefault?: boolean; isCurrent?: boolean }) => {
+  const add = (
+    idRaw: any,
+    labelRaw?: any,
+    opts?: {
+      isDefault?: boolean;
+      isCurrent?: boolean;
+      reasoningLevels?: string[];
+      defaultReasoningLevel?: string;
+    },
+  ) => {
     const id = String(idRaw ?? '').trim();
     if (!id || seen.has(id) || id.length > CHAT_MODEL_MAX_LEN) return;
     seen.add(id);
@@ -7194,6 +7274,10 @@ function parseCodexModelsCache(raw: string): DiscoveredModelOption[] {
       label,
       ...(opts?.isDefault ? { isDefault: true } : {}),
       ...(opts?.isCurrent ? { isCurrent: true } : {}),
+      ...(opts?.reasoningLevels?.length ? { reasoningLevels: opts.reasoningLevels } : {}),
+      ...(opts?.defaultReasoningLevel
+        ? { defaultReasoningLevel: opts.defaultReasoningLevel }
+        : {}),
     });
   };
   try {
@@ -7212,6 +7296,7 @@ function parseCodexModelsCache(raw: string): DiscoveredModelOption[] {
       add(modelId, label, {
         isCurrent: current ? modelId === current : false,
         isDefault: def ? modelId === def : false,
+        ...reasoningMetadataFromDiscoveredModel(m),
       });
     }
   } catch {
@@ -7415,6 +7500,36 @@ async function discoverModelsForBuiltinAgent(opts: {
       : `no model discovery command available for ${opts.agentId}`;
   chatModelDiscoveryCache.set(key, { atMs: now, models: [], error });
   return { models: [], source: 'none', discoveredAt: new Date(now).toISOString(), error };
+}
+
+function modelCatalogCacheKey(runtime: DroneRuntime, agentId: BuiltinAgentId): string {
+  return `${runtime}:${agentId}`;
+}
+
+async function discoverAndRememberModelsForBuiltinAgent(
+  opts: Parameters<typeof discoverModelsForBuiltinAgent>[0],
+): ReturnType<typeof discoverModelsForBuiltinAgent> {
+  const discovered = await discoverModelsForBuiltinAgent(opts);
+  const runtime = opts.runtime ?? 'container';
+  const models = discovered.models.map((model) =>
+    opts.agentId === 'codex' || opts.agentId === 'blip'
+      ? model
+      : {
+          id: model.id,
+          label: model.label,
+          ...(model.isDefault ? { isDefault: true } : {}),
+          ...(model.isCurrent ? { isCurrent: true } : {}),
+        },
+  );
+  if (models.length > 0) {
+    const discoveredAtMs = Date.parse(discovered.discoveredAt);
+    latestChatModelDiscoveryByAgent.set(modelCatalogCacheKey(runtime, opts.agentId), {
+      atMs: Number.isFinite(discoveredAtMs) ? discoveredAtMs : Date.now(),
+      models,
+      source: discovered.source === 'cache' ? 'cache' : 'live',
+    });
+  }
+  return { ...discovered, models };
 }
 
 async function readCodexLastTurnRuntime(opts: {
@@ -7630,6 +7745,7 @@ async function sendPromptToChat(opts: {
     const { d: dWithChat, chat } = await getChatEntry({ droneId, chatName: normalizedChat });
     const agent = inferChatAgent(chat, dWithChat);
     const chatModel = normalizeChatModel((chat as any)?.model);
+    const chatReasoning = normalizeChatReasoning((chat as any)?.reasoning);
     const agentPermissionMode = normalizeAgentPermissionMode((chat as any)?.agentPermissionMode);
     if (agentPermissionMode === 'read-only') assertReadOnlySupportedForAgent(agent);
     const managedEnv = resolveDroneEnvironmentConfig(regLatest, d).resolvedVars;
@@ -7720,6 +7836,9 @@ async function sendPromptToChat(opts: {
 
     if (agent.kind === 'builtin' && agent.id === 'codex') {
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
+      const reasoningArg = chatReasoning
+        ? ` -c ${bashQuote(`model_reasoning_effort="${chatReasoning}"`)}`
+        : '';
       const sandboxArg = agentPermissionMode === 'read-only' ? 'read-only' : 'danger-full-access';
       const existingThreadId = readBuiltinTranscriptSessionId(chat, 'codex');
       if (!existingThreadId) {
@@ -7729,7 +7848,7 @@ async function sendPromptToChat(opts: {
           ...managedEnvLines,
           `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
           cdCommand,
-          `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never${codexImageArgs} ${bashQuote(promptWithHistory)}`,
+          `codex --ask-for-approval never${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never${codexImageArgs} ${bashQuote(promptWithHistory)}`,
         ].join('\n');
         await enqueueTranscriptPrompt({
           id: opts.id,
@@ -7755,7 +7874,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `codex --ask-for-approval never exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never resume${codexImageArgs} ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
+        `codex --ask-for-approval never${reasoningArg} exec${modelArg} --skip-git-repo-check --sandbox ${sandboxArg} --json --color never resume${codexImageArgs} ${bashQuote(existingThreadId)} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({
         id: opts.id,
@@ -7873,6 +7992,7 @@ async function sendPromptToChat(opts: {
 
     if (agent.kind === 'builtin' && agent.id === 'blip') {
       const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
+      const reasoningArg = chatReasoning ? ` --reasoning ${bashQuote(chatReasoning)}` : '';
       const permissionArgs =
         agentPermissionMode === 'read-only'
           ? '--permission read-only --profile read-only'
@@ -7886,7 +8006,7 @@ async function sendPromptToChat(opts: {
         ...managedEnvLines,
         `mkdir -p ${bashQuote(cwd)} 2>/dev/null || true`,
         cdCommand,
-        `${blipCommand} --jsonl ${permissionArgs}${modelArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
+        `${blipCommand} --jsonl ${permissionArgs}${modelArg}${reasoningArg}${sessionArg} ${bashQuote(promptWithHistory)}`,
       ].join('\n');
       await enqueueTranscriptPrompt({
         id: opts.id,
@@ -12467,6 +12587,7 @@ const { dequeueProvisioning, enqueueProvisioning, enqueueProvisioningForAllPendi
     inferChatAgent,
     isSafePromptId,
     normalizeChatModel,
+    normalizeChatReasoning,
     normalizeChatName,
     normalizeDroneEntryKind,
     normalizeDroneEntryVisibility,
@@ -14402,6 +14523,9 @@ function buildNewChatEntry(opts: {
     ...(opts.sourceChatEntry && normalizeChatModel(opts.sourceChatEntry?.model)
       ? { model: normalizeChatModel(opts.sourceChatEntry?.model) }
       : {}),
+    ...(opts.sourceChatEntry && normalizeChatReasoning(opts.sourceChatEntry?.reasoning)
+      ? { reasoning: normalizeChatReasoning(opts.sourceChatEntry?.reasoning) }
+      : {}),
   };
   if (opts.autoContinueEnabledByDefault && agent.kind === 'builtin') {
     entry.agentMessageAutoContinueEnabled = true;
@@ -15367,6 +15491,8 @@ async function setChatAgentConfig(opts: {
   agent?: ChatAgentConfig;
   setModel?: boolean;
   model?: string | null;
+  setReasoning?: boolean;
+  reasoning?: string | null;
   setAgentPermissionMode?: boolean;
   agentPermissionMode?: AgentPermissionMode;
   setAgentMessageAutoContinueEnabled?: boolean;
@@ -15451,6 +15577,24 @@ async function setChatAgentConfig(opts: {
       if (opts.setModel) {
         if (opts.model) cur.model = opts.model;
         else delete cur.model;
+      }
+      if (opts.setReasoning) {
+        const reasoning = normalizeChatReasoning(opts.reasoning);
+        if (reasoning) {
+          if (
+            effectiveAgent.kind !== 'builtin' ||
+            (effectiveAgent.id !== 'codex' && effectiveAgent.id !== 'blip')
+          ) {
+            const error: Error & { statusCode?: number } = new Error(
+              'reasoning is only supported for Codex and Blip chats',
+            );
+            error.statusCode = 400;
+            throw error;
+          }
+          cur.reasoning = reasoning;
+        } else {
+          delete cur.reasoning;
+        }
       }
       if (opts.setAgentPermissionMode) {
         const mode = normalizeAgentPermissionMode(opts.agentPermissionMode);
@@ -23006,6 +23150,75 @@ export async function startDroneHubApiServer(opts: {
         }
       }
 
+      // GET /api/model-catalog?agent=<builtin>&runtime=<container|host>&refresh=1
+      // Returns the latest model discovery for an agent CLI and can refresh it against an
+      // existing drone without mutating that drone's chat configuration.
+      if (
+        method === 'GET' &&
+        parts.length === 2 &&
+        parts[0] === 'api' &&
+        parts[1] === 'model-catalog'
+      ) {
+        const agentId = normalizeBuiltinAgentId(u.searchParams.get('agent'));
+        const runtime: DroneRuntime =
+          String(u.searchParams.get('runtime') ?? '').trim() === 'host' ? 'host' : 'container';
+        const forceRefresh = parseBoolParam(u.searchParams.get('refresh'), false);
+        if (!agentId) {
+          json(res, 400, { ok: false, error: 'A builtin agent is required.' });
+          return;
+        }
+        const cacheKey = modelCatalogCacheKey(runtime, agentId);
+        const cached = latestChatModelDiscoveryByAgent.get(cacheKey);
+        if (!forceRefresh && cached) {
+          json(res, 200, {
+            ok: true,
+            agent: agentId,
+            runtime,
+            models: cached.models,
+            source: 'cache',
+            discoveredAt: new Date(cached.atMs).toISOString(),
+          });
+          return;
+        }
+        const registry: any = await loadRegistry();
+        const candidate = Object.entries<any>(registry?.drones ?? {}).find(
+          ([, drone]) => droneRuntime(drone) === runtime,
+        );
+        if (!candidate) {
+          json(res, 200, {
+            ok: true,
+            agent: agentId,
+            runtime,
+            models: cached?.models ?? [],
+            source: cached ? 'cache' : 'none',
+            discoveredAt: cached ? new Date(cached.atMs).toISOString() : null,
+            error: `No ${runtime} drone is available for model discovery.`,
+          });
+          return;
+        }
+        const [droneId, drone] = candidate;
+        const discovered = await discoverAndRememberModelsForBuiltinAgent({
+          containerName:
+            String(drone?.containerName ?? drone?.name ?? droneId).trim() || droneId,
+          containerPort: Number(drone?.containerPort ?? 7777),
+          runtime,
+          droneName: droneId,
+          chatName: '__model_catalog__',
+          agentId,
+          forceRefresh,
+        });
+        json(res, 200, {
+          ok: true,
+          agent: agentId,
+          runtime,
+          models: discovered.models,
+          source: discovered.source,
+          discoveredAt: discovered.discoveredAt,
+          ...(discovered.error ? { error: discovered.error } : {}),
+        });
+        return;
+      }
+
       // GET /api/repos
       // Lists repositories registered via `drone repo`.
       if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'repos') {
@@ -24102,6 +24315,19 @@ export async function startDroneHubApiServer(opts: {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
         }
+        const seedReasoning = normalizeChatReasoning(
+          body?.seedReasoning ?? body?.seed?.reasoning,
+        );
+        if (
+          seedReasoning &&
+          !(seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
+        ) {
+          json(res, 400, {
+            ok: false,
+            error: 'reasoning selection is currently supported for Codex and Blip seed agents',
+          });
+          return;
+        }
         if (seedAgentPermissionMode === 'read-only') {
           try {
             if (!seedAgent) throw new Error('read-only mode requires a Codex or Blip seed agent');
@@ -24304,11 +24530,16 @@ export async function startDroneHubApiServer(opts: {
                   ).fleet,
                 }
               : {}),
-            ...(seedPrompt || seedAgent || seedModel || seedAgentPermissionMode === 'read-only'
+            ...(seedPrompt ||
+            seedAgent ||
+            seedModel ||
+            seedReasoning ||
+            seedAgentPermissionMode === 'read-only'
               ? {
                   seed: {
                     chatName: seedChatName,
                     ...(seedModel ? { model: seedModel } : {}),
+                    ...(seedReasoning ? { reasoning: seedReasoning } : {}),
                     ...(seedAgentPermissionMode === 'read-only'
                       ? { agentPermissionMode: seedAgentPermissionMode }
                       : {}),
@@ -24651,6 +24882,24 @@ export async function startDroneHubApiServer(opts: {
                 rejected.push({ name, error: e?.message ?? String(e), status: 400 });
                 continue;
               }
+              const seedReasoning = normalizeChatReasoning(
+                raw?.seedReasoning ?? raw?.seed?.reasoning,
+              );
+              if (
+                seedReasoning &&
+                !(
+                  seedAgent?.kind === 'builtin' &&
+                  (seedAgent.id === 'codex' || seedAgent.id === 'blip')
+                )
+              ) {
+                rejected.push({
+                  name,
+                  error:
+                    'reasoning selection is currently supported for Codex and Blip seed agents',
+                  status: 400,
+                });
+                continue;
+              }
               if (seedAgentPermissionMode === 'read-only') {
                 try {
                   if (!seedAgent)
@@ -24816,11 +25065,16 @@ export async function startDroneHubApiServer(opts: {
                       ).fleet,
                     }
                   : {}),
-                ...(seedPrompt || seedAgent || seedModel || seedAgentPermissionMode === 'read-only'
+                ...(seedPrompt ||
+                seedAgent ||
+                seedModel ||
+                seedReasoning ||
+                seedAgentPermissionMode === 'read-only'
                   ? {
                       seed: {
                         chatName: seedChatName,
                         ...(seedModel ? { model: seedModel } : {}),
+                        ...(seedReasoning ? { reasoning: seedReasoning } : {}),
                         ...(seedAgentPermissionMode === 'read-only'
                           ? { agentPermissionMode: seedAgentPermissionMode }
                           : {}),
@@ -34066,7 +34320,7 @@ export async function startDroneHubApiServer(opts: {
             });
             return;
           }
-          const discovered = await discoverModelsForBuiltinAgent({
+          const discovered = await discoverAndRememberModelsForBuiltinAgent({
             containerName:
               String((d as any)?.containerName ?? (d as any)?.name ?? droneId).trim() || droneId,
             containerPort: Number((d as any)?.containerPort ?? 7777),
@@ -34633,6 +34887,7 @@ export async function startDroneHubApiServer(opts: {
             chat: chatName,
             agent,
             model: (chatEntry as any).model ?? null,
+            reasoning: normalizeChatReasoning((chatEntry as any).reasoning),
             agentPermissionMode: normalizeAgentPermissionMode(
               (chatEntry as any).agentPermissionMode,
             ),

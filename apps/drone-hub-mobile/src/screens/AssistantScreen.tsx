@@ -1,7 +1,7 @@
 import React from 'react';
 import { Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { latestThinkingText, type AssistantMessage } from '@drone/assistant-chat';
-import { Card, ErrorBanner, textStyles } from '../components/Ui';
+import { Card, ConfirmDialog, ErrorBanner, textStyles } from '../components/Ui';
 import {
   AssistantThreadDrawer,
   type AppDrawerNavigationItem,
@@ -24,6 +24,7 @@ type Thread = {
   id: string;
   title: string;
   status: string;
+  createdAt?: string;
   updatedAt?: string;
   model?: string;
   provider?: string;
@@ -131,6 +132,8 @@ export function AssistantScreen({
   const [error, setError] = React.useState<string | null>(null);
   const [modelOpen, setModelOpen] = React.useState(false);
   const [modelBusy, setModelBusy] = React.useState(false);
+  const [deleteCandidate, setDeleteCandidate] = React.useState<Thread | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
   const realtimeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const homeIdRef = React.useRef(homeId);
   const threadListVersion = React.useRef(0);
@@ -157,6 +160,8 @@ export function AssistantScreen({
     setError(null);
     setModelOpen(false);
     setModelBusy(false);
+    setDeleteCandidate(null);
+    setDeleting(false);
   }, [homeId]);
 
   const run = async (key: string, task: () => Promise<void>) => {
@@ -299,13 +304,15 @@ export function AssistantScreen({
     };
   }, [homeId, homeSupportsAssistant, loadThreads, mesh.subscribe, openThread, selectedId]);
 
-  const sendPrompt = () =>
-    run('prompt', async () => {
+  const sendPrompt = (promptOverride?: string) => {
+    const nextPrompt = String(promptOverride ?? prompt);
+    if (!nextPrompt.trim()) return;
+    return run('prompt', async () => {
       const destinationId = homeId;
       const threadId = selectedId;
       await mesh.request(destinationId, 'assistant-threads', 'thread.prompt', {
         threadId,
-        prompt,
+        prompt: nextPrompt,
       });
       if (homeIdRef.current !== destinationId) return;
       setThreads((current) =>
@@ -318,6 +325,7 @@ export function AssistantScreen({
         if (homeIdRef.current === destinationId) void openThread(threadId, true);
       }, 1500);
     });
+  };
 
   const selected = threads.find((thread) => thread.id === selectedId);
   const historyMessages = React.useMemo(
@@ -377,6 +385,7 @@ export function AssistantScreen({
         ? {
             title: selected.title,
             subtitle: `${selectedWorkspaceTargets.length > 1 ? `${selectedWorkspaceTargets.length} workspaces` : selectedWorkspaceTargets[0] ? `${selectedWorkspaceTargets[0].workspaceName ?? 'Workspace'} · ${workspacePermissionSummary(selectedWorkspaceTargets[0])}` : 'Home device only'}${activeHome ? ` · ${activeHome.name}` : ''}`,
+            onDelete: () => setDeleteCandidate(selected),
           }
         : null,
     );
@@ -457,9 +466,10 @@ export function AssistantScreen({
             />
           </ScrollView>
           <AssistantComposer
+            voiceResetKey={`${homeId}:${selected.id}`}
             value={prompt}
             onChangeText={setPrompt}
-            onSend={() => void sendPrompt()}
+            onSend={(promptOverride) => void sendPrompt(promptOverride)}
             onStop={() =>
               void run('stop', async () => {
                 await mesh.request(homeId, 'assistant-threads', 'thread.stop', {
@@ -525,6 +535,41 @@ export function AssistantScreen({
           />
         </>
       ) : null}
+      <ConfirmDialog
+        visible={Boolean(deleteCandidate)}
+        title="Delete assistant thread?"
+        message={`“${deleteCandidate?.title ?? 'This thread'}” and its conversation will be permanently removed from ${activeHome?.name ?? 'the selected device'}.`}
+        confirmLabel="Delete thread"
+        destructive
+        busy={deleting}
+        onCancel={() => setDeleteCandidate(null)}
+        onConfirm={() =>
+          void (async () => {
+            if (!deleteCandidate) return;
+            const destinationId = homeId;
+            const threadId = deleteCandidate.id;
+            setDeleting(true);
+            setError(null);
+            try {
+              await mesh.request(destinationId, 'assistant-threads', 'thread.delete', { threadId });
+              if (homeIdRef.current !== destinationId) return;
+              setDeleteCandidate(null);
+              setThreads((current) => current.filter((thread) => thread.id !== threadId));
+              if (selectedId === threadId) {
+                setSelectedId('');
+                setEntries([]);
+                setStreamingMessages([]);
+              }
+              await loadThreads(true);
+            } catch (nextError: any) {
+              if (homeIdRef.current === destinationId)
+                setError(nextError?.message ?? String(nextError));
+            } finally {
+              setDeleting(false);
+            }
+          })()
+        }
+      />
     </View>
   );
 }

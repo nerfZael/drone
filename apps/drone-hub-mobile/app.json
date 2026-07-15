@@ -21,7 +21,13 @@
     },
     "plugins": [
       ["expo-camera", { "cameraPermission": "Allow Drone Hub to scan a device pairing code." }],
-      ["expo-secure-store", { "configureAndroidBackup": true }]
+      ["expo-secure-store", { "configureAndroidBackup": true }],
+      [
+        "expo-audio",
+        {
+          "microphonePermission": "Allow Drone Hub to record voice messages for transcription."
+        }
+      ]
     ]
   }
 }

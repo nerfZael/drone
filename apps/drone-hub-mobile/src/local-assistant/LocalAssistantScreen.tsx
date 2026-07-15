@@ -100,9 +100,9 @@ export function LocalAssistantScreen({
     }
   };
 
-  const send = async () => {
-    if (!thread || !prompt.trim()) return;
-    const nextPrompt = prompt;
+  const send = async (promptOverride?: string) => {
+    const nextPrompt = String(promptOverride ?? prompt);
+    if (!thread || !nextPrompt.trim()) return;
     setPrompt('');
     setError(null);
     try {
@@ -308,9 +308,10 @@ export function LocalAssistantScreen({
             <ErrorBanner message={error ?? thread.error ?? assistant.error} />
           </ScrollView>
           <AssistantComposer
+            voiceResetKey={thread.id}
             value={prompt}
             onChangeText={setPrompt}
-            onSend={() => void send()}
+            onSend={(promptOverride) => void send(promptOverride)}
             onStop={() => assistant.stop(thread.id)}
             onOpenModel={() => setModelOpen(true)}
             modelLabel={thread.model}

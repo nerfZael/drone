@@ -669,6 +669,12 @@ function listModels(provider: string, currentModel: string): void {
   const models = getModels(provider as any).map((model) => ({
     id: model.id,
     label: model.name || model.id,
+    reasoningLevels: model.reasoning
+      ? REASONING_LEVELS.filter(
+          (level) => level !== 'xhigh' || model.thinkingLevelMap?.xhigh !== undefined,
+        )
+      : ['off'],
+    defaultReasoningLevel: model.reasoning ? DEFAULT_REASONING : 'off',
     ...(model.id === DEFAULT_MODEL && provider === DEFAULT_PROVIDER ? { default: true } : {}),
     ...(model.id === currentModel ? { current: true } : {}),
   }));

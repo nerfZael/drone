@@ -70,6 +70,51 @@ export type MobileDroneSidebarOrder = {
   sidebarNodeOrderByParent: Record<string, string[]>;
 };
 
+export type MobileDroneCreateBranch = {
+  name: string;
+  remote: string;
+  branch: string;
+};
+
+export type MobileDroneCreateRepo = {
+  path: string;
+  hostBranch: string | null;
+  remoteBranches: MobileDroneCreateBranch[];
+  branchesError: string | null;
+};
+
+export type MobileDroneCreateModel = {
+  id: string;
+  label: string;
+  reasoningLevels: string[];
+  defaultReasoningLevel: string;
+};
+
+export function normalizeMobileDroneCreateModelCatalog(raw: unknown): MobileDroneCreateModel[] {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return [];
+  const models = (raw as Record<string, unknown>).models;
+  if (!Array.isArray(models)) return [];
+  const seen = new Set<string>();
+  return models.flatMap((item) => {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
+    const value = item as Record<string, unknown>;
+    const id = text(value.id);
+    if (!id || seen.has(id)) return [];
+    seen.add(id);
+    const reasoningLevels = stringList(value.reasoningLevels);
+    const defaultReasoningLevel = text(value.defaultReasoningLevel);
+    return [{
+      id,
+      label: text(value.label) || id,
+      reasoningLevels,
+      defaultReasoningLevel:
+        defaultReasoningLevel && reasoningLevels.includes(defaultReasoningLevel)
+          ? defaultReasoningLevel
+          : reasoningLevels[0] ?? '',
+    }];
+  });
+}
+
 export const EMPTY_MOBILE_DRONE_SIDEBAR_ORDER: MobileDroneSidebarOrder = {
   registeredRepoPaths: [],
   groupCreatedAtByName: {},
@@ -77,6 +122,25 @@ export const EMPTY_MOBILE_DRONE_SIDEBAR_ORDER: MobileDroneSidebarOrder = {
   sidebarDroneOrderByGroup: {},
   sidebarNodeOrderByParent: {},
 };
+
+export function suggestNextMobileDroneChatName(
+  chats: readonly string[] | null | undefined,
+): string {
+  const taken = new Set(
+    (Array.isArray(chats) ? chats : [])
+      .map((chat) => String(chat ?? '').trim())
+      .filter(Boolean),
+  );
+  let nextIndex = Math.max(1, taken.size + 1);
+  for (const chat of taken) {
+    const match = chat.match(/^chat-(\d+)$/i);
+    if (!match) continue;
+    const index = Number(match[1]);
+    if (Number.isFinite(index) && index >= 1) nextIndex = Math.max(nextIndex, index + 1);
+  }
+  while (taken.has(`chat-${nextIndex}`)) nextIndex += 1;
+  return `chat-${nextIndex}`;
+}
 
 function text(value: unknown): string {
   return String(value ?? '').trim();
@@ -151,9 +215,15 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
   drones: MobileDroneSummary[];
   schemaVersion: number | null;
   sidebar: MobileDroneSidebarOrder;
+  createRepos: MobileDroneCreateRepo[];
 } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
-    return { drones: [], schemaVersion: null, sidebar: EMPTY_MOBILE_DRONE_SIDEBAR_ORDER };
+    return {
+      drones: [],
+      schemaVersion: null,
+      sidebar: EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+      createRepos: [],
+    };
   }
   const value = raw as Record<string, unknown>;
   const sidebar =
@@ -170,6 +240,44 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
     ...drone,
     repoPath: drone.repoPath || text(repoPathByDroneId[drone.id]),
   }));
+  const createOptions =
+    value.createOptions &&
+    typeof value.createOptions === 'object' &&
+    !Array.isArray(value.createOptions)
+      ? (value.createOptions as Record<string, unknown>)
+      : {};
+  const createRepos = Array.isArray(createOptions.repos)
+    ? createOptions.repos.flatMap((rawRepo): MobileDroneCreateRepo[] => {
+        if (!rawRepo || typeof rawRepo !== 'object' || Array.isArray(rawRepo)) return [];
+        const repo = rawRepo as Record<string, unknown>;
+        const path = text(repo.path);
+        if (!path) return [];
+        const remoteBranches = Array.isArray(repo.remoteBranches)
+          ? repo.remoteBranches.flatMap((rawBranch): MobileDroneCreateBranch[] => {
+              if (!rawBranch || typeof rawBranch !== 'object' || Array.isArray(rawBranch))
+                return [];
+              const branch = rawBranch as Record<string, unknown>;
+              const name = text(branch.name);
+              if (!name) return [];
+              return [
+                {
+                  name,
+                  remote: text(branch.remote),
+                  branch: text(branch.branch) || name,
+                },
+              ];
+            })
+          : [];
+        return [
+          {
+            path,
+            hostBranch: text(repo.hostBranch) || null,
+            remoteBranches,
+            branchesError: text(repo.branchesError) || null,
+          },
+        ];
+      })
+    : [];
   return {
     drones,
     schemaVersion:
@@ -183,6 +291,7 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
       sidebarDroneOrderByGroup: stringListMap(sidebar.sidebarDroneOrderByGroup),
       sidebarNodeOrderByParent: stringListMap(sidebar.sidebarNodeOrderByParent),
     },
+    createRepos,
   };
 }
 
@@ -237,9 +346,7 @@ function orderSidebarEntries<T>(
       index,
       orderIndex:
         orderIndex.get(getKey(entry)) ??
-        (unorderedPlacement === 'start'
-          ? Number.NEGATIVE_INFINITY
-          : Number.POSITIVE_INFINITY),
+        (unorderedPlacement === 'start' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY),
     }))
     .sort((left, right) => left.orderIndex - right.orderIndex || left.index - right.index)
     .map(({ entry }) => entry);
@@ -373,9 +480,7 @@ function buildDroneGroupFolders(
       }
     }
   }
-  const groupOrderIndex = new Map(
-    order.sidebarGroupOrder.map((token, index) => [token, index]),
-  );
+  const groupOrderIndex = new Map(order.sidebarGroupOrder.map((token, index) => [token, index]));
   const sortFolders = (items: MobileDroneGroupFolder[]) => {
     items.sort((left, right) => {
       const leftOrder = groupOrderIndex.get(`group:${left.path}`) ?? Number.POSITIVE_INFINITY;
@@ -476,18 +581,14 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
           ? {
               role: 'assistant',
               ...(output ? { content: output } : {}),
-              ...(turn.completedAt || turn.at
-                ? { createdAt: turn.completedAt || turn.at }
-                : {}),
+              ...(turn.completedAt || turn.at ? { createdAt: turn.completedAt || turn.at } : {}),
               isError: true,
               errorMessage: error,
             }
           : {
               role: 'assistant',
               content: output || error,
-              ...(turn.completedAt || turn.at
-                ? { createdAt: turn.completedAt || turn.at }
-                : {}),
+              ...(turn.completedAt || turn.at ? { createdAt: turn.completedAt || turn.at } : {}),
             },
       );
     }

@@ -51,6 +51,7 @@ type KanbanBoardScopeType = KanbanTaskScopeType;
 type SpawnContextPreferences = {
   spawnAgentKey: string;
   spawnModel: string;
+  spawnReasoning: string;
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
   pullHostBranchBeforeCreate: boolean;
@@ -63,6 +64,7 @@ const NO_REPO_SPAWN_CONTEXT_KEY = '__no_repo__';
 const DEFAULT_SPAWN_CONTEXT_PREFERENCES: SpawnContextPreferences = {
   spawnAgentKey: 'builtin:cursor',
   spawnModel: '',
+  spawnReasoning: '',
   repoBranchSource: 'host',
   repoCreateRemoteBranch: '',
   pullHostBranchBeforeCreate: true,
@@ -126,6 +128,7 @@ type DroneHubUiState = {
   spawnContextByRepoKey: Record<string, SpawnContextPreferences>;
   spawnAgentKey: string;
   spawnModel: string;
+  spawnReasoning: string;
   seenModelIds: string[];
   repoBranchSource: RepoBranchSourceMode;
   repoCreateRemoteBranch: string;
@@ -200,6 +203,7 @@ type DroneHubUiState = {
   updateSpawnContextForRepo: (repoPath: string, next: Partial<SpawnContextPreferences>) => void;
   setSpawnAgentKey: (next: Updater<string>) => void;
   setSpawnModel: (next: Updater<string>) => void;
+  setSpawnReasoning: (next: Updater<string>) => void;
   rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
   setRepoBranchSource: (next: Updater<RepoBranchSourceMode>) => void;
   setRepoCreateRemoteBranch: (next: Updater<string>) => void;
@@ -249,6 +253,7 @@ function normalizeSpawnContextPreferences(
   return {
     spawnAgentKey: normalizeSpawnAgentKeyValue(value?.spawnAgentKey),
     spawnModel: normalizeTrimmedString(value?.spawnModel),
+    spawnReasoning: normalizeTrimmedString(value?.spawnReasoning),
     repoBranchSource: normalizeRepoBranchSourceMode(value?.repoBranchSource),
     repoCreateRemoteBranch: normalizeTrimmedString(value?.repoCreateRemoteBranch),
     pullHostBranchBeforeCreate: normalizePullHostBranchBeforeCreate(value?.pullHostBranchBeforeCreate),
@@ -294,6 +299,7 @@ function buildUpdatedSpawnContextByRepoKey(
     current &&
     current.spawnAgentKey === merged.spawnAgentKey &&
     current.spawnModel === merged.spawnModel &&
+    current.spawnReasoning === merged.spawnReasoning &&
     current.repoBranchSource === merged.repoBranchSource &&
     current.repoCreateRemoteBranch === merged.repoCreateRemoteBranch &&
     current.pullHostBranchBeforeCreate === merged.pullHostBranchBeforeCreate
@@ -346,6 +352,7 @@ type DroneHubUiPersistedState = Pick<
   | 'spawnContextByRepoKey'
   | 'spawnAgentKey'
   | 'spawnModel'
+  | 'spawnReasoning'
   | 'seenModelIds'
   | 'repoBranchSource'
   | 'repoCreateRemoteBranch'
@@ -383,6 +390,7 @@ export function migrateDroneHubUiPersistedState(
   const legacySpawnDefaults = normalizeSpawnContextPreferences({
     spawnAgentKey: migrated.spawnAgentKey,
     spawnModel: migrated.spawnModel,
+    spawnReasoning: migrated.spawnReasoning,
     repoBranchSource: migrated.repoBranchSource,
     repoCreateRemoteBranch: migrated.repoCreateRemoteBranch,
     pullHostBranchBeforeCreate: migrated.pullHostBranchBeforeCreate,
@@ -731,6 +739,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       },
       spawnAgentKey: DEFAULT_SPAWN_CONTEXT_PREFERENCES.spawnAgentKey,
       spawnModel: DEFAULT_SPAWN_CONTEXT_PREFERENCES.spawnModel,
+      spawnReasoning: '',
       seenModelIds: [],
       repoBranchSource: DEFAULT_SPAWN_CONTEXT_PREFERENCES.repoBranchSource,
       repoCreateRemoteBranch: DEFAULT_SPAWN_CONTEXT_PREFERENCES.repoCreateRemoteBranch,
@@ -925,6 +934,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             spawnContextRepoPath: repoPath,
             spawnAgentKey: resolved.spawnAgentKey,
             spawnModel: resolved.spawnModel,
+            spawnReasoning: resolved.spawnReasoning,
             repoBranchSource: resolved.repoBranchSource,
             repoCreateRemoteBranch: resolved.repoCreateRemoteBranch,
             pullHostBranchBeforeCreate: resolved.pullHostBranchBeforeCreate,
@@ -943,6 +953,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             spawnContextByRepoKey: nextByRepoKey,
             spawnAgentKey: resolved.spawnAgentKey,
             spawnModel: resolved.spawnModel,
+            spawnReasoning: resolved.spawnReasoning,
             repoBranchSource: resolved.repoBranchSource,
             repoCreateRemoteBranch: resolved.repoCreateRemoteBranch,
             pullHostBranchBeforeCreate: resolved.pullHostBranchBeforeCreate,
@@ -969,6 +980,14 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             spawnModel,
             spawnContextByRepoKey: nextByRepoKey,
           };
+        }),
+      setSpawnReasoning: (next) =>
+        set((s) => {
+          const spawnReasoning = normalizeTrimmedString(resolveNext(s.spawnReasoning, next));
+          const nextByRepoKey = buildUpdatedSpawnContextByRepoKey(s.spawnContextByRepoKey, s.spawnContextRepoPath, {
+            spawnReasoning,
+          });
+          return { spawnReasoning, spawnContextByRepoKey: nextByRepoKey };
         }),
       rememberSeenModels: (models) =>
         set((s) => {
@@ -1079,6 +1098,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         spawnContextByRepoKey: state.spawnContextByRepoKey,
         spawnAgentKey: state.spawnAgentKey,
         spawnModel: state.spawnModel,
+        spawnReasoning: state.spawnReasoning,
         seenModelIds: state.seenModelIds,
         repoBranchSource: state.repoBranchSource,
         repoCreateRemoteBranch: state.repoCreateRemoteBranch,
@@ -1265,6 +1285,7 @@ export function useDroneHubAppModelUiState() {
       spawnContextByRepoKey: s.spawnContextByRepoKey,
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
+      spawnReasoning: s.spawnReasoning,
       seenModelIds: s.seenModelIds,
       repoBranchSource: s.repoBranchSource,
       repoCreateRemoteBranch: s.repoCreateRemoteBranch,
@@ -1321,6 +1342,7 @@ export function useDroneHubAppModelUiState() {
       updateSpawnContextForRepo: s.updateSpawnContextForRepo,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
+      setSpawnReasoning: s.setSpawnReasoning,
       rememberSeenModels: s.rememberSeenModels,
       setRepoBranchSource: s.setRepoBranchSource,
       setRepoCreateRemoteBranch: s.setRepoCreateRemoteBranch,

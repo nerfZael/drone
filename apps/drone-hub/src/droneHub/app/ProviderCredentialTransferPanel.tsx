@@ -59,7 +59,7 @@ export function ProviderCredentialTransferPanel({
   };
 
   return (
-    <section className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] p-4">
+    <section>
       <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">
         Provider credentials
       </div>

@@ -52,6 +52,7 @@ describe('device mesh drone summaries', () => {
     const originalFetch = globalThis.fetch;
     globalThis.fetch = (async (input) => {
       const pathname = new URL(String(input)).pathname;
+      const url = new URL(String(input));
       const body =
         pathname === '/api/drones'
           ? {
@@ -68,19 +69,28 @@ describe('device mesh drone summaries', () => {
             }
           : pathname === '/api/repos'
             ? { ok: true, repos: [{ path: '/work/one' }, { path: '/work/empty' }] }
-            : pathname === '/api/groups'
+            : pathname === '/api/repos/branches'
               ? {
                   ok: true,
-                  groups: [{ name: 'Review', createdAt: '2026-07-13T10:00:00.000Z' }],
+                  hostBranch: url.searchParams.get('repoPath') === '/work/one' ? 'main' : null,
+                  remoteBranches:
+                    url.searchParams.get('repoPath') === '/work/one'
+                      ? [{ name: 'origin/main', remote: 'origin', branch: 'main' }]
+                      : [],
                 }
-              : {
-                  ok: true,
-                  uiPreferences: {
-                    sidebarGroupOrder: ['repo:repo:/work/one'],
-                    sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
-                    sidebarNodeOrderByParent: { root: ['drone:one'] },
-                  },
-                };
+              : pathname === '/api/groups'
+                ? {
+                    ok: true,
+                    groups: [{ name: 'Review', createdAt: '2026-07-13T10:00:00.000Z' }],
+                  }
+                : {
+                    ok: true,
+                    uiPreferences: {
+                      sidebarGroupOrder: ['repo:repo:/work/one'],
+                      sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
+                      sidebarNodeOrderByParent: { root: ['drone:one'] },
+                    },
+                  };
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -91,12 +101,11 @@ describe('device mesh drone summaries', () => {
         baseUrl: () => 'http://127.0.0.1:7777',
         apiToken: 'test',
       });
-      await expect(capability.invoke('drones.list', {})).resolves.toMatchObject({
-        schemaVersion: 3,
-        drones: [
-          { id: 'one', lastMessageAt: '2026-07-14T10:00:00.000Z' },
-          { id: 'loose' },
-        ],
+      await expect(
+        capability.invoke('drones.list', { includeCreateOptions: true }),
+      ).resolves.toMatchObject({
+        schemaVersion: 4,
+        drones: [{ id: 'one', lastMessageAt: '2026-07-14T10:00:00.000Z' }, { id: 'loose' }],
         repoPathByDroneId: { one: '/work/one' },
         sidebar: {
           registeredRepoPaths: ['/work/one', '/work/empty'],
@@ -105,7 +114,106 @@ describe('device mesh drone summaries', () => {
           sidebarDroneOrderByGroup: { 'group:Ungrouped': ['one'] },
           sidebarNodeOrderByParent: { root: ['drone:one'] },
         },
+        createOptions: {
+          repos: [
+            {
+              path: '/work/one',
+              hostBranch: 'main',
+              remoteBranches: [{ name: 'origin/main', remote: 'origin', branch: 'main' }],
+            },
+            { path: '/work/empty', hostBranch: null, remoteBranches: [] },
+          ],
+        },
       });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('forwards the desktop-equivalent drone creation options', async () => {
+    const originalFetch = globalThis.fetch;
+    let request: { method: string; body: any } | null = null;
+    globalThis.fetch = (async (_input, init) => {
+      request = {
+        method: String(init?.method ?? 'GET'),
+        body: JSON.parse(String(init?.body ?? '{}')),
+      };
+      return new Response(JSON.stringify({ ok: true, id: 'created' }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await capability.invoke('drone.create.container', {
+        name: 'mobile-drone',
+        group: 'review',
+        repoPath: '/work/drone',
+        draft: true,
+        persistVolume: true,
+        repoBranchSource: 'remote',
+        remoteBranch: 'origin/mobile',
+        seedAgent: { kind: 'builtin', id: 'codex' },
+        seedModel: 'gpt-5.2-codex',
+        seedReasoning: 'high',
+        seedAgentPermissionMode: 'read-only',
+        seedPrompt: 'Review the app',
+      });
+      expect(request).toMatchObject({
+        method: 'POST',
+        body: {
+          name: 'mobile-drone',
+          group: 'review',
+          repoPath: '/work/drone',
+          runtime: 'container',
+          draft: true,
+          persistVolume: true,
+          repoBranchSource: 'remote',
+          remoteBranch: 'origin/mobile',
+          seedAgent: { kind: 'builtin', id: 'codex' },
+          seedChat: 'default',
+          seedModel: 'gpt-5.2-codex',
+          seedReasoning: 'high',
+          seedAgentPermissionMode: 'read-only',
+          seedPrompt: 'Review the app',
+        },
+      });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('proxies agent-scoped create model catalogs with reasoning metadata', async () => {
+    const originalFetch = globalThis.fetch;
+    let requestedUrl = '';
+    globalThis.fetch = (async (input) => {
+      requestedUrl = String(input);
+      return new Response(JSON.stringify({
+        ok: true,
+        models: [{ id: 'gpt-5.2-codex', label: 'GPT-5.2 Codex', reasoningLevels: ['low', 'high'] }],
+      }), { status: 200, headers: { 'content-type': 'application/json' } });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(capability.invoke('drones.list', {
+        createModelAgent: 'codex',
+        createModelRuntime: 'host',
+        refreshCreateModels: true,
+      })).resolves.toMatchObject({
+        schemaVersion: 5,
+        createModelCatalog: {
+          models: [{ id: 'gpt-5.2-codex', reasoningLevels: ['low', 'high'] }],
+        },
+      });
+      expect(requestedUrl).toBe(
+        'http://127.0.0.1:7777/api/model-catalog?agent=codex&runtime=host&refresh=1',
+      );
     } finally {
       globalThis.fetch = originalFetch;
     }

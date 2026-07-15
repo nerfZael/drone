@@ -18,6 +18,7 @@ export const DRONE_CONTROL_CAPABILITY: CapabilityDescriptor = {
   operations: [
     'drones.list',
     'chats.list',
+    'chat.create',
     'chat.read',
     'chat.models',
     'chat.update',
@@ -25,6 +26,7 @@ export const DRONE_CONTROL_CAPABILITY: CapabilityDescriptor = {
     'chat.stop',
     'drone.create.container',
     'drone.create.host',
+    'drone.delete',
   ],
 };
 
@@ -36,6 +38,7 @@ export const ASSISTANT_THREADS_CAPABILITY: CapabilityDescriptor = {
     'models.list',
     'thread.get',
     'thread.create',
+    'thread.delete',
     'thread.update',
     'thread.prompt',
     'thread.stop',

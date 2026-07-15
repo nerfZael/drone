@@ -159,6 +159,12 @@ export function createAssistantThreadsCapability(
           streamingMessages: boundedStreamingMessages(snapshot),
         };
       }
+      if (operation === 'thread.delete') {
+        await localHubRequest(access, `/api/assistant/threads/${encodeURIComponent(threadId)}`, {
+          method: 'DELETE',
+        });
+        return { deleted: true, threadId };
+      }
       if (operation === 'thread.update') {
         const snapshot = await localHubRequest(
           access,

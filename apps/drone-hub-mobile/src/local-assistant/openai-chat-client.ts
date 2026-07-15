@@ -39,33 +39,38 @@ function contentText(content: Message['content']): string {
 }
 
 function providerMessages(context: Context): ProviderMessage[] {
-  return context.messages.map((message): ProviderMessage => {
-    if (message.role === 'user') return { role: 'user', content: contentText(message.content) };
+  return context.messages.flatMap((message): ProviderMessage[] => {
+    if (message.role === 'user') return [{ role: 'user', content: contentText(message.content) }];
     if (message.role === 'toolResult') {
-      return {
-        role: 'tool',
-        content: contentText(message.content),
-        tool_call_id: message.toolCallId,
-      };
+      return [
+        {
+          role: 'tool',
+          content: contentText(message.content),
+          tool_call_id: message.toolCallId,
+        },
+      ];
     }
     const calls = message.content.filter((part): part is ToolCall => part.type === 'toolCall');
-    return {
-      role: 'assistant',
-      content:
-        message.content
-          .map((part) => (part.type === 'text' ? part.text : ''))
-          .filter(Boolean)
-          .join('\n') || null,
-      ...(calls.length > 0
-        ? {
-            tool_calls: calls.map((call) => ({
-              id: call.id,
-              type: 'function' as const,
-              function: { name: call.name, arguments: JSON.stringify(call.arguments) },
-            })),
-          }
-        : {}),
-    };
+    const text = message.content
+      .map((part) => (part.type === 'text' ? part.text : ''))
+      .filter(Boolean)
+      .join('\n');
+    if (!text && calls.length === 0) return [];
+    return [
+      {
+        role: 'assistant',
+        content: text || null,
+        ...(calls.length > 0
+          ? {
+              tool_calls: calls.map((call) => ({
+                id: call.id,
+                type: 'function' as const,
+                function: { name: call.name, arguments: JSON.stringify(call.arguments) },
+              })),
+            }
+          : {}),
+      },
+    ];
   });
 }
 

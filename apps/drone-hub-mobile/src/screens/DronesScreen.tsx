@@ -8,12 +8,11 @@ import {
   ScrollView,
   StyleSheet,
   Text,
-  TextInput,
   View,
 } from 'react-native';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Button, Card, ErrorBanner, Label, textStyles } from '../components/Ui';
+import { ConfirmDialog, ErrorBanner } from '../components/Ui';
 import {
   AssistantThreadDrawer,
   type AppDrawerNavigationItem,
@@ -29,11 +28,22 @@ import { useLatestMessageScroll } from '../local-assistant/use-latest-message-sc
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import {
+  NewDroneScreen,
+  type MobileBuiltinAgentId,
+  type MobileDroneAgentPermissionMode,
+  type MobileDroneCreateDefaults,
+  type MobileDroneCreatePayload,
+} from '../drones/NewDroneScreen';
+import {
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   mobileRepoLabel,
   mobileDroneTurnsToAssistantMessages,
+  normalizeMobileDroneCreateModelCatalog,
   normalizeMobileDroneListPayload,
   normalizeMobileDroneTurns,
+  suggestNextMobileDroneChatName,
+  type MobileDroneCreateRepo,
+  type MobileDroneCreateModel,
   type MobileDroneSidebarOrder,
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
@@ -43,7 +53,17 @@ const APP_HEADER_HEIGHT = 58;
 export type DronesAppHeaderState = {
   title: string;
   subtitle: string;
+  onNewDrone?(): void;
+  onNewChat?(): void;
+  onDelete?(): void;
 };
+
+function mobileBuiltinAgentId(value: unknown): MobileBuiltinAgentId | null {
+  const id = String(value ?? '').trim();
+  return ['cursor', 'codex', 'claude', 'opencode', 'pi', 'blip'].includes(id)
+    ? (id as MobileBuiltinAgentId)
+    : null;
+}
 
 export function DronesScreen({
   drawerOpen,
@@ -86,16 +106,26 @@ export function DronesScreen({
   const [chats, setChats] = React.useState<string[]>([]);
   const [chatName, setChatName] = React.useState('default');
   const [chatModel, setChatModel] = React.useState('');
+  const [chatReasoning, setChatReasoning] = React.useState('');
   const [chatModelProvider, setChatModelProvider] = React.useState('drone');
+  const [chatAgentId, setChatAgentId] = React.useState<MobileBuiltinAgentId | null>(null);
+  const [chatAgentPermissionMode, setChatAgentPermissionMode] =
+    React.useState<MobileDroneAgentPermissionMode>('full-access');
   const [chatModels, setChatModels] = React.useState<AssistantModelChoice[]>([]);
   const [modelOpen, setModelOpen] = React.useState(false);
   const [modelBusy, setModelBusy] = React.useState(false);
   const [turns, setTurns] = React.useState<any[]>([]);
   const [prompt, setPrompt] = React.useState('');
-  const [createName, setCreateName] = React.useState('');
+  const [createRepos, setCreateRepos] = React.useState<MobileDroneCreateRepo[]>([]);
   const [busy, setBusy] = React.useState('');
   const [dronesLoaded, setDronesLoaded] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = React.useState<MobileDroneSummary | null>(null);
+  const [deleting, setDeleting] = React.useState(false);
+  const [newDroneDefaults, setNewDroneDefaults] =
+    React.useState<MobileDroneCreateDefaults | null>(null);
+  const [newDroneScreenVersion, setNewDroneScreenVersion] = React.useState(0);
+  const [composerFocusKey, setComposerFocusKey] = React.useState('');
   const targetIdRef = React.useRef(targetId);
   const selectedRef = React.useRef(selected);
   const chatNameRef = React.useRef(chatName);
@@ -106,6 +136,7 @@ export function DronesScreen({
   const runVersion = React.useRef(0);
   const busyVersion = React.useRef(0);
   const modelRequestVersion = React.useRef(0);
+  const createModelCatalogCache = React.useRef(new Map<string, MobileDroneCreateModel[]>());
   const readChatRef = React.useRef<(droneId: string, chatName: string) => Promise<void>>(
     async () => {},
   );
@@ -136,12 +167,15 @@ export function DronesScreen({
       if (!quiet) setBusy('drones');
       setError(null);
       try {
-        const result = await mesh.request(targetId, 'drone-control', 'drones.list');
+        const result = await mesh.request(targetId, 'drone-control', 'drones.list', {
+          includeCreateOptions: !quiet,
+        });
         if (targetIdRef.current !== targetId || droneListVersion.current !== requestVersion) return;
         const normalized = normalizeMobileDroneListPayload(result);
         const nextDrones = normalized.drones;
         setDrones(nextDrones);
         setDroneSidebarOrder(normalized.sidebar);
+        if (!quiet) setCreateRepos(normalized.createRepos);
         const currentSelected = selectedRef.current;
         const nextSelected = currentSelected
           ? (nextDrones.find((drone) => drone.id === currentSelected.id) ?? null)
@@ -154,6 +188,7 @@ export function DronesScreen({
             const fallbackChat = nextChats[0] ?? 'default';
             setChatName(fallbackChat);
             setChatModel('');
+            setChatReasoning('');
             setChatModels([]);
             setTurns([]);
             void readChatRef.current(nextSelected.id, fallbackChat).catch((nextError: any) => {
@@ -196,16 +231,24 @@ export function DronesScreen({
     setChats([]);
     setChatName('default');
     setChatModel('');
+    setChatReasoning('');
     setChatModelProvider('drone');
+    setChatAgentId(null);
+    setChatAgentPermissionMode('full-access');
     setChatModels([]);
     setTurns([]);
     setPrompt('');
-    setCreateName('');
+    setCreateRepos([]);
     setBusy('');
     setDronesLoaded(false);
     setError(null);
     setModelOpen(false);
     setModelBusy(false);
+    setDeleteCandidate(null);
+    setDeleting(false);
+    setNewDroneDefaults(null);
+    setNewDroneScreenVersion((value) => value + 1);
+    setComposerFocusKey('');
     droneListVersion.current += 1;
     chatReadVersion.current += 1;
     openDroneVersion.current += 1;
@@ -230,6 +273,9 @@ export function DronesScreen({
       setChats(knownChats);
       setChatName(knownChat);
       setChatModel('');
+      setChatReasoning('');
+      setChatAgentId(null);
+      setChatAgentPermissionMode('full-access');
       setChatModels([]);
       setTurns([]);
       const result = await mesh.request(destinationId, 'drone-control', 'chats.list', {
@@ -268,6 +314,15 @@ export function DronesScreen({
     )
       return;
     setChatModel(String(result?.model ?? '').trim());
+    setChatReasoning(String(result?.reasoning ?? '').trim());
+    setChatAgentId(
+      result?.agent?.kind === 'builtin'
+        ? mobileBuiltinAgentId(result.agent.id)
+        : mobileBuiltinAgentId(result?.agent?.id),
+    );
+    setChatAgentPermissionMode(
+      result?.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
+    );
     setChatModelProvider(
       String(result?.agent?.id ?? result?.agent?.kind ?? 'drone').trim() || 'drone',
     );
@@ -337,38 +392,76 @@ export function DronesScreen({
     run('chat', async () => {
       setChatName(nextChat);
       setChatModel('');
+      setChatReasoning('');
       setChatModels([]);
       setTurns([]);
       await readChat(selected.id, nextChat);
     });
 
-  const sendPrompt = () =>
-    selected &&
-    run('prompt', async () => {
+  const sendPrompt = (promptOverride?: string) => {
+    const nextPrompt = String(promptOverride ?? prompt);
+    if (!selected || !nextPrompt.trim()) return;
+    return run('prompt', async () => {
       const destinationId = targetId;
       const droneId = selected.id;
       const activeChat = chatName;
       await mesh.request(destinationId, 'drone-control', 'chat.prompt', {
         droneId,
         chatName: activeChat,
-        prompt,
+        prompt: nextPrompt,
       });
       if (targetIdRef.current !== destinationId) return;
       setPrompt('');
       await readChat(droneId, activeChat);
       await loadDrones(true);
     });
+  };
 
-  const createDrone = (runtime: 'host' | 'container') =>
-    run(`create-${runtime}`, async () => {
+  const createDrone = async (payload: MobileDroneCreatePayload): Promise<boolean> => {
+    let created = false;
+    await run(`create-${payload.runtime}`, async () => {
       const destinationId = targetId;
-      await mesh.request(destinationId, 'drone-control', `drone.create.${runtime}`, {
-        name: createName || undefined,
-      });
+      await mesh.request(
+        destinationId,
+        'drone-control',
+        `drone.create.${payload.runtime}`,
+        payload,
+      );
       if (targetIdRef.current !== destinationId) return;
-      setCreateName('');
+      created = true;
       await loadDrones();
     });
+    return created;
+  };
+
+  const detectCreateModels = React.useCallback(
+    async (
+      agent: MobileBuiltinAgentId,
+      runtime: 'container' | 'host',
+      refresh = false,
+    ): Promise<MobileDroneCreateModel[]> => {
+      const destinationId = targetId;
+      const cacheKey = `${destinationId}:${runtime}:${agent}`;
+      if (!refresh) {
+        const cached = createModelCatalogCache.current.get(cacheKey);
+        if (cached) return cached;
+      }
+      const result = await mesh.request(destinationId, 'drone-control', 'drones.list', {
+        createModelAgent: agent,
+        createModelRuntime: runtime,
+        refreshCreateModels: refresh,
+      });
+      if (targetIdRef.current !== destinationId) return [];
+      const catalog = result?.createModelCatalog;
+      const models = normalizeMobileDroneCreateModelCatalog(catalog);
+      if (models.length === 0 && catalog?.error) {
+        throw new Error(String(catalog.error));
+      }
+      createModelCatalogCache.current.set(cacheKey, models);
+      return models;
+    },
+    [mesh.request, targetId],
+  );
 
   const stopChat = () =>
     selected &&
@@ -385,12 +478,81 @@ export function DronesScreen({
       await loadDrones(true);
     });
 
+  const openNewDroneScreen = (defaults: MobileDroneCreateDefaults | null = null) => {
+    setNewDroneDefaults(defaults);
+    setNewDroneScreenVersion((value) => value + 1);
+    setSelected(null);
+    setChats([]);
+    setChatName('default');
+    setChatModel('');
+    setChatReasoning('');
+    setChatModelProvider('drone');
+    setChatAgentId(null);
+    setChatAgentPermissionMode('full-access');
+    setChatModels([]);
+    setTurns([]);
+    setPrompt('');
+    setModelOpen(false);
+    setComposerFocusKey('');
+  };
+
+  const openNewDroneFromCurrent = () => {
+    if (!selected) return;
+    openNewDroneScreen({
+      mode: 'with-chat',
+      runtime: selected.runtime === 'host' ? 'host' : 'container',
+      group: selected.group ?? '',
+      repoPath: selected.repoPath,
+      ...(chatAgentId ? { agent: chatAgentId } : {}),
+      agentPermissionMode: chatAgentPermissionMode,
+      ...(chatModel ? { model: chatModel } : {}),
+      ...(chatReasoning ? { reasoning: chatReasoning } : {}),
+    });
+  };
+
+  const createNewChat = () =>
+    selected &&
+    run('create-chat', async () => {
+      const destinationId = targetId;
+      const drone = selected;
+      const sourceChat = chatName;
+      const nextChat = suggestNextMobileDroneChatName(chats);
+      const result = await mesh.request(destinationId, 'drone-control', 'chat.create', {
+        droneId: drone.id,
+        name: nextChat,
+        copyFrom: sourceChat,
+      });
+      if (targetIdRef.current !== destinationId) return;
+      const createdChat = String(result?.chatName ?? nextChat).trim() || nextChat;
+      const nextChats: string[] = Array.isArray(result?.chats)
+        ? [
+            ...new Set<string>(
+              result.chats
+                .map((chat: unknown): string => String(chat ?? '').trim())
+                .filter((chat: string) => Boolean(chat)),
+            ),
+          ]
+        : [...new Set([...chats, createdChat])];
+      const updatedDrone = { ...drone, chats: nextChats };
+      setDrones((current) =>
+        current.map((item) => (item.id === updatedDrone.id ? updatedDrone : item)),
+      );
+      setSelected(updatedDrone);
+      setChats(nextChats);
+      setChatName(createdChat);
+      setTurns([]);
+      setPrompt('');
+      setComposerFocusKey(`${drone.id}:${createdChat}:${Date.now()}`);
+      await readChat(drone.id, createdChat);
+      await loadDrones(true);
+    });
+
   const normalizedTurns = React.useMemo(() => normalizeMobileDroneTurns(turns), [turns]);
   const transcriptMessages = React.useMemo(
     () => mobileDroneTurnsToAssistantMessages(turns),
     [turns],
   );
-  const chatLoading = busy === 'chats' || busy === 'chat';
+  const chatLoading = busy === 'chats' || busy === 'chat' || busy === 'create-chat';
   const latestMessageScroll = useLatestMessageScroll(
     selected ? `${selected.id}:${chatName}` : '',
     chatLoading,
@@ -409,6 +571,9 @@ export function DronesScreen({
         ? {
             title: selected.name,
             subtitle: `${mobileRepoLabel(selected.repoPath)} · ${selected.runtime}${activeTarget ? ` · ${activeTarget.name}` : ''}`,
+            onNewDrone: openNewDroneFromCurrent,
+            onNewChat: () => void createNewChat(),
+            onDelete: () => setDeleteCandidate(selected),
           }
         : null,
     );
@@ -416,9 +581,16 @@ export function DronesScreen({
     activeTarget?.name,
     onHeaderChange,
     selected?.id,
+    selected?.group,
     selected?.name,
     selected?.repoPath,
     selected?.runtime,
+    chatAgentId,
+    chatAgentPermissionMode,
+    chatModel,
+    chatReasoning,
+    chatName,
+    chats,
   ]);
   React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
@@ -531,6 +703,14 @@ export function DronesScreen({
         onClose={() => onDrawerOpenChange(false)}
         onSelect={() => {}}
         onCreate={() => {}}
+        onCreateDrone={
+          targetSupportsDrones
+            ? () => {
+                onDrawerOpenChange(false);
+                openNewDroneScreen();
+              }
+            : undefined
+        }
         onSelectDevice={(deviceId) => {
           setDronesLoaded(false);
           onDeviceChange(deviceId);
@@ -624,9 +804,11 @@ export function DronesScreen({
               />
             </ScrollView>
             <AssistantComposer
+              focusKey={composerFocusKey}
+              voiceResetKey={`${targetId}:${selected.id}:${chatName}`}
               value={prompt}
               onChangeText={setPrompt}
-              onSend={() => void sendPrompt()}
+              onSend={(promptOverride) => void sendPrompt(promptOverride)}
               onStop={() => void stopChat()}
               onOpenModel={() => void openModelPicker()}
               modelLabel={displayedModel}
@@ -646,60 +828,64 @@ export function DronesScreen({
               onSelect={(choice) => void updateChatModel(choice)}
             />
           </View>
+        ) : targetSupportsDrones ? (
+          <NewDroneScreen
+            key={`${targetId}:${newDroneScreenVersion}`}
+            deviceName={activeTarget?.name ?? 'this device'}
+            repos={createRepos}
+            loadingOptions={targetConnected && (!dronesLoaded || busy === 'drones')}
+            busy={busy.startsWith('create-')}
+            requestError={error}
+            initialValues={newDroneDefaults ?? undefined}
+            onDetectModels={detectCreateModels}
+            onCreate={createDrone}
+          />
         ) : (
-          <View style={styles.landing}>
-            <ScrollView
-              contentContainerStyle={styles.landingPage}
-              keyboardShouldPersistTaps="handled"
-            >
-              <View style={styles.landingStack}>
-                {!targetSupportsDrones ? (
-                  <Card style={styles.flatCard}>
-                    <Text style={textStyles.body}>
-                      {activeTarget
-                        ? `${activeTarget.name} does not provide drone control. Choose a Drone Hub device from the menu.`
-                        : 'Choose a connected Drone Hub device from the menu.'}
-                    </Text>
-                  </Card>
-                ) : null}
-                <ErrorBanner message={error} />
-                {targetSupportsDrones ? (
-                  <Card style={styles.createCard}>
-                    <Label>Create</Label>
-                    <Text style={[textStyles.heading, styles.createTitle]}>
-                      New drone on this device
-                    </Text>
-                    <TextInput
-                      value={createName}
-                      onChangeText={setCreateName}
-                      placeholder="Optional name"
-                      placeholderTextColor={colors.subtle}
-                      style={styles.nameInput}
-                    />
-                    <View style={styles.createButtons}>
-                      <Button
-                        style={styles.flex}
-                        tone="quiet"
-                        onPress={() => void createDrone('container')}
-                        loading={busy === 'create-container'}
-                      >
-                        Container
-                      </Button>
-                      <Button
-                        style={styles.flex}
-                        onPress={() => void createDrone('host')}
-                        loading={busy === 'create-host'}
-                      >
-                        Host
-                      </Button>
-                    </View>
-                  </Card>
-                ) : null}
-              </View>
-            </ScrollView>
+          <View style={styles.unavailable}>
+            <Text style={styles.unavailableText}>
+              {activeTarget
+                ? `${activeTarget.name} does not provide drone control. Choose a Drone Hub device from the drawer.`
+                : 'Choose a connected Drone Hub device from the drawer.'}
+            </Text>
+            <ErrorBanner message={error} />
           </View>
         )}
       </KeyboardAvoidingView>
+      <ConfirmDialog
+        visible={Boolean(deleteCandidate)}
+        title="Delete drone?"
+        message={`Delete “${deleteCandidate?.name ?? 'this drone'}” from ${activeTarget?.name ?? 'the selected device'}? The Hub’s deletion settings determine whether it is archived first or permanently removed.`}
+        confirmLabel="Delete drone"
+        destructive
+        busy={deleting}
+        onCancel={() => setDeleteCandidate(null)}
+        onConfirm={() =>
+          void (async () => {
+            if (!deleteCandidate) return;
+            const destinationId = targetId;
+            const droneId = deleteCandidate.id;
+            setDeleting(true);
+            setError(null);
+            try {
+              await mesh.request(destinationId, 'drone-control', 'drone.delete', { droneId });
+              if (targetIdRef.current !== destinationId) return;
+              setDeleteCandidate(null);
+              setDrones((current) => current.filter((drone) => drone.id !== droneId));
+              if (selectedRef.current?.id === droneId) {
+                setSelected(null);
+                setChats([]);
+                setTurns([]);
+              }
+              await loadDrones(true);
+            } catch (nextError: any) {
+              if (targetIdRef.current === destinationId)
+                setError(nextError?.message ?? String(nextError));
+            } finally {
+              setDeleting(false);
+            }
+          })()
+        }
+      />
     </View>
   );
 }
@@ -707,16 +893,8 @@ export function DronesScreen({
 const styles = StyleSheet.create({
   screen: { flex: 1 },
   content: { flex: 1 },
-  landing: { flex: 1 },
-  landingPage: {
-    flexGrow: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  landingStack: { width: '100%', maxWidth: 420, gap: 12 },
-  flatCard: { borderRadius: 6, padding: 14, shadowOpacity: 0, elevation: 0 },
-  createCard: { borderRadius: 6, padding: 15, shadowOpacity: 0, elevation: 0 },
+  unavailable: { flex: 1, justifyContent: 'center', padding: 24, gap: 14 },
+  unavailableText: { color: colors.muted, fontSize: 14, lineHeight: 21 },
   chatWorkspace: { flex: 1, backgroundColor: colors.background },
   chatTabsFrame: {
     minHeight: 44,
@@ -750,16 +928,4 @@ const styles = StyleSheet.create({
   transcriptScroll: { flex: 1 },
   transcriptContent: { flexGrow: 1 },
   transcriptContentHidden: { opacity: 0 },
-  createTitle: { marginTop: 4, marginBottom: 12 },
-  nameInput: {
-    color: colors.text,
-    backgroundColor: colors.panel,
-    borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: 6,
-    padding: 12,
-    marginBottom: 10,
-  },
-  createButtons: { flexDirection: 'row', gap: 8 },
-  flex: { flex: 1 },
 });

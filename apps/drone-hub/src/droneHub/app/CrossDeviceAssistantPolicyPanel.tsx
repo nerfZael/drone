@@ -20,7 +20,6 @@ type DeviceGrant = {
   write: boolean;
   execute: boolean;
 };
-type AssistantThread = { id: string; title: string };
 type RemoteWorkspace = {
   id: string;
   name: string;
@@ -88,18 +87,26 @@ export function CrossDeviceAssistantPolicyPanel({
   requestJson,
   devices,
   selfDeviceId,
+  connectedDeviceIds = [],
+  mode = 'sharing',
+  threadId = '',
+  threadTitle = '',
+  onClose,
 }: {
   requestJson: RequestJson;
   devices: MeshDevice[];
   selfDeviceId: string;
+  connectedDeviceIds?: string[];
+  mode?: 'sharing' | 'thread';
+  threadId?: string;
+  threadTitle?: string;
+  onClose?: () => void;
 }) {
   const [policy, setPolicy] = React.useState<Policy>(emptyPolicy);
   const [savedPolicy, setSavedPolicy] = React.useState<Policy>(emptyPolicy);
   const [loading, setLoading] = React.useState(true);
   const [saving, setSaving] = React.useState(false);
   const [choosing, setChoosing] = React.useState(false);
-  const [threads, setThreads] = React.useState<AssistantThread[]>([]);
-  const [activeThreadId, setActiveThreadId] = React.useState('');
   const [remoteWorkspaces, setRemoteWorkspaces] = React.useState<
     Record<string, { loading: boolean; error: string | null; workspaces: RemoteWorkspace[] }>
   >({});
@@ -113,6 +120,10 @@ export function CrossDeviceAssistantPolicyPanel({
     .map((device) => device.id)
     .sort()
     .join('\0');
+  const connectedDeviceKey = connectedDeviceIds
+    .filter((deviceId) => availableDevices.some((device) => device.id === deviceId))
+    .sort()
+    .join('\0');
   const dirty = policyFingerprint(policy) !== policyFingerprint(savedPolicy);
   const savedGrants = new Map(
     savedPolicy.deviceGrants.map((grant) => [grantKey(grant.deviceId, grant.rootId), grant]),
@@ -120,18 +131,12 @@ export function CrossDeviceAssistantPolicyPanel({
 
   React.useEffect(() => {
     let active = true;
-    void Promise.all([
-      requestJson<{ policy: Policy }>('/api/device-mesh/cross-device-assistant'),
-      requestJson<{ threads?: AssistantThread[] }>('/api/assistant/threads'),
-    ])
-      .then(([result, assistant]) => {
+    void requestJson<{ policy: Policy }>('/api/device-mesh/cross-device-assistant')
+      .then((result) => {
         if (!active) return;
         const next = normalizedPolicy(result.policy);
         setPolicy(next);
         setSavedPolicy(next);
-        const nextThreads = Array.isArray(assistant.threads) ? assistant.threads : [];
-        setThreads(nextThreads);
-        setActiveThreadId((current) => current || nextThreads[0]?.id || '');
       })
       .catch((nextError) => active && setError(nextError?.message ?? String(nextError)))
       .finally(() => active && setLoading(false));
@@ -141,49 +146,65 @@ export function CrossDeviceAssistantPolicyPanel({
   }, [requestJson]);
 
   React.useEffect(() => {
+    if (mode !== 'thread') return;
     let active = true;
+    const connected = new Set(connectedDeviceIds);
     setRemoteWorkspaces(
       Object.fromEntries(
         availableDevices.map((device) => [
           device.id,
-          { loading: true, error: null, workspaces: [] },
+          { loading: connected.has(device.id), error: null, workspaces: [] },
         ]),
       ),
     );
     void Promise.all(
-      availableDevices.map(async (device) => {
-        try {
-          const response = await requestJson<{ result?: { workspaces?: RemoteWorkspace[] } }>(
-            `/api/device-mesh/cross-device-assistant/remote-workspaces?deviceId=${encodeURIComponent(device.id)}`,
-          );
-          if (!active) return;
-          setRemoteWorkspaces((current) => ({
-            ...current,
-            [device.id]: {
-              loading: false,
-              error: null,
-              workspaces: Array.isArray(response.result?.workspaces)
-                ? response.result.workspaces
-                : [],
-            },
-          }));
-        } catch (nextError: any) {
-          if (!active) return;
-          setRemoteWorkspaces((current) => ({
-            ...current,
-            [device.id]: {
-              loading: false,
-              error: nextError?.message ?? String(nextError),
-              workspaces: [],
-            },
-          }));
-        }
-      }),
+      availableDevices
+        .filter((device) => connected.has(device.id))
+        .map(async (device) => {
+          try {
+            const response = await requestJson<{ result?: { workspaces?: RemoteWorkspace[] } }>(
+              `/api/device-mesh/cross-device-assistant/remote-workspaces?deviceId=${encodeURIComponent(device.id)}`,
+            );
+            if (!active) return;
+            setRemoteWorkspaces((current) => ({
+              ...current,
+              [device.id]: {
+                loading: false,
+                error: null,
+                workspaces: Array.isArray(response.result?.workspaces)
+                  ? response.result.workspaces
+                  : [],
+              },
+            }));
+          } catch (nextError: any) {
+            if (!active) return;
+            setRemoteWorkspaces((current) => ({
+              ...current,
+              [device.id]: {
+                loading: false,
+                error: nextError?.message ?? String(nextError),
+                workspaces: [],
+              },
+            }));
+          }
+        }),
     );
     return () => {
       active = false;
     };
-  }, [availableDeviceKey, remoteReload, requestJson]);
+  }, [availableDeviceKey, connectedDeviceKey, mode, remoteReload, requestJson]);
+
+  React.useEffect(() => {
+    if (
+      mode !== 'thread' ||
+      !Object.entries(remoteWorkspaces).some(
+        ([deviceId, remote]) => connectedDeviceIds.includes(deviceId) && remote.error,
+      )
+    )
+      return;
+    const timer = window.setTimeout(() => setRemoteReload((current) => current + 1), 3_000);
+    return () => window.clearTimeout(timer);
+  }, [connectedDeviceKey, mode, remoteWorkspaces]);
 
   const addRoot = (folderPath = '') => {
     const label = folderPath ? folderName(folderPath) : '';
@@ -309,6 +330,9 @@ export function CrossDeviceAssistantPolicyPanel({
         ...policy,
         homeTargets: policy.homeTargets.flatMap((target) => {
           if (!activeDeviceIds.has(target.targetDeviceId)) return [];
+          if (mode === 'thread' && target.threadId !== threadId) return [target];
+          if (mode === 'thread' && !connectedDeviceIds.includes(target.targetDeviceId))
+            return [target];
           const remote = remoteWorkspaces[target.targetDeviceId];
           if (!remote || remote.loading || remote.error) return [target];
           const workspace = remote.workspaces.find((item) => item.id === target.rootId);
@@ -349,346 +373,346 @@ export function CrossDeviceAssistantPolicyPanel({
     );
 
   return (
-    <section className="overflow-hidden rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)]">
+    <section className={mode === 'thread' ? 'min-h-full bg-[var(--panel-alt)]' : ''}>
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border-subtle)] p-4">
         <div>
           <div className="text-[10px] font-semibold uppercase tracking-[.16em] text-[var(--yellow)]">
-            Workspaces
+            {mode === 'thread' ? 'Thread access' : 'Workspace sharing'}
           </div>
           <h2 className="mt-1 text-[16px] font-semibold text-[var(--fg)]">
-            Folders available to trusted devices
+            {mode === 'thread'
+              ? threadTitle || 'Remote workspaces'
+              : 'Folders available to trusted devices'}
           </h2>
           <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-[var(--muted)]">
-            Add folders on this Hub, then choose what each device may do. Threads select a smaller
-            subset on the device where their assistant runs.
+            {mode === 'thread'
+              ? 'Choose which workspaces this thread may use on your connected devices.'
+              : 'Add folders on this Hub, then choose what each trusted device may do.'}
           </p>
         </div>
-        <div className="flex gap-2">
+        {mode === 'sharing' ? (
+          <div className="flex gap-2">
+            <button
+              type="button"
+              disabled={choosing}
+              onClick={() => void chooseRoot()}
+              className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"
+            >
+              {choosing ? 'Opening…' : 'Choose folder'}
+            </button>
+            <button
+              type="button"
+              onClick={() => addRoot()}
+              className="px-2 py-2 text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--fg)]"
+            >
+              Add path manually
+            </button>
+          </div>
+        ) : onClose ? (
           <button
             type="button"
-            disabled={choosing}
-            onClick={() => void chooseRoot()}
-            className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"
+            onClick={onClose}
+            className="px-2 py-1 text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--fg)]"
           >
-            {choosing ? 'Opening…' : 'Choose folder'}
+            Close
           </button>
-          <button
-            type="button"
-            onClick={() => addRoot()}
-            className="rounded border border-[var(--border-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--muted)]"
-          >
-            Add path manually
-          </button>
-        </div>
+        ) : null}
       </div>
 
       <div className="grid gap-3 p-4">
-        {policy.roots.map((root) => (
-          <div
-            key={root.id}
-            className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"
-          >
-            <div className="grid gap-2 border-b border-[var(--border-subtle)] p-3 sm:grid-cols-[1fr_2fr_auto_auto]">
-              <input
-                aria-label="Workspace name"
-                className={fieldClass}
-                placeholder="Workspace name"
-                value={root.label}
-                onChange={(event) =>
-                  setPolicy((current) => ({
-                    ...current,
-                    roots: current.roots.map((item) =>
-                      item.id === root.id ? { ...item, label: event.target.value } : item,
-                    ),
-                  }))
-                }
-              />
-              <input
-                aria-label="Workspace folder"
-                className={`${fieldClass} font-mono`}
-                placeholder="/absolute/workspace/path"
-                value={root.path}
-                onChange={(event) =>
-                  setPolicy((current) => ({
-                    ...current,
-                    roots: current.roots.map((item) =>
-                      item.id === root.id ? { ...item, path: event.target.value } : item,
-                    ),
-                  }))
-                }
-              />
-              <button
-                type="button"
-                disabled={choosing}
-                onClick={() => void chooseRoot(root.id)}
-                className="rounded border border-[var(--border-subtle)] px-3 text-[10px] font-semibold text-[var(--fg)] disabled:opacity-50"
+        {mode === 'sharing' ? (
+          <>
+            {policy.roots.map((root) => (
+              <div
+                key={root.id}
+                className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"
               >
-                Browse
-              </button>
-              <button
-                type="button"
-                onClick={() =>
-                  setPolicy((current) => ({
-                    ...current,
-                    roots: current.roots.filter((item) => item.id !== root.id),
-                    deviceGrants: current.deviceGrants.filter((grant) => grant.rootId !== root.id),
-                  }))
-                }
-                className="rounded px-2 text-[10px] font-semibold text-[var(--red)]"
-              >
-                Remove
-              </button>
-            </div>
-            <div className="grid gap-2 p-3">
-              {availableDevices.map((device) => {
-                const grant = policy.deviceGrants.find(
-                  (item) => item.deviceId === device.id && item.rootId === root.id,
-                );
-                const previous = savedGrants.get(grantKey(device.id, root.id));
-                const changed = JSON.stringify(grant) !== JSON.stringify(previous);
-                return (
-                  <div
-                    key={device.id}
-                    className={`flex flex-wrap items-center gap-3 rounded border px-3 py-2 ${changed ? 'border-[var(--yellow)] bg-[rgba(250,204,21,.04)]' : 'border-[var(--border-subtle)]'}`}
+                <div className="grid gap-2 border-b border-[var(--border-subtle)] p-3 sm:grid-cols-[1fr_2fr_auto_auto]">
+                  <input
+                    aria-label="Workspace name"
+                    className={fieldClass}
+                    placeholder="Workspace name"
+                    value={root.label}
+                    onChange={(event) =>
+                      setPolicy((current) => ({
+                        ...current,
+                        roots: current.roots.map((item) =>
+                          item.id === root.id ? { ...item, label: event.target.value } : item,
+                        ),
+                      }))
+                    }
+                  />
+                  <input
+                    aria-label="Workspace folder"
+                    className={`${fieldClass} font-mono`}
+                    placeholder="/absolute/workspace/path"
+                    value={root.path}
+                    onChange={(event) =>
+                      setPolicy((current) => ({
+                        ...current,
+                        roots: current.roots.map((item) =>
+                          item.id === root.id ? { ...item, path: event.target.value } : item,
+                        ),
+                      }))
+                    }
+                  />
+                  <button
+                    type="button"
+                    disabled={choosing}
+                    onClick={() => void chooseRoot(root.id)}
+                    className="rounded border border-[var(--border-subtle)] px-3 text-[10px] font-semibold text-[var(--fg)] disabled:opacity-50"
                   >
-                    <div className="min-w-36 flex-1">
-                      <div className="text-[12px] font-semibold text-[var(--fg)]">
-                        {device.name}
-                      </div>
-                      <div className="mt-0.5 text-[9px] text-[var(--muted)]">
-                        {permissionSummary(grant)}
-                        {changed ? ' · changed' : ''}
-                      </div>
-                    </div>
-                    {(['read', 'write', 'execute'] as const).map((permission) => (
-                      <label
-                        key={permission}
-                        className="flex items-center gap-1.5 text-[10px] text-[var(--muted)]"
-                      >
-                        <input
-                          type="checkbox"
-                          checked={grant?.[permission] === true}
-                          onChange={(event) =>
-                            setGrant(device.id, root.id, (current) => {
-                              if (permission === 'read')
-                                return event.target.checked
-                                  ? { ...current, read: true }
-                                  : { ...current, read: false, write: false };
-                              if (permission === 'write')
-                                return {
-                                  ...current,
-                                  read: event.target.checked || current.read,
-                                  write: event.target.checked,
-                                };
-                              return { ...current, execute: event.target.checked };
-                            })
-                          }
-                        />
-                        {permission === 'execute'
-                          ? 'Run commands'
-                          : permission[0].toUpperCase() + permission.slice(1)}
-                      </label>
-                    ))}
-                  </div>
-                );
-              })}
-              {availableDevices.length === 0 ? (
-                <div className="text-[11px] text-[var(--muted)]">
-                  Pair another device to grant access.
+                    Browse
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() =>
+                      setPolicy((current) => ({
+                        ...current,
+                        roots: current.roots.filter((item) => item.id !== root.id),
+                        deviceGrants: current.deviceGrants.filter(
+                          (grant) => grant.rootId !== root.id,
+                        ),
+                      }))
+                    }
+                    className="rounded px-2 text-[10px] font-semibold text-[var(--red)]"
+                  >
+                    Remove
+                  </button>
                 </div>
-              ) : null}
-            </div>
-          </div>
-        ))}
-        {policy.roots.length === 0 ? (
-          <div className="rounded border border-dashed border-[var(--border)] px-4 py-8 text-center text-[11px] text-[var(--muted)]">
-            No workspace folders are exposed by this Hub.
-          </div>
-        ) : null}
-        <div className="mt-2 rounded border border-[var(--border-subtle)]">
-          <div className="flex flex-wrap items-end justify-between gap-3 border-b border-[var(--border-subtle)] p-3">
-            <div>
-              <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">
-                Threads hosted on this Hub
+                <div className="grid gap-2 p-3">
+                  {availableDevices.map((device) => {
+                    const grant = policy.deviceGrants.find(
+                      (item) => item.deviceId === device.id && item.rootId === root.id,
+                    );
+                    const previous = savedGrants.get(grantKey(device.id, root.id));
+                    const changed = JSON.stringify(grant) !== JSON.stringify(previous);
+                    return (
+                      <div
+                        key={device.id}
+                        className={`flex flex-wrap items-center gap-3 rounded border px-3 py-2 ${changed ? 'border-[var(--yellow)] bg-[rgba(250,204,21,.04)]' : 'border-[var(--border-subtle)]'}`}
+                      >
+                        <div className="min-w-36 flex-1">
+                          <div className="text-[12px] font-semibold text-[var(--fg)]">
+                            {device.name}
+                          </div>
+                          <div className="mt-0.5 text-[9px] text-[var(--muted)]">
+                            {permissionSummary(grant)}
+                            {changed ? ' · changed' : ''}
+                          </div>
+                        </div>
+                        {(['read', 'write', 'execute'] as const).map((permission) => (
+                          <label
+                            key={permission}
+                            className="flex items-center gap-1.5 text-[10px] text-[var(--muted)]"
+                          >
+                            <input
+                              type="checkbox"
+                              checked={grant?.[permission] === true}
+                              onChange={(event) =>
+                                setGrant(device.id, root.id, (current) => {
+                                  if (permission === 'read')
+                                    return event.target.checked
+                                      ? { ...current, read: true }
+                                      : { ...current, read: false, write: false };
+                                  if (permission === 'write')
+                                    return {
+                                      ...current,
+                                      read: event.target.checked || current.read,
+                                      write: event.target.checked,
+                                    };
+                                  return { ...current, execute: event.target.checked };
+                                })
+                              }
+                            />
+                            {permission === 'execute'
+                              ? 'Run commands'
+                              : permission[0].toUpperCase() + permission.slice(1)}
+                          </label>
+                        ))}
+                      </div>
+                    );
+                  })}
+                  {availableDevices.length === 0 ? (
+                    <div className="text-[11px] text-[var(--muted)]">
+                      Pair another device to grant access.
+                    </div>
+                  ) : null}
+                </div>
               </div>
-              <div className="mt-1 text-[11px] text-[var(--muted)]">
-                Each thread starts with no remote workspace access and selects a subset of this
-                device’s destination grants.
+            ))}
+            {policy.roots.length === 0 ? (
+              <div className="rounded border border-dashed border-[var(--border)] px-4 py-8 text-center text-[11px] text-[var(--muted)]">
+                No workspace folders are exposed by this Hub.
               </div>
-            </div>
-            <div className="flex items-center gap-2">
-              <select
-                value={activeThreadId}
-                onChange={(event) => setActiveThreadId(event.target.value)}
-                className={fieldClass}
-              >
-                {threads.map((thread) => (
-                  <option key={thread.id} value={thread.id}>
-                    {thread.title}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                onClick={() => setRemoteReload((current) => current + 1)}
-                className="text-[10px] font-semibold text-[var(--accent)]"
-              >
-                Refresh workspaces
-              </button>
-            </div>
-          </div>
-          {activeThreadId ? (
-            <div className="grid gap-3 p-3">
-              {availableDevices.map((device) => {
-                const remote = remoteWorkspaces[device.id];
-                return (
-                  <div key={device.id} className="rounded border border-[var(--border-subtle)] p-3">
-                    <div className="text-[12px] font-semibold text-[var(--fg)]">{device.name}</div>
-                    {remote?.loading ? (
-                      <div className="mt-2 text-[10px] text-[var(--muted)]">
-                        Loading workspaces…
-                      </div>
-                    ) : remote?.error ? (
-                      <div className="mt-2 text-[10px] text-[var(--red)]">{remote.error}</div>
-                    ) : remote &&
-                      (remote.workspaces.length > 0 ||
-                        policy.homeTargets.some(
-                          (target) =>
-                            target.threadId === activeThreadId &&
-                            target.targetDeviceId === device.id,
-                        )) ? (
-                      <div className="mt-2 grid gap-2">
-                        {remote.workspaces.map((workspace) => {
-                          const selected = policy.homeTargets.find(
-                            (target) =>
-                              target.threadId === activeThreadId &&
-                              target.targetDeviceId === device.id &&
-                              target.rootId === workspace.id,
-                          );
-                          const previous = savedPolicy.homeTargets.find(
-                            (target) =>
-                              target.threadId === activeThreadId &&
-                              target.targetDeviceId === device.id &&
-                              target.rootId === workspace.id,
-                          );
-                          const changed = JSON.stringify(selected) !== JSON.stringify(previous);
-                          return (
-                            <div
-                              key={workspace.id}
-                              className={`flex flex-wrap items-center gap-3 rounded border px-3 py-2 ${changed ? 'border-[var(--yellow)] bg-[rgba(250,204,21,.04)]' : 'border-transparent bg-[rgba(255,255,255,.02)]'}`}
-                            >
-                              <div className="min-w-36 flex-1">
-                                <div className="text-[11px] font-semibold text-[var(--fg)]">
-                                  {workspace.name}
-                                </div>
-                                {changed ? (
-                                  <div className="mt-0.5 text-[9px] text-[var(--yellow)]">
-                                    changed
-                                  </div>
-                                ) : null}
-                              </div>
-                              {(['read', 'write', 'execute'] as const).map((permission) => {
-                                const allowed = workspace[permission];
-                                return (
-                                  <label
-                                    key={permission}
-                                    className={`flex items-center gap-1.5 text-[10px] ${allowed ? 'text-[var(--muted)]' : 'text-[var(--muted-dim)] opacity-40'}`}
-                                  >
-                                    <input
-                                      type="checkbox"
-                                      disabled={!allowed}
-                                      checked={selected?.[permission] === true}
-                                      onChange={() =>
-                                        setHomePermission(
-                                          activeThreadId,
-                                          device.id,
-                                          workspace,
-                                          permission,
-                                        )
-                                      }
-                                    />
-                                    {permission === 'execute'
-                                      ? 'Run'
-                                      : permission[0].toUpperCase() + permission.slice(1)}
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          );
-                        })}
-                        {policy.homeTargets
-                          .filter(
-                            (target) =>
-                              target.threadId === activeThreadId &&
-                              target.targetDeviceId === device.id &&
-                              !remote.workspaces.some(
-                                (workspace) => workspace.id === target.rootId,
-                              ),
-                          )
-                          .map((target) => (
-                            <div
-                              key={targetKey(target)}
-                              className="flex items-center gap-3 rounded border border-[var(--yellow)] bg-[rgba(250,204,21,.04)] px-3 py-2"
-                            >
-                              <div className="min-w-0 flex-1">
-                                <div className="truncate text-[11px] font-semibold text-[var(--fg)]">
-                                  {target.workspaceName}
-                                </div>
-                                <div className="mt-0.5 text-[9px] text-[var(--yellow)]">
-                                  No longer granted by the destination
-                                </div>
-                              </div>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  setPolicy((current) => ({
-                                    ...current,
-                                    homeTargets: current.homeTargets.filter(
-                                      (item) => targetKey(item) !== targetKey(target),
-                                    ),
-                                  }))
-                                }
-                                className="text-[10px] font-semibold text-[var(--red)]"
-                              >
-                                Remove
-                              </button>
-                            </div>
-                          ))}
-                      </div>
-                    ) : (
-                      <div className="mt-2 text-[10px] text-[var(--muted)]">
-                        This destination has not granted a workspace to this Hub.
-                      </div>
-                    )}
+            ) : null}
+          </>
+        ) : threadId ? (
+          <div className="grid gap-3 p-3">
+            {availableDevices.map((device) => {
+              const remote = remoteWorkspaces[device.id];
+              const connected = connectedDeviceIds.includes(device.id);
+              const selectedCount = policy.homeTargets.filter(
+                (target) => target.threadId === threadId && target.targetDeviceId === device.id,
+              ).length;
+              return (
+                <div
+                  key={device.id}
+                  className="border-b border-[var(--border-subtle)] pb-3 last:border-b-0"
+                >
+                  <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--fg)]">
+                    <span
+                      className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-[var(--green)]' : 'bg-[var(--muted-dim)]'}`}
+                    />
+                    {device.name}
+                    <span className="text-[9px] font-normal uppercase tracking-wide text-[var(--muted-dim)]">
+                      {connected ? 'Connected' : 'Offline'}
+                    </span>
                   </div>
-                );
-              })}
+                  {!connected ? (
+                    <div className="mt-2 text-[10px] text-[var(--muted)]">
+                      {selectedCount > 0
+                        ? `${selectedCount} saved workspace ${selectedCount === 1 ? 'selection is' : 'selections are'} preserved. Access resumes when this device reconnects.`
+                        : 'Workspace access will become available when this device reconnects.'}
+                    </div>
+                  ) : remote?.loading ? (
+                    <div className="mt-2 text-[10px] text-[var(--muted)]">Loading workspaces…</div>
+                  ) : remote?.error ? (
+                    <div className="mt-2 text-[10px] text-[var(--yellow)]">
+                      Connection changed while loading. Retrying automatically…
+                    </div>
+                  ) : remote &&
+                    (remote.workspaces.length > 0 ||
+                      policy.homeTargets.some(
+                        (target) =>
+                          target.threadId === threadId && target.targetDeviceId === device.id,
+                      )) ? (
+                    <div className="mt-2 grid gap-2">
+                      {remote.workspaces.map((workspace) => {
+                        const selected = policy.homeTargets.find(
+                          (target) =>
+                            target.threadId === threadId &&
+                            target.targetDeviceId === device.id &&
+                            target.rootId === workspace.id,
+                        );
+                        const previous = savedPolicy.homeTargets.find(
+                          (target) =>
+                            target.threadId === threadId &&
+                            target.targetDeviceId === device.id &&
+                            target.rootId === workspace.id,
+                        );
+                        const changed = JSON.stringify(selected) !== JSON.stringify(previous);
+                        return (
+                          <div
+                            key={workspace.id}
+                            className={`flex flex-wrap items-center gap-3 rounded border px-3 py-2 ${changed ? 'border-[var(--yellow)] bg-[rgba(250,204,21,.04)]' : 'border-transparent bg-[rgba(255,255,255,.02)]'}`}
+                          >
+                            <div className="min-w-36 flex-1">
+                              <div className="text-[11px] font-semibold text-[var(--fg)]">
+                                {workspace.name}
+                              </div>
+                              {changed ? (
+                                <div className="mt-0.5 text-[9px] text-[var(--yellow)]">
+                                  changed
+                                </div>
+                              ) : null}
+                            </div>
+                            {(['read', 'write', 'execute'] as const).map((permission) => {
+                              const allowed = workspace[permission];
+                              return (
+                                <label
+                                  key={permission}
+                                  className={`flex items-center gap-1.5 text-[10px] ${allowed ? 'text-[var(--muted)]' : 'text-[var(--muted-dim)] opacity-40'}`}
+                                >
+                                  <input
+                                    type="checkbox"
+                                    disabled={!allowed}
+                                    checked={selected?.[permission] === true}
+                                    onChange={() =>
+                                      setHomePermission(threadId, device.id, workspace, permission)
+                                    }
+                                  />
+                                  {permission === 'execute'
+                                    ? 'Run'
+                                    : permission[0].toUpperCase() + permission.slice(1)}
+                                </label>
+                              );
+                            })}
+                          </div>
+                        );
+                      })}
+                      {policy.homeTargets
+                        .filter(
+                          (target) =>
+                            target.threadId === threadId &&
+                            target.targetDeviceId === device.id &&
+                            !remote.workspaces.some((workspace) => workspace.id === target.rootId),
+                        )
+                        .map((target) => (
+                          <div
+                            key={targetKey(target)}
+                            className="flex items-center gap-3 rounded border border-[var(--yellow)] bg-[rgba(250,204,21,.04)] px-3 py-2"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-[11px] font-semibold text-[var(--fg)]">
+                                {target.workspaceName}
+                              </div>
+                              <div className="mt-0.5 text-[9px] text-[var(--yellow)]">
+                                No longer granted by the destination
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setPolicy((current) => ({
+                                  ...current,
+                                  homeTargets: current.homeTargets.filter(
+                                    (item) => targetKey(item) !== targetKey(target),
+                                  ),
+                                }))
+                              }
+                              className="text-[10px] font-semibold text-[var(--red)]"
+                            >
+                              Remove
+                            </button>
+                          </div>
+                        ))}
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-[10px] text-[var(--muted)]">
+                      This destination has not granted a workspace to this Hub.
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+            {availableDevices.length === 0 ? (
+              <div className="py-8 text-center text-[11px] text-[var(--muted)]">
+                Pair another device from Devices before assigning a remote workspace.
+              </div>
+            ) : null}
+            {policy.homeTargets.some((target) => target.threadId === threadId) ? (
               <button
                 type="button"
                 onClick={() =>
                   setPolicy((current) => ({
                     ...current,
                     homeTargets: current.homeTargets.filter(
-                      (target) => target.threadId !== activeThreadId,
+                      (target) => target.threadId !== threadId,
                     ),
                   }))
                 }
                 className="justify-self-start text-[10px] font-semibold text-[var(--red)]"
               >
-                Remove all access from this thread
+                Clear this thread’s workspace access
               </button>
-            </div>
-          ) : (
-            <div className="p-4 text-[11px] text-[var(--muted)]">
-              Create an assistant thread to configure its remote workspace access.
-            </div>
-          )}
-        </div>
-        <div className="rounded border border-[rgba(250,204,21,.28)] bg-[rgba(250,204,21,.04)] px-3 py-2 text-[10px] leading-relaxed text-[var(--muted)]">
-          Run commands starts Bash in the workspace folder, but it is host access and is not
-          confined to that folder. Output streams from a cancellable job with a 30-minute default
-          timeout.
-        </div>
+            ) : null}
+          </div>
+        ) : (
+          <div className="p-4 text-[11px] text-[var(--muted)]">
+            Start an assistant thread to configure its workspace access.
+          </div>
+        )}
       </div>
 
       <div className="flex items-center gap-3 border-t border-[var(--border-subtle)] p-4">

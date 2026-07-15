@@ -3,11 +3,37 @@ import {
   buildMobileDroneRepoGroups,
   mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneListPayload,
+  normalizeMobileDroneCreateModelCatalog,
   normalizeMobileDroneTurns,
   normalizeMobileDrones,
+  suggestNextMobileDroneChatName,
 } from '../src/drones/drone-sidebar-model';
 
 describe('mobile drone sidebar model', () => {
+  test('normalizes detected create models and their supported reasoning levels', () => {
+    expect(normalizeMobileDroneCreateModelCatalog({
+      models: [
+        {
+          id: 'gpt-5.2-codex',
+          label: 'GPT-5.2 Codex',
+          reasoningLevels: ['low', 'medium', 'high', 'high'],
+          defaultReasoningLevel: 'medium',
+        },
+        { id: 'gpt-5.2-codex', label: 'duplicate' },
+      ],
+    })).toEqual([{
+      id: 'gpt-5.2-codex',
+      label: 'GPT-5.2 Codex',
+      reasoningLevels: ['low', 'medium', 'high'],
+      defaultReasoningLevel: 'medium',
+    }]);
+  });
+  test('names a newly cloned chat after the highest existing chat number', () => {
+    expect(suggestNextMobileDroneChatName([])).toBe('chat-1');
+    expect(suggestNextMobileDroneChatName(['default'])).toBe('chat-2');
+    expect(suggestNextMobileDroneChatName(['default', 'chat-7', 'review'])).toBe('chat-8');
+  });
+
   test('groups drones by repo and preserves fleet and chat hierarchy', () => {
     const drones = normalizeMobileDrones([
       {
@@ -96,6 +122,40 @@ describe('mobile drone sidebar model', () => {
       sidebarDroneOrderByGroup: { 'group:Review': ['mapped'] },
       sidebarNodeOrderByParent: { root: ['drone:mapped'] },
     });
+  });
+
+  test('normalizes repo and branch choices for the mobile create screen', () => {
+    const payload = normalizeMobileDroneListPayload({
+      schemaVersion: 4,
+      createOptions: {
+        repos: [
+          {
+            path: '/work/drone',
+            hostBranch: 'main',
+            remoteBranches: [
+              { name: 'origin/main', remote: 'origin', branch: 'main' },
+              { name: '', remote: 'origin', branch: 'ignored' },
+            ],
+          },
+          { path: '/work/broken', branchesError: 'Not a git repository' },
+        ],
+      },
+    });
+
+    expect(payload.createRepos).toEqual([
+      {
+        path: '/work/drone',
+        hostBranch: 'main',
+        remoteBranches: [{ name: 'origin/main', remote: 'origin', branch: 'main' }],
+        branchesError: null,
+      },
+      {
+        path: '/work/broken',
+        hostBranch: null,
+        remoteBranches: [],
+        branchesError: 'Not a git repository',
+      },
+    ]);
   });
 
   test('keeps orphaned and cyclic children reachable at the repo root', () => {

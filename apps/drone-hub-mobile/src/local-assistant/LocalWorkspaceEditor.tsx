@@ -394,13 +394,6 @@ export function LocalWorkspaceEditor({
         </View>
       ) : null}
 
-      <View style={styles.commandWarning}>
-        <Text style={styles.commandWarningText}>
-          RUN starts Bash in the workspace folder. Commands are host access and can leave that
-          folder. Output streams back from a cancellable job with a 30-minute default timeout.
-        </Text>
-      </View>
-
       {dirty ? (
         <View style={styles.unsavedBanner}>
           <Text style={styles.unsavedText}>
@@ -522,14 +515,6 @@ const styles = StyleSheet.create({
   removeText: { color: colors.danger, fontSize: 10, fontWeight: '800' },
   empty: { padding: 18, borderRadius: 6, borderWidth: 1, borderColor: colors.border },
   emptyText: { color: colors.muted, fontSize: 10, lineHeight: 16 },
-  commandWarning: {
-    padding: 10,
-    borderRadius: 5,
-    borderWidth: 1,
-    borderColor: colors.warningBorder,
-    backgroundColor: colors.warningDark,
-  },
-  commandWarningText: { color: colors.warning, fontSize: 10, lineHeight: 15 },
   unsavedBanner: {
     minHeight: 38,
     flexDirection: 'row',

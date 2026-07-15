@@ -56,6 +56,30 @@ function workspaceAgentTools(runtime: MobileWorkspaceToolRuntime): AgentTool<any
   }));
 }
 
+function hasVisibleAssistantContent(message: LocalAssistantMessage): boolean {
+  if (message.role !== 'assistant') return false;
+  if (message.errorMessage) return true;
+  if (typeof message.content === 'string') return Boolean(message.content.trim());
+  if (!Array.isArray(message.content)) return false;
+  return message.content.some(
+    (part: any) =>
+      (part?.type === 'text' && String(part.text ?? '').trim()) ||
+      part?.type === 'image' ||
+      part?.type === 'image_url',
+  );
+}
+
+function hasTerminalAssistantReply(messages: LocalAssistantMessage[]): boolean {
+  let lastUserIndex = -1;
+  let lastToolResultIndex = -1;
+  messages.forEach((message, index) => {
+    if (message.role === 'user') lastUserIndex = index;
+    if (message.role === 'toolResult' && index > lastUserIndex) lastToolResultIndex = index;
+  });
+  const afterIndex = Math.max(lastUserIndex, lastToolResultIndex);
+  return messages.slice(afterIndex + 1).some(hasVisibleAssistantContent);
+}
+
 export async function runMobileBlip(input: {
   provider: 'openai' | 'codex';
   apiKey: string | null;
@@ -151,7 +175,13 @@ export async function runMobileBlip(input: {
     if (input.signal.aborted)
       throw Object.assign(new Error('Assistant run stopped'), { name: 'AbortError' });
     if (finishedError) throw new Error(finishedError);
-    return repository.localMessages();
+    const messages = repository.localMessages();
+    if (!hasTerminalAssistantReply(messages)) {
+      throw new Error(
+        'The assistant finished without a final response. Any completed tool results were kept; send another message to continue.',
+      );
+    }
+    return messages;
   } finally {
     input.signal.removeEventListener('abort', abort);
     handle.close();

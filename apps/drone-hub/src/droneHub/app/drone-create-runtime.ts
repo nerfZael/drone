@@ -47,6 +47,7 @@ type BuildDraftDroneCreatePayloadArgs = {
   repoBranchSelection: RepoBranchSelectionState;
   seedAgent: ChatAgentConfig | null;
   seedModel?: string | null;
+  seedReasoning?: string | null;
   seedAgentPermissionMode?: AgentPermissionMode;
   prompt?: string | null;
 };
@@ -62,6 +63,7 @@ export function buildDraftDroneCreatePayload({
   repoBranchSelection,
   seedAgent,
   seedModel,
+  seedReasoning,
   seedAgentPermissionMode,
   prompt,
 }: BuildDraftDroneCreatePayloadArgs) {
@@ -72,9 +74,10 @@ export function buildDraftDroneCreatePayload({
   const trimmedRepoSeedFromDroneId = String(repoSeedFromDroneId ?? '').trim();
   const trimmedPrompt = String(prompt ?? '').trim();
   const trimmedModel = String(seedModel ?? '').trim();
+  const trimmedReasoning = String(seedReasoning ?? '').trim();
   const repoBranchSource = repoBranchSelection.repoBranchSource;
   const remoteBranch = String(repoBranchSelection.remoteBranch ?? '').trim();
-  const hasChatSeed = Boolean(seedAgent || trimmedModel || trimmedPrompt);
+  const hasChatSeed = Boolean(seedAgent || trimmedModel || trimmedReasoning || trimmedPrompt);
   return {
     ...(trimmedName ? { name: trimmedName } : {}),
     ...(trimmedGroup ? { group: trimmedGroup } : {}),
@@ -89,6 +92,7 @@ export function buildDraftDroneCreatePayload({
     ...(hasChatSeed ? { seedChat: 'default' } : {}),
     ...(seedAgent ? { seedAgent } : {}),
     ...(trimmedModel ? { seedModel: trimmedModel } : {}),
+    ...(trimmedReasoning ? { seedReasoning: trimmedReasoning } : {}),
     ...(seedAgentPermissionMode === 'read-only' ? { seedAgentPermissionMode } : {}),
     ...(trimmedPrompt ? { seedPrompt: trimmedPrompt } : {}),
     ...(trimmedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),

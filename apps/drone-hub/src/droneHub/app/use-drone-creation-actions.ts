@@ -70,6 +70,7 @@ type UseDroneCreationActionsArgs = {
   cloneIncludeChats: boolean;
   spawnAgentKey: string;
   spawnModelForSeed: string | null;
+  spawnReasoningForSeed: string | null;
   spawnAgentPermissionMode: AgentPermissionMode;
   draftChat: DraftChatState | null;
   draftCreateMode: 'with-chat' | 'without-chat';
@@ -182,6 +183,7 @@ export function useDroneCreationActions({
   cloneIncludeChats,
   spawnAgentKey,
   spawnModelForSeed,
+  spawnReasoningForSeed,
   spawnAgentPermissionMode,
   draftChat,
   draftCreateMode,
@@ -414,6 +416,7 @@ export function useDroneCreationActions({
     };
     const seedAgent = isClone && cloneIncludeChats ? null : resolveAgentKeyToConfig(spawnAgentKey);
     const seedModel = isClone && cloneIncludeChats ? null : spawnModelForSeed;
+    const seedReasoning = isClone && cloneIncludeChats ? null : spawnReasoningForSeed;
     const seedAgentPermissionMode: AgentPermissionMode = seedAgent ? spawnAgentPermissionMode : 'full-access';
     if (runtime === 'host' && seedAgent?.kind === 'custom') {
       setCreateError('Host runtime currently supports builtin agents only.');
@@ -504,6 +507,7 @@ export function useDroneCreationActions({
             seedChat: 'default',
             ...(seedAgent ? { seedAgent } : {}),
             ...(seedModel ? { seedModel } : {}),
+            ...(seedReasoning ? { seedReasoning } : {}),
             ...(seedAgentPermissionMode === 'read-only' ? { seedAgentPermissionMode } : {}),
             ...(combinedSeedPrompt ? { seedPrompt: combinedSeedPrompt } : {}),
             ...(combinedSeedPrompt ? { seedSubmittedAt: new Date().toISOString() } : {}),
@@ -633,6 +637,7 @@ export function useDroneCreationActions({
     spawnAgentKey,
     spawnAgentPermissionMode,
     spawnModelForSeed,
+    spawnReasoningForSeed,
     startupSeedMissingGraceMs,
   ]);
 
@@ -740,6 +745,7 @@ export function useDroneCreationActions({
       beginDraftCreate();
       setDraftCreateError(null);
       const seedModel = createWithoutChat ? null : spawnModelForSeed;
+      const seedReasoning = createWithoutChat ? null : spawnReasoningForSeed;
       let createdDrone = false;
       let postCreateError: string | null = null;
       const optimisticDraftName =
@@ -775,6 +781,7 @@ export function useDroneCreationActions({
             },
             seedAgent,
             seedModel,
+            seedReasoning,
             seedAgentPermissionMode,
             prompt: shouldSeedPromptViaCreate ? prompt : '',
           });
@@ -991,6 +998,7 @@ export function useDroneCreationActions({
       spawnAgentKey,
       spawnAgentPermissionMode,
       spawnModelForSeed,
+      spawnReasoningForSeed,
       startupSeedMissingGraceMs,
       suggestAndRenameDraftDrone,
       setDraftChatState,

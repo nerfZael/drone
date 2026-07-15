@@ -401,6 +401,7 @@ export function DraftChatWorkspace({
       </div>
       <div className="mt-3">
         <SpawnContextToolbar
+          runtime={createRuntime}
           agentMenuEntries={filteredSpawnAgentMenuEntries}
           spawnAgentConfig={spawnAgentConfig}
           createRepoMenuEntries={createRepoMenuEntries}

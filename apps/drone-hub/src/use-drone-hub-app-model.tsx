@@ -218,6 +218,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     spawnContextByRepoKey,
     spawnAgentKey,
     spawnModel,
+    spawnReasoning,
     repoBranchSource,
     repoCreateRemoteBranch,
     pullHostBranchBeforeCreate,
@@ -736,6 +737,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return value || null;
   }, [spawnModel]);
   const spawnModelForSeed = spawnAgentConfig.kind === 'builtin' ? spawnModelValue : null;
+  const spawnReasoningForSeed =
+    spawnAgentConfig.kind === 'builtin' && (spawnAgentConfig.id === 'codex' || spawnAgentConfig.id === 'blip')
+      ? String(spawnReasoning ?? '').trim() || null
+      : null;
   const [spawnAgentPermissionMode, setSpawnAgentPermissionMode] = React.useState<AgentPermissionMode>('full-access');
   const spawnAgentReadOnlySupported = spawnAgentConfig.kind === 'builtin' && (spawnAgentConfig.id === 'codex' || spawnAgentConfig.id === 'blip');
   React.useEffect(() => {
@@ -1538,6 +1543,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       cloneIncludeChats,
       spawnAgentKey,
       spawnModelForSeed,
+      spawnReasoningForSeed,
       spawnAgentPermissionMode,
       draftChat,
       draftCreateMode,

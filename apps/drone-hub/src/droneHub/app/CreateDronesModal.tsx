@@ -7,8 +7,8 @@ import { droneNameHasWhitespace } from './name-helpers';
 import { IconChevron, IconSpinner, IconTrash } from './icons';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { filterSpawnAgentMenuEntriesForRuntime, type RepoBranchSourceMode } from './drone-create-runtime';
-import { buildSpawnModelMenuEntries, getSpawnModelTriggerLabel } from './spawn-model-history';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
+import { buildDetectedModelMenuEntries, useSpawnModelCatalog } from './use-spawn-model-catalog';
 import { RepoBranchSourceControls } from './RepoBranchSourceControls';
 import { repoPathLabel } from './repo-path-label';
 import type { RepoRemoteBranchOption } from '../types';
@@ -139,8 +139,6 @@ export function CreateDronesModal({
   onSubmitCreate,
   onRequestClose,
 }: CreateDronesModalProps) {
-  if (!open) return null;
-
   const mountedRef = React.useRef(false);
   const initialMessageVoiceRef = React.useRef<InitialMessageVoiceControlsHandle | null>(null);
   const [submittingCreate, setSubmittingCreate] = React.useState(false);
@@ -152,19 +150,26 @@ export function CreateDronesModal({
   const remoteBranchCheckoutEnabled = createMode !== 'clone' && createRuntime === 'container';
   const hostCustomAgentsUnsupported = hostRuntimeSelected;
   const filteredSpawnAgentMenuEntries = filterSpawnAgentMenuEntriesForRuntime(createRuntime, spawnAgentMenuEntries);
-  const { seenModelIds } = useDroneHubUiStore(
+  const { spawnReasoning, setSpawnReasoning } = useDroneHubUiStore(
     useShallow((s) => ({
-      seenModelIds: s.seenModelIds,
+      spawnReasoning: s.spawnReasoning,
+      setSpawnReasoning: s.setSpawnReasoning,
     })),
   );
+  const modelCatalog = useSpawnModelCatalog({
+    agentId: spawnAgentConfig.kind === 'builtin' ? spawnAgentConfig.id : '',
+    runtime: createRuntime,
+    enabled: open && spawnAgentConfig.kind === 'builtin',
+  });
   const spawnModelMenuEntries = React.useMemo(
-    () => buildSpawnModelMenuEntries(seenModelIds, spawnModel),
-    [seenModelIds, spawnModel],
+    () => buildDetectedModelMenuEntries(modelCatalog.models, spawnModel),
+    [modelCatalog.models, spawnModel],
   );
-  const spawnModelTriggerLabel = React.useMemo(
-    () => getSpawnModelTriggerLabel(seenModelIds, spawnModel),
-    [seenModelIds, spawnModel],
-  );
+  const selectedCatalogModel = modelCatalog.models.find((model) => model.id === spawnModel) ?? null;
+  const reasoningEntries = (selectedCatalogModel?.reasoningLevels ?? []).map((level) => ({
+    value: level,
+    label: level === 'off' ? 'Off' : level[0].toUpperCase() + level.slice(1),
+  }));
   const spawnModelMenuDisabled =
     creating ||
     (createMode === 'clone' && cloneIncludeChats) ||
@@ -180,6 +185,17 @@ export function CreateDronesModal({
     };
   }, []);
 
+  React.useEffect(() => {
+    const levels = selectedCatalogModel?.reasoningLevels ?? [];
+    if (levels.length === 0) {
+      if (spawnReasoning) setSpawnReasoning('');
+      return;
+    }
+    if (!levels.includes(spawnReasoning)) {
+      setSpawnReasoning(selectedCatalogModel?.defaultReasoningLevel || levels[0] || '');
+    }
+  }, [selectedCatalogModel, setSpawnReasoning, spawnReasoning]);
+
   const submitCreate = React.useCallback(async () => {
     if (creating || submittingCreate) return;
     setSubmittingCreate(true);
@@ -193,6 +209,8 @@ export function CreateDronesModal({
       if (mountedRef.current) setSubmittingCreate(false);
     }
   }, [createInitialMessage, creating, onSubmitCreate, submittingCreate]);
+
+  if (!open) return null;
 
   return (
     <div
@@ -582,8 +600,8 @@ export function CreateDronesModal({
                   triggerClassName="w-[190px] flex-none"
                   panelClassName="right-auto w-[360px] max-w-[calc(100vw-3rem)]"
                   menuClassName="max-h-[240px] overflow-y-auto"
-                  title="Choose from models already seen in existing drones."
-                  triggerLabel={spawnModelTriggerLabel}
+                  title="Choose a model detected from the selected agent CLI."
+                  triggerLabel={spawnModel || (modelCatalog.loading ? 'Detecting models…' : 'Default model')}
                   triggerLabelClassName="font-mono"
                   searchable
                   searchPlaceholder="Search models"
@@ -613,7 +631,33 @@ export function CreateDronesModal({
                 >
                   Clear
                 </button>
+                <button
+                  type="button"
+                  onClick={() => void modelCatalog.refresh()}
+                  disabled={spawnModelMenuDisabled || modelCatalog.loading}
+                  className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border border-[var(--border-subtle)] text-[var(--muted-dim)] disabled:opacity-40"
+                  style={{ fontFamily: 'var(--display)' }}
+                >
+                  {modelCatalog.loading ? 'Detecting…' : 'Refresh'}
+                </button>
               </div>
+              {reasoningEntries.length > 0 ? (
+                <div className="mt-2 flex items-center gap-2">
+                  <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]">Reasoning</span>
+                  <UiMenuSelect
+                    variant="form"
+                    value={spawnReasoning}
+                    onValueChange={setSpawnReasoning}
+                    entries={reasoningEntries}
+                    disabled={creating || spawnAgentAccessCopiedFromClone}
+                    triggerClassName="w-[160px]"
+                    panelClassName="w-[180px]"
+                    title="Reasoning level supported by this model"
+                    chevron={(menuOpen) => <IconChevron down={!menuOpen} className="text-[var(--muted-dim)] opacity-70" />}
+                  />
+                </div>
+              ) : null}
+              {modelCatalog.error ? <span className="mt-1 block text-[10px] text-[var(--danger)]">{modelCatalog.error}</span> : null}
               <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
                 {createMode === 'clone' && cloneIncludeChats
                   ? 'When cloning chats, model settings are copied from the source chats.'

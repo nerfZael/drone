@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Modal,
   PanResponder,
   Pressable,
   ScrollView,
@@ -10,9 +11,13 @@ import {
   useWindowDimensions,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import Menu from 'lucide-react-native/icons/menu';
+import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
+import MessageCircle from 'lucide-react-native/icons/message-circle';
+import Plus from 'lucide-react-native/icons/plus';
+import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
 import Trash2 from 'lucide-react-native/icons/trash-2';
 import WifiOff from 'lucide-react-native/icons/wifi-off';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
@@ -36,6 +41,82 @@ import { colors } from '../theme';
 
 type Tab = 'assistant' | 'drones' | 'devices' | 'settings';
 
+type HeaderMenuAction = {
+  id: string;
+  label: string;
+  icon?: typeof Trash2;
+  destructive?: boolean;
+  disabled?: boolean;
+  onPress(): void;
+};
+
+function HeaderOverflowMenu({
+  open,
+  actions,
+  onClose,
+}: {
+  open: boolean;
+  actions: HeaderMenuAction[];
+  onClose(): void;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal
+      visible={open}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={onClose}
+    >
+      <View style={styles.actionMenuLayer}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close actions menu"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={[styles.actionMenu, { top: insets.top + 50 }]}>
+          {actions.map((action) => {
+            const Icon = action.icon ?? (action.destructive ? Trash2 : SlidersHorizontal);
+            return (
+              <Pressable
+                key={action.id}
+                accessibilityRole="menuitem"
+                accessibilityState={{ disabled: action.disabled }}
+                disabled={action.disabled}
+                onPress={() => {
+                  onClose();
+                  action.onPress();
+                }}
+                style={({ pressed }) => [
+                  styles.actionMenuItem,
+                  action.disabled && styles.headerActionDisabled,
+                  pressed && styles.actionMenuItemPressed,
+                ]}
+              >
+                <Icon
+                  color={action.destructive ? colors.danger : colors.muted}
+                  size={16}
+                  strokeWidth={2}
+                />
+                <Text
+                  style={[
+                    styles.actionMenuItemText,
+                    action.destructive && styles.actionMenuItemTextDanger,
+                  ]}
+                >
+                  {action.label}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 function Shell() {
   const mesh = useMesh();
   const [tab, setTab] = React.useState<Tab>('assistant');
@@ -44,6 +125,7 @@ function Shell() {
   const [appDrawerOpen, setAppDrawerOpen] = React.useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = React.useState('');
   const [settingsTab, setSettingsTab] = React.useState<SettingsTab>('assistant');
+  const [headerMenuOpen, setHeaderMenuOpen] = React.useState(false);
   const [dronesHeader, setDronesHeader] = React.useState<DronesAppHeaderState | null>(null);
   const [assistantHeader, setAssistantHeader] = React.useState<AssistantAppHeaderState | null>(null);
   const handleDronesHeaderChange = React.useCallback(
@@ -81,10 +163,12 @@ function Shell() {
   const activeDeviceId = devicePickerItems.some((device) => device.id === selectedDeviceId)
     ? selectedDeviceId
     : (devicePickerItems[0]?.id ?? '');
+  const pairingVisible = pairing || !mesh.profile;
   React.useEffect(() => {
     if (devicePickerItems.some((device) => device.id === selectedDeviceId)) return;
     setSelectedDeviceId(devicePickerItems[0]?.id ?? '');
   }, [devicePickerItems, selectedDeviceId]);
+  React.useEffect(() => setHeaderMenuOpen(false), [activeDeviceId, pairingVisible, tab]);
   const { width: windowWidth } = useWindowDimensions();
   const drawerWidth = assistantDrawerWidth(windowWidth);
   const drawerOffset = React.useRef(new Animated.Value(-drawerWidth)).current;
@@ -146,7 +230,6 @@ function Shell() {
     setPairReturnTab('settings');
     setPairing(true);
   };
-  const pairingVisible = pairing || !mesh.profile;
   const navigateToTab = (nextTab: Tab) => {
     if (nextTab === 'devices' || nextTab === 'settings') setAppDrawerOpen(false);
     if (!pairingVisible && tab === nextTab) return;
@@ -189,11 +272,70 @@ function Shell() {
           settings: 'Settings',
         } as const
       )[tab];
-  const hasOpenChatHeader = Boolean(
+  const hasContextHeader = Boolean(
     !pairingVisible &&
       ((tab === 'drones' && dronesHeader) ||
         (tab === 'assistant' && assistantHeader)),
   );
+  const headerMenuActions: HeaderMenuAction[] = !pairingVisible
+    ? tab === 'assistant' && assistantHeader
+      ? [
+          ...(assistantHeader.onToggleAccess
+            ? [
+                {
+                  id: 'access',
+                  label: assistantHeader.accessOpen ? 'Return to chat' : 'Edit thread access',
+                  disabled: assistantHeader.accessDisabled,
+                  onPress: assistantHeader.onToggleAccess,
+                },
+              ]
+            : []),
+          ...(assistantHeader.onDelete
+            ? [
+                {
+                  id: 'delete-thread',
+                  label: 'Delete thread',
+                  destructive: true,
+                  onPress: assistantHeader.onDelete,
+                },
+              ]
+            : []),
+        ]
+      : tab === 'drones' && dronesHeader
+        ? [
+            ...(dronesHeader.onNewDrone
+              ? [
+                  {
+                    id: 'new-drone',
+                    label: 'New drone',
+                    icon: Plus,
+                    onPress: dronesHeader.onNewDrone,
+                  },
+                ]
+              : []),
+            ...(dronesHeader.onNewChat
+              ? [
+                  {
+                    id: 'new-chat',
+                    label: 'New chat',
+                    icon: MessageCircle,
+                    onPress: dronesHeader.onNewChat,
+                  },
+                ]
+              : []),
+            ...(dronesHeader.onDelete
+              ? [
+                  {
+                    id: 'delete-drone',
+                    label: 'Delete drone',
+                    destructive: true,
+                    onPress: dronesHeader.onDelete,
+                  },
+                ]
+              : []),
+          ]
+        : []
+    : [];
   const content = pairingVisible ? (
     <ScrollView keyboardShouldPersistTaps="handled">
       {mesh.profile ? (
@@ -275,7 +417,7 @@ function Shell() {
             onPress={() => setAppDrawerOpen((value) => !value)}
             style={styles.titleButton}
           >
-            {!hasOpenChatHeader ? (
+            {!hasContextHeader ? (
               <View style={[styles.menuButton, appDrawerOpen && styles.menuButtonActive]}>
                 <Menu
                   color={appDrawerOpen ? colors.accent : colors.text}
@@ -284,7 +426,7 @@ function Shell() {
                 />
               </View>
             ) : null}
-            {hasOpenChatHeader ? (
+            {hasContextHeader ? (
               <View style={styles.contextTitle}>
                 <View style={styles.contextTitleRow}>
                   <Text numberOfLines={1} style={styles.contextTitleText}>
@@ -303,31 +445,15 @@ function Shell() {
           <Text style={styles.title}>{title}</Text>
         )}
         <View style={styles.headerActions}>
-          {!pairingVisible && tab === 'assistant' && assistantHeader?.onToggleAccess ? (
+          {headerMenuActions.length > 0 ? (
             <Pressable
               accessibilityRole="button"
-              accessibilityLabel={assistantHeader.accessOpen ? 'Return to chat' : 'Edit access'}
-              accessibilityState={{ disabled: assistantHeader.accessDisabled }}
-              disabled={assistantHeader.accessDisabled}
-              onPress={assistantHeader.onToggleAccess}
-              style={[
-                styles.contextTextAction,
-                assistantHeader.accessDisabled && styles.headerActionDisabled,
-              ]}
+              accessibilityLabel="Open actions menu"
+              accessibilityState={{ expanded: headerMenuOpen }}
+              onPress={() => setHeaderMenuOpen(true)}
+              style={styles.contextMenuAction}
             >
-              <Text style={styles.contextTextActionLabel}>
-                {assistantHeader.accessOpen ? 'CHAT' : 'ACCESS'}
-              </Text>
-            </Pressable>
-          ) : null}
-          {!pairingVisible && tab === 'assistant' && assistantHeader?.onDelete ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel="Delete thread"
-              onPress={assistantHeader.onDelete}
-              style={styles.contextDeleteAction}
-            >
-              <Trash2 color={colors.muted} size={17} strokeWidth={2} />
+              <MoreVertical color={colors.text} size={19} strokeWidth={2.2} />
             </Pressable>
           ) : null}
           {mesh.connectedDeviceIds.length === 0 ? (
@@ -339,6 +465,11 @@ function Shell() {
         </View>
       </View>
       <View style={styles.content}>{content}</View>
+      <HeaderOverflowMenu
+        open={headerMenuOpen && headerMenuActions.length > 0}
+        actions={headerMenuActions}
+        onClose={() => setHeaderMenuOpen(false)}
+      />
     </SafeAreaView>
   );
 }
@@ -430,28 +561,43 @@ const styles = StyleSheet.create({
   },
   headerActions: { marginLeft: 'auto', flexDirection: 'row', alignItems: 'center', gap: 7 },
   headerActionDisabled: { opacity: 0.55 },
-  contextTextAction: {
-    height: 32,
-    paddingHorizontal: 9,
-    justifyContent: 'center',
+  contextMenuAction: {
+    width: 36,
+    height: 36,
     borderRadius: 6,
+    alignItems: 'center',
+    justifyContent: 'center',
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panelRaised,
   },
-  contextTextActionLabel: {
-    color: colors.accent,
-    fontSize: 8,
-    fontWeight: '900',
-    letterSpacing: 0.8,
+  actionMenuLayer: { flex: 1 },
+  actionMenu: {
+    position: 'absolute',
+    right: 10,
+    width: 210,
+    padding: 5,
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panelRaised,
+    elevation: 24,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.5,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 7 },
   },
-  contextDeleteAction: {
-    width: 32,
-    height: 32,
-    borderRadius: 6,
+  actionMenuItem: {
+    minHeight: 44,
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    gap: 10,
+    paddingHorizontal: 11,
+    borderRadius: 5,
   },
+  actionMenuItemPressed: { backgroundColor: colors.whiteWash },
+  actionMenuItemText: { color: colors.text, fontSize: 13, fontWeight: '700' },
+  actionMenuItemTextDanger: { color: colors.danger },
   route: {
     marginLeft: 'auto',
     flexDirection: 'row',

@@ -5,7 +5,7 @@ import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { IconChevron } from './icons';
 import { repoPathLabel } from './repo-path-label';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
-import { buildSpawnModelMenuEntries, getSpawnModelTriggerLabel } from './spawn-model-history';
+import { buildDetectedModelMenuEntries, useSpawnModelCatalog } from './use-spawn-model-catalog';
 
 type SpawnContextToolbarProps = {
   agentMenuEntries: UiMenuSelectEntry[];
@@ -21,6 +21,7 @@ type SpawnContextToolbarProps = {
   repoContainerClassName?: string;
   layout?: 'toolbar' | 'panel';
   allowWrap?: boolean;
+  runtime?: 'container' | 'host';
 };
 
 export function SpawnContextToolbar({
@@ -37,34 +38,53 @@ export function SpawnContextToolbar({
   repoContainerClassName,
   layout = 'toolbar',
   allowWrap = false,
+  runtime = 'container',
 }: SpawnContextToolbarProps) {
   const {
     spawnAgentKey,
     spawnModel,
-    seenModelIds,
+    spawnReasoning,
     chatHeaderRepoPath,
     setSpawnAgentKey,
     setSpawnModel,
+    setSpawnReasoning,
     setChatHeaderRepoPath,
   } = useDroneHubUiStore(
     useShallow((s) => ({
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
-      seenModelIds: s.seenModelIds,
+      spawnReasoning: s.spawnReasoning,
       chatHeaderRepoPath: s.chatHeaderRepoPath,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
+      setSpawnReasoning: s.setSpawnReasoning,
       setChatHeaderRepoPath: s.setChatHeaderRepoPath,
     })),
   );
+  const modelCatalog = useSpawnModelCatalog({
+    agentId: spawnAgentConfig.kind === 'builtin' ? spawnAgentConfig.id : '',
+    runtime,
+    enabled: showAgentControls && spawnAgentConfig.kind === 'builtin',
+  });
   const spawnModelMenuEntries = React.useMemo(
-    () => buildSpawnModelMenuEntries(seenModelIds, spawnModel),
-    [seenModelIds, spawnModel],
+    () => buildDetectedModelMenuEntries(modelCatalog.models, spawnModel),
+    [modelCatalog.models, spawnModel],
   );
-  const spawnModelTriggerLabel = React.useMemo(
-    () => getSpawnModelTriggerLabel(seenModelIds, spawnModel),
-    [seenModelIds, spawnModel],
-  );
+  const selectedCatalogModel = modelCatalog.models.find((model) => model.id === spawnModel) ?? null;
+  const reasoningEntries = (selectedCatalogModel?.reasoningLevels ?? []).map((level) => ({
+    value: level,
+    label: level === 'off' ? 'Off' : level[0].toUpperCase() + level.slice(1),
+  }));
+  React.useEffect(() => {
+    const levels = selectedCatalogModel?.reasoningLevels ?? [];
+    if (levels.length === 0) {
+      if (spawnReasoning) setSpawnReasoning('');
+      return;
+    }
+    if (!levels.includes(spawnReasoning)) {
+      setSpawnReasoning(selectedCatalogModel?.defaultReasoningLevel || levels[0] || '');
+    }
+  }, [selectedCatalogModel, setSpawnReasoning, spawnReasoning]);
   const spawnModelMenuDisabled = controlsLocked || spawnModelMenuEntries.length <= 1;
   const isPanelLayout = layout === 'panel';
   const sectionLabelClassName = 'text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase';
@@ -124,12 +144,24 @@ export function SpawnContextToolbar({
                 panelClassName="w-[320px]"
                 menuClassName="max-h-[220px] overflow-y-auto"
                 title={modelTitle}
-                triggerLabel={spawnModelTriggerLabel}
+                triggerLabel={spawnModel || (modelCatalog.loading ? 'Detecting models…' : 'Default model')}
                 triggerLabelClassName="font-mono"
                 searchable
                 searchPlaceholder="Search models"
                 chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
               />
+              {reasoningEntries.length > 0 ? (
+                <UiMenuSelect
+                  variant="form"
+                  value={spawnReasoning}
+                  onValueChange={setSpawnReasoning}
+                  entries={reasoningEntries}
+                  disabled={controlsLocked}
+                  panelClassName="w-[180px]"
+                  title="Reasoning level"
+                  chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+                />
+              ) : null}
               <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input
                   value={spawnModel}
@@ -241,12 +273,25 @@ export function SpawnContextToolbar({
             panelClassName="w-[320px]"
             menuClassName="max-h-[220px] overflow-y-auto"
             title={modelTitle}
-            triggerLabel={spawnModelTriggerLabel}
+            triggerLabel={spawnModel || (modelCatalog.loading ? 'Detecting models…' : 'Default model')}
             triggerLabelClassName="font-mono"
             searchable
             searchPlaceholder="Search models"
             chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
           />
+          {reasoningEntries.length > 0 ? (
+            <UiMenuSelect
+              variant="toolbar"
+              value={spawnReasoning}
+              onValueChange={setSpawnReasoning}
+              entries={reasoningEntries}
+              disabled={controlsLocked}
+              triggerClassName="min-w-[100px] max-w-[130px]"
+              panelClassName="w-[170px]"
+              title="Reasoning level"
+              chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+            />
+          ) : null}
           <input
             value={spawnModel}
             onChange={(event) => setSpawnModel(event.target.value)}

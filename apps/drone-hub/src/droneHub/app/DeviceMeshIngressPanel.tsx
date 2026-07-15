@@ -102,7 +102,7 @@ export function DeviceMeshIngressPanel({
 
   if (!status) {
     return (
-      <div className="flex min-h-24 flex-col items-center justify-center gap-2 rounded border border-[var(--border-subtle)] px-3 text-center text-[11px] text-[var(--muted)]">
+      <div className="flex min-h-24 flex-col items-center justify-center gap-2 text-center text-[11px] text-[var(--muted)]">
         {error ? (
           <>
             <span className="text-[var(--red)]">{error}</span>
@@ -129,7 +129,7 @@ export function DeviceMeshIngressPanel({
   }
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3">
+    <div className="py-1">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">

@@ -47,10 +47,7 @@ function PermissionGrid({
       {capabilities
         .filter((capability) => capability.id !== 'device-core' && capability.id !== 'workspace')
         .map((capability) => (
-          <div
-            key={capability.id}
-            className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3"
-          >
+          <div key={capability.id} className="border-l border-[var(--border-subtle)] py-1 pl-3">
             <div className="font-mono text-[11px] font-semibold text-[var(--accent)]">
               {capability.id}@{capability.version}
             </div>
@@ -115,9 +112,7 @@ function DeviceCard({
   }, [sourceKey]);
 
   return (
-    <article
-      className={`rounded-lg border p-4 ${connected ? 'border-[rgba(34,197,94,.35)] bg-[rgba(34,197,94,.035)]' : 'border-[var(--border-subtle)] bg-[var(--panel-alt)]'}`}
-    >
+    <article className="py-5 first:pt-2 last:pb-2">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex items-center gap-2">
@@ -224,6 +219,9 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
   const mesh = useDeviceMesh(requestJson);
   const [ingressStatus, setIngressStatus] = React.useState<DeviceMeshIngressStatus | null>(null);
   const [joinCode, setJoinCode] = React.useState('');
+  const [activeSection, setActiveSection] = React.useState<
+    'network' | 'devices' | 'sharing' | 'credentials'
+  >('network');
   const [pendingSelections, setPendingSelections] = React.useState<Record<string, Set<string>>>({});
   const [pendingAdmins, setPendingAdmins] = React.useState<Record<string, boolean>>({});
   const handleIngressStatus = React.useCallback(
@@ -240,233 +238,280 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
   }
 
   return (
-    <div className="space-y-4">
-      <section className="overflow-hidden rounded-lg border border-[var(--accent-muted)] bg-[var(--panel-alt)]">
-        <div className="border-b border-[var(--border-subtle)] bg-[linear-gradient(110deg,rgba(56,189,248,.09),transparent_55%)] p-4">
-          <div className="text-[10px] font-semibold uppercase tracking-[.16em] text-[var(--accent)]">
-            Device mesh
-          </div>
-          <h2 className="mt-1 text-[18px] font-semibold text-[var(--fg)]">
-            A private route between your Hubs
-          </h2>
-          <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-[var(--muted)]">
-            Pair with a one-time QR code, then grant only the operations each device needs. There is
-            no account or coordination service.
-          </p>
-          {mesh.status ? (
-            <div className="mt-3 font-mono text-[10px] text-[var(--muted-dim)]">
-              {mesh.status.networkId}
-            </div>
-          ) : null}
+    <div className="mx-auto max-w-5xl space-y-5">
+      <div>
+        <div className="text-[10px] font-semibold uppercase tracking-[.16em] text-[var(--accent)]">
+          Devices
         </div>
-        <div className="grid gap-3 p-4">
-          <DeviceMeshIngressPanel requestJson={requestJson} onStatus={handleIngressStatus} />
+        <h1 className="mt-1 text-[20px] font-semibold text-[var(--fg)]">Trusted device network</h1>
+        <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-[var(--muted)]">
+          Pair Hubs, manage their permissions, and choose what this Hub shares.
+        </p>
+      </div>
+
+      <nav
+        className="flex gap-5 border-b border-[var(--border-subtle)]"
+        aria-label="Device settings"
+      >
+        {(
+          [
+            ['network', 'Network & pairing'],
+            ['devices', 'Trusted devices'],
+            ['sharing', 'Workspace sharing'],
+            ['credentials', 'Credentials'],
+          ] as const
+        ).map(([id, label]) => (
           <button
+            key={id}
             type="button"
-            disabled={
-              mesh.busyId === 'invite' || !ingressStatus?.running || !ingressStatus.publicEndpoint
-            }
-            onClick={() => void mesh.createInvitation()}
-            className="h-9 justify-self-start rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--fg)] hover:bg-[var(--accent-soft)] disabled:opacity-50"
+            onClick={() => setActiveSection(id)}
+            className={`border-b-2 px-0.5 pb-2 text-[11px] font-semibold transition-colors ${
+              activeSection === id
+                ? 'border-[var(--accent)] text-[var(--fg)]'
+                : 'border-transparent text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+            }`}
           >
-            {mesh.busyId === 'invite' ? 'Creating…' : 'Create pairing QR'}
+            {label}
           </button>
-          {!ingressStatus?.publicEndpoint ? (
-            <span className="text-[10px] text-[var(--muted)]">
-              Configure the secure ingress before creating an invitation.
-            </span>
-          ) : null}
-        </div>
-        {mesh.invitation ? (
-          <div className="grid gap-4 border-t border-[var(--border-subtle)] p-4 sm:grid-cols-[180px_minmax(0,1fr)] sm:items-center">
-            <div
-              className="rounded bg-white p-2"
-              dangerouslySetInnerHTML={{ __html: mesh.invitation.qrSvg }}
-            />
-            <div>
-              <div className="text-[13px] font-semibold text-[var(--fg)]">
-                Scan or copy to another Hub
-              </div>
-              <p className="mt-1 text-[12px] text-[var(--muted)]">
-                The request still has to be approved below. This code expires at{' '}
-                {new Date(mesh.invitation.expiresAt).toLocaleTimeString()}.
-              </p>
-              <textarea
-                readOnly
-                rows={4}
-                value={JSON.stringify(mesh.invitation.payload)}
-                className="mt-3 w-full resize-none rounded border border-[var(--border)] bg-[var(--input)] p-2 font-mono text-[10px] text-[var(--muted)]"
-              />
-              <button
-                type="button"
-                onClick={() =>
-                  void navigator.clipboard.writeText(JSON.stringify(mesh.invitation!.payload))
-                }
-                className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]"
-              >
-                Copy pairing code
-              </button>
-            </div>
-          </div>
-        ) : null}
-        <div className="grid gap-3 border-t border-[var(--border-subtle)] p-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
-          <label className="grid gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-dim)]">
-              Join from another Hub
-            </span>
-            <textarea
-              value={joinCode}
-              onChange={(event) => setJoinCode(event.target.value)}
-              rows={3}
-              placeholder="Paste the pairing JSON shown on the other computer"
-              className="resize-y rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 font-mono text-[11px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
-            />
-          </label>
-          <button
-            type="button"
-            disabled={mesh.busyId === 'join' || !joinCode.trim()}
-            onClick={() => void mesh.join(joinCode)}
-            className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-50"
-          >
-            {mesh.busyId === 'join' ? 'Waiting for approval…' : 'Request to join'}
-          </button>
-        </div>
-      </section>
+        ))}
+      </nav>
 
       {mesh.error ? (
-        <div className="rounded border border-[rgba(248,113,113,.35)] bg-[rgba(248,113,113,.08)] px-3 py-2 text-[12px] text-[var(--red)]">
+        <div className="border-l-2 border-[var(--red)] px-3 py-1 text-[12px] text-[var(--red)]">
           {mesh.error}
         </div>
       ) : null}
 
-      <section className="rounded-lg border border-[rgba(250,204,21,.34)] bg-[rgba(250,204,21,.045)] p-4">
-        <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--yellow)]">
-          Prototype forwarding trust
-        </div>
-        <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-[var(--muted)]">
-          Device signatures protect identity and destination permissions. A bridge Hub can still
-          read ordinary payloads it forwards because this milestone uses TLS between devices.
-          Provider credential transfers are separately encrypted for the receiving device.
-        </p>
-      </section>
-
-      {mesh.status?.pending.map((pending) => {
-        const selected = pendingSelections[pending.id] ?? new Set<string>();
-        return (
-          <section
-            key={pending.id}
-            className="rounded-lg border border-[rgba(250,204,21,.38)] bg-[rgba(250,204,21,.045)] p-4"
-          >
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--yellow)]">
-                  Approval requested
-                </div>
-                <h3 className="mt-1 text-[15px] font-semibold text-[var(--fg)]">
-                  {pending.device.name}
-                </h3>
-                <div className="text-[10px] text-[var(--muted-dim)]">{pending.device.platform}</div>
+      {activeSection === 'network' ? (
+        <>
+          <section>
+            <div className="pb-4">
+              <div className="text-[10px] font-semibold uppercase tracking-[.16em] text-[var(--accent)]">
+                Network & pairing
               </div>
-              <div className="text-[11px] text-[var(--muted)]">Default: deny all controls</div>
+              <h2 className="mt-1 text-[18px] font-semibold text-[var(--fg)]">
+                A private route between your Hubs
+              </h2>
+              <p className="mt-1 max-w-2xl text-[12px] leading-relaxed text-[var(--muted)]">
+                Pair with a one-time QR code, then grant only the operations each device needs.
+                There is no account or coordination service.
+              </p>
+              {mesh.status ? (
+                <div className="mt-3 font-mono text-[10px] text-[var(--muted-dim)]">
+                  {mesh.status.networkId}
+                </div>
+              ) : null}
             </div>
-            <div className="mt-4">
-              <PermissionGrid
-                capabilities={mesh.status!.capabilities}
-                selected={selected}
-                onChange={(next) =>
-                  setPendingSelections((current) => ({ ...current, [pending.id]: next }))
-                }
-              />
-            </div>
-            <label className="mt-3 flex items-center gap-2 text-[11px] text-[var(--muted)]">
-              <input
-                type="checkbox"
-                checked={pendingAdmins[pending.id] === true}
-                onChange={(event) =>
-                  setPendingAdmins((current) => ({
-                    ...current,
-                    [pending.id]: event.target.checked,
-                  }))
-                }
-              />
-              Make this device an administrator. Administrators can invite devices and receive
-              separately granted provider credential copies.
-            </label>
-            <div className="mt-4 flex gap-2">
+            <div className="grid gap-3 border-t border-[var(--border-subtle)] py-4">
+              <DeviceMeshIngressPanel requestJson={requestJson} onStatus={handleIngressStatus} />
               <button
                 type="button"
-                disabled={mesh.busyId === pending.id}
-                onClick={() =>
-                  void mesh.approve(
-                    pending.id,
-                    grantsFromOperations(mesh.status!.capabilities, selected),
-                    pendingAdmins[pending.id] === true,
-                  )
+                disabled={
+                  mesh.busyId === 'invite' ||
+                  !ingressStatus?.running ||
+                  !ingressStatus.publicEndpoint
                 }
-                className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"
+                onClick={() => void mesh.createInvitation()}
+                className="h-9 justify-self-start rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--fg)] hover:bg-[var(--accent-soft)] disabled:opacity-50"
               >
-                Approve device
+                {mesh.busyId === 'invite' ? 'Creating…' : 'Create pairing QR'}
               </button>
+              {!ingressStatus?.publicEndpoint ? (
+                <span className="text-[10px] text-[var(--muted)]">
+                  Configure the secure ingress before creating an invitation.
+                </span>
+              ) : null}
+            </div>
+            {mesh.invitation ? (
+              <div className="grid gap-4 border-t border-[var(--border-subtle)] py-4 sm:grid-cols-[180px_minmax(0,1fr)] sm:items-center">
+                <div
+                  className="rounded bg-white p-2"
+                  dangerouslySetInnerHTML={{ __html: mesh.invitation.qrSvg }}
+                />
+                <div>
+                  <div className="text-[13px] font-semibold text-[var(--fg)]">
+                    Scan or copy to another Hub
+                  </div>
+                  <p className="mt-1 text-[12px] text-[var(--muted)]">
+                    The request still has to be approved below. This code expires at{' '}
+                    {new Date(mesh.invitation.expiresAt).toLocaleTimeString()}.
+                  </p>
+                  <textarea
+                    readOnly
+                    rows={4}
+                    value={JSON.stringify(mesh.invitation.payload)}
+                    className="mt-3 w-full resize-none rounded border border-[var(--border)] bg-[var(--input)] p-2 font-mono text-[10px] text-[var(--muted)]"
+                  />
+                  <button
+                    type="button"
+                    onClick={() =>
+                      void navigator.clipboard.writeText(JSON.stringify(mesh.invitation!.payload))
+                    }
+                    className="mt-2 text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]"
+                  >
+                    Copy pairing code
+                  </button>
+                </div>
+              </div>
+            ) : null}
+            <div className="grid gap-3 border-t border-[var(--border-subtle)] py-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-end">
+              <label className="grid gap-1">
+                <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-dim)]">
+                  Join from another Hub
+                </span>
+                <textarea
+                  value={joinCode}
+                  onChange={(event) => setJoinCode(event.target.value)}
+                  rows={3}
+                  placeholder="Paste the pairing JSON shown on the other computer"
+                  className="resize-y rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 font-mono text-[11px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+                />
+              </label>
               <button
                 type="button"
-                disabled={mesh.busyId === pending.id}
-                onClick={() => void mesh.reject(pending.id)}
-                className="rounded border border-[var(--border-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--muted)] disabled:opacity-50"
+                disabled={mesh.busyId === 'join' || !joinCode.trim()}
+                onClick={() => void mesh.join(joinCode)}
+                className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-50"
               >
-                Reject
+                {mesh.busyId === 'join' ? 'Waiting for approval…' : 'Request to join'}
               </button>
             </div>
           </section>
-        );
-      })}
 
-      <section>
-        <div className="mb-3 flex items-end justify-between gap-3">
-          <div>
-            <h2 className="text-[15px] font-semibold text-[var(--fg)]">Known devices</h2>
-            <p className="mt-1 text-[11px] text-[var(--muted)]">
-              Permissions shown here apply only to actions targeting this Hub.
+          <section className="border-l-2 border-[rgba(250,204,21,.5)] px-3 py-1">
+            <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--yellow)]">
+              Prototype forwarding trust
+            </div>
+            <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-[var(--muted)]">
+              Device signatures protect identity and destination permissions. A bridge Hub can still
+              read ordinary payloads it forwards because this milestone uses TLS between devices.
+              Provider credential transfers are separately encrypted for the receiving device.
             </p>
+          </section>
+
+          {mesh.status?.pending.map((pending) => {
+            const selected = pendingSelections[pending.id] ?? new Set<string>();
+            return (
+              <section key={pending.id} className="border-t border-[rgba(250,204,21,.38)] py-4">
+                <div className="flex flex-wrap items-start justify-between gap-2">
+                  <div>
+                    <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--yellow)]">
+                      Approval requested
+                    </div>
+                    <h3 className="mt-1 text-[15px] font-semibold text-[var(--fg)]">
+                      {pending.device.name}
+                    </h3>
+                    <div className="text-[10px] text-[var(--muted-dim)]">
+                      {pending.device.platform}
+                    </div>
+                  </div>
+                  <div className="text-[11px] text-[var(--muted)]">Default: deny all controls</div>
+                </div>
+                <div className="mt-4">
+                  <PermissionGrid
+                    capabilities={mesh.status!.capabilities}
+                    selected={selected}
+                    onChange={(next) =>
+                      setPendingSelections((current) => ({ ...current, [pending.id]: next }))
+                    }
+                  />
+                </div>
+                <label className="mt-3 flex items-center gap-2 text-[11px] text-[var(--muted)]">
+                  <input
+                    type="checkbox"
+                    checked={pendingAdmins[pending.id] === true}
+                    onChange={(event) =>
+                      setPendingAdmins((current) => ({
+                        ...current,
+                        [pending.id]: event.target.checked,
+                      }))
+                    }
+                  />
+                  Make this device an administrator. Administrators can invite devices and receive
+                  separately granted provider credential copies.
+                </label>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    type="button"
+                    disabled={mesh.busyId === pending.id}
+                    onClick={() =>
+                      void mesh.approve(
+                        pending.id,
+                        grantsFromOperations(mesh.status!.capabilities, selected),
+                        pendingAdmins[pending.id] === true,
+                      )
+                    }
+                    className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"
+                  >
+                    Approve device
+                  </button>
+                  <button
+                    type="button"
+                    disabled={mesh.busyId === pending.id}
+                    onClick={() => void mesh.reject(pending.id)}
+                    className="rounded border border-[var(--border-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--muted)] disabled:opacity-50"
+                  >
+                    Reject
+                  </button>
+                </div>
+              </section>
+            );
+          })}
+        </>
+      ) : null}
+
+      {activeSection === 'devices' ? (
+        <section>
+          <div className="mb-3 flex items-end justify-between gap-3">
+            <div>
+              <h2 className="text-[15px] font-semibold text-[var(--fg)]">Known devices</h2>
+              <p className="mt-1 text-[11px] text-[var(--muted)]">
+                Permissions shown here apply only to actions targeting this Hub.
+              </p>
+            </div>
+            <div className="text-[10px] uppercase tracking-wider text-[var(--muted-dim)]">
+              Connection status updates automatically
+            </div>
           </div>
-          <button
-            type="button"
-            onClick={() => void mesh.load()}
-            disabled={mesh.loading}
-            className="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)] disabled:opacity-50"
-          >
-            Refresh
-          </button>
-        </div>
-        <div className="grid gap-3">
-          {mesh.status?.devices
-            .filter((device) => !device.revokedAt)
-            .map((device) => (
-              <DeviceCard
-                key={device.id}
-                device={device}
-                selfDeviceId={mesh.status!.selfDeviceId}
-                connected={mesh.status!.connectedDeviceIds.includes(device.id)}
-                capabilities={mesh.status!.capabilities}
-                busy={mesh.busyId === device.id}
-                onSave={(update) => void mesh.saveDevice(device.id, update)}
-                onRevoke={() => {
-                  if (window.confirm(`Revoke ${device.name}? It will lose access immediately.`))
-                    void mesh.revoke(device.id);
-                }}
-              />
-            ))}
-        </div>
-      </section>
-      <ProviderCredentialTransferPanel
-        requestJson={requestJson}
-        devices={mesh.status?.devices ?? []}
-        selfDeviceId={mesh.status?.selfDeviceId ?? ''}
-      />
-      <CrossDeviceAssistantPolicyPanel
-        requestJson={requestJson}
-        devices={mesh.status?.devices ?? []}
-        selfDeviceId={mesh.status?.selfDeviceId ?? ''}
-      />
+          <div className="divide-y divide-[var(--border-subtle)]">
+            {mesh.status?.devices
+              .filter((device) => !device.revokedAt)
+              .map((device) => (
+                <DeviceCard
+                  key={device.id}
+                  device={device}
+                  selfDeviceId={mesh.status!.selfDeviceId}
+                  connected={mesh.status!.connectedDeviceIds.includes(device.id)}
+                  capabilities={mesh.status!.capabilities}
+                  busy={mesh.busyId === device.id}
+                  onSave={(update) => void mesh.saveDevice(device.id, update)}
+                  onRevoke={() => {
+                    if (window.confirm(`Revoke ${device.name}? It will lose access immediately.`))
+                      void mesh.revoke(device.id);
+                  }}
+                />
+              ))}
+          </div>
+        </section>
+      ) : null}
+
+      {activeSection === 'credentials' ? (
+        <ProviderCredentialTransferPanel
+          requestJson={requestJson}
+          devices={mesh.status?.devices ?? []}
+          selfDeviceId={mesh.status?.selfDeviceId ?? ''}
+        />
+      ) : null}
+
+      {activeSection === 'sharing' ? (
+        <CrossDeviceAssistantPolicyPanel
+          requestJson={requestJson}
+          devices={mesh.status?.devices ?? []}
+          selfDeviceId={mesh.status?.selfDeviceId ?? ''}
+          connectedDeviceIds={mesh.status?.connectedDeviceIds ?? []}
+          mode="sharing"
+        />
+      ) : null}
     </div>
   );
 }

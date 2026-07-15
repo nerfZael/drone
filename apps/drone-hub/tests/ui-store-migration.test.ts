@@ -83,6 +83,7 @@ describe('drone hub ui store migration', () => {
       __no_repo__: {
         spawnAgentKey: 'builtin:codex',
         spawnModel: 'gpt-5.4',
+        spawnReasoning: '',
         repoBranchSource: 'remote',
         repoCreateRemoteBranch: 'origin/feature-x',
         pullHostBranchBeforeCreate: false,

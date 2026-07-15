@@ -46,6 +46,7 @@ type DroneProvisioningControllerDeps = {
   inferChatAgent: (entry: any, droneEntry?: any) => any;
   isSafePromptId: (raw: string) => boolean;
   normalizeChatModel: (raw: any) => string | null;
+  normalizeChatReasoning?: (raw: any) => string | null;
   normalizeChatName: (raw: any) => string;
   normalizeDroneEntryKind: (raw: unknown) => 'standard' | 'playbook-run';
   normalizeDroneEntryVisibility: (raw: unknown) => 'visible' | 'hidden';
@@ -64,6 +65,8 @@ type DroneProvisioningControllerDeps = {
     agent?: any;
     setModel: boolean;
     model?: string | null;
+    setReasoning?: boolean;
+    reasoning?: string | null;
     setAgentPermissionMode?: boolean;
     agentPermissionMode?: 'full-access' | 'read-only';
     setAgentSuggestionEnabled?: boolean;
@@ -91,6 +94,12 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
   let PROVISION_ACTIVE = 0;
   let PROVISION_PUMPING = false;
   let PROVISION_PUMP_SCHEDULED = false;
+
+  const normalizeChatReasoning = (raw: any): string | null => {
+    if (deps.normalizeChatReasoning) return deps.normalizeChatReasoning(raw);
+    const value = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+    return value && value.length <= 32 && /^[a-z0-9._-]+$/.test(value) ? value : null;
+  };
 
   async function updatePendingDrone(droneIdRaw: string, patch: PendingDronePatch) {
     const registry = await loadRegistry();
@@ -133,10 +142,12 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     const seedAgent = deps.parseSeedAgent(seedRaw?.agent);
     const seedAgentPermissionMode = seedRaw?.agentPermissionMode === 'read-only' ? 'read-only' : null;
     const hasSeedModel = Object.prototype.hasOwnProperty.call(seedRaw, 'model');
-    if (!seedAgent && !hasSeedModel && !seedAgentPermissionMode) return;
+    const hasSeedReasoning = Object.prototype.hasOwnProperty.call(seedRaw, 'reasoning');
+    if (!seedAgent && !hasSeedModel && !hasSeedReasoning && !seedAgentPermissionMode) return;
 
     const chatName = deps.normalizeChatName(seedRaw?.chatName ?? 'default');
     const seedModel = deps.normalizeChatModel(seedRaw?.model);
+    const seedReasoning = normalizeChatReasoning(seedRaw?.reasoning);
     droneEntry.chats = droneEntry.chats && typeof droneEntry.chats === 'object' ? droneEntry.chats : {};
     const entry =
       droneEntry.chats[chatName] && typeof droneEntry.chats[chatName] === 'object'
@@ -149,6 +160,10 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     if (hasSeedModel) {
       if (seedModel) entry.model = seedModel;
       else delete entry.model;
+    }
+    if (hasSeedReasoning) {
+      if (seedReasoning) entry.reasoning = seedReasoning;
+      else delete entry.reasoning;
     }
     droneEntry.chats[chatName] = entry;
   }
@@ -450,6 +465,8 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     const seedChatName = deps.normalizeChatName(seed?.chatName ?? 'default');
     const seedAgent = deps.parseSeedAgent(seed?.agent);
     const seedModel = deps.normalizeChatModel(seed?.model);
+    const hasSeedReasoning = Object.prototype.hasOwnProperty.call(seed ?? {}, 'reasoning');
+    const seedReasoning = normalizeChatReasoning(seed?.reasoning);
     const seedAgentPermissionMode = seed?.agentPermissionMode === 'read-only' ? 'read-only' : null;
     const seedPrompt = String(seed?.prompt ?? '').trim();
     const seedPromptIdRaw = typeof (seed as any)?.promptId === 'string' ? String((seed as any).promptId).trim() : '';
@@ -552,6 +569,10 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
             if (seedModel) entry.model = seedModel;
             else delete entry.model;
           }
+          if (chatName === seedChatName && Object.prototype.hasOwnProperty.call(seed ?? {}, 'reasoning')) {
+            if (seedReasoning) entry.reasoning = seedReasoning;
+            else delete entry.reasoning;
+          }
           if (chatName === seedChatName && seedAgentPermissionMode) {
             entry.agentPermissionMode = seedAgentPermissionMode;
           }
@@ -587,7 +608,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       }
     }
 
-    if (seed && (seedAgent || seedModel || seedAgentPermissionMode || seedPrompt)) {
+    if (seed && (seedAgent || seedModel || hasSeedReasoning || seedAgentPermissionMode || seedPrompt)) {
       const chatName = seedChatName;
       const prompt = seedPrompt;
 
@@ -600,7 +621,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         },
       });
       try {
-        if (seedAgent || seedModel || seedAgentPermissionMode) {
+        if (seedAgent || seedModel || hasSeedReasoning || seedAgentPermissionMode) {
           const agentSuggestionEnabledByDefault = await deps.resolveAgentSuggestionEnabledByDefault();
           await deps.ensureChatEntry({ droneId: pendingDroneId, chatName });
           await deps.setChatAgentConfig({
@@ -609,6 +630,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
             ...(seedAgent ? { agent: seedAgent } : {}),
             setModel: true,
             model: seedModel,
+            ...(hasSeedReasoning ? { setReasoning: true, reasoning: seedReasoning } : {}),
             ...(seedAgentPermissionMode ? { setAgentPermissionMode: true, agentPermissionMode: seedAgentPermissionMode } : {}),
             setAgentSuggestionEnabled: true,
             agentSuggestionEnabled: agentSuggestionEnabledByDefault && seedAgent?.kind !== 'custom',

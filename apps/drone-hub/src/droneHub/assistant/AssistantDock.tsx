@@ -39,6 +39,8 @@ import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import { useBlipThreadSession } from './useBlipThreadSession';
 import { AssistantThreadFilesView, selectDefaultArtifactPath } from './AssistantThreadFilesView';
 import { AssistantThreadSidebar } from './AssistantThreadSidebar';
+import { AssistantWorkspaceAccessView } from './AssistantWorkspaceAccessView';
+import { assistantThreadsByCreatedAtNewestFirst } from './assistant-thread-order';
 import {
   AssistantSystemPromptModal,
   AssistantToolsPanel,
@@ -397,6 +399,7 @@ export function AssistantDock() {
   const [defaultModelBusy, setDefaultModelBusy] = React.useState(false);
   const [toolsPanelOpen, setToolsPanelOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
+  const [workspaceAccessOpen, setWorkspaceAccessOpen] = React.useState(false);
   const [enabledToolDraftNames, setEnabledToolDraftNames] = React.useState<string[]>([]);
   const [defaultEnabledToolDraftNames, setDefaultEnabledToolDraftNames] = React.useState<string[]>([]);
   const [defaultToolsBusy, setDefaultToolsBusy] = React.useState(false);
@@ -503,7 +506,11 @@ export function AssistantDock() {
 
   const visibleThreads = React.useMemo(() => {
     const threads = snapshot?.threads ?? [];
-    return threads.filter((thread) => (assistantPanelMode === 'voice' ? Boolean(thread.voiceEnabled) : !thread.voiceEnabled));
+    return assistantThreadsByCreatedAtNewestFirst(
+      threads.filter((thread) =>
+        assistantPanelMode === 'voice' ? Boolean(thread.voiceEnabled) : !thread.voiceEnabled,
+      ),
+    );
   }, [assistantPanelMode, snapshot?.threads]);
 
   const activeThread = React.useMemo(() => {
@@ -2141,7 +2148,10 @@ export function AssistantDock() {
           ) : null}
           <button
             type="button"
-            onClick={() => setFilesOpen((value) => !value)}
+            onClick={() => {
+              setWorkspaceAccessOpen(false);
+              setFilesOpen((value) => !value);
+            }}
             aria-pressed={filesOpen}
             className={`relative flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] ${
               filesOpen
@@ -2160,6 +2170,26 @@ export function AssistantDock() {
           </button>
           <button
             type="button"
+            onClick={() => {
+              setFilesOpen(false);
+              setToolsPanelOpen(false);
+              setSettingsOpen(false);
+              setWorkspaceAccessOpen((value) => !value);
+            }}
+            disabled={!activeThread}
+            aria-pressed={workspaceAccessOpen}
+            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
+              workspaceAccessOpen
+                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
+            }`}
+            title="Configure workspace access"
+            aria-label="Configure workspace access"
+          >
+            <IconFolder className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
             onClick={openSystemPromptEditor}
             className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg)]"
             title="Edit assistant system prompts"
@@ -2172,6 +2202,7 @@ export function AssistantDock() {
             data-assistant-tools-trigger
             onClick={() => {
               setSettingsOpen(false);
+              setWorkspaceAccessOpen(false);
               setToolsPanelOpen((value) => !value);
             }}
             disabled={!activeThread}
@@ -2190,6 +2221,7 @@ export function AssistantDock() {
             type="button"
             onClick={() => {
               setToolsPanelOpen(false);
+              setWorkspaceAccessOpen(false);
               setSettingsOpen((value) => !value);
             }}
             aria-pressed={settingsOpen}
@@ -2273,6 +2305,18 @@ export function AssistantDock() {
               onDisableAll={() => void updateDefaultEnabledTools([])}
             />
           </div>
+        </div>
+      ) : null}
+
+      {workspaceAccessOpen && activeThread ? (
+        <div className="absolute inset-x-0 bottom-0 top-11 z-20 overflow-y-auto bg-[var(--panel-alt)]">
+          <AssistantWorkspaceAccessView
+            key={activeThread.id}
+            requestJson={requestJson}
+            threadId={activeThread.id}
+            threadTitle={activeThread.title}
+            onClose={() => setWorkspaceAccessOpen(false)}
+          />
         </div>
       ) : null}
 
