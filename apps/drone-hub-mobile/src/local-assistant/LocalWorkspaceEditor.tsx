@@ -208,9 +208,9 @@ export function LocalWorkspaceEditor({
       };
       let next = { ...existing, deviceName: device.name, workspaceName: workspace.name };
       if (permission === 'read') {
-        next = next.read ? { ...next, read: false, write: false } : { ...next, read: true };
+        next = { ...next, read: !next.read };
       } else if (permission === 'write') {
-        next = next.write ? { ...next, write: false } : { ...next, read: true, write: true };
+        next = { ...next, write: !next.write };
       } else {
         next = { ...next, execute: !next.execute };
       }

@@ -30,4 +30,72 @@ describe('mesh assistant history', () => {
     expect(serialized).toContain('desktop');
     expect((history as any).entries.at(-1).id).toBe('message_80');
   });
+
+  test('preserves transfer result pairing and bounded progress details', () => {
+    const history: any = boundedAssistantHistory({
+      threadId: 'thread_transfer',
+      sessionId: 'session_transfer',
+      entries: [
+        {
+          sequence: 1,
+          id: 'transfer_result',
+          timestamp: new Date().toISOString(),
+          message: {
+            role: 'toolResult',
+            toolCallId: 'call_transfer',
+            toolName: 'transfer_files',
+            isError: true,
+            content: 'Transfer partially completed',
+            details: {
+              type: 'workspace_transfer',
+              phase: 'failed',
+              source: { targetId: 'source', targetLabel: 'Source', path: 'folder' },
+              destination: {
+                targetId: 'destination',
+                targetLabel: 'Destination',
+                path: 'copied-folder',
+              },
+              fileCount: 500,
+              completedFiles: 250,
+              totalBytes: 500_000,
+              transferredBytes: 250_000,
+              retries: 5,
+              resumeToken: 'tr1_250_0123456789abcdef',
+              failure: {
+                sourcePath: 'folder/failed.txt',
+                destinationPath: 'copied-folder/failed.txt',
+                error: 'connection failed',
+                resumable: true,
+              },
+              files: Array.from({ length: 500 }, (_, index) => ({
+                sourcePath: `folder/${String(index).padStart(3, '0')}-${'x'.repeat(500)}.txt`,
+                destinationPath: `copied-folder/${String(index).padStart(3, '0')}.txt`,
+                size: 1_000,
+                transferredBytes: index < 250 ? 1_000 : 0,
+                retries: 0,
+                status: index < 250 ? 'completed' : index === 250 ? 'failed' : 'pending',
+              })),
+            },
+          },
+        },
+      ],
+      page: { limit: 1, beforeCursor: null, hasOlder: false },
+    });
+
+    const message = history.entries[0].message;
+    expect(message).toMatchObject({
+      toolCallId: 'call_transfer',
+      toolName: 'transfer_files',
+      isError: true,
+      details: {
+        type: 'workspace_transfer',
+        phase: 'failed',
+        fileCount: 500,
+        completedFiles: 250,
+        filesTruncated: 484,
+      },
+    });
+    expect(message.details.files.some((file: any) => file.status === 'failed')).toBe(true);
+    expect(Buffer.byteLength(JSON.stringify(history))).toBeLessThanOrEqual(180 * 1024);
+  });
 });

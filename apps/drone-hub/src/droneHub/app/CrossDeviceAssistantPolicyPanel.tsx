@@ -288,14 +288,8 @@ export function CrossDeviceAssistantPolicyPanel({
         execute: false,
       };
       let next = existing;
-      if (permission === 'read')
-        next = existing.read
-          ? { ...existing, read: false, write: false }
-          : { ...existing, read: true };
-      else if (permission === 'write')
-        next = existing.write
-          ? { ...existing, write: false }
-          : { ...existing, read: true, write: true };
+      if (permission === 'read') next = { ...existing, read: !existing.read };
+      else if (permission === 'write') next = { ...existing, write: !existing.write };
       else next = { ...existing, execute: !existing.execute };
       next = {
         ...next,
@@ -344,7 +338,7 @@ export function CrossDeviceAssistantPolicyPanel({
               target.deviceName,
             workspaceName: workspace.name,
             read: target.read && workspace.read,
-            write: target.write && workspace.write && target.read && workspace.read,
+            write: target.write && workspace.write,
             execute: target.execute && workspace.execute,
           };
           return next.read || next.write || next.execute ? [next] : [];
@@ -512,13 +506,10 @@ export function CrossDeviceAssistantPolicyPanel({
                               onChange={(event) =>
                                 setGrant(device.id, root.id, (current) => {
                                   if (permission === 'read')
-                                    return event.target.checked
-                                      ? { ...current, read: true }
-                                      : { ...current, read: false, write: false };
+                                    return { ...current, read: event.target.checked };
                                   if (permission === 'write')
                                     return {
                                       ...current,
-                                      read: event.target.checked || current.read,
                                       write: event.target.checked,
                                     };
                                   return { ...current, execute: event.target.checked };

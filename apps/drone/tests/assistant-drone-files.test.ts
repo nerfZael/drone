@@ -68,4 +68,48 @@ describe('assistant drone workspace target execution', () => {
       expect(writeCalls).toBe(0);
     });
   });
+
+  test('keeps write-only drones available as workspace destinations', async () => {
+    await withTempDroneDataDir('assistant-drone-write-only-', async () => {
+      await markDroneReady('drone-a');
+      await markDroneReady('drone-b');
+      const drones = [
+        {
+          id: 'drone-a',
+          name: 'Drone A',
+          group: null,
+          runtime: 'container',
+          repoPath: '/repo-a',
+          status: 'ready',
+          chats: ['default'],
+        },
+        {
+          id: 'drone-b',
+          name: 'Drone B',
+          group: null,
+          runtime: 'container',
+          repoPath: '/repo-b',
+          status: 'ready',
+          chats: ['default'],
+        },
+      ];
+      const service = new HubAssistantService({
+        listDrones: async () => drones,
+      });
+      const created = await service.createThread({ title: 'write only' });
+      const threadId = created.activeThreadId;
+      await service.updateAccessScope({
+        threadId,
+        readMode: 'selected',
+        writeMode: 'all',
+        droneIds: ['drone-a'],
+      });
+
+      expect(await service.visibleDrones(threadId)).toEqual([drones[0]]);
+      expect(await service.workspaceDrones(threadId)).toEqual([
+        { ...drones[0], canRead: true, canWrite: true },
+        { ...drones[1], canRead: false, canWrite: true },
+      ]);
+    });
+  });
 });

@@ -1,14 +1,50 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import { WORKSPACE_CAPABILITY } from '@drone/device-protocol';
 import type { CapabilityHandler } from '../../device-mesh-types';
+import { isAssistantTransferTemporaryName } from '../../../assistant/is-assistant-transfer-temporary-name';
 import { CommandJobStore } from './command-job-store';
 import { CrossDeviceAssistantPolicyStore } from './policy-store';
 
 const MAX_FILE_BYTES = 192 * 1024;
 const MAX_SEARCH_ENTRIES = 5_000;
 const MAX_CONTENT_SEARCH_BYTES = 16 * 1024 * 1024;
+const MAX_TRANSFER_CHUNK_BYTES = 256 * 1024;
+const MAX_TRANSFER_DIRECTORY_ENTRIES = 500;
+
+async function readTransferBytes(
+  handle: FileHandle,
+  buffer: Buffer,
+  position: number,
+): Promise<boolean> {
+  let read = 0;
+  while (read < buffer.length) {
+    const result = await handle.read(buffer, read, buffer.length - read, position + read);
+    if (result.bytesRead <= 0) return false;
+    read += result.bytesRead;
+  }
+  return true;
+}
+
+async function writeTransferBytes(
+  handle: FileHandle,
+  buffer: Buffer,
+  position: number,
+): Promise<void> {
+  let written = 0;
+  while (written < buffer.length) {
+    const result = await handle.write(
+      buffer,
+      written,
+      buffer.length - written,
+      position + written,
+    );
+    if (result.bytesWritten <= 0) throw new Error('destination stopped writing transfer data');
+    written += result.bytesWritten;
+  }
+}
 
 function object(value: unknown): Record<string, any> {
   if (!value || typeof value !== 'object' || Array.isArray(value))
@@ -49,6 +85,7 @@ async function writePath(root: string, relative: string): Promise<string> {
     throw Object.assign(new Error('path leaves the configured workspace root'), {
       code: 'PATH_OUTSIDE_ROOT',
     });
+  if (target === realRoot) return target;
   let ancestor = path.dirname(target);
   while (ancestor !== realRoot) {
     try {
@@ -76,6 +113,17 @@ async function writePath(root: string, relative: string): Promise<string> {
 
 function textResult(text: string, details: Record<string, unknown>) {
   return { text, details };
+}
+
+function transferId(value: unknown): string {
+  const result = String(value ?? '').trim();
+  if (!/^[a-zA-Z0-9_-]{1,220}$/.test(result))
+    throw Object.assign(new Error('invalid transfer id'), { code: 'INVALID_REQUEST' });
+  return result;
+}
+
+function transferTempPath(target: string, id: string): string {
+  return path.join(path.dirname(target), `.blip-transfer-${id}.part`);
 }
 
 function boundedInteger(
@@ -128,7 +176,12 @@ export function createWorkspaceCapability(
         });
       }
       const required =
-        operation === 'files.write'
+        operation === 'files.write' ||
+        operation === 'files.transfer.mkdir' ||
+        operation === 'files.transfer.prepare' ||
+        operation === 'files.transfer.write' ||
+        operation === 'files.transfer.commit' ||
+        operation === 'files.transfer.abort'
           ? 'write'
           : operation.startsWith('commands.')
             ? 'execute'
@@ -189,6 +242,190 @@ export function createWorkspaceCapability(
         return textResult(text || '(no output)', current);
       }
       const requestedPath = relativePath(payload.path);
+
+      if (operation === 'files.transfer.stat') {
+        const target = await existingPath(rootPath, requestedPath);
+        const info = await fs.stat(target);
+        if (!info.isFile() && !info.isDirectory())
+          throw Object.assign(new Error('transfer source is not a file or directory'), {
+            code: 'INVALID_REQUEST',
+          });
+        return {
+          type: info.isDirectory() ? 'directory' : 'file',
+          size: info.isFile() ? info.size : 0,
+          mtimeMs: info.mtimeMs,
+        };
+      }
+
+      if (operation === 'files.transfer.list') {
+        const target = await existingPath(rootPath, requestedPath);
+        const entries = await fs.readdir(target, { withFileTypes: true });
+        if (entries.length > MAX_TRANSFER_DIRECTORY_ENTRIES)
+          throw Object.assign(
+            new Error(`directory contains more than ${MAX_TRANSFER_DIRECTORY_ENTRIES} entries`),
+            { code: 'INVALID_REQUEST' },
+          );
+        return {
+          entries: await Promise.all(
+            entries
+              .filter(
+                (entry) =>
+                  (entry.isFile() || entry.isDirectory()) &&
+                  !isAssistantTransferTemporaryName(entry.name),
+              )
+              .map(async (entry) => {
+                const absolute = await existingPath(rootPath, path.join(requestedPath, entry.name));
+                const info = await fs.stat(absolute);
+                return {
+                  name: entry.name,
+                  type: entry.isDirectory() ? 'directory' : 'file',
+                  size: entry.isFile() ? info.size : 0,
+                  mtimeMs: info.mtimeMs,
+                };
+              }),
+          ),
+        };
+      }
+
+      if (operation === 'files.transfer.read') {
+        const target = await existingPath(rootPath, requestedPath);
+        const offset = boundedInteger(payload.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+        const length = boundedInteger(
+          payload.length,
+          MAX_TRANSFER_CHUNK_BYTES,
+          1,
+          MAX_TRANSFER_CHUNK_BYTES,
+        );
+        const handle = await fs.open(target, 'r');
+        try {
+          const buffer = Buffer.alloc(length);
+          const { bytesRead } = await handle.read(buffer, 0, length, offset);
+          return {
+            dataBase64: buffer.subarray(0, bytesRead).toString('base64'),
+            bytes: bytesRead,
+          };
+        } finally {
+          await handle.close();
+        }
+      }
+
+      if (operation === 'files.transfer.mkdir') {
+        await fs.mkdir(await writePath(rootPath, requestedPath), { recursive: true });
+        return { ok: true };
+      }
+
+      if (operation === 'files.transfer.prepare') {
+        const target = await writePath(rootPath, requestedPath);
+        const id = transferId(payload.transferId);
+        const size = boundedInteger(payload.size, 0, 0, Number.MAX_SAFE_INTEGER);
+        const existing = await fs.stat(target).catch((error: any) => {
+          if (error?.code === 'ENOENT') return null;
+          throw error;
+        });
+        if (existing && !existing.isFile())
+          throw Object.assign(new Error('destination path is not a file'), {
+            code: 'INVALID_REQUEST',
+          });
+        if (existing && payload.overwrite !== true)
+          throw Object.assign(new Error('destination file already exists'), {
+            code: 'FILE_EXISTS',
+          });
+        await fs.mkdir(path.dirname(target), { recursive: true });
+        const temp = transferTempPath(target, id);
+        let partial = await fs.lstat(temp).catch((error: any) => {
+          if (error?.code === 'ENOENT') return null;
+          throw error;
+        });
+        if (partial && (!partial.isFile() || partial.size > size)) {
+          await fs.rm(temp, { force: true });
+          partial = null;
+        }
+        if (!partial) {
+          const handle = await fs.open(temp, 'wx');
+          await handle.close();
+        }
+        return { offset: partial?.size ?? 0 };
+      }
+
+      if (operation === 'files.transfer.write') {
+        const target = await writePath(rootPath, requestedPath);
+        const id = transferId(payload.transferId);
+        const offset = boundedInteger(payload.offset, 0, 0, Number.MAX_SAFE_INTEGER);
+        const data = Buffer.from(String(payload.dataBase64 ?? ''), 'base64');
+        if (data.length > MAX_TRANSFER_CHUNK_BYTES)
+          throw Object.assign(new Error('transfer chunk is too large'), {
+            code: 'INVALID_REQUEST',
+          });
+        const temp = transferTempPath(target, id);
+        const tempInfo = await fs.lstat(temp);
+        if (!tempInfo.isFile())
+          throw Object.assign(new Error('transfer temporary path is not a file'), {
+            code: 'INVALID_REQUEST',
+          });
+        const handle = await fs.open(temp, 'r+');
+        try {
+          const info = await handle.stat();
+          if (info.size === offset + data.length) {
+            const existing = Buffer.alloc(data.length);
+            if ((await readTransferBytes(handle, existing, offset)) && existing.equals(data))
+              return { offset: info.size };
+          }
+          if (info.size !== offset)
+            throw Object.assign(
+              new Error(`transfer offset mismatch: expected ${info.size}, received ${offset}`),
+              { code: 'TRANSFER_OFFSET_MISMATCH' },
+            );
+          await writeTransferBytes(handle, data, offset);
+          await handle.sync();
+          return { offset: offset + data.length };
+        } finally {
+          await handle.close();
+        }
+      }
+
+      if (operation === 'files.transfer.commit') {
+        const target = await writePath(rootPath, requestedPath);
+        const id = transferId(payload.transferId);
+        const size = boundedInteger(payload.size, 0, 0, Number.MAX_SAFE_INTEGER);
+        const temp = transferTempPath(target, id);
+        const info = await fs.lstat(temp).catch((error: any) => {
+          if (error?.code !== 'ENOENT') throw error;
+          return null;
+        });
+        if (!info) {
+          const committed = await fs.stat(target).catch(() => null);
+          if (committed?.isFile() && committed.size === size) return { ok: true };
+          throw Object.assign(new Error('transfer temporary file was not found'), {
+            code: 'TRANSFER_INCOMPLETE',
+          });
+        }
+        if (!info.isFile())
+          throw Object.assign(new Error('transfer temporary path is not a file'), {
+            code: 'INVALID_REQUEST',
+          });
+        if (info.size !== size)
+          throw Object.assign(new Error('transfer is incomplete'), {
+            code: 'TRANSFER_INCOMPLETE',
+          });
+        if (payload.overwrite !== true) {
+          const existing = await fs.stat(target).catch((error: any) => {
+            if (error?.code === 'ENOENT') return null;
+            throw error;
+          });
+          if (existing)
+            throw Object.assign(new Error('destination file already exists'), {
+              code: 'FILE_EXISTS',
+            });
+        }
+        await fs.rename(temp, target);
+        return { ok: true };
+      }
+
+      if (operation === 'files.transfer.abort') {
+        const target = await writePath(rootPath, requestedPath);
+        await fs.rm(transferTempPath(target, transferId(payload.transferId)), { force: true });
+        return { ok: true };
+      }
 
       if (operation === 'files.list') {
         const target = await existingPath(rootPath, requestedPath);

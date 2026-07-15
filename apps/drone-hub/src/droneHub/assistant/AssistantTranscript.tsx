@@ -380,6 +380,148 @@ function ToolPayloadDetails({
   );
 }
 
+function formatTransferBytes(value: unknown): string {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(bytes < 10 * 1024 ** 2 ? 1 : 0)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+function TransferActivityRow({
+  call,
+  result,
+}: {
+  call: AssistantToolCall;
+  result?: AssistantMessage;
+}) {
+  const [detailsOpen, setDetailsOpen] = React.useState(false);
+  const progress: any =
+    result?.details && (result.details as any).type === 'workspace_transfer'
+      ? result.details
+      : null;
+  const totalBytes = Number(progress?.totalBytes ?? 0);
+  const transferredBytes = Number(progress?.transferredBytes ?? 0);
+  const percent =
+    totalBytes > 0
+      ? Math.min(100, Math.round((transferredBytes / totalBytes) * 100))
+      : progress?.phase === 'completed'
+        ? 100
+        : 0;
+  const files = Array.isArray(progress?.files) ? progress.files : [];
+  const failed = result?.isError === true || progress?.phase === 'failed';
+  const sourceLabel = progress?.source?.targetLabel || call.args?.sourceTarget || 'Source';
+  const destinationLabel =
+    progress?.destination?.targetLabel || call.args?.destinationTarget || 'Destination';
+  return (
+    <div
+      className={`mx-3 overflow-hidden rounded border ${failed ? 'border-[var(--red)]' : 'border-[var(--border-subtle)]'} bg-[rgba(255,255,255,.025)]`}
+    >
+      <div className="px-2.5 py-2.5">
+        <div className="flex min-w-0 items-center gap-2">
+          <ToolStatusIndicator
+            result={result && progress?.phase !== 'completed' && !failed ? undefined : result}
+          />
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center justify-between gap-2">
+              <div
+                className="truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                Transfer files
+              </div>
+              <div className="tabular-nums text-[10px] text-[var(--muted)]">
+                {progress
+                  ? `${formatTransferBytes(transferredBytes)} / ${formatTransferBytes(totalBytes)}`
+                  : 'Preparing…'}
+              </div>
+            </div>
+            <div className="mt-1 truncate text-[11px] text-[var(--fg-secondary)]">
+              {sourceLabel} <span className="text-[var(--muted-dim)]">→</span> {destinationLabel}
+            </div>
+          </div>
+          <ToolDetailsButton open={detailsOpen} onClick={() => setDetailsOpen((value) => !value)} />
+        </div>
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[rgba(255,255,255,.07)]">
+          <div
+            className={`h-full rounded-full transition-[width] duration-200 ${failed ? 'bg-[var(--red)]' : 'bg-[var(--accent)]'}`}
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+        <div className="mt-1.5 flex items-center justify-between text-[10px] text-[var(--muted-dim)]">
+          <span>
+            {progress?.phase === 'planning'
+              ? 'Scanning folder…'
+              : `${progress?.completedFiles ?? 0} of ${progress?.fileCount ?? files.length} files`}
+          </span>
+          <span>
+            {progress?.retries
+              ? `${progress.retries} ${progress.retries === 1 ? 'retry' : 'retries'}`
+              : `${percent}%`}
+          </span>
+        </div>
+        {failed && progress?.failure?.error ? (
+          <div className="mt-1.5 text-[10px] text-[var(--red)]">
+            {progress.failure.error}
+            {progress.failure.cleanupError ? ` Cleanup: ${progress.failure.cleanupError}` : ''}
+          </div>
+        ) : null}
+        {failed && progress?.resumeToken ? (
+          <div className="mt-1 text-[10px] text-[var(--muted-dim)]">
+            The assistant can resume after {progress.completedFiles ?? 0} committed files.
+          </div>
+        ) : null}
+      </div>
+      {detailsOpen && files.length > 0 ? (
+        <div className="max-h-56 overflow-y-auto border-t border-[var(--border-subtle)] p-2">
+          <div className="grid gap-1.5">
+            {files.map((file: any, index: number) => {
+              const filePercent =
+                file.size > 0
+                  ? Math.min(100, (Number(file.transferredBytes ?? 0) / file.size) * 100)
+                  : file.status === 'completed'
+                    ? 100
+                    : 0;
+              return (
+                <div
+                  key={`${file.destinationPath}-${index}`}
+                  className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-2 py-1.5"
+                >
+                  <div className="flex min-w-0 items-center gap-2 text-[10px]">
+                    <span className="min-w-0 flex-1 truncate text-[var(--fg-secondary)]">
+                      {file.sourcePath}
+                    </span>
+                    {file.status === 'retrying' ? (
+                      <span className="text-[var(--yellow)]">
+                        Retrying {file.retries}/{5}
+                      </span>
+                    ) : null}
+                    <span className="flex-shrink-0 tabular-nums text-[var(--muted-dim)]">
+                      {formatTransferBytes(file.transferredBytes)} /{' '}
+                      {formatTransferBytes(file.size)}
+                    </span>
+                  </div>
+                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-[rgba(255,255,255,.06)]">
+                    <div
+                      className={`h-full rounded-full ${file.status === 'failed' ? 'bg-[var(--red)]' : file.status === 'retrying' ? 'bg-[var(--yellow)]' : 'bg-[var(--green)]'}`}
+                      style={{ width: `${filePercent}%` }}
+                    />
+                  </div>
+                  {file.error && (file.status === 'retrying' || file.status === 'failed') ? (
+                    <div className="mt-1 truncate text-[9px] text-[var(--muted-dim)]">
+                      {file.error}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderItem[] }) {
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const first = items[0];
@@ -569,6 +711,9 @@ export function ToolActivityRow({
   result?: AssistantMessage;
   droneNameById?: AssistantDroneNameMap;
 }) {
+  if (call?.name === 'transfer_files') {
+    return <TransferActivityRow call={call} result={result} />;
+  }
   if (call?.name === 'message_drone') {
     return <MessageDroneActivityRow call={call} result={result} droneNameById={droneNameById} />;
   }

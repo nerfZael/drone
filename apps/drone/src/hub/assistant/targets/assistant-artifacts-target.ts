@@ -1,6 +1,10 @@
 import type { WorkspaceTarget, WorkspaceTargetCall, WorkspaceTargetDescriptor } from '@blip/tools';
 
-import { listAssistantArtifactEntries, runAssistantArtifactAction } from '../../assistant-artifacts';
+import {
+  createAssistantArtifactTransferAdapter,
+  listAssistantArtifactEntries,
+  runAssistantArtifactAction,
+} from '../../assistant-artifacts';
 
 function textResult(text: string, details: unknown) {
   return { content: [{ type: 'text' as const, text }], details };
@@ -8,6 +12,7 @@ function textResult(text: string, details: unknown) {
 
 export class AssistantArtifactsTarget implements WorkspaceTarget {
   readonly descriptor: WorkspaceTargetDescriptor;
+  readonly transfer;
 
   constructor(private readonly threadId: string) {
     this.descriptor = {
@@ -17,6 +22,7 @@ export class AssistantArtifactsTarget implements WorkspaceTarget {
       rootLabel: `artifacts:${threadId}`,
       capabilities: ['files.list', 'files.read', 'files.write', 'files.delete', 'directories.create'],
     };
+    this.transfer = createAssistantArtifactTransferAdapter(threadId);
   }
 
   async execute(call: WorkspaceTargetCall) {

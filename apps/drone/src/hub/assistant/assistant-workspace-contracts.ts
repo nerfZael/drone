@@ -54,6 +54,39 @@ export type AssistantToolCallbacks = {
     droneId: string;
     path: string;
   }) => Promise<AssistantDronePathStatResult>;
+  readDroneFileChunk?: (opts: {
+    droneId: string;
+    path: string;
+    offset: number;
+    length: number;
+  }) => Promise<{ dataBase64: string; bytes: number }>;
+  createDroneTransferDirectory?: (opts: { droneId: string; path: string }) => Promise<void>;
+  prepareDroneTransferFile?: (opts: {
+    droneId: string;
+    path: string;
+    transferId: string;
+    size: number;
+    overwrite: boolean;
+  }) => Promise<{ offset: number }>;
+  writeDroneTransferChunk?: (opts: {
+    droneId: string;
+    path: string;
+    transferId: string;
+    offset: number;
+    dataBase64: string;
+  }) => Promise<{ offset: number }>;
+  commitDroneTransferFile?: (opts: {
+    droneId: string;
+    path: string;
+    transferId: string;
+    size: number;
+    overwrite: boolean;
+  }) => Promise<void>;
+  abortDroneTransferFile?: (opts: {
+    droneId: string;
+    path: string;
+    transferId: string;
+  }) => Promise<void>;
   runDroneBash?: (opts: {
     droneId: string;
     command: string;

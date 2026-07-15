@@ -111,6 +111,7 @@ const TOOL_LABELS: Record<string, string> = {
   send_message: 'Send message',
   set_drone_group: 'Set drone group',
   set_target: 'Set workspace target',
+  transfer_files: 'Transfer files',
   subscribe_to_any_chat_idle: 'Subscribe to any chat idle',
   subscribe_to_all_chats_idle: 'Subscribe to all chats idle',
   subscribe_to_chats_idle: 'Subscribe to all chats idle',
