@@ -16,6 +16,7 @@ import {
   resolveAgentSuggestionSettingsResponse,
   resolveEffectiveVoiceApprovalSettings,
   resolveEffectiveVoiceRealtimeSettings,
+  resolveNameSuggestionLlmSettings,
   upsertStoredProviderApiKey,
   upsertStoredAgentSuggestionSettings,
   upsertStoredVoiceApprovalSettings,
@@ -144,6 +145,42 @@ describe('LLM settings diagnostics', () => {
       expect(diagnostics.effective.source).toBe('codex-cli');
       expect(diagnostics.effective.hasValue).toBe(true);
       expect(diagnostics.effective.fingerprint).not.toBeNull();
+    });
+  });
+
+  test('prefers a Codex connection over an OpenAI API key for name suggestions', async () => {
+    await withTempDroneDataDirAndEnv({ OPENAI_API_KEY: 'openai-key' }, async () => {
+      const authPath = path.join(process.env.DRONE_DATA_DIR!, 'codex-auth.json');
+      process.env.DRONE_HUB_CODEX_AUTH_FILE = authPath;
+      fs.writeFileSync(
+        authPath,
+        JSON.stringify({
+          auth_mode: 'chatgpt',
+          tokens: {
+            access_token: fakeJwt({ exp: Math.floor(Date.now() / 1000) + 3600 }),
+            refresh_token: 'refresh-token',
+            account_id: 'acct-123',
+          },
+        }),
+        'utf8',
+      );
+
+      const resolved = await resolveNameSuggestionLlmSettings();
+      expect(resolved.provider).toBe('codex');
+      expect(resolved.source).toBe('codex-cli');
+    });
+  });
+
+  test('falls back to the OpenAI API key when Codex is unavailable', async () => {
+    await withTempDroneDataDirAndEnv({ OPENAI_API_KEY: 'openai-key' }, async () => {
+      process.env.DRONE_HUB_CODEX_AUTH_FILE = path.join(
+        process.env.DRONE_DATA_DIR!,
+        'missing-codex-auth.json',
+      );
+      const resolved = await resolveNameSuggestionLlmSettings();
+      expect(resolved.provider).toBe('openai');
+      expect(resolved.apiKey).toBe('openai-key');
+      expect(resolved.source).toBe('environment');
     });
   });
 });

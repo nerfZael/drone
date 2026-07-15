@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { fetchDroneChatState, fetchDroneChatTranscript, sameTranscriptItem } from '../src/droneHub/app/chat-api';
+import {
+  fetchDroneChatState,
+  fetchDroneChatTranscript,
+  sameTranscriptItem,
+  sendDroneChatPrompt,
+} from '../src/droneHub/app/chat-api';
 import type { TranscriptItem } from '../src/droneHub/types';
 
 function transcriptItem(overrides: Partial<TranscriptItem> = {}): TranscriptItem {
@@ -59,6 +64,24 @@ describe('chat api transcript equality', () => {
 });
 
 describe('chat api request scopes', () => {
+  test('marks prompt submissions whose auto-rename will be handled by the client', async () => {
+    let body: any = null;
+    await sendDroneChatPrompt(
+      async <T>(_url: string, init?: RequestInit): Promise<T> => {
+        body = JSON.parse(String(init?.body ?? '{}'));
+        return { ok: true, accepted: true, promptId: 'prompt-1' } as T;
+      },
+      {
+        droneId: 'drone-1',
+        chatName: 'chat-2',
+        prompt: 'Fix login',
+        autoRenameHandledByClient: true,
+      },
+    );
+
+    expect(body.autoRenameHandledByClient).toBe(true);
+  });
+
   test('loads the initial transcript tail and pending prompts in one request', async () => {
     const urls: string[] = [];
     const result = await fetchDroneChatState(

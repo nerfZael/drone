@@ -14,6 +14,7 @@ type UseGroupBroadcastArgs = {
   sidebarVisibleDrones: DroneSummary[];
   selectedChat: string;
   requestJson: RequestJsonFn;
+  onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
   setSelectedGroupMultiChat: React.Dispatch<React.SetStateAction<string | null>>;
   setGroupBroadcastExpanded: React.Dispatch<React.SetStateAction<boolean>>;
 };
@@ -24,6 +25,7 @@ export function useGroupBroadcast({
   sidebarVisibleDrones,
   selectedChat,
   requestJson,
+  onAutoRenameChatFromFirstPrompt,
   setSelectedGroupMultiChat,
   setGroupBroadcastExpanded,
 }: UseGroupBroadcastArgs) {
@@ -93,12 +95,16 @@ export function useGroupBroadcast({
               throw new Error(`"${d.name}" is still starting.`);
             }
             const chatName = resolveChatNameForDrone(d, preferredChat);
-            await sendDroneChatPrompt(requestJson, {
+            const data = await sendDroneChatPrompt(requestJson, {
               droneId: d.id,
               chatName,
               prompt,
               attachments,
+              autoRenameHandledByClient: Boolean(prompt),
             });
+            if (data.autoRenameChat && prompt) {
+              onAutoRenameChatFromFirstPrompt?.(d.id, chatName, prompt);
+            }
             return d.name;
           }),
         );
@@ -125,7 +131,7 @@ export function useGroupBroadcast({
         setGroupBroadcastSendingCount((c) => Math.max(0, c - 1));
       }
     },
-    [requestJson, selectedChat, selectedGroupMultiChatData],
+    [onAutoRenameChatFromFirstPrompt, requestJson, selectedChat, selectedGroupMultiChatData],
   );
 
   return {

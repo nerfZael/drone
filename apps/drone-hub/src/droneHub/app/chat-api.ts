@@ -9,6 +9,7 @@ export type SendDroneChatPromptResponse = {
   promptId: string;
   pendingState?: PendingPrompt['state'];
   blockedByAutomation?: boolean;
+  autoRenameChat?: boolean;
 };
 
 export type FetchDroneChatTranscriptResult = {
@@ -215,6 +216,7 @@ export async function sendDroneChatPrompt(
     prompt: string;
     attachments?: ChatSendPayload['attachments'];
     submittedAt?: string;
+    autoRenameHandledByClient?: boolean;
   },
 ): Promise<SendDroneChatPromptResponse> {
   const droneId = String(opts.droneId ?? '').trim();
@@ -227,7 +229,12 @@ export async function sendDroneChatPrompt(
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt, attachments, submittedAt }),
+      body: JSON.stringify({
+        prompt,
+        attachments,
+        submittedAt,
+        ...(opts.autoRenameHandledByClient ? { autoRenameHandledByClient: true } : {}),
+      }),
     },
   );
 }

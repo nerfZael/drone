@@ -8,6 +8,8 @@ type GenerateObjectInput = {
   prompt: string;
   temperature?: number;
   maxRetries?: number;
+  reasoning?: 'none' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+  providerOptions?: Record<string, Record<string, unknown>>;
 };
 
 export type HubLlmRuntime = {
@@ -65,13 +67,25 @@ function parseJsonObject(raw: string): any {
   throw new Error('LLM response did not contain a JSON object');
 }
 
+export function codexObjectCompletionOptions(opts: {
+  apiKey: string;
+  reasoning?: GenerateObjectInput['reasoning'];
+  maxRetries?: number;
+}): Record<string, unknown> {
+  return {
+    apiKey: opts.apiKey,
+    reasoningEffort: opts.reasoning ?? 'low',
+    maxRetries: opts.maxRetries,
+  };
+}
+
 async function generateCodexObject(apiKey: string, z: any, input: GenerateObjectInput): Promise<{ object: any }> {
   const ai = await dynamicImport('@mariozechner/pi-ai');
   const modelId = String(input.model ?? '').trim();
   const model = ai.getModel('openai-codex', modelId) ?? ai.getModel('openai-codex', defaultHubLlmModelId('codex'));
   if (!model) throw new Error(`Unknown Codex model: ${modelId}`);
 
-  const response = await ai.completeSimple(
+  const response = await ai.streamOpenAICodexResponses(
     model,
     {
       systemPrompt: [
@@ -88,12 +102,19 @@ async function generateCodexObject(apiKey: string, z: any, input: GenerateObject
         },
       ],
     },
-    {
+    codexObjectCompletionOptions({
       apiKey,
-      reasoning: 'low',
+      reasoning: input.reasoning,
       maxRetries: input.maxRetries,
-    },
-  );
+    }),
+  ).result();
+
+  if (response?.stopReason === 'error' || response?.stopReason === 'aborted') {
+    throw new Error(
+      String(response?.errorMessage ?? '').trim() ||
+        `Codex completion ${response?.stopReason === 'aborted' ? 'was aborted' : 'failed'}`,
+    );
+  }
 
   const parsed = parseJsonObject(textFromAssistantMessage(response));
   return { object: input.schema?.parse ? input.schema.parse(parsed) : parsed };
@@ -120,10 +141,20 @@ export async function resolveHubLlmRuntime(opts?: { provider?: LlmProviderId; ap
   if (provider === 'gemini') {
     const { createGoogleGenerativeAI } = await dynamicImport('@ai-sdk/google');
     const google = createGoogleGenerativeAI({ apiKey });
-    return { provider, z, generateObject, modelFactory: google };
+    return {
+      provider,
+      z,
+      generateObject: ({ reasoning: _reasoning, ...input }) => generateObject(input),
+      modelFactory: google,
+    };
   }
 
   const { createOpenAI } = await dynamicImport('@ai-sdk/openai');
   const openai = createOpenAI({ apiKey });
-  return { provider, z, generateObject, modelFactory: openai };
+  return {
+    provider,
+    z,
+    generateObject: ({ reasoning: _reasoning, ...input }) => generateObject(input),
+    modelFactory: openai,
+  };
 }

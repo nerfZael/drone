@@ -103,10 +103,12 @@ import {
   terminalPrompt as droneTerminalPrompt,
 } from '../host/api';
 import {
+  DEFAULT_DRONE_NAME_MODEL_ID,
   jobsPlanFromAgentMessage,
   suggestDroneNameFromMessage,
   suggestTaskTitleFromMessage,
 } from './jobs-from-message';
+import { buildAutoRenamedChatCandidate, isGeneratedChatName } from './chat-auto-rename';
 import { createDeviceMeshService } from './device-mesh';
 import {
   canonicalRepositoriesMap,
@@ -390,6 +392,7 @@ import {
   resolveEffectiveVoiceTranscriptionSettings,
   resolveFilesystemSettingsResponse,
   resolveEffectiveProviderApiKeySettings,
+  resolveNameSuggestionLlmSettings,
   resolveExaApiKeySettings,
   resolveGroqApiKeySettings,
   resolveVoiceStreamPairingPasswordSettings,
@@ -14851,6 +14854,146 @@ async function projectCanonicalChatsToRegistry(droneIdRaw: string): Promise<void
   });
 }
 
+const CHAT_AUTO_RENAME_IN_FLIGHT = new Set<string>();
+const CHAT_AUTO_RENAME_ATTEMPTED_AT_FIELD = 'firstMessageNameSuggestionAttemptedAt';
+
+async function shouldAutoRenameChatOnPrompt(opts: {
+  droneId: string;
+  chatName: string;
+  chatEntry: any;
+}): Promise<boolean> {
+  if (!isGeneratedChatName(opts.chatName)) return false;
+  try {
+    await importResolvedChatToStore(opts.droneId, opts.chatName, opts.chatEntry);
+    const stored = readChatFromStore({ droneId: opts.droneId, chatName: opts.chatName });
+    if (String(stored.chat?.[CHAT_AUTO_RENAME_ATTEMPTED_AT_FIELD] ?? '').trim()) return false;
+    const transcript = countTranscriptTurnsFromStore({
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+    });
+    const pending = await readPendingPrompts({
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+    });
+    return transcript.count === 0 && pending.length === 0;
+  } catch (error: any) {
+    hubLog('warn', 'chat auto-rename first-message check failed', {
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+      error: error?.message ?? String(error),
+    });
+    return false;
+  }
+}
+
+async function claimChatAutoRenameFromFirstPrompt(opts: {
+  droneId: string;
+  chatName: string;
+}): Promise<boolean> {
+  try {
+    const attemptedAt = nowIso();
+    const patched = await patchChatMetadataInStore({
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+      patch: {
+        setIfMissing: {
+          [CHAT_AUTO_RENAME_ATTEMPTED_AT_FIELD]: attemptedAt,
+        },
+      },
+    });
+    if (!patched.changed) return false;
+    await projectCanonicalChatToRegistry(opts.droneId, opts.chatName);
+    return true;
+  } catch (error: any) {
+    hubLog('warn', 'chat auto-rename first-message claim failed', {
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+      error: error?.message ?? String(error),
+    });
+    return false;
+  }
+}
+
+async function autoRenameGeneratedChatFromFirstPrompt(opts: {
+  droneId: string;
+  chatName: string;
+  prompt: string;
+  expectedCreatedAt: string;
+}): Promise<void> {
+  if (!isGeneratedChatName(opts.chatName)) return;
+  const key = `${opts.droneId}\u0000${opts.chatName}`;
+  if (CHAT_AUTO_RENAME_IN_FLIGHT.has(key)) return;
+  CHAT_AUTO_RENAME_IN_FLIGHT.add(key);
+
+  try {
+    const llm = await resolveNameSuggestionLlmSettings();
+    if (!llm.apiKey) {
+      hubLog('warn', 'chat auto-rename skipped: missing Codex connection and OpenAI key', {
+        droneId: opts.droneId,
+        chatName: opts.chatName,
+      });
+      return;
+    }
+
+    const base = await suggestDroneNameFromMessage(opts.prompt, {
+      provider: llm.provider,
+      apiKey: llm.apiKey,
+    });
+    const current = readChatFromStore({ droneId: opts.droneId, chatName: opts.chatName });
+    if (
+      !current.chat ||
+      String(current.chat?.createdAt ?? '') !== opts.expectedCreatedAt
+    ) return;
+
+    const existing = new Set(listChatsFromStore({ droneId: opts.droneId }).chats);
+    let candidate = '';
+    let renamed = false;
+    for (let attempt = 1; attempt <= 100; attempt += 1) {
+      const next = buildAutoRenamedChatCandidate(base, attempt);
+      if (!next || next === opts.chatName || existing.has(next)) continue;
+      try {
+        renamed = await renameChatInStore({
+          droneId: opts.droneId,
+          chatName: opts.chatName,
+          newChatName: next,
+        });
+        candidate = next;
+        break;
+      } catch (error: any) {
+        const message = String(error?.message ?? error ?? '');
+        if (/already exists/i.test(message)) {
+          existing.add(next);
+          continue;
+        }
+        if (/unknown chat/i.test(message)) return;
+        throw error;
+      }
+    }
+    if (!candidate) throw new Error('could not find an available suggested chat name');
+    if (!renamed) return;
+    migrateInMemoryChatStateForRename({
+      droneId: opts.droneId,
+      fromChatName: opts.chatName,
+      toChatName: candidate,
+    });
+    await projectCanonicalChatsToRegistry(opts.droneId);
+    hubLog('info', 'chat auto-renamed from first message', {
+      droneId: opts.droneId,
+      oldChatName: opts.chatName,
+      chatName: candidate,
+      provider: llm.provider,
+    });
+  } catch (error: any) {
+    hubLog('warn', 'chat auto-rename failed', {
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+      error: error?.message ?? String(error),
+    });
+  } finally {
+    CHAT_AUTO_RENAME_IN_FLIGHT.delete(key);
+  }
+}
+
 async function importResolvedDroneChatsToStore(
   droneId: string,
   droneEntry: any,
@@ -22671,13 +22814,12 @@ export async function startDroneHubApiServer(opts: {
 
         let selectedProvider: LlmProviderId | null = null;
         try {
-          const { provider } = await resolveEffectiveLlmProvider();
+          const { provider, ...resolved } = await resolveNameSuggestionLlmSettings();
           selectedProvider = provider;
-          const resolved = await resolveEffectiveProviderApiKeySettings(provider);
           if (!resolved.apiKey) {
             await logProviderApiKeyResolution(
               'warn',
-              'name-from-message rejected: missing provider key',
+              'name-from-message rejected: missing Codex connection and OpenAI key',
               provider,
               {
                 pathname,
@@ -22689,7 +22831,7 @@ export async function startDroneHubApiServer(opts: {
             );
             json(res, 412, {
               ok: false,
-              error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
+              error: 'Connect Codex or configure an OpenAI API key in Settings.',
             });
             return;
           }
@@ -22720,7 +22862,7 @@ export async function startDroneHubApiServer(opts: {
                 source,
                 requestedDroneId,
                 messageLength,
-                model: String(process.env.DRONE_HUB_DRONE_NAME_MODEL ?? '').trim() || null,
+                model: DEFAULT_DRONE_NAME_MODEL_ID,
                 error: e?.message ?? String(e),
               },
             );
@@ -22730,7 +22872,7 @@ export async function startDroneHubApiServer(opts: {
               source,
               requestedDroneId,
               messageLength,
-              model: String(process.env.DRONE_HUB_DRONE_NAME_MODEL ?? '').trim() || null,
+              model: DEFAULT_DRONE_NAME_MODEL_ID,
               error: e?.message ?? String(e),
             });
           }
@@ -33562,6 +33704,16 @@ export async function startDroneHubApiServer(opts: {
           const drone = resolved.kind === 'real' ? resolved.drone : resolved.pending;
           const droneName = String(drone?.name ?? droneRef).trim() || droneRef;
           const chat = normalizeChatName(chatName);
+          const existingChatEntry =
+            resolved.kind === 'real' ? ((drone as any)?.chats?.[chat] ?? null) : null;
+          const autoRenameCandidateFromFirstPrompt = existingChatEntry
+            ? await shouldAutoRenameChatOnPrompt({
+                droneId,
+                chatName: chat,
+                chatEntry: existingChatEntry,
+              })
+            : false;
+          const autoRenameExpectedCreatedAt = String(existingChatEntry?.createdAt ?? '');
           const promptIdRaw = String(body?.promptId ?? body?.prompt_id ?? body?.id ?? '').trim();
           if (promptIdRaw && !isSafePromptId(promptIdRaw)) {
             timer.setHeader(res);
@@ -33683,6 +33835,19 @@ export async function startDroneHubApiServer(opts: {
             json(res, r.status, { ok: false, error: r.error });
             return;
           }
+          const autoRenameFromFirstPrompt = autoRenameCandidateFromFirstPrompt
+            ? await claimChatAutoRenameFromFirstPrompt({ droneId, chatName: chat })
+            : false;
+          if (autoRenameFromFirstPrompt && autoRenameExpectedCreatedAt) {
+            if (body?.autoRenameHandledByClient !== true) {
+              void autoRenameGeneratedChatFromFirstPrompt({
+                droneId,
+                chatName: chat,
+                prompt,
+                expectedCreatedAt: autoRenameExpectedCreatedAt,
+              });
+            }
+          }
           timer.mark('format');
           timer.setHeader(res);
           logSlowHubRequest('chat prompt', timer, {
@@ -33701,6 +33866,7 @@ export async function startDroneHubApiServer(opts: {
             promptId: r.id,
             pendingState: r.pendingState,
             blockedByAutomation: r.blockedByAutomation,
+            autoRenameChat: autoRenameFromFirstPrompt,
           });
           return;
         } catch (e: any) {

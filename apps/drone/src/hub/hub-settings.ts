@@ -1124,6 +1124,19 @@ export async function resolveEffectiveLlmProvider(): Promise<EffectiveLlmProvide
   return { provider: 'openai', source: 'default' };
 }
 
+export async function resolveNameSuggestionLlmSettings(): Promise<{
+  provider: 'codex' | 'openai';
+  apiKey: string | null;
+  source: ApiKeySettingsSource;
+  updatedAt: string | null;
+}> {
+  const codex = await resolveEffectiveProviderApiKeySettings('codex');
+  if (codex.apiKey) return { provider: 'codex', ...codex };
+
+  const openai = await resolveEffectiveProviderApiKeySettings('openai');
+  return { provider: 'openai', ...openai };
+}
+
 export function providerKeySettingsResponse(
   settings: EffectiveProviderApiKeySettings,
   options?: { includeApiKey?: boolean },

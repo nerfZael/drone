@@ -114,6 +114,80 @@ describeSocketSuite('chat management api', () => {
     expect((listed.data?.chats ?? []).includes('review')).toBe(true);
   });
 
+  test('offers auto-rename only for the first prompt in a generated chat name', async () => {
+    const droneId = 'drone-chat-first-prompt-auto-rename';
+    await seedDrone(droneId);
+
+    const generated = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'chat-2' }),
+    });
+    expect(generated.r.status).toBe(201);
+
+    const firstPrompt = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/chat-2/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Fix the login redirect loop',
+          autoRenameHandledByClient: true,
+        }),
+      },
+    );
+    expect(firstPrompt.r.status).toBe(202);
+    expect(firstPrompt.data?.autoRenameChat).toBe(true);
+
+    const secondPrompt = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/chat-2/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt: 'Add a regression test too',
+          autoRenameHandledByClient: true,
+        }),
+      },
+    );
+    expect(secondPrompt.r.status).toBe(202);
+    expect(secondPrompt.data?.autoRenameChat).toBe(false);
+
+    const customNamed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'login-review' }),
+    });
+    expect(customNamed.r.status).toBe(201);
+    const customPrompt = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/login-review/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'This manually named chat must stay named' }),
+      },
+    );
+    expect(customPrompt.r.status).toBe(202);
+    expect(customPrompt.data?.autoRenameChat).toBe(false);
+
+    const regAfterPrompts: any = await loadRegistry();
+    expect(
+      typeof regAfterPrompts?.drones?.[droneId]?.chats?.['chat-2']
+        ?.firstMessageNameSuggestionAttemptedAt,
+    ).toBe('string');
+
+    const defaultPrompt = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'Keep this chat name' }),
+      },
+    );
+    expect(defaultPrompt.r.status).toBe(202);
+    expect(defaultPrompt.data?.autoRenameChat).toBe(false);
+  });
+
   test('applies the auto-continue default to newly created builtin chats', async () => {
     const droneId = 'drone-chat-create-auto-continue-default';
     await seedDrone(droneId);

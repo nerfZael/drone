@@ -94,6 +94,7 @@ type UseChatRuntimeOrchestrationArgs = {
   patchQueuedPrompt: (key: string, id: string, patch: Partial<QueuedPrompt>) => void;
   removeQueuedPrompt: (key: string, id: string) => void;
   requestJson: RequestJson;
+  onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
 };
 
 function chatUiModeForAgent(agent: ChatAgentConfig | null | undefined): 'transcript' | 'cli' {
@@ -133,6 +134,7 @@ export function useChatRuntimeOrchestration({
   patchQueuedPrompt,
   removeQueuedPrompt,
   requestJson,
+  onAutoRenameChatFromFirstPrompt,
 }: UseChatRuntimeOrchestrationArgs) {
   const [sendingPromptCount, setSendingPromptCount] = React.useState(0);
   const [promptError, setPromptError] = React.useState<string | null>(null);
@@ -321,7 +323,11 @@ export function useChatRuntimeOrchestration({
           chatName: selectedChat || 'default',
           prompt,
           attachments,
+          autoRenameHandledByClient: Boolean(prompt),
         });
+        if (data.autoRenameChat && prompt) {
+          onAutoRenameChatFromFirstPrompt?.(originDroneId, originChat, prompt);
+        }
         const stillOnSameChat =
           selectedDroneRef.current === originDroneId &&
           (selectedChatRef.current || 'default') === originChat;
@@ -365,6 +371,7 @@ export function useChatRuntimeOrchestration({
       currentDrone,
       currentDroneLabel,
       enqueueQueuedPrompt,
+      onAutoRenameChatFromFirstPrompt,
       requestJson,
       selectedChat,
     ],
@@ -449,7 +456,12 @@ export function useChatRuntimeOrchestration({
               prompt: head.prompt,
               attachments: head.attachmentPayloads ?? [],
               submittedAt: head.at,
+              autoRenameHandledByClient: Boolean(head.prompt),
             });
+
+            if (data.autoRenameChat && head.prompt) {
+              onAutoRenameChatFromFirstPrompt?.(parsed.droneId, parsed.chatName, head.prompt);
+            }
 
             const id = String((data as any)?.promptId ?? '').trim();
             removeQueuedPrompt(key, head.id);
@@ -485,6 +497,7 @@ export function useChatRuntimeOrchestration({
     patchQueuedPrompt,
     queuedPromptsByDroneChat,
     getQueuedPromptsForKey,
+    onAutoRenameChatFromFirstPrompt,
     removeQueuedPrompt,
     requestJson,
     selectedChat,

@@ -160,6 +160,7 @@ describe('remote Hub server', () => {
 
   test('allows remote create auto-rename name suggestions', () => {
     expect(routeAllowed('POST', '/api/drones/name-from-message')).toBe(true);
+    expect(routeAllowed('POST', '/api/drones/drone-1/chats/chat-2/rename')).toBe(true);
   });
 
   test('allows remote chat voice transcriptions', () => {

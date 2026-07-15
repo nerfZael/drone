@@ -94,6 +94,7 @@ import { ASSISTANT_OPEN_DRONE_CHAT_EVENT, type AssistantOpenDroneChatEventDetail
 import { buildDroneHubTaskQueueSpec, type DroneHubTaskSpawnMode } from './droneHub/chat/drone-hub-task-spawn';
 import {
   buildSuggestedChatNameCandidate,
+  isGeneratedChatName,
   isSuggestedChatRenameConflict,
   isSuggestedChatRenameRetriable,
 } from './droneHub/app/chat-name-suggestions';
@@ -1808,6 +1809,14 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     if (!ids[selectedDrone]) ids[selectedDrone] = makeId();
     return ids[selectedDrone];
   }, [selectedDrone]);
+  const autoRenameChatFromFirstPromptRef = React.useRef<
+    (droneId: string, chatName: string, prompt: string) => void
+  >(() => {});
+  const handleAutoRenameChatFromFirstPrompt = React.useCallback(
+    (droneId: string, chatName: string, prompt: string) =>
+      autoRenameChatFromFirstPromptRef.current(droneId, chatName, prompt),
+    [],
+  );
 
   const {
     cancelPendingPromptErrorById,
@@ -1850,6 +1859,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     patchQueuedPrompt,
     removeQueuedPrompt,
     requestJson,
+    onAutoRenameChatFromFirstPrompt: handleAutoRenameChatFromFirstPrompt,
   });
   const [agentSuggestionPolicyFingerprint, setAgentSuggestionPolicyFingerprint] = React.useState('');
   const {
@@ -1975,6 +1985,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarVisibleDrones,
     selectedChat,
     requestJson,
+    onAutoRenameChatFromFirstPrompt: handleAutoRenameChatFromFirstPrompt,
     setSelectedGroupMultiChat,
     setGroupBroadcastExpanded,
   });
@@ -2836,14 +2847,27 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             throw new Error(`"${uiDroneName(drone.name)}" is still starting.`);
           }
           const resolvedChat = resolveChatNameForDrone(drone, chatName);
-          await requestJson<{ ok: true; accepted: true; promptId: string }>(
+          const data = await requestJson<{
+            ok: true;
+            accepted: true;
+            promptId: string;
+            autoRenameChat?: boolean;
+          }>(
             `/api/drones/${encodeURIComponent(drone.id)}/chats/${encodeURIComponent(resolvedChat)}/prompt`,
             {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({ prompt, attachments: [], submittedAt: new Date().toISOString() }),
+              body: JSON.stringify({
+                prompt,
+                attachments: [],
+                submittedAt: new Date().toISOString(),
+                autoRenameHandledByClient: true,
+              }),
             },
           );
+          if (data.autoRenameChat) {
+            autoRenameChatFromFirstPromptRef.current(drone.id, resolvedChat, prompt);
+          }
         }),
       );
 
@@ -3058,7 +3082,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const droneId = String(droneIdRaw ?? '').trim();
       const chatName = String(chatNameRaw ?? '').trim();
       const prompt = String(promptRaw ?? '').trim();
-      if (!droneId || !chatName || !prompt || chatName === 'default') return;
+      if (!droneId || !isGeneratedChatName(chatName) || !prompt) return;
+      let originalChatSeen = (droneByIdRef.current[droneId]?.chats ?? []).includes(chatName);
       try {
         const data = await requestJson<{ ok: true; name: string }>(
           '/api/drones/name-from-message',
@@ -3084,6 +3109,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         let candidateIndex = 1;
         let lastError = '';
         for (let attempt = 1; attempt <= 180; attempt += 1) {
+          const currentChats = droneByIdRef.current[droneId]?.chats ?? [];
+          if (currentChats.includes(chatName)) originalChatSeen = true;
+          else if (originalChatSeen) return;
           const candidate = buildSuggestedChatNameCandidate(base, candidateIndex);
           if (!candidate) {
             showNameSuggestionFailureToast(new Error('Chat name suggestion produced an empty candidate.'));
@@ -3098,6 +3126,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
                 body: JSON.stringify({ newName: candidate }),
               },
             );
+            const oldCanvasNodeId = createCanvasChatNodeId(droneId, chatName);
+            const newCanvasNodeId = createCanvasChatNodeId(droneId, candidate);
+            if (oldCanvasNodeId && newCanvasNodeId) {
+              useDroneCanvasStore.getState().replaceNodeId(oldCanvasNodeId, newCanvasNodeId, candidate);
+            }
             setSidebarChatOrderByDrone((prev) => {
               const currentOrder = prev[droneId];
               if (!currentOrder || !currentOrder.includes(chatName)) return prev;
@@ -3143,6 +3176,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [requestJson, setSelectedChat, setSidebarChatOrderByDrone, showNameSuggestionFailureToast],
   );
+  autoRenameChatFromFirstPromptRef.current = suggestAndRenameDroneChatFromMessage;
   const createDroneChat = React.useCallback(
     async (
       drone: DroneSummary,
@@ -3980,6 +4014,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     groupBroadcastPromptError,
     groupBroadcastSending,
     sendGroupBroadcastPrompt,
+    handleAutoRenameChatFromFirstPrompt,
     publishSelectedDraft,
     publishingDraft,
     uiDroneName,

@@ -17,6 +17,7 @@ import {
 } from './remote-api';
 import { remoteBusyChatNodeIds, updateRemoteUnreadChats } from './remote-unread';
 import { buildRemoteChatTimeline, normalizeRemotePendingPrompts } from './remote-chat-timeline';
+import { suggestAndRenameRemoteChatFromPrompt } from './remote-chat-auto-rename';
 
 type RemoteChatState = {
   transcripts: TranscriptItem[];
@@ -410,15 +411,37 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
   const sendPrompt = React.useCallback(async (payload?: ChatSendPayload) => {
     const prompt = String(payload?.prompt ?? draft).trim();
     if (!effectiveDroneId || !selectedChat || !prompt) return;
+    const originDroneId = effectiveDroneId;
+    const originChat = selectedChat;
     setSending(true);
     try {
-      await remoteRequestJson(`/api/drones/${encodeURIComponent(effectiveDroneId)}/chats/${encodeURIComponent(selectedChat)}/prompt`, {
+      const response = await remoteRequestJson<{ autoRenameChat?: boolean }>(`/api/drones/${encodeURIComponent(originDroneId)}/chats/${encodeURIComponent(originChat)}/prompt`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt, submittedAt: new Date().toISOString() }),
+        body: JSON.stringify({
+          prompt,
+          submittedAt: new Date().toISOString(),
+          autoRenameHandledByClient: true,
+        }),
       });
       setDraft('');
-      await loadChatState(effectiveDroneId, selectedChat);
+      await loadChatState(originDroneId, originChat);
+      if (response.autoRenameChat) {
+        void suggestAndRenameRemoteChatFromPrompt({
+          droneId: originDroneId,
+          chatName: originChat,
+          prompt,
+          requestJson: remoteRequestJson,
+        }).then((result) => {
+          if (!result.ok) {
+            setError(result.error);
+            return;
+          }
+          setChats((current) => current.map((chat) => (chat === originChat ? result.chatName : chat)));
+          setSelectedChat((current) => (current === originChat ? result.chatName : current));
+          void reloadDrones(originDroneId);
+        });
+      }
       return true;
     } catch (err: any) {
       setError(errorMessage(err));
@@ -426,7 +449,7 @@ export function useRemoteHubModel(options: UseRemoteHubModelOptions = {}) {
     } finally {
       setSending(false);
     }
-  }, [draft, effectiveDroneId, errorMessage, loadChatState, selectedChat]);
+  }, [draft, effectiveDroneId, errorMessage, loadChatState, reloadDrones, selectedChat]);
 
   const publishDraft = React.useCallback(async () => {
     if (!effectiveDroneId || !selectedChat || publishing) return false;

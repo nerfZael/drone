@@ -1,11 +1,18 @@
 import { describe, expect, test } from 'bun:test';
 import {
   buildSuggestedChatNameCandidate,
+  isGeneratedChatName,
   isSuggestedChatRenameConflict,
   isSuggestedChatRenameRetriable,
 } from '../src/droneHub/app/chat-name-suggestions';
 
 describe('chat name suggestions', () => {
+  test('recognizes only generated chat-number names', () => {
+    expect(isGeneratedChatName('chat-2')).toBe(true);
+    expect(isGeneratedChatName('default')).toBe(false);
+    expect(isGeneratedChatName('login-chat-2')).toBe(false);
+  });
+
   test('adds numbered suffixes for conflicts', () => {
     expect(buildSuggestedChatNameCandidate('Fix login flow', 1)).toBe('Fix login flow');
     expect(buildSuggestedChatNameCandidate('Fix login flow', 3)).toBe('Fix login flow (3)');

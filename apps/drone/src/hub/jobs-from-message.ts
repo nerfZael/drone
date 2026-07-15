@@ -16,8 +16,10 @@ function defaultJobsModelId(provider: LlmProviderId): string {
   return defaultHubLlmModelId(provider, 'standard');
 }
 
+export const DEFAULT_DRONE_NAME_MODEL_ID = 'gpt-5.6-luna';
+
 function defaultDroneNameModelId(provider: LlmProviderId): string {
-  return defaultHubLlmModelId(provider, 'standard');
+  return provider === 'gemini' ? defaultHubLlmModelId(provider, 'standard') : DEFAULT_DRONE_NAME_MODEL_ID;
 }
 
 function defaultTaskTitleModelId(provider: LlmProviderId): string {
@@ -278,7 +280,7 @@ export async function suggestDroneNameFromMessage(
   if (!text) throw new Error('missing message');
 
   const runtime = await resolveHubLlmRuntime(opts);
-  const modelId = String(process.env.DRONE_HUB_DRONE_NAME_MODEL ?? '').trim() || defaultDroneNameModelId(runtime.provider);
+  const modelId = defaultDroneNameModelId(runtime.provider);
   const outputSchema = runtime.z.object({
     name: runtime.z.string().min(1).describe('Drone name in dash-case (letters/numbers/single hyphens), max 48 chars.'),
   });
@@ -301,8 +303,11 @@ export async function suggestDroneNameFromMessage(
       schema: outputSchema,
       system,
       prompt: `Message:\n${text}`,
-      temperature: 0.2,
       maxRetries: 1,
+      reasoning: 'none',
+      ...(runtime.provider === 'openai'
+        ? { providerOptions: { openai: { reasoningEffort: 'none' } } }
+        : {}),
     });
     object = out.object;
   } catch (e: any) {

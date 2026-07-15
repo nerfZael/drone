@@ -60,6 +60,7 @@ export type GroupMultiChatColumnProps = {
     task: DroneHubTask;
     mode: DroneHubTaskSpawnMode;
   }) => Promise<{ ok: boolean; error?: string | null }>;
+  onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
   columnWidthPx: number;
   onRuntimeStateChange?: (next: GroupMultiChatColumnRuntimeState) => void;
 };
@@ -73,6 +74,7 @@ export function GroupMultiChatColumn({
   deleteBusy = false,
   onCreateJobs,
   onSpawnDroneHubTask,
+  onAutoRenameChatFromFirstPrompt,
   columnWidthPx,
   onRuntimeStateChange,
 }: GroupMultiChatColumnProps) {
@@ -403,7 +405,11 @@ export function GroupMultiChatColumn({
           chatName,
           prompt,
           attachments,
+          autoRenameHandledByClient: Boolean(prompt),
         });
+        if (data.autoRenameChat && prompt) {
+          onAutoRenameChatFromFirstPrompt?.(drone.id, chatName, prompt);
+        }
         const id = String((data as any)?.promptId ?? '').trim();
         const pendingState = normalizePendingPromptState(data?.pendingState);
         setOptimisticPendingPrompts((prev) =>
@@ -434,7 +440,7 @@ export function GroupMultiChatColumn({
         setSendingPromptCount((c) => Math.max(0, c - 1));
       }
     },
-    [chatName, drone.hubPhase, drone.id, scrollColumnToBottom, shownName],
+    [chatName, drone.hubPhase, drone.id, onAutoRenameChatFromFirstPrompt, scrollColumnToBottom, shownName],
   );
   const spawnDroneHubTaskForColumn = React.useCallback(
     (mode: DroneHubTaskSpawnMode, task: DroneHubTask) =>

@@ -480,6 +480,7 @@ export function routeAllowed(method: string, pathname: string): boolean {
   if (method === 'GET' && parts.length === 5 && parts[3] === 'chats') return true;
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'models') return true;
   if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'prompt') return true;
+  if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'rename') return true;
   if (method === 'POST' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'stop') return true;
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'state') return true;
   if (method === 'GET' && parts.length === 6 && parts[3] === 'chats' && parts[5] === 'pending') return true;

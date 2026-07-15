@@ -24,6 +24,7 @@ type GroupMultiChatWorkspaceProps = {
   groupBroadcastPromptError: string | null;
   groupBroadcastSending: boolean;
   onSendGroupBroadcastPrompt: (payload: ChatSendPayload) => Promise<boolean>;
+  onAutoRenameChatFromFirstPrompt?: (droneId: string, chatName: string, prompt: string) => void;
   uiDroneName: (nameRaw: string) => string;
   onSelectDroneCard: (droneId: string) => void;
   onDeleteDrone: (droneId: string) => void;
@@ -42,6 +43,7 @@ export function GroupMultiChatWorkspace({
   groupBroadcastPromptError,
   groupBroadcastSending,
   onSendGroupBroadcastPrompt,
+  onAutoRenameChatFromFirstPrompt,
   uiDroneName,
   onSelectDroneCard,
   onDeleteDrone,
@@ -258,6 +260,7 @@ export function GroupMultiChatWorkspace({
                   deleteBusy={Boolean(deletingDrones[d.id])}
                   onCreateJobs={onParseJobsFromAgentMessage}
                   onSpawnDroneHubTask={onSpawnDroneHubTaskFromAgentMessage}
+                  onAutoRenameChatFromFirstPrompt={onAutoRenameChatFromFirstPrompt}
                   columnWidthPx={groupMultiChatColumnWidth}
                   onRuntimeStateChange={(next) => onColumnRuntimeStateChange(d.id, next)}
                 />
