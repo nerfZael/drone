@@ -30,4 +30,19 @@ describe('mesh assistant history', () => {
     expect(serialized).toContain('desktop');
     expect((history as any).entries.at(-1).id).toBe('message_80');
   });
+
+  test('honors a smaller caller budget when queue metadata shares the response', () => {
+    const history: any = boundedAssistantHistory(
+      {
+        threadId: 'thread_1',
+        entries: Array.from({ length: 60 }, (_, index) => ({
+          id: `message_${index}`,
+          message: { role: 'assistant', content: 'x'.repeat(12_000) },
+        })),
+      },
+      64 * 1024,
+    );
+    expect(Buffer.byteLength(JSON.stringify(history))).toBeLessThanOrEqual(64 * 1024);
+    expect(history.entries.at(-1).id).toBe('message_59');
+  });
 });

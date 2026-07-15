@@ -24,6 +24,14 @@ export type LocalWorkspaceTarget = {
   execute: boolean;
 };
 
+export type LocalAssistantQueuedPrompt = {
+  id: string;
+  prompt: string;
+  createdAt: string;
+  status: 'queued' | 'failed';
+  error: string | null;
+};
+
 export type LocalAssistantThread = {
   id: string;
   title: string;
@@ -35,6 +43,7 @@ export type LocalAssistantThread = {
   error: string | null;
   workspaceTargets: LocalWorkspaceTarget[];
   messages: LocalAssistantMessage[];
+  queuedPrompts: LocalAssistantQueuedPrompt[];
 };
 
 export type LocalAssistantSettings = {

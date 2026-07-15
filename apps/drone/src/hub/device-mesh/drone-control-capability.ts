@@ -40,6 +40,35 @@ function optionalText(value: unknown): string | undefined {
   return value.trim() || undefined;
 }
 
+function truncateUtf8(value: unknown, maxBytes: number): string {
+  const source = String(value ?? '');
+  const bytes = Buffer.from(source);
+  if (bytes.length <= maxBytes) return source;
+  return `${bytes
+    .subarray(0, Math.max(0, maxBytes - 3))
+    .toString('utf8')
+    .replace(/\uFFFD+$/u, '')}…`;
+}
+
+function compactPendingPrompts(value: unknown): any[] {
+  const prompts = Array.isArray(value) ? value.slice(-50) : [];
+  const promptLimit = Math.max(160, Math.floor(8_000 / Math.max(1, prompts.length)));
+  const errorLimit = Math.max(80, Math.floor(4_000 / Math.max(1, prompts.length)));
+  return prompts.map((prompt: any) => ({
+    id: String(prompt?.id ?? '').slice(0, 160),
+    at: String(prompt?.at ?? ''),
+    prompt: truncateUtf8(prompt?.prompt, promptLimit),
+    state: ['queued', 'sending', 'sent', 'failed'].includes(String(prompt?.state ?? ''))
+      ? String(prompt.state)
+      : 'queued',
+    ...(prompt?.error ? { error: truncateUtf8(prompt.error, errorLimit) } : {}),
+    ...(prompt?.automation ? { automation: true } : {}),
+    ...(prompt?.blockedByAutomation ? { blockedByAutomation: true } : {}),
+    imageCount: Array.isArray(prompt?.attachments) ? prompt.attachments.length : 0,
+    updatedAt: String(prompt?.updatedAt ?? ''),
+  }));
+}
+
 function seedAgent(value: unknown): Record<string, string> | undefined {
   const agent = object(value);
   const kind = agent.kind === 'builtin' || agent.kind === 'custom' ? agent.kind : '';
@@ -248,7 +277,10 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
       const chatName = requiredText(payload.chatName ?? 'default', 'chatName');
       const chatPath = `/api/drones/${encodedDrone}/chats/${encodeURIComponent(chatName)}`;
       if (operation === 'chat.read') {
-        const result = await localHubRequest(access, chatPath);
+        const [result, pendingResult] = await Promise.all([
+          localHubRequest(access, chatPath),
+          localHubRequest(access, `${chatPath}/pending`),
+        ]);
         return {
           droneId,
           chatName,
@@ -256,6 +288,7 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
           agent: result.agent ?? null,
           model: result.model ?? null,
           reasoning: result.reasoning ?? null,
+          pending: compactPendingPrompts(pendingResult?.pending),
           agentPermissionMode:
             result.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
         };
@@ -289,6 +322,16 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
         });
       }
       if (operation === 'chat.stop') {
+        // Per-prompt cancellation is intentionally covered by the existing stop grant so an
+        // already-paired mobile device does not need its access permissions expanded on upgrade.
+        const promptId = optionalText(payload.promptId);
+        if (promptId) {
+          return await localHubRequest(
+            access,
+            `${chatPath}/pending/${encodeURIComponent(promptId)}`,
+            { method: 'DELETE' },
+          );
+        }
         return await localHubRequest(access, `${chatPath}/stop`, { method: 'POST', body: '{}' });
       }
       throw Object.assign(new Error(`unsupported drone-control operation: ${operation}`), {

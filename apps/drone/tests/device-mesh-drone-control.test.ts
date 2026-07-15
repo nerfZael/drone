@@ -191,21 +191,28 @@ describe('device mesh drone summaries', () => {
     let requestedUrl = '';
     globalThis.fetch = (async (input) => {
       requestedUrl = String(input);
-      return new Response(JSON.stringify({
-        ok: true,
-        models: [{ id: 'gpt-5.2-codex', label: 'GPT-5.2 Codex', reasoningLevels: ['low', 'high'] }],
-      }), { status: 200, headers: { 'content-type': 'application/json' } });
+      return new Response(
+        JSON.stringify({
+          ok: true,
+          models: [
+            { id: 'gpt-5.2-codex', label: 'GPT-5.2 Codex', reasoningLevels: ['low', 'high'] },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
     }) as typeof fetch;
     try {
       const capability = createDroneControlCapability({
         baseUrl: () => 'http://127.0.0.1:7777',
         apiToken: 'test',
       });
-      await expect(capability.invoke('drones.list', {
-        createModelAgent: 'codex',
-        createModelRuntime: 'host',
-        refreshCreateModels: true,
-      })).resolves.toMatchObject({
+      await expect(
+        capability.invoke('drones.list', {
+          createModelAgent: 'codex',
+          createModelRuntime: 'host',
+          refreshCreateModels: true,
+        }),
+      ).resolves.toMatchObject({
         schemaVersion: 5,
         createModelCatalog: {
           models: [{ id: 'gpt-5.2-codex', reasoningLevels: ['low', 'high'] }],
@@ -262,6 +269,59 @@ describe('device mesh drone summaries', () => {
         'http://127.0.0.1:7777/api/drones/drone%20one/chats/default/config',
       ]);
       expect(requests[1]).toMatchObject({ method: 'POST', body: '{"model":"gpt-5"}' });
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('returns durable pending prompts and forwards per-prompt cancellation', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ url: string; method: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = String(input);
+      requests.push({ url, method: String(init?.method ?? 'GET') });
+      const body = url.endsWith('/pending')
+        ? {
+            ok: true,
+            pending: [
+              {
+                id: 'prompt-2',
+                at: '2026-07-15T12:00:00.000Z',
+                prompt: 'Make a PR',
+                state: 'queued',
+              },
+            ],
+          }
+        : url.endsWith('/pending/prompt-2')
+          ? { ok: true, cancelled: true, promptId: 'prompt-2' }
+          : { ok: true, turns: [{ turn: 1, prompt: 'Review the code' }] };
+      return new Response(JSON.stringify(body), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('chat.read', { droneId: 'Untitled 6', chatName: 'default' }),
+      ).resolves.toMatchObject({
+        turns: [{ turn: 1, prompt: 'Review the code' }],
+        pending: [{ id: 'prompt-2', prompt: 'Make a PR', state: 'queued' }],
+      });
+      await expect(
+        capability.invoke('chat.stop', {
+          droneId: 'Untitled 6',
+          chatName: 'default',
+          promptId: 'prompt-2',
+        }),
+      ).resolves.toMatchObject({ cancelled: true, promptId: 'prompt-2' });
+      expect(requests).toContainEqual({
+        url: 'http://127.0.0.1:7777/api/drones/Untitled%206/chats/default/pending/prompt-2',
+        method: 'DELETE',
+      });
     } finally {
       globalThis.fetch = originalFetch;
     }

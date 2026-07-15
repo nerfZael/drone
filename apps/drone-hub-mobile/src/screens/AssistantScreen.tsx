@@ -2,6 +2,7 @@ import React from 'react';
 import { Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { latestThinkingText, type AssistantMessage } from '@drone/assistant-chat';
 import { Card, ConfirmDialog, ErrorBanner, textStyles } from '../components/Ui';
+import { QueuedPromptRows, type MobileQueuedPrompt } from '../components/QueuedPromptRows';
 import {
   AssistantThreadDrawer,
   type AppDrawerNavigationItem,
@@ -31,6 +32,16 @@ type Thread = {
   thinkingLevel?: string;
   error: string | null;
   messageCount: number;
+  promptDeliveryMode?: 'queue' | 'asap';
+  queuedPromptCount?: number;
+  queuedPrompts?: Array<{
+    id: string;
+    prompt: string;
+    createdAt: string;
+    status: 'queued' | 'running' | 'failed';
+    error?: string | null;
+    imageCount?: number;
+  }>;
   workspaceTarget: null | {
     targetDeviceId: string;
     rootId: string;
@@ -134,6 +145,7 @@ export function AssistantScreen({
   const [modelBusy, setModelBusy] = React.useState(false);
   const [deleteCandidate, setDeleteCandidate] = React.useState<Thread | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const [cancellingPromptId, setCancellingPromptId] = React.useState('');
   const realtimeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const homeIdRef = React.useRef(homeId);
   const threadListVersion = React.useRef(0);
@@ -162,6 +174,7 @@ export function AssistantScreen({
     setModelBusy(false);
     setDeleteCandidate(null);
     setDeleting(false);
+    setCancellingPromptId('');
   }, [homeId]);
 
   const run = async (key: string, task: () => Promise<void>) => {
@@ -191,7 +204,24 @@ export function AssistantScreen({
         if (homeIdRef.current !== destinationId || threadListVersion.current !== requestVersion)
           return;
         const nextThreads = Array.isArray(result?.threads) ? result.threads : [];
-        setThreads(nextThreads);
+        setThreads((current) =>
+          nextThreads.map((thread: Thread) => {
+            const previous = current.find((item) => item.id === thread.id);
+            if (!previous?.queuedPrompts?.length || thread.queuedPromptCount === 0) return thread;
+            if (!thread.queuedPrompts?.length)
+              return { ...thread, queuedPrompts: previous.queuedPrompts };
+            return {
+              ...thread,
+              queuedPrompts: thread.queuedPrompts.map((queued) => ({
+                ...queued,
+                prompt:
+                  queued.prompt ||
+                  previous.queuedPrompts?.find((item) => item.id === queued.id)?.prompt ||
+                  '',
+              })),
+            };
+          }),
+        );
         if (Array.isArray(result?.models)) setModels(result.models);
         setSelectedId((current) =>
           nextThreads.some((thread: Thread) => thread.id === current) ? current : '',
@@ -310,14 +340,40 @@ export function AssistantScreen({
     return run('prompt', async () => {
       const destinationId = homeId;
       const threadId = selectedId;
-      await mesh.request(destinationId, 'assistant-threads', 'thread.prompt', {
+      const result = await mesh.request(destinationId, 'assistant-threads', 'thread.prompt', {
         threadId,
         prompt: nextPrompt,
       });
       if (homeIdRef.current !== destinationId) return;
+      const queuedPrompt = result?.queuedPrompt;
       setThreads((current) =>
         current.map((thread) =>
-          thread.id === threadId ? { ...thread, status: 'running' } : thread,
+          thread.id === threadId
+            ? {
+                ...thread,
+                status: 'running',
+                ...(queuedPrompt?.id
+                  ? {
+                      queuedPrompts: [
+                        ...(thread.queuedPrompts ?? []).filter(
+                          (item) => item.id !== String(queuedPrompt.id),
+                        ),
+                        {
+                          id: String(queuedPrompt.id),
+                          prompt: String(queuedPrompt.prompt ?? nextPrompt.trim()),
+                          createdAt: String(queuedPrompt.createdAt ?? new Date().toISOString()),
+                          status:
+                            queuedPrompt.status === 'failed'
+                              ? ('failed' as const)
+                              : ('queued' as const),
+                          error: queuedPrompt.error ? String(queuedPrompt.error) : null,
+                          imageCount: Math.max(0, Number(queuedPrompt.imageCount ?? 0) || 0),
+                        },
+                      ],
+                    }
+                  : {}),
+              }
+            : thread,
         ),
       );
       setPrompt('');
@@ -325,6 +381,44 @@ export function AssistantScreen({
         if (homeIdRef.current === destinationId) void openThread(threadId, true);
       }, 1500);
     });
+  };
+
+  const cancelQueuedPrompt = (promptId: string) => {
+    if (!selected || !promptId || cancellingPromptId) return;
+    const destinationId = homeId;
+    const threadId = selected.id;
+    setCancellingPromptId(promptId);
+    setError(null);
+    void mesh
+      .request(destinationId, 'assistant-threads', 'thread.stop', {
+        threadId,
+        promptId,
+      })
+      .then((result) => {
+        if (homeIdRef.current !== destinationId) return;
+        if (result?.thread) {
+          setThreads((current) =>
+            current.map((thread) => (thread.id === threadId ? result.thread : thread)),
+          );
+        } else {
+          setThreads((current) =>
+            current.map((thread) =>
+              thread.id === threadId
+                ? {
+                    ...thread,
+                    queuedPrompts: (thread.queuedPrompts ?? []).filter(
+                      (item) => item.id !== promptId,
+                    ),
+                  }
+                : thread,
+            ),
+          );
+        }
+      })
+      .catch((nextError: any) => {
+        if (homeIdRef.current === destinationId) setError(nextError?.message ?? String(nextError));
+      })
+      .finally(() => setCancellingPromptId((current) => (current === promptId ? '' : current)));
   };
 
   const selected = threads.find((thread) => thread.id === selectedId);
@@ -351,6 +445,7 @@ export function AssistantScreen({
   const streamingAssistant = streamingMessages.find((message) => message.role === 'assistant');
   const running = Boolean(
     streamingMessages.length > 0 ||
+    selected?.queuedPrompts?.some((item) => item.status === 'running') ||
     selected?.status === 'running' ||
     selected?.status === 'waiting_for_approval' ||
     selected?.status === 'waiting_for_chats_idle',
@@ -370,6 +465,20 @@ export function AssistantScreen({
       ?.name ||
     selected?.model ||
     'Model';
+  const visibleQueuedPrompts = React.useMemo<MobileQueuedPrompt[]>(
+    () =>
+      (selected?.queuedPrompts ?? [])
+        .filter((item) => item.status !== 'running')
+        .map((item) => ({
+          id: item.id,
+          prompt: item.prompt,
+          status: item.status === 'failed' ? 'failed' : 'queued',
+          error: item.error,
+          imageCount: item.imageCount,
+          cancelable: true,
+        })),
+    [selected?.queuedPrompts],
+  );
   const activeHome = homes.find((home) => home.id === homeId);
   const selectedWorkspaceTargets = React.useMemo(
     () =>
@@ -464,6 +573,11 @@ export function AssistantScreen({
               currentReasoning={currentReasoning}
               loading={threadLoading}
             />
+            <QueuedPromptRows
+              prompts={visibleQueuedPrompts}
+              cancellingId={cancellingPromptId}
+              onCancel={cancelQueuedPrompt}
+            />
           </ScrollView>
           <AssistantComposer
             voiceResetKey={`${homeId}:${selected.id}`}
@@ -482,7 +596,8 @@ export function AssistantScreen({
             reasoningLabel={selected.thinkingLevel}
             running={running}
             sending={busy === 'prompt'}
-            editable={!running}
+            editable
+            queueWhileRunning
           />
           <AssistantModelPicker
             open={modelOpen}

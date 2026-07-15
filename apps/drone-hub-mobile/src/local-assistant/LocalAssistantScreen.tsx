@@ -2,6 +2,7 @@ import React from 'react';
 import { latestThinkingText } from '@drone/assistant-chat';
 import { Animated, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { Button, ConfirmDialog, ErrorBanner, Label, textStyles } from '../components/Ui';
+import { QueuedPromptRows } from '../components/QueuedPromptRows';
 import { colors } from '../theme';
 import { useLocalAssistant } from './LocalAssistantContext';
 import { LocalAssistantTranscript } from './LocalAssistantTranscript';
@@ -56,6 +57,7 @@ export function LocalAssistantScreen({
     title: string;
   } | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const [cancellingPromptId, setCancellingPromptId] = React.useState('');
   const pendingAfterAccessDiscard = React.useRef<(() => void) | null>(null);
   const thread = assistant.threads.find((item) => item.id === assistant.activeThreadId) ?? null;
   const latestMessageScroll = useLatestMessageScroll(thread?.id ?? '');
@@ -305,6 +307,27 @@ export function LocalAssistantScreen({
               running={running}
               currentReasoning={currentReasoning}
             />
+            <QueuedPromptRows
+              prompts={thread.queuedPrompts.map((item) => ({
+                id: item.id,
+                prompt: item.prompt,
+                status: item.status,
+                error: item.error,
+                cancelable: true,
+              }))}
+              cancellingId={cancellingPromptId}
+              onCancel={(promptId) => {
+                if (cancellingPromptId) return;
+                setCancellingPromptId(promptId);
+                setError(null);
+                void assistant
+                  .cancelQueuedPrompt(thread.id, promptId)
+                  .catch((nextError: any) => setError(nextError?.message ?? String(nextError)))
+                  .finally(() =>
+                    setCancellingPromptId((current) => (current === promptId ? '' : current)),
+                  );
+              }}
+            />
             <ErrorBanner message={error ?? thread.error ?? assistant.error} />
           </ScrollView>
           <AssistantComposer
@@ -317,7 +340,8 @@ export function LocalAssistantScreen({
             modelLabel={thread.model}
             reasoningLabel={thread.thinkingLevel}
             running={running}
-            editable={!running}
+            editable
+            queueWhileRunning
           />
           <AssistantModelPicker
             open={modelOpen}

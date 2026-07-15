@@ -1622,6 +1622,11 @@ export function AssistantDock() {
           setError(String(event.error ?? 'Assistant failed.'));
         }
       });
+      if (!sentOk && snapshotMutationCurrent(requestSeq)) {
+        setDraft((cur) => (cur.trim() ? cur : draftPrompt));
+        setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
+        setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
+      }
     } catch (err: any) {
       sentOk = false;
       if (snapshotMutationCurrent(requestSeq)) {

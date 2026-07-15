@@ -13,6 +13,7 @@ import {
 import MessageCircle from 'lucide-react-native/icons/message-circle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ConfirmDialog, ErrorBanner } from '../components/Ui';
+import { QueuedPromptRows } from '../components/QueuedPromptRows';
 import {
   AssistantThreadDrawer,
   type AppDrawerNavigationItem,
@@ -47,6 +48,7 @@ import {
   type MobileDroneSidebarOrder,
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
+import { mobileDronePendingPrompts } from '../drones/mobile-pending-prompts';
 
 const APP_HEADER_HEIGHT = 58;
 
@@ -100,8 +102,9 @@ export function DronesScreen({
   const targetSupportsDrones = targets.some((target) => target.id === targetId);
   const targetConnected = mesh.connectedDeviceIds.includes(targetId);
   const [drones, setDrones] = React.useState<MobileDroneSummary[]>([]);
-  const [droneSidebarOrder, setDroneSidebarOrder] =
-    React.useState<MobileDroneSidebarOrder>(EMPTY_MOBILE_DRONE_SIDEBAR_ORDER);
+  const [droneSidebarOrder, setDroneSidebarOrder] = React.useState<MobileDroneSidebarOrder>(
+    EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
+  );
   const [selected, setSelected] = React.useState<MobileDroneSummary | null>(null);
   const [chats, setChats] = React.useState<string[]>([]);
   const [chatName, setChatName] = React.useState('default');
@@ -115,6 +118,8 @@ export function DronesScreen({
   const [modelOpen, setModelOpen] = React.useState(false);
   const [modelBusy, setModelBusy] = React.useState(false);
   const [turns, setTurns] = React.useState<any[]>([]);
+  const [pendingPrompts, setPendingPrompts] = React.useState<any[]>([]);
+  const [cancellingPromptId, setCancellingPromptId] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
   const [createRepos, setCreateRepos] = React.useState<MobileDroneCreateRepo[]>([]);
   const [busy, setBusy] = React.useState('');
@@ -122,8 +127,9 @@ export function DronesScreen({
   const [error, setError] = React.useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = React.useState<MobileDroneSummary | null>(null);
   const [deleting, setDeleting] = React.useState(false);
-  const [newDroneDefaults, setNewDroneDefaults] =
-    React.useState<MobileDroneCreateDefaults | null>(null);
+  const [newDroneDefaults, setNewDroneDefaults] = React.useState<MobileDroneCreateDefaults | null>(
+    null,
+  );
   const [newDroneScreenVersion, setNewDroneScreenVersion] = React.useState(0);
   const [composerFocusKey, setComposerFocusKey] = React.useState('');
   const targetIdRef = React.useRef(targetId);
@@ -152,8 +158,7 @@ export function DronesScreen({
     try {
       await task();
     } catch (nextError: any) {
-      if (runVersion.current === requestVersion)
-        setError(nextError?.message ?? String(nextError));
+      if (runVersion.current === requestVersion) setError(nextError?.message ?? String(nextError));
     } finally {
       if (busyVersion.current === busyRequestVersion) setBusy('');
     }
@@ -237,6 +242,8 @@ export function DronesScreen({
     setChatAgentPermissionMode('full-access');
     setChatModels([]);
     setTurns([]);
+    setPendingPrompts([]);
+    setCancellingPromptId('');
     setPrompt('');
     setCreateRepos([]);
     setBusy('');
@@ -278,13 +285,11 @@ export function DronesScreen({
       setChatAgentPermissionMode('full-access');
       setChatModels([]);
       setTurns([]);
+      setPendingPrompts([]);
       const result = await mesh.request(destinationId, 'drone-control', 'chats.list', {
         droneId: drone.id,
       });
-      if (
-        targetIdRef.current !== destinationId ||
-        openDroneVersion.current !== requestVersion
-      )
+      if (targetIdRef.current !== destinationId || openDroneVersion.current !== requestVersion)
         return;
       const listedChats: string[] = Array.isArray(result?.chats)
         ? result.chats
@@ -308,11 +313,7 @@ export function DronesScreen({
       droneId,
       chatName: nextChat,
     });
-    if (
-      targetIdRef.current !== destinationId ||
-      chatReadVersion.current !== requestVersion
-    )
-      return;
+    if (targetIdRef.current !== destinationId || chatReadVersion.current !== requestVersion) return;
     setChatModel(String(result?.model ?? '').trim());
     setChatReasoning(String(result?.reasoning ?? '').trim());
     setChatAgentId(
@@ -327,6 +328,7 @@ export function DronesScreen({
       String(result?.agent?.id ?? result?.agent?.kind ?? 'drone').trim() || 'drone',
     );
     setTurns(Array.isArray(result?.turns) ? result.turns : []);
+    setPendingPrompts(Array.isArray(result?.pending) ? result.pending : []);
   };
 
   const loadDronesRef = React.useRef(loadDrones);
@@ -344,12 +346,9 @@ export function DronesScreen({
         const activeDrone = selectedRef.current;
         const activeChat = chatNameRef.current;
         if (activeDrone)
-          void readChatRef
-            .current(activeDrone.id, activeChat)
-            .catch((nextError: any) => {
-              if (targetIdRef.current === targetId)
-                setError(nextError?.message ?? String(nextError));
-            });
+          void readChatRef.current(activeDrone.id, activeChat).catch((nextError: any) => {
+            if (targetIdRef.current === targetId) setError(nextError?.message ?? String(nextError));
+          });
       }
       dronesChanged = false;
       chatChanged = false;
@@ -395,6 +394,7 @@ export function DronesScreen({
       setChatReasoning('');
       setChatModels([]);
       setTurns([]);
+      setPendingPrompts([]);
       await readChat(selected.id, nextChat);
     });
 
@@ -405,13 +405,25 @@ export function DronesScreen({
       const destinationId = targetId;
       const droneId = selected.id;
       const activeChat = chatName;
-      await mesh.request(destinationId, 'drone-control', 'chat.prompt', {
+      const result = await mesh.request(destinationId, 'drone-control', 'chat.prompt', {
         droneId,
         chatName: activeChat,
         prompt: nextPrompt,
       });
       if (targetIdRef.current !== destinationId) return;
       setPrompt('');
+      const promptId = String(result?.promptId ?? '').trim();
+      if (promptId) {
+        setPendingPrompts((current) => [
+          ...current.filter((item) => String(item?.id ?? '') !== promptId),
+          {
+            id: promptId,
+            at: new Date().toISOString(),
+            prompt: nextPrompt.trim(),
+            state: result?.pendingState === 'queued' ? 'queued' : 'sending',
+          },
+        ]);
+      }
       await readChat(droneId, activeChat);
       await loadDrones(true);
     });
@@ -478,6 +490,34 @@ export function DronesScreen({
       await loadDrones(true);
     });
 
+  const cancelPendingPrompt = (promptId: string) => {
+    if (!selected || !promptId || cancellingPromptId) return;
+    const destinationId = targetId;
+    const droneId = selected.id;
+    const activeChat = chatName;
+    setCancellingPromptId(promptId);
+    setError(null);
+    void mesh
+      .request(destinationId, 'drone-control', 'chat.stop', {
+        droneId,
+        chatName: activeChat,
+        promptId,
+      })
+      .then(async () => {
+        if (targetIdRef.current !== destinationId) return;
+        setPendingPrompts((current) =>
+          current.filter((item) => String(item?.id ?? '') !== promptId),
+        );
+        await readChat(droneId, activeChat);
+        await loadDrones(true);
+      })
+      .catch((nextError: any) => {
+        if (targetIdRef.current === destinationId)
+          setError(nextError?.message ?? String(nextError));
+      })
+      .finally(() => setCancellingPromptId((current) => (current === promptId ? '' : current)));
+  };
+
   const openNewDroneScreen = (defaults: MobileDroneCreateDefaults | null = null) => {
     setNewDroneDefaults(defaults);
     setNewDroneScreenVersion((value) => value + 1);
@@ -491,6 +531,8 @@ export function DronesScreen({
     setChatAgentPermissionMode('full-access');
     setChatModels([]);
     setTurns([]);
+    setPendingPrompts([]);
+    setCancellingPromptId('');
     setPrompt('');
     setModelOpen(false);
     setComposerFocusKey('');
@@ -541,6 +583,7 @@ export function DronesScreen({
       setChats(nextChats);
       setChatName(createdChat);
       setTurns([]);
+      setPendingPrompts([]);
       setPrompt('');
       setComposerFocusKey(`${drone.id}:${createdChat}:${Date.now()}`);
       await readChat(drone.id, createdChat);
@@ -552,6 +595,10 @@ export function DronesScreen({
     () => mobileDroneTurnsToAssistantMessages(turns),
     [turns],
   );
+  const visiblePendingPrompts = React.useMemo(
+    () => mobileDronePendingPrompts(pendingPrompts, turns),
+    [pendingPrompts, turns],
+  );
   const chatLoading = busy === 'chats' || busy === 'chat' || busy === 'create-chat';
   const latestMessageScroll = useLatestMessageScroll(
     selected ? `${selected.id}:${chatName}` : '',
@@ -561,6 +608,7 @@ export function DronesScreen({
   const running =
     busy === 'prompt' ||
     busy === 'stop' ||
+    visiblePendingPrompts.some((item) => item.status === 'pending') ||
     Boolean(selected?.busyChats.some((chat) => chat === chatName));
   const activeTarget = mesh.devices.find((target) => target.id === targetId);
   const displayedModel = chatModel || latestModel || 'Model';
@@ -634,10 +682,7 @@ export function DronesScreen({
       const discoveryError = String(result?.error ?? '').trim();
       if (discoveryError && options.length === 0) setError(discoveryError);
     } catch (nextError: any) {
-      if (
-        targetIdRef.current === destinationId &&
-        modelRequestVersion.current === requestVersion
-      )
+      if (targetIdRef.current === destinationId && modelRequestVersion.current === requestVersion)
         setError(nextError?.message ?? String(nextError));
     } finally {
       if (modelRequestVersion.current === requestVersion) setModelBusy(false);
@@ -669,10 +714,7 @@ export function DronesScreen({
       setChatModel(choice.id);
       setModelOpen(false);
     } catch (nextError: any) {
-      if (
-        targetIdRef.current === destinationId &&
-        modelRequestVersion.current === requestVersion
-      )
+      if (targetIdRef.current === destinationId && modelRequestVersion.current === requestVersion)
         setError(nextError?.message ?? String(nextError));
     } finally {
       if (modelRequestVersion.current === requestVersion) setModelBusy(false);
@@ -802,6 +844,11 @@ export function DronesScreen({
                 emptyBody="Send a prompt to start the conversation."
                 assistantLabel="Agent"
               />
+              <QueuedPromptRows
+                prompts={visiblePendingPrompts}
+                cancellingId={cancellingPromptId}
+                onCancel={cancelPendingPrompt}
+              />
             </ScrollView>
             <AssistantComposer
               focusKey={composerFocusKey}
@@ -815,7 +862,8 @@ export function DronesScreen({
               placeholder={`Message ${selected.name}…`}
               sending={busy === 'prompt'}
               running={running}
-              editable={!running}
+              editable
+              queueWhileRunning
             />
             <AssistantModelPicker
               open={modelOpen}

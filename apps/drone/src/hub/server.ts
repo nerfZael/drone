@@ -21385,6 +21385,7 @@ export async function startDroneHubApiServer(opts: {
                   threadMetadata?.promptDeliveryMode === 'asap' &&
                   blipAssistantHost.isThreadRunning(threadId)
                 ) {
+                  writeEvent({ type: 'accepted', threadId });
                   await blipAssistantHost.promptThread(threadId, promptInput, async (event) => {
                     writeEvent({ type: 'blip_event', version: 1, threadId, event });
                   });
@@ -21402,6 +21403,7 @@ export async function startDroneHubApiServer(opts: {
                     });
                     writeEvent({ type: 'queued', threadId, prompt: queued });
                   } else {
+                    writeEvent({ type: 'accepted', threadId });
                     void drain.promise.catch((error: any) => {
                       hubLog('warn', 'assistant prompt drain failed', {
                         threadId,

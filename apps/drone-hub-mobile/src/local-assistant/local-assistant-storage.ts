@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import type {
   LocalAssistantMessage,
+  LocalAssistantQueuedPrompt,
   LocalAssistantThread,
   LocalWorkspaceTarget,
 } from './local-assistant-types';
@@ -122,6 +123,22 @@ function cleanThread(value: any): LocalAssistantThread | null {
       : [];
   const workspaceTargets = cleanLocalWorkspaceTargets(rawWorkspaces);
   const messages = boundLocalAssistantMessages(Array.isArray(value.messages) ? value.messages : []);
+  const queuedPrompts = (Array.isArray(value.queuedPrompts) ? value.queuedPrompts : [])
+    .slice(0, 20)
+    .map(
+      (prompt: any): LocalAssistantQueuedPrompt => ({
+        id: String(prompt?.id ?? '')
+          .trim()
+          .slice(0, 120),
+        prompt: String(prompt?.prompt ?? '')
+          .trim()
+          .slice(0, 32_000),
+        createdAt: String(prompt?.createdAt ?? new Date().toISOString()),
+        status: prompt?.status === 'failed' ? ('failed' as const) : ('queued' as const),
+        error: prompt?.error ? String(prompt.error).slice(0, 2_000) : null,
+      }),
+    )
+    .filter((prompt: LocalAssistantQueuedPrompt) => Boolean(prompt.id && prompt.prompt));
   return {
     id: String(value.id).slice(0, 100),
     title: String(value.title ?? 'Phone assistant').slice(0, 160),
@@ -133,6 +150,7 @@ function cleanThread(value: any): LocalAssistantThread | null {
     error: value.status === 'error' && value.error ? String(value.error).slice(0, 2_000) : null,
     workspaceTargets,
     messages,
+    queuedPrompts,
   };
 }
 

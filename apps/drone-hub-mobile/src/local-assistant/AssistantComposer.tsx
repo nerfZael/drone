@@ -129,6 +129,7 @@ export function AssistantComposer({
   running = false,
   sending = false,
   editable = true,
+  queueWhileRunning = false,
   maxLength = 32_000,
   placeholder = 'Ask the assistant…',
 }: {
@@ -144,6 +145,7 @@ export function AssistantComposer({
   running?: boolean;
   sending?: boolean;
   editable?: boolean;
+  queueWhileRunning?: boolean;
   maxLength?: number;
   placeholder?: string;
 }) {
@@ -153,7 +155,10 @@ export function AssistantComposer({
   const [focused, setFocused] = React.useState(false);
   const [voiceError, setVoiceError] = React.useState('');
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
-  const handleVoiceError = React.useCallback((message: string) => setVoiceError(message.trim()), []);
+  const handleVoiceError = React.useCallback(
+    (message: string) => setVoiceError(message.trim()),
+    [],
+  );
   const {
     status: voiceStatus,
     startRecording,
@@ -163,7 +168,8 @@ export function AssistantComposer({
   } = useMobileChatVoiceRecorder({ onError: handleVoiceError });
   const voiceActive = voiceStatus !== 'idle';
   const voiceCanPauseOrStop = voiceStatus === 'recording' || voiceStatus === 'paused';
-  const expanded = focused || Boolean(value.trim()) || running || voiceActive || Boolean(voiceError);
+  const expanded =
+    focused || Boolean(value.trim()) || running || voiceActive || Boolean(voiceError);
   const canSend =
     (Boolean(value.trim()) || voiceCanPauseOrStop) &&
     !sending &&
@@ -272,7 +278,7 @@ export function AssistantComposer({
           onChangeText={changeText}
           onFocus={() => setFocused(true)}
           onBlur={() => setFocused(false)}
-          editable={editable && !running}
+          editable={editable && (!running || queueWhileRunning)}
           multiline
           maxLength={maxLength}
           placeholder={placeholder}
@@ -371,8 +377,9 @@ export function AssistantComposer({
               </>
             )}
             {running && onStop ? (
-              <IconButton label="Stop assistant" icon={Square} accent onPress={onStop} />
-            ) : (
+              <IconButton label="Stop assistant" icon={Square} onPress={onStop} />
+            ) : null}
+            {!running || queueWhileRunning ? (
               <IconButton
                 label="Send message"
                 icon={ArrowUp}
@@ -380,7 +387,7 @@ export function AssistantComposer({
                 disabled={!canSend}
                 onPress={() => void send()}
               />
-            )}
+            ) : null}
           </View>
         ) : null}
       </View>

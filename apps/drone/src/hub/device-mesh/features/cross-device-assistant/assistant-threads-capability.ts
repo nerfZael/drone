@@ -15,18 +15,47 @@ function required(value: unknown, label: string): string {
   return result;
 }
 
-function compactThread(thread: any, workspaceTargets: unknown[]) {
+function truncateUtf8(value: unknown, maxBytes: number): string {
+  const source = String(value ?? '');
+  const bytes = Buffer.from(source);
+  if (bytes.length <= maxBytes) return source;
+  return `${bytes
+    .subarray(0, Math.max(0, maxBytes - 3))
+    .toString('utf8')
+    .replace(/\uFFFD+$/u, '')}…`;
+}
+
+function compactQueuedPrompt(prompt: any) {
+  return {
+    id: String(prompt?.id ?? '').slice(0, 160),
+    prompt: truncateUtf8(prompt?.prompt, 768),
+    createdAt: String(prompt?.createdAt ?? ''),
+    status:
+      prompt?.status === 'running' || prompt?.status === 'failed' ? prompt.status : 'queued',
+    error: prompt?.error ? truncateUtf8(prompt.error, 512) : null,
+    imageCount: Math.max(0, Number(prompt?.imageCount ?? 0) || 0),
+  };
+}
+
+function compactThread(thread: any, workspaceTargets: unknown[], includeQueuedPrompts = true) {
+  const queuedPromptSource = Array.isArray(thread?.queuedPrompts) ? thread.queuedPrompts : [];
+  const queuedPrompts = includeQueuedPrompts
+    ? queuedPromptSource.slice(-32).map(compactQueuedPrompt)
+    : [];
   return {
     id: String(thread?.id ?? ''),
     title: String(thread?.title ?? 'Assistant thread'),
     createdAt: String(thread?.createdAt ?? ''),
     updatedAt: String(thread?.updatedAt ?? ''),
     status: String(thread?.status ?? 'idle'),
-    error: thread?.error ? String(thread.error) : null,
+    error: thread?.error ? truncateUtf8(thread.error, 2_000) : null,
     provider: String(thread?.provider ?? ''),
     model: String(thread?.model ?? ''),
     thinkingLevel: String(thread?.thinkingLevel ?? ''),
     messageCount: Number(thread?.messageCount ?? 0),
+    promptDeliveryMode: thread?.promptDeliveryMode === 'asap' ? 'asap' : 'queue',
+    queuedPromptCount: queuedPromptSource.length,
+    queuedPrompts,
     workspaceTarget: workspaceTargets[0] ?? null,
     workspaceTargets,
   };
@@ -39,7 +68,7 @@ function threadsFromSnapshot(snapshot: any): any[] {
 function boundedArguments(value: unknown): unknown {
   if (value == null) return undefined;
   try {
-    return JSON.stringify(value).length <= 8_000 ? value : { truncated: true };
+    return Buffer.byteLength(JSON.stringify(value)) <= 2_000 ? value : { truncated: true };
   } catch {
     return { truncated: true };
   }
@@ -57,15 +86,15 @@ function boundedStreamingMessages(snapshot: any): any[] {
       ? { timestamp: message.timestamp }
       : {}),
     content: Array.isArray(message?.content)
-      ? message.content.slice(-12).map((part: any) => ({
+      ? message.content.slice(-8).map((part: any) => ({
           type: String(part?.type ?? ''),
-          ...(part?.text ? { text: String(part.text).slice(0, 16_000) } : {}),
-          ...(part?.thinking ? { thinking: String(part.thinking).slice(0, 16_000) } : {}),
+          ...(part?.text ? { text: truncateUtf8(part.text, 2_000) } : {}),
+          ...(part?.thinking ? { thinking: truncateUtf8(part.thinking, 2_000) } : {}),
           ...(part?.name ? { name: String(part.name).slice(0, 120) } : {}),
           ...(part?.id ? { id: String(part.id).slice(0, 160) } : {}),
           ...(part?.arguments ? { arguments: boundedArguments(part.arguments) } : {}),
         }))
-      : String(message?.content ?? '').slice(0, 24_000),
+      : truncateUtf8(message?.content, 12_000),
   }));
 }
 
@@ -73,7 +102,7 @@ async function submitPrompt(
   access: LocalHubAccess,
   threadId: string,
   prompt: string,
-): Promise<void> {
+): Promise<any> {
   const response = await fetch(
     new URL(`/api/assistant/threads/${encodeURIComponent(threadId)}/prompt`, access.baseUrl()),
     {
@@ -90,10 +119,49 @@ async function submitPrompt(
     throw new Error(String(body?.error ?? `assistant prompt failed (${response.status})`));
   }
   const reader = response.body?.getReader();
-  if (!reader) return;
+  if (!reader) return { type: 'accepted', threadId };
+  const decoder = new TextDecoder();
+  let buffer = '';
+  const continueDraining = async () => {
+    try {
+      for (;;) {
+        const chunk = await reader.read();
+        if (chunk.done) return;
+      }
+    } catch {
+      // The request has already been acknowledged; realtime thread changes carry later state.
+    }
+  };
   for (;;) {
     const chunk = await reader.read();
-    if (chunk.done) return;
+    if (chunk.done) {
+      buffer += decoder.decode();
+      const trailing = buffer.trim();
+      if (!trailing) return { type: 'accepted', threadId };
+      const event = JSON.parse(trailing);
+      if (event?.type === 'error')
+        throw new Error(String(event.error ?? 'assistant prompt failed'));
+      return event;
+    }
+    buffer += decoder.decode(chunk.value, { stream: true });
+    for (;;) {
+      const newline = buffer.indexOf('\n');
+      if (newline < 0) break;
+      const line = buffer.slice(0, newline).trim();
+      buffer = buffer.slice(newline + 1);
+      if (!line) continue;
+      const event = JSON.parse(line);
+      if (event?.type === 'heartbeat') continue;
+      if (event?.type === 'error') {
+        void continueDraining();
+        throw new Error(String(event.error ?? 'assistant prompt failed'));
+      }
+      if (event?.type === 'accepted' || event?.type === 'queued' || event?.type === 'blip_event') {
+        void continueDraining();
+        return event;
+      }
+      if (event?.type === 'done') return { type: 'accepted', threadId };
+    }
   }
 }
 
@@ -101,8 +169,12 @@ export function createAssistantThreadsCapability(
   access: LocalHubAccess,
   policies: CrossDeviceAssistantPolicyStore,
 ): CapabilityHandler {
-  const withTarget = async (thread: any) =>
-    compactThread(thread, await policies.homeTargets(String(thread?.id ?? '')));
+  const withTarget = async (thread: any, includeQueuedPrompts = true) =>
+    compactThread(
+      thread,
+      await policies.homeTargets(String(thread?.id ?? '')),
+      includeQueuedPrompts,
+    );
 
   return {
     descriptor: ASSISTANT_THREADS_CAPABILITY,
@@ -111,7 +183,9 @@ export function createAssistantThreadsCapability(
       if (operation === 'threads.list') {
         const snapshot = await localHubRequest(access, '/api/assistant/threads');
         return {
-          threads: await Promise.all(threadsFromSnapshot(snapshot).map(withTarget)),
+          threads: await Promise.all(
+            threadsFromSnapshot(snapshot).map((thread) => withTarget(thread, false)),
+          ),
           models: Array.isArray(snapshot?.models) ? snapshot.models : [],
         };
       }
@@ -153,10 +227,15 @@ export function createAssistantThreadsCapability(
           ),
         ]);
         const thread = threadsFromSnapshot(snapshot).find((item) => item.id === threadId);
+        const compact = thread ? await withTarget(thread) : null;
+        const streamingMessages = boundedStreamingMessages(snapshot);
+        const nonHistoryBytes = Buffer.byteLength(
+          JSON.stringify({ thread: compact, streamingMessages }),
+        );
         return {
-          thread: thread ? await withTarget(thread) : null,
-          history: boundedAssistantHistory(history),
-          streamingMessages: boundedStreamingMessages(snapshot),
+          thread: compact,
+          history: boundedAssistantHistory(history, 205 * 1024 - nonHistoryBytes),
+          streamingMessages,
         };
       }
       if (operation === 'thread.delete') {
@@ -182,6 +261,18 @@ export function createAssistantThreadsCapability(
         return { thread: thread ? await withTarget(thread) : null };
       }
       if (operation === 'thread.stop') {
+        // Queue cancellation is a narrower form of the existing stop permission. Keeping it on
+        // this operation makes the feature available to devices paired before queue UI shipped.
+        const promptId = String(payload.promptId ?? '').trim();
+        if (promptId) {
+          const snapshot = await localHubRequest(
+            access,
+            `/api/assistant/threads/${encodeURIComponent(threadId)}/queued/${encodeURIComponent(promptId)}`,
+            { method: 'DELETE' },
+          );
+          const thread = threadsFromSnapshot(snapshot).find((item) => item.id === threadId);
+          return { cancelled: true, thread: thread ? await withTarget(thread) : null };
+        }
         await localHubRequest(
           access,
           `/api/assistant/threads/${encodeURIComponent(threadId)}/stop`,
@@ -197,8 +288,15 @@ export function createAssistantThreadsCapability(
         if (prompt.length > 32_000)
           throw Object.assign(new Error('prompt is too large'), { code: 'INVALID_REQUEST' });
         await localHubRequest(access, `/api/assistant/threads/${encodeURIComponent(threadId)}`);
-        void submitPrompt(access, threadId, prompt).catch(() => undefined);
-        return { accepted: true, threadId };
+        const acknowledgement = await submitPrompt(access, threadId, prompt);
+        return {
+          accepted: true,
+          threadId,
+          queuedPrompt:
+            acknowledgement?.type === 'queued' && acknowledgement.prompt
+              ? compactQueuedPrompt(acknowledgement.prompt)
+              : null,
+        };
       }
       throw Object.assign(new Error(`unsupported assistant operation: ${operation}`), {
         code: 'UNSUPPORTED_OPERATION',

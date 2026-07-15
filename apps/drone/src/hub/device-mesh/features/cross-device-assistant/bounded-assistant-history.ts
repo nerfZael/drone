@@ -60,7 +60,7 @@ function boundedEntry(entry: any): unknown {
   };
 }
 
-export function boundedAssistantHistory(history: any): unknown {
+export function boundedAssistantHistory(history: any, maxBytes = MAX_HISTORY_BYTES): unknown {
   const entries = (Array.isArray(history?.entries) ? history.entries : [])
     .slice(-60)
     .map(boundedEntry);
@@ -77,7 +77,8 @@ export function boundedAssistantHistory(history: any): unknown {
       hasOlder: history?.page?.hasOlder === true,
     },
   };
-  while (result.entries.length > 1 && Buffer.byteLength(JSON.stringify(result)) > MAX_HISTORY_BYTES)
+  const byteLimit = Math.max(32 * 1024, Math.min(MAX_HISTORY_BYTES, maxBytes));
+  while (result.entries.length > 1 && Buffer.byteLength(JSON.stringify(result)) > byteLimit)
     result.entries.shift();
   return result;
 }
