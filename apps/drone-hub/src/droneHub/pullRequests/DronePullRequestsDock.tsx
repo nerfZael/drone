@@ -15,15 +15,14 @@ import {
   selectedPullRequestForDrone,
   type ChangesOpenPullRequestDetail,
 } from '../changes/navigation';
-import { profileStorageKey } from '../../profile-storage';
 import { PullRequestListView } from './PullRequestListView';
+import { readPullRequestMergeMethod, writePullRequestMergeMethod } from './pull-request-preferences';
 import {
   forceMergeReason,
   mergeBlockedReason,
   MetaChip,
 } from './pull-request-ui';
 
-const PR_MERGE_METHOD_STORAGE_KEY = profileStorageKey('droneHub.prMergeMethod');
 const PR_LIST_CACHE_TTL_MS = 12_000;
 const PR_LIST_POLL_INTERVAL_MS = 20_000;
 
@@ -116,14 +115,7 @@ export function DronePullRequestsDock({
   const lastRefreshNonceRef = React.useRef(refreshNonce);
   const repoCacheKey = React.useMemo(() => normalizePullRequestListCacheKey(repoPath, droneId), [droneId, repoPath]);
   const lastRepoCacheKeyRef = React.useRef(repoCacheKey);
-  const [mergeMethod, setMergeMethod] = React.useState<RepoPullRequestMergeMethod>(() => {
-    try {
-      const raw = localStorage.getItem(PR_MERGE_METHOD_STORAGE_KEY);
-      return raw === 'squash' || raw === 'rebase' || raw === 'merge' ? raw : 'merge';
-    } catch {
-      return 'merge';
-    }
-  });
+  const [mergeMethod, setMergeMethod] = React.useState<RepoPullRequestMergeMethod>(readPullRequestMergeMethod);
 
   const startup = usePaneReadiness({
     hubPhase,
@@ -132,11 +124,7 @@ export function DronePullRequestsDock({
   });
 
   React.useEffect(() => {
-    try {
-      localStorage.setItem(PR_MERGE_METHOD_STORAGE_KEY, mergeMethod);
-    } catch {
-      // ignore
-    }
+    writePullRequestMergeMethod(mergeMethod);
   }, [mergeMethod]);
 
   React.useEffect(() => {

@@ -72,6 +72,12 @@ function pullRequestStatusBadges(pr: RepoPullRequestSummary): Array<{ key: strin
       label: 'Checks pending',
       className: 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
     });
+  } else if (pr.checksState === 'success') {
+    out.push({
+      key: 'checks_success',
+      label: 'Checks passed',
+      className: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
+    });
   }
   if (pr.reviewState === 'approved') {
     out.push({
@@ -115,21 +121,32 @@ export function forceMergeReason(pr: RepoPullRequestSummary): string | null {
   return null;
 }
 
-export function PullRequestStatusBadgeStrip({ pullRequest }: { pullRequest: RepoPullRequestSummary }) {
-  const badges = pullRequestStatusBadges(pullRequest);
+export function PullRequestStatusBadgeStrip({
+  pullRequest,
+  limit,
+  compact = false,
+}: {
+  pullRequest: RepoPullRequestSummary;
+  limit?: number;
+  compact?: boolean;
+}) {
+  const allBadges = pullRequestStatusBadges(pullRequest);
+  const badges = typeof limit === 'number' ? allBadges.slice(0, Math.max(1, Math.floor(limit))) : allBadges;
   if (badges.length === 0) return null;
   return (
-    <>
+    <span className="inline-flex flex-wrap items-center gap-1">
       {badges.map((badge) => (
         <span
           key={`pr-badge-${pullRequest.number}-${badge.key}`}
-          className={`inline-flex items-center rounded border px-1.5 py-[1px] text-[10px] ${badge.className}`}
+          className={`inline-flex items-center rounded border py-[1px] ${
+            compact ? 'px-1 text-[9px] leading-none' : 'px-1.5 text-[10px]'
+          } ${badge.className}`}
           title={badge.label}
         >
           {badge.label}
         </span>
       ))}
-    </>
+    </span>
   );
 }
 

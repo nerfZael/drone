@@ -16,6 +16,7 @@ import { collectInlineAgentMedia, type InlineAgentMedia } from './inline-agent-m
 import { IconAlert, IconBot, IconCheck, IconCopy, IconImage, IconJobs, IconOpen, IconSnapshot, IconSpinner, IconTldr, IconUser } from './icons';
 import { VideoPreview } from '../media/VideoPreview';
 import { AgentPlanList } from './AgentPlanList';
+import { LinkedPullRequestCards, type LinkedPullRequestContext } from './LinkedPullRequestCards';
 
 type TldrState =
   | { status: 'idle' }
@@ -105,6 +106,7 @@ export const TranscriptTurn = React.memo(
     onHoverAgentMessage,
     onOpenFileReference,
     onOpenLink,
+    linkedPullRequestContext,
     droneId,
     droneHomePath,
     showRoleIcons = true,
@@ -123,6 +125,7 @@ export const TranscriptTurn = React.memo(
     onHoverAgentMessage: (item: TranscriptItem | null) => void;
     onOpenFileReference?: (ref: MarkdownFileReference) => void;
     onOpenLink?: (href: string) => boolean;
+    linkedPullRequestContext?: LinkedPullRequestContext;
     droneId?: string;
     droneHomePath?: string;
     showRoleIcons?: boolean;
@@ -422,6 +425,12 @@ export const TranscriptTurn = React.memo(
                   </div>
                 </div>
               )}
+              <LinkedPullRequestCards
+                text={cleanedAgentMessage}
+                context={linkedPullRequestContext}
+                onOpenLink={onOpenLink}
+                className="mb-8"
+              />
 
               <div className="absolute bottom-2 right-2 flex items-center gap-1">
                 {agentCopyText.length > 0 ? (
@@ -575,6 +584,13 @@ export const TranscriptTurn = React.memo(
     a.onHoverAgentMessage === b.onHoverAgentMessage &&
     a.onOpenFileReference === b.onOpenFileReference &&
     a.onOpenLink === b.onOpenLink &&
+    (a.linkedPullRequestContext?.droneId ?? '') === (b.linkedPullRequestContext?.droneId ?? '') &&
+    (a.linkedPullRequestContext?.repoPath ?? '') === (b.linkedPullRequestContext?.repoPath ?? '') &&
+    (a.linkedPullRequestContext?.repoAttached ?? false) === (b.linkedPullRequestContext?.repoAttached ?? false) &&
+    (a.linkedPullRequestContext?.disabled ?? false) === (b.linkedPullRequestContext?.disabled ?? false) &&
+    a.linkedPullRequestContext?.openPullRequestsData === b.linkedPullRequestContext?.openPullRequestsData &&
+    (a.linkedPullRequestContext?.openPullRequestsLoading ?? false) === (b.linkedPullRequestContext?.openPullRequestsLoading ?? false) &&
+    (a.linkedPullRequestContext?.openPullRequestsError ?? '') === (b.linkedPullRequestContext?.openPullRequestsError ?? '') &&
     (a.droneId ?? '') === (b.droneId ?? '') &&
     (a.droneHomePath ?? '') === (b.droneHomePath ?? '') &&
     (a.dockerSnapshotsEnabled ?? false) === (b.dockerSnapshotsEnabled ?? false) &&

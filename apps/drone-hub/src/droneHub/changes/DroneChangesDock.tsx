@@ -3,6 +3,7 @@ import { requestJson } from '../http';
 import { IconChevron, IconFolder, iconForFilePath } from '../icons';
 import { IconEye, IconEyeOff, IconPencil } from '../app/icons';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
+import { readPullRequestMergeMethod } from '../pullRequests/pull-request-preferences';
 import type {
   RepoChangeEntry,
   RepoCommitChangesPayload,
@@ -49,7 +50,6 @@ import {
   badgeTone,
   appendDiffExpansionRange,
   buildExplorerTree,
-  changesPrMergeMethod,
   defaultKindForEntry,
   entryPathExistsInCurrentTree,
   estimateExplorerSidebarWidth,
@@ -2216,7 +2216,7 @@ export function DroneChangesDock({
 
   const mergeActivePullRequest = React.useCallback(async () => {
     if (!activePullRequestNumber || pullRequestActionBusy || activePullRequestIsFinalState) return;
-    const mergeMethod = changesPrMergeMethod();
+    const mergeMethod = readPullRequestMergeMethod();
     if (!window.confirm(`Merge PR #${activePullRequestNumber} using "${mergeMethod}"?`)) return;
     setPullRequestActionError(null);
     setPullRequestActionNotice(null);

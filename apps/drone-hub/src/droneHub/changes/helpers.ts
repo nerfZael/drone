@@ -11,11 +11,8 @@ import type {
   RepoPullRequestCommitListPayload,
   RepoPullRequestChangeEntry,
   RepoPullRequestChangesPayload,
-  RepoPullRequestMergeMethod,
 } from '../types';
 import type { DiffExpansionRange, DiffNoTextReason } from './types';
-import { readChangesStorage } from './storage';
-import { profileStorageKey } from '../../profile-storage';
 
 export type DiffKind = 'staged' | 'unstaged';
 export type ChangesDataMode = 'working-tree' | 'pull-preview' | 'pull-request';
@@ -45,8 +42,6 @@ export type ExplorerSidebarWidthOptions = {
   fallbackWidthPx?: number;
 };
 
-const PR_MERGE_METHOD_STORAGE_KEY = profileStorageKey('droneHub.prMergeMethod');
-
 export function shortSha(sha: string | null | undefined): string {
   const s = String(sha ?? '').trim();
   if (!s) return '-';
@@ -65,12 +60,6 @@ export function shortRefName(raw: string | null | undefined, maxLen: number = 32
   return `${text.slice(0, maxLen - 1)}…`;
 }
 
-export function changesPrMergeMethod(): RepoPullRequestMergeMethod {
-  const raw = String(readChangesStorage(PR_MERGE_METHOD_STORAGE_KEY) ?? '').trim().toLowerCase();
-  if (raw === 'squash' || raw === 'rebase' || raw === 'merge') return raw;
-  return 'merge';
-}
-
 export function pullRequestStateBadge(
   raw: string | null | undefined,
 ): { label: string; title: string; className: string } | null {
@@ -80,14 +69,14 @@ export function pullRequestStateBadge(
     return {
       label: 'Open',
       title: 'Pull request is open.',
-      className: 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]',
+      className: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
     };
   }
   if (state === 'merged') {
     return {
       label: 'Merged',
       title: 'Pull request has been merged.',
-      className: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
+      className: 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]',
     };
   }
   if (state === 'closed') {

@@ -104,24 +104,3 @@ export function parseIsoMs(raw: string | null | undefined): number {
   const ms = Date.parse(String(raw ?? ''));
   return Number.isFinite(ms) ? ms : Number.MAX_SAFE_INTEGER;
 }
-
-export function parseGithubPullRequestHref(
-  hrefRaw: string,
-): { owner: string; repo: string; pullNumber: number } | null {
-  const href = String(hrefRaw ?? '').trim();
-  if (!href) return null;
-  let u: URL;
-  try {
-    u = new URL(href);
-  } catch {
-    return null;
-  }
-  if (u.protocol !== 'https:' || String(u.hostname || '').toLowerCase() !== 'github.com') return null;
-  const m = /^\/([^/]+)\/([^/]+)\/pull\/(\d+)(?:\/|$)/i.exec(String(u.pathname ?? '').trim());
-  if (!m) return null;
-  const owner = String(m[1] ?? '').trim().toLowerCase();
-  const repo = String(m[2] ?? '').trim().toLowerCase();
-  const pullNumber = Number(m[3]);
-  if (!owner || !repo || !Number.isFinite(pullNumber) || pullNumber <= 0) return null;
-  return { owner, repo, pullNumber: Math.floor(pullNumber) };
-}
