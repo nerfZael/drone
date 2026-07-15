@@ -429,7 +429,7 @@ export const TranscriptTurn = React.memo(
                 text={cleanedAgentMessage}
                 context={linkedPullRequestContext}
                 onOpenLink={onOpenLink}
-                className="mb-8"
+                className="mb-8 md:mb-0 md:mr-40"
               />
 
               <div className="absolute bottom-2 right-2 flex items-center gap-1">
