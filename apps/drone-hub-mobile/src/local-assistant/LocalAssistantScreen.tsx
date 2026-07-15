@@ -288,80 +288,83 @@ export function LocalAssistantScreen({
           />
         </ScrollView>
       ) : (
-        <>
-          <ScrollView
-            ref={latestMessageScroll.ref}
-            style={styles.transcript}
-            contentContainerStyle={[
-              styles.transcriptContent,
-              !latestMessageScroll.contentVisible && styles.transcriptContentHidden,
-            ]}
-            keyboardShouldPersistTaps="handled"
-            onLayout={latestMessageScroll.onLayout}
-            onContentSizeChange={latestMessageScroll.onContentSizeChange}
-            onScroll={latestMessageScroll.onScroll}
-            scrollEventThrottle={16}
-          >
-            <LocalAssistantTranscript
-              thread={thread}
-              running={running}
-              currentReasoning={currentReasoning}
-            />
-            <QueuedPromptRows
-              prompts={thread.queuedPrompts.map((item) => ({
-                id: item.id,
-                prompt: item.prompt,
-                status: item.status,
-                error: item.error,
-                cancelable: true,
-              }))}
-              cancellingId={cancellingPromptId}
-              onCancel={(promptId) => {
-                if (cancellingPromptId) return;
-                setCancellingPromptId(promptId);
-                setError(null);
-                void assistant
-                  .cancelQueuedPrompt(thread.id, promptId)
-                  .catch((nextError: any) => setError(nextError?.message ?? String(nextError)))
-                  .finally(() =>
-                    setCancellingPromptId((current) => (current === promptId ? '' : current)),
-                  );
-              }}
-            />
-            <ErrorBanner message={error ?? thread.error ?? assistant.error} />
-          </ScrollView>
-          <AssistantComposer
-            voiceResetKey={thread.id}
-            value={prompt}
-            onChangeText={setPrompt}
-            onSend={(promptOverride) => void send(promptOverride)}
-            onStop={() => assistant.stop(thread.id)}
-            onOpenModel={() => setModelOpen(true)}
-            modelLabel={thread.model}
-            reasoningLabel={thread.thinkingLevel}
+        <ScrollView
+          ref={latestMessageScroll.ref}
+          style={styles.transcript}
+          contentContainerStyle={[
+            styles.transcriptContent,
+            !latestMessageScroll.contentVisible && styles.transcriptContentHidden,
+          ]}
+          keyboardShouldPersistTaps="handled"
+          onLayout={latestMessageScroll.onLayout}
+          onContentSizeChange={latestMessageScroll.onContentSizeChange}
+          onScroll={latestMessageScroll.onScroll}
+          scrollEventThrottle={16}
+        >
+          <LocalAssistantTranscript
+            thread={thread}
             running={running}
-            editable
-            queueWhileRunning
+            currentReasoning={currentReasoning}
           />
-          <AssistantModelPicker
-            open={modelOpen}
-            currentProvider={localProvider}
-            currentModel={thread.model}
-            currentThinkingLevel={thread.thinkingLevel}
-            options={localAssistantModelOptions(localProvider)}
-            onClose={() => setModelOpen(false)}
-            onSelect={(choice, selection) =>
-              void runAction(async () => {
-                await assistant.updateThread(thread.id, {
-                  model: choice.id,
-                  thinkingLevel: normalizeLocalAssistantThinkingLevel(choice.thinkingLevel),
-                });
-                if (selection === 'reasoning') setModelOpen(false);
-              })
-            }
+          <QueuedPromptRows
+            prompts={thread.queuedPrompts.map((item) => ({
+              id: item.id,
+              prompt: item.prompt,
+              status: item.status,
+              error: item.error,
+              cancelable: true,
+            }))}
+            cancellingId={cancellingPromptId}
+            onCancel={(promptId) => {
+              if (cancellingPromptId) return;
+              setCancellingPromptId(promptId);
+              setError(null);
+              void assistant
+                .cancelQueuedPrompt(thread.id, promptId)
+                .catch((nextError: any) => setError(nextError?.message ?? String(nextError)))
+                .finally(() =>
+                  setCancellingPromptId((current) => (current === promptId ? '' : current)),
+                );
+            }}
           />
-        </>
+          <ErrorBanner message={error ?? thread.error ?? assistant.error} />
+        </ScrollView>
       )}
+      {/* Preserve the same-thread recorder while thread access temporarily replaces the chat. */}
+      <View style={settingsOpen ? styles.composerHidden : undefined}>
+        <AssistantComposer
+          voiceResetKey={thread.id}
+          value={prompt}
+          onChangeText={setPrompt}
+          onSend={(promptOverride) => void send(promptOverride)}
+          onStop={() => assistant.stop(thread.id)}
+          onOpenModel={() => setModelOpen(true)}
+          modelLabel={thread.model}
+          reasoningLabel={thread.thinkingLevel}
+          running={running}
+          editable
+          queueWhileRunning
+        />
+      </View>
+      {!settingsOpen ? (
+        <AssistantModelPicker
+          open={modelOpen}
+          currentProvider={localProvider}
+          currentModel={thread.model}
+          currentThinkingLevel={thread.thinkingLevel}
+          options={localAssistantModelOptions(localProvider)}
+          onClose={() => setModelOpen(false)}
+          onSelect={(choice, selection) =>
+            void runAction(async () => {
+              await assistant.updateThread(thread.id, {
+                model: choice.id,
+                thinkingLevel: normalizeLocalAssistantThinkingLevel(choice.thinkingLevel),
+              });
+              if (selection === 'reasoning') setModelOpen(false);
+            })
+          }
+        />
+      ) : null}
       <ConfirmDialog
         visible={confirmAccessDiscard}
         title="Discard access changes?"
@@ -423,7 +426,8 @@ const styles = StyleSheet.create({
   },
   welcomeBody: { color: colors.muted, fontSize: 15, lineHeight: 23, marginBottom: 8 },
   transcript: { flex: 1 },
-  transcriptContent: { flexGrow: 1, padding: 14, paddingBottom: 20 },
+  transcriptContent: { flexGrow: 1, paddingVertical: 14, paddingBottom: 20 },
   transcriptContentHidden: { opacity: 0 },
   editorScroll: { padding: 14 },
+  composerHidden: { display: 'none' },
 });

@@ -10,6 +10,7 @@ import {
   View,
 } from 'react-native';
 import {
+  compactRepeatedToolItems,
   messageImageParts,
   messageText,
   renderItemsFromMessages,
@@ -63,7 +64,61 @@ function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
   );
 }
 
-function ToolRow({ item }: { item: AssistantToolRenderItem }) {
+function TappableMessageView({
+  children,
+  onTap,
+}: {
+  children: any;
+  onTap: () => void;
+}) {
+  const touch = React.useRef({ x: 0, y: 0, moved: false, active: false });
+  return (
+    <View
+      style={styles.message}
+      onTouchStart={(event) => {
+        touch.current = {
+          x: event.nativeEvent.pageX,
+          y: event.nativeEvent.pageY,
+          moved: false,
+          active: true,
+        };
+      }}
+      onTouchMove={(event) => {
+        const current = touch.current;
+        if (!current.active || current.moved) return;
+        const dx = event.nativeEvent.pageX - current.x;
+        const dy = event.nativeEvent.pageY - current.y;
+        if (Math.hypot(dx, dy) > 8) current.moved = true;
+      }}
+      onTouchEnd={() => {
+        const current = touch.current;
+        touch.current.active = false;
+        if (!current.moved) onTap();
+      }}
+      onTouchCancel={() => {
+        touch.current.active = false;
+      }}
+    >
+      {children}
+    </View>
+  );
+}
+
+function ToolStatus({ failed, pending }: { failed: boolean; pending: boolean }) {
+  return (
+    <View style={styles.toolStatusSlot}>
+      {pending ? (
+        <View style={styles.toolStatusPending} />
+      ) : (
+        <View style={[styles.toolStatusCircle, failed && styles.toolStatusError]}>
+          <Text style={styles.toolStatusText}>{failed ? '!' : '✓'}</Text>
+        </View>
+      )}
+    </View>
+  );
+}
+
+function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nested?: boolean }) {
   const failed = item.result?.isError === true;
   const pending = !item.result;
   const [open, setOpen] = React.useState(false);
@@ -72,34 +127,29 @@ function ToolRow({ item }: { item: AssistantToolRenderItem }) {
     ? messageText(item.result).trim() || String(item.result.errorMessage ?? '').trim()
     : '';
   return (
-    <Pressable
-      onPress={() => setOpen((value) => !value)}
-      style={[styles.tool, failed && styles.toolError]}
-    >
-      <View style={styles.toolHead}>
-        <View style={[styles.toolGlyph, failed && styles.toolGlyphError]}>
-          <Text style={styles.toolGlyphText}>{pending ? '…' : failed ? '!' : '✓'}</Text>
-        </View>
+    <View style={[styles.tool, nested && styles.toolNested, failed && styles.toolError]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${toolLabel(item.call?.name ?? item.result?.toolName)}, ${pending ? 'running' : failed ? 'failed' : 'completed'}`}
+        accessibilityState={{ expanded: open }}
+        hitSlop={4}
+        onPress={() => setOpen((value) => !value)}
+        style={({ pressed }) => [styles.toolHead, pressed && styles.toolHeadPressed]}
+      >
+        <ToolStatus failed={failed} pending={pending} />
         <View style={styles.toolCopy}>
-          <Text style={styles.toolTitle}>
+          <Text numberOfLines={1} style={styles.toolTitle}>
             {toolLabel(item.call?.name ?? item.result?.toolName)}
           </Text>
-          <Text numberOfLines={open ? undefined : 1} style={styles.toolSummary}>
-            {failed
-              ? item.result?.errorMessage
-              : pending
-                ? 'Waiting for result'
-                : result || 'Completed'}
-          </Text>
         </View>
-        <Text style={styles.disclosure}>{open ? '−' : '+'}</Text>
-      </View>
+        <Text style={styles.disclosure}>{open ? 'Hide' : 'Details'}</Text>
+      </Pressable>
       {open ? (
         <View style={styles.toolDetails}>
           {args !== undefined ? (
             <>
               <Text style={styles.detailLabel}>ARGUMENTS</Text>
-              <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+              <ScrollView horizontal nestedScrollEnabled showsHorizontalScrollIndicator>
                 <Text selectable style={styles.detailText}>
                   {JSON.stringify(args, null, 2)}
                 </Text>
@@ -112,7 +162,7 @@ function ToolRow({ item }: { item: AssistantToolRenderItem }) {
           </Text>
         </View>
       ) : null}
-    </Pressable>
+    </View>
   );
 }
 
@@ -123,24 +173,27 @@ function ToolGroupRow({ item }: { item: Extract<AssistantRenderItem, { type: 'to
   const name = toolLabel(item.items[0]?.call?.name ?? item.items[0]?.result?.toolName);
   return (
     <View style={[styles.tool, failed && styles.toolError]}>
-      <Pressable onPress={() => setOpen((value) => !value)} style={styles.toolHead}>
-        <View style={[styles.toolGlyph, failed && styles.toolGlyphError]}>
-          <Text style={styles.toolGlyphText}>{pending ? '…' : failed ? '!' : '✓'}</Text>
-        </View>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`${name}, ${item.items.length} calls, ${pending ? 'running' : failed ? 'failed' : 'completed'}`}
+        accessibilityState={{ expanded: open }}
+        hitSlop={4}
+        onPress={() => setOpen((value) => !value)}
+        style={({ pressed }) => [styles.toolHead, pressed && styles.toolHeadPressed]}
+      >
+        <ToolStatus failed={failed} pending={pending} />
         <View style={styles.toolCopy}>
-          <Text style={styles.toolTitle}>
-            {name} × {item.items.length}
-          </Text>
-          <Text style={styles.toolSummary}>
-            {pending ? 'Tools are running' : failed ? 'One or more calls failed' : 'Completed'}
+          <Text numberOfLines={1} style={styles.toolTitle}>
+            {name}
           </Text>
         </View>
-        <Text style={styles.disclosure}>{open ? '−' : '+'}</Text>
+        <Text style={styles.toolCount}>×{item.items.length}</Text>
+        <Text style={styles.disclosure}>{open ? 'Hide' : 'Details'}</Text>
       </Pressable>
       {open ? (
         <View style={styles.groupDetails}>
           {item.items.map((tool) => (
-            <ToolRow key={tool.key} item={tool} />
+            <ToolRow key={tool.key} item={tool} nested />
           ))}
         </View>
       ) : null}
@@ -169,6 +222,15 @@ function messageTimestamp(message: AssistantMessage): string | number | undefine
   return message.createdAt ?? message.timestamp;
 }
 
+function hasVisibleMessageContent(message: AssistantMessage): boolean {
+  return Boolean(
+    visibleMessageText(message).trim() ||
+    messageImageParts(message).length > 0 ||
+    attachments(message).length > 0 ||
+    message.errorMessage,
+  );
+}
+
 export function MobileAssistantTranscript({
   messages,
   running = false,
@@ -186,7 +248,15 @@ export function MobileAssistantTranscript({
   emptyBody?: string;
   assistantLabel?: string;
 }) {
-  const items = React.useMemo(() => renderItemsFromMessages(messages), [messages]);
+  const items = React.useMemo(
+    () =>
+      compactRepeatedToolItems(
+        renderItemsFromMessages(messages).filter(
+          (item) => item.type !== 'message' || hasVisibleMessageContent(item.message),
+        ),
+      ),
+    [messages],
+  );
   const [visibleMessageTimestamps, setVisibleMessageTimestamps] = React.useState<Set<string>>(
     () => new Set(),
   );
@@ -307,19 +377,15 @@ export function MobileAssistantTranscript({
           );
         }
         return (
-          <Pressable
+          <TappableMessageView
             key={item.key}
-            accessibilityRole="button"
-            accessibilityHint="Shows or hides this message timestamp"
-            accessibilityState={{ expanded: timestampVisible }}
-            onPress={() => toggleMessageTimestamp(timestampKey)}
-            style={styles.message}
+            onTap={() => toggleMessageTimestamp(timestampKey)}
           >
             {content}
             {timestampVisible ? (
               <RelativeMessageTimestamp timestamp={timestamp} style={styles.messageTime} />
             ) : null}
-          </Pressable>
+          </TappableMessageView>
         );
       })}
       {running ? (
@@ -363,13 +429,13 @@ export function LocalAssistantTranscript({
 
 const styles = StyleSheet.create({
   messages: { gap: 0 },
-  message: { width: '100%', paddingHorizontal: 14, paddingVertical: 13 },
+  message: { width: '100%', paddingHorizontal: 10, paddingVertical: 13 },
   userMessageGroup: {
     width: 'auto',
     maxWidth: '86%',
     alignSelf: 'flex-end',
     alignItems: 'flex-end',
-    marginHorizontal: 12,
+    marginHorizontal: 10,
     marginVertical: 7,
   },
   userMessage: {
@@ -428,49 +494,106 @@ const styles = StyleSheet.create({
   attachmentName: { color: colors.text, fontSize: 11, fontWeight: '700' },
   attachmentMeta: { color: colors.muted, fontSize: 9, marginTop: 2 },
   tool: {
-    borderRadius: 5,
-    borderColor: colors.border,
+    borderRadius: 6,
+    borderColor: colors.surface1,
     borderWidth: 1,
-    backgroundColor: colors.panel,
-    marginHorizontal: 12,
-    marginVertical: 3,
+    backgroundColor: colors.whiteWashSoft,
+    marginHorizontal: 10,
+    marginVertical: 2,
   },
+  toolNested: { marginHorizontal: 0, backgroundColor: colors.crust },
   toolError: { borderColor: colors.dangerBorder },
   toolHead: {
-    minHeight: 52,
+    minHeight: 34,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingHorizontal: 11,
-    paddingVertical: 8,
+    gap: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 6,
   },
-  toolGlyph: {
-    width: 25,
-    height: 25,
-    borderRadius: 4,
+  toolHeadPressed: { backgroundColor: colors.whiteWash },
+  toolStatusSlot: {
+    width: 13,
+    height: 13,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: colors.accentDark,
   },
-  toolGlyphError: { backgroundColor: colors.dangerDark },
-  toolGlyphText: { color: colors.accent, fontSize: 11, fontWeight: '900' },
+  toolStatusPending: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
+  toolStatusCircle: {
+    width: 13,
+    height: 13,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.online,
+  },
+  toolStatusError: { backgroundColor: colors.danger },
+  toolStatusText: {
+    color: colors.crust,
+    fontSize: 8,
+    lineHeight: 11,
+    fontWeight: '900',
+    includeFontPadding: false,
+  },
   toolCopy: { flex: 1, minWidth: 0 },
-  toolTitle: { color: colors.text, fontSize: 11, fontWeight: '800' },
-  toolSummary: { color: colors.muted, fontSize: 9, lineHeight: 13, marginTop: 3 },
-  disclosure: { color: colors.muted, fontSize: 18, width: 22, textAlign: 'center' },
-  toolDetails: { gap: 6, padding: 11, borderTopWidth: 1, borderTopColor: colors.border },
+  toolTitle: {
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.45,
+  },
+  toolCount: {
+    color: colors.text,
+    backgroundColor: colors.crust,
+    borderWidth: 1,
+    borderColor: colors.surface1,
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    fontSize: 9,
+    fontWeight: '800',
+  },
+  disclosure: {
+    color: colors.subtle,
+    backgroundColor: colors.crust,
+    borderWidth: 1,
+    borderColor: colors.surface1,
+    borderRadius: 4,
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    fontSize: 8,
+    fontWeight: '800',
+    textTransform: 'uppercase',
+    letterSpacing: 0.35,
+  },
+  toolDetails: {
+    gap: 6,
+    paddingHorizontal: 9,
+    paddingVertical: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.surface1,
+    backgroundColor: colors.mantle,
+  },
   detailLabel: { color: colors.accent, fontSize: 7, fontWeight: '900', letterSpacing: 1 },
   detailText: { color: colors.muted, fontSize: 10, lineHeight: 15, fontFamily: 'monospace' },
-  groupDetails: { gap: 1, paddingVertical: 5, borderTopWidth: 1, borderTopColor: colors.border },
+  groupDetails: {
+    gap: 2,
+    padding: 5,
+    borderTopWidth: 1,
+    borderTopColor: colors.surface1,
+    backgroundColor: colors.mantle,
+  },
   reasoning: {
-    margin: 12,
+    marginHorizontal: 10,
+    marginVertical: 12,
     padding: 12,
     borderRadius: 5,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panel,
   },
-  waiting: { alignSelf: 'flex-start', gap: 2, marginHorizontal: 12, marginVertical: 10 },
+  waiting: { alignSelf: 'flex-start', gap: 2, marginHorizontal: 10, marginVertical: 10 },
   reasoningHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   reasoningLabel: { color: colors.muted, fontSize: 11, fontWeight: '700' },
   reasoningText: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 9 },

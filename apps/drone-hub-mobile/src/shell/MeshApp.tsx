@@ -39,6 +39,8 @@ import { PairScreen } from '../screens/PairScreen';
 import { SettingsScreen, type SettingsTab } from '../screens/SettingsScreen';
 import { colors } from '../theme';
 
+const DRAWER_EDGE_SWIPE_WIDTH = 12;
+
 type Tab = 'assistant' | 'drones' | 'devices' | 'settings';
 
 type HeaderMenuAction = {
@@ -185,13 +187,13 @@ function Shell() {
         onMoveShouldSetPanResponderCapture: (_event, gesture) =>
           drawerEnabledRef.current &&
           !drawerOpenRef.current &&
-          gesture.x0 <= 42 &&
+          gesture.x0 <= DRAWER_EDGE_SWIPE_WIDTH &&
           gesture.dx > 3 &&
           Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15,
         onMoveShouldSetPanResponder: (_event, gesture) =>
           drawerEnabledRef.current &&
           !drawerOpenRef.current &&
-          gesture.x0 <= 42 &&
+          gesture.x0 <= DRAWER_EDGE_SWIPE_WIDTH &&
           gesture.dx > 3 &&
           Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15,
         onPanResponderGrant: (_event, gesture) => {

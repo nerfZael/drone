@@ -143,30 +143,35 @@ function canGroupToolItem(item: AssistantToolRenderItem): boolean {
   );
 }
 
-function compactRepeatedToolItems(items: AssistantRenderItem[]): AssistantRenderItem[] {
+function repeatedToolRun(item: AssistantRenderItem | undefined): AssistantToolRenderItem[] | null {
+  if (!item) return null;
+  if (item.type === 'tool') return canGroupToolItem(item) ? [item] : null;
+  if (item.type !== 'toolGroup' || item.items.length === 0) return null;
+  const name = toolItemName(item.items[0]!);
+  return item.items.every((entry) => canGroupToolItem(entry) && toolItemName(entry) === name)
+    ? item.items
+    : null;
+}
+
+export function compactRepeatedToolItems(items: AssistantRenderItem[]): AssistantRenderItem[] {
   const compacted: AssistantRenderItem[] = [];
-  for (let index = 0; index < items.length; index += 1) {
-    const item = items[index];
-    if (item.type !== 'tool' || !canGroupToolItem(item)) {
+  for (const item of items) {
+    const run = repeatedToolRun(item);
+    if (!run) {
       compacted.push(item);
       continue;
     }
-    const name = toolItemName(item);
-    const run: AssistantToolRenderItem[] = [item];
-    let nextIndex = index + 1;
-    while (nextIndex < items.length) {
-      const next = items[nextIndex];
-      if (next.type !== 'tool' || !canGroupToolItem(next) || toolItemName(next) !== name) break;
-      run.push(next);
-      nextIndex += 1;
-    }
-    if (run.length > 1) {
-      compacted.push({
+
+    const previousIndex = compacted.length - 1;
+    const previousRun = repeatedToolRun(compacted[previousIndex]);
+    const name = toolItemName(run[0]!);
+    if (previousRun && toolItemName(previousRun[0]!) === name) {
+      const combined = [...previousRun, ...run];
+      compacted[previousIndex] = {
         type: 'toolGroup',
-        key: `tool-group:${name}:${run[0].key}:${run.length}`,
-        items: run,
-      });
-      index = nextIndex - 1;
+        key: `tool-group:${name}:${combined[0]!.key}:${combined.length}`,
+        items: combined,
+      };
     } else {
       compacted.push(item);
     }

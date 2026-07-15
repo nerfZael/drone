@@ -59,6 +59,7 @@ export const colors = {
   onlineDark: 'rgba(166, 227, 161, 0.12)',
   onlineBorder: 'rgba(166, 227, 161, 0.36)',
   info: catppuccin.blue,
+  infoDark: 'rgba(137, 180, 250, 0.12)',
   overlay: 'rgba(17, 17, 27, 0.78)',
   overlaySoft: 'rgba(17, 17, 27, 0.54)',
   shadow: catppuccin.crust,
