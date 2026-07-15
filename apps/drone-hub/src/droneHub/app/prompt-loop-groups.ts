@@ -100,12 +100,15 @@ function isActivePendingPrompt(item: PendingPrompt): boolean {
 function comparePendingPromptTimelineBlocks(
   a: TranscriptTimelineBlock,
   b: TranscriptTimelineBlock,
-): number {
-  if (a.kind !== 'pending-prompt' || b.kind !== 'pending-prompt') return 0;
+): number | null {
+  if (a.kind !== 'pending-prompt' || b.kind !== 'pending-prompt') return null;
   const aActive = isActivePendingPrompt(a.item);
   const bActive = isActivePendingPrompt(b.item);
   if (aActive && b.item.state === 'queued') return -1;
   if (a.item.state === 'queued' && bActive) return 1;
+  const aSubmittedMs = parseIsoMs(a.item.at);
+  const bSubmittedMs = parseIsoMs(b.item.at);
+  if (aSubmittedMs !== bSubmittedMs) return aSubmittedMs - bSubmittedMs;
   return 0;
 }
 
@@ -136,7 +139,7 @@ export function buildTranscriptTimelineBlocks(opts: {
 
   items.sort((a, b) => {
     const pendingOrder = comparePendingPromptTimelineBlocks(a, b);
-    if (pendingOrder !== 0) return pendingOrder;
+    if (pendingOrder !== null) return pendingOrder || (a.order - b.order);
     if (a.sortMs !== b.sortMs) return a.sortMs - b.sortMs;
     return a.order - b.order;
   });

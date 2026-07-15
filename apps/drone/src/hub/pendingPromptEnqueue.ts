@@ -152,3 +152,17 @@ export function shouldDeferQueuedTranscriptPrompt(opts: {
   }
   return false;
 }
+
+export function shouldDeferQueuedPendingPrompt(opts: {
+  agentId: BuiltinTranscriptAgentId;
+  sessionKnown: boolean;
+  priorPendingPrompts: PendingPromptLike[];
+  transcriptDoneIds?: Set<string>;
+}): boolean {
+  return (
+    hasActivePriorPendingPrompt({
+      priorPendingPrompts: opts.priorPendingPrompts,
+      transcriptDoneIds: opts.transcriptDoneIds,
+    }) || shouldDeferQueuedTranscriptPrompt(opts)
+  );
+}

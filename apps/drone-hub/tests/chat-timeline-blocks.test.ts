@@ -122,4 +122,37 @@ describe('buildChatTimelineBlocks', () => {
       out.map((item) => (item.block.kind === 'pending-prompt' ? item.block.item.id : item.block.kind)),
     ).toEqual(['waiting-first', 'queued-follow-up']);
   });
+
+  test('preserves active prompt submission order during the final timeline merge', () => {
+    const transcriptTimelineBlocks: TranscriptTimelineBlock[] = [
+      {
+        kind: 'pending-prompt',
+        key: 'pending:review',
+        item: activePendingPrompt(
+          'review-first',
+          '2026-03-29T10:00:00.000Z',
+          '2026-03-29T10:05:00.000Z',
+        ),
+      },
+      {
+        kind: 'pending-prompt',
+        key: 'pending:make-pr',
+        item: activePendingPrompt(
+          'make-pr-second',
+          '2026-03-29T10:01:00.000Z',
+          '2026-03-29T10:02:00.000Z',
+        ),
+      },
+    ];
+
+    const out = buildChatTimelineBlocks({
+      transcriptTimelineBlocks,
+      pendingTimelineBlocks: [],
+      runningAutomationIdentity: '',
+    });
+
+    expect(
+      out.map((item) => (item.block.kind === 'pending-prompt' ? item.block.item.id : item.block.kind)),
+    ).toEqual(['review-first', 'make-pr-second']);
+  });
 });

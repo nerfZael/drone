@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import {
   hasActivePriorPendingPrompt,
   looksLikeTransientPromptEnqueueError,
+  shouldDeferQueuedPendingPrompt,
   shouldDeferQueuedTranscriptPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
@@ -102,6 +103,28 @@ describe('shouldDeferQueuedTranscriptPrompt', () => {
         agentId: 'pi',
         sessionKnown: false,
         priorPendingPrompts: [{ id: 'p1', state: 'queued' }],
+      }),
+    ).toBe(false);
+  });
+});
+
+describe('shouldDeferQueuedPendingPrompt', () => {
+  test('keeps a follow-up queued while a known Codex session has an active prompt', () => {
+    const priorPendingPrompts = [{ id: 'review-first', state: 'sent' }];
+
+    expect(
+      shouldDeferQueuedPendingPrompt({
+        agentId: 'codex',
+        sessionKnown: true,
+        priorPendingPrompts,
+      }),
+    ).toBe(true);
+    expect(
+      shouldDeferQueuedPendingPrompt({
+        agentId: 'codex',
+        sessionKnown: true,
+        priorPendingPrompts,
+        transcriptDoneIds: new Set(['review-first']),
       }),
     ).toBe(false);
   });

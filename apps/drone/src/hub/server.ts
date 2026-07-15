@@ -221,6 +221,7 @@ import { createSyncSetService } from './sync-set-service';
 import {
   hasActivePriorPendingPrompt,
   looksLikeTransientPromptEnqueueError,
+  shouldDeferQueuedPendingPrompt,
   shouldDeferQueuedTranscriptPrompt,
   shouldRetryFailedPendingPrompt,
   stalePendingPromptState,
@@ -10926,7 +10927,9 @@ async function pumpQueuedPendingPromptsForChat(opts: {
       .slice(0, idx)
       .map((x: any) => ({ id: String(x?.id ?? '').trim(), state: String(x?.state ?? '') }))
       .filter((x: any) => x.id);
-    const defer = shouldDeferQueuedTranscriptPrompt({
+    // Keep manual follow-ups cancellable until the earlier response reaches the transcript.
+    // A known agent session makes continuation possible, but does not make concurrent delivery safe.
+    const defer = shouldDeferQueuedPendingPrompt({
       agentId: agent.id,
       sessionKnown,
       priorPendingPrompts: prior,

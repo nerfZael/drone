@@ -105,4 +105,19 @@ describe('buildTranscriptTimelineBlocks', () => {
       'queued-follow-up',
     ]);
   });
+
+  test('keeps active prompts in submission order when the first receives a later plan update', () => {
+    const out = buildTranscriptTimelineBlocks({
+      transcriptRenderBlocks: [],
+      pendingPlainPrompts: [
+        activePendingPrompt('review-first', '2026-03-29T10:00:00.000Z', '2026-03-29T10:05:00.000Z'),
+        activePendingPrompt('make-pr-second', '2026-03-29T10:01:00.000Z', '2026-03-29T10:02:00.000Z'),
+      ],
+    });
+
+    expect(out.map((item) => (item.kind === 'pending-prompt' ? item.item.id : item.kind))).toEqual([
+      'review-first',
+      'make-pr-second',
+    ]);
+  });
 });

@@ -1,5 +1,6 @@
 import type { PendingTimelineBlock } from './pending-timeline-blocks';
 import { transcriptTimelineSortMs, type TranscriptTimelineBlock } from './prompt-loop-groups';
+import { parseIsoMs } from './selected-drone-workspace-utils';
 
 export type ChatTimelineBlock =
   | { source: 'transcript'; block: TranscriptTimelineBlock }
@@ -25,6 +26,11 @@ function pendingPromptState(item: ChatTimelineItem): string {
   return item.block.kind === 'pending-prompt' ? String(item.block.item?.state ?? '') : '';
 }
 
+function pendingPromptSubmittedMs(item: ChatTimelineItem): number | null {
+  if (item.block.kind !== 'pending-prompt') return null;
+  return parseIsoMs(item.block.item?.at);
+}
+
 function isActivePendingPromptState(state: string): boolean {
   return state === 'sending' || state === 'sent';
 }
@@ -36,6 +42,12 @@ function compareChatTimelineItems(a: ChatTimelineItem, b: ChatTimelineItem): num
   const bPendingState = pendingPromptState(b);
   if (isActivePendingPromptState(aPendingState) && bPendingState === 'queued') return -1;
   if (aPendingState === 'queued' && isActivePendingPromptState(bPendingState)) return 1;
+  const aSubmittedMs = pendingPromptSubmittedMs(a);
+  const bSubmittedMs = pendingPromptSubmittedMs(b);
+  if (aSubmittedMs !== null && bSubmittedMs !== null) {
+    if (aSubmittedMs !== bSubmittedMs) return aSubmittedMs - bSubmittedMs;
+    return a.order - b.order;
+  }
   if (a.sortMs !== b.sortMs) return a.sortMs - b.sortMs;
   return a.order - b.order;
 }
