@@ -95,6 +95,11 @@ export async function runMobileBlip(input: {
   sessionSnapshot?: LocalBlipSessionSnapshot | null;
   onSessionSnapshot?: MobileSessionSnapshotWriter;
   onDeleteSession?(): Promise<void>;
+  requestExecuteApproval?(input: {
+    toolName: 'bash';
+    args: any;
+    signal?: AbortSignal;
+  }): Promise<boolean>;
 }): Promise<LocalAssistantMessage[]> {
   const providerId = input.provider === 'codex' ? 'openai-codex' : 'openai';
   const repository = new MobileSessionRepository(
@@ -167,6 +172,24 @@ export async function runMobileBlip(input: {
     sessionId: repository.state.id,
     reasoning: input.thread.thinkingLevel,
     tools: workspaceAgentTools(input.workspaceRuntime),
+    permissionPreflight: async (request) => {
+      if (request.tool !== 'bash') return { status: 'allow' };
+      const toolArgs = (request.args ?? {}) as Record<string, unknown>;
+      const approvalArgs = input.workspaceRuntime.resolveExecutionApproval(toolArgs);
+      // Freeze the resolved target before asking so a concurrent set_target call cannot
+      // substitute a different workspace after the user approves.
+      toolArgs.target = approvalArgs.resolved.targetId;
+      const approved = input.requestExecuteApproval
+        ? await input.requestExecuteApproval({
+            toolName: 'bash',
+            args: approvalArgs,
+            signal: request.signal,
+          })
+        : false;
+      return approved
+        ? { status: 'allow' }
+        : { status: 'deny', reason: 'User denied bash execution.' };
+    },
     streamFn,
     promptProvider: () => mobileAssistantSystemPrompt(input.thread),
     eventSink,

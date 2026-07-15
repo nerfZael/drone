@@ -26,19 +26,51 @@ describe('assistant drone workspace target execution', () => {
       await markDroneReady('drone-a');
       const writes: any[] = [];
       const service = new HubAssistantService({
-        listDrones: async () => [{ id: 'drone-a', name: 'Drone A', group: null, runtime: 'container', repoPath: '/repo', status: 'ready', chats: ['default'] }],
-        readDroneFile: async ({ droneId, path }) => ({ droneId, path, relativePath: path, kind: 'text', content: 'hello' }),
+        listDrones: async () => [
+          {
+            id: 'drone-a',
+            name: 'Drone A',
+            group: null,
+            runtime: 'container',
+            repoPath: '/repo',
+            status: 'ready',
+            chats: ['default'],
+          },
+        ],
+        readDroneFile: async ({ droneId, path }) => ({
+          droneId,
+          path,
+          relativePath: path,
+          kind: 'text',
+          content: 'hello',
+        }),
         writeDroneFile: async (input) => {
           writes.push(input);
-          return { droneId: input.droneId, path: input.path, relativePath: input.path, size: input.content.length };
+          return {
+            droneId: input.droneId,
+            path: input.path,
+            relativePath: input.path,
+            size: input.content.length,
+          };
         },
       });
       const created = await service.createThread({ title: 'files' });
       const threadId = created.activeThreadId;
-      await service.updateAccessScope({ threadId, readMode: 'selected', writeMode: 'selected', droneIds: ['drone-a'] });
+      await service.updateAccessScope({
+        threadId,
+        readMode: 'selected',
+        writeMode: 'selected',
+        droneIds: ['drone-a'],
+      });
 
-      const read = await service.executeDroneWorkspaceTool(threadId, 'drone-a', { tool: 'read_file', args: { path: 'src/a.ts' } });
-      const write = await service.executeDroneWorkspaceTool(threadId, 'drone-a', { tool: 'write_file', args: { path: 'src/a.ts', content: 'updated' } });
+      const read = await service.executeDroneWorkspaceTool(threadId, 'drone-a', {
+        tool: 'read_file',
+        args: { path: 'src/a.ts' },
+      });
+      const write = await service.executeDroneWorkspaceTool(threadId, 'drone-a', {
+        tool: 'write_file',
+        args: { path: 'src/a.ts', content: 'updated' },
+      });
       expect(read.details.content).toBe('hello');
       expect(write.details.size).toBe(7);
       expect(writes).toEqual([{ droneId: 'drone-a', path: 'src/a.ts', content: 'updated' }]);
@@ -59,12 +91,19 @@ describe('assistant drone workspace target execution', () => {
       });
       const created = await service.createThread({ title: 'files' });
       const threadId = created.activeThreadId;
-      await service.updateAccessScope({ threadId, readMode: 'all', writeMode: 'selected', droneIds: ['drone-a'] });
+      await service.updateAccessScope({
+        threadId,
+        readMode: 'all',
+        writeMode: 'selected',
+        droneIds: ['drone-a'],
+      });
 
-      await expect(service.executeDroneWorkspaceTool(threadId, 'drone-b', {
-        tool: 'write_file',
-        args: { path: 'blocked.txt', content: 'no' },
-      })).rejects.toThrow('write scope does not include drone');
+      await expect(
+        service.executeDroneWorkspaceTool(threadId, 'drone-b', {
+          tool: 'write_file',
+          args: { path: 'blocked.txt', content: 'no' },
+        }),
+      ).rejects.toThrow('write scope does not include drone');
       expect(writeCalls).toBe(0);
     });
   });
@@ -107,9 +146,93 @@ describe('assistant drone workspace target execution', () => {
 
       expect(await service.visibleDrones(threadId)).toEqual([drones[0]]);
       expect(await service.workspaceDrones(threadId)).toEqual([
-        { ...drones[0], canRead: true, canWrite: true },
-        { ...drones[1], canRead: false, canWrite: true },
+        { ...drones[0], canRead: true, canWrite: true, canExecute: true },
+        { ...drones[1], canRead: false, canWrite: true, canExecute: true },
       ]);
+    });
+  });
+
+  test('uses execute scope rather than write scope for bash', async () => {
+    await withTempDroneDataDir('assistant-drone-execute-scope-', async () => {
+      await markDroneReady('drone-a');
+      await markDroneReady('drone-b');
+      const executions: any[] = [];
+      const service = new HubAssistantService({
+        listDrones: async () => [],
+        runDroneBash: async (input) => {
+          executions.push(input);
+          return { droneId: input.droneId, command: input.command, code: 0 } as any;
+        },
+      });
+      const created = await service.createThread({ title: 'execute' });
+      const threadId = created.activeThreadId;
+      await service.updateAccessScope({
+        threadId,
+        readMode: 'all',
+        writeMode: 'selected',
+        executeMode: 'selected',
+        droneIds: ['drone-b'],
+      });
+
+      await expect(
+        service.executeDroneWorkspaceTool(threadId, 'drone-a', {
+          tool: 'bash',
+          args: { command: 'pwd' },
+        }),
+      ).rejects.toThrow('execute scope does not include drone');
+      await service.executeDroneWorkspaceTool(threadId, 'drone-b', {
+        tool: 'bash',
+        args: { command: 'pwd' },
+      });
+      expect(executions).toHaveLength(1);
+      expect(executions[0].droneId).toBe('drone-b');
+    });
+  });
+
+  test('preflights remote workspace bash against the resolved target', async () => {
+    await withTempDroneDataDir('assistant-remote-workspace-bash-', async () => {
+      const service = new HubAssistantService({ listDrones: async () => [] });
+      const created = await service.createThread({ title: 'remote execute' });
+      const threadId = created.activeThreadId;
+      await service.updateThread(threadId, { autoApprove: true });
+
+      await expect(
+        service.preflightBlipTool(threadId, 'bash', 'call-remote', {
+          command: 'pwd',
+          workspaceTarget: {
+            id: 'remote:desktop:project',
+            kind: 'remote-device',
+            label: 'Desktop · Project',
+          },
+        }),
+      ).resolves.toBeUndefined();
+    });
+  });
+
+  test('denies an approval immediately when its signal is already aborted', async () => {
+    await withTempDroneDataDir('assistant-aborted-bash-approval-', async () => {
+      const service = new HubAssistantService({ listDrones: async () => [] });
+      const created = await service.createThread({ title: 'aborted execute' });
+      const threadId = created.activeThreadId;
+      const controller = new AbortController();
+      controller.abort();
+
+      await expect(
+        service.preflightBlipTool(
+          threadId,
+          'bash',
+          'call-aborted',
+          {
+            command: 'pwd',
+            workspaceTarget: {
+              id: 'remote:desktop:project',
+              kind: 'remote-device',
+              label: 'Desktop · Project',
+            },
+          },
+          controller.signal,
+        ),
+      ).resolves.toEqual({ block: true, reason: 'User denied bash.' });
     });
   });
 });

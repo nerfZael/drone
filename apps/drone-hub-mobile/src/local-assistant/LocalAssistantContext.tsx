@@ -10,6 +10,7 @@ import {
 } from './local-assistant-storage';
 import type {
   LocalAssistantMessage,
+  LocalAssistantApproval,
   LocalAssistantQueuedPrompt,
   LocalAssistantThinkingLevel,
   LocalAssistantThread,
@@ -34,6 +35,7 @@ type LocalAssistantContextValue = {
   loading: boolean;
   runningThreadId: string | null;
   error: string | null;
+  pendingApprovals: LocalAssistantApproval[];
   refreshThreads(): Promise<LocalAssistantThread[]>;
   selectThread(threadId: string): void;
   createThread(title?: string): Promise<LocalAssistantThread>;
@@ -47,8 +49,10 @@ type LocalAssistantContextValue = {
       model?: string;
       thinkingLevel?: LocalAssistantThinkingLevel;
       workspaceTargets?: LocalWorkspaceTarget[];
+      autoApprove?: boolean;
     },
   ): Promise<void>;
+  resolveApproval(threadId: string, approvalId: string, approved: boolean): void;
   sendPrompt(threadId: string, prompt: string): Promise<void>;
   cancelQueuedPrompt(threadId: string, promptId: string): Promise<void>;
   stop(threadId: string): void;
@@ -72,6 +76,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
   const [loading, setLoading] = React.useState(true);
   const [runningThreadId, setRunningThreadId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const [pendingApprovals, setPendingApprovals] = React.useState<LocalAssistantApproval[]>([]);
   const threadsRef = React.useRef<LocalAssistantThread[]>([]);
   const abortRef = React.useRef<{ threadId: string; controller: AbortController } | null>(null);
   const sendPromptRef = React.useRef<(threadId: string, prompt: string) => Promise<void>>(
@@ -80,6 +85,20 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
   const drainQueuedPromptsRef = React.useRef<() => void>(() => {});
   const drainingQueuedPromptRef = React.useRef(false);
   const persistenceRef = React.useRef(Promise.resolve());
+  const approvalResolversRef = React.useRef(
+    new Map<string, { threadId: string; resolve(approved: boolean): void }>(),
+  );
+
+  const resolveApproval = React.useCallback(
+    (threadId: string, approvalId: string, approved: boolean) => {
+      const pending = approvalResolversRef.current.get(approvalId);
+      if (!pending || pending.threadId !== threadId) return;
+      approvalResolversRef.current.delete(approvalId);
+      setPendingApprovals((current) => current.filter((item) => item.id !== approvalId));
+      pending.resolve(approved);
+    },
+    [],
+  );
 
   const replaceThreads = React.useCallback(async (next: LocalAssistantThread[]) => {
     threadsRef.current = next;
@@ -130,6 +149,8 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     return () => {
       active = false;
       abortRef.current?.controller.abort();
+      for (const pending of approvalResolversRef.current.values()) pending.resolve(false);
+      approvalResolversRef.current.clear();
     };
   }, []);
 
@@ -162,6 +183,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         status: 'idle',
         error: null,
         workspaceTargets: [],
+        autoApprove: false,
         messages: [],
         queuedPrompts: [],
       };
@@ -246,6 +268,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         model?: string;
         thinkingLevel?: LocalAssistantThinkingLevel;
         workspaceTargets?: LocalWorkspaceTarget[];
+        autoApprove?: boolean;
       },
     ) => {
       const current = threadsRef.current.find((thread) => thread.id === threadId);
@@ -258,10 +281,19 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         ...(patch.workspaceTargets !== undefined
           ? { workspaceTargets: cleanLocalWorkspaceTargets(patch.workspaceTargets) }
           : {}),
+        ...(patch.autoApprove !== undefined ? { autoApprove: patch.autoApprove === true } : {}),
         updatedAt: new Date().toISOString(),
       });
+      if (patch.autoApprove === true) {
+        // Resolve from the authoritative map rather than the rendered approval list. Header
+        // actions can retain an older callback while an approval is being added, and using the
+        // state snapshot here would leave that already-pending tool call blocked indefinitely.
+        for (const [approvalId, pending] of [...approvalResolversRef.current]) {
+          if (pending.threadId === threadId) resolveApproval(threadId, approvalId, true);
+        }
+      }
     },
-    [replaceThread],
+    [replaceThread, resolveApproval],
   );
 
   const sendPrompt = React.useCallback(
@@ -294,6 +326,15 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       abortRef.current = { threadId, controller };
       setRunningThreadId(threadId);
       let running: LocalAssistantThread | null = null;
+      const persistRunning = async (patch: Partial<LocalAssistantThread>) => {
+        const next = await mutateThread(threadId, (latest) => ({
+          ...latest,
+          ...patch,
+          updatedAt: new Date().toISOString(),
+        }));
+        if (next) running = next;
+        return next;
+      };
       try {
         const [apiKey, settings, sessionSnapshot] = await Promise.all([
           readLocalAssistantApiKey(),
@@ -305,15 +346,13 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         if (!mesh.identity) throw new Error('Phone device identity is not ready');
         const latest = threadsRef.current.find((thread) => thread.id === threadId);
         if (!latest) throw new Error('Local assistant thread was not found');
-        running = {
-          ...latest,
+        running = await persistRunning({
           model: latest.model || settings.model,
           status: 'running',
           error: null,
-          updatedAt: new Date().toISOString(),
           messages: [...latest.messages, userMessage(prompt)],
-        };
-        await replaceThread(running);
+        });
+        if (!running) throw new Error('Local assistant thread was not found');
         const workspaceRuntime = createWorkspaceToolRuntime(running, mesh.request);
         const messages = await runMobileBlip({
           provider: settings.provider,
@@ -324,26 +363,48 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
           history: latest.messages,
           workspaceRuntime,
           signal: controller.signal,
-          onMessages: async (messages: LocalAssistantMessage[]) => {
-            const queuedPrompts =
-              threadsRef.current.find((thread) => thread.id === threadId)?.queuedPrompts ??
-              running!.queuedPrompts;
-            running = {
-              ...running!,
-              messages: boundLocalAssistantMessages(messages),
-              queuedPrompts,
-              updatedAt: new Date().toISOString(),
+          requestExecuteApproval: async ({ toolName, args, signal }) => {
+            if (
+              threadsRef.current.find((candidate) => candidate.id === threadId)?.autoApprove ===
+              true
+            )
+              return true;
+            const approval: LocalAssistantApproval = {
+              id: `mobile_approval_${Crypto.randomUUID()}`,
+              threadId,
+              toolName,
+              label: 'Execute Bash command',
+              args,
+              createdAt: new Date().toISOString(),
             };
-            await replaceThread(running);
+            return await new Promise<boolean>((resolve) => {
+              let settled = false;
+              const finish = (approved: boolean) => {
+                if (settled) return;
+                settled = true;
+                signal?.removeEventListener('abort', deny);
+                resolve(approved);
+              };
+              const deny = () => {
+                approvalResolversRef.current.delete(approval.id);
+                setPendingApprovals((current) => current.filter((item) => item.id !== approval.id));
+                finish(false);
+              };
+              approvalResolversRef.current.set(approval.id, { threadId, resolve: finish });
+              setPendingApprovals((current) => [...current, approval]);
+              signal?.addEventListener('abort', deny, { once: true });
+              if (signal?.aborted) deny();
+            });
+          },
+          onMessages: async (messages: LocalAssistantMessage[]) => {
+            await persistRunning({
+              messages: boundLocalAssistantMessages(messages),
+            });
           },
           onStreamingMessages: async (messages: LocalAssistantMessage[]) => {
-            const queuedPrompts =
-              threadsRef.current.find((thread) => thread.id === threadId)?.queuedPrompts ??
-              running!.queuedPrompts;
             const preview = {
-              ...running!,
+              ...(threadsRef.current.find((thread) => thread.id === threadId) ?? running!),
               messages: boundLocalAssistantMessages(messages),
-              queuedPrompts,
               updatedAt: new Date().toISOString(),
             };
             const next = threadsRef.current.map((thread) =>
@@ -357,30 +418,18 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
             saveLocalBlipSessionSnapshot(threadId, snapshot, startIndex, appendedEntries),
           onDeleteSession: () => deleteLocalBlipSessionSnapshot(threadId),
         });
-        running = {
-          ...running!,
+        await persistRunning({
           messages: boundLocalAssistantMessages(messages),
-          queuedPrompts:
-            threadsRef.current.find((thread) => thread.id === threadId)?.queuedPrompts ??
-            running!.queuedPrompts,
           status: 'idle',
           error: null,
-          updatedAt: new Date().toISOString(),
-        };
-        await replaceThread(running);
+        });
       } catch (nextError: any) {
         const stopped = controller.signal.aborted;
         if (running) {
-          running = {
-            ...running,
-            queuedPrompts:
-              threadsRef.current.find((thread) => thread.id === threadId)?.queuedPrompts ??
-              running.queuedPrompts,
+          await persistRunning({
             status: stopped ? 'idle' : 'error',
             error: stopped ? null : (nextError?.message ?? String(nextError)),
-            updatedAt: new Date().toISOString(),
-          };
-          await replaceThread(running);
+          });
         }
         if (!stopped) throw nextError;
       } finally {
@@ -389,7 +438,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         queueMicrotask(() => drainQueuedPromptsRef.current());
       }
     },
-    [mesh.identity, mesh.request, mutateThread, replaceThread],
+    [mesh.identity, mesh.request, mutateThread],
   );
 
   sendPromptRef.current = sendPrompt;
@@ -474,6 +523,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     loading,
     runningThreadId,
     error,
+    pendingApprovals,
     refreshThreads,
     selectThread: setActiveThreadId,
     createThread,
@@ -481,6 +531,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     deleteThread,
     deleteMessage,
     updateThread,
+    resolveApproval,
     sendPrompt,
     cancelQueuedPrompt,
     stop,

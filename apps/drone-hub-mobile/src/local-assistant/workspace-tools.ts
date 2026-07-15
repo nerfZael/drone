@@ -356,6 +356,42 @@ export class MobileWorkspaceToolRuntime {
     this.tools = [...selectionTools, ...workspaceTools, ...transferTools];
   }
 
+  private resolveTargetId(
+    capability: WorkspaceCapability,
+    args: Record<string, unknown>,
+  ): string {
+    const requestedTarget = String(args.target ?? args.workspace ?? '').trim();
+    let targetId = requestedTarget;
+    if (!targetId) {
+      const active = this.catalog.active();
+      if (active?.capabilities.includes(capability)) targetId = active.id;
+      else {
+        const eligible = this.catalog
+          .list()
+          .filter((target) => target.capabilities.includes(capability));
+        if (eligible.length === 1) targetId = eligible[0].id;
+      }
+    }
+    const target = this.catalog.resolve(targetId).descriptor;
+    if (!target.capabilities.includes(capability))
+      throw new Error(`Workspace target ${target.label} does not allow ${capability}`);
+    return target.id;
+  }
+
+  resolveExecutionApproval(args: Record<string, unknown>) {
+    const target = this.catalog.resolve(this.resolveTargetId('shell.execute', args)).descriptor;
+    return {
+      requested: args,
+      resolved: {
+        targetId: target.id,
+        targetLabel: target.label,
+        targetKind: target.kind,
+        command: String(args.command ?? ''),
+        timeoutMs: typeof args.timeoutMs === 'number' ? args.timeoutMs : 30 * 60_000,
+      },
+    };
+  }
+
   async execute(input: {
     name: string;
     args: Record<string, unknown>;
@@ -392,24 +428,8 @@ export class MobileWorkspaceToolRuntime {
     }
     const definition = definitions[name];
     if (!definition) throw new Error(`Unsupported workspace tool: ${input.name}`);
-    const requestedTarget = String(input.args.target ?? input.args.workspace ?? '').trim();
-    let targetId = requestedTarget;
-    if (!targetId) {
-      const active = this.catalog.active();
-      if (active?.capabilities.includes(definition.capability)) targetId = active.id;
-      else {
-        const eligible = this.catalog
-          .list()
-          .filter((target) => target.capabilities.includes(definition.capability));
-        if (eligible.length === 1) targetId = eligible[0].id;
-      }
-    }
-    const invocation = this.catalog.beginCall(targetId);
+    const invocation = this.catalog.beginCall(this.resolveTargetId(definition.capability, input.args));
     try {
-      if (!invocation.target.descriptor.capabilities.includes(definition.capability))
-        throw new Error(
-          `Workspace target ${invocation.target.descriptor.label} does not allow ${name}`,
-        );
       const { target: _target, workspace: _workspace, ...args } = input.args;
       const result = await invocation.target.execute({
         callId: `mobile_${createPortableId()}`,

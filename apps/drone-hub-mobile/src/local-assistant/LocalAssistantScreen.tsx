@@ -22,6 +22,7 @@ import {
 } from './local-assistant-model';
 import type { AssistantAppHeaderState } from '../screens/AssistantHomeScreen';
 import { useLatestMessageScroll } from './use-latest-message-scroll';
+import { AssistantApprovalCard } from './AssistantApprovalCard';
 
 export function LocalAssistantScreen({
   drawerOpen,
@@ -172,6 +173,11 @@ export function LocalAssistantScreen({
             onCloneThread: cloneThreadFromHeader,
             cloneDisabled: running,
             onToggleAccess: toggleAccess,
+            autoApprove: thread.autoApprove === true,
+            onToggleAutoApprove: () =>
+              void runAction(() =>
+                assistant.updateThread(thread.id, { autoApprove: !thread.autoApprove }),
+              ),
             onDelete: deleteFromHeader,
           }
         : null,
@@ -185,6 +191,7 @@ export function LocalAssistantScreen({
     settingsOpen,
     thread?.id,
     thread?.title,
+    thread?.autoApprove,
     thread?.workspaceTargets,
     toggleAccess,
   ]);
@@ -353,6 +360,17 @@ export function LocalAssistantScreen({
                 );
             }}
           />
+          {assistant.pendingApprovals
+            .filter((approval) => approval.threadId === thread.id)
+            .map((approval) => (
+              <AssistantApprovalCard
+                key={approval.id}
+                approval={approval}
+                onResolve={(approved) =>
+                  assistant.resolveApproval(thread.id, approval.id, approved)
+                }
+              />
+            ))}
           <ErrorBanner message={error ?? thread.error ?? assistant.error} />
         </ScrollView>
       )}

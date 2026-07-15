@@ -149,7 +149,6 @@ function snapshotWithPreferredActiveThread(snapshot: AssistantSnapshot, preferre
   if (!snapshot.threads.some((thread) => thread.id === threadId)) return snapshot;
   return { ...snapshot, activeThreadId: threadId };
 }
-
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
 const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
 
@@ -174,8 +173,8 @@ function readInitialFilesOpen(): boolean {
   return window.localStorage.getItem(ASSISTANT_FILES_OPEN_STORAGE_KEY) === '1';
 }
 
-function assistantScopeSyncKey(readMode: AssistantScopeMode, writeMode: AssistantScopeMode, droneIds: string[]): string {
-  return `${readMode}\u0000${writeMode}\u0000${droneIds.join('\u0000')}`;
+function assistantScopeSyncKey(readMode: AssistantScopeMode, writeMode: AssistantScopeMode, executeMode: AssistantScopeMode, droneIds: string[]): string {
+  return `${readMode}\u0000${writeMode}\u0000${executeMode}\u0000${droneIds.join('\u0000')}`;
 }
 
 function cleanAssistantScopeIds(ids: unknown[]): string[] {
@@ -212,8 +211,8 @@ function appendAssistantDroneReferences(promptRaw: string, drones: AssistantDron
   return prompt ? `${prompt}\n\n${referenceBlock}` : referenceBlock;
 }
 
-function assistantScopeDroneIds(readMode: AssistantScopeMode, writeMode: AssistantScopeMode, drones: AssistantScopeDrone[]): string[] {
-  if (readMode !== 'selected' && writeMode !== 'selected') return [];
+function assistantScopeDroneIds(readMode: AssistantScopeMode, writeMode: AssistantScopeMode, executeMode: AssistantScopeMode, drones: AssistantScopeDrone[]): string[] {
+  if (readMode !== 'selected' && writeMode !== 'selected' && executeMode !== 'selected') return [];
   return cleanAssistantScopeDrones(drones).map((drone) => drone.id);
 }
 
@@ -240,8 +239,9 @@ function assistantDroneDropTargetFromDragData(data: ReturnType<typeof parseDrone
 function assistantScopeKeyFromScope(scope: AssistantAccessScope): string {
   const readMode: AssistantScopeMode = scope.readMode === 'selected' ? 'selected' : 'all';
   const writeMode: AssistantScopeMode = scope.writeMode === 'selected' ? 'selected' : 'all';
-  const ids = readMode === 'selected' || writeMode === 'selected' ? cleanAssistantScopeIds(scope.droneIds) : [];
-  return assistantScopeSyncKey(readMode, writeMode, ids);
+  const executeMode: AssistantScopeMode = scope.executeMode === 'selected' ? 'selected' : 'all';
+  const ids = readMode === 'selected' || writeMode === 'selected' || executeMode === 'selected' ? cleanAssistantScopeIds(scope.droneIds) : [];
+  return assistantScopeSyncKey(readMode, writeMode, executeMode, ids);
 }
 
 function assistantScopeUpdatedAtMs(scope: AssistantAccessScope | null | undefined): number {
@@ -390,6 +390,7 @@ export function AssistantDock() {
   const [artifactsError, setArtifactsError] = React.useState<string | null>(null);
   const [scopeReadMode, setScopeReadMode] = React.useState<AssistantScopeMode>('all');
   const [scopeWriteMode, setScopeWriteMode] = React.useState<AssistantScopeMode>('all');
+  const [scopeExecuteMode, setScopeExecuteMode] = React.useState<AssistantScopeMode>('all');
   const [scopeDrones, setScopeDrones] = React.useState<AssistantScopeDrone[]>([]);
   const [scopeSyncBusy, setScopeSyncBusy] = React.useState(false);
   const [droneNameById, setDroneNameById] = React.useState<AssistantDroneNameMap>({});
@@ -1078,6 +1079,7 @@ export function AssistantDock() {
     const ids = cleanAssistantScopeIds(Array.isArray(scope.droneIds) ? scope.droneIds : []);
     const readMode: AssistantScopeMode = scope.readMode === 'selected' ? 'selected' : 'all';
     const writeMode: AssistantScopeMode = scope.writeMode === 'selected' ? 'selected' : 'all';
+    const executeMode: AssistantScopeMode = scope.executeMode === 'selected' ? 'selected' : 'all';
     const incomingKey = assistantScopeKeyFromScope(scope);
     const incomingUpdatedAtMs = assistantScopeUpdatedAtMs(scope);
     const pending = scopeSyncPromiseRef.current;
@@ -1092,6 +1094,7 @@ export function AssistantDock() {
     lastSyncedScopeUpdatedAtMsRef.current = incomingUpdatedAtMs;
     setScopeReadMode(readMode);
     setScopeWriteMode(writeMode);
+    setScopeExecuteMode(executeMode);
     if (ids.length === 0) {
       setScopeDrones([]);
       return;
@@ -1106,6 +1109,7 @@ export function AssistantDock() {
   }, [
     activeAccessScope?.readMode,
     activeAccessScope?.writeMode,
+    activeAccessScope?.executeMode,
     activeAccessScope?.updatedAt,
     activeAccessScopeDroneIdsKey,
     resolveScopeDroneNames,
@@ -1115,13 +1119,15 @@ export function AssistantDock() {
   const saveScopeDraft = React.useCallback(async (draft: AssistantScopeDraft): Promise<boolean> => {
     const readMode = draft.readMode === 'selected' ? 'selected' : 'all';
     const writeMode = draft.writeMode === 'selected' ? 'selected' : 'all';
+    const executeMode = draft.executeMode === 'selected' ? 'selected' : 'all';
     const cleanDrones = cleanAssistantScopeDrones(draft.drones);
-    const visibleDrones = readMode === 'selected' || writeMode === 'selected' ? cleanDrones : [];
-    const scopedDroneIds = assistantScopeDroneIds(readMode, writeMode, visibleDrones);
-    const syncKey = assistantScopeSyncKey(readMode, writeMode, scopedDroneIds);
+    const visibleDrones = readMode === 'selected' || writeMode === 'selected' || executeMode === 'selected' ? cleanDrones : [];
+    const scopedDroneIds = assistantScopeDroneIds(readMode, writeMode, executeMode, visibleDrones);
+    const syncKey = assistantScopeSyncKey(readMode, writeMode, executeMode, scopedDroneIds);
     currentScopeKeyRef.current = syncKey;
     setScopeReadMode(readMode);
     setScopeWriteMode(writeMode);
+    setScopeExecuteMode(executeMode);
     setScopeDrones(visibleDrones);
     if (!activeThread) return true;
     if (lastSyncedScopeKeyRef.current === syncKey && !scopeSyncPromiseRef.current) return true;
@@ -1137,12 +1143,13 @@ export function AssistantDock() {
         threadId,
         readMode,
         writeMode,
+        executeMode,
         droneIds: scopedDroneIds,
       }),
     })
       .then((data) => {
         if (scopeSaveRequestIdRef.current !== requestId) return true;
-        const savedScope = data.accessScope ?? { readMode, writeMode, droneIds: scopedDroneIds, updatedAt: new Date().toISOString() };
+        const savedScope = data.accessScope ?? { readMode, writeMode, executeMode, droneIds: scopedDroneIds, updatedAt: new Date().toISOString() };
         lastSyncedScopeKeyRef.current = assistantScopeKeyFromScope(savedScope);
         lastSyncedScopeUpdatedAtMsRef.current = assistantScopeUpdatedAtMs(savedScope);
         return true;
@@ -1175,7 +1182,7 @@ export function AssistantDock() {
     if (clean.length === 0) return;
     const byId = new Map(scopeDrones.map((drone) => [drone.id, drone]));
     for (const drone of clean) byId.set(drone.id, drone);
-    void saveScopeDraft({ readMode: 'selected', writeMode: 'selected', drones: Array.from(byId.values()) });
+    void saveScopeDraft({ readMode: 'selected', writeMode: 'selected', executeMode: 'selected', drones: Array.from(byId.values()) });
   }, [saveScopeDraft, scopeDrones]);
 
   const addReferencedDrones = React.useCallback((drones: AssistantDroneReference[]) => {
@@ -1200,17 +1207,22 @@ export function AssistantDock() {
     void saveScopeDraft({
       readMode: scopeReadMode,
       writeMode: scopeWriteMode,
+      executeMode: scopeExecuteMode,
       drones: scopeDrones.filter((drone) => drone.id !== droneId),
     });
-  }, [saveScopeDraft, scopeDrones, scopeReadMode, scopeWriteMode]);
+  }, [saveScopeDraft, scopeDrones, scopeExecuteMode, scopeReadMode, scopeWriteMode]);
 
   const updateScopeReadMode = React.useCallback((mode: AssistantScopeMode) => {
-    void saveScopeDraft({ readMode: mode, writeMode: scopeWriteMode, drones: scopeDrones });
-  }, [saveScopeDraft, scopeDrones, scopeWriteMode]);
+    void saveScopeDraft({ readMode: mode, writeMode: scopeWriteMode, executeMode: scopeExecuteMode, drones: scopeDrones });
+  }, [saveScopeDraft, scopeDrones, scopeExecuteMode, scopeWriteMode]);
 
   const updateScopeWriteMode = React.useCallback((mode: AssistantScopeMode) => {
-    void saveScopeDraft({ readMode: scopeReadMode, writeMode: mode, drones: scopeDrones });
-  }, [saveScopeDraft, scopeDrones, scopeReadMode]);
+    void saveScopeDraft({ readMode: scopeReadMode, writeMode: mode, executeMode: scopeExecuteMode, drones: scopeDrones });
+  }, [saveScopeDraft, scopeDrones, scopeExecuteMode, scopeReadMode]);
+
+  const updateScopeExecuteMode = React.useCallback((mode: AssistantScopeMode) => {
+    void saveScopeDraft({ readMode: scopeReadMode, writeMode: scopeWriteMode, executeMode: mode, drones: scopeDrones });
+  }, [saveScopeDraft, scopeDrones, scopeReadMode, scopeWriteMode]);
 
   useDndMonitor({
     onDragEnd: (event) => {
@@ -2265,8 +2277,8 @@ export function AssistantDock() {
             onClick={() => void updateThread({ autoApprove: !autoApprove })}
             disabled={!activeThread}
             aria-pressed={autoApprove}
-            aria-label="Toggle auto-approve proposals"
-            title={autoApprove ? 'Auto-approve proposals is on' : 'Auto-approve proposals is off'}
+            aria-label="Toggle auto-approve requests"
+            title={autoApprove ? 'Auto-approve requests is on' : 'Auto-approve requests is off'}
             className={`h-8 w-8 flex-shrink-0 rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
               autoApprove
                 ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
@@ -2338,11 +2350,12 @@ export function AssistantDock() {
           <div className="flex flex-shrink-0 items-center gap-1">
             <ScopeModeControl label="R" mode={scopeReadMode} onChange={updateScopeReadMode} />
             <ScopeModeControl label="W" mode={scopeWriteMode} onChange={updateScopeWriteMode} />
+            <ScopeModeControl label="X" mode={scopeExecuteMode} onChange={updateScopeExecuteMode} />
           </div>
           <div className="min-w-[120px] flex-1 overflow-hidden">
             {scopeDrones.length === 0 ? (
               <div className="truncate text-[10px] text-[var(--muted-dim)]">
-                {scopeReadMode === 'selected' || scopeWriteMode === 'selected'
+                {scopeReadMode === 'selected' || scopeWriteMode === 'selected' || scopeExecuteMode === 'selected'
                   ? 'No selected drones. Drop drones here to allow existing-drone access.'
                   : 'Drop drones here to limit existing-drone access.'}
               </div>

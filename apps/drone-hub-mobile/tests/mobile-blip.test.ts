@@ -343,6 +343,7 @@ describe('phone Blip session', () => {
       },
     );
     const previews: string[] = [];
+    const approvals: any[] = [];
     await runMobileBlip({
       provider: 'openai',
       apiKey: 'test-key',
@@ -352,8 +353,19 @@ describe('phone Blip session', () => {
       history: [],
       workspaceRuntime,
       signal: new AbortController().signal,
+      requestExecuteApproval: async (approval) => {
+        approvals.push(approval);
+        return true;
+      },
       onMessages: async () => undefined,
       onStreamingMessages: (messages) => previews.push(JSON.stringify(messages)),
+    });
+    expect(approvals).toHaveLength(1);
+    expect(approvals[0]).toMatchObject({
+      toolName: 'bash',
+      args: {
+        resolved: { targetLabel: 'Server / Project B', command: 'yarn build' },
+      },
     });
     expect(previews.some((preview) => preview.includes('building…'))).toBe(true);
   });

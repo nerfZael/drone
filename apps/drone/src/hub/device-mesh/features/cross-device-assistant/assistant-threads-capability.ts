@@ -30,8 +30,7 @@ function compactQueuedPrompt(prompt: any) {
     id: String(prompt?.id ?? '').slice(0, 160),
     prompt: truncateUtf8(prompt?.prompt, 768),
     createdAt: String(prompt?.createdAt ?? ''),
-    status:
-      prompt?.status === 'running' || prompt?.status === 'failed' ? prompt.status : 'queued',
+    status: prompt?.status === 'running' || prompt?.status === 'failed' ? prompt.status : 'queued',
     error: prompt?.error ? truncateUtf8(prompt.error, 512) : null,
     imageCount: Math.max(0, Number(prompt?.imageCount ?? 0) || 0),
   };
@@ -52,6 +51,7 @@ function compactThread(thread: any, workspaceTargets: unknown[], includeQueuedPr
     provider: String(thread?.provider ?? ''),
     model: String(thread?.model ?? ''),
     thinkingLevel: String(thread?.thinkingLevel ?? ''),
+    autoApprove: thread?.autoApprove === true,
     messageCount: Number(thread?.messageCount ?? 0),
     promptDeliveryMode: thread?.promptDeliveryMode === 'asap' ? 'asap' : 'queue',
     queuedPromptCount: queuedPromptSource.length,
@@ -65,10 +65,10 @@ function threadsFromSnapshot(snapshot: any): any[] {
   return Array.isArray(snapshot?.threads) ? snapshot.threads : [];
 }
 
-function boundedArguments(value: unknown): unknown {
+function boundedArguments(value: unknown, maxBytes = 2_000): unknown {
   if (value == null) return undefined;
   try {
-    return Buffer.byteLength(JSON.stringify(value)) <= 2_000 ? value : { truncated: true };
+    return Buffer.byteLength(JSON.stringify(value)) <= maxBytes ? value : { truncated: true };
   } catch {
     return { truncated: true };
   }
@@ -244,13 +244,32 @@ export function createAssistantThreadsCapability(
         const thread = threadsFromSnapshot(snapshot).find((item) => item.id === threadId);
         const compact = thread ? await withTarget(thread) : null;
         const streamingMessages = boundedStreamingMessages(snapshot);
+        const pendingApprovals = (Array.isArray(snapshot?.pendingApprovals)
+          ? snapshot.pendingApprovals
+          : []
+        )
+          .filter(
+            (approval: any) =>
+              String(approval?.threadId ?? '') === threadId && approval?.status === 'pending',
+          )
+          .slice(-8)
+          .map((approval: any) => ({
+            id: String(approval?.id ?? ''),
+            threadId,
+            toolName: String(approval?.toolName ?? ''),
+            label: String(approval?.label ?? 'Approval required').slice(0, 160),
+            args: boundedArguments(approval?.args, 20_000),
+            createdAt: String(approval?.createdAt ?? ''),
+            status: 'pending',
+          }));
         const nonHistoryBytes = Buffer.byteLength(
-          JSON.stringify({ thread: compact, streamingMessages }),
+          JSON.stringify({ thread: compact, streamingMessages, pendingApprovals }),
         );
         return {
           thread: compact,
           history: boundedAssistantHistory(history, 205 * 1024 - nonHistoryBytes),
           streamingMessages,
+          pendingApprovals,
         };
       }
       if (operation === 'thread.delete') {
@@ -270,20 +289,38 @@ export function createAssistantThreadsCapability(
         return { deleted: true, threadId, messageId, deleteFollowing };
       }
       if (operation === 'thread.update') {
+        const patch: Record<string, unknown> = {};
+        if (payload.provider != null) patch.provider = required(payload.provider, 'provider');
+        if (payload.model != null) patch.model = required(payload.model, 'model');
+        if (payload.thinkingLevel) patch.thinkingLevel = String(payload.thinkingLevel);
+        if (payload.autoApprove != null) patch.autoApprove = payload.autoApprove === true;
+        if (Object.keys(patch).length === 0)
+          throw Object.assign(new Error('thread update is empty'), { code: 'INVALID_REQUEST' });
         const snapshot = await localHubRequest(
           access,
           `/api/assistant/threads/${encodeURIComponent(threadId)}`,
           {
             method: 'PATCH',
-            body: JSON.stringify({
-              provider: required(payload.provider, 'provider'),
-              model: required(payload.model, 'model'),
-              ...(payload.thinkingLevel ? { thinkingLevel: String(payload.thinkingLevel) } : {}),
-            }),
+            body: JSON.stringify(patch),
           },
         );
         const thread = threadsFromSnapshot(snapshot).find((item) => item.id === threadId);
         return { thread: thread ? await withTarget(thread) : null };
+      }
+      if (operation === 'approval.resolve') {
+        const approvalId = required(payload.approvalId, 'approval id');
+        const decision = payload.approved === true ? 'approve' : 'deny';
+        const snapshot = await localHubRequest(
+          access,
+          `/api/assistant/threads/${encodeURIComponent(threadId)}/approvals/${encodeURIComponent(approvalId)}/${decision}`,
+          { method: 'POST', body: '{}' },
+        );
+        const thread = threadsFromSnapshot(snapshot).find((item) => item.id === threadId);
+        return {
+          resolved: true,
+          approved: payload.approved === true,
+          thread: thread ? await withTarget(thread) : null,
+        };
       }
       if (operation === 'thread.stop') {
         // Queue cancellation is a narrower form of the existing stop permission. Keeping it on

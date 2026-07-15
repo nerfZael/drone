@@ -36,6 +36,7 @@ export type AssistantChatIdleSubscription = {
 export type AssistantAccessScope = {
   readMode: 'all' | 'selected';
   writeMode: 'all' | 'selected';
+  executeMode: 'all' | 'selected';
   droneIds: string[];
   updatedAt: string;
 };
@@ -105,6 +106,7 @@ export type AssistantScopeDrone = { id: string; name: string };
 export type AssistantScopeDraft = {
   readMode: AssistantScopeMode;
   writeMode: AssistantScopeMode;
+  executeMode: AssistantScopeMode;
   drones: AssistantScopeDrone[];
 };
 export type PendingAssistantScopeSave = {
@@ -164,7 +166,6 @@ export type AssistantThreadSystemPromptSettings = {
     runtimeAppendix: string;
   };
 };
-
 
 export type AssistantArtifactSummary = {
   path: string;

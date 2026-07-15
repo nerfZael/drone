@@ -86,6 +86,23 @@ function approvalSummary(approval: AssistantApproval): {
     };
   }
 
+  if (approval.toolName === 'bash') {
+    const resolved = args.resolved ?? args;
+    const target = String(
+      resolved.targetLabel ?? resolved.droneName ?? resolved.targetId ?? resolved.droneId ?? '',
+    ).trim();
+    const command = String(resolved.command ?? args.command ?? '').trim();
+    return {
+      title: 'Execute Bash command',
+      rows: [
+        ...(target ? [{ label: 'Target', value: target }] : []),
+        ...(resolved.cwd ? [{ label: 'Working directory', value: String(resolved.cwd) }] : []),
+      ],
+      markdownLabel: 'Command',
+      markdown: command ? `\`\`\`bash\n${command}\n\`\`\`` : '',
+    };
+  }
+
   return {
     title: approval.label || 'Approval required',
     rows: [],

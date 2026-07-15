@@ -1,11 +1,5 @@
 import React from 'react';
-import {
-  Animated,
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  View,
-} from 'react-native';
+import { Animated, KeyboardAvoidingView, Platform, StyleSheet, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type {
   AppDrawerNavigationItem,
@@ -22,6 +16,8 @@ export type AssistantAppHeaderState = {
   accessOpen?: boolean;
   accessDisabled?: boolean;
   onToggleAccess?(): void;
+  autoApprove?: boolean;
+  onToggleAutoApprove?(): void;
   onNewThread?(): void;
   onCloneThread?(): void;
   cloneDisabled?: boolean;

@@ -4385,12 +4385,7 @@ async function writeAssistantTransferBytes(
 ): Promise<void> {
   let written = 0;
   while (written < buffer.length) {
-    const result = await handle.write(
-      buffer,
-      written,
-      buffer.length - written,
-      position + written,
-    );
+    const result = await handle.write(buffer, written, buffer.length - written, position + written);
     if (result.bytesWritten <= 0) throw new Error('destination stopped writing transfer data');
     written += result.bytesWritten;
   }
@@ -4572,10 +4567,7 @@ async function assistantWriteDroneTransferChunk(opts: {
       const info = await handle.stat();
       if (info.size === offset + data.length) {
         const existing = Buffer.alloc(data.length);
-        if (
-          (await readAssistantTransferBytes(handle, existing, offset)) &&
-          existing.equals(data)
-        )
+        if ((await readAssistantTransferBytes(handle, existing, offset)) && existing.equals(data))
           return { offset: info.size };
       }
       if (info.size !== offset)
@@ -7499,9 +7491,7 @@ function parseDiscoveredModelsFromOutput(raw: string): DiscoveredModelOption[] {
       ...(opts?.isDefault ? { isDefault: true } : {}),
       ...(opts?.isCurrent ? { isCurrent: true } : {}),
       ...(opts?.reasoningLevels?.length ? { reasoningLevels: opts.reasoningLevels } : {}),
-      ...(opts?.defaultReasoningLevel
-        ? { defaultReasoningLevel: opts.defaultReasoningLevel }
-        : {}),
+      ...(opts?.defaultReasoningLevel ? { defaultReasoningLevel: opts.defaultReasoningLevel } : {}),
     });
   };
 
@@ -7614,9 +7604,7 @@ function parseCodexModelsCache(raw: string): DiscoveredModelOption[] {
       ...(opts?.isDefault ? { isDefault: true } : {}),
       ...(opts?.isCurrent ? { isCurrent: true } : {}),
       ...(opts?.reasoningLevels?.length ? { reasoningLevels: opts.reasoningLevels } : {}),
-      ...(opts?.defaultReasoningLevel
-        ? { defaultReasoningLevel: opts.defaultReasoningLevel }
-        : {}),
+      ...(opts?.defaultReasoningLevel ? { defaultReasoningLevel: opts.defaultReasoningLevel } : {}),
     });
   };
   try {
@@ -15278,10 +15266,7 @@ async function autoRenameGeneratedChatFromFirstPrompt(opts: {
       apiKey: llm.apiKey,
     });
     const current = readChatFromStore({ droneId: opts.droneId, chatName: opts.chatName });
-    if (
-      !current.chat ||
-      String(current.chat?.createdAt ?? '') !== opts.expectedCreatedAt
-    ) return;
+    if (!current.chat || String(current.chat?.createdAt ?? '') !== opts.expectedCreatedAt) return;
 
     const existing = new Set(listChatsFromStore({ droneId: opts.droneId }).chats);
     let candidate = '';
@@ -17805,9 +17790,9 @@ export async function startDroneHubApiServer(opts: {
                   'directories.create',
                   'directories.delete',
                   'patch.apply',
-                  'shell.execute',
                 ] as const)
               : []),
+            ...(drone.canExecute ? (['shell.execute'] as const) : []),
           ],
           execute: async (call) =>
             assistantService.executeDroneWorkspaceTool(threadId, drone.id, call, {
@@ -18107,6 +18092,7 @@ export async function startDroneHubApiServer(opts: {
             const target = targetCatalog.resolve(args.target);
             if (targetCatalog.size() > 1) args.target = target.descriptor.id;
             if (target instanceof DroneWorkspaceTarget) args = { ...args, droneId: target.droneId };
+            else if (toolName === 'bash') args = { ...args, workspaceTarget: target.descriptor };
           }
           const decision = await assistantService.preflightBlipTool(
             threadId,
@@ -21848,7 +21834,11 @@ export async function startDroneHubApiServer(opts: {
               json(
                 res,
                 200,
-                await assistantService.approve(approvalId, assistantParts[6] === 'approve'),
+                await assistantService.approve(
+                  approvalId,
+                  assistantParts[6] === 'approve',
+                  threadId,
+                ),
               );
             } catch (e: any) {
               json(res, /unknown approval/i.test(String(e?.message ?? e)) ? 404 : 400, {
@@ -23732,8 +23722,7 @@ export async function startDroneHubApiServer(opts: {
         }
         const [droneId, drone] = candidate;
         const discovered = await discoverAndRememberModelsForBuiltinAgent({
-          containerName:
-            String(drone?.containerName ?? drone?.name ?? droneId).trim() || droneId,
+          containerName: String(drone?.containerName ?? drone?.name ?? droneId).trim() || droneId,
           containerPort: Number(drone?.containerPort ?? 7777),
           runtime,
           droneName: droneId,
@@ -24849,9 +24838,7 @@ export async function startDroneHubApiServer(opts: {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
         }
-        const seedReasoning = normalizeChatReasoning(
-          body?.seedReasoning ?? body?.seed?.reasoning,
-        );
+        const seedReasoning = normalizeChatReasoning(body?.seedReasoning ?? body?.seed?.reasoning);
         if (
           seedReasoning &&
           !(seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip'))

@@ -10,6 +10,43 @@ afterEach(() => {
 });
 
 describe('device mesh delete actions', () => {
+  test('forwards assistant approval decisions to the local Hub', async () => {
+    let request: { url: string; method: string } | null = null;
+    globalThis.fetch = (async (input, init) => {
+      request = { url: String(input), method: String(init?.method ?? 'GET') };
+      return new Response(
+        JSON.stringify({
+          activeThreadId: 'thread one',
+          threads: [
+            {
+              id: 'thread one',
+              title: 'Thread',
+              status: 'running',
+              autoApprove: false,
+            },
+          ],
+        }),
+        { status: 200, headers: { 'content-type': 'application/json' } },
+      );
+    }) as typeof fetch;
+    const capability = createAssistantThreadsCapability(
+      { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+      new CrossDeviceAssistantPolicyStore('/tmp/drone-unused-assistant-policy.json'),
+    );
+
+    await expect(
+      capability.invoke('approval.resolve', {
+        threadId: 'thread one',
+        approvalId: 'approval/one',
+        approved: true,
+      }),
+    ).resolves.toMatchObject({ resolved: true, approved: true });
+    expect(request).toEqual({
+      url: 'http://127.0.0.1:7777/api/assistant/threads/thread%20one/approvals/approval%2Fone/approve',
+      method: 'POST',
+    });
+  });
+
   test('forwards assistant thread deletion to the local Hub', async () => {
     let request: { url: string; method: string } | null = null;
     globalThis.fetch = (async (input, init) => {

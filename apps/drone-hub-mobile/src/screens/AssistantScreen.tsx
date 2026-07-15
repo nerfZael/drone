@@ -20,6 +20,10 @@ import { latestAssistantThread } from '../local-assistant/latest-assistant-threa
 import { nextAssistantThreadTitle } from '../local-assistant/next-assistant-thread-title';
 import { clonedAssistantThreadTitle } from '../local-assistant/cloned-assistant-thread-title';
 import { useLatestMessageScroll } from '../local-assistant/use-latest-message-scroll';
+import {
+  AssistantApprovalCard,
+  type MobileAssistantApproval,
+} from '../local-assistant/AssistantApprovalCard';
 import type { AssistantAppHeaderState } from './AssistantHomeScreen';
 
 type Thread = {
@@ -31,6 +35,7 @@ type Thread = {
   model?: string;
   provider?: string;
   thinkingLevel?: string;
+  autoApprove?: boolean;
   error: string | null;
   messageCount: number;
   promptDeliveryMode?: 'queue' | 'asap';
@@ -138,6 +143,8 @@ export function AssistantScreen({
   const [selectedId, setSelectedId] = React.useState('');
   const [entries, setEntries] = React.useState<any[]>([]);
   const [streamingMessages, setStreamingMessages] = React.useState<AssistantMessage[]>([]);
+  const [pendingApprovals, setPendingApprovals] = React.useState<MobileAssistantApproval[]>([]);
+  const [approvalBusyId, setApprovalBusyId] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
   const [busy, setBusy] = React.useState('');
   const [threadsLoaded, setThreadsLoaded] = React.useState(false);
@@ -173,6 +180,8 @@ export function AssistantScreen({
     setSelectedId('');
     setEntries([]);
     setStreamingMessages([]);
+    setPendingApprovals([]);
+    setApprovalBusyId('');
     setPrompt('');
     setBusy('');
     setThreadsLoaded(false);
@@ -276,6 +285,7 @@ export function AssistantScreen({
         const nextStreaming = Array.isArray(result?.streamingMessages)
           ? result.streamingMessages
           : [];
+        setPendingApprovals(Array.isArray(result?.pendingApprovals) ? result.pendingApprovals : []);
         setEntries(nextEntries);
         setStreamingMessages((current) => {
           if (nextStreaming.length > 0) return nextStreaming;
@@ -453,9 +463,7 @@ export function AssistantScreen({
         return {
           ...message,
           ...(entry?.id ? { id: String(entry.id) } : {}),
-          ...(Number.isFinite(Number(entry?.sequence))
-            ? { sequence: Number(entry.sequence) }
-            : {}),
+          ...(Number.isFinite(Number(entry?.sequence)) ? { sequence: Number(entry.sequence) } : {}),
           ...(message?.createdAt == null && message?.timestamp == null && entry?.timestamp
             ? { timestamp: entry.timestamp }
             : {}),
@@ -508,6 +516,21 @@ export function AssistantScreen({
     [selected?.queuedPrompts],
   );
   const activeHome = homes.find((home) => home.id === homeId);
+  const updateAutoApprove = React.useCallback(
+    async (thread: Thread) => {
+      const destinationId = homeId;
+      const result = await mesh.request(destinationId, 'assistant-threads', 'thread.update', {
+        threadId: thread.id,
+        autoApprove: !thread.autoApprove,
+      });
+      if (homeIdRef.current !== destinationId || !result?.thread) return;
+      setThreads((current) =>
+        current.map((item) => (item.id === thread.id ? result.thread : item)),
+      );
+      if (result.thread.autoApprove) setPendingApprovals([]);
+    },
+    [homeId, mesh.request],
+  );
   const selectedWorkspaceTargets = React.useMemo(
     () =>
       (
@@ -525,6 +548,8 @@ export function AssistantScreen({
             onNewThread: () => void createThread(),
             onCloneThread: () => void cloneThread(selected),
             cloneDisabled: running,
+            autoApprove: selected.autoApprove === true,
+            onToggleAutoApprove: () => void run('auto-approve', () => updateAutoApprove(selected)),
             onDelete: () => setDeleteCandidate(selected),
           }
         : null,
@@ -537,7 +562,9 @@ export function AssistantScreen({
     onHeaderChange,
     selected?.id,
     selected?.title,
+    selected?.autoApprove,
     selectedWorkspaceTargets,
+    updateAutoApprove,
   ]);
   React.useEffect(() => () => onHeaderChange(null), [onHeaderChange]);
 
@@ -621,6 +648,32 @@ export function AssistantScreen({
               cancellingId={cancellingPromptId}
               onCancel={cancelQueuedPrompt}
             />
+            {pendingApprovals.map((approval) => (
+              <AssistantApprovalCard
+                key={approval.id}
+                approval={approval}
+                busy={approvalBusyId === approval.id}
+                onResolve={(approved) => {
+                  if (!selected || approvalBusyId) return;
+                  setApprovalBusyId(approval.id);
+                  setError(null);
+                  void mesh
+                    .request(homeId, 'assistant-threads', 'approval.resolve', {
+                      threadId: selected.id,
+                      approvalId: approval.id,
+                      approved,
+                    })
+                    .then(() => {
+                      setPendingApprovals((current) =>
+                        current.filter((item) => item.id !== approval.id),
+                      );
+                      return openThread(selected.id, true);
+                    })
+                    .catch((nextError: any) => setError(nextError?.message ?? String(nextError)))
+                    .finally(() => setApprovalBusyId(''));
+                }}
+              />
+            ))}
           </ScrollView>
           <AssistantComposer
             voiceResetKey={`${homeId}:${selected.id}`}

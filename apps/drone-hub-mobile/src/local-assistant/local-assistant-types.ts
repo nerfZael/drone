@@ -41,9 +41,19 @@ export type LocalAssistantThread = {
   thinkingLevel: LocalAssistantThinkingLevel;
   status: 'idle' | 'running' | 'error';
   error: string | null;
+  autoApprove?: boolean;
   workspaceTargets: LocalWorkspaceTarget[];
   messages: LocalAssistantMessage[];
   queuedPrompts: LocalAssistantQueuedPrompt[];
+};
+
+export type LocalAssistantApproval = {
+  id: string;
+  threadId: string;
+  toolName: 'bash';
+  label: string;
+  args: any;
+  createdAt: string;
 };
 
 export type LocalAssistantSettings = {

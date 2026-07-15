@@ -32,10 +32,7 @@ import {
   type DrawerDevicePickerItem,
 } from '../local-assistant/AssistantThreadDrawer';
 import { DevicesScreen } from '../screens/DevicesScreen';
-import {
-  AssistantHomeScreen,
-  type AssistantAppHeaderState,
-} from '../screens/AssistantHomeScreen';
+import { AssistantHomeScreen, type AssistantAppHeaderState } from '../screens/AssistantHomeScreen';
 import { DronesScreen, type DronesAppHeaderState } from '../screens/DronesScreen';
 import { PairScreen } from '../screens/PairScreen';
 import { SettingsScreen, type SettingsTab } from '../screens/SettingsScreen';
@@ -131,7 +128,9 @@ function Shell() {
   const [settingsTab, setSettingsTab] = React.useState<SettingsTab>('assistant');
   const [headerMenuOpen, setHeaderMenuOpen] = React.useState(false);
   const [dronesHeader, setDronesHeader] = React.useState<DronesAppHeaderState | null>(null);
-  const [assistantHeader, setAssistantHeader] = React.useState<AssistantAppHeaderState | null>(null);
+  const [assistantHeader, setAssistantHeader] = React.useState<AssistantAppHeaderState | null>(
+    null,
+  );
   const handleDronesHeaderChange = React.useCallback(
     (header: DronesAppHeaderState | null) => setDronesHeader(header),
     [],
@@ -143,9 +142,7 @@ function Shell() {
   const devicePickerItems = React.useMemo<DrawerDevicePickerItem[]>(() => {
     const currentId = mesh.identity?.id ?? '';
     const current = mesh.devices.find((device) => device.id === currentId);
-    const others = mesh.devices.filter(
-      (device) => device.id !== currentId && !device.revokedAt,
-    );
+    const others = mesh.devices.filter((device) => device.id !== currentId && !device.revokedAt);
     return [
       ...(currentId
         ? [
@@ -278,8 +275,7 @@ function Shell() {
       )[tab];
   const hasContextHeader = Boolean(
     !pairingVisible &&
-      ((tab === 'drones' && dronesHeader) ||
-        (tab === 'assistant' && assistantHeader)),
+    ((tab === 'drones' && dronesHeader) || (tab === 'assistant' && assistantHeader)),
   );
   const headerMenuActions: HeaderMenuAction[] = !pairingVisible
     ? tab === 'assistant' && assistantHeader
@@ -312,6 +308,18 @@ function Shell() {
                   label: assistantHeader.accessOpen ? 'Return to chat' : 'Edit thread access',
                   disabled: assistantHeader.accessDisabled,
                   onPress: assistantHeader.onToggleAccess,
+                },
+              ]
+            : []),
+          ...(assistantHeader.onToggleAutoApprove
+            ? [
+                {
+                  id: 'auto-approve',
+                  label: assistantHeader.autoApprove
+                    ? 'Disable auto-approve requests'
+                    : 'Auto-approve requests',
+                  icon: Check,
+                  onPress: assistantHeader.onToggleAutoApprove,
                 },
               ]
             : []),
@@ -487,20 +495,14 @@ function Shell() {
               ]}
             >
               <View
-                style={[
-                  styles.draftCheckbox,
-                  dronesHeader.draft && styles.draftCheckboxActive,
-                ]}
+                style={[styles.draftCheckbox, dronesHeader.draft && styles.draftCheckboxActive]}
               >
                 {dronesHeader.draft ? (
                   <Check color={colors.crust} size={12} strokeWidth={3} />
                 ) : null}
               </View>
               <Text
-                style={[
-                  styles.draftActionText,
-                  dronesHeader.draft && styles.draftActionTextActive,
-                ]}
+                style={[styles.draftActionText, dronesHeader.draft && styles.draftActionTextActive]}
               >
                 Draft
               </Text>

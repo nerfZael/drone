@@ -259,6 +259,7 @@ type AssistantAppContext = {
 type AssistantAccessScope = {
   readMode: 'all' | 'selected';
   writeMode: 'all' | 'selected';
+  executeMode: 'all' | 'selected';
   droneIds: string[];
   updatedAt: string;
 };
@@ -1543,6 +1544,7 @@ function assistantRealtimeToolOutput(value: unknown): string {
 function makeAssistantAccessScope(input?: {
   readMode?: unknown;
   writeMode?: unknown;
+  executeMode?: unknown;
   droneIds?: unknown;
   updatedAt?: unknown;
 }): AssistantAccessScope {
@@ -1558,6 +1560,12 @@ function makeAssistantAccessScope(input?: {
       .toLowerCase() === 'selected'
       ? 'selected'
       : 'all';
+  const executeMode =
+    String(input?.executeMode ?? input?.writeMode ?? '')
+      .trim()
+      .toLowerCase() === 'selected'
+      ? 'selected'
+      : 'all';
   const rawIds = Array.isArray(input?.droneIds) ? input.droneIds : [];
   const droneIds = Array.from(
     new Set(rawIds.map((item) => cleanOptionalString(item)).filter(Boolean)),
@@ -1565,9 +1573,21 @@ function makeAssistantAccessScope(input?: {
   return {
     readMode,
     writeMode,
-    droneIds: readMode === 'selected' || writeMode === 'selected' ? droneIds : [],
+    executeMode,
+    droneIds:
+      readMode === 'selected' || writeMode === 'selected' || executeMode === 'selected'
+        ? droneIds
+        : [],
     updatedAt: String(input?.updatedAt ?? '').trim() || nowIso(),
   };
+}
+
+function makeDefaultAssistantAccessScope(droneIds: string[] = []): AssistantAccessScope {
+  return makeAssistantAccessScope({
+    writeMode: 'selected',
+    executeMode: 'selected',
+    droneIds,
+  });
 }
 
 function describeAssistantAccessMode(
@@ -2091,6 +2111,7 @@ export class HubAssistantService {
     mode?: unknown;
     readMode?: unknown;
     writeMode?: unknown;
+    executeMode?: unknown;
     droneIds?: unknown;
   }): Promise<AssistantAccessScope> {
     await this.ensureLoaded();
@@ -2100,6 +2121,7 @@ export class HubAssistantService {
     thread.accessScope = makeAssistantAccessScope({
       readMode: (input as any).readMode ?? input.mode,
       writeMode: (input as any).writeMode ?? input.mode,
+      executeMode: (input as any).executeMode ?? (input as any).writeMode ?? input.mode,
       droneIds: input.droneIds,
       updatedAt: nowIso(),
     });
@@ -2119,18 +2141,23 @@ export class HubAssistantService {
   }
 
   private allowedDroneIdSet(
-    kind: 'read' | 'write' = 'read',
+    kind: 'read' | 'write' | 'execute' = 'read',
     threadId?: string,
   ): Set<string> | null {
     const accessScope = this.activeAccessScope(threadId);
-    const mode = kind === 'write' ? accessScope.writeMode : accessScope.readMode;
+    const mode =
+      kind === 'write'
+        ? accessScope.writeMode
+        : kind === 'execute'
+          ? accessScope.executeMode
+          : accessScope.readMode;
     if (mode !== 'selected') return null;
     return new Set(accessScope.droneIds);
   }
 
   private async requireDroneInScope(
     droneRef: unknown,
-    kind: 'read' | 'write' = 'read',
+    kind: 'read' | 'write' | 'execute' = 'read',
     threadId?: string,
   ): Promise<string> {
     const regAny: any = await loadRegistry();
@@ -2774,15 +2801,19 @@ export class HubAssistantService {
 
   async workspaceDrones(
     threadId: string,
-  ): Promise<Array<AssistantDroneSummary & { canRead: boolean; canWrite: boolean }>> {
+  ): Promise<
+    Array<AssistantDroneSummary & { canRead: boolean; canWrite: boolean; canExecute: boolean }>
+  > {
     await this.ensureLoaded();
     this.getThread(threadId);
     const readScope = this.allowedDroneIdSet('read', threadId);
     const writeScope = this.allowedDroneIdSet('write', threadId);
+    const executeScope = this.allowedDroneIdSet('execute', threadId);
     return (await this.tools.listDrones()).flatMap((drone) => {
       const canRead = readScope === null || readScope.has(drone.id);
       const canWrite = writeScope === null || writeScope.has(drone.id);
-      return canRead || canWrite ? [{ ...drone, canRead, canWrite }] : [];
+      const canExecute = executeScope === null || executeScope.has(drone.id);
+      return canRead || canWrite || canExecute ? [{ ...drone, canRead, canWrite, canExecute }] : [];
     });
   }
 
@@ -2825,14 +2856,14 @@ export class HubAssistantService {
       'create_directory',
       'delete_directory',
       'apply_patch',
-      'bash',
       'transfer_mkdir',
       'transfer_prepare',
       'transfer_write',
       'transfer_commit',
       'transfer_abort',
     ].includes(call.tool);
-    const droneId = await this.requireDroneInScope(droneRef, write ? 'write' : 'read', threadId);
+    const permission = call.tool === 'bash' ? 'execute' : write ? 'write' : 'read';
+    const droneId = await this.requireDroneInScope(droneRef, permission, threadId);
     const params: any = call.args ?? {};
     if (call.tool === 'transfer_stat') {
       const result = await this.requireFileCallback('statDronePath')({
@@ -3090,10 +3121,16 @@ export class HubAssistantService {
     );
   }
 
-  async approve(approvalId: string, approved: boolean): Promise<AssistantSnapshot> {
+  async approve(
+    approvalId: string,
+    approved: boolean,
+    expectedThreadId?: string,
+  ): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const approval = this.approvals.get(approvalId);
     if (!approval) throw new Error(`unknown approval: ${approvalId}`);
+    if (expectedThreadId && approval.threadId !== expectedThreadId)
+      throw new Error(`approval does not belong to thread: ${expectedThreadId}`);
     approval.status = approved ? 'approved' : 'denied';
     this.approvals.delete(approvalId);
     approval.resolve(approved);
@@ -3303,7 +3340,7 @@ export class HubAssistantService {
     voiceEnabled?: unknown;
   }): AssistantAccessScope {
     if (normalizeAssistantVoiceEnabled(input?.voiceEnabled)) {
-      return makeAssistantAccessScope({ readMode: 'all', writeMode: 'selected', droneIds: [] });
+      return makeDefaultAssistantAccessScope();
     }
     const hasInputDrone = Object.prototype.hasOwnProperty.call(input ?? {}, 'activeDroneId');
     const hasInputChat = Object.prototype.hasOwnProperty.call(input ?? {}, 'activeChatName');
@@ -3313,13 +3350,8 @@ export class HubAssistantService {
     const activeChatName = hasInputChat
       ? cleanOptionalString(input?.activeChatName)
       : cleanOptionalString(this.appContext.activeChatName);
-    if (!activeDroneId || !activeChatName)
-      return makeAssistantAccessScope({ readMode: 'all', writeMode: 'selected', droneIds: [] });
-    return makeAssistantAccessScope({
-      readMode: 'all',
-      writeMode: 'selected',
-      droneIds: [activeDroneId],
-    });
+    if (!activeDroneId || !activeChatName) return makeDefaultAssistantAccessScope();
+    return makeDefaultAssistantAccessScope([activeDroneId]);
   }
 
   private makeThread(input?: {
@@ -3639,34 +3671,54 @@ export class HubAssistantService {
           : toolName === 'rename_drones'
             ? 'Rename drones'
             : toolName === 'bash'
-              ? 'Run bash in drone'
+              ? 'Execute Bash command'
               : 'Send message to drone';
     let approvalArgs = ctx?.args ?? {};
     if (toolName === 'bash') {
       const drones = await this.tools.listDrones();
       const rawDroneId = cleanOptionalString(ctx?.args?.droneId);
-      const scopedDroneId = await this.requireDroneInScope(rawDroneId, 'write', threadId);
-      const drone =
-        drones.find((item) => item.id === scopedDroneId) ??
-        drones.find((item) => item.name === rawDroneId) ??
-        null;
-      if (drone && String(drone.runtime ?? '').trim() !== 'container') {
-        return {
-          block: true,
-          reason: `bash is only supported for container drones: ${drone.name}`,
+      const workspaceTarget =
+        ctx?.args?.workspaceTarget && typeof ctx.args.workspaceTarget === 'object'
+          ? ctx.args.workspaceTarget
+          : null;
+      if (workspaceTarget) {
+        approvalArgs = {
+          requested: ctx?.args ?? {},
+          resolved: {
+            targetId: cleanOptionalString(workspaceTarget.id),
+            targetLabel:
+              cleanOptionalString(workspaceTarget.label) ||
+              cleanOptionalString(workspaceTarget.rootLabel) ||
+              'Remote workspace',
+            targetKind: cleanOptionalString(workspaceTarget.kind) || 'remote-device',
+            command: String(ctx?.args?.command ?? ''),
+            timeoutMs: clampAssistantBashTimeout(ctx?.args?.timeoutMs),
+          },
+        };
+      } else {
+        const scopedDroneId = await this.requireDroneInScope(rawDroneId, 'execute', threadId);
+        const drone =
+          drones.find((item) => item.id === scopedDroneId) ??
+          drones.find((item) => item.name === rawDroneId) ??
+          null;
+        if (drone && String(drone.runtime ?? '').trim() !== 'container') {
+          return {
+            block: true,
+            reason: `bash is only supported for container drones: ${drone.name}`,
+          };
+        }
+        const cwd = cleanOptionalString(ctx?.args?.cwd);
+        approvalArgs = {
+          requested: ctx?.args ?? {},
+          resolved: {
+            droneId: drone?.id ?? scopedDroneId,
+            droneName: drone?.name ?? scopedDroneId,
+            command: String(ctx?.args?.command ?? ''),
+            ...(cwd ? { cwd: normalizeAssistantDroneFilePath(cwd) } : {}),
+            timeoutMs: clampAssistantBashTimeout(ctx?.args?.timeoutMs),
+          },
         };
       }
-      const cwd = cleanOptionalString(ctx?.args?.cwd);
-      approvalArgs = {
-        requested: ctx?.args ?? {},
-        resolved: {
-          droneId: drone?.id ?? scopedDroneId,
-          droneName: drone?.name ?? scopedDroneId,
-          command: String(ctx?.args?.command ?? ''),
-          ...(cwd ? { cwd: normalizeAssistantDroneFilePath(cwd) } : {}),
-          timeoutMs: clampAssistantBashTimeout(ctx?.args?.timeoutMs),
-        },
-      };
     } else {
       try {
         if (toolName === 'set_drone_group') {
@@ -3797,11 +3849,18 @@ export class HubAssistantService {
     const thread = this.getThread(input.threadId);
     thread.status = 'waiting_for_approval';
     await new Promise<void>((resolve) => {
-      const entry = {
+      let entry: AssistantApproval & { resolve: (approved: boolean) => void };
+      const onAbort = () => {
+        if (!this.approvals.has(approvalId)) return;
+        this.approvals.delete(approvalId);
+        entry.resolve(false);
+      };
+      entry = {
         ...approval,
         resolve: (approved: boolean) => {
           approval.status = approved ? 'approved' : 'denied';
           thread.status = 'running';
+          input.signal?.removeEventListener('abort', onAbort);
           this.emitChange('approval_resolved', input.threadId);
           resolve();
         },
@@ -3814,15 +3873,8 @@ export class HubAssistantService {
       });
       this.emitChange('approval_pending', input.threadId);
       if (input.signal) {
-        input.signal.addEventListener(
-          'abort',
-          () => {
-            if (!this.approvals.has(approvalId)) return;
-            this.approvals.delete(approvalId);
-            entry.resolve(false);
-          },
-          { once: true },
-        );
+        input.signal.addEventListener('abort', onAbort, { once: true });
+        if (input.signal.aborted) onAbort();
       }
     });
     return approval.status === 'approved';
@@ -3939,7 +3991,8 @@ export class HubAssistantService {
     const accessScope = this.activeAccessScope(threadId);
     const readScope = describeAssistantAccessMode(accessScope.readMode, accessScope.droneIds);
     const writeScope = describeAssistantAccessMode(accessScope.writeMode, accessScope.droneIds);
-    const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}. Do not claim access to existing drones outside those scopes. This scope does not restrict enabled global creation tools such as create_drone, clone_drone, or create_group.`;
+    const executeScope = describeAssistantAccessMode(accessScope.executeMode, accessScope.droneIds);
+    const scopeText = `Current existing-drone access scope: read=${readScope}; write=${writeScope}; execute=${executeScope}. Do not claim access to existing drones outside those scopes. This scope does not restrict enabled global creation tools such as create_drone, clone_drone, or create_group.`;
     const basePrompt =
       normalizeAssistantSystemPrompt(thread?.systemPrompt) ||
       (thread ? this.defaultSystemPromptForThread(thread) : this.defaultSystemPrompt);

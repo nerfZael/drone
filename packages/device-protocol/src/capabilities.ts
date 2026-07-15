@@ -45,6 +45,7 @@ export const ASSISTANT_THREADS_CAPABILITY: CapabilityDescriptor = {
     'thread.delete',
     'thread.message.delete',
     'thread.update',
+    'approval.resolve',
     'thread.prompt',
     'thread.stop',
   ],

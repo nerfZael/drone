@@ -421,6 +421,7 @@ describe('assistant thread isolation', () => {
       const thread = snapshot.threads.find((item) => item.id === threadId) as any;
       expect(thread.accessScope.readMode).toBe('selected');
       expect(thread.accessScope.writeMode).toBe('selected');
+      expect(thread.accessScope.executeMode).toBe('selected');
       expect(thread.accessScope.droneIds).toEqual([]);
     });
   });
@@ -435,6 +436,7 @@ describe('assistant thread isolation', () => {
       expect(thread.accessScope).toMatchObject({
         readMode: 'all',
         writeMode: 'selected',
+        executeMode: 'selected',
         droneIds: [],
       });
 
@@ -449,6 +451,7 @@ describe('assistant thread isolation', () => {
       expect(thread.accessScope).toMatchObject({
         readMode: 'all',
         writeMode: 'selected',
+        executeMode: 'selected',
         droneIds: ['drone-a'],
       });
 
@@ -456,6 +459,7 @@ describe('assistant thread isolation', () => {
       expect(voice.thread.accessScope).toMatchObject({
         readMode: 'all',
         writeMode: 'selected',
+        executeMode: 'selected',
         droneIds: [],
       });
     });

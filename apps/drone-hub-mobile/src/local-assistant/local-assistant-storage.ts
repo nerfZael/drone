@@ -22,22 +22,25 @@ function cleanTransferDetails(value: any): unknown {
   if (serialized.length <= MAX_STORED_TRANSFER_DETAILS_CHARS) return value;
   const rawFiles = Array.isArray(value.files) ? value.files : [];
   const important = rawFiles.filter(
-    (file: any) => file?.status === 'failed' || file?.status === 'retrying' || file?.status === 'transferring',
+    (file: any) =>
+      file?.status === 'failed' || file?.status === 'retrying' || file?.status === 'transferring',
   );
   const nearby = [
     ...rawFiles.filter((file: any) => file?.status === 'completed').slice(-20),
     ...rawFiles.filter((file: any) => file?.status === 'pending').slice(0, 40),
   ];
-  const files = Array.from(new Set([...important, ...nearby])).slice(0, 80).map((file: any) => ({
-    sourcePath: String(file?.sourcePath ?? '').slice(0, 800),
-    destinationPath: String(file?.destinationPath ?? '').slice(0, 800),
-    size: Number(file?.size) || 0,
-    mtimeMs: Number.isFinite(Number(file?.mtimeMs)) ? Number(file.mtimeMs) : null,
-    transferredBytes: Number(file?.transferredBytes) || 0,
-    retries: Number(file?.retries) || 0,
-    status: String(file?.status ?? 'pending'),
-    ...(file?.error ? { error: String(file.error).slice(0, 2_000) } : {}),
-  }));
+  const files = Array.from(new Set([...important, ...nearby]))
+    .slice(0, 80)
+    .map((file: any) => ({
+      sourcePath: String(file?.sourcePath ?? '').slice(0, 800),
+      destinationPath: String(file?.destinationPath ?? '').slice(0, 800),
+      size: Number(file?.size) || 0,
+      mtimeMs: Number.isFinite(Number(file?.mtimeMs)) ? Number(file.mtimeMs) : null,
+      transferredBytes: Number(file?.transferredBytes) || 0,
+      retries: Number(file?.retries) || 0,
+      status: String(file?.status ?? 'pending'),
+      ...(file?.error ? { error: String(file.error).slice(0, 2_000) } : {}),
+    }));
   const endpoint = (candidate: any) => ({
     targetId: String(candidate?.targetId ?? '').slice(0, 500),
     targetLabel: String(candidate?.targetLabel ?? '').slice(0, 500),
@@ -55,8 +58,7 @@ function cleanTransferDetails(value: any): unknown {
             destinationPath:
               String(value.failure.destinationPath ?? '').slice(0, 2_000) || undefined,
             error: String(value.failure.error ?? '').slice(0, 4_000),
-            cleanupError:
-              String(value.failure.cleanupError ?? '').slice(0, 4_000) || undefined,
+            cleanupError: String(value.failure.cleanupError ?? '').slice(0, 4_000) || undefined,
           },
         }
       : {}),
@@ -198,6 +200,7 @@ function cleanThread(value: any): LocalAssistantThread | null {
     thinkingLevel: normalizeLocalAssistantThinkingLevel(value.thinkingLevel),
     status: value.status === 'error' ? 'error' : 'idle',
     error: value.status === 'error' && value.error ? String(value.error).slice(0, 2_000) : null,
+    autoApprove: value.autoApprove === true,
     workspaceTargets,
     messages,
     queuedPrompts,
