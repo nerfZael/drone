@@ -18,6 +18,7 @@ import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { latestAssistantThread } from '../local-assistant/latest-assistant-thread';
 import { nextAssistantThreadTitle } from '../local-assistant/next-assistant-thread-title';
+import { clonedAssistantThreadTitle } from '../local-assistant/cloned-assistant-thread-title';
 import { useLatestMessageScroll } from '../local-assistant/use-latest-message-scroll';
 import type { AssistantAppHeaderState } from './AssistantHomeScreen';
 
@@ -145,6 +146,12 @@ export function AssistantScreen({
   const [modelBusy, setModelBusy] = React.useState(false);
   const [deleteCandidate, setDeleteCandidate] = React.useState<Thread | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const [messageDeleteCandidate, setMessageDeleteCandidate] = React.useState<{
+    threadId: string;
+    messageId: string;
+    deleteFollowing: boolean;
+  } | null>(null);
+  const [deletingMessage, setDeletingMessage] = React.useState(false);
   const [cancellingPromptId, setCancellingPromptId] = React.useState('');
   const realtimeTimer = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const homeIdRef = React.useRef(homeId);
@@ -174,6 +181,8 @@ export function AssistantScreen({
     setModelBusy(false);
     setDeleteCandidate(null);
     setDeleting(false);
+    setMessageDeleteCandidate(null);
+    setDeletingMessage(false);
     setCancellingPromptId('');
   }, [homeId]);
 
@@ -305,6 +314,21 @@ export function AssistantScreen({
       if (result?.thread?.id) await openThread(result.thread.id);
     });
 
+  const cloneThread = React.useCallback(
+    (thread: Thread) =>
+      run('clone', async () => {
+        const destinationId = homeId;
+        const result = await mesh.request(destinationId, 'assistant-threads', 'thread.clone', {
+          title: clonedAssistantThreadTitle(thread.title, threads),
+          threadId: thread.id,
+        });
+        if (homeIdRef.current !== destinationId) return;
+        await loadThreads(true);
+        if (result?.thread?.id) await openThread(result.thread.id);
+      }),
+    [homeId, loadThreads, mesh.request, openThread, threads],
+  );
+
   React.useEffect(() => {
     if (!homeId || !homeSupportsAssistant || !homeConnected) return;
     void loadThreads();
@@ -428,6 +452,10 @@ export function AssistantScreen({
         const message = entry?.message ?? entry;
         return {
           ...message,
+          ...(entry?.id ? { id: String(entry.id) } : {}),
+          ...(Number.isFinite(Number(entry?.sequence))
+            ? { sequence: Number(entry.sequence) }
+            : {}),
           ...(message?.createdAt == null && message?.timestamp == null && entry?.timestamp
             ? { timestamp: entry.timestamp }
             : {}),
@@ -494,6 +522,9 @@ export function AssistantScreen({
         ? {
             title: selected.title,
             subtitle: `${selectedWorkspaceTargets.length > 1 ? `${selectedWorkspaceTargets.length} workspaces` : selectedWorkspaceTargets[0] ? `${selectedWorkspaceTargets[0].workspaceName ?? 'Workspace'} · ${workspacePermissionSummary(selectedWorkspaceTargets[0])}` : 'Home device only'}${activeHome ? ` · ${activeHome.name}` : ''}`,
+            onNewThread: () => void createThread(),
+            onCloneThread: () => void cloneThread(selected),
+            cloneDisabled: running,
             onDelete: () => setDeleteCandidate(selected),
           }
         : null,
@@ -501,6 +532,8 @@ export function AssistantScreen({
   }, [
     activeHome?.name,
     homeId,
+    cloneThread,
+    running,
     onHeaderChange,
     selected?.id,
     selected?.title,
@@ -572,6 +605,16 @@ export function AssistantScreen({
               running={running}
               currentReasoning={currentReasoning}
               loading={threadLoading}
+              messageActionsDisabled={running || threadLoading}
+              onDeleteMessageRequest={({ message, deleteFollowing }) => {
+                const messageId = String((message as any)?.id ?? '').trim();
+                if (!messageId || !selected) return;
+                setMessageDeleteCandidate({
+                  threadId: selected.id,
+                  messageId,
+                  deleteFollowing,
+                });
+              }}
             />
             <QueuedPromptRows
               prompts={visibleQueuedPrompts}
@@ -650,6 +693,49 @@ export function AssistantScreen({
           />
         </>
       ) : null}
+      <ConfirmDialog
+        visible={Boolean(messageDeleteCandidate)}
+        title={
+          messageDeleteCandidate?.deleteFollowing
+            ? 'Delete this message and everything below it?'
+            : 'Delete this message?'
+        }
+        message={
+          messageDeleteCandidate?.deleteFollowing
+            ? 'This message and every later message in the conversation will be permanently removed.'
+            : 'This message will be permanently removed from the conversation.'
+        }
+        confirmLabel={
+          messageDeleteCandidate?.deleteFollowing ? 'Delete messages' : 'Delete message'
+        }
+        destructive
+        busy={deletingMessage}
+        onCancel={() => setMessageDeleteCandidate(null)}
+        onConfirm={() =>
+          void (async () => {
+            if (!messageDeleteCandidate) return;
+            const destinationId = homeId;
+            const candidate = messageDeleteCandidate;
+            setDeletingMessage(true);
+            setError(null);
+            try {
+              await mesh.request(destinationId, 'assistant-threads', 'thread.message.delete', {
+                threadId: candidate.threadId,
+                messageId: candidate.messageId,
+                deleteFollowing: candidate.deleteFollowing,
+              });
+              if (homeIdRef.current !== destinationId) return;
+              setMessageDeleteCandidate(null);
+              await Promise.all([openThread(candidate.threadId, true), loadThreads(true)]);
+            } catch (nextError: any) {
+              if (homeIdRef.current === destinationId)
+                setError(nextError?.message ?? String(nextError));
+            } finally {
+              setDeletingMessage(false);
+            }
+          })()
+        }
+      />
       <ConfirmDialog
         visible={Boolean(deleteCandidate)}
         title="Delete assistant thread?"

@@ -34,8 +34,15 @@ export function createPendingDroneStateHelpers(deps: {
   }
 
   function applyPendingDisplayNameToProvisionedDrone(droneEntry: any, pendingEntry: any, fallbackRaw: unknown): string {
-    const fallback = String(droneEntry?.name ?? '').trim() || String(fallbackRaw ?? '').trim();
-    const displayName = resolvePendingDroneDisplayName(pendingEntry, fallback);
+    const currentName = String(droneEntry?.name ?? '').trim();
+    const fallback = String(fallbackRaw ?? '').trim();
+    const pendingName = resolvePendingDroneDisplayName(pendingEntry, fallback);
+    // The canonical pending -> real transition carries a rename that lands while
+    // the CLI create is running. Do not overwrite that newer real name with the
+    // pending snapshot captured before creation started.
+    const displayName = currentName && fallback && currentName !== fallback
+      ? currentName
+      : pendingName || currentName || fallback;
     if (displayName) droneEntry.name = displayName;
     return displayName;
   }

@@ -69,6 +69,7 @@ Each assistant location opens its most recently updated thread. Tap the **Assist
 open the shared thread drawer. Phone and cross-device transcripts use the same compact message,
 tool-call, image, attachment, composer, and model-selection presentation. Changing a model on a
 remote thread additionally requires the `assistant-threads/thread.update` grant.
+Cloning a remote thread requires the `assistant-threads/thread.clone` grant.
 
 ### Copying OpenAI or Codex credentials from another Hub
 

@@ -208,6 +208,107 @@ export class HubSessionRepository implements SessionRepository {
     };
   }
 
+  async deleteThreadMessage(
+    threadId: string,
+    entryId: string,
+    deleteFollowing: boolean,
+  ): Promise<void> {
+    const sessionId = await this.sessionIdForThread(threadId);
+    if (!sessionId) throw new Error(`unknown Hub assistant session for thread: ${threadId}`);
+    const target = this.db.prepare(`
+      SELECT sequence, entry_json
+      FROM assistant_blip_entries
+      WHERE session_id = ?
+        AND json_extract(entry_json, '$.type') = 'message'
+        AND json_extract(entry_json, '$.id') = ?
+    `).get(sessionId, entryId) as { sequence?: number; entry_json?: string } | undefined;
+    const sequence = Number(target?.sequence);
+    if (!Number.isSafeInteger(sequence)) throw new Error(`unknown assistant message: ${entryId}`);
+    let dependentToolCallIds = new Set<string>();
+    try {
+      const selected = JSON.parse(String(target?.entry_json ?? ''))?.message;
+      dependentToolCallIds = new Set(
+        selected?.role === 'assistant' && Array.isArray(selected.content)
+          ? selected.content
+              .filter((part: any) => part?.type === 'toolCall')
+              .map((part: any) => String(part.id ?? '').trim())
+              .filter(Boolean)
+          : [],
+      );
+    } catch {
+      // The target row itself is still safe to delete if its optional tool metadata is malformed.
+    }
+
+    const remove = () => {
+      if (deleteFollowing) {
+        this.db.prepare(
+          'DELETE FROM assistant_blip_entries WHERE session_id = ? AND sequence >= ?',
+        ).run(sessionId, sequence);
+      } else {
+        this.db.prepare(
+          'DELETE FROM assistant_blip_entries WHERE session_id = ? AND sequence = ?',
+        ).run(sessionId, sequence);
+        if (dependentToolCallIds.size > 0) {
+          const laterMessages = this.db.prepare(`
+            SELECT sequence, entry_json
+            FROM assistant_blip_entries
+            WHERE session_id = ?
+              AND sequence > ?
+              AND json_extract(entry_json, '$.type') = 'message'
+          `).all(sessionId, sequence) as Array<{ sequence: number; entry_json: string }>;
+          const removeEntry = this.db.prepare(
+            'DELETE FROM assistant_blip_entries WHERE session_id = ? AND sequence = ?',
+          );
+          for (const row of laterMessages) {
+            try {
+              const message = JSON.parse(row.entry_json)?.message;
+              if (
+                message?.role === 'toolResult' &&
+                dependentToolCallIds.has(String(message.toolCallId ?? '').trim())
+              ) {
+                removeEntry.run(sessionId, row.sequence);
+              }
+            } catch {
+              // Leave unrelated malformed history untouched.
+            }
+          }
+        }
+        // A later compaction may summarize the removed message. Drop only affected compactions so
+        // deleted content cannot survive invisibly in model context.
+        this.db.prepare(`
+          DELETE FROM assistant_blip_entries
+          WHERE session_id = ?
+            AND sequence > ?
+            AND json_extract(entry_json, '$.type') = 'compaction'
+        `).run(sessionId, sequence);
+      }
+
+      const row = this.db.prepare(
+        'SELECT metadata_json FROM assistant_blip_sessions WHERE id = ?',
+      ).get(sessionId) as { metadata_json?: string } | undefined;
+      if (!row?.metadata_json) return;
+      const state = JSON.parse(row.metadata_json) as BlipSessionState;
+      const latestCompaction = this.db.prepare(`
+        SELECT entry_json
+        FROM assistant_blip_entries
+        WHERE session_id = ? AND json_extract(entry_json, '$.type') = 'compaction'
+        ORDER BY sequence DESC
+        LIMIT 1
+      `).get(sessionId) as { entry_json?: string } | undefined;
+      if (latestCompaction?.entry_json) {
+        state.compactedSummary = String(JSON.parse(latestCompaction.entry_json)?.summary ?? '');
+      } else {
+        delete state.compactedSummary;
+      }
+      state.updatedAt = nowIso();
+      this.db.prepare(
+        'UPDATE assistant_blip_sessions SET metadata_json = ?, updated_at = ? WHERE id = ?',
+      ).run(JSON.stringify(state), state.updatedAt, sessionId);
+    };
+    if (this.db.transaction) this.db.transaction(remove)();
+    else remove();
+  }
+
   async bindThread(threadId: string, sessionId: string): Promise<void> {
     this.db.prepare(`
       INSERT INTO assistant_blip_thread_bindings (thread_id, session_id, created_at)

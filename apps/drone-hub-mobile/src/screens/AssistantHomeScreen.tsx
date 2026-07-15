@@ -22,6 +22,9 @@ export type AssistantAppHeaderState = {
   accessOpen?: boolean;
   accessDisabled?: boolean;
   onToggleAccess?(): void;
+  onNewThread?(): void;
+  onCloneThread?(): void;
+  cloneDisabled?: boolean;
   onDelete?(): void;
 };
 

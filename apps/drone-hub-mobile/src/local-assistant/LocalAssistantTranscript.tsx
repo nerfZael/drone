@@ -20,6 +20,7 @@ import {
   type AssistantToolRenderItem,
 } from '@drone/assistant-chat';
 import { colors } from '../theme';
+import { ContextMenu } from '../components/Ui';
 import { NativeMarkdown } from './NativeMarkdown';
 import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
 import type { LocalAssistantThread } from './local-assistant-types';
@@ -64,17 +65,46 @@ function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
   );
 }
 
-function TappableMessageView({ children, onTap }: { children: any; onTap: () => void }) {
-  const touch = React.useRef({ x: 0, y: 0, moved: false, active: false });
+function TappableMessageView({
+  children,
+  onTap,
+  onLongPress,
+}: {
+  children: any;
+  onTap: () => void;
+  onLongPress?: () => void;
+}) {
+  const touch = React.useRef({
+    x: 0,
+    y: 0,
+    moved: false,
+    active: false,
+    longPressed: false,
+    timer: null as ReturnType<typeof setTimeout> | null,
+  });
+  const clearLongPress = React.useCallback(() => {
+    if (touch.current.timer) clearTimeout(touch.current.timer);
+    touch.current.timer = null;
+  }, []);
+  React.useEffect(() => clearLongPress, [clearLongPress]);
   return (
     <View
       style={styles.message}
       onTouchStart={(event) => {
+        clearLongPress();
         touch.current = {
           x: event.nativeEvent.pageX,
           y: event.nativeEvent.pageY,
           moved: false,
           active: true,
+          longPressed: false,
+          timer: onLongPress
+            ? setTimeout(() => {
+                if (!touch.current.active || touch.current.moved) return;
+                touch.current.longPressed = true;
+                onLongPress();
+              }, 500)
+            : null,
         };
       }}
       onTouchMove={(event) => {
@@ -82,15 +112,20 @@ function TappableMessageView({ children, onTap }: { children: any; onTap: () => 
         if (!current.active || current.moved) return;
         const dx = event.nativeEvent.pageX - current.x;
         const dy = event.nativeEvent.pageY - current.y;
-        if (Math.hypot(dx, dy) > 8) current.moved = true;
+        if (Math.hypot(dx, dy) > 8) {
+          current.moved = true;
+          clearLongPress();
+        }
       }}
       onTouchEnd={() => {
         const current = touch.current;
         touch.current.active = false;
-        if (!current.moved) onTap();
+        clearLongPress();
+        if (!current.moved && !current.longPressed) onTap();
       }}
       onTouchCancel={() => {
         touch.current.active = false;
+        clearLongPress();
       }}
     >
       {children}
@@ -380,6 +415,8 @@ export function MobileAssistantTranscript({
   emptyTitle = 'The assistant lives here.',
   emptyBody = 'Ask a question, or attach a remote workspace and let this phone inspect and edit it.',
   assistantLabel = 'Assistant',
+  messageActionsDisabled = false,
+  onDeleteMessageRequest,
 }: {
   messages: AssistantMessage[];
   running?: boolean;
@@ -388,6 +425,12 @@ export function MobileAssistantTranscript({
   emptyTitle?: string;
   emptyBody?: string;
   assistantLabel?: string;
+  messageActionsDisabled?: boolean;
+  onDeleteMessageRequest?: (input: {
+    message: AssistantMessage;
+    sourceMessageIndex: number;
+    deleteFollowing: boolean;
+  }) => void;
 }) {
   const items = React.useMemo(
     () =>
@@ -401,6 +444,10 @@ export function MobileAssistantTranscript({
   const [visibleMessageTimestamps, setVisibleMessageTimestamps] = React.useState<Set<string>>(
     () => new Set(),
   );
+  const [messageActionTarget, setMessageActionTarget] = React.useState<{
+    message: AssistantMessage;
+    sourceMessageIndex: number;
+  } | null>(null);
   const toggleMessageTimestamp = React.useCallback((key: string) => {
     setVisibleMessageTimestamps((current) => {
       const next = new Set(current);
@@ -457,6 +504,14 @@ export function MobileAssistantTranscript({
         const timestamp = messageTimestamp(item.message);
         const timestampKey = `${item.key}:${String(timestamp ?? '')}`;
         const timestampVisible = visibleMessageTimestamps.has(timestampKey);
+        const openMessageActions =
+          onDeleteMessageRequest && !messageActionsDisabled
+            ? () =>
+                setMessageActionTarget({
+                  message: item.message,
+                  sourceMessageIndex: item.sourceMessageIndex,
+                })
+            : undefined;
         const content = (
           <>
             {text && assistant ? (
@@ -505,9 +560,15 @@ export function MobileAssistantTranscript({
             <Pressable
               key={item.key}
               accessibilityRole="button"
-              accessibilityHint="Shows or hides this message timestamp"
+              accessibilityHint={
+                openMessageActions
+                  ? 'Tap to show the timestamp. Press and hold for message actions.'
+                  : 'Shows or hides this message timestamp'
+              }
               accessibilityState={{ expanded: timestampVisible }}
               onPress={() => toggleMessageTimestamp(timestampKey)}
+              onLongPress={openMessageActions}
+              delayLongPress={500}
               style={styles.userMessageGroup}
             >
               {timestampVisible ? (
@@ -518,7 +579,11 @@ export function MobileAssistantTranscript({
           );
         }
         return (
-          <TappableMessageView key={item.key} onTap={() => toggleMessageTimestamp(timestampKey)}>
+          <TappableMessageView
+            key={item.key}
+            onTap={() => toggleMessageTimestamp(timestampKey)}
+            onLongPress={openMessageActions}
+          >
             {content}
             {timestampVisible ? (
               <RelativeMessageTimestamp timestamp={timestamp} style={styles.messageTime} />
@@ -543,6 +608,29 @@ export function MobileAssistantTranscript({
           </View>
         )
       ) : null}
+      <ContextMenu
+        visible={Boolean(messageActionTarget)}
+        title="Message actions"
+        actions={[
+          {
+            label: 'Delete message',
+            destructive: true,
+            onPress: () => {
+              if (!messageActionTarget) return;
+              onDeleteMessageRequest?.({ ...messageActionTarget, deleteFollowing: false });
+            },
+          },
+          {
+            label: 'Delete message and everything below',
+            destructive: true,
+            onPress: () => {
+              if (!messageActionTarget) return;
+              onDeleteMessageRequest?.({ ...messageActionTarget, deleteFollowing: true });
+            },
+          },
+        ]}
+        onClose={() => setMessageActionTarget(null)}
+      />
     </View>
   );
 }
@@ -551,16 +639,26 @@ export function LocalAssistantTranscript({
   thread,
   running = false,
   currentReasoning = '',
+  messageActionsDisabled = false,
+  onDeleteMessageRequest,
 }: {
   thread: LocalAssistantThread;
   running?: boolean;
   currentReasoning?: string;
+  messageActionsDisabled?: boolean;
+  onDeleteMessageRequest?: (input: {
+    message: AssistantMessage;
+    sourceMessageIndex: number;
+    deleteFollowing: boolean;
+  }) => void;
 }) {
   return (
     <MobileAssistantTranscript
       messages={thread.messages}
       running={running}
       currentReasoning={currentReasoning}
+      messageActionsDisabled={messageActionsDisabled}
+      onDeleteMessageRequest={onDeleteMessageRequest}
     />
   );
 }

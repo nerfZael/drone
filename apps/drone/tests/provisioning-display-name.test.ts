@@ -30,6 +30,20 @@ describe('pending provisioning display name helpers', () => {
     expect(droneEntry.name).toBe('existing-name');
   });
 
+  test('keeps a rename already carried into the real drone during creation', () => {
+    const droneEntry: any = { id: 'drone-1', name: 'auth-bugfix' };
+    const stalePendingEntry: any = { id: 'drone-1', name: 'Untitled 25' };
+
+    const applied = applyPendingDisplayNameToProvisionedDrone(
+      droneEntry,
+      stalePendingEntry,
+      'Untitled 25',
+    );
+
+    expect(applied).toBe('auth-bugfix');
+    expect(droneEntry.name).toBe('auth-bugfix');
+  });
+
   test('falls back when the pending entry has no valid name yet', () => {
     expect(resolvePendingDroneDisplayName({ name: '   ' }, 'Untitled 25')).toBe('Untitled 25');
   });

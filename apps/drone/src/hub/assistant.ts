@@ -535,6 +535,19 @@ function titleFromPrompt(prompt: string): string {
   return cleaned.length > 48 ? `${cleaned.slice(0, 48).trimEnd()}...` : cleaned;
 }
 
+function clonedThreadTitle(sourceTitle: string, threads: AssistantThread[]): string {
+  const base = (cleanOptionalString(sourceTitle) || DEFAULT_THREAD_TITLE).slice(0, 153);
+  const titles = new Set(threads.map((thread) => thread.title));
+  const first = `${base} (copy)`;
+  if (!titles.has(first)) return first;
+  for (let copy = 2; copy < 10_000; copy += 1) {
+    const suffix = ` (copy ${copy})`;
+    const candidate = `${base.slice(0, 160 - suffix.length)}${suffix}`;
+    if (!titles.has(candidate)) return candidate;
+  }
+  return `${base.slice(0, 145)} (${Date.now()})`;
+}
+
 function textFromMessage(message: any): string {
   const content = message?.content;
   if (typeof content === 'string') return content;
@@ -2483,6 +2496,32 @@ export class HubAssistantService {
       threadId: thread.id,
       thread: sanitizeThread(thread, false),
     };
+  }
+
+  async cloneThread(threadId: string, input?: { title?: unknown }): Promise<AssistantSnapshot> {
+    await this.ensureLoaded();
+    const source = this.getThread(threadId);
+    const voiceEnabled = normalizeAssistantVoiceEnabled(source.voiceEnabled);
+    const thread = this.makeThread({
+      provider: source.provider,
+      model: source.model,
+      thinkingLevel: source.thinkingLevel,
+      title:
+        cleanOptionalString(input?.title)?.slice(0, 160) ||
+        clonedThreadTitle(source.title, this.threads),
+      voiceEnabled,
+      accessScope: structuredClone(source.accessScope),
+      systemPrompt: source.systemPrompt,
+    });
+    thread.systemPromptUpdatedAt = source.systemPromptUpdatedAt;
+    thread.enabledTools = [...source.enabledTools];
+    thread.autoApprove = source.autoApprove;
+    thread.promptDeliveryMode = source.promptDeliveryMode;
+    thread.messages = structuredClone(source.messages);
+    this.threads = [thread, ...this.threads].slice(0, ASSISTANT_REGISTRY_MAX_THREADS);
+    this.activeThreadId = thread.id;
+    await this.persist();
+    return await this.threadSnapshot(thread.id);
   }
 
   async submitVoicePrompt(input: {

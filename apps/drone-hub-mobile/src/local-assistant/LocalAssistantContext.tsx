@@ -17,13 +17,16 @@ import type {
 } from './local-assistant-types';
 import { readLocalAssistantCodexAuth } from './local-assistant-codex-auth';
 import { nextAssistantThreadTitle } from './next-assistant-thread-title';
+import { clonedAssistantThreadTitle } from './cloned-assistant-thread-title';
 import { createWorkspaceToolRuntime } from './workspace-tools';
 import { runMobileBlip } from './run-mobile-blip';
 import {
   deleteLocalBlipSessionSnapshot,
+  cloneLocalBlipSessionSnapshot,
   loadLocalBlipSessionSnapshot,
   saveLocalBlipSessionSnapshot,
 } from './local-blip-storage';
+import { messagesAfterDeletion } from './assistant-message-deletion';
 
 type LocalAssistantContextValue = {
   threads: LocalAssistantThread[];
@@ -34,7 +37,9 @@ type LocalAssistantContextValue = {
   refreshThreads(): Promise<LocalAssistantThread[]>;
   selectThread(threadId: string): void;
   createThread(title?: string): Promise<LocalAssistantThread>;
+  cloneThread(threadId: string): Promise<LocalAssistantThread>;
   deleteThread(threadId: string): Promise<void>;
+  deleteMessage(threadId: string, messageId: string, deleteFollowing: boolean): Promise<void>;
   updateThread(
     threadId: string,
     patch: {
@@ -174,6 +179,61 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       await replaceThreads(next);
       await deleteLocalBlipSessionSnapshot(threadId);
       setActiveThreadId((current) => (current === threadId ? (next[0]?.id ?? '') : current));
+    },
+    [replaceThreads],
+  );
+
+  const deleteMessage = React.useCallback(
+    async (threadId: string, messageId: string, deleteFollowing: boolean) => {
+      if (abortRef.current?.threadId === threadId) {
+        throw new Error('Stop the assistant before deleting messages');
+      }
+      const current = threadsRef.current.find((thread) => thread.id === threadId);
+      if (!current) throw new Error('Local assistant thread was not found');
+      const messages = messagesAfterDeletion(current.messages, messageId, deleteFollowing);
+      if (!messages) throw new Error('Assistant message was not found');
+
+      // Rebuild the canonical model transcript from the edited visible history on the next prompt.
+      await deleteLocalBlipSessionSnapshot(threadId);
+      await replaceThread({
+        ...current,
+        messages,
+        status: 'idle',
+        error: null,
+        updatedAt: new Date().toISOString(),
+      });
+    },
+    [replaceThread],
+  );
+
+  const cloneThread = React.useCallback(
+    async (threadId: string) => {
+      if (abortRef.current?.threadId === threadId)
+        throw new Error('Stop this thread before cloning it');
+      const source = threadsRef.current.find((thread) => thread.id === threadId);
+      if (!source) throw new Error('Local assistant thread was not found');
+      const now = new Date().toISOString();
+      const thread: LocalAssistantThread = {
+        ...source,
+        id: `mobile_thread_${Crypto.randomUUID()}`,
+        title: clonedAssistantThreadTitle(source.title, threadsRef.current),
+        createdAt: now,
+        updatedAt: now,
+        status: 'idle',
+        error: null,
+        workspaceTargets: source.workspaceTargets.map((target) => ({ ...target })),
+        messages: source.messages.map((message) => ({ ...message })),
+        queuedPrompts: [],
+      };
+      await cloneLocalBlipSessionSnapshot(source, thread);
+      try {
+        await replaceThreads([thread, ...threadsRef.current]);
+      } catch (error) {
+        await deleteLocalBlipSessionSnapshot(thread.id).catch(() => undefined);
+        throw error;
+      }
+      setActiveThreadId(thread.id);
+      return thread;
     },
     [replaceThreads],
   );
@@ -417,7 +477,9 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     refreshThreads,
     selectThread: setActiveThreadId,
     createThread,
+    cloneThread,
     deleteThread,
+    deleteMessage,
     updateThread,
     sendPrompt,
     cancelQueuedPrompt,

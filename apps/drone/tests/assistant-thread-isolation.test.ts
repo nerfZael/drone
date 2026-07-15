@@ -145,6 +145,46 @@ async function markDroneReady(input: {
 }
 
 describe('assistant thread isolation', () => {
+  test('clones thread conversation and settings without pending work', async () => {
+    await withTempDroneDataDir('assistant-thread-clone-', async () => {
+      const service = makeService();
+      installFakeRuntime(service, {});
+
+      const created = await service.createThread({ title: 'Source' });
+      const sourceId = created.activeThreadId;
+      await service.updateThread(sourceId, {
+        autoApprove: true,
+        promptDeliveryMode: 'asap',
+      });
+      const source = (service as any).threads.find((thread: any) => thread.id === sourceId);
+      source.messages = [
+        { role: 'user', content: 'hello' },
+        { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
+      ];
+      source.queuedPrompts = [
+        {
+          id: 'queued',
+          prompt: 'later',
+          promptImages: [],
+          imageCount: 0,
+          createdAt: new Date().toISOString(),
+          status: 'queued',
+          error: null,
+        },
+      ];
+
+      const cloned = await service.cloneThread(sourceId);
+      const copy = cloned.threads.find((thread) => thread.id === cloned.activeThreadId) as any;
+      expect(copy.id).not.toBe(sourceId);
+      expect(copy.title).toBe('Source (copy)');
+      expect(copy.messages).toEqual(source.messages);
+      expect(copy.queuedPrompts).toEqual([]);
+      expect(copy.autoApprove).toBe(true);
+      expect(copy.promptDeliveryMode).toBe('asap');
+      expect(copy.status).toBe('idle');
+    });
+  });
+
   test('defaults new assistant threads to OpenAI when Codex is not connected', async () => {
     await withTempDroneDataDir('assistant-default-openai-', async (droneDataDir) => {
       const previousCodexAuthFile = process.env.DRONE_HUB_CODEX_AUTH_FILE;

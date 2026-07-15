@@ -35,6 +35,38 @@ describe('device mesh delete actions', () => {
     });
   });
 
+  test('forwards assistant message deletion modes to the local Hub', async () => {
+    const requests: Array<{ url: string; method: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      requests.push({ url: String(input), method: String(init?.method ?? 'GET') });
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'content-type': 'application/json' },
+      });
+    }) as typeof fetch;
+    const capability = createAssistantThreadsCapability(
+      { baseUrl: () => 'http://127.0.0.1:7777', apiToken: 'test' },
+      new CrossDeviceAssistantPolicyStore('/tmp/drone-unused-assistant-policy.json'),
+    );
+
+    await expect(
+      capability.invoke('thread.message.delete', {
+        threadId: 'thread one',
+        messageId: 'message/one',
+        deleteFollowing: true,
+      }),
+    ).resolves.toEqual({
+      deleted: true,
+      threadId: 'thread one',
+      messageId: 'message/one',
+      deleteFollowing: true,
+    });
+    expect(requests).toContainEqual({
+      url: 'http://127.0.0.1:7777/api/assistant/threads/thread%20one/messages/message%2Fone?following=true',
+      method: 'DELETE',
+    });
+  });
+
   test('returns assistant queue state and forwards queued prompt cancellation', async () => {
     const requests: Array<{ url: string; method: string }> = [];
     globalThis.fetch = (async (input, init) => {

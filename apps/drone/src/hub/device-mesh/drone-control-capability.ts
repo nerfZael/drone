@@ -69,6 +69,20 @@ function compactPendingPrompts(value: unknown): any[] {
   }));
 }
 
+const CREATE_REPO_BRANCH_PAGE_SIZE = 500;
+const CREATE_REPO_BRANCH_PAGE_BYTES = 160 * 1024;
+
+function compactCreateRepoBranch(branch: unknown) {
+  const entry = object(branch);
+  const name = truncateUtf8(entry.name, 600);
+  if (!name) return null;
+  return {
+    name,
+    remote: truncateUtf8(entry.remote, 200),
+    branch: truncateUtf8(entry.branch, 600) || name,
+  };
+}
+
 function seedAgent(value: unknown): Record<string, string> | undefined {
   const agent = object(value);
   const kind = agent.kind === 'builtin' || agent.kind === 'custom' ? agent.kind : '';
@@ -129,6 +143,78 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
           );
           return { schemaVersion: 5, createModelCatalog };
         }
+        const createRepoPath = optionalText(payload.createRepoPath);
+        if (createRepoPath) {
+          const reposResult = await localHubRequest(access, '/api/repos');
+          const registeredRepoPaths = textList(
+            Array.isArray(reposResult.repos)
+              ? reposResult.repos.map((repo: unknown) => object(repo).path)
+              : [],
+          );
+          if (!registeredRepoPaths.includes(createRepoPath)) {
+            throw Object.assign(new Error('repository is not registered on this Hub'), {
+              code: 'INVALID_REQUEST',
+            });
+          }
+          const requestedCursor = Number(payload.createRepoCursor);
+          const cursor =
+            Number.isSafeInteger(requestedCursor) && requestedCursor >= 0 ? requestedCursor : 0;
+          try {
+            const result = await localHubRequest(
+              access,
+              `/api/repos/branches?repoPath=${encodeURIComponent(createRepoPath)}`,
+            );
+            const branches = Array.isArray(result.remoteBranches) ? result.remoteBranches : [];
+            const remoteBranches: NonNullable<ReturnType<typeof compactCreateRepoBranch>>[] = [];
+            let pageBytes = 0;
+            let nextIndex = cursor;
+            while (
+              nextIndex < branches.length &&
+              remoteBranches.length < CREATE_REPO_BRANCH_PAGE_SIZE
+            ) {
+              const branch = compactCreateRepoBranch(branches[nextIndex]);
+              nextIndex += 1;
+              if (!branch) continue;
+              const branchBytes = Buffer.byteLength(JSON.stringify(branch));
+              if (
+                remoteBranches.length > 0 &&
+                pageBytes + branchBytes > CREATE_REPO_BRANCH_PAGE_BYTES
+              ) {
+                nextIndex -= 1;
+                break;
+              }
+              remoteBranches.push(branch);
+              pageBytes += branchBytes;
+            }
+            const nextCursor = nextIndex < branches.length ? nextIndex : null;
+            return {
+              schemaVersion: 6,
+              createRepo: {
+                path: createRepoPath,
+                hostBranch: optionalText(result.hostBranch) ?? null,
+                remoteBranches,
+                branchesError: null,
+                branchesLoaded: nextCursor === null,
+                nextCursor,
+              },
+            };
+          } catch (error: any) {
+            return {
+              schemaVersion: 6,
+              createRepo: {
+                path: createRepoPath,
+                hostBranch: null,
+                remoteBranches: [],
+                branchesError: truncateUtf8(
+                  error?.message ?? error ?? 'Failed to load branches.',
+                  4_000,
+                ),
+                branchesLoaded: true,
+                nextCursor: null,
+              },
+            };
+          }
+        }
         const result = await localHubRequest(access, '/api/drones');
         const [reposResult, groupsResult, preferencesResult] = await Promise.all([
           localHubRequest(access, '/api/repos').catch(() => ({})),
@@ -147,41 +233,16 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
         );
         const createRepos =
           payload.includeCreateOptions === true
-            ? await Promise.all(
-                repoPaths.map(async (path) => {
-                  try {
-                    const result = await localHubRequest(
-                      access,
-                      `/api/repos/branches?repoPath=${encodeURIComponent(path)}`,
-                    );
-                    return {
-                      path,
-                      hostBranch: optionalText(result.hostBranch) ?? null,
-                      remoteBranches: Array.isArray(result.remoteBranches)
-                        ? result.remoteBranches.map((branch: unknown) => {
-                            const entry = object(branch);
-                            return {
-                              name: optionalText(entry.name) ?? '',
-                              remote: optionalText(entry.remote) ?? '',
-                              branch: optionalText(entry.branch) ?? '',
-                            };
-                          })
-                        : [],
-                      branchesError: null,
-                    };
-                  } catch (error: any) {
-                    return {
-                      path,
-                      hostBranch: null,
-                      remoteBranches: [],
-                      branchesError: String(error?.message ?? error ?? 'Failed to load branches.'),
-                    };
-                  }
-                }),
-              )
+            ? repoPaths.map((path) => ({
+                path,
+                hostBranch: null,
+                remoteBranches: [],
+                branchesError: null,
+                branchesLoaded: false,
+              }))
             : [];
         return {
-          schemaVersion: 4,
+          schemaVersion: 6,
           drones,
           repoPathByDroneId: Object.fromEntries(
             drones

@@ -53,6 +53,11 @@ export type BlipHistoryMessage = {
   role: string;
   content: unknown;
   timestamp?: number;
+  toolCallId?: string;
+  toolName?: string;
+  details?: unknown;
+  isError?: boolean;
+  errorMessage?: string;
 };
 
 export type BlipHistoryEntry = {

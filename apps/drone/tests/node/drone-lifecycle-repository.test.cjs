@@ -179,6 +179,25 @@ describe('DroneLifecycleRepository', () => {
     assert.equal(repository.get('transition'), null);
   });
 
+  test('carries a pending rename into the real record during promotion', async () => {
+    useTempDataDir('pending-rename-promotion');
+    const repository = await getDroneLifecycleRepository();
+    await repository.upsert('pending', 'promoted', {
+      id: 'promoted',
+      name: 'file-transfer-tool',
+      runtime: 'container',
+      phase: 'creating',
+    });
+
+    await repository.upsert('real', 'promoted', realEntry('promoted', {
+      name: 'Untitled 6',
+    }));
+
+    assert.equal(repository.list('pending').length, 0);
+    assert.equal(repository.get('promoted').state, 'real');
+    assert.equal(repository.get('promoted').name, 'file-transfer-tool');
+  });
+
   test('commits lifecycle state and outbox events atomically', async () => {
     useTempDataDir('outbox');
     const repository = await getDroneLifecycleRepository();

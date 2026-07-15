@@ -202,7 +202,9 @@ export function createAssistantThreadsCapability(
             : [],
         };
       }
-      if (operation === 'thread.create') {
+      if (operation === 'thread.create' || operation === 'thread.clone') {
+        const cloneThreadId =
+          operation === 'thread.clone' ? required(payload.threadId, 'thread id') : '';
         const snapshot = await localHubRequest(access, '/api/assistant/threads', {
           method: 'POST',
           body: JSON.stringify({
@@ -210,11 +212,24 @@ export function createAssistantThreadsCapability(
               String(payload.title ?? '')
                 .trim()
                 .slice(0, 160) || undefined,
+            ...(cloneThreadId ? { cloneThreadId } : {}),
           }),
         });
         const threads = threadsFromSnapshot(snapshot);
         const activeId = String(snapshot?.activeThreadId ?? '');
         const thread = threads.find((item) => item.id === activeId) ?? threads.at(-1);
+        if (cloneThreadId && thread) {
+          try {
+            await policies.cloneHomeTargets(cloneThreadId, String(thread.id));
+          } catch (error) {
+            await localHubRequest(
+              access,
+              `/api/assistant/threads/${encodeURIComponent(String(thread.id))}`,
+              { method: 'DELETE' },
+            ).catch(() => undefined);
+            throw error;
+          }
+        }
         return { thread: thread ? await withTarget(thread) : null };
       }
       const threadId = required(payload.threadId, 'thread id');
@@ -243,6 +258,16 @@ export function createAssistantThreadsCapability(
           method: 'DELETE',
         });
         return { deleted: true, threadId };
+      }
+      if (operation === 'thread.message.delete') {
+        const messageId = required(payload.messageId, 'message id');
+        const deleteFollowing = payload.deleteFollowing === true;
+        await localHubRequest(
+          access,
+          `/api/assistant/threads/${encodeURIComponent(threadId)}/messages/${encodeURIComponent(messageId)}?following=${deleteFollowing}`,
+          { method: 'DELETE' },
+        );
+        return { deleted: true, threadId, messageId, deleteFollowing };
       }
       if (operation === 'thread.update') {
         const snapshot = await localHubRequest(

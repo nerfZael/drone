@@ -81,7 +81,42 @@ export type MobileDroneCreateRepo = {
   hostBranch: string | null;
   remoteBranches: MobileDroneCreateBranch[];
   branchesError: string | null;
+  branchesLoaded: boolean;
 };
+
+export function normalizeMobileDroneCreateRepo(raw: unknown): MobileDroneCreateRepo | null {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
+  const repo = raw as Record<string, unknown>;
+  const path = text(repo.path);
+  if (!path) return null;
+  const remoteBranches = Array.isArray(repo.remoteBranches)
+    ? repo.remoteBranches.flatMap((rawBranch): MobileDroneCreateBranch[] => {
+        if (!rawBranch || typeof rawBranch !== 'object' || Array.isArray(rawBranch)) return [];
+        const branch = rawBranch as Record<string, unknown>;
+        const name = text(branch.name);
+        if (!name) return [];
+        const slash = name.indexOf('/');
+        return [
+          {
+            name,
+            remote: text(branch.remote) || (slash > 0 ? name.slice(0, slash) : ''),
+            branch: text(branch.branch) || (slash > 0 ? name.slice(slash + 1) : name),
+          },
+        ];
+      })
+    : [];
+  const branchesError = text(repo.branchesError) || null;
+  return {
+    path,
+    hostBranch: text(repo.hostBranch) || null,
+    remoteBranches,
+    branchesError,
+    branchesLoaded:
+      repo.branchesLoaded === true ||
+      (repo.branchesLoaded !== false &&
+        (Array.isArray(repo.remoteBranches) || Boolean(branchesError))),
+  };
+}
 
 export type MobileDroneCreateModel = {
   id: string;
@@ -248,34 +283,8 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
       : {};
   const createRepos = Array.isArray(createOptions.repos)
     ? createOptions.repos.flatMap((rawRepo): MobileDroneCreateRepo[] => {
-        if (!rawRepo || typeof rawRepo !== 'object' || Array.isArray(rawRepo)) return [];
-        const repo = rawRepo as Record<string, unknown>;
-        const path = text(repo.path);
-        if (!path) return [];
-        const remoteBranches = Array.isArray(repo.remoteBranches)
-          ? repo.remoteBranches.flatMap((rawBranch): MobileDroneCreateBranch[] => {
-              if (!rawBranch || typeof rawBranch !== 'object' || Array.isArray(rawBranch))
-                return [];
-              const branch = rawBranch as Record<string, unknown>;
-              const name = text(branch.name);
-              if (!name) return [];
-              return [
-                {
-                  name,
-                  remote: text(branch.remote),
-                  branch: text(branch.branch) || name,
-                },
-              ];
-            })
-          : [];
-        return [
-          {
-            path,
-            hostBranch: text(repo.hostBranch) || null,
-            remoteBranches,
-            branchesError: text(repo.branchesError) || null,
-          },
-        ];
+        const repo = normalizeMobileDroneCreateRepo(rawRepo);
+        return repo ? [repo] : [];
       })
     : [];
   return {

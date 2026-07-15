@@ -39,6 +39,7 @@ import {
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   mobileRepoLabel,
   mobileDroneTurnsToAssistantMessages,
+  normalizeMobileDroneCreateRepo,
   normalizeMobileDroneCreateModelCatalog,
   normalizeMobileDroneListPayload,
   normalizeMobileDroneTurns,
@@ -100,7 +101,7 @@ export function DronesScreen({
   );
   const targetId = selectedDeviceId;
   const targetSupportsDrones = targets.some((target) => target.id === targetId);
-  const targetConnected = mesh.connectedDeviceIds.includes(targetId);
+  const meshRouteAvailable = mesh.connectedDeviceIds.length > 0;
   const [drones, setDrones] = React.useState<MobileDroneSummary[]>([]);
   const [droneSidebarOrder, setDroneSidebarOrder] = React.useState<MobileDroneSidebarOrder>(
     EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
@@ -124,6 +125,7 @@ export function DronesScreen({
   const [createRepos, setCreateRepos] = React.useState<MobileDroneCreateRepo[]>([]);
   const [busy, setBusy] = React.useState('');
   const [dronesLoaded, setDronesLoaded] = React.useState(false);
+  const [droneListError, setDroneListError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = React.useState<MobileDroneSummary | null>(null);
   const [deleting, setDeleting] = React.useState(false);
@@ -143,6 +145,7 @@ export function DronesScreen({
   const busyVersion = React.useRef(0);
   const modelRequestVersion = React.useRef(0);
   const createModelCatalogCache = React.useRef(new Map<string, MobileDroneCreateModel[]>());
+  const createRepoBranchesCache = React.useRef(new Map<string, MobileDroneCreateRepo>());
   const readChatRef = React.useRef<(droneId: string, chatName: string) => Promise<void>>(
     async () => {},
   );
@@ -170,17 +173,20 @@ export function DronesScreen({
       const requestVersion = ++droneListVersion.current;
       const busyRequestVersion = quiet ? 0 : ++busyVersion.current;
       if (!quiet) setBusy('drones');
+      if (!quiet) setDroneListError(null);
       setError(null);
       try {
         const result = await mesh.request(targetId, 'drone-control', 'drones.list', {
-          includeCreateOptions: !quiet,
+          includeCreateOptions: false,
         });
         if (targetIdRef.current !== targetId || droneListVersion.current !== requestVersion) return;
+        if (!result || typeof result !== 'object' || !Array.isArray(result.drones)) {
+          throw new Error('The selected Drone Hub returned an invalid drone list');
+        }
         const normalized = normalizeMobileDroneListPayload(result);
         const nextDrones = normalized.drones;
         setDrones(nextDrones);
         setDroneSidebarOrder(normalized.sidebar);
-        if (!quiet) setCreateRepos(normalized.createRepos);
         const currentSelected = selectedRef.current;
         const nextSelected = currentSelected
           ? (nextDrones.find((drone) => drone.id === currentSelected.id) ?? null)
@@ -211,16 +217,45 @@ export function DronesScreen({
             'This device returned the legacy drone list without repository metadata. Update and restart DroneHub on the selected device.',
           );
         }
+        if (!quiet) {
+          try {
+            const optionsResult = await mesh.request(targetId, 'drone-control', 'drones.list', {
+              includeCreateOptions: true,
+            });
+            if (
+              targetIdRef.current !== targetId ||
+              droneListVersion.current !== requestVersion
+            )
+              return;
+            const options = normalizeMobileDroneListPayload(optionsResult);
+            setCreateRepos(
+              options.createRepos.map(
+                (repo) => createRepoBranchesCache.current.get(`${targetId}:${repo.path}`) ?? repo,
+              ),
+            );
+          } catch (nextError: any) {
+            if (
+              targetIdRef.current === targetId &&
+              droneListVersion.current === requestVersion
+            ) {
+              setError(
+                `Drones loaded, but creation options are unavailable: ${nextError?.message ?? String(nextError)}`,
+              );
+            }
+          }
+        }
       } catch (nextError: any) {
-        if (targetIdRef.current === targetId && droneListVersion.current === requestVersion)
-          setError(nextError?.message ?? String(nextError));
+        if (targetIdRef.current === targetId && droneListVersion.current === requestVersion) {
+          const message = nextError?.message ?? String(nextError);
+          if (!quiet) setDroneListError(message);
+          setError(message);
+        }
       } finally {
         if (targetIdRef.current === targetId && droneListVersion.current === requestVersion)
           setDronesLoaded(true);
         if (
           !quiet &&
           targetIdRef.current === targetId &&
-          droneListVersion.current === requestVersion &&
           busyVersion.current === busyRequestVersion
         )
           setBusy('');
@@ -248,6 +283,7 @@ export function DronesScreen({
     setCreateRepos([]);
     setBusy('');
     setDronesLoaded(false);
+    setDroneListError(null);
     setError(null);
     setModelOpen(false);
     setModelBusy(false);
@@ -264,8 +300,8 @@ export function DronesScreen({
     modelRequestVersion.current += 1;
   }, [targetId, targetSupportsDrones]);
   React.useEffect(() => {
-    if (targetConnected && targetSupportsDrones) void loadDrones();
-  }, [loadDrones, targetConnected, targetSupportsDrones]);
+    if (meshRouteAvailable && targetSupportsDrones) void loadDrones();
+  }, [loadDrones, meshRouteAvailable, targetSupportsDrones]);
 
   const openDrone = (drone: MobileDroneSummary, requestedChat?: string) =>
     run('chats', async () => {
@@ -445,6 +481,63 @@ export function DronesScreen({
     });
     return created;
   };
+
+  const loadCreateRepoBranches = React.useCallback(
+    async (repoPath: string, refresh = false): Promise<MobileDroneCreateRepo> => {
+      const destinationId = targetId;
+      const cacheKey = `${destinationId}:${repoPath}`;
+      if (!refresh) {
+        const cached = createRepoBranchesCache.current.get(cacheKey);
+        if (cached) return cached;
+      }
+
+      let cursor = 0;
+      let hostBranch: string | null = null;
+      let branchesError: string | null = null;
+      const branches = new Map<string, MobileDroneCreateRepo['remoteBranches'][number]>();
+      for (let pageNumber = 0; pageNumber < 100; pageNumber += 1) {
+        const result = await mesh.request(destinationId, 'drone-control', 'drones.list', {
+          createRepoPath: repoPath,
+          createRepoCursor: cursor,
+        });
+        if (targetIdRef.current !== destinationId)
+          throw new Error('The selected Drone Hub changed while branches were loading');
+        const page = normalizeMobileDroneCreateRepo(result?.createRepo);
+        if (!page || page.path !== repoPath) {
+          throw new Error('This Drone Hub does not support lazy repository branch loading');
+        }
+        hostBranch = page.hostBranch ?? hostBranch;
+        branchesError = page.branchesError;
+        for (const branch of page.remoteBranches) branches.set(branch.name, branch);
+        const nextCursor = Number(result?.createRepo?.nextCursor);
+        if (
+          branchesError ||
+          result?.createRepo?.nextCursor == null ||
+          !Number.isSafeInteger(nextCursor)
+        )
+          break;
+        if (nextCursor <= cursor) throw new Error('Drone Hub returned an invalid branch page');
+        cursor = nextCursor;
+        if (pageNumber === 99) throw new Error('Repository has too many branch pages');
+      }
+
+      const repo: MobileDroneCreateRepo = {
+        path: repoPath,
+        hostBranch,
+        remoteBranches: [...branches.values()],
+        branchesError,
+        branchesLoaded: true,
+      };
+      createRepoBranchesCache.current.set(cacheKey, repo);
+      setCreateRepos((current) =>
+        current.some((item) => item.path === repoPath)
+          ? current.map((item) => (item.path === repoPath ? repo : item))
+          : [...current, repo],
+      );
+      return repo;
+    },
+    [mesh.request, targetId],
+  );
 
   const detectCreateModels = React.useCallback(
     async (
@@ -738,23 +831,27 @@ export function DronesScreen({
         activeDroneId={selected?.id ?? ''}
         activeChatName={chatName}
         dronesLoading={
-          targetConnected && targetSupportsDrones && (!dronesLoaded || busy === 'drones')
+          meshRouteAvailable && targetSupportsDrones && (!dronesLoaded || busy === 'drones')
         }
+        dronesReachable={meshRouteAvailable}
+        dronesError={droneListError}
         devicePickerItems={devicePickerItems}
         activeDeviceId={targetId}
         onClose={() => onDrawerOpenChange(false)}
         onSelect={() => {}}
         onCreate={() => {}}
         onCreateDrone={
-          targetSupportsDrones
+          targetSupportsDrones && meshRouteAvailable
             ? () => {
                 onDrawerOpenChange(false);
                 openNewDroneScreen();
               }
             : undefined
         }
+        onRetryDrones={() => void loadDrones()}
         onSelectDevice={(deviceId) => {
           setDronesLoaded(false);
+          setDroneListError(null);
           onDeviceChange(deviceId);
           setDrones([]);
           setDroneSidebarOrder(EMPTY_MOBILE_DRONE_SIDEBAR_ORDER);
@@ -881,11 +978,12 @@ export function DronesScreen({
             key={`${targetId}:${newDroneScreenVersion}`}
             deviceName={activeTarget?.name ?? 'this device'}
             repos={createRepos}
-            loadingOptions={targetConnected && (!dronesLoaded || busy === 'drones')}
+            loadingOptions={meshRouteAvailable && (!dronesLoaded || busy === 'drones')}
             busy={busy.startsWith('create-')}
             requestError={error}
             initialValues={newDroneDefaults ?? undefined}
             onDetectModels={detectCreateModels}
+            onLoadRepoBranches={loadCreateRepoBranches}
             onCreate={createDrone}
           />
         ) : (

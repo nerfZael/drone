@@ -123,9 +123,10 @@ export function useMobileChatVoiceRecorder({
       previousStatus === 'starting' ||
       previousStatus === 'recording' ||
       previousStatus === 'paused';
-    const uri = recordingUriRef.current || recorder.uri;
+    let uri = recordingUriRef.current || recorder.uri;
     recordingUriRef.current = uri;
     if (shouldStop) await recorder.stop().catch(() => undefined);
+    uri = recordingUriRef.current || recorder.uri || uri;
     deleteRecordingFile(uri);
     recordingUriRef.current = null;
     await deactivateRecordingMode();
@@ -228,6 +229,7 @@ export function useMobileChatVoiceRecorder({
     try {
       uri = recordingUriRef.current || recorder.uri || '';
       await recorder.stop();
+      uri = recordingUriRef.current || recorder.uri || uri;
       if (!uri) throw new Error('The voice recording could not be saved.');
       recordingUriRef.current = uri;
       await deactivateRecordingMode();

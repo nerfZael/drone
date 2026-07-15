@@ -148,12 +148,41 @@ describe('mobile drone sidebar model', () => {
         hostBranch: 'main',
         remoteBranches: [{ name: 'origin/main', remote: 'origin', branch: 'main' }],
         branchesError: null,
+        branchesLoaded: true,
       },
       {
         path: '/work/broken',
         hostBranch: null,
         remoteBranches: [],
         branchesError: 'Not a git repository',
+        branchesLoaded: true,
+      },
+    ]);
+  });
+
+  test('preserves unloaded repo stubs for lazy branch fetching', () => {
+    const payload = normalizeMobileDroneListPayload({
+      schemaVersion: 6,
+      createOptions: {
+        repos: [
+          {
+            path: '/work/drone',
+            hostBranch: null,
+            remoteBranches: [],
+            branchesError: null,
+            branchesLoaded: false,
+          },
+        ],
+      },
+    });
+
+    expect(payload.createRepos).toEqual([
+      {
+        path: '/work/drone',
+        hostBranch: null,
+        remoteBranches: [],
+        branchesError: null,
+        branchesLoaded: false,
       },
     ]);
   });

@@ -187,6 +187,7 @@ export function NewDroneScreen({
   requestError,
   initialValues,
   onDetectModels,
+  onLoadRepoBranches,
   onCreate,
 }: {
   deviceName: string;
@@ -200,6 +201,7 @@ export function NewDroneScreen({
     runtime: MobileDroneCreateRuntime,
     refresh?: boolean,
   ): Promise<MobileDroneCreateModel[]>;
+  onLoadRepoBranches(repoPath: string, refresh?: boolean): Promise<MobileDroneCreateRepo>;
   onCreate(payload: MobileDroneCreatePayload): Promise<boolean>;
 }) {
   const [mode, setMode] = React.useState<MobileDroneCreateMode>(
@@ -233,8 +235,11 @@ export function NewDroneScreen({
   const [initialMessage, setInitialMessage] = React.useState('');
   const [repoPickerOpen, setRepoPickerOpen] = React.useState(false);
   const [branchPickerOpen, setBranchPickerOpen] = React.useState(false);
+  const [branchesLoading, setBranchesLoading] = React.useState(false);
+  const [branchesLoadError, setBranchesLoadError] = React.useState<string | null>(null);
   const [formError, setFormError] = React.useState<string | null>(null);
   const modelRequestId = React.useRef(0);
+  const branchRequestId = React.useRef(0);
   const selectedRepo = repos.find((repo) => repo.path === repoPath) ?? null;
   const readOnlySupported = agent === 'codex' || agent === 'blip';
   const selectedModel = models.find((option) => option.id === model) ?? null;
@@ -281,9 +286,29 @@ export function NewDroneScreen({
   React.useEffect(
     () => () => {
       modelRequestId.current += 1;
+      branchRequestId.current += 1;
     },
     [],
   );
+
+  React.useEffect(() => {
+    const requestId = branchRequestId.current + 1;
+    branchRequestId.current = requestId;
+    setBranchesLoadError(null);
+    if (!repoPath || !selectedRepo || selectedRepo.branchesLoaded) {
+      setBranchesLoading(false);
+      return;
+    }
+    setBranchesLoading(true);
+    void onLoadRepoBranches(repoPath)
+      .catch((error: any) => {
+        if (branchRequestId.current !== requestId) return;
+        setBranchesLoadError(String(error?.message ?? error ?? 'Could not load branches.'));
+      })
+      .finally(() => {
+        if (branchRequestId.current === requestId) setBranchesLoading(false);
+      });
+  }, [onLoadRepoBranches, repoPath, selectedRepo?.branchesLoaded]);
 
   React.useEffect(() => {
     if (!model) {
@@ -648,7 +673,9 @@ export function NewDroneScreen({
             ) : branchSource === 'host' ? (
               <>
                 <Text style={styles.helper}>
-                  Current host branch: {selectedRepo.hostBranch ?? 'Unavailable'}
+                  {branchesLoading
+                    ? 'Loading current host branch…'
+                    : `Current host branch: ${selectedRepo.hostBranch ?? 'Unavailable'}`}
                 </Text>
                 <Toggle
                   label="Pull before create"
@@ -663,18 +690,25 @@ export function NewDroneScreen({
                 <Pressable
                   accessibilityRole="button"
                   accessibilityState={{ expanded: branchPickerOpen }}
-                  disabled={busy || selectedRepo.remoteBranches.length === 0}
+                  disabled={busy || branchesLoading || selectedRepo.remoteBranches.length === 0}
                   onPress={() => setBranchPickerOpen((open) => !open)}
                   style={({ pressed }) => [
                     styles.pickerTrigger,
-                    selectedRepo.remoteBranches.length === 0 && styles.disabled,
+                    (branchesLoading || selectedRepo.remoteBranches.length === 0) &&
+                      styles.disabled,
                     pressed && styles.pressed,
                   ]}
                 >
                   <Text numberOfLines={1} style={styles.pickerValue}>
-                    {remoteBranch || 'Choose remote branch'}
+                    {branchesLoading
+                      ? 'Loading remote branches…'
+                      : remoteBranch || 'Choose remote branch'}
                   </Text>
-                  <ChevronDown color={colors.muted} size={17} strokeWidth={2} />
+                  {branchesLoading ? (
+                    <ActivityIndicator color={colors.accent} size="small" />
+                  ) : (
+                    <ChevronDown color={colors.muted} size={17} strokeWidth={2} />
+                  )}
                 </Pressable>
                 {branchPickerOpen ? (
                   <View style={styles.pickerOptions}>
@@ -694,9 +728,11 @@ export function NewDroneScreen({
                     ))}
                   </View>
                 ) : null}
-                {selectedRepo.branchesError ? (
-                  <Text style={styles.errorText}>{selectedRepo.branchesError}</Text>
-                ) : selectedRepo.remoteBranches.length === 0 ? (
+                {branchesLoadError || selectedRepo.branchesError ? (
+                  <Text style={styles.errorText}>
+                    {branchesLoadError ?? selectedRepo.branchesError}
+                  </Text>
+                ) : selectedRepo.branchesLoaded && selectedRepo.remoteBranches.length === 0 ? (
                   <Text style={styles.helper}>No remote branches are available for this repo.</Text>
                 ) : null}
               </>

@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { loadRegistry, updateRegistry } from '../src/host/registry';
+import { upsertCanonicalDroneLifecycle } from '../src/hub/drone-lifecycle-service';
 import { createPendingDroneStateHelpers } from '../src/hub/drone-pending-state';
 import { createDroneProvisioningController } from '../src/hub/drone-provisioning';
 import { withTempDroneDataDir } from './test-helpers';
@@ -18,7 +19,10 @@ async function waitFor(check: () => Promise<boolean>, timeoutMs = 1500): Promise
   throw new Error(`condition not met within ${timeoutMs}ms`);
 }
 
-function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: boolean }) {
+function createControllerHarness(opts?: {
+  agentSuggestionEnabledByDefault?: boolean;
+  duringRunNodeCli?: (context: { droneId: string; displayName: string }) => Promise<void>;
+}) {
   const pendingStateHelpers = createPendingDroneStateHelpers({
     normalizeChatName: (raw: any) => String(raw ?? 'default').trim() || 'default',
     nowIso: () => '2026-03-26T12:00:00.000Z',
@@ -75,16 +79,14 @@ function createControllerHarness(opts?: { agentSuggestionEnabledByDefault?: bool
       const displayName = String(args[2] ?? '').trim();
       const droneIdIndex = args.indexOf('--drone-id');
       const droneId = droneIdIndex >= 0 ? String(args[droneIdIndex + 1] ?? '').trim() : '';
-      await updateRegistry((reg: any) => {
-        reg.drones = reg.drones ?? {};
-        reg.drones[droneId] = {
-          id: droneId,
-          name: 'Untitled 25',
-          runtime: 'host',
-          containerName: displayName,
-          createdAt: '2026-03-26T11:00:00.000Z',
-          chats: {},
-        };
+      await opts?.duringRunNodeCli?.({ droneId, displayName });
+      await upsertCanonicalDroneLifecycle('real', droneId, {
+        id: droneId,
+        name: 'Untitled 25',
+        runtime: 'host',
+        containerName: displayName,
+        createdAt: '2026-03-26T11:00:00.000Z',
+        chats: {},
       });
       return { code: 0, stdout: '', stderr: '' };
     },
@@ -154,7 +156,11 @@ describe('drone provisioning controller', () => {
 
       await waitFor(async () => {
         const reg: any = await loadRegistry();
-        return !reg?.pending?.['drone-1'] && String(reg?.drones?.['drone-1']?.name ?? '') === 'auth-bugfix';
+        return (
+          !reg?.pending?.['drone-1'] &&
+          String(reg?.drones?.['drone-1']?.name ?? '') === 'auth-bugfix' &&
+          harness.syncTaskStateCalls.length > 0
+        );
       });
 
       const reg: any = await loadRegistry();
@@ -169,6 +175,47 @@ describe('drone provisioning controller', () => {
       expect(harness.syncSharedPathsCalls).toHaveLength(1);
       expect(harness.syncRepoAgentsCalls).toHaveLength(1);
       expect(harness.syncSharedPathsCalls).toHaveLength(1);
+    });
+  });
+
+  test('preserves a pending auto-rename that lands while the CLI create is running', async () => {
+    await withTempDroneDataDir('drone-provisioning-', async () => {
+      await updateRegistry((reg: any) => {
+        reg.pending = {
+          'drone-race': {
+            id: 'drone-race',
+            name: 'Untitled 6',
+            runtime: 'host',
+            repoPath: '',
+            build: false,
+            createdAt: '2026-03-26T11:00:00.000Z',
+            updatedAt: '2026-03-26T11:00:00.000Z',
+            phase: 'starting',
+            message: 'Starting...',
+          },
+        };
+      });
+
+      const harness = createControllerHarness({
+        duringRunNodeCli: async ({ droneId }) => {
+          await updateRegistry((reg: any) => {
+            reg.pending[droneId].name = 'file-transfer-tool';
+          });
+        },
+      });
+      harness.controller.enqueueProvisioning('drone-race');
+
+      await waitFor(async () => {
+        const reg: any = await loadRegistry();
+        return (
+          !reg?.pending?.['drone-race'] &&
+          Boolean(reg?.drones?.['drone-race']) &&
+          harness.syncTaskStateCalls.length > 0
+        );
+      });
+
+      const reg: any = await loadRegistry();
+      expect(reg?.drones?.['drone-race']?.name).toBe('file-transfer-tool');
     });
   });
 

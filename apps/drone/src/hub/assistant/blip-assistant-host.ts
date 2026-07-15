@@ -176,6 +176,38 @@ export class BlipAssistantHost {
     await this.disposeConfiguration(threadId);
   }
 
+  async deleteMessage(
+    threadId: string,
+    entryId: string,
+    deleteFollowing: boolean,
+  ): Promise<void> {
+    const pending = this.handlePromises.get(threadId);
+    const handle = this.handles.get(threadId) ?? (pending ? await pending : null);
+    if (handle?.running) throw new Error('Stop the assistant before deleting messages');
+    this.invalidateThread(threadId);
+    await this.repository.deleteThreadMessage(threadId, entryId, deleteFollowing);
+  }
+
+  async cloneThread(sourceThreadId: string, targetThreadId: string): Promise<void> {
+    if (this.isThreadRunning(sourceThreadId))
+      throw new Error('Stop this assistant thread before cloning it');
+    const sourceSessionId = await this.repository.sessionIdForThread(sourceThreadId);
+    if (!sourceSessionId) return;
+    const source = await this.repository.load(sourceSessionId);
+    const cloned = await this.repository.fork(source, {
+      provider: source.modelProvider,
+      model: source.modelId,
+      permissionMode: source.permissionMode,
+      toolProfile: source.toolProfile,
+    });
+    try {
+      await this.repository.bindThread(targetThreadId, cloned.id);
+    } catch (error) {
+      await this.repository.delete(cloned.id).catch(() => undefined);
+      throw error;
+    }
+  }
+
   private async publishEvent(threadId: string, event: BlipRuntimeEvent): Promise<void> {
     try {
       await this.eventObserver?.(threadId, event);

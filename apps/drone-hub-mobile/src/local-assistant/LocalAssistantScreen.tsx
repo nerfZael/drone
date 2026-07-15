@@ -57,6 +57,12 @@ export function LocalAssistantScreen({
     title: string;
   } | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const [messageDeleteCandidate, setMessageDeleteCandidate] = React.useState<{
+    threadId: string;
+    messageId: string;
+    deleteFollowing: boolean;
+  } | null>(null);
+  const [deletingMessage, setDeletingMessage] = React.useState(false);
   const [cancellingPromptId, setCancellingPromptId] = React.useState('');
   const pendingAfterAccessDiscard = React.useRef<(() => void) | null>(null);
   const thread = assistant.threads.find((item) => item.id === assistant.activeThreadId) ?? null;
@@ -78,6 +84,7 @@ export function LocalAssistantScreen({
     setSettingsOpen(false);
     setAccessDirty(false);
     setConfirmAccessDiscard(false);
+    setMessageDeleteCandidate(null);
     pendingAfterAccessDiscard.current = null;
   }, [thread?.id]);
   React.useEffect(() => {
@@ -139,6 +146,14 @@ export function LocalAssistantScreen({
     setDeleteCandidate({ id: thread.id, title: thread.title });
   };
   const deleteFromHeader = React.useCallback(() => deleteActionRef.current(), []);
+  const newThreadFromHeader = React.useCallback(() => {
+    guardAccessChanges(() => void runAction(() => assistant.createThread()));
+  }, [assistant.createThread, guardAccessChanges]);
+  const cloneThreadFromHeader = React.useCallback(() => {
+    if (!thread) return;
+    const threadId = thread.id;
+    guardAccessChanges(() => void runAction(() => assistant.cloneThread(threadId)));
+  }, [assistant.cloneThread, guardAccessChanges, thread?.id]);
 
   React.useEffect(() => {
     onHeaderChange(
@@ -153,6 +168,9 @@ export function LocalAssistantScreen({
                   : `${thread.workspaceTargets.length} workspaces · ${new Set(thread.workspaceTargets.map((target) => target.targetDeviceId)).size} devices`,
             accessOpen: settingsOpen,
             accessDisabled: running,
+            onNewThread: newThreadFromHeader,
+            onCloneThread: cloneThreadFromHeader,
+            cloneDisabled: running,
             onToggleAccess: toggleAccess,
             onDelete: deleteFromHeader,
           }
@@ -160,6 +178,8 @@ export function LocalAssistantScreen({
     );
   }, [
     deleteFromHeader,
+    cloneThreadFromHeader,
+    newThreadFromHeader,
     onHeaderChange,
     running,
     settingsOpen,
@@ -305,6 +325,12 @@ export function LocalAssistantScreen({
             thread={thread}
             running={running}
             currentReasoning={currentReasoning}
+            messageActionsDisabled={running}
+            onDeleteMessageRequest={({ message, deleteFollowing }) => {
+              const messageId = String((message as any)?.id ?? '').trim();
+              if (!messageId) return;
+              setMessageDeleteCandidate({ threadId: thread.id, messageId, deleteFollowing });
+            }}
           />
           <QueuedPromptRows
             prompts={thread.queuedPrompts.map((item) => ({
@@ -383,6 +409,44 @@ export function LocalAssistantScreen({
           setSettingsOpen(false);
           nextAction?.();
         }}
+      />
+      <ConfirmDialog
+        visible={Boolean(messageDeleteCandidate)}
+        title={
+          messageDeleteCandidate?.deleteFollowing
+            ? 'Delete this message and everything below it?'
+            : 'Delete this message?'
+        }
+        message={
+          messageDeleteCandidate?.deleteFollowing
+            ? 'This message and every later message in the conversation will be permanently removed.'
+            : 'This message will be permanently removed from the conversation.'
+        }
+        confirmLabel={
+          messageDeleteCandidate?.deleteFollowing ? 'Delete messages' : 'Delete message'
+        }
+        destructive
+        busy={deletingMessage}
+        onCancel={() => setMessageDeleteCandidate(null)}
+        onConfirm={() =>
+          void (async () => {
+            if (!messageDeleteCandidate) return;
+            setDeletingMessage(true);
+            setError(null);
+            try {
+              await assistant.deleteMessage(
+                messageDeleteCandidate.threadId,
+                messageDeleteCandidate.messageId,
+                messageDeleteCandidate.deleteFollowing,
+              );
+              setMessageDeleteCandidate(null);
+            } catch (nextError: any) {
+              setError(nextError?.message ?? String(nextError));
+            } finally {
+              setDeletingMessage(false);
+            }
+          })()
+        }
       />
       <ConfirmDialog
         visible={Boolean(deleteCandidate)}

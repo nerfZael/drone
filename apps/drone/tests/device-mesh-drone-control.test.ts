@@ -50,9 +50,11 @@ describe('device mesh drone summaries', () => {
 
   test('returns timestamps and desktop sidebar ordering from drones.list', async () => {
     const originalFetch = globalThis.fetch;
+    const requestedPaths: string[] = [];
     globalThis.fetch = (async (input) => {
       const pathname = new URL(String(input)).pathname;
       const url = new URL(String(input));
+      requestedPaths.push(`${pathname}${url.search}`);
       const body =
         pathname === '/api/drones'
           ? {
@@ -104,7 +106,7 @@ describe('device mesh drone summaries', () => {
       await expect(
         capability.invoke('drones.list', { includeCreateOptions: true }),
       ).resolves.toMatchObject({
-        schemaVersion: 4,
+        schemaVersion: 6,
         drones: [{ id: 'one', lastMessageAt: '2026-07-14T10:00:00.000Z' }, { id: 'loose' }],
         repoPathByDroneId: { one: '/work/one' },
         sidebar: {
@@ -118,13 +120,86 @@ describe('device mesh drone summaries', () => {
           repos: [
             {
               path: '/work/one',
-              hostBranch: 'main',
-              remoteBranches: [{ name: 'origin/main', remote: 'origin', branch: 'main' }],
+              hostBranch: null,
+              remoteBranches: [],
+              branchesLoaded: false,
             },
-            { path: '/work/empty', hostBranch: null, remoteBranches: [] },
+            {
+              path: '/work/empty',
+              hostBranch: null,
+              remoteBranches: [],
+              branchesLoaded: false,
+            },
           ],
         },
       });
+      expect(requestedPaths.some((path) => path.startsWith('/api/repos/branches'))).toBe(false);
+
+      await expect(
+        capability.invoke('drones.list', { createRepoPath: '/work/one' }),
+      ).resolves.toEqual({
+        schemaVersion: 6,
+        createRepo: {
+          path: '/work/one',
+          hostBranch: 'main',
+          remoteBranches: [{ name: 'origin/main', remote: 'origin', branch: 'main' }],
+          branchesError: null,
+          branchesLoaded: true,
+          nextCursor: null,
+        },
+      });
+      expect(requestedPaths).toContain('/api/repos/branches?repoPath=%2Fwork%2Fone');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('bounds lazy branch pages and rejects unregistered repository paths', async () => {
+    const originalFetch = globalThis.fetch;
+    let branchRequests = 0;
+    const remoteBranches = Array.from({ length: 700 }, (_, index) => ({
+      name: `origin/${index}-${'n'.repeat(580)}`,
+      remote: 'origin',
+      branch: `${index}-${'b'.repeat(580)}`,
+    }));
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/repos') {
+        return Response.json({ ok: true, repos: [{ path: '/work/large' }] });
+      }
+      if (url.pathname === '/api/repos/branches') {
+        branchRequests += 1;
+        return Response.json({ ok: true, hostBranch: 'main', remoteBranches });
+      }
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      const firstPage: any = await capability.invoke('drones.list', {
+        createRepoPath: '/work/large',
+      });
+      expect(Buffer.byteLength(JSON.stringify(firstPage))).toBeLessThan(220 * 1024);
+      expect(firstPage.createRepo.remoteBranches.length).toBeGreaterThan(0);
+      expect(firstPage.createRepo.remoteBranches.length).toBeLessThan(500);
+      expect(firstPage.createRepo.branchesLoaded).toBe(false);
+      expect(firstPage.createRepo.nextCursor).toBeGreaterThan(0);
+
+      const secondPage: any = await capability.invoke('drones.list', {
+        createRepoPath: '/work/large',
+        createRepoCursor: firstPage.createRepo.nextCursor,
+      });
+      expect(Buffer.byteLength(JSON.stringify(secondPage))).toBeLessThan(220 * 1024);
+      expect(secondPage.createRepo.remoteBranches[0]?.name).toBe(
+        remoteBranches[firstPage.createRepo.nextCursor]?.name,
+      );
+
+      await expect(
+        capability.invoke('drones.list', { createRepoPath: '/work/not-registered' }),
+      ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+      expect(branchRequests).toBe(2);
     } finally {
       globalThis.fetch = originalFetch;
     }

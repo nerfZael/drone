@@ -15,6 +15,43 @@ afterEach(async () => {
 });
 
 describe('cross-device workspace policy', () => {
+  test('copies a thread workspace selection when the thread is cloned', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-workspace-clone-'));
+    tempDirs.push(directory);
+    const policies = new CrossDeviceAssistantPolicyStore(path.join(directory, 'policy.json'));
+    await policies.replace({
+      roots: [],
+      homeTargets: [
+        {
+          threadId: 'thread_source',
+          targetDeviceId: 'device_remote',
+          rootId: 'remote-root',
+          deviceName: 'Remote',
+          workspaceName: 'Project',
+          read: true,
+          write: true,
+          execute: false,
+        },
+      ],
+      deviceGrants: [],
+    });
+
+    await policies.cloneHomeTargets('thread_source', 'thread_copy');
+
+    expect(await policies.homeTargets('thread_copy')).toEqual([
+      {
+        threadId: 'thread_copy',
+        targetDeviceId: 'device_remote',
+        rootId: 'remote-root',
+        deviceName: 'Remote',
+        workspaceName: 'Project',
+        read: true,
+        write: true,
+        execute: false,
+      },
+    ]);
+  });
+
   test('keeps read and write grants independent', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-workspace-write-only-'));
     tempDirs.push(directory);

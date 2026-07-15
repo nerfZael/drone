@@ -242,3 +242,33 @@ export async function deleteLocalBlipSessionSnapshot(threadId: string): Promise<
   if (directory.exists) directory.delete();
   await AsyncStorage.removeItem(legacySnapshotKey(threadId));
 }
+
+export async function cloneLocalBlipSessionSnapshot(
+  source: LocalAssistantThread,
+  target: LocalAssistantThread,
+): Promise<void> {
+  const snapshot = await loadLocalBlipSessionSnapshot(source);
+  if (!snapshot) return;
+  const sessionId = `mobile_${target.id}`;
+  const transcript = snapshot.transcript.map((entry) =>
+    entry.type === 'runtime_event'
+      ? { ...entry, event: { ...entry.event, sessionId } }
+      : entry,
+  );
+  const cloned: LocalBlipSessionSnapshot = {
+    version: 1,
+    state: {
+      ...snapshot.state,
+      id: sessionId,
+      parentSessionId: snapshot.state.id,
+      transcriptPath: `mobile:${target.id}`,
+      createdAt: target.createdAt,
+      updatedAt: target.updatedAt,
+      loadedSkills: [...snapshot.state.loadedSkills],
+      changedFiles: [...snapshot.state.changedFiles],
+      readFiles: [...snapshot.state.readFiles],
+    },
+    transcript,
+  };
+  await saveLocalBlipSessionSnapshot(target.id, cloned, 0, transcript);
+}

@@ -144,6 +144,81 @@ export function ConfirmDialog({
   );
 }
 
+export type ContextMenuAction = {
+  label: string;
+  destructive?: boolean;
+  onPress(): void;
+};
+
+export function ContextMenu({
+  visible,
+  title,
+  actions,
+  onClose,
+}: {
+  visible: boolean;
+  title: string;
+  actions: ContextMenuAction[];
+  onClose(): void;
+}) {
+  const insets = useSafeAreaInsets();
+  return (
+    <Modal
+      visible={visible}
+      transparent
+      animationType="fade"
+      statusBarTranslucent
+      navigationBarTranslucent
+      onRequestClose={onClose}
+    >
+      <View style={[styles.contextMenuLayer, { paddingBottom: Math.max(insets.bottom, 12) }]}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Close message actions"
+          onPress={onClose}
+          style={StyleSheet.absoluteFill}
+        />
+        <View style={styles.contextMenu}>
+          <Text style={styles.contextMenuTitle}>{title}</Text>
+          {actions.map((action) => (
+            <Pressable
+              key={action.label}
+              accessibilityRole="menuitem"
+              onPress={() => {
+                onClose();
+                action.onPress();
+              }}
+              style={({ pressed }) => [
+                styles.contextMenuAction,
+                pressed && styles.contextMenuActionPressed,
+              ]}
+            >
+              <Text
+                style={[
+                  styles.contextMenuActionText,
+                  action.destructive && styles.contextMenuActionDanger,
+                ]}
+              >
+                {action.label}
+              </Text>
+            </Pressable>
+          ))}
+          <Pressable
+            accessibilityRole="button"
+            onPress={onClose}
+            style={({ pressed }) => [
+              styles.contextMenuCancel,
+              pressed && styles.contextMenuActionPressed,
+            ]}
+          >
+            <Text style={styles.contextMenuCancelText}>Cancel</Text>
+          </Pressable>
+        </View>
+      </View>
+    </Modal>
+  );
+}
+
 export const textStyles: Record<string, TextStyle> = {
   title: { color: colors.textStrong, fontSize: 29, fontWeight: '800', letterSpacing: -0.9 },
   heading: { color: colors.text, fontSize: 17, fontWeight: '800', letterSpacing: -0.2 },
@@ -234,4 +309,53 @@ const styles = StyleSheet.create({
   dialogMessage: { color: colors.muted, fontSize: 14, lineHeight: 21, marginTop: 9 },
   dialogActions: { flexDirection: 'row', gap: 9, marginTop: 22 },
   dialogButton: { flex: 1 },
+  contextMenuLayer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    paddingHorizontal: 12,
+    backgroundColor: colors.overlay,
+  },
+  contextMenu: {
+    width: '100%',
+    maxWidth: 520,
+    alignSelf: 'center',
+    overflow: 'hidden',
+    borderRadius: radii.xlarge,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panel,
+    shadowColor: colors.shadow,
+    shadowOpacity: 0.5,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 16,
+  },
+  contextMenuTitle: {
+    color: colors.muted,
+    fontSize: 11,
+    fontWeight: '800',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    paddingHorizontal: 18,
+    paddingTop: 16,
+    paddingBottom: 9,
+  },
+  contextMenuAction: {
+    minHeight: 52,
+    justifyContent: 'center',
+    paddingHorizontal: 18,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  contextMenuActionPressed: { backgroundColor: colors.whiteWash },
+  contextMenuActionText: { color: colors.text, fontSize: 15, fontWeight: '700' },
+  contextMenuActionDanger: { color: colors.danger },
+  contextMenuCancel: {
+    minHeight: 52,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderTopWidth: 7,
+    borderTopColor: colors.background,
+  },
+  contextMenuCancelText: { color: colors.textStrong, fontSize: 15, fontWeight: '800' },
 });

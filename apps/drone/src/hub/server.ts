@@ -21087,7 +21087,29 @@ export async function startDroneHubApiServer(opts: {
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
         }
-        json(res, 201, await assistantService.createThread(body ?? {}));
+        const cloneThreadId = String(body?.cloneThreadId ?? '').trim();
+        if (!cloneThreadId) {
+          json(res, 201, await assistantService.createThread(body ?? {}));
+          return;
+        }
+        let clonedThreadId = '';
+        try {
+          if (blipAssistantHost.isThreadRunning(cloneThreadId))
+            throw new Error('Stop this assistant thread before cloning it');
+          const snapshot = await assistantService.cloneThread(cloneThreadId, body ?? {});
+          clonedThreadId = snapshot.activeThreadId;
+          await blipAssistantHost.cloneThread(cloneThreadId, clonedThreadId);
+          json(res, 201, snapshot);
+        } catch (e: any) {
+          if (clonedThreadId) {
+            await blipAssistantHost.deleteThread(clonedThreadId).catch(() => undefined);
+            await assistantService.deleteThread(clonedThreadId).catch(() => undefined);
+          }
+          json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, {
+            ok: false,
+            error: e?.message ?? String(e),
+          });
+        }
         return;
       }
 
@@ -21465,6 +21487,31 @@ export async function startDroneHubApiServer(opts: {
               json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, {
                 ok: false,
                 error: e?.message ?? String(e),
+              });
+            }
+            return;
+          }
+
+          if (
+            assistantParts.length === 6 &&
+            assistantParts[4] === 'messages' &&
+            method === 'DELETE'
+          ) {
+            const messageId = decodeURIComponent(assistantParts[5] ?? '');
+            try {
+              await assistantService.threadSnapshot(threadId);
+              await blipAssistantHost.deleteMessage(
+                threadId,
+                messageId,
+                u.searchParams.get('following') === 'true',
+              );
+              await assistantService.notifyCanonicalHistoryChanged(threadId);
+              json(res, 200, { ok: true, deleted: true, threadId, messageId });
+            } catch (e: any) {
+              const detail = String(e?.message ?? e);
+              json(res, /unknown (assistant thread|assistant message)/i.test(detail) ? 404 : 400, {
+                ok: false,
+                error: detail,
               });
             }
             return;

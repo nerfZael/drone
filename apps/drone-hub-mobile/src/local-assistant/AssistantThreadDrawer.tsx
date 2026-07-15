@@ -79,12 +79,15 @@ export type AssistantThreadDrawerProps = {
   activeDroneId?: string;
   activeChatName?: string;
   dronesLoading?: boolean;
+  dronesReachable?: boolean;
+  dronesError?: string | null;
   devicePickerItems?: DrawerDevicePickerItem[];
   activeDeviceId?: string;
   onClose(): void;
   onSelect(threadId: string): void;
   onCreate(): void;
   onCreateDrone?(): void;
+  onRetryDrones?(): void;
   onSelectDroneChat?(droneId: string, chatName: string): void;
   onSelectDevice?(deviceId: string): void;
 };
@@ -530,12 +533,15 @@ function AssistantThreadDrawerView({
   activeDroneId = '',
   activeChatName = 'default',
   dronesLoading = false,
+  dronesReachable = true,
+  dronesError = null,
   devicePickerItems = [],
   activeDeviceId = '',
   onClose,
   onSelect,
   onCreate,
   onCreateDrone,
+  onRetryDrones,
   onSelectDroneChat,
   onSelectDevice,
 }: AssistantThreadDrawerProps) {
@@ -814,6 +820,14 @@ function AssistantThreadDrawerView({
                     <ActivityIndicator color={colors.accent} size="small" />
                     <Text style={styles.loadingSummaryText}>Loading drones…</Text>
                   </View>
+                ) : !dronesReachable ? (
+                  <Text numberOfLines={1} style={styles.sidebarToolbarText}>
+                    Device unavailable
+                  </Text>
+                ) : dronesError ? (
+                  <Text numberOfLines={1} style={styles.sidebarToolbarText}>
+                    Could not load drones
+                  </Text>
                 ) : (
                   <Text numberOfLines={1} style={styles.sidebarToolbarText}>
                     {drones.length} {drones.length === 1 ? 'drone' : 'drones'} · {droneGroups.length}{' '}
@@ -933,7 +947,24 @@ function AssistantThreadDrawerView({
                       </Pressable>
                     </View>
                   ))}
-                {!dronesLoading && drones.length === 0 ? (
+                {!dronesLoading && !dronesReachable ? (
+                  <Text style={styles.empty}>
+                    No mesh route is currently available. Connect any paired Hub and try again.
+                  </Text>
+                ) : !dronesLoading && dronesError ? (
+                  <View style={styles.drawerError}>
+                    <Text style={styles.drawerErrorText}>{dronesError}</Text>
+                    {onRetryDrones ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        onPress={onRetryDrones}
+                        style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
+                      >
+                        <Text style={styles.retryText}>Retry</Text>
+                      </Pressable>
+                    ) : null}
+                  </View>
+                ) : !dronesLoading && drones.length === 0 ? (
                   <Text style={styles.empty}>No drones are available on this device.</Text>
                 ) : null}
               </ScrollView>
@@ -1070,6 +1101,18 @@ const styles = StyleSheet.create({
   list: { paddingHorizontal: 8, paddingBottom: 20 },
   activeText: { color: colors.accent, fontWeight: '800' },
   empty: { color: colors.muted, fontSize: 12, lineHeight: 18, padding: 12 },
+  drawerError: { gap: 10, padding: 12 },
+  drawerErrorText: { color: colors.danger, fontSize: 11, lineHeight: 17 },
+  retry: {
+    alignSelf: 'flex-start',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panelRaised,
+  },
+  retryText: { color: colors.accent, fontSize: 10, fontWeight: '800' },
   devicePickerSection: {
     position: 'relative',
     width: 164,

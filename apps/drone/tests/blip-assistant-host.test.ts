@@ -69,6 +69,39 @@ describe('Blip assistant host', () => {
     });
   });
 
+  test('forks a completed thread transcript into an independent thread', async () => {
+    await withTempDroneDataDir('blip-assistant-clone-', async () => {
+      const faux = registerFauxProvider({
+        api: 'faux',
+        provider: 'faux',
+        tokensPerSecond: 0,
+      });
+      faux.setResponses([fauxAssistantMessage('source response')]);
+      const host = new BlipAssistantHost(async () => ({
+        provider: 'faux',
+        model: faux.getModel().id,
+        thinkingLevel: 'off',
+        systemPrompt: 'Hub host prompt',
+        tools: [],
+      }));
+
+      await host.promptThread('source-thread', 'source prompt');
+      await host.cloneThread('source-thread', 'cloned-thread');
+
+      const source = await host.historyPage('source-thread', { limit: 10 });
+      const cloned = await host.historyPage('cloned-thread', { limit: 10 });
+      expect(cloned.entries.map((entry) => entry.message)).toEqual(
+        source.entries.map((entry) => entry.message),
+      );
+      const repository = new HubSessionRepository();
+      const sourceSessionId = await repository.sessionIdForThread('source-thread');
+      const clonedSessionId = await repository.sessionIdForThread('cloned-thread');
+      expect(clonedSessionId).not.toBe(sourceSessionId);
+      expect((await repository.load(clonedSessionId!)).parentSessionId).toBe(sourceSessionId);
+      faux.unregister();
+    });
+  });
+
   test('serializes concurrent first prompts onto one thread session', async () => {
     await withTempDroneDataDir('blip-assistant-concurrent-', async () => {
       const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
@@ -125,6 +158,47 @@ describe('Blip assistant host', () => {
       expect(page.entries.map((entry) => entry.message.role)).toEqual(['user', 'assistant']);
       expect(events.filter((event) => event.type === 'transcript_changed').map((event) => event.role)).toEqual(['user', 'assistant']);
       unsubscribe();
+      faux.unregister();
+    });
+  });
+
+  test('deletes one canonical message or the selected message and its suffix', async () => {
+    await withTempDroneDataDir('blip-assistant-message-delete-', async () => {
+      const faux = registerFauxProvider({
+        api: 'faux',
+        provider: 'faux',
+        tokensPerSecond: 0,
+      });
+      faux.setResponses([fauxAssistantMessage('first'), fauxAssistantMessage('second')]);
+      const host = new BlipAssistantHost(async () => ({
+        provider: 'faux',
+        model: faux.getModel().id,
+        thinkingLevel: 'off',
+        systemPrompt: 'Hub host prompt',
+        tools: [],
+      }));
+
+      await host.promptThread('thread-delete', 'one');
+      await host.promptThread('thread-delete', 'two');
+      const original = await host.historyPage('thread-delete', { limit: 10 });
+      expect(original.entries.map((entry) => entry.message.role)).toEqual([
+        'user',
+        'assistant',
+        'user',
+        'assistant',
+      ]);
+
+      await host.deleteMessage('thread-delete', original.entries[1]!.id, false);
+      const afterSingle = await host.historyPage('thread-delete', { limit: 10 });
+      expect(afterSingle.entries.map((entry) => entry.message.role)).toEqual([
+        'user',
+        'user',
+        'assistant',
+      ]);
+
+      await host.deleteMessage('thread-delete', afterSingle.entries[1]!.id, true);
+      const afterSuffix = await host.historyPage('thread-delete', { limit: 10 });
+      expect(afterSuffix.entries.map((entry) => entry.message.role)).toEqual(['user']);
       faux.unregister();
     });
   });

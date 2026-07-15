@@ -197,6 +197,15 @@ export class CrossDeviceAssistantPolicyStore {
     return (await this.read()).homeTargets.filter((item) => item.threadId === threadId);
   }
 
+  async cloneHomeTargets(sourceThreadId: string, targetThreadId: string): Promise<void> {
+    const policy = await this.read();
+    const targets = policy.homeTargets
+      .filter((item) => item.threadId === sourceThreadId)
+      .map((item) => ({ ...item, threadId: targetThreadId }));
+    if (targets.length === 0) return;
+    await this.replace({ ...policy, homeTargets: [...policy.homeTargets, ...targets] });
+  }
+
   async root(rootId: string): Promise<WorkspaceRoot | null> {
     return (await this.read()).roots.find((item) => item.id === rootId) ?? null;
   }

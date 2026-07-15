@@ -16,6 +16,7 @@ import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import Menu from 'lucide-react-native/icons/menu';
 import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
+import Copy from 'lucide-react-native/icons/copy';
 import Plus from 'lucide-react-native/icons/plus';
 import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
 import Trash2 from 'lucide-react-native/icons/trash-2';
@@ -282,6 +283,27 @@ function Shell() {
   const headerMenuActions: HeaderMenuAction[] = !pairingVisible
     ? tab === 'assistant' && assistantHeader
       ? [
+          ...(assistantHeader.onNewThread
+            ? [
+                {
+                  id: 'new-thread',
+                  label: 'New thread',
+                  icon: Plus,
+                  onPress: assistantHeader.onNewThread,
+                },
+              ]
+            : []),
+          ...(assistantHeader.onCloneThread
+            ? [
+                {
+                  id: 'clone-thread',
+                  label: 'Clone thread',
+                  icon: Copy,
+                  disabled: assistantHeader.cloneDisabled,
+                  onPress: assistantHeader.onCloneThread,
+                },
+              ]
+            : []),
           ...(assistantHeader.onToggleAccess
             ? [
                 {

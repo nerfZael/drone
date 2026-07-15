@@ -80,6 +80,20 @@ function compatibilityLifecycleRecord(
   };
 }
 
+function preservePendingNameOnPromotion(
+  registry: any,
+  state: CanonicalDroneLifecycleState,
+  droneId: string,
+  entryRaw: unknown,
+): unknown {
+  if (state !== 'real' || !entryRaw || typeof entryRaw !== 'object' || Array.isArray(entryRaw)) {
+    return entryRaw;
+  }
+  const pending = findDroneEntryByIdentity({ drones: registry?.pending }, droneId)?.entry;
+  const pendingName = String(pending?.name ?? '').trim();
+  return pendingName ? { ...(entryRaw as Record<string, any>), name: pendingName } : entryRaw;
+}
+
 export async function upsertCanonicalDroneLifecycle(
   state: CanonicalDroneLifecycleState,
   droneId: string,
@@ -90,14 +104,15 @@ export async function upsertCanonicalDroneLifecycle(
     requireRepository(repository);
     return await updateRegistry((registry: any) => {
       const bucketName = lifecycleBucketName(state);
+      const transitionedEntry = preservePendingNameOnPromotion(registry, state, droneId, entry);
       for (const otherBucket of ['drones', 'pending', 'archived'] as const) {
         if (otherBucket === bucketName) continue;
         const found = findDroneEntryByIdentity({ drones: registry?.[otherBucket] }, droneId);
         if (found) delete registry[otherBucket][found.key];
       }
       registry[bucketName] = registry[bucketName] ?? {};
-      registry[bucketName][droneId] = entry;
-      return compatibilityLifecycleRecord(state, droneId, entry);
+      registry[bucketName][droneId] = transitionedEntry;
+      return compatibilityLifecycleRecord(state, droneId, transitionedEntry);
     });
   }
   return await repository.commitUpsert(state, droneId, entry, {
@@ -115,14 +130,15 @@ export async function upsertCanonicalDroneLifecycleBatch(
     requireRepository(repository);
     return await updateRegistry((registry: any) => entries.map(({ state, droneId, entry }) => {
       const bucketName = lifecycleBucketName(state);
+      const transitionedEntry = preservePendingNameOnPromotion(registry, state, droneId, entry);
       for (const otherBucket of ['drones', 'pending', 'archived'] as const) {
         if (otherBucket === bucketName) continue;
         const found = findDroneEntryByIdentity({ drones: registry?.[otherBucket] }, droneId);
         if (found) delete registry[otherBucket][found.key];
       }
       registry[bucketName] = registry[bucketName] ?? {};
-      registry[bucketName][droneId] = entry;
-      return compatibilityLifecycleRecord(state, droneId, entry);
+      registry[bucketName][droneId] = transitionedEntry;
+      return compatibilityLifecycleRecord(state, droneId, transitionedEntry);
     }));
   }
   const items: CanonicalDroneLifecycleUpsert[] = entries.map(({ state, droneId, entry }) => ({

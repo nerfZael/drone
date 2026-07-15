@@ -261,7 +261,13 @@ function writeRecord(
   now: string,
   version = nextVersion(connection, normalizeId(idRaw)),
 ): CanonicalDroneLifecycleRecord {
-  const fields = lifecycleFields(idRaw, entryRaw, now);
+  const id = normalizeId(idRaw);
+  const pendingBeforePromotion = state === 'real' ? selectById(connection, 'pending', id) : null;
+  const promotedEntry =
+    pendingBeforePromotion && entryRaw && typeof entryRaw === 'object' && !Array.isArray(entryRaw)
+      ? { ...(entryRaw as Record<string, any>), name: pendingBeforePromotion.name }
+      : entryRaw;
+  const fields = lifecycleFields(id, promotedEntry, now);
   assertActiveNameAvailable(connection, state, fields.id, fields.name);
   deleteOtherStates(connection, fields.id, state);
   if (state === 'archived') {
