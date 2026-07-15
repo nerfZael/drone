@@ -39,13 +39,16 @@ describe('assistant system prompt settings', () => {
       const artifactsOnly = makeAssistantService();
       const single = await artifactsOnly.createThread({ title: 'artifacts only' });
       expect(single.availableTools.map((tool) => tool.name)).not.toContain('set_target');
+      expect(single.availableTools.map((tool) => tool.name)).not.toContain('transfer_files');
       expect(artifactsOnly.resolvedSystemPrompt(single.activeThreadId, { multipleWorkspaceTargets: false })).toContain('only workspace');
 
       const withDrone = new HubAssistantService({
         listDrones: async () => [{ id: 'drone-a', name: 'Drone A', group: null, status: 'ready' } as any],
       });
       const multiple = await withDrone.createThread({ title: 'multiple targets' });
-      expect(multiple.availableTools.map((tool) => tool.name)).toEqual(expect.arrayContaining(['list_targets', 'set_target']));
+      expect(multiple.availableTools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining(['list_targets', 'set_target', 'transfer_files']),
+      );
     });
   });
 
@@ -54,6 +57,7 @@ describe('assistant system prompt settings', () => {
       const service = new HubAssistantService({ listDrones: async () => { throw new Error('registry unavailable'); } });
       const snapshot = await service.createThread({ title: 'fallback tools' });
       expect(snapshot.availableTools.map((tool) => tool.name)).not.toContain('set_target');
+      expect(snapshot.availableTools.map((tool) => tool.name)).not.toContain('transfer_files');
     });
   });
 

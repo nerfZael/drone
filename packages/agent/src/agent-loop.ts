@@ -11,15 +11,16 @@ import {
   type ToolResultMessage,
   validateToolArguments,
 } from '@mariozechner/pi-ai/agent-core';
-import type {
-  AgentContext,
-  AgentEvent,
-  AgentLoopConfig,
-  AgentMessage,
-  AgentTool,
-  AgentToolCall,
-  AgentToolResult,
-  StreamFn,
+import {
+  AgentToolResultError,
+  type AgentContext,
+  type AgentEvent,
+  type AgentLoopConfig,
+  type AgentMessage,
+  type AgentTool,
+  type AgentToolCall,
+  type AgentToolResult,
+  type StreamFn,
 } from './types.js';
 
 export type AgentEventSink = (event: AgentEvent) => Promise<void> | void;
@@ -619,6 +620,7 @@ async function executePreparedToolCall(
   emit: AgentEventSink,
 ): Promise<ExecutedToolCallOutcome> {
   const updateEvents: Promise<void>[] = [];
+  let updateQueue = Promise.resolve();
 
   try {
     const result = await prepared.tool.execute(
@@ -626,7 +628,7 @@ async function executePreparedToolCall(
       prepared.args as never,
       signal,
       (partialResult) => {
-        updateEvents.push(
+        const updateEvent = updateQueue.then(() =>
           Promise.resolve(
             emit({
               type: 'tool_execution_update',
@@ -637,14 +639,21 @@ async function executePreparedToolCall(
             }),
           ),
         );
+        updateEvents.push(updateEvent);
+        updateQueue = updateEvent.catch(() => undefined);
       },
     );
-    await Promise.all(updateEvents);
+    // A progress-listener failure must not turn an already completed side effect
+    // into a failed tool result and invite the model to repeat it.
+    await Promise.allSettled(updateEvents);
     return { result, isError: false };
   } catch (error) {
-    await Promise.all(updateEvents);
+    await Promise.allSettled(updateEvents);
     return {
-      result: createErrorToolResult(error instanceof Error ? error.message : String(error)),
+      result:
+        error instanceof AgentToolResultError
+          ? error.result
+          : createErrorToolResult(error instanceof Error ? error.message : String(error)),
       isError: true,
     };
   }

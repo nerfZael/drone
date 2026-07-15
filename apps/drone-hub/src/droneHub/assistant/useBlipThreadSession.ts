@@ -1,4 +1,5 @@
 import * as React from 'react';
+import { mergeWorkspaceTransferProgress } from '@drone/assistant-chat';
 import type {
   BlipHistoryEntry,
   BlipHistoryMessage,
@@ -8,19 +9,32 @@ import type {
   BlipThreadStreamEvent,
 } from '@blip/protocol';
 
-async function requestHistory(threadId: string, input?: { before?: number; limit?: number }): Promise<BlipHistoryPage> {
+async function requestHistory(
+  threadId: string,
+  input?: { before?: number; limit?: number },
+): Promise<BlipHistoryPage> {
   const query = new URLSearchParams();
   if (input?.before) query.set('before', String(input.before));
   if (input?.limit) query.set('limit', String(input.limit));
-  const response = await fetch(`/api/assistant/threads/${encodeURIComponent(threadId)}/history${query.size ? `?${query}` : ''}`);
+  const response = await fetch(
+    `/api/assistant/threads/${encodeURIComponent(threadId)}/history${query.size ? `?${query}` : ''}`,
+  );
   const text = await response.text();
   let body: any = null;
-  try { body = text ? JSON.parse(text) : null; } catch { body = null; }
-  if (!response.ok) throw new Error(String(body?.error ?? text ?? `History request failed: ${response.status}`));
+  try {
+    body = text ? JSON.parse(text) : null;
+  } catch {
+    body = null;
+  }
+  if (!response.ok)
+    throw new Error(String(body?.error ?? text ?? `History request failed: ${response.status}`));
   return body as BlipHistoryPage;
 }
 
-function mergeEntries(current: BlipHistoryEntry[], incoming: BlipHistoryEntry[]): BlipHistoryEntry[] {
+function mergeEntries(
+  current: BlipHistoryEntry[],
+  incoming: BlipHistoryEntry[],
+): BlipHistoryEntry[] {
   const bySequence = new Map(current.map((entry) => [entry.sequence, entry]));
   for (const entry of incoming) bySequence.set(entry.sequence, entry);
   return [...bySequence.values()].sort((a, b) => a.sequence - b.sequence);
@@ -34,6 +48,7 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
   const [olderLoading, setOlderLoading] = React.useState(false);
   const [running, setRunning] = React.useState(false);
   const [streamingText, setStreamingText] = React.useState('');
+  const [toolProgress, setToolProgress] = React.useState<Record<string, BlipHistoryMessage>>({});
   const [runError, setRunError] = React.useState<string | null>(null);
   const [historyError, setHistoryError] = React.useState<string | null>(null);
   const threadIdRef = React.useRef(threadId);
@@ -41,25 +56,48 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
   const latestHistoryRequestRef = React.useRef(0);
   threadIdRef.current = threadId;
 
-  const refreshHistory = React.useCallback(async (options?: { quiet?: boolean }) => {
-    if (!enabled || !threadId) return;
-    const requestId = ++latestHistoryRequestRef.current;
-    if (!options?.quiet) setHistoryLoading(true);
-    try {
-      const page = await requestHistory(threadId, { limit: 80 });
-      if (threadIdRef.current !== threadId) return;
-      setEntries((current) => mergeEntries(current, page.entries));
-      if (requestId === latestHistoryRequestRef.current) {
-        setBeforeCursor(page.page.beforeCursor);
-        setHasOlder(page.page.hasOlder);
+  const refreshHistory = React.useCallback(
+    async (options?: { quiet?: boolean }) => {
+      if (!enabled || !threadId) return;
+      const requestId = ++latestHistoryRequestRef.current;
+      if (!options?.quiet) setHistoryLoading(true);
+      try {
+        const page = await requestHistory(threadId, { limit: 80 });
+        if (threadIdRef.current !== threadId) return;
+        setEntries((current) => mergeEntries(current, page.entries));
+        const persistedToolCalls = new Set(
+          page.entries.flatMap((entry) => {
+            const message = entry.message as any;
+            return message?.role === 'toolResult' && message.toolCallId
+              ? [String(message.toolCallId)]
+              : [];
+          }),
+        );
+        if (persistedToolCalls.size > 0)
+          setToolProgress((current) => {
+            const next = { ...current };
+            let changed = false;
+            for (const callId of persistedToolCalls) {
+              if (!(callId in next)) continue;
+              delete next[callId];
+              changed = true;
+            }
+            return changed ? next : current;
+          });
+        if (requestId === latestHistoryRequestRef.current) {
+          setBeforeCursor(page.page.beforeCursor);
+          setHasOlder(page.page.hasOlder);
+        }
+        setHistoryError(null);
+      } catch (error) {
+        if (threadIdRef.current === threadId)
+          setHistoryError(error instanceof Error ? error.message : String(error));
+      } finally {
+        if (!options?.quiet && threadIdRef.current === threadId) setHistoryLoading(false);
       }
-      setHistoryError(null);
-    } catch (error) {
-      if (threadIdRef.current === threadId) setHistoryError(error instanceof Error ? error.message : String(error));
-    } finally {
-      if (!options?.quiet && threadIdRef.current === threadId) setHistoryLoading(false);
-    }
-  }, [enabled, threadId]);
+    },
+    [enabled, threadId],
+  );
 
   React.useEffect(() => {
     setEntries([]);
@@ -67,6 +105,7 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
     setHasOlder(false);
     setRunning(false);
     setStreamingText('');
+    setToolProgress({});
     setRunError(null);
     setHistoryError(null);
     seenEventKeysRef.current = [];
@@ -85,76 +124,136 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
       setHasOlder(page.page.hasOlder);
       setHistoryError(null);
     } catch (error) {
-      if (threadIdRef.current === threadId) setHistoryError(error instanceof Error ? error.message : String(error));
+      if (threadIdRef.current === threadId)
+        setHistoryError(error instanceof Error ? error.message : String(error));
     } finally {
       if (threadIdRef.current === threadId) setOlderLoading(false);
     }
   }, [beforeCursor, enabled, hasOlder, olderLoading, threadId]);
 
-  const handleRuntimeEvent = React.useCallback((event: BlipRuntimeEvent) => {
-    if (event.type === 'session_started' || event.type === 'turn_started') {
-      setRunning(true);
-      setRunError(null);
-      if (event.type === 'turn_started') setStreamingText('');
-      void refreshHistory({ quiet: true });
-      return;
-    }
-    if (event.type === 'assistant_delta') {
-      setRunning(true);
-      setStreamingText((current) => `${current}${event.text}`);
-      return;
-    }
-    if (event.type === 'session_error') {
-      setRunError(event.error);
-      return;
-    }
-    if (event.type === 'transcript_changed') {
-      void refreshHistory({ quiet: true });
-      return;
-    }
-    if (event.type === 'assistant_message' || event.type === 'tool_call_started' || event.type === 'tool_call_completed' || event.type === 'tool_call_failed') {
-      setRunning(true);
-      void refreshHistory({ quiet: true });
-      return;
-    }
-    if (event.type === 'session_finished') {
-      setRunning(false);
-      setStreamingText('');
-      if (event.status === 'error') setRunError(event.error ?? 'Assistant failed.');
-      void refreshHistory({ quiet: true });
-    }
-  }, [refreshHistory]);
+  const handleRuntimeEvent = React.useCallback(
+    (event: BlipRuntimeEvent) => {
+      if (event.type === 'session_started' || event.type === 'turn_started') {
+        setRunning(true);
+        setRunError(null);
+        if (event.type === 'turn_started') setStreamingText('');
+        void refreshHistory({ quiet: true });
+        return;
+      }
+      if (event.type === 'assistant_delta') {
+        setRunning(true);
+        setStreamingText((current) => `${current}${event.text}`);
+        return;
+      }
+      if (event.type === 'session_error') {
+        setRunError(event.error);
+        return;
+      }
+      if (event.type === 'transcript_changed') {
+        void refreshHistory({ quiet: true });
+        return;
+      }
+      if (
+        event.type === 'assistant_message' ||
+        event.type === 'tool_call_started' ||
+        event.type === 'tool_call_completed' ||
+        event.type === 'tool_call_failed'
+      ) {
+        setRunning(true);
+        void refreshHistory({ quiet: true });
+        return;
+      }
+      if (event.type === 'tool_call_progress') {
+        setRunning(true);
+        setToolProgress((current) => {
+          const previous = current[event.callId];
+          return {
+            ...current,
+            [event.callId]: {
+              role: 'toolResult',
+              toolCallId: event.callId,
+              toolName: event.tool,
+              content: event.message,
+              details: mergeWorkspaceTransferProgress(previous?.details, event.details),
+              timestamp: Date.now(),
+            } as BlipHistoryMessage,
+          };
+        });
+        return;
+      }
+      if (event.type === 'session_finished') {
+        setRunning(false);
+        setStreamingText('');
+        if (event.status === 'error') setRunError(event.error ?? 'Assistant failed.');
+        void refreshHistory({ quiet: true });
+      }
+    },
+    [refreshHistory],
+  );
 
-  const handleStreamEvent = React.useCallback((envelope: BlipPromptStreamEvent | BlipThreadStreamEvent | any) => {
-    if (envelope?.type === 'connected' && envelope.version === 1 && envelope.threadId === threadId) {
-      const nextRunning = envelope.running === true;
-      setRunning(nextRunning);
-      if (!nextRunning) setStreamingText('');
-      void refreshHistory({ quiet: true });
-      return;
-    }
-    if (envelope?.type !== 'blip_event' || envelope.version !== 1 || envelope.threadId !== threadId) return;
-    const eventKey = String(envelope.event?.eventId ?? '') || JSON.stringify(envelope.event);
-    if (seenEventKeysRef.current.includes(eventKey)) return;
-    seenEventKeysRef.current = [...seenEventKeysRef.current.slice(-399), eventKey];
-    handleRuntimeEvent(envelope.event);
-  }, [handleRuntimeEvent, refreshHistory, threadId]);
+  const handleStreamEvent = React.useCallback(
+    (envelope: BlipPromptStreamEvent | BlipThreadStreamEvent | any) => {
+      if (
+        envelope?.type === 'connected' &&
+        envelope.version === 1 &&
+        envelope.threadId === threadId
+      ) {
+        const nextRunning = envelope.running === true;
+        setRunning(nextRunning);
+        if (!nextRunning) setStreamingText('');
+        void refreshHistory({ quiet: true });
+        return;
+      }
+      if (
+        envelope?.type !== 'blip_event' ||
+        envelope.version !== 1 ||
+        envelope.threadId !== threadId
+      )
+        return;
+      const eventKey = String(envelope.event?.eventId ?? '') || JSON.stringify(envelope.event);
+      if (seenEventKeysRef.current.includes(eventKey)) return;
+      seenEventKeysRef.current = [...seenEventKeysRef.current.slice(-399), eventKey];
+      handleRuntimeEvent(envelope.event);
+    },
+    [handleRuntimeEvent, refreshHistory, threadId],
+  );
 
   React.useEffect(() => {
-    if (!enabled || !threadId || typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
+    if (
+      !enabled ||
+      !threadId ||
+      typeof window === 'undefined' ||
+      typeof window.EventSource === 'undefined'
+    )
+      return;
     const source = new EventSource(`/api/assistant/threads/${encodeURIComponent(threadId)}/events`);
     const onEvent = (raw: MessageEvent<string>) => {
-      try { handleStreamEvent(JSON.parse(raw.data)); } catch { /* Ignore malformed events and let EventSource continue. */ }
+      try {
+        handleStreamEvent(JSON.parse(raw.data));
+      } catch {
+        /* Ignore malformed events and let EventSource continue. */
+      }
     };
     source.addEventListener('connected', onEvent as EventListener);
     source.addEventListener('blip_event', onEvent as EventListener);
     return () => source.close();
   }, [enabled, handleStreamEvent, threadId]);
 
-  const streamingMessage = React.useMemo<BlipHistoryMessage | null>(() => streamingText
-    ? { role: 'assistant', content: [{ type: 'text', text: streamingText }], timestamp: Date.now() }
-    : null, [streamingText]);
-  const messages = React.useMemo(() => entries.map((entry) => entry.message), [entries]);
+  const streamingMessage = React.useMemo<BlipHistoryMessage | null>(
+    () =>
+      streamingText
+        ? {
+            role: 'assistant',
+            content: [{ type: 'text', text: streamingText }],
+            timestamp: Date.now(),
+          }
+        : null,
+    [streamingText],
+  );
+  const messages = React.useMemo(
+    () => [...entries.map((entry) => entry.message), ...Object.values(toolProgress)],
+    [entries, toolProgress],
+  );
 
   return {
     messages,

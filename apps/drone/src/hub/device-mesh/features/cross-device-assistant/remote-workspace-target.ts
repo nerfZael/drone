@@ -27,6 +27,7 @@ export class RemoteWorkspaceTarget {
       'files.list' | 'files.read' | 'files.search' | 'files.write' | 'shell.execute'
     >;
   };
+  readonly transfer;
 
   constructor(
     private readonly homeDeviceId: string,
@@ -45,6 +46,54 @@ export class RemoteWorkspaceTarget {
         ...(policy.write ? (['files.write'] as const) : []),
         ...(policy.execute ? (['shell.execute'] as const) : []),
       ],
+    };
+    const transferRequest = (
+      operation: string,
+      payload: Record<string, unknown>,
+      signal?: AbortSignal,
+    ) =>
+      this.request(
+        this.policy.targetDeviceId,
+        WORKSPACE_CAPABILITY.id,
+        operation,
+        {
+          ...payload,
+          workspaceId: this.policy.rootId,
+        },
+        signal,
+      );
+    this.transfer = {
+      ...(policy.read
+        ? {
+            source: {
+              stat: (path: string, signal?: AbortSignal) =>
+                transferRequest('files.transfer.stat', { path }, signal),
+              list: async (path: string, signal?: AbortSignal) =>
+                (await transferRequest('files.transfer.list', { path }, signal)).entries,
+              readChunk: (path: string, offset: number, length: number, signal?: AbortSignal) =>
+                transferRequest('files.transfer.read', { path, offset, length }, signal),
+            },
+          }
+        : {}),
+      ...(policy.write
+        ? {
+            destination: {
+              createDirectory: async (path: string, signal?: AbortSignal) => {
+                await transferRequest('files.transfer.mkdir', { path }, signal);
+              },
+              prepareFile: (input: Record<string, unknown>, signal?: AbortSignal) =>
+                transferRequest('files.transfer.prepare', input, signal),
+              writeChunk: (input: Record<string, unknown>, signal?: AbortSignal) =>
+                transferRequest('files.transfer.write', input, signal),
+              commitFile: async (input: Record<string, unknown>, signal?: AbortSignal) => {
+                await transferRequest('files.transfer.commit', input, signal);
+              },
+              abortFile: async (input: Record<string, unknown>, signal?: AbortSignal) => {
+                await transferRequest('files.transfer.abort', input, signal);
+              },
+            },
+          }
+        : {}),
     };
   }
 

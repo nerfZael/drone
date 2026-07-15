@@ -1,4 +1,5 @@
 import type { AgentToolResult } from '@mariozechner/pi-agent-core';
+export * from './transfer.js';
 
 export type WorkspaceCapability =
   | 'files.list'
@@ -29,8 +30,49 @@ export interface WorkspaceTargetCall {
   onUpdate?: (result: AgentToolResult<unknown>) => void;
 }
 
+export type WorkspaceTransferEntry = {
+  name: string;
+  type: 'file' | 'directory';
+  size: number;
+  mtimeMs?: number | null;
+};
+
+export interface WorkspaceTransferSource {
+  stat(path: string, signal?: AbortSignal): Promise<Omit<WorkspaceTransferEntry, 'name'>>;
+  list(path: string, signal?: AbortSignal): Promise<WorkspaceTransferEntry[]>;
+  readChunk(
+    path: string,
+    offset: number,
+    length: number,
+    signal?: AbortSignal,
+  ): Promise<{ dataBase64: string; bytes: number }>;
+}
+
+export interface WorkspaceTransferDestination {
+  createDirectory(path: string, signal?: AbortSignal): Promise<void>;
+  prepareFile(
+    input: { path: string; transferId: string; size: number; overwrite: boolean },
+    signal?: AbortSignal,
+  ): Promise<{ offset: number }>;
+  writeChunk(
+    input: { path: string; transferId: string; offset: number; dataBase64: string },
+    signal?: AbortSignal,
+  ): Promise<{ offset: number }>;
+  commitFile(
+    input: { path: string; transferId: string; size: number; overwrite: boolean },
+    signal?: AbortSignal,
+  ): Promise<void>;
+  abortFile?(input: { path: string; transferId: string }, signal?: AbortSignal): Promise<void>;
+}
+
+export interface WorkspaceTransferAdapter {
+  source?: WorkspaceTransferSource;
+  destination?: WorkspaceTransferDestination;
+}
+
 export interface WorkspaceTarget {
   readonly descriptor: WorkspaceTargetDescriptor;
+  readonly transfer?: WorkspaceTransferAdapter;
   execute(call: WorkspaceTargetCall): Promise<AgentToolResult<unknown>>;
 }
 

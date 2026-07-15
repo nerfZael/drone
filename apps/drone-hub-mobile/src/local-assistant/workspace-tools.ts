@@ -4,6 +4,7 @@ import {
   type WorkspaceTarget,
   type WorkspaceTargetCall,
 } from '@blip/workspace';
+import { runWorkspaceTransfer } from '@blip/workspace';
 import { createPortableId } from '@blip/core';
 import { runWorkspaceCommandJob } from '@drone/device-protocol';
 import type { LocalAssistantThread, LocalWorkspaceTarget } from './local-assistant-types';
@@ -126,6 +127,7 @@ function workspaceChoices(targets: LocalWorkspaceTarget[]) {
 
 class MobileWorkspaceTarget implements WorkspaceTarget {
   readonly descriptor;
+  readonly transfer;
 
   constructor(
     readonly policy: LocalWorkspaceTarget,
@@ -142,6 +144,54 @@ class MobileWorkspaceTarget implements WorkspaceTarget {
         ...(policy.write ? (['files.write'] as const) : []),
         ...(policy.execute ? (['shell.execute'] as const) : []),
       ],
+    };
+    const transferRequest = (
+      operation: string,
+      payload: Record<string, unknown>,
+      signal?: AbortSignal,
+    ) =>
+      this.request(
+        this.policy.targetDeviceId,
+        'workspace',
+        operation,
+        {
+          ...payload,
+          workspaceId: this.policy.workspaceId,
+        },
+        signal,
+      );
+    this.transfer = {
+      ...(policy.read
+        ? {
+            source: {
+              stat: (path: string, signal?: AbortSignal) =>
+                transferRequest('files.transfer.stat', { path }, signal),
+              list: async (path: string, signal?: AbortSignal) =>
+                (await transferRequest('files.transfer.list', { path }, signal)).entries,
+              readChunk: (path: string, offset: number, length: number, signal?: AbortSignal) =>
+                transferRequest('files.transfer.read', { path, offset, length }, signal),
+            },
+          }
+        : {}),
+      ...(policy.write
+        ? {
+            destination: {
+              createDirectory: async (path: string, signal?: AbortSignal) => {
+                await transferRequest('files.transfer.mkdir', { path }, signal);
+              },
+              prepareFile: (input: Record<string, unknown>, signal?: AbortSignal) =>
+                transferRequest('files.transfer.prepare', input, signal),
+              writeChunk: (input: Record<string, unknown>, signal?: AbortSignal) =>
+                transferRequest('files.transfer.write', input, signal),
+              commitFile: async (input: Record<string, unknown>, signal?: AbortSignal) => {
+                await transferRequest('files.transfer.commit', input, signal);
+              },
+              abortFile: async (input: Record<string, unknown>, signal?: AbortSignal) => {
+                await transferRequest('files.transfer.abort', input, signal);
+              },
+            },
+          }
+        : {}),
     };
   }
 
@@ -232,6 +282,48 @@ export class MobileWorkspaceToolRuntime {
         },
       ];
     });
+    const transferSources = descriptors.filter((target) =>
+      Boolean(this.catalog.resolve(target.id).transfer?.source),
+    );
+    const transferDestinations = descriptors.filter((target) =>
+      Boolean(this.catalog.resolve(target.id).transfer?.destination),
+    );
+    const transferTools: LocalAssistantTool[] =
+      descriptors.length > 1 && transferSources.length > 0 && transferDestinations.length > 0
+        ? [
+            {
+              type: 'function',
+              function: {
+                name: 'transfer_files',
+                description:
+                  'Copy one file or a folder between different workspace targets. Requires read access on the source and write access on the destination.',
+                parameters: {
+                  type: 'object',
+                  properties: {
+                    sourceTarget: {
+                      type: 'string',
+                      enum: transferSources.map((target) => target.id),
+                    },
+                    sourcePath: { type: 'string' },
+                    destinationTarget: {
+                      type: 'string',
+                      enum: transferDestinations.map((target) => target.id),
+                    },
+                    destinationPath: { type: 'string' },
+                    overwrite: { type: 'boolean' },
+                    resumeToken: {
+                      type: 'string',
+                      description:
+                        'Token returned by a partially completed transfer. Reuse it with the same source and destination.',
+                    },
+                  },
+                  required: ['sourceTarget', 'sourcePath', 'destinationTarget', 'destinationPath'],
+                  additionalProperties: false,
+                },
+              },
+            },
+          ]
+        : [];
     const selectionTools: LocalAssistantTool[] =
       descriptors.length > 1
         ? [
@@ -261,7 +353,7 @@ export class MobileWorkspaceToolRuntime {
             },
           ]
         : [];
-    this.tools = [...selectionTools, ...workspaceTools];
+    this.tools = [...selectionTools, ...workspaceTools, ...transferTools];
   }
 
   async execute(input: {
@@ -281,6 +373,22 @@ export class MobileWorkspaceToolRuntime {
     if (name === 'set_target') {
       const target = await this.catalog.setActiveForTool(String(input.args.target ?? ''));
       return { text: `Active workspace target set to ${target.label}.`, details: { target } };
+    }
+    if (name === 'transfer_files') {
+      const result = await runWorkspaceTransfer({
+        catalog: this.catalog,
+        callId: `mobile_${createPortableId()}`,
+        sourceTarget: String(input.args.sourceTarget ?? ''),
+        sourcePath: String(input.args.sourcePath ?? ''),
+        destinationTarget: String(input.args.destinationTarget ?? ''),
+        destinationPath: String(input.args.destinationPath ?? ''),
+        overwrite: input.args.overwrite === true,
+        resumeToken: String(input.args.resumeToken ?? '').trim() || undefined,
+        signal: input.signal,
+        onUpdate: (update) =>
+          void input.onOutput?.({ text: textFromResult(update), details: update.details }),
+      });
+      return { text: textFromResult(result), details: result.details };
     }
     const definition = definitions[name];
     if (!definition) throw new Error(`Unsupported workspace tool: ${input.name}`);

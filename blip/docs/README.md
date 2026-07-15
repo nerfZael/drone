@@ -29,6 +29,7 @@ Tool availability depends on the active profile. The default trusted local profi
 - [bash](tools/bash.md)
 - [apply_patch](tools/apply-patch.md)
 - [read_file](tools/read-file.md)
+- [transfer_files](tools/transfer-files.md)
 - [search_files](tools/search-files.md)
 - [list_files](tools/list-files.md)
 - [write_file](tools/write-file.md)
