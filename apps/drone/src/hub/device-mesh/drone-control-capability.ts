@@ -83,6 +83,20 @@ function compactCreateRepoBranch(branch: unknown) {
   };
 }
 
+function requiredPositiveInteger(value: unknown, label: string): number {
+  const normalized =
+    typeof value === 'number'
+      ? value
+      : typeof value === 'string' && /^\d+$/.test(value.trim())
+        ? Number(value.trim())
+        : Number.NaN;
+  if (!Number.isSafeInteger(normalized) || normalized <= 0)
+    throw Object.assign(new Error(`${label} must be a positive integer`), {
+      code: 'INVALID_REQUEST',
+    });
+  return normalized;
+}
+
 function seedAgent(value: unknown): Record<string, string> | undefined {
   const agent = object(value);
   const kind = agent.kind === 'builtin' || agent.kind === 'custom' ? agent.kind : '';
@@ -333,6 +347,32 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
           chatName: optionalText(result.chat) ?? chatName,
           chats: Array.isArray(result.chats) ? result.chats : [],
         };
+      }
+      if (operation === 'repo.pull-requests.read') {
+        const state =
+          payload.state === 'open' || payload.state === 'closed' ? payload.state : 'all';
+        return await localHubRequest(
+          access,
+          `/api/drones/${encodedDrone}/repo/pull-requests?state=${state}`,
+        );
+      }
+      if (operation === 'repo.pull-requests.merge') {
+        const pullNumber = requiredPositiveInteger(payload.pullNumber, 'pullNumber');
+        const method =
+          payload.method === 'squash' || payload.method === 'rebase' ? payload.method : 'merge';
+        return await localHubRequest(
+          access,
+          `/api/drones/${encodedDrone}/repo/pull-requests/${pullNumber}/merge`,
+          { method: 'POST', body: JSON.stringify({ method }) },
+        );
+      }
+      if (operation === 'repo.pull-requests.close') {
+        const pullNumber = requiredPositiveInteger(payload.pullNumber, 'pullNumber');
+        return await localHubRequest(
+          access,
+          `/api/drones/${encodedDrone}/repo/pull-requests/${pullNumber}/close`,
+          { method: 'POST', body: '{}' },
+        );
       }
 
       const chatName = requiredText(payload.chatName ?? 'default', 'chatName');

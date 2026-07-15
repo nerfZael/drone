@@ -357,7 +357,6 @@ export const TranscriptTurn = React.memo(
                   onOpenLink={onOpenLink}
                 />
               ) : null}
-              <AgentPlanList plan={item.agentPlan} />
               {actionsEnabled && item.ok && droneHubTasks.length > 0 ? (
                 <DroneHubTaskList tasks={droneHubTasks} onSpawnTask={onSpawnDroneHubTask} />
               ) : null}
@@ -429,6 +428,10 @@ export const TranscriptTurn = React.memo(
                 text={cleanedAgentMessage}
                 context={linkedPullRequestContext}
                 onOpenLink={onOpenLink}
+                className={item.agentPlan?.items.length ? undefined : 'mb-8 md:mb-0 md:mr-40'}
+              />
+              <AgentPlanList
+                plan={item.agentPlan}
                 className="mb-8 md:mb-0 md:mr-40"
               />
 

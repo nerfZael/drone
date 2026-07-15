@@ -24,6 +24,8 @@ import { ContextMenu } from '../components/Ui';
 import { NativeMarkdown } from './NativeMarkdown';
 import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
 import type { LocalAssistantThread } from './local-assistant-types';
+import { LinkedPullRequestAttachments } from '../drones/LinkedPullRequestAttachment';
+import type { MobileLinkedPullRequestContext } from '../drones/use-drone-linked-pull-requests';
 
 function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
   const dots = React.useRef([
@@ -417,6 +419,7 @@ export function MobileAssistantTranscript({
   assistantLabel = 'Assistant',
   messageActionsDisabled = false,
   onDeleteMessageRequest,
+  linkedPullRequests,
 }: {
   messages: AssistantMessage[];
   running?: boolean;
@@ -431,6 +434,7 @@ export function MobileAssistantTranscript({
     sourceMessageIndex: number;
     deleteFollowing: boolean;
   }) => void;
+  linkedPullRequests?: MobileLinkedPullRequestContext;
 }) {
   const items = React.useMemo(
     () =>
@@ -515,7 +519,10 @@ export function MobileAssistantTranscript({
         const content = (
           <>
             {text && assistant ? (
-              <NativeMarkdown text={text} />
+              <>
+                <NativeMarkdown text={text} />
+                <LinkedPullRequestAttachments text={text} context={linkedPullRequests} />
+              </>
             ) : text ? (
               <Text selectable style={[styles.messageText, user && styles.userMessageText]}>
                 {text}

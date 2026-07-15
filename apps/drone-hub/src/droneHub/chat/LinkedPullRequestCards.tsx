@@ -1,4 +1,5 @@
 import React from 'react';
+import { githubPullRequestMatchesRepo } from '@drone/assistant-chat';
 import { invalidateHeaderRepoPullRequestSummaryCache } from '../app/HeaderPullRequestShortcuts';
 import { requestJson } from '../http';
 import {
@@ -14,7 +15,7 @@ import type {
   RepoPullRequestsPayload,
 } from '../types';
 import { extractGithubPullRequestLinks, type GithubPullRequestLink } from './github-pull-request-links';
-import { IconOpen, IconSpinner } from './icons';
+import { IconSpinner } from './icons';
 import { invalidateLinkedPullRequestCache, useLinkedPullRequests } from './linked-pull-request-resource';
 import { readPullRequestMergeMethod } from '../pullRequests/pull-request-preferences';
 
@@ -27,14 +28,6 @@ export type LinkedPullRequestContext = {
   openPullRequestsLoading: boolean;
   openPullRequestsError: string | null;
 };
-
-function repoMatches(link: GithubPullRequestLink, github: { owner: string; repo: string } | null | undefined): boolean | null {
-  if (!github) return null;
-  return (
-    String(github.owner ?? '').trim().toLowerCase() === link.owner &&
-    String(github.repo ?? '').trim().toLowerCase() === link.repo
-  );
-}
 
 function openRequest(link: GithubPullRequestLink, onOpenLink: ((href: string) => boolean) | undefined): void {
   if (onOpenLink?.(link.href)) return;
@@ -49,7 +42,8 @@ function LinkedPullRequestCard({
   sameRepo,
   context,
   anyActionBusy,
-  onActionBusyChange,
+  onActionBegin,
+  onActionEnd,
   onOpenLink,
 }: {
   link: GithubPullRequestLink;
@@ -59,7 +53,8 @@ function LinkedPullRequestCard({
   sameRepo: boolean | null;
   context: LinkedPullRequestContext;
   anyActionBusy: boolean;
-  onActionBusyChange: (busy: boolean) => void;
+  onActionBegin: () => boolean;
+  onActionEnd: () => void;
   onOpenLink?: (href: string) => boolean;
 }) {
   const [busyAction, setBusyAction] = React.useState<'merge' | 'close' | null>(null);
@@ -79,8 +74,8 @@ function LinkedPullRequestCard({
 
   const finishAction = React.useCallback(() => {
     setBusyAction(null);
-    onActionBusyChange(false);
-  }, [onActionBusyChange]);
+    onActionEnd();
+  }, [onActionEnd]);
 
   const mergePullRequest = React.useCallback(async () => {
     if (!pullRequest || !canManage || blockedReason || busyAction || anyActionBusy) return;
@@ -88,8 +83,8 @@ function LinkedPullRequestCard({
     const verb = forceReason ? 'Force merge' : 'Merge';
     const forceLabel = forceReason ? ` Checks currently report: ${forceReason}.` : '';
     if (!window.confirm(`${verb} PR #${pullRequest.number} into ${pullRequest.baseRefName || 'base'} using "${method}"?${forceLabel}`)) return;
+    if (!onActionBegin()) return;
     setBusyAction('merge');
-    onActionBusyChange(true);
     setActionError(null);
     setActionNotice(null);
     try {
@@ -113,13 +108,13 @@ function LinkedPullRequestCard({
     } finally {
       finishAction();
     }
-  }, [anyActionBusy, blockedReason, busyAction, canManage, context.droneId, context.repoPath, finishAction, forceReason, onActionBusyChange, pullRequest]);
+  }, [anyActionBusy, blockedReason, busyAction, canManage, context.droneId, context.repoPath, finishAction, forceReason, onActionBegin, pullRequest]);
 
   const closePullRequest = React.useCallback(async () => {
     if (!pullRequest || !canManage || busyAction || anyActionBusy) return;
     if (!window.confirm(`Close PR #${pullRequest.number} without merging?`)) return;
+    if (!onActionBegin()) return;
     setBusyAction('close');
-    onActionBusyChange(true);
     setActionError(null);
     setActionNotice(null);
     try {
@@ -139,7 +134,7 @@ function LinkedPullRequestCard({
     } finally {
       finishAction();
     }
-  }, [anyActionBusy, busyAction, canManage, context.droneId, context.repoPath, finishAction, onActionBusyChange, pullRequest]);
+  }, [anyActionBusy, busyAction, canManage, context.droneId, context.repoPath, finishAction, onActionBegin, pullRequest]);
 
   const statusLabel = pullRequest
     ? state || 'Unknown'
@@ -154,8 +149,7 @@ function LinkedPullRequestCard({
 
   return (
     <section className="border-l-2 border-[rgba(167,139,250,.32)] pl-3">
-      <div className="flex flex-col items-start gap-3 py-1 pr-1 sm:flex-row">
-        <div className="min-w-0 flex-1">
+      <div className="min-w-0 py-1 pr-1">
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Linked request
@@ -174,14 +168,17 @@ function LinkedPullRequestCard({
               {statusLabel}
             </span>
           </div>
-          <button
-            type="button"
-            onClick={() => openRequest(link, onOpenLink)}
+          <a
+            href={link.href}
+            onClick={(event) => {
+              event.preventDefault();
+              openRequest(link, onOpenLink);
+            }}
             className="mt-1.5 block max-w-full truncate text-left text-[12px] font-medium text-[var(--fg-secondary)] hover:text-[var(--fg)] hover:underline"
             title={pullRequest?.title ?? `Open ${link.owner}/${link.repo} PR #${link.pullNumber}`}
           >
             {pullRequest?.title ?? `${link.owner}/${link.repo} pull request #${link.pullNumber}`}
-          </button>
+          </a>
           <div className="mt-1 flex min-w-0 flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
             <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-[var(--muted-dim)]">
               <span className="font-mono">{link.owner}/{link.repo}</span>
@@ -200,45 +197,32 @@ function LinkedPullRequestCard({
               ) : pullRequest ? (
                 <PullRequestStatusBadgeStrip pullRequest={pullRequest} compact />
               ) : null}
+              {isOpen && sameRepo ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => void mergePullRequest()}
+                    disabled={!canManage || Boolean(blockedReason) || Boolean(busyAction) || anyActionBusy}
+                    className="h-6 rounded border border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--green)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
+                    style={{ fontFamily: 'var(--display)' }}
+                    title={blockedReason ? `Cannot merge: ${blockedReason}` : forceReason ? `Force merge: ${forceReason}` : `Merge PR #${link.pullNumber}`}
+                  >
+                    {busyAction === 'merge' ? 'Merging…' : blockedReason ? 'Blocked' : forceReason ? 'Force merge' : 'Merge'}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void closePullRequest()}
+                    disabled={!canManage || Boolean(busyAction) || anyActionBusy}
+                    className="h-6 rounded border border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--red)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
+                    style={{ fontFamily: 'var(--display)' }}
+                    title="Close this pull request without merging"
+                  >
+                    {busyAction === 'close' ? 'Closing…' : 'Close'}
+                  </button>
+                </>
+              ) : null}
             </div>
           </div>
-        </div>
-        <div className="flex shrink-0 flex-wrap items-center justify-start gap-1 sm:justify-end">
-          <a
-            href={link.href}
-            target="_blank"
-            rel="noreferrer"
-            className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg-secondary)]"
-            title="Open on GitHub"
-            aria-label={`Open PR #${link.pullNumber} on GitHub`}
-          >
-            <IconOpen className="h-3 w-3" />
-          </a>
-          {isOpen && sameRepo ? (
-            <>
-              <button
-                type="button"
-                onClick={() => void mergePullRequest()}
-                disabled={!canManage || Boolean(blockedReason) || Boolean(busyAction) || anyActionBusy}
-                className="h-6 rounded border border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--green)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
-                style={{ fontFamily: 'var(--display)' }}
-                title={blockedReason ? `Cannot merge: ${blockedReason}` : forceReason ? `Force merge: ${forceReason}` : `Merge PR #${link.pullNumber}`}
-              >
-                {busyAction === 'merge' ? 'Merging…' : blockedReason ? 'Blocked' : forceReason ? 'Force merge' : 'Merge'}
-              </button>
-              <button
-                type="button"
-                onClick={() => void closePullRequest()}
-                disabled={!canManage || Boolean(busyAction) || anyActionBusy}
-                className="h-6 rounded border border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--red)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
-                style={{ fontFamily: 'var(--display)' }}
-                title="Close this pull request without merging"
-              >
-                {busyAction === 'close' ? 'Closing…' : 'Close'}
-              </button>
-            </>
-          ) : null}
-        </div>
       </div>
       {footerMessage ? (
         <div
@@ -256,7 +240,7 @@ function findPullRequest(
   link: GithubPullRequestLink,
   data: Extract<RepoPullRequestsPayload, { ok: true }> | null,
 ): RepoPullRequestSummary | null {
-  if (repoMatches(link, data?.github) !== true) return null;
+  if (githubPullRequestMatchesRepo(link, data?.github) !== true) return null;
   return data?.pullRequests.find((candidate) => Number(candidate.number) === link.pullNumber) ?? null;
 }
 
@@ -278,12 +262,23 @@ function LinkedPullRequestCardsContent({
   className?: string;
 }) {
   const [anyActionBusy, setAnyActionBusy] = React.useState(false);
+  const anyActionBusyRef = React.useRef(false);
+  const beginAction = React.useCallback(() => {
+    if (anyActionBusyRef.current) return false;
+    anyActionBusyRef.current = true;
+    setAnyActionBusy(true);
+    return true;
+  }, []);
+  const endAction = React.useCallback(() => {
+    anyActionBusyRef.current = false;
+    setAnyActionBusy(false);
+  }, []);
 
   return (
     <div className={`mt-3 flex flex-col gap-2 ${className ?? ''}`} aria-label="Pull requests linked in this message">
       {links.map((link) => {
-        const openRepoMatch = repoMatches(link, context.openPullRequestsData?.github);
-        const sameRepo = openRepoMatch ?? repoMatches(link, allData?.github);
+        const openRepoMatch = githubPullRequestMatchesRepo(link, context.openPullRequestsData?.github);
+        const sameRepo = openRepoMatch ?? githubPullRequestMatchesRepo(link, allData?.github);
         const pullRequest = findPullRequest(link, context.openPullRequestsData) ?? findPullRequest(link, allData);
         return (
           <LinkedPullRequestCard
@@ -295,7 +290,8 @@ function LinkedPullRequestCardsContent({
             sameRepo={sameRepo}
             context={context}
             anyActionBusy={anyActionBusy}
-            onActionBusyChange={setAnyActionBusy}
+            onActionBegin={beginAction}
+            onActionEnd={endAction}
             onOpenLink={onOpenLink}
           />
         );
@@ -346,7 +342,7 @@ export function LinkedPullRequestCards({
     context.openPullRequestsData &&
       links.some(
         (link) =>
-          repoMatches(link, context.openPullRequestsData?.github) === true &&
+          githubPullRequestMatchesRepo(link, context.openPullRequestsData?.github) === true &&
           !findPullRequest(link, context.openPullRequestsData),
       ),
   );
