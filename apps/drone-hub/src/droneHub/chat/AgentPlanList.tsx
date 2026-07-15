@@ -4,7 +4,15 @@ import { IconCheck, IconChevron, IconSpinner } from './icons';
 
 const DEFAULT_VISIBLE_ITEMS = 8;
 
-export function AgentPlanList({ plan, running = false }: { plan?: AgentPlan; running?: boolean }) {
+export function AgentPlanList({
+  plan,
+  running = false,
+  className = '',
+}: {
+  plan?: AgentPlan;
+  running?: boolean;
+  className?: string;
+}) {
   const [planExpanded, setPlanExpanded] = React.useState(running);
   const [stepsExpanded, setStepsExpanded] = React.useState(false);
   if (!plan?.items.length) return null;
@@ -14,7 +22,10 @@ export function AgentPlanList({ plan, running = false }: { plan?: AgentPlan; run
   const visibleItems = stepsExpanded ? plan.items : plan.items.slice(0, DEFAULT_VISIBLE_ITEMS);
 
   return (
-    <section className="mt-2.5 border-t border-[var(--border-subtle)] pt-2.5" aria-label="Plan">
+    <section
+      className={`mt-2.5 border-t border-[var(--border-subtle)] pt-2.5 ${className}`}
+      aria-label="Plan"
+    >
       <div className={`${showPlanItems ? 'mb-2' : ''} flex items-center justify-between gap-3`}>
         {running ? (
           <span

@@ -144,11 +144,14 @@ describe('linked pull request messages', () => {
     expect(html).toContain('feature/workspace-transfers → main');
     expect(html).not.toContain('feature/workspace-tra...');
     expect(html).not.toContain('>View<');
+    expect(html).not.toContain('Open on GitHub');
     expect(html).not.toContain('Merge requires confirmation');
     expect(html).toContain('border-l-2');
     expect(html).not.toContain('shadow-[inset_3px_0_0');
     expect(html).toContain('Force merge');
     expect(html).toContain('Close');
+    expect(html.indexOf('Checks pending')).toBeLessThan(html.indexOf('Force merge'));
+    expect(html.match(/href=/g)).toHaveLength(1);
   });
 
   test('shares one all-state status request across linked cards', async () => {
