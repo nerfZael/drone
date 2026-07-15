@@ -7,6 +7,77 @@ import {
 import type { LocalAssistantThread } from '../src/local-assistant/local-assistant-types';
 
 describe('phone assistant workspace tools', () => {
+  test('transfers between a readable source and a write-only destination with retry progress', async () => {
+    const thread = {
+      id: 'mobile_transfer',
+      title: 'Transfer',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      model: 'gpt-test',
+      thinkingLevel: 'low' as const,
+      status: 'idle' as const,
+      error: null,
+      messages: [],
+      workspaceTargets: [
+        {
+          targetDeviceId: 'source_device',
+          deviceName: 'Laptop',
+          workspaceId: 'source',
+          workspaceName: 'Source',
+          read: true,
+          write: false,
+          execute: false,
+        },
+        {
+          targetDeviceId: 'destination_device',
+          deviceName: 'Server',
+          workspaceId: 'destination',
+          workspaceName: 'Drop box',
+          read: false,
+          write: true,
+          execute: false,
+        },
+      ],
+    };
+    const runtime = createWorkspaceToolRuntime(
+      thread,
+      async (deviceId, _capability, operation, payload: any) => {
+        if (operation === 'files.transfer.stat') return { type: 'file', size: 3, mtimeMs: 10 };
+        if (operation === 'files.transfer.read') {
+          if (!(runtime as any).__retried) {
+            (runtime as any).__retried = true;
+            throw new Error('connection closed');
+          }
+          return { dataBase64: 'YWJj', bytes: 3 };
+        }
+        if (operation === 'files.transfer.prepare') return { offset: 0 };
+        if (operation === 'files.transfer.write') {
+          expect(deviceId).toBe('destination_device');
+          expect(payload.workspaceId).toBe('destination');
+          return { offset: 3 };
+        }
+        if (operation === 'files.transfer.commit') return { ok: true };
+        throw new Error(`unexpected operation: ${operation}`);
+      },
+    );
+    expect(runtime.tools.map((tool) => tool.function.name)).toContain('transfer_files');
+    const updates: any[] = [];
+    const result = await runtime.execute({
+      name: 'transfer_files',
+      args: {
+        sourceTarget: 'Laptop / Source',
+        sourcePath: 'a.bin',
+        destinationTarget: 'Server / Drop box',
+        destinationPath: 'incoming/a.bin',
+      },
+      onOutput: (update) => {
+        updates.push(update.details);
+      },
+    });
+    expect(result.details).toMatchObject({ phase: 'completed', retries: 1, transferredBytes: 3 });
+    expect(updates.some((update) => update.files?.[0]?.status === 'retrying')).toBe(true);
+  });
+
   test('binds every request to the selected destination workspace', async () => {
     const thread: LocalAssistantThread = {
       id: 'mobile_thread_1',

@@ -15,10 +15,60 @@ const MAX_THREADS = 30;
 const MAX_MESSAGES_PER_THREAD = 120;
 const MAX_STORED_MESSAGE_CHARS = 24_000;
 const MAX_STORED_THREAD_CHARS = 650_000;
+const MAX_STORED_TRANSFER_DETAILS_CHARS = 250_000;
+
+function cleanTransferDetails(value: any): unknown {
+  const serialized = JSON.stringify(value);
+  if (serialized.length <= MAX_STORED_TRANSFER_DETAILS_CHARS) return value;
+  const rawFiles = Array.isArray(value.files) ? value.files : [];
+  const important = rawFiles.filter(
+    (file: any) => file?.status === 'failed' || file?.status === 'retrying' || file?.status === 'transferring',
+  );
+  const nearby = [
+    ...rawFiles.filter((file: any) => file?.status === 'completed').slice(-20),
+    ...rawFiles.filter((file: any) => file?.status === 'pending').slice(0, 40),
+  ];
+  const files = Array.from(new Set([...important, ...nearby])).slice(0, 80).map((file: any) => ({
+    sourcePath: String(file?.sourcePath ?? '').slice(0, 800),
+    destinationPath: String(file?.destinationPath ?? '').slice(0, 800),
+    size: Number(file?.size) || 0,
+    mtimeMs: Number.isFinite(Number(file?.mtimeMs)) ? Number(file.mtimeMs) : null,
+    transferredBytes: Number(file?.transferredBytes) || 0,
+    retries: Number(file?.retries) || 0,
+    status: String(file?.status ?? 'pending'),
+    ...(file?.error ? { error: String(file.error).slice(0, 2_000) } : {}),
+  }));
+  const endpoint = (candidate: any) => ({
+    targetId: String(candidate?.targetId ?? '').slice(0, 500),
+    targetLabel: String(candidate?.targetLabel ?? '').slice(0, 500),
+    path: String(candidate?.path ?? '').slice(0, 2_000),
+  });
+  return {
+    ...value,
+    source: endpoint(value.source),
+    destination: endpoint(value.destination),
+    ...(value.failure
+      ? {
+          failure: {
+            ...value.failure,
+            sourcePath: String(value.failure.sourcePath ?? '').slice(0, 2_000) || undefined,
+            destinationPath:
+              String(value.failure.destinationPath ?? '').slice(0, 2_000) || undefined,
+            error: String(value.failure.error ?? '').slice(0, 4_000),
+            cleanupError:
+              String(value.failure.cleanupError ?? '').slice(0, 4_000) || undefined,
+          },
+        }
+      : {}),
+    files,
+    filesTruncated: Math.max(0, rawFiles.length - files.length),
+  };
+}
 
 function cleanDetails(value: unknown): unknown {
   if (value === undefined) return undefined;
   try {
+    if ((value as any)?.type === 'workspace_transfer') return cleanTransferDetails(value);
     return JSON.stringify(value).length <= 8_000 ? value : { truncated: true };
   } catch {
     return undefined;
@@ -79,7 +129,7 @@ export function cleanLocalWorkspaceTargets(values: unknown[]): LocalWorkspaceTar
     if (!targetDeviceId || !workspaceId) continue;
     const previous = targets.get(`${targetDeviceId}\0${workspaceId}`);
     const write = workspace.write === true || previous?.write === true;
-    const read = workspace.read === true || write || previous?.read === true;
+    const read = workspace.read === true || previous?.read === true;
     const execute = workspace.execute === true || previous?.execute === true;
     if (!read && !write && !execute) continue;
     targets.set(`${targetDeviceId}\0${workspaceId}`, {

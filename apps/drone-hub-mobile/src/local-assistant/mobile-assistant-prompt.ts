@@ -11,7 +11,7 @@ export function mobileAssistantSystemPrompt(thread: LocalAssistantThread): strin
       ? `This thread can use these remote workspaces: ${targets.map(workspaceHandle).join(', ')}. Use only the available tools and their permitted workspaces.`
       : 'No workspace is selected. Explain that file tools require remote workspace access when relevant.',
     targets.length > 1
-      ? 'Use list_targets to inspect targets, set_target before a sequence of calls, or pass target on an individual filesystem or Bash call.'
+      ? 'Use list_targets to inspect targets, set_target before a sequence of calls, pass target on an individual filesystem or Bash call, and use transfer_files to copy files or folders between workspaces.'
       : '',
   ]
     .filter(Boolean)

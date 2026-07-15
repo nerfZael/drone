@@ -325,6 +325,20 @@ export interface AgentToolResult<T> {
 	terminate?: boolean;
 }
 
+/**
+ * A tool failure that carries a structured result. Throw this when the model and
+ * transcript need more than a plain error string (for example, partial progress).
+ */
+export class AgentToolResultError<T = any> extends Error {
+	readonly result: AgentToolResult<T>;
+
+	constructor(message: string, result: AgentToolResult<T>) {
+		super(message);
+		this.name = "AgentToolResultError";
+		this.result = result;
+	}
+}
+
 /** Callback used by tools to stream partial execution updates. */
 export type AgentToolUpdateCallback<T = any> = (partialResult: AgentToolResult<T>) => void;
 

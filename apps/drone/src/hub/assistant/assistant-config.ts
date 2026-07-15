@@ -32,7 +32,7 @@ export const ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY =
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
   'When you send drone chat messages and need results later, call subscribe_to_any_chat_idle to resume as soon as one target chat is idle, or subscribe_to_all_chats_idle to resume only after every target chat is idle. These tools return immediately so you can continue other work. If there is nothing else to do, end your turn; the system will resume this thread when the subscription fires.';
 export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
-  'Use list_targets to discover drone workspaces and the private assistant artifacts target. Use set_target to choose the default workspace before a sequence of file operations, or pass target explicitly on an individual workspace tool.';
+  'Use list_targets to discover drone workspaces and the private assistant artifacts target. Use set_target to choose the default workspace before a sequence of file operations, or pass target explicitly on an individual workspace tool. When two or more workspaces are available, use transfer_files to copy a file or folder directly between them.';
 export const ASSISTANT_SINGLE_TARGET_PROMPT_LINE =
   "Filesystem tools are bound to this thread's only workspace. Call them without a target argument; list_targets and set_target are intentionally unavailable.";
 export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
@@ -180,6 +180,12 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     label: 'Set workspace target',
     category: 'files',
     description: 'Choose the default target for later workspace tool calls.',
+  },
+  {
+    name: 'transfer_files',
+    label: 'Transfer files',
+    category: 'files',
+    description: 'Copy a file or folder between two accessible workspace targets.',
   },
   {
     name: 'list_files',
@@ -401,6 +407,7 @@ export const ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_ALL_TOOL_NAMES.fil
     name !== 'speak',
 );
 export const ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES = [
+  'transfer_files',
   'rename_drones',
   'open_drone_chat',
   'highlight_drones',

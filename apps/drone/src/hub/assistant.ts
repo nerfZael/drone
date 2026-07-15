@@ -79,6 +79,7 @@ import {
   type AssistantPatchStagedFile,
   type AssistantToolCallbacks,
 } from './assistant/assistant-workspace-contracts';
+import { isAssistantTransferTemporaryName } from './assistant/is-assistant-transfer-temporary-name';
 import type {
   AssistantChangeEvent,
   AssistantChatIdleStatus,
@@ -2732,12 +2733,26 @@ export class HubAssistantService {
     return this.filterDronesForScope(await this.tools.listDrones(), threadId);
   }
 
+  async workspaceDrones(
+    threadId: string,
+  ): Promise<Array<AssistantDroneSummary & { canRead: boolean; canWrite: boolean }>> {
+    await this.ensureLoaded();
+    this.getThread(threadId);
+    const readScope = this.allowedDroneIdSet('read', threadId);
+    const writeScope = this.allowedDroneIdSet('write', threadId);
+    return (await this.tools.listDrones()).flatMap((drone) => {
+      const canRead = readScope === null || readScope.has(drone.id);
+      const canWrite = writeScope === null || writeScope.has(drone.id);
+      return canRead || canWrite ? [{ ...drone, canRead, canWrite }] : [];
+    });
+  }
+
   private async availableToolsForThread(threadId: string): Promise<AssistantToolSummary[]> {
     // Every Assistant thread has its artifacts workspace. Target discovery and
-    // selection are useful only when at least one drone workspace is also visible.
+    // selection and transfer are useful only when at least one drone workspace is accessible.
     let hasMultipleTargets = false;
     try {
-      hasMultipleTargets = (await this.visibleDrones(threadId)).length > 0;
+      hasMultipleTargets = (await this.workspaceDrones(threadId)).length > 0;
     } catch (error: any) {
       hubLog('warn', 'assistant target catalog unavailable while building tool summary', {
         threadId,
@@ -2747,7 +2762,10 @@ export class HubAssistantService {
     return hasMultipleTargets
       ? ASSISTANT_TOOL_SUMMARIES
       : ASSISTANT_TOOL_SUMMARIES.filter(
-          (tool) => tool.name !== 'list_targets' && tool.name !== 'set_target',
+          (tool) =>
+            tool.name !== 'list_targets' &&
+            tool.name !== 'set_target' &&
+            tool.name !== 'transfer_files',
         );
   }
 
@@ -2769,9 +2787,99 @@ export class HubAssistantService {
       'delete_directory',
       'apply_patch',
       'bash',
+      'transfer_mkdir',
+      'transfer_prepare',
+      'transfer_write',
+      'transfer_commit',
+      'transfer_abort',
     ].includes(call.tool);
     const droneId = await this.requireDroneInScope(droneRef, write ? 'write' : 'read', threadId);
     const params: any = call.args ?? {};
+    if (call.tool === 'transfer_stat') {
+      const result = await this.requireFileCallback('statDronePath')({
+        droneId,
+        path: normalizeAssistantDroneFilePath(params.path),
+      });
+      if (!result.exists || (result.kind !== 'file' && result.kind !== 'directory'))
+        throw new Error(`transfer source was not found: ${String(params.path ?? '')}`);
+      return {
+        type: result.kind,
+        size: result.kind === 'file' ? (result.size ?? 0) : 0,
+        mtimeMs: result.mtimeMs,
+      };
+    }
+    if (call.tool === 'transfer_list') {
+      const result = await this.requireFileCallback('listDroneFiles')({
+        droneId,
+        path: normalizeAssistantDroneFilePath(params.path),
+      });
+      return {
+        entries: result.entries.flatMap((entry) =>
+          (entry.kind === 'file' || entry.kind === 'directory') &&
+          !isAssistantTransferTemporaryName(entry.name)
+            ? [
+                {
+                  name: entry.name,
+                  type: entry.kind,
+                  size: entry.kind === 'file' ? (entry.size ?? 0) : 0,
+                  mtimeMs: entry.mtimeMs,
+                },
+              ]
+            : [],
+        ),
+      };
+    }
+    if (call.tool === 'transfer_read') {
+      return await this.requireFileCallback('readDroneFileChunk')({
+        droneId,
+        path: normalizeAssistantDroneFilePath(params.path),
+        offset: Number(params.offset),
+        length: Number(params.length),
+      });
+    }
+    if (call.tool === 'transfer_mkdir') {
+      await this.requireFileCallback('createDroneTransferDirectory')({
+        droneId,
+        path: normalizeAssistantDroneFilePath(params.path),
+      });
+      return { ok: true };
+    }
+    if (call.tool === 'transfer_prepare') {
+      return await this.requireFileCallback('prepareDroneTransferFile')({
+        droneId,
+        path: normalizeAssistantDroneFilePath(params.path),
+        transferId: String(params.transferId ?? ''),
+        size: Number(params.size),
+        overwrite: params.overwrite === true,
+      });
+    }
+    if (call.tool === 'transfer_write') {
+      return await this.requireFileCallback('writeDroneTransferChunk')({
+        droneId,
+        path: normalizeAssistantDroneFilePath(params.path),
+        transferId: String(params.transferId ?? ''),
+        offset: Number(params.offset),
+        dataBase64: String(params.dataBase64 ?? ''),
+      });
+    }
+    if (call.tool === 'transfer_commit') {
+      await this.requireFileCallback('commitDroneTransferFile')({
+        droneId,
+        path: normalizeAssistantDroneFilePath(params.path),
+        transferId: String(params.transferId ?? ''),
+        size: Number(params.size),
+        overwrite: params.overwrite === true,
+      });
+      return { ok: true };
+    }
+    if (call.tool === 'transfer_abort') {
+      await this.requireFileCallback('abortDroneTransferFile')({
+        droneId,
+        path: normalizeAssistantDroneFilePath(params.path),
+        transferId: String(params.transferId ?? ''),
+      });
+      return { ok: true };
+    }
     if (call.tool === 'list_files') {
       const rawPath = cleanOptionalString(params.path);
       const result = await this.requireFileCallback('listDroneFiles')({

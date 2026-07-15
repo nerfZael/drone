@@ -6,7 +6,6 @@ import {
   mergeBlockedReason,
   PullRequestStatusBadgeStrip,
   pullRequestStateClassName,
-  shortBranchName,
 } from '../pullRequests/pull-request-ui';
 import type {
   RepoPullRequestClosePayload,
@@ -151,22 +150,7 @@ function LinkedPullRequestCard({
         : sameRepo === false
           ? 'External repository'
           : 'Status unavailable';
-  const footerMessage =
-    actionError ??
-    actionNotice ??
-    (blockedReason
-      ? `Merge blocked: ${blockedReason}.`
-      : forceReason
-        ? `Merge requires confirmation: ${forceReason}.`
-        : loadError
-          ? `Status unavailable: ${loadError}`
-          : null);
-  const footerTone =
-    actionError || loadError || blockedReason
-      ? 'text-[var(--red)]'
-      : forceReason
-        ? 'text-[var(--yellow)]'
-        : 'text-[var(--green)]';
+  const footerMessage = actionError ?? (loadError ? `Status unavailable: ${loadError}` : null);
 
   return (
     <section className="overflow-hidden rounded-md border border-[rgba(167,139,250,.2)] bg-[rgba(5,8,15,.24)] shadow-[inset_3px_0_0_rgba(167,139,250,.38)]">
@@ -189,7 +173,6 @@ function LinkedPullRequestCard({
               {loading ? <IconSpinner className="h-2.5 w-2.5" /> : null}
               {statusLabel}
             </span>
-            {pullRequest ? <PullRequestStatusBadgeStrip pullRequest={pullRequest} /> : null}
           </div>
           <button
             type="button"
@@ -199,26 +182,28 @@ function LinkedPullRequestCard({
           >
             {pullRequest?.title ?? `${link.owner}/${link.repo} pull request #${link.pullNumber}`}
           </button>
-          <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-[var(--muted-dim)]">
-            <span className="font-mono">{link.owner}/{link.repo}</span>
-            {pullRequest?.headRefName || pullRequest?.baseRefName ? (
-              <span className="font-mono" title={`${pullRequest.headRefName} → ${pullRequest.baseRefName}`}>
-                {shortBranchName(pullRequest.headRefName, 24)} → {shortBranchName(pullRequest.baseRefName, 24)}
-              </span>
-            ) : null}
-            {pullRequest?.authorLogin ? <span>by {pullRequest.authorLogin}</span> : null}
+          <div className="mt-1 flex min-w-0 flex-col gap-1 sm:flex-row sm:items-end sm:justify-between sm:gap-3">
+            <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-[var(--muted-dim)]">
+              <span className="font-mono">{link.owner}/{link.repo}</span>
+              {pullRequest?.headRefName || pullRequest?.baseRefName ? (
+                <span className="min-w-0 font-mono break-all" title={`${pullRequest.headRefName} → ${pullRequest.baseRefName}`}>
+                  {pullRequest.headRefName || '-'} → {pullRequest.baseRefName || '-'}
+                </span>
+              ) : null}
+              {pullRequest?.authorLogin ? <span>by {pullRequest.authorLogin}</span> : null}
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-1 sm:justify-end">
+              {actionNotice ? (
+                <span role="status" className="text-[9px] text-[var(--green)]">
+                  {actionNotice}
+                </span>
+              ) : pullRequest ? (
+                <PullRequestStatusBadgeStrip pullRequest={pullRequest} compact />
+              ) : null}
+            </div>
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center justify-start gap-1 sm:justify-end">
-          <button
-            type="button"
-            onClick={() => openRequest(link, onOpenLink)}
-            className="h-6 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--accent)] hover:brightness-110"
-            style={{ fontFamily: 'var(--display)' }}
-            title="View this pull request"
-          >
-            View
-          </button>
           <a
             href={link.href}
             target="_blank"
@@ -257,8 +242,8 @@ function LinkedPullRequestCard({
       </div>
       {footerMessage ? (
         <div
-          role={actionError || loadError ? 'alert' : 'status'}
-          className={`border-t border-[var(--border-subtle)] px-3 py-1.5 text-[9px] ${footerTone}`}
+          role="alert"
+          className="border-t border-[var(--border-subtle)] px-3 py-1.5 text-[9px] text-[var(--red)]"
         >
           {footerMessage}
         </div>

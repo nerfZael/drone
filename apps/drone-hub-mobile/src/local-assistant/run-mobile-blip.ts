@@ -1,4 +1,5 @@
 import { createBlipSession, createPortableId, type BlipRuntimeEvent } from '@blip/core';
+import { mergeWorkspaceTransferProgress } from '@drone/assistant-chat';
 import { Type, type AgentTool } from '@mariozechner/pi-agent-core/portable';
 import type { Model } from '@mariozechner/pi-ai/agent-core';
 import type { LocalCodexAuth } from './codex-auth-format';
@@ -116,6 +117,7 @@ export async function runMobileBlip(input: {
   let streamedText = '';
   let finishedError = '';
   let previewId = `preview_${createPortableId()}`;
+  const toolProgressDetails = new Map<string, unknown>();
   const eventSink = async (event: BlipRuntimeEvent) => {
     if (event.type === 'turn_started') {
       streamedText = '';
@@ -132,6 +134,11 @@ export async function runMobileBlip(input: {
         },
       ]);
     } else if (event.type === 'tool_call_progress') {
+      const details = mergeWorkspaceTransferProgress(
+        toolProgressDetails.get(event.callId),
+        event.details,
+      );
+      toolProgressDetails.set(event.callId, details);
       await input.onStreamingMessages([
         ...repository.localMessages(),
         {
@@ -141,10 +148,13 @@ export async function runMobileBlip(input: {
           toolCallId: event.callId,
           toolName: event.tool,
           content: event.message,
-          details: event.details,
+          details,
         },
       ]);
+    } else if (event.type === 'tool_call_completed' || event.type === 'tool_call_failed') {
+      toolProgressDetails.delete(event.callId);
     } else if (event.type === 'session_finished') {
+      toolProgressDetails.clear();
       finishedError = event.status === 'error' ? String(event.error ?? 'Assistant run failed') : '';
     }
   };

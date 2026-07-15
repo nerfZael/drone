@@ -22,7 +22,6 @@ function id(value: unknown, label: string): string {
 }
 
 function normalizeHomeTarget(value: any): HomeWorkspaceTarget {
-  const write = value?.write === true;
   return {
     threadId: id(value?.threadId, 'thread id'),
     targetDeviceId: id(value?.targetDeviceId, 'target device id'),
@@ -33,8 +32,8 @@ function normalizeHomeTarget(value: any): HomeWorkspaceTarget {
     workspaceName: String(value?.workspaceName ?? value?.rootId ?? '')
       .trim()
       .slice(0, 160),
-    read: value?.read === true || write,
-    write,
+    read: value?.read === true,
+    write: value?.write === true,
     execute: value?.execute === true,
   };
 }
@@ -76,7 +75,7 @@ export class CrossDeviceAssistantPolicyStore {
         const previous = mergedGrants.get(key);
         mergedGrants.set(key, {
           ...grant,
-          read: grant.read || grant.write || previous?.read === true,
+          read: grant.read || previous?.read === true,
           write: grant.write || previous?.write === true,
           execute: grant.execute || previous?.execute === true,
         });
@@ -152,10 +151,6 @@ export class CrossDeviceAssistantPolicyStore {
     const rootIds = new Set(roots.map((root) => root.id));
     if (next.deviceGrants.some((rule) => !rootIds.has(rule.rootId)))
       throw Object.assign(new Error('every device grant needs a local workspace root'), {
-        code: 'INVALID_POLICY',
-      });
-    if ([...next.homeTargets, ...next.deviceGrants].some((rule) => rule.write && !rule.read))
-      throw Object.assign(new Error('write access also requires read access'), {
         code: 'INVALID_POLICY',
       });
     const grantKeys = next.deviceGrants.map((grant) => `${grant.deviceId}\0${grant.rootId}`);

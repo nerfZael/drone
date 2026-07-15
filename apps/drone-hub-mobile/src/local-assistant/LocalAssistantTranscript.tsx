@@ -64,13 +64,7 @@ function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
   );
 }
 
-function TappableMessageView({
-  children,
-  onTap,
-}: {
-  children: any;
-  onTap: () => void;
-}) {
+function TappableMessageView({ children, onTap }: { children: any; onTap: () => void }) {
   const touch = React.useRef({ x: 0, y: 0, moved: false, active: false });
   return (
     <View
@@ -118,10 +112,157 @@ function ToolStatus({ failed, pending }: { failed: boolean; pending: boolean }) 
   );
 }
 
+function formatTransferBytes(value: unknown): string {
+  const bytes = Math.max(0, Number(value) || 0);
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(bytes < 10 * 1024 ? 1 : 0)} KB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(bytes < 10 * 1024 ** 2 ? 1 : 0)} MB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GB`;
+}
+
+function TransferToolRow({
+  item,
+  nested = false,
+}: {
+  item: AssistantToolRenderItem;
+  nested?: boolean;
+}) {
+  const [open, setOpen] = React.useState(false);
+  const progress: any =
+    item.result?.details && (item.result.details as any).type === 'workspace_transfer'
+      ? item.result.details
+      : null;
+  const files = Array.isArray(progress?.files) ? progress.files : [];
+  const total = Number(progress?.totalBytes ?? 0);
+  const transferred = Number(progress?.transferredBytes ?? 0);
+  const percent =
+    total > 0
+      ? Math.min(100, (transferred / total) * 100)
+      : progress?.phase === 'completed'
+        ? 100
+        : 0;
+  const failed = item.result?.isError === true || progress?.phase === 'failed';
+  return (
+    <View style={[styles.transfer, nested && styles.transferNested, failed && styles.toolError]}>
+      <Pressable
+        accessibilityRole="button"
+        accessibilityLabel={`Transfer files, ${failed ? 'failed' : progress?.phase === 'completed' ? 'completed' : 'running'}`}
+        accessibilityState={{ expanded: open }}
+        hitSlop={4}
+        onPress={() => setOpen((value) => !value)}
+        style={({ pressed }) => [styles.transferHead, pressed && styles.toolHeadPressed]}
+      >
+        <ToolStatus failed={failed} pending={!failed && progress?.phase !== 'completed'} />
+        <View style={styles.toolCopy}>
+          <View style={styles.transferTitleRow}>
+            <Text style={styles.toolTitle}>Transfer files</Text>
+            <Text style={styles.transferBytes}>
+              {progress
+                ? `${formatTransferBytes(transferred)} / ${formatTransferBytes(total)}`
+                : 'Preparing…'}
+            </Text>
+          </View>
+          <Text numberOfLines={1} style={styles.toolSummary}>
+            {progress
+              ? `${progress.source?.targetLabel ?? 'Source'} → ${progress.destination?.targetLabel ?? 'Destination'}`
+              : 'Scanning files to transfer'}
+          </Text>
+          <View style={styles.progressTrack}>
+            <View
+              style={[
+                styles.progressFill,
+                failed && styles.progressFailed,
+                { width: `${percent}%` },
+              ]}
+            />
+          </View>
+          <View style={styles.transferMeta}>
+            <Text style={styles.transferMetaText}>
+              {progress?.phase === 'planning'
+                ? 'Scanning folder…'
+                : `${progress?.completedFiles ?? 0} of ${progress?.fileCount ?? 0} files`}
+            </Text>
+            <Text style={styles.transferMetaText}>
+              {progress?.retries
+                ? `${progress.retries} ${progress.retries === 1 ? 'retry' : 'retries'}`
+                : `${Math.round(percent)}%`}
+            </Text>
+          </View>
+          {failed && progress?.failure?.error ? (
+            <Text style={styles.transferError}>
+              {progress.failure.error}
+              {progress.failure.cleanupError ? ` Cleanup: ${progress.failure.cleanupError}` : ''}
+            </Text>
+          ) : null}
+          {failed && progress?.resumeToken ? (
+            <Text style={styles.transferMetaText}>
+              Resume available after {progress.completedFiles ?? 0} committed files.
+            </Text>
+          ) : null}
+        </View>
+        <Text style={styles.disclosure}>{open ? 'Hide' : 'Details'}</Text>
+      </Pressable>
+      {open && files.length > 0 ? (
+        <View style={styles.transferFiles}>
+          {files.map((file: any, index: number) => {
+            const filePercent =
+              file.size > 0
+                ? Math.min(100, (Number(file.transferredBytes ?? 0) / file.size) * 100)
+                : file.status === 'completed'
+                  ? 100
+                  : 0;
+            return (
+              <View key={`${file.destinationPath}-${index}`} style={styles.transferFile}>
+                <View style={styles.transferFileHead}>
+                  <Text numberOfLines={1} style={styles.transferFileName}>
+                    {file.sourcePath}
+                  </Text>
+                  <Text
+                    style={[
+                      styles.transferFileBytes,
+                      file.status === 'retrying' && styles.transferRetry,
+                    ]}
+                  >
+                    {file.status === 'retrying' ? `Retry ${file.retries}/5 · ` : ''}
+                    {formatTransferBytes(file.transferredBytes)} / {formatTransferBytes(file.size)}
+                  </Text>
+                </View>
+                <View style={styles.fileProgressTrack}>
+                  <View
+                    style={[
+                      styles.fileProgressFill,
+                      file.status === 'retrying' && styles.fileProgressRetry,
+                      file.status === 'failed' && styles.progressFailed,
+                      { width: `${filePercent}%` },
+                    ]}
+                  />
+                </View>
+                {file.error && (file.status === 'retrying' || file.status === 'failed') ? (
+                  <Text numberOfLines={1} style={styles.transferError}>
+                    {file.error}
+                  </Text>
+                ) : null}
+              </View>
+            );
+          })}
+          {Number(progress?.filesTruncated ?? 0) > 0 ? (
+            <Text style={styles.transferMetaText}>
+              {progress.filesTruncated} additional file rows omitted from local history.
+            </Text>
+          ) : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
 function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nested?: boolean }) {
+  const [open, setOpen] = React.useState(false);
+  if ((item.call?.name ?? item.result?.toolName) === 'transfer_files') {
+    return <TransferToolRow item={item} nested={nested} />;
+  }
   const failed = item.result?.isError === true;
   const pending = !item.result;
-  const [open, setOpen] = React.useState(false);
   const args = item.call?.args;
   const result = item.result
     ? messageText(item.result).trim() || String(item.result.errorMessage ?? '').trim()
@@ -377,10 +518,7 @@ export function MobileAssistantTranscript({
           );
         }
         return (
-          <TappableMessageView
-            key={item.key}
-            onTap={() => toggleMessageTimestamp(timestampKey)}
-          >
+          <TappableMessageView key={item.key} onTap={() => toggleMessageTimestamp(timestampKey)}>
             {content}
             {timestampVisible ? (
               <RelativeMessageTimestamp timestamp={timestamp} style={styles.messageTime} />
@@ -584,6 +722,64 @@ const styles = StyleSheet.create({
     borderTopColor: colors.surface1,
     backgroundColor: colors.mantle,
   },
+  transfer: {
+    borderRadius: 6,
+    borderColor: colors.surface1,
+    borderWidth: 1,
+    backgroundColor: colors.whiteWashSoft,
+    marginHorizontal: 10,
+    marginVertical: 2,
+    overflow: 'hidden',
+  },
+  transferNested: { marginHorizontal: 0, backgroundColor: colors.crust },
+  transferHead: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+    paddingHorizontal: 9,
+    paddingVertical: 8,
+  },
+  transferTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  toolSummary: { color: colors.muted, fontSize: 9, lineHeight: 13, marginTop: 3 },
+  transferBytes: { color: colors.muted, fontSize: 8, fontFamily: 'monospace' },
+  progressTrack: {
+    height: 5,
+    borderRadius: 3,
+    overflow: 'hidden',
+    backgroundColor: colors.surface0,
+    marginTop: 9,
+  },
+  progressFill: { height: '100%', borderRadius: 3, backgroundColor: colors.accent },
+  progressFailed: { backgroundColor: colors.danger },
+  transferMeta: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 5 },
+  transferMetaText: { color: colors.subtle, fontSize: 8, fontFamily: 'monospace' },
+  transferFiles: { gap: 5, padding: 8, borderTopWidth: 1, borderTopColor: colors.surface1 },
+  transferFile: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 5,
+    backgroundColor: colors.background,
+    padding: 7,
+  },
+  transferFileHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  transferFileName: { color: colors.text, fontSize: 9, flex: 1, minWidth: 0 },
+  transferFileBytes: { color: colors.subtle, fontSize: 7, fontFamily: 'monospace' },
+  transferRetry: { color: colors.warning },
+  fileProgressTrack: {
+    height: 3,
+    borderRadius: 2,
+    overflow: 'hidden',
+    backgroundColor: colors.surface0,
+    marginTop: 6,
+  },
+  fileProgressFill: { height: '100%', borderRadius: 2, backgroundColor: colors.online },
+  fileProgressRetry: { backgroundColor: colors.warning },
+  transferError: { color: colors.subtle, fontSize: 7, marginTop: 5 },
   reasoning: {
     marginHorizontal: 10,
     marginVertical: 12,

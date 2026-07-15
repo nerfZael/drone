@@ -141,6 +141,10 @@ describe('linked pull request messages', () => {
     expect(html).toContain('Checks pending');
     expect(html).toContain('Review required');
     expect(html).toContain('feature/workspace-transfers');
+    expect(html).toContain('feature/workspace-transfers → main');
+    expect(html).not.toContain('feature/workspace-tra...');
+    expect(html).not.toContain('>View<');
+    expect(html).not.toContain('Merge requires confirmation');
     expect(html).toContain('Force merge');
     expect(html).toContain('Close');
   });

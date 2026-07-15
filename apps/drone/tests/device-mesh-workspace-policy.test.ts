@@ -15,6 +15,89 @@ afterEach(async () => {
 });
 
 describe('cross-device workspace policy', () => {
+  test('keeps read and write grants independent', async () => {
+    const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-workspace-write-only-'));
+    tempDirs.push(directory);
+    const workspace = path.join(directory, 'workspace');
+    await fs.mkdir(workspace);
+    const policies = new CrossDeviceAssistantPolicyStore(path.join(directory, 'policy.json'));
+    const policy = await policies.replace({
+      roots: [{ id: 'main', label: 'Main', path: workspace }],
+      homeTargets: [
+        {
+          threadId: 'thread_1',
+          targetDeviceId: 'device_remote',
+          rootId: 'main',
+          deviceName: 'Remote',
+          workspaceName: 'Main',
+          read: false,
+          write: true,
+          execute: false,
+        },
+      ],
+      deviceGrants: [
+        { deviceId: 'device_writer', rootId: 'main', read: false, write: true, execute: false },
+      ],
+    });
+    expect(policy.homeTargets[0]).toMatchObject({ read: false, write: true });
+    expect(policy.deviceGrants[0]).toMatchObject({ read: false, write: true });
+    const capability = createWorkspaceCapability(policies);
+    const sourceDevice = {
+      id: 'device_writer',
+      name: 'Writer',
+      platform: 'server',
+      publicKey: {},
+      administrator: false,
+      grants: [],
+      endpoints: [],
+      revokedAt: null,
+      addedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as MeshDevice;
+    const context = { sourceDevice, requestId: 'write_only_transfer' };
+    await expect(
+      capability.invoke('files.transfer.stat', { workspaceId: 'main', path: 'drop.bin' }, context),
+    ).rejects.toMatchObject({ code: 'WORKSPACE_POLICY_DENIED' });
+    expect(
+      await capability.invoke(
+        'files.transfer.prepare',
+        {
+          workspaceId: 'main',
+          path: 'drop.bin',
+          transferId: 'write-only',
+          size: 3,
+          overwrite: false,
+        },
+        context,
+      ),
+    ).toEqual({ offset: 0 });
+    expect(
+      await capability.invoke(
+        'files.transfer.write',
+        {
+          workspaceId: 'main',
+          path: 'drop.bin',
+          transferId: 'write-only',
+          offset: 0,
+          dataBase64: 'YWJj',
+        },
+        context,
+      ),
+    ).toEqual({ offset: 3 });
+    await capability.invoke(
+      'files.transfer.commit',
+      {
+        workspaceId: 'main',
+        path: 'drop.bin',
+        transferId: 'write-only',
+        size: 3,
+        overwrite: false,
+      },
+      context,
+    );
+    expect(await fs.readFile(path.join(workspace, 'drop.bin'), 'utf8')).toBe('abc');
+  });
+
   test('requires a device grant for the exact workspace and operation', async () => {
     const directory = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-workspace-policy-'));
     tempDirs.push(directory);

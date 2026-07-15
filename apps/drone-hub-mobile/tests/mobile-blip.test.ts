@@ -112,6 +112,167 @@ describe('phone Blip session', () => {
     expect(persisted.length).toBeGreaterThanOrEqual(4);
   });
 
+  test('keeps partial transfer details in the transcript but sends compact failure text to the model', async () => {
+    const thread: LocalAssistantThread = {
+      id: 'mobile_blip_transfer_failure',
+      title: 'Partial transfer',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      model: 'gpt-test',
+      thinkingLevel: 'low',
+      status: 'running',
+      error: null,
+      workspaceTargets: [
+        {
+          targetDeviceId: 'desktop_1',
+          deviceName: 'Desktop',
+          workspaceId: 'source',
+          workspaceName: 'Source',
+          read: true,
+          write: false,
+          execute: false,
+        },
+        {
+          targetDeviceId: 'server_1',
+          deviceName: 'Server',
+          workspaceId: 'destination',
+          workspaceName: 'Destination',
+          read: false,
+          write: true,
+          execute: false,
+        },
+      ],
+      messages: [],
+    };
+    const requestBodies: any[] = [];
+    globalThis.fetch = (async (_url, init) => {
+      requestBodies.push(JSON.parse(String(init?.body ?? '{}')));
+      return {
+        ok: true,
+        json: async () =>
+          requestBodies.length === 1
+            ? {
+                choices: [
+                  {
+                    finish_reason: 'tool_calls',
+                    message: {
+                      content: null,
+                      tool_calls: [
+                        {
+                          id: 'call_transfer',
+                          type: 'function',
+                          function: {
+                            name: 'transfer_files',
+                            arguments: JSON.stringify({
+                              sourceTarget: 'Desktop / Source',
+                              sourcePath: 'bundle',
+                              destinationTarget: 'Server / Destination',
+                              destinationPath: 'copied-bundle',
+                            }),
+                          },
+                        },
+                      ],
+                    },
+                  },
+                ],
+              }
+            : {
+                choices: [
+                  {
+                    finish_reason: 'stop',
+                    message: { content: 'I can resume the remaining file.' },
+                  },
+                ],
+              },
+      } as Response;
+    }) as typeof fetch;
+    const workspaceRuntime = createWorkspaceToolRuntime(
+      thread,
+      async (deviceId, _capability, operation, rawPayload) => {
+        const payload = rawPayload as Record<string, any>;
+        if (deviceId === 'desktop_1' && operation === 'files.transfer.stat') {
+          if (payload.path === 'bundle') return { type: 'directory', size: 0, mtimeMs: 1 };
+          return { type: 'file', size: 3, mtimeMs: 1 };
+        }
+        if (deviceId === 'desktop_1' && operation === 'files.transfer.list') {
+          return {
+            entries: [
+              { name: 'a.txt', type: 'file', size: 3, mtimeMs: 1 },
+              { name: 'b.txt', type: 'file', size: 3, mtimeMs: 1 },
+            ],
+          };
+        }
+        if (deviceId === 'desktop_1' && operation === 'files.transfer.read') {
+          return {
+            dataBase64: payload.path.endsWith('/a.txt') ? 'b25l' : 'dHdv',
+            bytes: 3,
+          };
+        }
+        if (operation === 'files.transfer.prepare') return { offset: 0 };
+        if (operation === 'files.transfer.write') {
+          if (payload.path.endsWith('/b.txt')) {
+            throw Object.assign(new Error('destination disconnected'), {
+              code: 'INVALID_REQUEST',
+            });
+          }
+          return { offset: 3 };
+        }
+        return {};
+      },
+    );
+
+    const transferPreviews: any[] = [];
+    const messages = await runMobileBlip({
+      provider: 'openai',
+      apiKey: 'test-key',
+      codexAuth: null,
+      prompt: 'Transfer the bundle',
+      thread,
+      history: [],
+      workspaceRuntime,
+      signal: new AbortController().signal,
+      onMessages: async () => undefined,
+      onStreamingMessages: (streamingMessages) => {
+        const preview = streamingMessages.find(
+          (message) => message.role === 'toolResult' && message.toolName === 'transfer_files',
+        );
+        if (preview) transferPreviews.push(preview.details);
+      },
+    });
+
+    const toolResult = messages.find((message) => message.role === 'toolResult');
+    expect(toolResult).toMatchObject({
+      toolName: 'transfer_files',
+      isError: true,
+      details: {
+        type: 'workspace_transfer',
+        phase: 'failed',
+        fileCount: 2,
+        completedFiles: 1,
+        failure: {
+          sourcePath: 'bundle/b.txt',
+          destinationPath: 'copied-bundle/b.txt',
+          resumable: true,
+        },
+      },
+    });
+    const providerToolResult = requestBodies[1]?.messages?.find(
+      (message: any) => message.role === 'tool',
+    );
+    expect(providerToolResult?.content).toContain('Failed at bundle/b.txt');
+    expect(providerToolResult?.content).toMatch(/resumeToken "tr1_1_[0-9a-f]{16}"/);
+    expect(providerToolResult?.content).not.toContain('bundle/a.txt');
+    expect(
+      transferPreviews.some(
+        (details) =>
+          details?.files?.length === 2 &&
+          details.files.some(
+            (file: any) => file.sourcePath === 'bundle/b.txt' && file.status === 'failed',
+          ),
+      ),
+    ).toBe(true);
+  });
+
   test('forwards asynchronous command output through Blip tool progress events', async () => {
     const thread: LocalAssistantThread = {
       id: 'mobile_blip_command',

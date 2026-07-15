@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import crypto from 'node:crypto';
 import { createReadStream, existsSync } from 'node:fs';
 import fs from 'node:fs/promises';
+import type { FileHandle } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
@@ -4359,6 +4360,340 @@ async function assistantReadDroneFile(opts: {
     mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
     ...(ranged.lineRange ? { lineRange: ranged.lineRange } : {}),
   };
+}
+
+const ASSISTANT_TRANSFER_CHUNK_BYTES = 256 * 1024;
+
+async function readAssistantTransferBytes(
+  handle: FileHandle,
+  buffer: Buffer,
+  position: number,
+): Promise<boolean> {
+  let read = 0;
+  while (read < buffer.length) {
+    const result = await handle.read(buffer, read, buffer.length - read, position + read);
+    if (result.bytesRead <= 0) return false;
+    read += result.bytesRead;
+  }
+  return true;
+}
+
+async function writeAssistantTransferBytes(
+  handle: FileHandle,
+  buffer: Buffer,
+  position: number,
+): Promise<void> {
+  let written = 0;
+  while (written < buffer.length) {
+    const result = await handle.write(
+      buffer,
+      written,
+      buffer.length - written,
+      position + written,
+    );
+    if (result.bytesWritten <= 0) throw new Error('destination stopped writing transfer data');
+    written += result.bytesWritten;
+  }
+}
+
+function assistantTransferId(raw: unknown): string {
+  const value = String(raw ?? '').trim();
+  if (!/^[a-zA-Z0-9_-]{1,220}$/.test(value)) throw new Error('invalid transfer id');
+  return value;
+}
+
+function assistantTransferTempPath(runtime: DroneRuntime, targetPath: string, id: string): string {
+  const parent = runtime === 'host' ? path.dirname(targetPath) : path.posix.dirname(targetPath);
+  return runtime === 'host'
+    ? path.join(parent, `.blip-transfer-${id}.part`)
+    : path.posix.join(parent, `.blip-transfer-${id}.part`);
+}
+
+async function assistantReadDroneFileChunk(opts: {
+  droneId: string;
+  path: string;
+  offset: number;
+  length: number;
+}): Promise<{ dataBase64: string; bytes: number }> {
+  const target = await resolveAssistantDroneFsTarget({
+    droneId: opts.droneId,
+    path: opts.path,
+    fallbackToHome: false,
+  });
+  const offset = Math.max(0, Math.floor(Number(opts.offset)));
+  const length = Math.max(
+    1,
+    Math.min(ASSISTANT_TRANSFER_CHUNK_BYTES, Math.floor(Number(opts.length))),
+  );
+  if (!Number.isFinite(offset) || !Number.isFinite(length))
+    throw new Error('invalid transfer range');
+  if (target.runtime === 'host') {
+    const handle = await fs.open(target.targetPath, 'r');
+    try {
+      const buffer = Buffer.alloc(length);
+      const { bytesRead } = await handle.read(buffer, 0, length, offset);
+      return { dataBase64: buffer.subarray(0, bytesRead).toString('base64'), bytes: bytesRead };
+    } finally {
+      await handle.close();
+    }
+  }
+  const script = [
+    'set -euo pipefail',
+    `target=${bashQuote(target.targetPath)}`,
+    `[ -f "$target" ] || { echo "file not found" >&2; exit 4; }`,
+    `dd if="$target" iflag=skip_bytes,count_bytes skip=${offset} count=${length} status=none | base64 | tr -d "\\n"`,
+  ].join('\n');
+  const result = await withReadonlyDroneContainer(
+    { requestedDroneName: target.name, droneEntry: target.drone },
+    async ({ containerName }) => await dvmExec(containerName, 'bash', ['-lc', script]),
+  );
+  if (result.code !== 0)
+    throw new Error((result.stderr || result.stdout || 'failed reading transfer chunk').trim());
+  const dataBase64 = String(result.stdout ?? '').trim();
+  return { dataBase64, bytes: Buffer.from(dataBase64, 'base64').length };
+}
+
+async function assistantCreateDroneTransferDirectory(opts: {
+  droneId: string;
+  path: string;
+}): Promise<void> {
+  const target = await resolveAssistantDroneFsTarget({
+    droneId: opts.droneId,
+    path: opts.path,
+    fallbackToHome: false,
+  });
+  if (target.runtime === 'host') {
+    await fs.mkdir(target.targetPath, { recursive: true });
+    return;
+  }
+  const result = await withLockedDroneContainer(
+    { requestedDroneName: target.name, droneEntry: target.drone },
+    async ({ containerName }) =>
+      await dvmExec(containerName, 'bash', ['-lc', `mkdir -p -- ${bashQuote(target.targetPath)}`]),
+  );
+  if (result.code !== 0)
+    throw new Error(
+      (result.stderr || result.stdout || 'failed creating transfer directory').trim(),
+    );
+}
+
+async function assistantPrepareDroneTransferFile(opts: {
+  droneId: string;
+  path: string;
+  transferId: string;
+  size: number;
+  overwrite: boolean;
+}): Promise<{ offset: number }> {
+  const target = await resolveAssistantDroneFsTarget({
+    droneId: opts.droneId,
+    path: opts.path,
+    fallbackToHome: false,
+  });
+  const id = assistantTransferId(opts.transferId);
+  const size = Math.max(0, Math.floor(Number(opts.size)));
+  if (!Number.isFinite(size)) throw new Error('invalid transfer size');
+  const temp = assistantTransferTempPath(target.runtime, target.targetPath, id);
+  if (target.runtime === 'host') {
+    const existing = await fs
+      .stat(target.targetPath)
+      .catch((error: any) => (error?.code === 'ENOENT' ? null : Promise.reject(error)));
+    if (existing && !existing.isFile())
+      throw Object.assign(new Error('destination path is not a file'), {
+        code: 'INVALID_REQUEST',
+      });
+    if (existing && !opts.overwrite)
+      throw Object.assign(new Error('destination file already exists'), { code: 'FILE_EXISTS' });
+    await fs.mkdir(path.dirname(target.targetPath), { recursive: true });
+    let partial = await fs
+      .lstat(temp)
+      .catch((error: any) => (error?.code === 'ENOENT' ? null : Promise.reject(error)));
+    if (partial && (!partial.isFile() || partial.size > size)) {
+      await fs.rm(temp, { force: true });
+      partial = null;
+    }
+    if (!partial) {
+      const handle = await fs.open(temp, 'wx');
+      await handle.close();
+    }
+    return { offset: partial?.size ?? 0 };
+  }
+  const script = [
+    'set -euo pipefail',
+    `target=${bashQuote(target.targetPath)}`,
+    `temp=${bashQuote(temp)}`,
+    `size=${size}`,
+    '[ ! -e "$target" ] || [ -f "$target" ] || { echo "__TYPE__"; exit 5; }',
+    opts.overwrite ? ':' : '[ ! -e "$target" ] || { echo "__EXISTS__"; exit 5; }',
+    'mkdir -p -- "$(dirname -- "$target")"',
+    'if { [ -e "$temp" ] || [ -L "$temp" ]; } && { [ -L "$temp" ] || [ ! -f "$temp" ] || [ "$(stat -c %s -- "$temp")" -gt "$size" ]; }; then rm -f -- "$temp"; fi',
+    'if [ ! -e "$temp" ] && [ ! -L "$temp" ]; then (set -o noclobber; : > "$temp"); fi',
+    '[ ! -L "$temp" ] && [ -f "$temp" ] || { echo "invalid transfer temporary path" >&2; exit 7; }',
+    'stat -c %s -- "$temp"',
+  ].join('\n');
+  const result = await withLockedDroneContainer(
+    { requestedDroneName: target.name, droneEntry: target.drone },
+    async ({ containerName }) => await dvmExec(containerName, 'bash', ['-lc', script]),
+  );
+  if (result.code !== 0) {
+    if (String(result.stdout).includes('__TYPE__'))
+      throw Object.assign(new Error('destination path is not a file'), {
+        code: 'INVALID_REQUEST',
+      });
+    if (String(result.stdout).includes('__EXISTS__'))
+      throw Object.assign(new Error('destination file already exists'), { code: 'FILE_EXISTS' });
+    throw new Error((result.stderr || result.stdout || 'failed preparing transfer').trim());
+  }
+  return { offset: Math.max(0, Number(String(result.stdout).trim()) || 0) };
+}
+
+async function assistantWriteDroneTransferChunk(opts: {
+  droneId: string;
+  path: string;
+  transferId: string;
+  offset: number;
+  dataBase64: string;
+}): Promise<{ offset: number }> {
+  const target = await resolveAssistantDroneFsTarget({
+    droneId: opts.droneId,
+    path: opts.path,
+    fallbackToHome: false,
+  });
+  const id = assistantTransferId(opts.transferId);
+  const offset = Math.max(0, Math.floor(Number(opts.offset)));
+  const data = Buffer.from(String(opts.dataBase64 ?? ''), 'base64');
+  if (!Number.isFinite(offset) || data.length > ASSISTANT_TRANSFER_CHUNK_BYTES)
+    throw new Error('invalid transfer chunk');
+  const temp = assistantTransferTempPath(target.runtime, target.targetPath, id);
+  if (target.runtime === 'host') {
+    const tempInfo = await fs.lstat(temp);
+    if (!tempInfo.isFile()) throw new Error('transfer temporary path is not a file');
+    const handle = await fs.open(temp, 'r+');
+    try {
+      const info = await handle.stat();
+      if (info.size === offset + data.length) {
+        const existing = Buffer.alloc(data.length);
+        if (
+          (await readAssistantTransferBytes(handle, existing, offset)) &&
+          existing.equals(data)
+        )
+          return { offset: info.size };
+      }
+      if (info.size !== offset)
+        throw Object.assign(
+          new Error(`transfer offset mismatch: expected ${info.size}, received ${offset}`),
+          { code: 'TRANSFER_OFFSET_MISMATCH' },
+        );
+      await writeAssistantTransferBytes(handle, data, offset);
+      await handle.sync();
+      return { offset: offset + data.length };
+    } finally {
+      await handle.close();
+    }
+  }
+  const script = [
+    'set -euo pipefail',
+    `temp=${bashQuote(temp)}`,
+    `offset=${offset}`,
+    `length=${data.length}`,
+    `data=${bashQuote(data.toString('base64'))}`,
+    '[ ! -L "$temp" ] && [ -f "$temp" ] || { echo "invalid transfer temporary path" >&2; exit 7; }',
+    'current=$(stat -c %s -- "$temp")',
+    'if [ "$current" -eq $((offset + length)) ]; then existing=$(dd if="$temp" iflag=skip_bytes,count_bytes skip="$offset" count="$length" status=none | base64 | tr -d "\\n"); [ "$existing" = "$data" ] && { echo "$current"; exit 0; }; fi',
+    '[ "$current" -eq "$offset" ] || { echo "offset mismatch: $current" >&2; exit 6; }',
+    'printf "%s" "$data" | base64 -d >> "$temp"',
+    'sync "$temp" 2>/dev/null || true',
+    'echo $((offset + length))',
+  ].join('\n');
+  const result = await withLockedDroneContainer(
+    { requestedDroneName: target.name, droneEntry: target.drone },
+    async ({ containerName }) => await dvmExec(containerName, 'bash', ['-lc', script]),
+  );
+  if (result.code !== 0)
+    throw new Error((result.stderr || result.stdout || 'failed writing transfer chunk').trim());
+  return { offset: Math.max(0, Number(String(result.stdout).trim()) || 0) };
+}
+
+async function assistantCommitDroneTransferFile(opts: {
+  droneId: string;
+  path: string;
+  transferId: string;
+  size: number;
+  overwrite: boolean;
+}): Promise<void> {
+  const target = await resolveAssistantDroneFsTarget({
+    droneId: opts.droneId,
+    path: opts.path,
+    fallbackToHome: false,
+  });
+  const temp = assistantTransferTempPath(
+    target.runtime,
+    target.targetPath,
+    assistantTransferId(opts.transferId),
+  );
+  const size = Math.max(0, Math.floor(Number(opts.size)));
+  if (target.runtime === 'host') {
+    const info = await fs
+      .lstat(temp)
+      .catch((error: any) => (error?.code === 'ENOENT' ? null : Promise.reject(error)));
+    if (!info) {
+      const committed = await fs.stat(target.targetPath).catch(() => null);
+      if (committed?.isFile() && committed.size === size) return;
+      throw new Error('transfer temporary file was not found');
+    }
+    if (!info.isFile()) throw new Error('transfer temporary path is not a file');
+    if (info.size !== size) throw new Error('transfer is incomplete');
+    if (!opts.overwrite && (await fs.stat(target.targetPath).catch(() => null)))
+      throw Object.assign(new Error('destination file already exists'), { code: 'FILE_EXISTS' });
+    await fs.rename(temp, target.targetPath);
+    return;
+  }
+  const script = [
+    'set -euo pipefail',
+    `target=${bashQuote(target.targetPath)}`,
+    `temp=${bashQuote(temp)}`,
+    `size=${size}`,
+    'if [ ! -e "$temp" ]; then [ -f "$target" ] && [ "$(stat -c %s -- "$target")" -eq "$size" ] && exit 0; echo "transfer temporary file was not found" >&2; exit 7; fi',
+    '[ ! -L "$temp" ] && [ -f "$temp" ] || { echo "invalid transfer temporary path" >&2; exit 7; }',
+    '[ "$(stat -c %s -- "$temp")" -eq "$size" ] || { echo "incomplete transfer" >&2; exit 7; }',
+    opts.overwrite ? ':' : '[ ! -e "$target" ] || { echo "__EXISTS__"; exit 5; }',
+    'mv -f -- "$temp" "$target"',
+  ].join('\n');
+  const result = await withLockedDroneContainer(
+    { requestedDroneName: target.name, droneEntry: target.drone },
+    async ({ containerName }) => await dvmExec(containerName, 'bash', ['-lc', script]),
+  );
+  if (result.code !== 0) {
+    if (String(result.stdout).includes('__EXISTS__'))
+      throw Object.assign(new Error('destination file already exists'), { code: 'FILE_EXISTS' });
+    throw new Error((result.stderr || result.stdout || 'failed committing transfer').trim());
+  }
+}
+
+async function assistantAbortDroneTransferFile(opts: {
+  droneId: string;
+  path: string;
+  transferId: string;
+}): Promise<void> {
+  const target = await resolveAssistantDroneFsTarget({
+    droneId: opts.droneId,
+    path: opts.path,
+    fallbackToHome: false,
+  });
+  const temp = assistantTransferTempPath(
+    target.runtime,
+    target.targetPath,
+    assistantTransferId(opts.transferId),
+  );
+  if (target.runtime === 'host') {
+    await fs.rm(temp, { force: true });
+    return;
+  }
+  await withLockedDroneContainer(
+    { requestedDroneName: target.name, droneEntry: target.drone },
+    async ({ containerName }) => {
+      await dvmExec(containerName, 'bash', ['-lc', `rm -f -- ${bashQuote(temp)}`]);
+    },
+  );
 }
 
 async function assistantWriteDroneFile(opts: {
@@ -17410,6 +17745,13 @@ export async function startDroneHubApiServer(opts: {
     searchDroneFiles: async ({ droneId, path, query, limit, contextBefore, contextAfter }) =>
       await assistantSearchDroneFiles({ droneId, path, query, limit, contextBefore, contextAfter }),
     statDronePath: async ({ droneId, path }) => await assistantStatDronePath({ droneId, path }),
+    readDroneFileChunk: async (input) => await assistantReadDroneFileChunk(input),
+    createDroneTransferDirectory: async (input) =>
+      await assistantCreateDroneTransferDirectory(input),
+    prepareDroneTransferFile: async (input) => await assistantPrepareDroneTransferFile(input),
+    writeDroneTransferChunk: async (input) => await assistantWriteDroneTransferChunk(input),
+    commitDroneTransferFile: async (input) => await assistantCommitDroneTransferFile(input),
+    abortDroneTransferFile: async (input) => await assistantAbortDroneTransferFile(input),
     runDroneBash: async ({ droneId, command, cwd, timeoutMs }) =>
       await assistantRunDroneBash({ droneId, command, cwd, timeoutMs }),
     listDroneChangedFiles: async ({ droneId }) => await assistantListDroneChangedFiles({ droneId }),
@@ -17424,20 +17766,15 @@ export async function startDroneHubApiServer(opts: {
         loadBlipMcp(),
         loadBlipTools(),
       ]);
-      const visibleDrones = await assistantService.visibleDrones(threadId);
-      const workspaceCapabilities = [
+      const workspaceDrones = await assistantService.workspaceDrones(threadId);
+      const readableWorkspaceCapabilities = [
         'files.list',
         'files.read',
         'files.search',
         'git.status',
       ] as const;
-      const writableDroneIds = new Set(
-        Array.isArray(thread.accessScope?.droneIds) ? thread.accessScope.droneIds : [],
-      );
-      const writableDrones =
-        thread.accessScope?.writeMode === 'all'
-          ? visibleDrones
-          : visibleDrones.filter((drone: any) => writableDroneIds.has(drone.id));
+      const readableDrones = workspaceDrones.filter((drone) => drone.canRead);
+      const writableDrones = workspaceDrones.filter((drone) => drone.canWrite);
       const refsFor = (drones: any[]) =>
         Array.from(
           new Set(
@@ -17448,20 +17785,19 @@ export async function startDroneHubApiServer(opts: {
         );
       const mcpClient = await createInProcessDroneHubMcpClient({
         correlationId: threadId,
-        allowedDroneRefs: refsFor(visibleDrones),
+        allowedDroneRefs: refsFor(readableDrones),
         allowedWriteDroneRefs: refsFor(writableDrones),
-        allowedDroneIds: visibleDrones.map((drone: any) => String(drone.id ?? '')).filter(Boolean),
+        allowedDroneIds: readableDrones.map((drone: any) => String(drone.id ?? '')).filter(Boolean),
       });
-      const droneTargets = visibleDrones.map((drone: any) => {
-        const writable = thread.accessScope?.writeMode === 'all' || writableDroneIds.has(drone.id);
+      const droneTargets = workspaceDrones.map((drone) => {
         return new DroneWorkspaceTarget({
           id: `drone:${drone.id}`,
           droneId: drone.id,
           label: drone.name || drone.id,
           rootLabel: `${drone.name || drone.id} workspace`,
           capabilities: [
-            ...workspaceCapabilities,
-            ...(writable
+            ...(drone.canRead ? readableWorkspaceCapabilities : []),
+            ...(drone.canWrite
               ? ([
                   'files.write',
                   'files.delete',
@@ -17501,6 +17837,9 @@ export async function startDroneHubApiServer(opts: {
         .filter((tool) => enabledTools.has(tool.name));
       const targetTools = blipTools
         .createWorkspaceTargetSelectionTools(targetCatalog)
+        .filter((tool) => enabledTools.has(tool.name));
+      const transferTools = blipTools
+        .createWorkspaceTransferTools(targetCatalog)
         .filter((tool) => enabledTools.has(tool.name));
       const tools = [
         {
@@ -17676,6 +18015,7 @@ export async function startDroneHubApiServer(opts: {
           },
         },
         ...targetTools,
+        ...transferTools,
         ...workspaceTools,
       ].filter((tool) => enabledTools.has(tool.name));
       const mcpProvider = createMcpToolProvider({
