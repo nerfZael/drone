@@ -41,8 +41,35 @@ function responseHasReasoningSummary(output: any[]): boolean {
   );
 }
 
+function completedOutputItems(events: any[]): any[] {
+  return events.flatMap((event) =>
+    event?.type === 'response.output_item.done' && event.item ? [event.item] : [],
+  );
+}
+
+function hasOutputItem(output: any[], item: any): boolean {
+  const id = String(item?.id ?? '').trim();
+  if (id && output.some((candidate) => String(candidate?.id ?? '').trim() === id)) return true;
+  if (item?.type === 'function_call') {
+    const callId = String(item.call_id ?? '').trim();
+    return Boolean(
+      callId &&
+        output.some(
+          (candidate) =>
+            candidate?.type === 'function_call' &&
+            String(candidate.call_id ?? '').trim() === callId,
+        ),
+    );
+  }
+  return false;
+}
+
 function hydrateSparseCompletedResponse(response: any, events: any[]): any {
-  const output = Array.isArray(response?.output) ? response.output : [];
+  const completedItems = completedOutputItems(events);
+  const output = [...(Array.isArray(response?.output) ? response.output : [])];
+  for (const item of completedItems) {
+    if (!hasOutputItem(output, item)) output.push(item);
+  }
   const text = streamedText(
     events,
     'response.output_text.delta',
@@ -68,7 +95,9 @@ function hydrateSparseCompletedResponse(response: any, events: any[]): any {
       content: [{ type: 'output_text', text, annotations: [] }],
     });
   }
-  return additions.length > 0 ? { ...response, output: [...output, ...additions] } : response;
+  return completedItems.length > 0 || additions.length > 0
+    ? { ...response, output: [...output, ...additions] }
+    : response;
 }
 
 function completedResponse(events: any[]): any {

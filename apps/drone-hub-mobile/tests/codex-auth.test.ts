@@ -97,4 +97,31 @@ describe('phone Codex SSE', () => {
       },
     ]);
   });
+
+  test('keeps a final answer delivered only as a completed output item', () => {
+    const message = {
+      id: 'message_1',
+      type: 'message',
+      role: 'assistant',
+      status: 'completed',
+      content: [
+        {
+          type: 'output_text',
+          text: 'The repository contains apps, packages, and shared tooling.',
+          annotations: [],
+        },
+      ],
+    };
+    const raw = [
+      `data: ${JSON.stringify({ type: 'response.output_item.done', item: message })}`,
+      `data: ${JSON.stringify({
+        type: 'response.completed',
+        response: { id: 'response-sparse', status: 'completed', output: [] },
+      })}`,
+      'data: [DONE]',
+      '',
+    ].join('\n\n');
+
+    expect(parseCodexSseResponse(raw).output).toEqual([message]);
+  });
 });
