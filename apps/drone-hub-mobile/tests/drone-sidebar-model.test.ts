@@ -103,6 +103,20 @@ describe('mobile drone sidebar model', () => {
         {
           id: 'mapped',
           lastMessageAt: '2026-07-14T10:00:00.000Z',
+          chats: ['default', 'review'],
+          unreadChats: ['default'],
+          chatReadStates: {
+            default: {
+              unread: false,
+              latestAgentTurnId: null,
+              latestAgentRevision: 0,
+            },
+            review: {
+              unread: true,
+              latestAgentTurnId: 'turn-2',
+              latestAgentRevision: 2,
+            },
+          },
         },
       ],
       sidebar: {
@@ -115,6 +129,12 @@ describe('mobile drone sidebar model', () => {
     });
 
     expect(payload.drones[0]?.lastMessageAt).toBe('2026-07-14T10:00:00.000Z');
+    expect(payload.drones[0]?.unreadChats).toEqual(['review']);
+    expect(payload.drones[0]?.chatReadStates?.review).toEqual({
+      unread: true,
+      latestAgentTurnId: 'turn-2',
+      latestAgentRevision: 2,
+    });
     expect(payload.sidebar).toEqual({
       registeredRepoPaths: ['/work/mapped', '/work/empty'],
       groupCreatedAtByName: { Review: '2026-07-13T10:00:00.000Z' },

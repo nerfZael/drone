@@ -133,6 +133,13 @@ export function deviceMeshDroneSummary(drone: any) {
     busyChats: Array.isArray(drone?.busyChats)
       ? drone.busyChats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean)
       : [],
+    unreadChats: Array.isArray(drone?.unreadChats)
+      ? drone.unreadChats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean)
+      : [],
+    chatReadStates:
+      drone?.chatReadStates && typeof drone.chatReadStates === 'object'
+        ? drone.chatReadStates
+        : {},
     createdAt: String(drone?.createdAt ?? ''),
     lastActivityAt: String(drone?.lastActivityAt ?? ''),
     lastMessageAt: String(drone?.lastMessageAt ?? ''),
@@ -144,7 +151,7 @@ export function deviceMeshDroneSummary(drone: any) {
 export function createDroneControlCapability(access: LocalHubAccess): CapabilityHandler {
   return {
     descriptor: DRONE_CONTROL_CAPABILITY,
-    async invoke(operation, rawPayload) {
+    async invoke(operation, rawPayload, context) {
       const payload = object(rawPayload);
       if (operation === 'drones.list') {
         const createModelAgent = optionalText(payload.createModelAgent);
@@ -333,7 +340,12 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
       }
       if (operation === 'chats.list') {
         const result = await localHubRequest(access, `/api/drones/${encodedDrone}/chats`);
-        return { droneId, chats: result.chats ?? [] };
+        return {
+          droneId,
+          chats: result.chats ?? [],
+          unreadChats: result.unreadChats ?? [],
+          chatReadStates: result.chatReadStates ?? {},
+        };
       }
       if (operation === 'chat.create') {
         const chatName = requiredText(payload.name ?? payload.chatName, 'chatName');
@@ -382,6 +394,18 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
           localHubRequest(access, chatPath),
           localHubRequest(access, `${chatPath}/pending`),
         ]);
+        const latestAgentTurnId = optionalText(result?.readState?.latestAgentTurnId) ?? null;
+        const latestAgentRevision = Number.isSafeInteger(result?.readState?.latestAgentRevision)
+          ? Number(result.readState.latestAgentRevision)
+          : 0;
+        const marked = await localHubRequest(access, `${chatPath}/read`, {
+          method: 'POST',
+          body: JSON.stringify({
+            latestAgentTurnId,
+            latestAgentRevision,
+            updatedByDeviceId: context?.sourceDevice?.id ?? null,
+          }),
+        });
         return {
           droneId,
           chatName,
@@ -390,6 +414,7 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
           model: result.model ?? null,
           reasoning: result.reasoning ?? null,
           pending: compactPendingPrompts(pendingResult?.pending),
+          readState: marked?.readState ?? result?.readState ?? null,
           agentPermissionMode:
             result.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
         };

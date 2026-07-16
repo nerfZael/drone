@@ -17,9 +17,14 @@ const {
   importArchivedChatsFromRegistry,
   importDroneChatsFromRegistry,
   listArchivedChatsFromStore,
+  listChatReadStatesForDronesFromStore,
+  listChatReadStatesFromStore,
   listChatsFromStore,
+  markChatReadInStore,
+  markChatUnreadInStore,
   patchChatMetadataInStore,
   readChatFromStore,
+  readChatReadStateFromStore,
   readTranscriptTurnsFromStore,
   renameChatInStore,
   restoreArchivedChatInStore,
@@ -87,8 +92,117 @@ describe('canonical chat and transcript repository', () => {
       requireHubDatabase().read((connection) =>
         connection.prepare("SELECT COUNT(*) AS count FROM hub_schema_migrations WHERE scope = 'chats'").get().count,
       ),
-      3,
+      4,
     );
+  });
+
+  test('shares monotonic unread cursors without letting stale devices clear newer replies', async () => {
+    tempDataDir('shared-read-state');
+    await importDroneChatsFromRegistry({
+      droneId: 'drone-1',
+      chats: {
+        default: legacyChat('existing', [
+          {
+            id: 'turn-existing',
+            at: '2026-01-01T00:01:00.000Z',
+            completedAt: '2026-01-01T00:02:00.000Z',
+            prompt: 'old',
+            ok: true,
+            output: 'old reply',
+          },
+        ]),
+      },
+    });
+    assert.equal(readChatReadStateFromStore({ droneId: 'drone-1', chatName: 'default' }).unread, false);
+
+    await upsertTranscriptTurnInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      turn: {
+        id: 'turn-new',
+        at: '2026-01-01T00:03:00.000Z',
+        completedAt: '2026-01-01T00:04:00.000Z',
+        prompt: 'new',
+        ok: true,
+        output: 'new reply',
+      },
+    });
+    const unread = readChatReadStateFromStore({ droneId: 'drone-1', chatName: 'default' });
+    assert.equal(unread.unread, true);
+    assert.equal(unread.latestAgentTurnId, 'turn-new');
+    assert.equal(unread.latestAgentRevision, 2);
+    assert.deepEqual(Object.keys(listChatReadStatesFromStore({ droneId: 'drone-1' })), ['default']);
+    const batched = listChatReadStatesForDronesFromStore({
+      droneIds: ['drone-1', 'missing', 'drone-1'],
+    });
+    assert.equal(batched.get('drone-1').default.latestAgentRevision, 2);
+    assert.deepEqual(batched.get('missing'), {});
+
+    const stale = await markChatReadInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      latestAgentTurnId: 'turn-existing',
+      latestAgentRevision: 1,
+      updatedByDeviceId: 'phone-old',
+    });
+    assert.equal(stale.unread, true);
+
+    const read = await markChatReadInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      latestAgentTurnId: 'turn-new',
+      latestAgentRevision: unread.latestAgentRevision,
+      updatedByDeviceId: 'phone-new',
+    });
+    assert.equal(read.unread, false);
+
+    await upsertTranscriptTurnInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      turn: {
+        id: 'turn-new',
+        at: '2026-01-01T00:03:00.000Z',
+        completedAt: '2026-01-01T00:05:00.000Z',
+        prompt: 'new',
+        ok: true,
+        output: 'retried reply',
+      },
+    });
+    const retried = readChatReadStateFromStore({ droneId: 'drone-1', chatName: 'default' });
+    assert.equal(retried.latestAgentTurnId, 'turn-new');
+    assert.equal(retried.latestAgentRevision, 3);
+    assert.equal(retried.unread, true);
+
+    const staleRevision = await markChatReadInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      latestAgentTurnId: 'turn-new',
+      latestAgentRevision: 2,
+      updatedByDeviceId: 'phone-old',
+    });
+    assert.equal(staleRevision.unread, true);
+
+    const retriedRead = await markChatReadInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      latestAgentTurnId: 'turn-new',
+      latestAgentRevision: retried.latestAgentRevision,
+      updatedByDeviceId: 'phone-new',
+    });
+    assert.equal(retriedRead.unread, false);
+
+    const manuallyUnread = await markChatUnreadInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      updatedByDeviceId: 'desktop',
+    });
+    assert.equal(manuallyUnread.unread, true);
+    const alreadyUnread = await markChatUnreadInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      updatedByDeviceId: 'desktop',
+    });
+    assert.equal(alreadyUnread.readThroughRevision, manuallyUnread.readThroughRevision);
   });
 
   test('backfills archived chats once and tombstones prevent stale archive resurrection', async () => {

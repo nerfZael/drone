@@ -366,6 +366,30 @@ export function DronesScreen({
     );
     setTurns(Array.isArray(result?.turns) ? result.turns : []);
     setPendingPrompts(Array.isArray(result?.pending) ? result.pending : []);
+    if (result?.readState?.unread === false) {
+      const clearUnreadChat = (drone: MobileDroneSummary): MobileDroneSummary =>
+        drone.id !== droneId || !(drone.unreadChats ?? []).includes(nextChat)
+          ? drone
+          : {
+              ...drone,
+              unreadChats: (drone.unreadChats ?? []).filter((chat) => chat !== nextChat),
+              chatReadStates: {
+                ...(drone.chatReadStates ?? {}),
+                [nextChat]: {
+                  unread: false,
+                  latestAgentTurnId:
+                    String(result?.readState?.latestAgentTurnId ?? '').trim() || null,
+                  latestAgentRevision:
+                    Number.isSafeInteger(result?.readState?.latestAgentRevision) &&
+                    Number(result.readState.latestAgentRevision) >= 0
+                      ? Number(result.readState.latestAgentRevision)
+                      : 0,
+                },
+              },
+            };
+      setDrones((current) => current.map(clearUnreadChat));
+      setSelected((current) => (current ? clearUnreadChat(current) : current));
+    }
   };
 
   const loadDronesRef = React.useRef(loadDrones);
@@ -906,9 +930,11 @@ export function DronesScreen({
                   {visibleChats.map((chat) => {
                     const active = chat === chatName;
                     const chatBusy = selected.busyChats.includes(chat);
+                    const chatUnread = !active && (selected.unreadChats ?? []).includes(chat);
                     return (
                       <Pressable
                         key={chat}
+                        accessibilityLabel={`${chat}${chatUnread ? ', unread' : ''}`}
                         accessibilityRole="tab"
                         accessibilityState={{ selected: active }}
                         onPress={() => !active && void selectChat(chat)}
@@ -931,6 +957,8 @@ export function DronesScreen({
                         </Text>
                         {chatBusy ? (
                           <ActivityIndicator color={colors.warning} size="small" />
+                        ) : chatUnread ? (
+                          <View accessible={false} style={styles.chatUnreadDot} />
                         ) : null}
                       </Pressable>
                     );
@@ -1093,6 +1121,7 @@ const styles = StyleSheet.create({
   chatTabPressed: { opacity: 0.72 },
   chatText: { flexShrink: 1, color: colors.muted, fontSize: 10, fontWeight: '800' },
   chatTextActive: { color: colors.accent },
+  chatUnreadDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.warning },
   chatError: { paddingHorizontal: 12, paddingTop: 9 },
   transcriptScroll: { flex: 1 },
   transcriptContent: { flexGrow: 1 },

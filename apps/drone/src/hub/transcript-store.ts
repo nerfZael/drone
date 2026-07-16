@@ -76,6 +76,15 @@ export type ChatReadRows = {
 export type ChatStoreImportResult = { available: boolean; sourceHash: string };
 export type ChatStoreReadResult = { available: boolean; chat: any | null; sourceHash: string };
 export type ChatStoreListResult = { available: boolean; chats: string[] };
+export type ChatReadState = {
+  droneId: string;
+  chatName: string;
+  latestAgentTurnId: string | null;
+  latestAgentRevision: number;
+  readThroughRevision: number;
+  unread: boolean;
+  updatedAt: string | null;
+};
 export type CreateChatStoreResult = { available: boolean; chat: any; chats: string[] };
 export type UpdateChatStoreResult = { available: boolean; chat: any; chats: string[] };
 export type DeleteActiveChatStoreResult = { available: boolean; deletedChat: any; chats: string[] };
@@ -285,6 +294,58 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 4,
+    name: 'shared chat read cursors',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE canonical_chat_read_state (
+          drone_id TEXT NOT NULL,
+          chat_name TEXT NOT NULL,
+          latest_agent_turn_id TEXT,
+          latest_agent_completed_at TEXT,
+          latest_agent_ordinal INTEGER,
+          latest_agent_revision INTEGER NOT NULL DEFAULT 0 CHECK (latest_agent_revision >= 0),
+          read_through_revision INTEGER NOT NULL DEFAULT 0 CHECK (read_through_revision >= 0),
+          updated_at TEXT,
+          updated_by_device_id TEXT,
+          PRIMARY KEY (drone_id, chat_name),
+          FOREIGN KEY (drone_id, chat_name)
+            REFERENCES canonical_chats(drone_id, chat_name)
+            ON UPDATE CASCADE ON DELETE CASCADE
+        );
+
+        INSERT INTO canonical_chat_read_state (
+          drone_id, chat_name, latest_agent_turn_id, latest_agent_completed_at,
+          latest_agent_ordinal, latest_agent_revision, read_through_revision, updated_at
+        )
+        SELECT c.drone_id, c.chat_name, latest.turn_id, latest.completed_at,
+               latest.ordinal,
+               CASE WHEN latest.turn_id IS NULL THEN 0 ELSE 1 END,
+               CASE WHEN latest.turn_id IS NULL THEN 0 ELSE 1 END,
+               strftime('%Y-%m-%dT%H:%M:%fZ', 'now')
+        FROM canonical_chats c
+        LEFT JOIN (
+          SELECT drone_id, chat_name, turn_id, completed_at, ordinal
+          FROM (
+            SELECT drone_id, chat_name, turn_id, completed_at, ordinal,
+                   ROW_NUMBER() OVER (
+                     PARTITION BY drone_id, chat_name
+                     ORDER BY ordinal DESC, completed_at DESC, turn_id DESC
+                   ) AS row_number
+            FROM canonical_chat_turns
+            WHERE completed_at IS NOT NULL
+              AND (
+                TRIM(COALESCE(json_extract(turn_json, '$.output'), '')) != '' OR
+                TRIM(COALESCE(json_extract(turn_json, '$.error'), '')) != ''
+              )
+          ) ranked
+          WHERE row_number = 1
+        ) latest
+          ON latest.drone_id = c.drone_id AND latest.chat_name = c.chat_name;
+      `);
+    },
+  },
 ];
 
 type ChatRow = {
@@ -295,6 +356,21 @@ type ChatRow = {
   turns_source_hash: string;
 };
 type TurnRow = { turn_json: string };
+type LatestAgentTurnRow = {
+  turn_id: string;
+  completed_at: string;
+  ordinal: number;
+};
+type ChatReadStateRow = {
+  drone_id: string;
+  chat_name: string;
+  latest_agent_turn_id: string | null;
+  latest_agent_completed_at: string | null;
+  latest_agent_ordinal: number | null;
+  latest_agent_revision: number;
+  read_through_revision: number;
+  updated_at: string | null;
+};
 type ArchivedChatRow = {
   drone_id: string;
   chat_name: string;
@@ -308,6 +384,10 @@ type ArchivedChatRow = {
 const memoryChats = new Map<string, { metadata: any; sourceHash: string; version: number }>();
 const memoryTurns = new Map<string, Map<string, StoredTranscriptTurn>>();
 const memoryPrompts = new Map<string, Map<string, StoredPendingPrompt>>();
+const memoryReadStates = new Map<
+  string,
+  ChatReadState & { latestAgentCompletedAt: string | null; latestAgentOrdinal: number | null }
+>();
 const memoryCancelledPrompts = new Set<string>();
 const memoryChatTombstones = new Set<string>();
 const memoryArchivedChats = new Map<string, ArchivedChatRecord>();
@@ -506,7 +586,153 @@ function refreshTranscriptMetadata(connection: HubDatabaseConnection, droneId: s
     .prepare(`UPDATE canonical_chats SET transcript_version = ?, turns_source_hash = ?, updated_at = ?
               WHERE drone_id = ? AND chat_name = ?`)
     .run(version, sourceHash, new Date().toISOString(), droneId, chatName);
+  refreshChatReadActivity(connection, droneId, chatName);
   return { available: true, transcriptVersion: version, sourceHash };
+}
+
+function latestCompletedAgentTurn(
+  connection: HubDatabaseConnection,
+  droneId: string,
+  chatName: string,
+): LatestAgentTurnRow | null {
+  return (
+    (connection
+      .prepare(`SELECT turn_id, completed_at, ordinal
+        FROM canonical_chat_turns
+        WHERE drone_id = ? AND chat_name = ? AND completed_at IS NOT NULL
+          AND (
+            TRIM(COALESCE(json_extract(turn_json, '$.output'), '')) != '' OR
+            TRIM(COALESCE(json_extract(turn_json, '$.error'), '')) != ''
+          )
+        ORDER BY ordinal DESC, completed_at DESC, turn_id DESC
+        LIMIT 1`)
+      .get(droneId, chatName) as LatestAgentTurnRow | undefined) ?? null
+  );
+}
+
+function readStateRow(
+  connection: HubDatabaseConnection,
+  droneId: string,
+  chatName: string,
+): ChatReadStateRow | null {
+  return (
+    (connection
+      .prepare(`SELECT drone_id, chat_name, latest_agent_turn_id,
+        latest_agent_completed_at, latest_agent_ordinal, latest_agent_revision,
+        read_through_revision, updated_at
+        FROM canonical_chat_read_state
+        WHERE drone_id = ? AND chat_name = ?`)
+      .get(droneId, chatName) as ChatReadStateRow | undefined) ?? null
+  );
+}
+
+function chatReadStateFromRow(
+  droneId: string,
+  chatName: string,
+  row: ChatReadStateRow | null,
+): ChatReadState {
+  const latestAgentRevision = Math.max(0, Number(row?.latest_agent_revision ?? 0));
+  const readThroughRevision = Math.max(0, Number(row?.read_through_revision ?? 0));
+  return {
+    droneId,
+    chatName,
+    latestAgentTurnId: row?.latest_agent_turn_id ?? null,
+    latestAgentRevision,
+    readThroughRevision,
+    unread: latestAgentRevision > readThroughRevision,
+    updatedAt: row?.updated_at ?? null,
+  };
+}
+
+function isNewerAgentActivity(
+  latest: { ordinal: number; completedAt: string } | null,
+  current: { ordinal: number | null; completedAt: string | null },
+): boolean {
+  if (!latest) return false;
+  if (current.ordinal == null) return true;
+  if (latest.ordinal !== current.ordinal) return latest.ordinal > current.ordinal;
+  const latestCompletedMs = Date.parse(latest.completedAt);
+  const currentCompletedMs = Date.parse(current.completedAt ?? '');
+  if (Number.isFinite(latestCompletedMs) && Number.isFinite(currentCompletedMs)) {
+    return latestCompletedMs > currentCompletedMs;
+  }
+  return true;
+}
+
+function refreshChatReadActivity(
+  connection: HubDatabaseConnection,
+  droneId: string,
+  chatName: string,
+): ChatReadStateRow {
+  const latest = latestCompletedAgentTurn(connection, droneId, chatName);
+  const current = readStateRow(connection, droneId, chatName);
+  const now = new Date().toISOString();
+  if (!current) {
+    const latestRevision = latest ? 1 : 0;
+    connection
+      .prepare(`INSERT INTO canonical_chat_read_state (
+        drone_id, chat_name, latest_agent_turn_id, latest_agent_completed_at,
+        latest_agent_ordinal, latest_agent_revision, read_through_revision, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, 0, ?)`)
+      .run(
+        droneId,
+        chatName,
+        latest?.turn_id ?? null,
+        latest?.completed_at ?? null,
+        latest?.ordinal ?? null,
+        latestRevision,
+        now,
+      );
+    return readStateRow(connection, droneId, chatName)!;
+  }
+  const sameActivity =
+    (latest?.turn_id ?? null) === current.latest_agent_turn_id &&
+    (latest?.completed_at ?? null) === current.latest_agent_completed_at &&
+    (latest?.ordinal ?? null) === current.latest_agent_ordinal;
+  if (sameActivity) return current;
+
+  const isNewer = isNewerAgentActivity(
+    latest ? { ordinal: latest.ordinal, completedAt: latest.completed_at } : null,
+    {
+      ordinal: current.latest_agent_ordinal,
+      completedAt: current.latest_agent_completed_at,
+    },
+  );
+  const nextRevision = isNewer
+    ? Math.max(0, Number(current.latest_agent_revision)) + 1
+    : Math.max(0, Number(current.latest_agent_revision));
+  const nextReadThrough = isNewer
+    ? Math.max(0, Number(current.read_through_revision))
+    : nextRevision;
+  connection
+    .prepare(`UPDATE canonical_chat_read_state
+      SET latest_agent_turn_id = ?, latest_agent_completed_at = ?, latest_agent_ordinal = ?,
+          latest_agent_revision = ?, read_through_revision = ?, updated_at = ?
+      WHERE drone_id = ? AND chat_name = ?`)
+    .run(
+      latest?.turn_id ?? null,
+      latest?.completed_at ?? null,
+      latest?.ordinal ?? null,
+      nextRevision,
+      nextReadThrough,
+      now,
+      droneId,
+      chatName,
+    );
+  return readStateRow(connection, droneId, chatName)!;
+}
+
+function markCurrentReadForBootstrap(
+  connection: HubDatabaseConnection,
+  droneId: string,
+  chatName: string,
+): void {
+  refreshChatReadActivity(connection, droneId, chatName);
+  connection
+    .prepare(`UPDATE canonical_chat_read_state
+      SET read_through_revision = latest_agent_revision, updated_at = ?
+      WHERE drone_id = ? AND chat_name = ?`)
+    .run(new Date().toISOString(), droneId, chatName);
 }
 
 function appendChatEvent(
@@ -529,6 +755,142 @@ export class ChatTranscriptRepository {
   constructor(private readonly database: HubDatabase) {
     database.read((connection) => applyHubDatabaseMigrations(connection, CHAT_STORE_MIGRATIONS, 'chats'));
     initializeHubOutbox(database);
+  }
+
+  readState(opts: { droneId: string; chatName: string }): ChatReadState {
+    return this.database.read((connection) =>
+      chatReadStateFromRow(
+        opts.droneId,
+        opts.chatName,
+        readStateRow(connection, opts.droneId, opts.chatName),
+      ),
+    );
+  }
+
+  listReadStates(opts: { droneId: string }): Record<string, ChatReadState> {
+    return this.listReadStatesForDrones({ droneIds: [opts.droneId] }).get(opts.droneId) ?? {};
+  }
+
+  listReadStatesForDrones(opts: {
+    droneIds: string[];
+  }): Map<string, Record<string, ChatReadState>> {
+    const droneIds = [...new Set(opts.droneIds.map((id) => String(id ?? '').trim()).filter(Boolean))];
+    if (droneIds.length === 0) return new Map();
+    return this.database.read((connection) => {
+      const result = new Map<string, Record<string, ChatReadState>>(
+        droneIds.map((droneId) => [droneId, {}]),
+      );
+      for (let offset = 0; offset < droneIds.length; offset += 400) {
+        const batch = droneIds.slice(offset, offset + 400);
+        const rows = connection
+          .prepare(`SELECT drone_id, chat_name, latest_agent_turn_id,
+            latest_agent_completed_at, latest_agent_ordinal, latest_agent_revision,
+            read_through_revision, updated_at
+            FROM canonical_chat_read_state
+            WHERE drone_id IN (${batch.map(() => '?').join(', ')})
+            ORDER BY drone_id, chat_name`)
+          .all(...batch) as ChatReadStateRow[];
+        for (const row of rows) {
+          result.get(row.drone_id)![row.chat_name] = chatReadStateFromRow(
+            row.drone_id,
+            row.chat_name,
+            row,
+          );
+        }
+      }
+      return result;
+    });
+  }
+
+  async markRead(opts: {
+    droneId: string;
+    chatName: string;
+    latestAgentTurnId?: string | null;
+    latestAgentRevision?: number;
+    updatedByDeviceId?: string | null;
+  }): Promise<ChatReadState> {
+    return await this.database.writeTransaction('mark canonical chat read', (connection) => {
+      const row = refreshChatReadActivity(connection, opts.droneId, opts.chatName);
+      const expectedTurnId =
+        opts.latestAgentTurnId === undefined
+          ? row.latest_agent_turn_id
+          : opts.latestAgentTurnId;
+      if (expectedTurnId !== row.latest_agent_turn_id) {
+        return chatReadStateFromRow(opts.droneId, opts.chatName, row);
+      }
+      const latestRevision = Math.max(0, Number(row.latest_agent_revision));
+      if (
+        opts.latestAgentRevision !== undefined &&
+        opts.latestAgentRevision !== latestRevision
+      ) {
+        return chatReadStateFromRow(opts.droneId, opts.chatName, row);
+      }
+      const changed = Number(row.read_through_revision) !== latestRevision;
+      if (changed) {
+        const now = new Date().toISOString();
+        connection
+          .prepare(`UPDATE canonical_chat_read_state
+            SET read_through_revision = ?, updated_at = ?, updated_by_device_id = ?
+            WHERE drone_id = ? AND chat_name = ?`)
+          .run(
+            latestRevision,
+            now,
+            String(opts.updatedByDeviceId ?? '').trim() || null,
+            opts.droneId,
+            opts.chatName,
+          );
+        appendChatEvent(connection, 'chat.read-state.changed', opts.droneId, opts.chatName, {
+          unread: false,
+          latestAgentTurnId: row.latest_agent_turn_id,
+          latestAgentRevision: latestRevision,
+          updatedByDeviceId: String(opts.updatedByDeviceId ?? '').trim() || null,
+        });
+      }
+      return chatReadStateFromRow(
+        opts.droneId,
+        opts.chatName,
+        changed ? readStateRow(connection, opts.droneId, opts.chatName) : row,
+      );
+    });
+  }
+
+  async markUnread(opts: {
+    droneId: string;
+    chatName: string;
+    updatedByDeviceId?: string | null;
+  }): Promise<ChatReadState> {
+    return await this.database.writeTransaction('mark canonical chat unread', (connection) => {
+      const row = refreshChatReadActivity(connection, opts.droneId, opts.chatName);
+      const latestRevision = Math.max(0, Number(row.latest_agent_revision));
+      const readThroughRevision = Math.max(0, Number(row.read_through_revision));
+      const changed = latestRevision > 0 && readThroughRevision >= latestRevision;
+      const nextReadThrough = changed ? latestRevision - 1 : readThroughRevision;
+      if (changed) {
+        const now = new Date().toISOString();
+        connection
+          .prepare(`UPDATE canonical_chat_read_state
+            SET read_through_revision = ?, updated_at = ?, updated_by_device_id = ?
+            WHERE drone_id = ? AND chat_name = ?`)
+          .run(
+            nextReadThrough,
+            now,
+            String(opts.updatedByDeviceId ?? '').trim() || null,
+            opts.droneId,
+            opts.chatName,
+          );
+        appendChatEvent(connection, 'chat.read-state.changed', opts.droneId, opts.chatName, {
+          unread: true,
+          latestAgentTurnId: row.latest_agent_turn_id,
+          latestAgentRevision: latestRevision,
+          updatedByDeviceId: String(opts.updatedByDeviceId ?? '').trim() || null,
+        });
+      }
+      return chatReadStateFromRow(
+        opts.droneId,
+        opts.chatName,
+        changed ? readStateRow(connection, opts.droneId, opts.chatName) : row,
+      );
+    });
   }
 
   async backfillDroneChats(opts: { droneId: string; chats: unknown }): Promise<ChatStoreListResult> {
@@ -569,6 +931,9 @@ export class ChatTranscriptRepository {
       }
       const entry = opts.createEntry(source);
       this.writeChatWithConnection(connection, opts.droneId, opts.chatName, entry);
+      if (opts.copyFromChatName) {
+        markCurrentReadForBootstrap(connection, opts.droneId, opts.chatName);
+      }
       appendChatEvent(connection, 'chat.created', opts.droneId, opts.chatName, {
         ...(opts.copyFromChatName ? { copiedFromChatName: opts.copyFromChatName } : {}),
       });
@@ -742,6 +1107,7 @@ export class ChatTranscriptRepository {
         opts.maxChatNameLength ?? 64,
       );
       this.writeChatWithConnection(connection, opts.droneId, chatName, record.chat);
+      markCurrentReadForBootstrap(connection, opts.droneId, chatName);
       connection.prepare('DELETE FROM canonical_archived_chats WHERE drone_id = ? AND chat_name = ?')
         .run(opts.droneId, opts.archivedChatName);
       connection.prepare(`INSERT OR REPLACE INTO canonical_archived_chat_tombstones (
@@ -1336,6 +1702,7 @@ export class ChatTranscriptRepository {
       false,
     );
     if (Number(info.changes) === 1) {
+      markCurrentReadForBootstrap(connection, droneId, chatName);
       appendChatEvent(connection, 'chat.imported', droneId, chatName, { source: 'legacy-import', importedTurnCount });
     } else if (importedTurnCount > 0) {
       appendChatEvent(connection, 'chat.turns.imported', droneId, chatName, { source: 'legacy-import', importedTurnCount });
@@ -1533,6 +1900,79 @@ function memoryTurnMap(droneId: string, chatName: string): Map<string, StoredTra
   return value;
 }
 
+function refreshMemoryReadState(droneId: string, chatName: string): ChatReadState {
+  const k = key(droneId, chatName);
+  const completedTurns = sortedTurns(memoryTurnMap(droneId, chatName).values())
+    .map((turn, ordinal) => ({ turn, ordinal }))
+    .filter(
+      ({ turn }) =>
+        Boolean(turn.completedAt) && Boolean(String(turn.output ?? '').trim() || String(turn.error ?? '').trim()),
+    );
+  const latest = completedTurns.at(-1) ?? null;
+  const latestTurnId = latest ? turnId(latest.turn) : null;
+  const current = memoryReadStates.get(k);
+  if (!current) {
+    const latestAgentRevision = latest ? 1 : 0;
+    const state = {
+      droneId,
+      chatName,
+      latestAgentTurnId: latestTurnId,
+      latestAgentRevision,
+      readThroughRevision: 0,
+      unread: latestAgentRevision > 0,
+      updatedAt: new Date().toISOString(),
+      latestAgentCompletedAt: latest?.turn.completedAt ?? null,
+      latestAgentOrdinal: latest?.ordinal ?? null,
+    };
+    memoryReadStates.set(k, state);
+    return state;
+  }
+  const latestCompletedAt = latest?.turn.completedAt ?? null;
+  const sameActivity =
+    current.latestAgentTurnId === latestTurnId &&
+    current.latestAgentCompletedAt === latestCompletedAt &&
+    current.latestAgentOrdinal === (latest?.ordinal ?? null);
+  if (sameActivity) return current;
+  const isNewer = isNewerAgentActivity(
+    latest && latestCompletedAt
+      ? { ordinal: latest.ordinal, completedAt: latestCompletedAt }
+      : null,
+    {
+      ordinal: current.latestAgentOrdinal,
+      completedAt: current.latestAgentCompletedAt,
+    },
+  );
+  const latestAgentRevision = isNewer
+    ? current.latestAgentRevision + 1
+    : current.latestAgentRevision;
+  const readThroughRevision = isNewer ? current.readThroughRevision : latestAgentRevision;
+  const state = {
+    ...current,
+    latestAgentTurnId: latestTurnId,
+    latestAgentRevision,
+    readThroughRevision,
+    unread: latestAgentRevision > readThroughRevision,
+    updatedAt: new Date().toISOString(),
+    latestAgentCompletedAt: latestCompletedAt,
+    latestAgentOrdinal: latest?.ordinal ?? null,
+  };
+  memoryReadStates.set(k, state);
+  return state;
+}
+
+function markMemoryCurrentRead(droneId: string, chatName: string): ChatReadState {
+  const k = key(droneId, chatName);
+  const current = refreshMemoryReadState(droneId, chatName);
+  const next = {
+    ...memoryReadStates.get(k)!,
+    readThroughRevision: current.latestAgentRevision,
+    unread: false,
+    updatedAt: new Date().toISOString(),
+  };
+  memoryReadStates.set(k, next);
+  return next;
+}
+
 function memoryPromptMap(droneId: string, chatName: string): Map<string, StoredPendingPrompt> {
   const k = key(droneId, chatName);
   let value = memoryPrompts.get(k);
@@ -1551,7 +1991,8 @@ async function memoryBackfillChat(droneId: string, chatName: string, raw: unknow
   if (memoryDroneChatTombstones.has(droneId)) return { available: true, sourceHash: '' };
   const value = raw && typeof raw === 'object' ? raw : {};
   if (memoryChatTombstones.has(k)) return { available: true, sourceHash: '' };
-  if (!memoryChats.has(k)) {
+  const inserted = !memoryChats.has(k);
+  if (inserted) {
     memoryChats.set(k, { metadata: metadata(value), sourceHash: chatEntrySourceHash(value), version: 0 });
   }
   const turns = memoryTurnMap(droneId, chatName);
@@ -1564,6 +2005,9 @@ async function memoryBackfillChat(droneId: string, chatName: string, raw: unknow
     const id = String(prompt?.id ?? '').trim();
     const cancelledKey = `${k}\u0000${id}`;
     if (id && !memoryCancelledPrompts.has(cancelledKey) && !prompts.has(id)) prompts.set(id, prompt);
+  }
+  if (inserted) {
+    markMemoryCurrentRead(droneId, chatName);
   }
   return { available: true, sourceHash: memoryChats.get(k)?.sourceHash ?? '' };
 }
@@ -1624,6 +2068,9 @@ export async function createChatInStore(opts: {
     if (!source) throw new Error(`unknown chat: ${opts.copyFromChatName}`);
   }
   await upsertChatInStore({ droneId: opts.droneId, chatName: opts.chatName, chatEntry: opts.createEntry(source) });
+  if (opts.copyFromChatName) {
+    markMemoryCurrentRead(opts.droneId, opts.chatName);
+  }
   return {
     available: true,
     chat: memoryReadChat(opts.droneId, opts.chatName).chat,
@@ -1765,6 +2212,7 @@ export async function restoreArchivedChatInStore(opts: {
     }
   }
   await upsertChatInStore({ droneId: opts.droneId, chatName, chatEntry: record.chat });
+  markMemoryCurrentRead(opts.droneId, chatName);
   memoryArchivedChats.delete(k);
   memoryArchivedChatTombstones.add(k);
   return {
@@ -1889,6 +2337,11 @@ export async function renameChatInStore(opts: { droneId: string; chatName: strin
   memoryChats.set(nextKey, row); memoryChats.delete(oldKey);
   const turns = memoryTurns.get(oldKey); if (turns) { memoryTurns.set(nextKey, turns); memoryTurns.delete(oldKey); }
   const prompts = memoryPrompts.get(oldKey); if (prompts) { memoryPrompts.set(nextKey, prompts); memoryPrompts.delete(oldKey); }
+  const readState = memoryReadStates.get(oldKey);
+  if (readState) {
+    memoryReadStates.set(nextKey, { ...readState, chatName: opts.newChatName });
+    memoryReadStates.delete(oldKey);
+  }
   memoryChatTombstones.add(oldKey); memoryChatTombstones.delete(nextKey);
   return true;
 }
@@ -1898,6 +2351,7 @@ export async function deleteChatFromStore(opts: { droneId: string; chatName: str
   if (store) return await store.deleteChat(opts);
   memoryTurns.delete(key(opts.droneId, opts.chatName));
   memoryPrompts.delete(key(opts.droneId, opts.chatName));
+  memoryReadStates.delete(key(opts.droneId, opts.chatName));
   const deleted = memoryChats.delete(key(opts.droneId, opts.chatName));
   memoryChatTombstones.add(key(opts.droneId, opts.chatName));
   return deleted;
@@ -1924,6 +2378,7 @@ export async function commitPermanentDroneDeletionInStore(opts: {
   for (const item of activeChatKeys) memoryChats.delete(item);
   for (const item of [...memoryTurns.keys()].filter((keyValue) => keyValue.startsWith(prefix))) memoryTurns.delete(item);
   for (const item of [...memoryPrompts.keys()].filter((keyValue) => keyValue.startsWith(prefix))) memoryPrompts.delete(item);
+  for (const item of [...memoryReadStates.keys()].filter((keyValue) => keyValue.startsWith(prefix))) memoryReadStates.delete(item);
   for (const item of archivedChatKeys) memoryArchivedChats.delete(item);
   for (const item of chatTombstoneKeys) memoryChatTombstones.delete(item);
   for (const item of archivedTombstoneKeys) memoryArchivedChatTombstones.delete(item);
@@ -1947,6 +2402,86 @@ export function listChatsFromStore(opts: { droneId: string }): ChatStoreListResu
   if (store) return store.listChats(opts);
   const prefix = `${opts.droneId}\u0000`;
   return { available: true, chats: [...memoryChats.keys()].filter((item) => item.startsWith(prefix)).map((item) => item.slice(prefix.length)).sort() };
+}
+
+export function readChatReadStateFromStore(opts: {
+  droneId: string;
+  chatName: string;
+}): ChatReadState {
+  const store = repository();
+  return store ? store.readState(opts) : refreshMemoryReadState(opts.droneId, opts.chatName);
+}
+
+export function listChatReadStatesFromStore(opts: {
+  droneId: string;
+}): Record<string, ChatReadState> {
+  const store = repository();
+  if (store) return store.listReadStates(opts);
+  return Object.fromEntries(
+    listChatsFromStore(opts).chats.map((chatName) => [
+      chatName,
+      refreshMemoryReadState(opts.droneId, chatName),
+    ]),
+  );
+}
+
+export function listChatReadStatesForDronesFromStore(opts: {
+  droneIds: string[];
+}): Map<string, Record<string, ChatReadState>> {
+  const droneIds = [...new Set(opts.droneIds.map((id) => String(id ?? '').trim()).filter(Boolean))];
+  const store = repository();
+  if (store) return store.listReadStatesForDrones({ droneIds });
+  return new Map(
+    droneIds.map((droneId) => [
+      droneId,
+      listChatReadStatesFromStore({ droneId }),
+    ]),
+  );
+}
+
+export async function markChatReadInStore(opts: {
+  droneId: string;
+  chatName: string;
+  latestAgentTurnId?: string | null;
+  latestAgentRevision?: number;
+  updatedByDeviceId?: string | null;
+}): Promise<ChatReadState> {
+  const store = repository();
+  if (store) return await store.markRead(opts);
+  const current = refreshMemoryReadState(opts.droneId, opts.chatName);
+  const expected =
+    opts.latestAgentTurnId === undefined ? current.latestAgentTurnId : opts.latestAgentTurnId;
+  if (expected !== current.latestAgentTurnId) return current;
+  if (
+    opts.latestAgentRevision !== undefined &&
+    opts.latestAgentRevision !== current.latestAgentRevision
+  ) {
+    return current;
+  }
+  return markMemoryCurrentRead(opts.droneId, opts.chatName);
+}
+
+export async function markChatUnreadInStore(opts: {
+  droneId: string;
+  chatName: string;
+  updatedByDeviceId?: string | null;
+}): Promise<ChatReadState> {
+  const store = repository();
+  if (store) return await store.markUnread(opts);
+  const current = refreshMemoryReadState(opts.droneId, opts.chatName);
+  if (current.unread || current.latestAgentRevision === 0) return current;
+  const readThroughRevision = current.latestAgentRevision - 1;
+  const next = {
+    ...current,
+    readThroughRevision,
+    unread: current.latestAgentRevision > readThroughRevision,
+    updatedAt: new Date().toISOString(),
+  };
+  memoryReadStates.set(key(opts.droneId, opts.chatName), {
+    ...memoryReadStates.get(key(opts.droneId, opts.chatName))!,
+    ...next,
+  });
+  return next;
 }
 
 export function readChatFromStore(opts: { droneId: string; chatName: string }): ChatStoreReadResult {
@@ -2101,7 +2636,7 @@ export function cancelQueuedPendingPromptInStore(opts: { droneId: string; chatNa
 export async function resetTranscriptStoreForTests(): Promise<void> {
   const store = repository();
   if (store) await store.clearAllForTests();
-  memoryChats.clear(); memoryTurns.clear(); memoryPrompts.clear(); memoryCancelledPrompts.clear();
+  memoryChats.clear(); memoryTurns.clear(); memoryPrompts.clear(); memoryReadStates.clear(); memoryCancelledPrompts.clear();
   memoryChatTombstones.clear(); memoryArchivedChats.clear(); memoryArchivedChatTombstones.clear();
   memoryDroneChatTombstones.clear();
 }

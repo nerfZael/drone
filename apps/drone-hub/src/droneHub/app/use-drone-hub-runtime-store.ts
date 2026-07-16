@@ -2,13 +2,12 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { useShallow } from 'zustand/react/shallow';
 import type { PendingPrompt, TranscriptItem } from '../types';
-import { createCanvasChatNodeId } from './app-config';
 import type { StartupSeedState } from './app-types';
 import { profileStorageKey } from '../../profile-storage';
 
 type Updater<T> = T | ((prev: T) => T);
 
-type DroneHubRuntimePersistedState = Pick<DroneHubRuntimeState, 'unreadAgentMessageByChatNodeId' | 'lastAgentSnippetByChatNodeId'>;
+type DroneHubRuntimePersistedState = Pick<DroneHubRuntimeState, 'lastAgentSnippetByChatNodeId'>;
 
 type DroneHubRuntimeState = {
   optimisticallyDeletedDrones: Record<string, boolean>;
@@ -39,19 +38,6 @@ type DroneHubRuntimeState = {
 
 function resolveNext<T>(prev: T, next: Updater<T>): T {
   return typeof next === 'function' ? (next as (current: T) => T)(prev) : next;
-}
-
-function normalizeUnreadAgentMessageByChatNodeId(value: unknown): Record<string, boolean> {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
-  const out: Record<string, boolean> = {};
-  for (const [key, unread] of Object.entries(value as Record<string, unknown>)) {
-    const rawKey = String(key ?? '').trim();
-    if (!rawKey || unread !== true) continue;
-    const chatNodeId = rawKey.startsWith('chat:') ? rawKey : createCanvasChatNodeId(rawKey, 'default');
-    if (!chatNodeId) continue;
-    out[chatNodeId] = true;
-  }
-  return out;
 }
 
 export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
@@ -103,17 +89,22 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
     }),
     {
       name: profileStorageKey('droneHub.runtime'),
-      version: 1,
+      version: 2,
       storage: createJSONStorage(() => localStorage),
+      migrate: (persistedState) => {
+        const persisted =
+          persistedState && typeof persistedState === 'object' && !Array.isArray(persistedState)
+            ? (persistedState as Record<string, unknown>)
+            : {};
+        return {
+          lastAgentSnippetByChatNodeId: persisted.lastAgentSnippetByChatNodeId ?? {},
+        } as DroneHubRuntimePersistedState;
+      },
       partialize: (state): DroneHubRuntimePersistedState => ({
-        unreadAgentMessageByChatNodeId: state.unreadAgentMessageByChatNodeId,
         lastAgentSnippetByChatNodeId: state.lastAgentSnippetByChatNodeId,
       }),
       merge: (persistedState, currentState) => {
-        const persisted =
-          (persistedState as Partial<DroneHubRuntimePersistedState> & {
-            unreadAgentMessageByDroneId?: unknown;
-          }) ?? {};
+        const persisted = (persistedState as Partial<DroneHubRuntimePersistedState>) ?? {};
         const rawSnippets = (persisted as any).lastAgentSnippetByChatNodeId;
         const lastAgentSnippetByChatNodeId: Record<string, string> =
           rawSnippets && typeof rawSnippets === 'object' && !Array.isArray(rawSnippets)
@@ -126,11 +117,7 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
         return {
           ...currentState,
           ...persisted,
-          unreadAgentMessageByChatNodeId: normalizeUnreadAgentMessageByChatNodeId(
-            persisted.unreadAgentMessageByChatNodeId ??
-              persisted.unreadAgentMessageByDroneId ??
-              currentState.unreadAgentMessageByChatNodeId,
-          ),
+          unreadAgentMessageByChatNodeId: {},
           lastAgentSnippetByChatNodeId,
         };
       },

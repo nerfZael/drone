@@ -352,9 +352,13 @@ describe('device mesh drone summaries', () => {
   test('returns durable pending prompts and forwards per-prompt cancellation', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; method: string }> = [];
+    let markReadBody = '';
     globalThis.fetch = (async (input, init) => {
       const url = String(input);
       requests.push({ url, method: String(init?.method ?? 'GET') });
+      if (url.endsWith('/read')) {
+        markReadBody = String(init?.body ?? '');
+      }
       const body = url.endsWith('/pending')
         ? {
             ok: true,
@@ -369,7 +373,24 @@ describe('device mesh drone summaries', () => {
           }
         : url.endsWith('/pending/prompt-2')
           ? { ok: true, cancelled: true, promptId: 'prompt-2' }
-          : { ok: true, turns: [{ turn: 1, prompt: 'Review the code' }] };
+          : url.endsWith('/read')
+            ? {
+                ok: true,
+                readState: {
+                  unread: false,
+                  latestAgentTurnId: 'turn-1',
+                  latestAgentRevision: 2,
+                },
+              }
+            : {
+                ok: true,
+                turns: [{ turn: 1, prompt: 'Review the code' }],
+                readState: {
+                  unread: true,
+                  latestAgentTurnId: 'turn-1',
+                  latestAgentRevision: 2,
+                },
+              };
       return new Response(JSON.stringify(body), {
         status: 200,
         headers: { 'content-type': 'application/json' },
@@ -380,12 +401,23 @@ describe('device mesh drone summaries', () => {
         baseUrl: () => 'http://127.0.0.1:7777',
         apiToken: 'test',
       });
-      await expect(
-        capability.invoke('chat.read', { droneId: 'Untitled 6', chatName: 'default' }),
-      ).resolves.toMatchObject({
+      const readResult = capability.invoke(
+        'chat.read',
+        { droneId: 'Untitled 6', chatName: 'default' },
+        { sourceDevice: { id: 'phone-1' } } as never,
+      );
+      await expect(readResult).resolves.toMatchObject({
         turns: [{ turn: 1, prompt: 'Review the code' }],
         pending: [{ id: 'prompt-2', prompt: 'Make a PR', state: 'queued' }],
+        readState: {
+          unread: false,
+          latestAgentTurnId: 'turn-1',
+          latestAgentRevision: 2,
+        },
       });
+      expect(markReadBody).toBe(
+        '{"latestAgentTurnId":"turn-1","latestAgentRevision":2,"updatedByDeviceId":"phone-1"}',
+      );
       await expect(
         capability.invoke('chat.stop', {
           droneId: 'Untitled 6',

@@ -1,6 +1,11 @@
 import { createCanvasChatNodeId } from './app-config';
 import type { DroneSummary } from '../types';
 
+export type ManualUnreadMarker = {
+  latestAgentRevision: number | null;
+  observedInSummary: boolean;
+};
+
 export function normalizedDroneChats(
   drone: DroneSummary | null | undefined,
   opts?: { includeDefaultWhenEmpty?: boolean },
@@ -71,4 +76,36 @@ export function busyChatNodeIdsForDrone(drone: DroneSummary | null | undefined):
     out.push(nodeId);
   }
   return out;
+}
+
+export function unreadChatNodeIdsForDrone(
+  drone: DroneSummary | null | undefined,
+): string[] {
+  const droneId = String(drone?.id ?? '').trim();
+  if (!droneId) return [];
+  const chats = normalizedDroneChats(drone, { includeDefaultWhenEmpty: true });
+  const readStates = drone?.chatReadStates ?? {};
+  const hasReadStates = Object.keys(readStates).length > 0;
+  const unreadChats = hasReadStates
+    ? chats.filter((chatName) => readStates[chatName]?.unread === true)
+    : (drone?.unreadChats ?? []).filter((chatName) => chats.includes(chatName));
+  const out: string[] = [];
+  for (const chatName of unreadChats) {
+    const nodeId = createCanvasChatNodeId(droneId, chatName);
+    if (nodeId && !out.includes(nodeId)) out.push(nodeId);
+  }
+  return out;
+}
+
+export function reconcileManualUnreadMarker(
+  marker: ManualUnreadMarker,
+  readState: NonNullable<DroneSummary['chatReadStates']>[string] | null | undefined,
+): ManualUnreadMarker | null {
+  if (marker.latestAgentRevision == null || !readState) return marker;
+  if (readState.latestAgentRevision > marker.latestAgentRevision) return null;
+  if (readState.latestAgentRevision < marker.latestAgentRevision) return marker;
+  if (readState.unread) {
+    return marker.observedInSummary ? marker : { ...marker, observedInSummary: true };
+  }
+  return marker.observedInSummary ? null : marker;
 }

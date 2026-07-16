@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { hasOnlyDefaultChat, resolveCanvasChatDisplay } from '../src/droneHub/app/chat-node-helpers';
+import {
+  hasOnlyDefaultChat,
+  reconcileManualUnreadMarker,
+  resolveCanvasChatDisplay,
+  unreadChatNodeIdsForDrone,
+} from '../src/droneHub/app/chat-node-helpers';
 import type { DroneSummary } from '../src/droneHub/types';
 
 function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>): DroneSummary {
@@ -14,6 +19,8 @@ function drone(seed: Partial<DroneSummary> & Pick<DroneSummary, 'id' | 'name'>):
     statusOk: seed.statusOk ?? true,
     statusError: seed.statusError ?? null,
     chats: seed.chats ?? ['default'],
+    unreadChats: seed.unreadChats,
+    chatReadStates: seed.chatReadStates,
     fleetParentId: seed.fleetParentId ?? null,
     repoAttached: seed.repoAttached ?? false,
     hubPhase: seed.hubPhase ?? null,
@@ -39,5 +46,62 @@ describe('chat node helpers', () => {
       primaryLabel: 'default',
       secondaryLabel: 'Alpha',
     });
+  });
+
+  test('uses cursor-backed read states instead of a stale unread summary array', () => {
+    expect(
+      unreadChatNodeIdsForDrone(
+        drone({
+          id: 'alpha',
+          name: 'Alpha',
+          chats: ['default', 'review'],
+          unreadChats: ['default'],
+          chatReadStates: {
+            default: {
+              unread: false,
+              latestAgentTurnId: null,
+              latestAgentRevision: 0,
+            },
+            review: {
+              unread: true,
+              latestAgentTurnId: 'turn-2',
+              latestAgentRevision: 2,
+            },
+          },
+        }),
+      ),
+    ).toEqual(['chat:alpha::review']);
+  });
+
+  test('keeps a manual unread marker until its shared unread state has been observed', () => {
+    const pending = { latestAgentRevision: 2, observedInSummary: false };
+    expect(
+      reconcileManualUnreadMarker(pending, {
+        unread: false,
+        latestAgentTurnId: 'turn-2',
+        latestAgentRevision: 2,
+      }),
+    ).toBe(pending);
+
+    const observed = reconcileManualUnreadMarker(pending, {
+      unread: true,
+      latestAgentTurnId: 'turn-2',
+      latestAgentRevision: 2,
+    });
+    expect(observed).toEqual({ latestAgentRevision: 2, observedInSummary: true });
+    expect(
+      reconcileManualUnreadMarker(observed!, {
+        unread: false,
+        latestAgentTurnId: 'turn-2',
+        latestAgentRevision: 2,
+      }),
+    ).toBeNull();
+    expect(
+      reconcileManualUnreadMarker(pending, {
+        unread: true,
+        latestAgentTurnId: 'turn-3',
+        latestAgentRevision: 3,
+      }),
+    ).toBeNull();
   });
 });

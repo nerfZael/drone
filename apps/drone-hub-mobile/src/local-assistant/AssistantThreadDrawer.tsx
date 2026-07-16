@@ -365,21 +365,38 @@ function SwitchItemState({
   state,
   detail,
   chatCount,
+  unread = false,
 }: {
   state: SwitchDisplayState;
   detail?: string;
   chatCount?: number;
+  unread?: boolean;
 }) {
   const stateColor = switchStateColor(state);
+  const indicatorColor = unread && state !== 'working' ? colors.warning : stateColor;
+  const stateLabel = switchStateLabel(state);
   return (
-    <View style={styles.switchItemMetaRow}>
+    <View
+      accessible
+      accessibilityLabel={[
+        stateLabel,
+        detail,
+        unread ? 'unread chat' : '',
+        chatCount != null && chatCount > 1 ? `${chatCount} chats` : '',
+      ]
+        .filter(Boolean)
+        .join(', ')}
+      style={styles.switchItemMetaRow}
+    >
       {state === 'working' ? (
-        <WorkingDots color={stateColor} />
+        <PulsingStatusDot color={indicatorColor} />
       ) : (
-        <View style={[styles.switchStateDot, { backgroundColor: stateColor }]} />
+        <View accessible={false} style={styles.switchStateIndicator}>
+          <View style={[styles.switchStateDot, { backgroundColor: indicatorColor }]} />
+        </View>
       )}
       <Text numberOfLines={1} style={[styles.switchItemMeta, { color: stateColor }]}>
-        {switchStateLabel(state)}
+        {stateLabel}
         {detail ? ` · ${detail}` : ''}
       </Text>
       {chatCount != null && chatCount > 1 ? (
@@ -395,41 +412,42 @@ function SwitchItemState({
   );
 }
 
-function WorkingDots({ color }: { color: string }) {
+function PulsingStatusDot({ color }: { color: string }) {
   const phase = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
     const animation = Animated.loop(
       Animated.timing(phase, {
         toValue: 1,
-        duration: 960,
+        duration: 1400,
         useNativeDriver: true,
       }),
     );
     animation.start();
     return () => animation.stop();
   }, [phase]);
-  const ranges = [
-    [0, 0.16, 0.34, 1],
-    [0, 0.33, 0.51, 1],
-    [0, 0.5, 0.68, 1],
-  ];
   return (
-    <View accessible={false} style={styles.workingDots}>
-      {ranges.map((inputRange, index) => (
-        <Animated.View
-          key={index}
-          style={[
-            styles.workingDot,
-            {
-              backgroundColor: color,
-              opacity: phase.interpolate({
-                inputRange,
-                outputRange: [0.35, 1, 0.35, 0.35],
-              }),
-            },
-          ]}
-        />
-      ))}
+    <View accessible={false} style={styles.switchStateIndicator}>
+      <Animated.View
+        style={[
+          styles.pulsingStatusRing,
+          {
+            borderColor: color,
+            opacity: phase.interpolate({
+              inputRange: [0, 0.7, 1],
+              outputRange: [0.72, 0.18, 0],
+            }),
+            transform: [
+              {
+                scale: phase.interpolate({
+                  inputRange: [0, 1],
+                  outputRange: [0.62, 1.38],
+                }),
+              },
+            ],
+          },
+        ]}
+      />
+      <View style={[styles.pulsingStatusCore, { backgroundColor: color }]} />
     </View>
   );
 }
@@ -481,7 +499,12 @@ function DrawerDroneNode({
               style={styles.switchItemTime}
             />
           </View>
-          <SwitchItemState state={displayState} detail={drone.runtime} chatCount={chats.length} />
+          <SwitchItemState
+            state={displayState}
+            detail={drone.runtime}
+            chatCount={chats.length}
+            unread={(drone.unreadChats?.length ?? 0) > 0}
+          />
         </View>
       </Pressable>
       {node.children.length > 0 ? (
@@ -1328,9 +1351,21 @@ const styles = StyleSheet.create({
     gap: 6,
     marginTop: 3,
   },
+  switchStateIndicator: {
+    width: 12,
+    height: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   switchStateDot: { width: 6, height: 6, borderRadius: 3 },
-  workingDots: { flexDirection: 'row', alignItems: 'center', gap: 2 },
-  workingDot: { width: 4, height: 4, borderRadius: 2 },
+  pulsingStatusRing: {
+    position: 'absolute',
+    width: 9,
+    height: 9,
+    borderRadius: 4.5,
+    borderWidth: 1.25,
+  },
+  pulsingStatusCore: { width: 5, height: 5, borderRadius: 2.5 },
   chatCount: {
     flexDirection: 'row',
     alignItems: 'center',

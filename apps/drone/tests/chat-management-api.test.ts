@@ -5,7 +5,10 @@ import { afterAll, beforeAll, describe, expect, test } from 'bun:test';
 import { startDroneHubApiServer } from '../src/hub/server';
 import { resetDroneRootDirForTests } from '../src/host/paths';
 import { loadRegistry, updateRegistry } from '../src/host/registry';
-import { upsertPendingPromptInStore } from '../src/hub/transcript-store';
+import {
+  upsertPendingPromptInStore,
+  upsertTranscriptTurnInStore,
+} from '../src/hub/transcript-store';
 import { getSocketListenSupport } from './socket-listen-support';
 
 const listenSupport = getSocketListenSupport();
@@ -112,6 +115,68 @@ describeSocketSuite('chat management api', () => {
     expect(Array.isArray(listed.data?.chats)).toBe(true);
     expect((listed.data?.chats ?? []).includes('default')).toBe(true);
     expect((listed.data?.chats ?? []).includes('review')).toBe(true);
+  });
+
+  test('shares exact read cursors and rejects cursorless acknowledgements', async () => {
+    const droneId = 'drone-shared-unread';
+    await seedDrone(droneId);
+    await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    await upsertTranscriptTurnInStore({
+      droneId,
+      chatName: 'default',
+      turn: {
+        id: 'turn-1',
+        at: '2026-07-16T10:00:00.000Z',
+        completedAt: '2026-07-16T10:01:00.000Z',
+        prompt: 'Review this',
+        ok: true,
+        output: 'Reviewed',
+      },
+    });
+
+    const listed = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`);
+    expect(listed.data?.unreadChats).toEqual(['default']);
+    expect(listed.data?.chatReadStates?.default).toMatchObject({
+      unread: true,
+      latestAgentTurnId: 'turn-1',
+      latestAgentRevision: 1,
+    });
+
+    const cursorless = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/read`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: '{}',
+      },
+    );
+    expect(cursorless.r.status).toBe(400);
+
+    const stale = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/read`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ latestAgentTurnId: null, latestAgentRevision: 0 }),
+      },
+    );
+    expect(stale.r.status).toBe(200);
+    expect(stale.data?.readState?.unread).toBe(true);
+
+    const read = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/read`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          latestAgentTurnId: 'turn-1',
+          latestAgentRevision: 1,
+          updatedByDeviceId: 'browser-test',
+        }),
+      },
+    );
+    expect(read.r.status).toBe(200);
+    expect(read.data?.readState?.unread).toBe(false);
   });
 
   test('offers auto-rename only for the first prompt in a generated chat name', async () => {

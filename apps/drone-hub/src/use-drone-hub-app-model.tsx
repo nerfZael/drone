@@ -76,7 +76,14 @@ import {
   resolveNewDroneContextFromCurrentSelection,
   shouldInheritNewDroneContextFromCurrentSelection,
 } from './droneHub/app/new-drone-context';
-import { busyChatNodeIdsForDrone, droneChatNodeIds, normalizedDroneChats } from './droneHub/app/chat-node-helpers';
+import {
+  busyChatNodeIdsForDrone,
+  droneChatNodeIds,
+  normalizedDroneChats,
+  reconcileManualUnreadMarker,
+  unreadChatNodeIdsForDrone,
+  type ManualUnreadMarker,
+} from './droneHub/app/chat-node-helpers';
 import { orderSidebarEntries } from './droneHub/app/sidebar-group-order';
 import {
   buildFleetAssignedIdsByDroneId,
@@ -510,25 +517,44 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   );
   React.useEffect(() => {
     if (dronesLoading || dronesError) return;
-    setUnreadAgentMessageByChatNodeId((prev) => {
-      const prevEntries = Object.entries(prev);
-      if (prevEntries.length === 0) return prev;
-      const next: Record<string, boolean> = {};
-      let changed = false;
-      for (const [nodeId, unread] of prevEntries) {
-        if (!unread) {
-          changed = true;
-          continue;
-        }
-        if (!validChatNodeIdSet.has(nodeId)) {
-          changed = true;
-          continue;
-        }
-        next[nodeId] = true;
+    const next: Record<string, boolean> = {};
+    for (const drone of drones) {
+      for (const nodeId of unreadChatNodeIdsForDrone(drone)) {
+        if (nodeId && validChatNodeIdSet.has(nodeId)) next[nodeId] = true;
       }
-      return changed ? next : prev;
+    }
+    for (const [nodeId, marker] of manuallyMarkedUnreadChatsRef.current) {
+      if (marker.latestAgentRevision == null) continue;
+      const chatRef = parseCanvasChatNodeId(nodeId);
+      const readState = chatRef
+        ? droneById[chatRef.droneId]?.chatReadStates?.[chatRef.chatName]
+        : null;
+      const reconciled = reconcileManualUnreadMarker(marker, readState);
+      if (!reconciled) {
+        manuallyMarkedUnreadChatsRef.current.delete(nodeId);
+      } else if (reconciled !== marker) {
+        manuallyMarkedUnreadChatsRef.current.set(nodeId, reconciled);
+      }
+    }
+    setUnreadAgentMessageByChatNodeId((prev) => {
+      const prevKeys = Object.keys(prev);
+      const nextKeys = Object.keys(next);
+      if (
+        prevKeys.length === nextKeys.length &&
+        nextKeys.every((nodeId) => prev[nodeId] === true)
+      ) {
+        return prev;
+      }
+      return next;
     });
-  }, [dronesError, dronesLoading, setUnreadAgentMessageByChatNodeId, validChatNodeIdSet]);
+  }, [
+    droneById,
+    drones,
+    dronesError,
+    dronesLoading,
+    setUnreadAgentMessageByChatNodeId,
+    validChatNodeIdSet,
+  ]);
   React.useEffect(() => {
     if (dronesLoading || dronesError) return;
     setLastAgentSnippetByChatNodeId((prev) => {
@@ -571,7 +597,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const shellTerminalPrewarmInFlightRef = React.useRef<Set<string>>(new Set());
   const lastSyncedCanvasRepoContextRef = React.useRef<string>('');
   const lastSyncedCanvasAgentModelContextRef = React.useRef<string>('');
-  const previousBusyChatNodeIdSetRef = React.useRef<Set<string>>(new Set());
+  const previousUnreadChatNodeIdSetRef = React.useRef<Set<string>>(new Set());
+  const manuallyMarkedUnreadChatsRef = React.useRef<Map<string, ManualUnreadMarker>>(new Map());
+  const readAcknowledgementsInFlightRef = React.useRef<Set<string>>(new Set());
   const droneIdentityByNameRef = React.useRef<Record<string, string>>({});
   const llmSettingsState = useLlmSettings(requestJson);
   const { reloadUiPreferences } = useUiPreferencesSettings({ requestJson });
@@ -1659,28 +1687,77 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [],
   );
   React.useEffect(() => {
-    const selectedNodeId = createCanvasChatNodeId(String(selectedDrone ?? '').trim(), String(selectedChat ?? '').trim() || 'default');
+    const droneId = String(selectedDrone ?? '').trim();
+    const chatName = String(selectedChat ?? '').trim() || 'default';
+    const selectedNodeId = createCanvasChatNodeId(droneId, chatName);
     if (!selectedNodeId) return;
-    clearChatsUnread([selectedNodeId]);
-  }, [clearChatsUnread, selectedChat, selectedDrone]);
+    for (const nodeId of manuallyMarkedUnreadChatsRef.current.keys()) {
+      if (nodeId !== selectedNodeId) manuallyMarkedUnreadChatsRef.current.delete(nodeId);
+    }
+    if (unreadAgentMessageByChatNodeId[selectedNodeId] !== true) return;
+    if (manuallyMarkedUnreadChatsRef.current.has(selectedNodeId)) return;
+    if (readAcknowledgementsInFlightRef.current.has(selectedNodeId)) return;
+    const initialReadState = currentDrone?.chatReadStates?.[chatName];
+    if (!initialReadState) return;
+    readAcknowledgementsInFlightRef.current.add(selectedNodeId);
+    void (async () => {
+      let cursor = initialReadState;
+      try {
+        while (cursor.unread) {
+          const result = await requestJson<{
+            readState?: {
+              unread?: boolean;
+              latestAgentTurnId?: string | null;
+              latestAgentRevision?: number;
+            };
+          }>(
+            `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent(chatName)}/read`,
+            {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                latestAgentTurnId: cursor.latestAgentTurnId,
+                latestAgentRevision: cursor.latestAgentRevision,
+                updatedByDeviceId: 'web',
+              }),
+            },
+          );
+          if (result?.readState?.unread === false) {
+            clearChatsUnread([selectedNodeId]);
+            return;
+          }
+          const latest = droneByIdRef.current[droneId]?.chatReadStates?.[chatName];
+          if (!latest || latest.latestAgentRevision === cursor.latestAgentRevision) return;
+          cursor = latest;
+        }
+      } catch {
+        // Keep the authoritative unread dot visible when acknowledgement fails.
+      } finally {
+        readAcknowledgementsInFlightRef.current.delete(selectedNodeId);
+      }
+    })();
+  }, [
+    clearChatsUnread,
+    currentDrone,
+    requestJson,
+    selectedChat,
+    selectedDrone,
+    unreadAgentMessageByChatNodeId,
+  ]);
   React.useEffect(() => {
-    const previousBusyChatNodeIdSet = previousBusyChatNodeIdSetRef.current;
-    const nextBusyChatNodeIdSet = new Set<string>();
-    const markUnreadChatNodeIds: string[] = [];
-    const selectedNodeId = createCanvasChatNodeId(String(selectedDrone ?? '').trim(), String(selectedChat ?? '').trim() || 'default');
+    const previousUnreadChatNodeIdSet = previousUnreadChatNodeIdSetRef.current;
+    const nextUnreadChatNodeIdSet = new Set<string>();
     for (const drone of drones) {
-      if (isDroneStartingOrSeeding(drone.hubPhase)) continue;
-      for (const nodeId of busyChatNodeIdsForDrone(drone)) nextBusyChatNodeIdSet.add(nodeId);
+      for (const nodeId of unreadChatNodeIdsForDrone(drone)) {
+        nextUnreadChatNodeIdSet.add(nodeId);
+      }
     }
-    for (const nodeId of previousBusyChatNodeIdSet) {
-      if (nextBusyChatNodeIdSet.has(nodeId) || nodeId === selectedNodeId) continue;
-      if (!parseCanvasChatNodeId(nodeId)) continue;
-      markUnreadChatNodeIds.push(nodeId);
-    }
-    previousBusyChatNodeIdSetRef.current = nextBusyChatNodeIdSet;
-    if (markUnreadChatNodeIds.length > 0) {
-      markChatsUnread(markUnreadChatNodeIds);
-      for (const nodeId of markUnreadChatNodeIds) {
+    previousUnreadChatNodeIdSetRef.current = nextUnreadChatNodeIdSet;
+    const newlyUnreadChatNodeIds = [...nextUnreadChatNodeIdSet].filter(
+      (nodeId) => !previousUnreadChatNodeIdSet.has(nodeId),
+    );
+    if (newlyUnreadChatNodeIds.length > 0) {
+      for (const nodeId of newlyUnreadChatNodeIds) {
         const chatRef = parseCanvasChatNodeId(nodeId);
         if (!chatRef) continue;
         void (async () => {
@@ -1700,7 +1777,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         })();
       }
     }
-  }, [drones, markChatsUnread, requestJson, selectedChat, selectedDrone, setLastAgentSnippetByChatNodeId]);
+  }, [drones, requestJson, setLastAgentSnippetByChatNodeId]);
 
   const selectedDroneIdentity = React.useMemo(() => {
     if (!selectedDrone) return '';
@@ -1918,8 +1995,53 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const nodeId = createCanvasChatNodeId(droneId, String(selectedChat ?? '').trim() || 'default');
       if (nodeId) targetChatNodeIds.push(nodeId);
     }
-    return markChatsUnread(targetChatNodeIds) > 0;
-  }, [markChatsUnread, selectedChat, selectedDrone, selectedDroneIds]);
+    const changed = markChatsUnread(targetChatNodeIds) > 0;
+    if (changed) {
+      const activeNodeId = createCanvasChatNodeId(
+        String(selectedDrone ?? '').trim(),
+        String(selectedChat ?? '').trim() || 'default',
+      );
+      for (const nodeId of targetChatNodeIds) {
+        const chatRef = parseCanvasChatNodeId(nodeId);
+        if (!chatRef) continue;
+        if (nodeId === activeNodeId) {
+          manuallyMarkedUnreadChatsRef.current.set(nodeId, {
+            latestAgentRevision: null,
+            observedInSummary: false,
+          });
+        }
+        void requestJson<{
+          readState?: { unread?: boolean; latestAgentRevision?: number };
+        }>(
+          `/api/drones/${encodeURIComponent(chatRef.droneId)}/chats/${encodeURIComponent(chatRef.chatName)}/read`,
+          {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ unread: true, updatedByDeviceId: 'web' }),
+          },
+        )
+          .then((result) => {
+            if (result?.readState?.unread !== true) {
+              manuallyMarkedUnreadChatsRef.current.delete(nodeId);
+              clearChatsUnread([nodeId]);
+              return;
+            }
+            const marker = manuallyMarkedUnreadChatsRef.current.get(nodeId);
+            if (!marker) return;
+            if (Number.isSafeInteger(result.readState.latestAgentRevision)) {
+              marker.latestAgentRevision = Number(result.readState.latestAgentRevision);
+            } else {
+              manuallyMarkedUnreadChatsRef.current.delete(nodeId);
+            }
+          })
+          .catch(() => {
+            manuallyMarkedUnreadChatsRef.current.delete(nodeId);
+            clearChatsUnread([nodeId]);
+          });
+      }
+    }
+    return changed;
+  }, [clearChatsUnread, markChatsUnread, requestJson, selectedChat, selectedDrone, selectedDroneIds]);
   const currentGroup = currentDrone?.group ? groups.find((g) => g.group === currentDrone.group) ?? null : null;
   const filesPaneActive = Boolean(
     currentDrone &&

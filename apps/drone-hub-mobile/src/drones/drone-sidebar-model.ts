@@ -11,6 +11,15 @@ export type MobileDroneSummary = {
   fleetParentId: string | null;
   chats: string[];
   busyChats: string[];
+  unreadChats?: string[];
+  chatReadStates?: Record<
+    string,
+    {
+      unread: boolean;
+      latestAgentTurnId: string | null;
+      latestAgentRevision: number;
+    }
+  >;
   createdAt?: string;
   lastActivityAt?: string;
   lastMessageAt?: string;
@@ -205,6 +214,35 @@ function nullableStringMap(value: unknown): Record<string, string | null> {
   );
 }
 
+function chatReadStateMap(
+  value: unknown,
+): NonNullable<MobileDroneSummary['chatReadStates']> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  return Object.fromEntries(
+    Object.entries(value as Record<string, unknown>).flatMap(([chatNameRaw, stateRaw]) => {
+      const chatName = text(chatNameRaw);
+      if (!chatName || !stateRaw || typeof stateRaw !== 'object' || Array.isArray(stateRaw)) {
+        return [];
+      }
+      const state = stateRaw as Record<string, unknown>;
+      return [
+        [
+          chatName,
+          {
+            unread: state.unread === true,
+            latestAgentTurnId: text(state.latestAgentTurnId) || null,
+            latestAgentRevision:
+              Number.isSafeInteger(state.latestAgentRevision) &&
+              Number(state.latestAgentRevision) >= 0
+                ? Number(state.latestAgentRevision)
+                : 0,
+          },
+        ] as const,
+      ];
+    }),
+  );
+}
+
 export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const value = raw as Record<string, unknown>;
@@ -214,6 +252,11 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
       : {};
   const id = text(value.id || value.name);
   if (!id) return null;
+  const chats = stringList(value.chats, ['default']);
+  const chatReadStates = chatReadStateMap(value.chatReadStates);
+  const unreadChats = Object.keys(chatReadStates).length > 0
+    ? chats.filter((chatName) => chatReadStates[chatName]?.unread === true)
+    : stringList(value.unreadChats).filter((chatName) => chats.includes(chatName));
   return {
     id,
     name: text(value.name || value.id) || id,
@@ -228,8 +271,10 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
       text(repo.hostPath) ||
       text(repo.dest),
     fleetParentId: text(value.fleetParentId) || null,
-    chats: stringList(value.chats, ['default']),
+    chats,
     busyChats: stringList(value.busyChats),
+    unreadChats,
+    chatReadStates,
     createdAt: text(value.createdAt) || undefined,
     lastActivityAt: text(value.lastActivityAt) || undefined,
     lastMessageAt: text(value.lastMessageAt) || undefined,

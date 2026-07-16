@@ -133,9 +133,14 @@ import {
   importChatFromRegistry,
   importDroneChatsFromRegistry,
   importTranscriptTurnsFromRegistry,
+  listChatReadStatesForDronesFromStore,
+  listChatReadStatesFromStore,
   listChatsFromStore,
+  markChatReadInStore,
+  markChatUnreadInStore,
   patchChatMetadataInStore,
   readChatFromStore,
+  readChatReadStateFromStore,
   readChatRowsFromStore,
   readChatVersionFromStore,
   readTranscriptTurnsFromStore,
@@ -144,6 +149,7 @@ import {
   restoreArchivedChatInStore,
   rollbackTranscriptToTurnInStore,
   transcriptTurnsSourceHash,
+  type ChatReadState,
   upsertChatInStore,
   upsertTranscriptTurnInStore,
   updateTranscriptTurnInStore,
@@ -17490,7 +17496,11 @@ export async function startDroneHubApiServer(opts: {
     };
   }
 
-  async function buildRealDroneSummary(regAny: any, d: any): Promise<any> {
+  async function buildRealDroneSummary(
+    regAny: any,
+    d: any,
+    storedReadStates: Record<string, ChatReadState>,
+  ): Promise<any> {
     const runtime = normalizeDroneRuntime(d?.runtime);
     const activity = summarizeDroneActivity(d);
     const hubPhase = typeof d?.hub?.phase === 'string' ? String(d.hub.phase) : null;
@@ -17504,6 +17514,20 @@ export async function startDroneHubApiServer(opts: {
     const droneId = normalizeDroneIdentity(d?.id);
     const busyChats = droneId ? busyChatNamesForDrone(d, droneId) : [];
     const chats = Object.keys(d.chats ?? {});
+    const chatReadStates = Object.fromEntries(
+      chats.map((chatName) => {
+        const state = storedReadStates[chatName];
+        return [
+          chatName,
+          {
+            unread: state?.unread === true,
+            latestAgentTurnId: state?.latestAgentTurnId ?? null,
+            latestAgentRevision: state?.latestAgentRevision ?? 0,
+          },
+        ];
+      }),
+    );
+    const unreadChats = chats.filter((chatName) => chatReadStates[chatName]?.unread === true);
     const draftChats = Object.fromEntries(
       chats
         .filter((chatName) => isDraftChatEntry((d.chats ?? {})[chatName]))
@@ -17542,6 +17566,8 @@ export async function startDroneHubApiServer(opts: {
       statusError,
       statusChecking: Boolean(statusChecking),
       chats,
+      unreadChats,
+      chatReadStates,
       draftChats,
       busyChats,
       hubPhase,
@@ -17556,10 +17582,16 @@ export async function startDroneHubApiServer(opts: {
       buildPendingDroneSummary(regAny, p),
     );
     const realDrones = Object.values(regAny.drones ?? {});
+    const readStatesByDroneId = listChatReadStatesForDronesFromStore({
+      droneIds: realDrones.map((drone: any) => normalizeDroneIdentity(drone?.id)).filter(Boolean),
+    });
     const realSummaries = await mapDroneRegistrySummaryConcurrent(
       realDrones,
       DRONE_STATUS_SUMMARY_CONCURRENCY,
-      async (d) => buildRealDroneSummary(regAny, d),
+      async (d) => {
+        const droneId = normalizeDroneIdentity((d as any)?.id);
+        return buildRealDroneSummary(regAny, d, readStatesByDroneId.get(droneId) ?? {});
+      },
     );
 
     const byId = new Map<string, any>();
@@ -29264,9 +29296,13 @@ export async function startDroneHubApiServer(opts: {
           timer.mark('store');
           const chats = storeChats.available ? storeChats.chats : importedChats;
           const registryChats = (resolved.drone as any)?.chats ?? {};
+          const readStates = listChatReadStatesFromStore({ droneId });
           const chatDetails = chats.map((chatName) => ({
             chat: chatName,
             draft: isDraftChatEntry(registryChats?.[chatName]),
+            unread: readStates[chatName]?.unread === true,
+            latestAgentTurnId: readStates[chatName]?.latestAgentTurnId ?? null,
+            latestAgentRevision: readStates[chatName]?.latestAgentRevision ?? 0,
           }));
           const draftChats = Object.fromEntries(
             chatDetails.filter((item) => item.draft).map((item) => [item.chat, true]),
@@ -29286,6 +29322,17 @@ export async function startDroneHubApiServer(opts: {
             chats,
             chatDetails,
             draftChats,
+            unreadChats: chatDetails.filter((item) => item.unread).map((item) => item.chat),
+            chatReadStates: Object.fromEntries(
+              chatDetails.map((item) => [
+                item.chat,
+                {
+                  unread: item.unread,
+                  latestAgentTurnId: item.latestAgentTurnId,
+                  latestAgentRevision: item.latestAgentRevision,
+                },
+              ]),
+            ),
           });
           return;
         } catch (e: any) {
@@ -29343,6 +29390,7 @@ export async function startDroneHubApiServer(opts: {
           const chatEntry = (await importResolvedChatToStore(droneId, chatName, c)) ?? c;
           timer.mark('import');
           const agent = inferChatAgent(chatEntry as any, resolved.drone);
+          const readState = readChatReadStateFromStore({ droneId, chatName });
           timer.mark('format');
           timer.setHeader(res);
           logSlowHubRequest('chat metadata', timer, {
@@ -29372,6 +29420,7 @@ export async function startDroneHubApiServer(opts: {
               chatEntry,
             ),
             turns: (chatEntry as any).turns ?? [],
+            readState,
             sessionName: hubChatSessionName(chatName || 'default'),
             createdAt: chatEntry.createdAt,
           });
@@ -29393,6 +29442,77 @@ export async function startDroneHubApiServer(opts: {
           json(res, code, { ok: false, error: msg });
           return;
         }
+      }
+
+      // POST /api/drones/:id/chats/:chat/read
+      if (
+        method === 'POST' &&
+        parts.length === 6 &&
+        parts[0] === 'api' &&
+        parts[1] === 'drones' &&
+        parts[3] === 'chats' &&
+        parts[5] === 'read'
+      ) {
+        const droneRef = decodeURIComponent(parts[2]);
+        const chatName = normalizeChatName(decodeURIComponent(parts[4]));
+        let body: any = null;
+        try {
+          body = await readJsonBody(req);
+        } catch (error: any) {
+          json(res, 400, { ok: false, error: error?.message ?? String(error) });
+          return;
+        }
+        const markUnread = body?.unread === true;
+        const hasLatestAgentTurnId = Object.prototype.hasOwnProperty.call(
+          body ?? {},
+          'latestAgentTurnId',
+        );
+        const hasLatestAgentRevision = Object.prototype.hasOwnProperty.call(
+          body ?? {},
+          'latestAgentRevision',
+        );
+        if (
+          !markUnread &&
+          (!hasLatestAgentTurnId ||
+            !hasLatestAgentRevision ||
+            (body.latestAgentTurnId !== null &&
+              typeof body.latestAgentTurnId !== 'string') ||
+            !Number.isSafeInteger(body.latestAgentRevision) ||
+            body.latestAgentRevision < 0)
+        ) {
+          json(res, 400, {
+            ok: false,
+            error: 'latestAgentTurnId and latestAgentRevision are required to mark a chat read',
+          });
+          return;
+        }
+        const updatedByDeviceId = String(body?.updatedByDeviceId ?? '')
+          .trim()
+          .slice(0, 128) || null;
+        const resolved = await resolveDroneOrRespond(res, droneRef);
+        if (!resolved) return;
+        const droneId = resolved.id;
+        const chatEntry = (resolved.drone as any)?.chats?.[chatName];
+        if (!chatEntry) {
+          json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
+          return;
+        }
+        try {
+          await importResolvedChatToStore(droneId, chatName, chatEntry);
+          const readState = markUnread
+            ? await markChatUnreadInStore({ droneId, chatName, updatedByDeviceId })
+            : await markChatReadInStore({
+                droneId,
+                chatName,
+                latestAgentTurnId: String(body.latestAgentTurnId ?? '').trim() || null,
+                latestAgentRevision: body.latestAgentRevision,
+                updatedByDeviceId,
+              });
+          json(res, 200, { ok: true, id: droneId, chat: chatName, readState });
+        } catch (error: any) {
+          json(res, 500, { ok: false, error: error?.message ?? String(error) });
+        }
+        return;
       }
 
       // POST /api/drones/:id/chats/:chat/config

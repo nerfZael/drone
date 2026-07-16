@@ -38,6 +38,15 @@ export type DroneSummary = {
   statusError: string | null;
   statusChecking?: boolean;
   chats: string[];
+  unreadChats?: string[];
+  chatReadStates?: Record<
+    string,
+    {
+      unread: boolean;
+      latestAgentTurnId: string | null;
+      latestAgentRevision: number;
+    }
+  >;
   draftChats?: Record<string, boolean>;
   busyChats?: string[];
   dockerSize?: {
