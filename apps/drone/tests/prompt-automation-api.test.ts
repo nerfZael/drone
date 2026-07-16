@@ -4,7 +4,9 @@ import path from 'node:path';
 import { afterAll, afterEach, beforeAll, describe, expect, test } from 'bun:test';
 import { resetPromptAutomationStateForTests, startDroneHubApiServer } from '../src/hub/server';
 import { resetDroneRootDirForTests } from '../src/host/paths';
+import { getPromptQueueRepository } from '../src/host/prompt-queue-repository';
 import { loadRegistry, updateRegistry } from '../src/host/registry';
+import { updatePendingPromptInStore } from '../src/hub/transcript-store';
 import { getSocketListenSupport } from './socket-listen-support';
 
 type ApiResponse = {
@@ -14,7 +16,9 @@ type ApiResponse = {
 
 const listenSupport = getSocketListenSupport();
 if (!listenSupport.ok && process.env.CI) {
-  throw new Error(`prompt automation api tests require local socket binding support: ${listenSupport.detail}`);
+  throw new Error(
+    `prompt automation api tests require local socket binding support: ${listenSupport.detail}`,
+  );
 }
 if (!listenSupport.ok) {
   // eslint-disable-next-line no-console
@@ -32,12 +36,10 @@ describeSocketSuite('prompt automation api', () => {
   const droneDataDir = path.join(tempRoot, 'data', 'drone');
   let server: Awaited<ReturnType<typeof startDroneHubApiServer>> | null = null;
   let baseUrl = '';
-  let mockDaemon:
-    | {
-        port: number;
-        stop: () => void;
-      }
-    | null = null;
+  let mockDaemon: {
+    port: number;
+    stop: () => void;
+  } | null = null;
   let mockPromptOutputOverride:
     | ((opts: {
         body: any;
@@ -90,7 +92,8 @@ describeSocketSuite('prompt automation api', () => {
         const frame = state.buffer.slice(0, sep);
         state.buffer = state.buffer.slice(sep + 2);
         const lines = frame.split('\n').map((line) => line.trimEnd());
-        if (lines.length === 0 || lines.every((line) => line === '' || line.startsWith(':'))) continue;
+        if (lines.length === 0 || lines.every((line) => line === '' || line.startsWith(':')))
+          continue;
         let event = 'message';
         let dataText = '';
         for (const line of lines) {
@@ -110,7 +113,9 @@ describeSocketSuite('prompt automation api', () => {
       if (remaining <= 0) throw new Error('timed out waiting for SSE event');
       const result = await Promise.race([
         reader.read(),
-        new Promise<{ timeout: true }>((resolve) => setTimeout(() => resolve({ timeout: true }), remaining)),
+        new Promise<{ timeout: true }>((resolve) =>
+          setTimeout(() => resolve({ timeout: true }), remaining),
+        ),
       ]);
       if ('timeout' in result) throw new Error('timed out waiting for SSE event');
       if (result.done) throw new Error('SSE stream ended');
@@ -137,8 +142,27 @@ describeSocketSuite('prompt automation api', () => {
     droneId: string;
     chatName: string;
     promptId: string;
-    state: string;
+    state: 'queued' | 'sending' | 'sent' | 'failed';
   }) => {
+    const updatedAt = new Date().toISOString();
+    updatePendingPromptInStore({
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+      id: opts.promptId,
+      patch: {
+        state: opts.state,
+        updatedAt,
+      },
+    });
+    await getPromptQueueRepository()?.update({
+      droneId: opts.droneId,
+      chatName: opts.chatName,
+      promptId: opts.promptId,
+      patch: {
+        state: opts.state,
+        updatedAt,
+      },
+    });
     await updateRegistry((reg: any) => {
       const chat = reg?.drones?.[opts.droneId]?.chats?.[opts.chatName];
       if (!chat) return;
@@ -148,7 +172,7 @@ describeSocketSuite('prompt automation api', () => {
       pending[idx] = {
         ...pending[idx],
         state: opts.state,
-        updatedAt: new Date().toISOString(),
+        updatedAt,
       };
       chat.pendingPrompts = pending;
     });
@@ -175,12 +199,19 @@ describeSocketSuite('prompt automation api', () => {
             const id = String(body?.id ?? '').trim();
             const now = new Date().toISOString();
             const override = mockPromptOutputOverride?.({ body, id }) ?? null;
+            const kind = String(body?.kind ?? '').trim();
+            const message = String(override?.stdout ?? `mock-response:${id}`);
+            const stdout =
+              kind === 'cursor' || kind === 'claude' || kind === 'opencode'
+                ? JSON.stringify({ type: 'result', result: message, is_error: false })
+                : message;
             mockPromptJobs.set(id, {
               id,
+              kind,
               state: String(override?.state ?? 'done') || 'done',
               startedAt: now,
               finishedAt: now,
-              stdout: String(override?.stdout ?? `mock-response:${id}`),
+              stdout,
               stderr: String(override?.stderr ?? ''),
             });
             return Response.json({ ok: true, accepted: true, id });
@@ -278,29 +309,35 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const stopped = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/stop`, {
-      method: 'POST',
-    });
+    const stopped = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/stop`,
+      {
+        method: 'POST',
+      },
+    );
     expect(stopped.r.status).toBe(200);
     expect(Boolean(stopped.data?.stopped)).toBe(true);
     expect(stopped.data?.mode).toBe('transcript');
     expect(stopped.data?.stoppedPromptIds).toEqual([promptId]);
 
-    const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pending = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     expect(pending.r.status).toBe(200);
     const pendingRows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
     expect(pendingRows).toHaveLength(1);
     expect(String(pendingRows[0]?.state ?? '')).toBe('failed');
     expect(String(pendingRows[0]?.error ?? '')).toContain('Stopped by user');
 
-    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    const transcript = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`,
+    );
     expect(transcript.r.status).toBe(200);
     expect(Array.isArray(transcript.data?.transcripts)).toBe(true);
     expect(transcript.data?.transcripts).toEqual([]);
 
     expect(String(mockPromptJobs.get(promptId)?.state ?? '')).toBe('canceled');
   });
-
 
   test('stop endpoint ignores recently completed prompts that already exist in the transcript', async () => {
     const droneId = 'drone-stop-completed-response';
@@ -345,24 +382,33 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const stopped = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/stop`, {
-      method: 'POST',
-    });
+    const stopped = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/stop`,
+      {
+        method: 'POST',
+      },
+    );
     expect(stopped.r.status).toBe(200);
     expect(Boolean(stopped.data?.stopped)).toBe(false);
     expect(stopped.data?.stoppedPromptIds).toEqual([]);
     expect(stopped.data?.clearedPromptIds).toEqual([]);
 
-    const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pending = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     expect(pending.r.status).toBe(200);
     const pendingRows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
     expect(pendingRows).toHaveLength(1);
     expect(String(pendingRows[0]?.state ?? '')).toBe('sent');
     expect(String(pendingRows[0]?.error ?? '')).toBe('');
 
-    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    const transcript = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`,
+    );
     expect(transcript.r.status).toBe(200);
-    const transcriptRows = Array.isArray(transcript.data?.transcripts) ? transcript.data.transcripts : [];
+    const transcriptRows = Array.isArray(transcript.data?.transcripts)
+      ? transcript.data.transcripts
+      : [];
     expect(transcriptRows).toHaveLength(1);
     expect(String(transcriptRows[0]?.id ?? '')).toBe(promptId);
     expect(String(transcriptRows[0]?.output ?? '')).toBe('done');
@@ -397,22 +443,27 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'stop-active-automation',
-        automationLabel: 'Stop Active Automation',
-        prompt: 'repeat',
-        runs: 2,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'stop-active-automation',
+          automationLabel: 'Stop Active Automation',
+          prompt: 'repeat',
+          runs: 2,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
 
     let activePromptId = '';
     await pollUntil(
       async () => {
-        const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+        const pending = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+        );
         const rows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
         const activeRow = rows.find(
           (row: any) =>
@@ -429,17 +480,22 @@ describeSocketSuite('prompt automation api', () => {
       'active automation run pending',
     );
 
-    const stopped = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ stopMode: 'all', clearQueued: false }),
-    });
+    const stopped = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ stopMode: 'all', clearQueued: false }),
+      },
+    );
     expect(stopped.r.status).toBe(200);
     expect(String(stopped.data?.job?.status ?? '')).toBe('stopped');
 
     await pollUntil(
       async () => {
-        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+        const status = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+        );
         return status.data?.job?.running === false;
       },
       15_000,
@@ -447,17 +503,26 @@ describeSocketSuite('prompt automation api', () => {
       'automation stop all completed',
     );
 
-    const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pending = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     expect(pending.r.status).toBe(200);
     const pendingRows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
-    const stoppedRow = pendingRows.find((row: any) => String(row?.id ?? '').trim() === activePromptId) ?? null;
+    const stoppedRow =
+      pendingRows.find((row: any) => String(row?.id ?? '').trim() === activePromptId) ?? null;
     expect(String(stoppedRow?.state ?? '')).toBe('failed');
     expect(String(stoppedRow?.error ?? '')).toContain('Stopped by user');
 
-    const transcript = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`);
+    const transcript = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/transcript?turn=all`,
+    );
     expect(transcript.r.status).toBe(200);
-    const transcriptRows = Array.isArray(transcript.data?.transcripts) ? transcript.data.transcripts : [];
-    expect(transcriptRows.some((row: any) => String(row?.id ?? '').trim() === activePromptId)).toBe(false);
+    const transcriptRows = Array.isArray(transcript.data?.transcripts)
+      ? transcript.data.transcripts
+      : [];
+    expect(transcriptRows.some((row: any) => String(row?.id ?? '').trim() === activePromptId)).toBe(
+      false,
+    );
 
     expect(String(mockPromptJobs.get(activePromptId)?.state ?? '')).toBe('canceled');
   });
@@ -503,29 +568,35 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const firstAutomation = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'repeat',
-        runs: 2,
-      }),
-    });
+    const firstAutomation = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'repeat',
+          runs: 2,
+        }),
+      },
+    );
     expect(firstAutomation.r.status).toBe(202);
     expect(firstAutomation.data?.job?.running).toBe(true);
 
-    const secondAutomation = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-2',
-        automationLabel: 'Loop 2',
-        prompt: 'repeat again',
-        runs: 2,
-      }),
-    });
+    const secondAutomation = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-2',
+          automationLabel: 'Loop 2',
+          prompt: 'repeat again',
+          runs: 2,
+        }),
+      },
+    );
     expect(secondAutomation.r.status).toBe(202);
     expect(Number(secondAutomation.data?.job?.queuedCount ?? 0)).toBeGreaterThan(0);
 
@@ -552,7 +623,9 @@ describeSocketSuite('prompt automation api', () => {
     });
     expect(restored.r.status).toBe(200);
 
-    const automationStatus = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+    const automationStatus = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+    );
     expect(automationStatus.r.status).toBe(200);
     expect(automationStatus.data?.job?.status).toBe('idle');
     expect(automationStatus.data?.job?.running).toBe(false);
@@ -629,27 +702,34 @@ describeSocketSuite('prompt automation api', () => {
     });
 
     const startOnce = async () => {
-      const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          automationId: 'sync-pass',
-          automationLabel: 'Sync Pass',
-          prompt: 'run checks',
-          runs: 1,
-        }),
-      });
+      const started = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            automationId: 'sync-pass',
+            automationLabel: 'Sync Pass',
+            prompt: 'run checks',
+            runs: 1,
+          }),
+        },
+      );
       expect(started.r.status).toBe(202);
       expect(started.data?.ok).toBe(true);
 
       await pollUntil(async () => {
-        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+        const status = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+        );
         return status.data?.job?.running === false;
       });
     };
 
     await startOnce();
-    const pendingAfterFirst = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingAfterFirst = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     expect(pendingAfterFirst.r.status).toBe(200);
     const firstPromptLoop = (pendingAfterFirst.data?.pending ?? []).filter(
       (p: any) =>
@@ -657,11 +737,15 @@ describeSocketSuite('prompt automation api', () => {
         String(p?.automation?.automationId ?? '') === 'sync-pass',
     );
     expect(firstPromptLoop.length).toBeGreaterThan(0);
-    const firstJobKey = String(firstPromptLoop[firstPromptLoop.length - 1]?.automation?.jobKey ?? '');
+    const firstJobKey = String(
+      firstPromptLoop[firstPromptLoop.length - 1]?.automation?.jobKey ?? '',
+    );
     expect(firstJobKey.length).toBeGreaterThan(0);
 
     await startOnce();
-    const pendingAfterSecond = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingAfterSecond = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     expect(pendingAfterSecond.r.status).toBe(200);
     const secondPromptLoop = (pendingAfterSecond.data?.pending ?? []).filter(
       (p: any) =>
@@ -669,7 +753,9 @@ describeSocketSuite('prompt automation api', () => {
         String(p?.automation?.automationId ?? '') === 'sync-pass',
     );
     expect(secondPromptLoop.length).toBeGreaterThan(1);
-    const secondJobKey = String(secondPromptLoop[secondPromptLoop.length - 1]?.automation?.jobKey ?? '');
+    const secondJobKey = String(
+      secondPromptLoop[secondPromptLoop.length - 1]?.automation?.jobKey ?? '',
+    );
     expect(secondJobKey.length).toBeGreaterThan(0);
     expect(secondJobKey).not.toBe(firstJobKey);
   });
@@ -707,39 +793,50 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'repeat',
-        runs: 2,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'repeat',
+          runs: 2,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
 
-    const stopped = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`, {
-      method: 'POST',
-    });
+    const stopped = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`,
+      {
+        method: 'POST',
+      },
+    );
     expect(stopped.r.status).toBe(200);
     expect(stopped.data?.job?.status).toBe('stopped');
 
-    const restarted = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-2',
-        automationLabel: 'Loop 2',
-        prompt: 'repeat again',
-        runs: 2,
-      }),
-    });
+    const restarted = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-2',
+          automationLabel: 'Loop 2',
+          prompt: 'repeat again',
+          runs: 2,
+        }),
+      },
+    );
     expect(restarted.r.status).toBe(202);
     expect(restarted.data?.job?.running).toBe(false);
     expect(Number(restarted.data?.job?.queuedCount ?? 0)).toBeGreaterThan(0);
     const queuedItems = Array.isArray(restarted.data?.job?.queued) ? restarted.data.job.queued : [];
-    const queuedAutomationIds = queuedItems.map((item: any) => String(item?.automationId ?? '').trim());
+    const queuedAutomationIds = queuedItems.map((item: any) =>
+      String(item?.automationId ?? '').trim(),
+    );
     expect(queuedAutomationIds).toContain('loop-2');
   });
 
@@ -775,34 +872,42 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'repeat',
-        runs: 2,
-      }),
-    });
+    const first = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'repeat',
+          runs: 2,
+        }),
+      },
+    );
     expect(first.r.status).toBe(202);
     expect(first.data?.job?.running).toBe(true);
 
-    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-2',
-        automationLabel: 'Loop 2',
-        prompt: 'repeat again',
-        runs: 2,
-      }),
-    });
+    const second = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-2',
+          automationLabel: 'Loop 2',
+          prompt: 'repeat again',
+          runs: 2,
+        }),
+      },
+    );
     expect(second.r.status).toBe(202);
     expect(second.data?.job?.running).toBe(true);
     expect(Number(second.data?.job?.queuedCount ?? 0)).toBeGreaterThan(0);
     const queuedItems = Array.isArray(second.data?.job?.queued) ? second.data.job.queued : [];
-    const queuedAutomationIds = queuedItems.map((item: any) => String(item?.automationId ?? '').trim());
+    const queuedAutomationIds = queuedItems.map((item: any) =>
+      String(item?.automationId ?? '').trim(),
+    );
     expect(queuedAutomationIds).toContain('loop-2');
   });
 
@@ -850,37 +955,46 @@ describeSocketSuite('prompt automation api', () => {
         };
       });
 
-      const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          automationId: 'loop-1',
-          automationLabel: 'Loop 1',
-          prompt: 'repeat',
-          runs: 2,
-        }),
-      });
+      const first = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            automationId: 'loop-1',
+            automationLabel: 'Loop 1',
+            prompt: 'repeat',
+            runs: 2,
+          }),
+        },
+      );
       expect(first.r.status).toBe(202);
       expect(first.data?.job?.running).toBe(true);
 
-      const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          automationId: 'loop-2',
-          automationLabel: 'Loop 2',
-          prompt: 'repeat again',
-          runs: 2,
-        }),
-      });
+      const second = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            automationId: 'loop-2',
+            automationLabel: 'Loop 2',
+            prompt: 'repeat again',
+            runs: 2,
+          }),
+        },
+      );
       expect(second.r.status).toBe(202);
       expect(Number(second.data?.job?.queuedCount ?? 0)).toBeGreaterThan(0);
 
-      const stopped = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ stopMode: c.mode, clearQueued: c.clearQueued }),
-      });
+      const stopped = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ stopMode: c.mode, clearQueued: c.clearQueued }),
+        },
+      );
       expect(stopped.r.status).toBe(200);
       if (c.expectQueueCleared) {
         expect(Number(stopped.data?.job?.queuedCount ?? -1)).toBe(0);
@@ -889,8 +1003,13 @@ describeSocketSuite('prompt automation api', () => {
       if (c.expectQueueCleared) {
         await pollUntil(
           async () => {
-            const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
-            return status.data?.job?.running === false && Number(status.data?.job?.queuedCount ?? 0) === 0;
+            const status = await apiFetch(
+              `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+            );
+            return (
+              status.data?.job?.running === false &&
+              Number(status.data?.job?.queuedCount ?? 0) === 0
+            );
           },
           15_000,
           120,
@@ -899,8 +1018,13 @@ describeSocketSuite('prompt automation api', () => {
       } else {
         await pollUntil(
           async () => {
-            const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
-            return status.data?.job?.running === true && String(status.data?.job?.automationId ?? '').trim() === 'loop-2';
+            const status = await apiFetch(
+              `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+            );
+            return (
+              status.data?.job?.running === true &&
+              String(status.data?.job?.automationId ?? '').trim() === 'loop-2'
+            );
           },
           15_000,
           120,
@@ -948,31 +1072,37 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'repeat',
-        runs: 2,
-        sleepBetweenRunsSeconds: 90,
-      }),
-    });
+    const first = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'repeat',
+          runs: 2,
+          sleepBetweenRunsSeconds: 90,
+        }),
+      },
+    );
     expect(first.r.status).toBe(202);
     expect(Number(first.data?.job?.sleepBetweenRunsSeconds ?? -1)).toBe(90);
 
-    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-2',
-        automationLabel: 'Loop 2',
-        prompt: 'repeat again',
-        runs: 2,
-        sleepBetweenRunsSeconds: 180,
-      }),
-    });
+    const second = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-2',
+          automationLabel: 'Loop 2',
+          prompt: 'repeat again',
+          runs: 2,
+          sleepBetweenRunsSeconds: 180,
+        }),
+      },
+    );
     expect(second.r.status).toBe(202);
     const queuedSleep = Number(second.data?.job?.queued?.[0]?.sleepBetweenRunsSeconds ?? -1);
     expect(queuedSleep).toBe(180);
@@ -1010,33 +1140,39 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'repeat',
-        runs: 2,
-        sleepAmount: 8,
-        sleepUnit: 'hours',
-      }),
-    });
+    const first = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'repeat',
+          runs: 2,
+          sleepAmount: 8,
+          sleepUnit: 'hours',
+        }),
+      },
+    );
     expect(first.r.status).toBe(202);
     expect(Number(first.data?.job?.sleepBetweenRunsSeconds ?? -1)).toBe(8 * 60 * 60);
 
-    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-2',
-        automationLabel: 'Loop 2',
-        prompt: 'repeat again',
-        runs: 2,
-        sleepAmount: 30,
-        sleepUnit: 'minutes',
-      }),
-    });
+    const second = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-2',
+          automationLabel: 'Loop 2',
+          prompt: 'repeat again',
+          runs: 2,
+          sleepAmount: 30,
+          sleepUnit: 'minutes',
+        }),
+      },
+    );
     expect(second.r.status).toBe(202);
     const queuedSleep = Number(second.data?.job?.queued?.[0]?.sleepBetweenRunsSeconds ?? -1);
     expect(queuedSleep).toBe(30 * 60);
@@ -1074,16 +1210,19 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'repeat',
-        runs: 2,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'repeat',
+          runs: 2,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
     expect(started.data?.job?.running).toBe(true);
 
@@ -1098,9 +1237,12 @@ describeSocketSuite('prompt automation api', () => {
     expect(String(sent.data?.pendingState ?? '')).toBe('queued');
     expect(Boolean(sent.data?.blockedByAutomation)).toBe(true);
 
-    const pendingAfterSend = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingAfterSend = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     const rows = Array.isArray(pendingAfterSend.data?.pending) ? pendingAfterSend.data.pending : [];
-    const queuedManual = rows.find((p: any) => String(p?.id ?? '').trim() === queuedPromptId) ?? null;
+    const queuedManual =
+      rows.find((p: any) => String(p?.id ?? '').trim() === queuedPromptId) ?? null;
     expect(queuedManual).not.toBeNull();
     expect(String(queuedManual?.state ?? '')).toBe('queued');
     expect(Boolean(queuedManual?.blockedByAutomation)).toBe(true);
@@ -1145,16 +1287,19 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'repeat',
-        runs: 2,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'repeat',
+          runs: 2,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
     expect(started.data?.job?.running).toBe(true);
 
@@ -1169,7 +1314,9 @@ describeSocketSuite('prompt automation api', () => {
 
     await pollUntil(
       async () => {
-        const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/review/pending`);
+        const pending = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/review/pending`,
+        );
         const rows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
         const row = rows.find((p: any) => String(p?.id ?? '').trim() === reviewPromptId) ?? null;
         if (!row) return false;
@@ -1181,7 +1328,9 @@ describeSocketSuite('prompt automation api', () => {
       'review chat prompt is not blocked by default chat automation',
     );
 
-    const defaultStatus = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+    const defaultStatus = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+    );
     expect(defaultStatus.r.status).toBe(200);
     expect(defaultStatus.data?.job?.running).toBe(true);
     expect(String(defaultStatus.data?.job?.automationId ?? '').trim()).toBe('loop-1');
@@ -1225,16 +1374,19 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'repeat',
-        runs: 2,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'repeat',
+          runs: 2,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
 
     const sent = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`, {
@@ -1254,7 +1406,9 @@ describeSocketSuite('prompt automation api', () => {
     expect(Boolean(cancelled.data?.cancelled)).toBe(true);
     expect(Boolean(cancelled.data?.alreadySubmitted)).toBe(false);
 
-    const pendingAfter = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingAfter = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     const rows = Array.isArray(pendingAfter.data?.pending) ? pendingAfter.data.pending : [];
     expect(rows.some((p: any) => String(p?.id ?? '').trim() === queuedPromptId)).toBe(false);
   });
@@ -1291,9 +1445,12 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const cancelled = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending/in-flight-prompt`, {
-      method: 'DELETE',
-    });
+    const cancelled = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending/in-flight-prompt`,
+      {
+        method: 'DELETE',
+      },
+    );
     expect(cancelled.r.status).toBe(200);
     expect(Boolean(cancelled.data?.cancelled)).toBe(false);
     expect(Boolean(cancelled.data?.alreadySubmitted)).toBe(true);
@@ -1332,29 +1489,35 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'repeat',
-        runs: 2,
-      }),
-    });
+    const first = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'repeat',
+          runs: 2,
+        }),
+      },
+    );
     expect(first.r.status).toBe(202);
     expect(first.data?.job?.running).toBe(true);
 
-    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-2',
-        automationLabel: 'Loop 2',
-        prompt: 'repeat again',
-        runs: 2,
-      }),
-    });
+    const second = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-2',
+          automationLabel: 'Loop 2',
+          prompt: 'repeat again',
+          runs: 2,
+        }),
+      },
+    );
     expect(second.r.status).toBe(202);
     const queueId = String(second.data?.job?.queued?.[0]?.queueId ?? '').trim();
     expect(queueId.length).toBeGreaterThan(0);
@@ -1402,28 +1565,34 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'repeat',
-        runs: 1,
-      }),
-    });
+    const first = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'repeat',
+          runs: 1,
+        }),
+      },
+    );
     expect(first.r.status).toBe(202);
 
-    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-2',
-        automationLabel: 'Loop 2',
-        prompt: 'repeat again',
-        runs: 1,
-      }),
-    });
+    const second = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-2',
+          automationLabel: 'Loop 2',
+          prompt: 'repeat again',
+          runs: 1,
+        }),
+      },
+    );
     expect(second.r.status).toBe(202);
     const queueId = String(second.data?.job?.queued?.[0]?.queueId ?? '').trim();
     expect(queueId.length).toBeGreaterThan(0);
@@ -1436,8 +1605,13 @@ describeSocketSuite('prompt automation api', () => {
 
     await pollUntil(
       async () => {
-        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
-        return String(status.data?.job?.automationId ?? '').trim() === 'loop-2' && status.data?.job?.running === false;
+        const status = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+        );
+        return (
+          String(status.data?.job?.automationId ?? '').trim() === 'loop-2' &&
+          status.data?.job?.running === false
+        );
       },
       20_000,
       150,
@@ -1484,39 +1658,52 @@ describeSocketSuite('prompt automation api', () => {
         },
       };
     });
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'automation run one',
-        runs: 1,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'automation run one',
+          runs: 1,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
     expect(started.data?.job?.running).toBe(true);
 
-    const manualA = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt: 'manual A queued behind automation' }),
-    });
+    const manualA = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'manual A queued behind automation' }),
+      },
+    );
     expect(manualA.r.status).toBe(202);
     const manualAId = String(manualA.data?.promptId ?? '').trim();
     expect(manualAId.length).toBeGreaterThan(0);
 
-    const manualB = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt: 'manual B queued behind automation' }),
-    });
+    const manualB = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'manual B queued behind automation' }),
+      },
+    );
     expect(manualB.r.status).toBe(202);
     const manualBId = String(manualB.data?.promptId ?? '').trim();
     expect(manualBId.length).toBeGreaterThan(0);
 
-    const pendingWhileBlocked = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
-    const blockedRows = Array.isArray(pendingWhileBlocked.data?.pending) ? pendingWhileBlocked.data.pending : [];
+    const pendingWhileBlocked = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
+    const blockedRows = Array.isArray(pendingWhileBlocked.data?.pending)
+      ? pendingWhileBlocked.data.pending
+      : [];
     const blockedA = blockedRows.find((p: any) => String(p?.id ?? '').trim() === manualAId);
     const blockedB = blockedRows.find((p: any) => String(p?.id ?? '').trim() === manualBId);
     expect(String(blockedA?.state ?? '')).toBe('queued');
@@ -1524,12 +1711,21 @@ describeSocketSuite('prompt automation api', () => {
     expect(Boolean(blockedA?.blockedByAutomation)).toBe(true);
     expect(Boolean(blockedB?.blockedByAutomation)).toBe(true);
 
-    await setPendingPromptState({ droneId, chatName: 'default', promptId: 'blocking-prompt', state: 'failed' });
+    await setPendingPromptState({
+      droneId,
+      chatName: 'default',
+      promptId: 'blocking-prompt',
+      state: 'failed',
+    });
 
     await pollUntil(
       async () => {
-        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
-        return status.data?.job?.running === false && Number(status.data?.job?.queuedCount ?? 0) === 0;
+        const status = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+        );
+        return (
+          status.data?.job?.running === false && Number(status.data?.job?.queuedCount ?? 0) === 0
+        );
       },
       20_000,
       120,
@@ -1538,7 +1734,9 @@ describeSocketSuite('prompt automation api', () => {
 
     await pollUntil(
       async () => {
-        const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+        const pending = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+        );
         const rows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
         const rowA = rows.find((p: any) => String(p?.id ?? '').trim() === manualAId);
         const rowB = rows.find((p: any) => String(p?.id ?? '').trim() === manualBId);
@@ -1551,7 +1749,9 @@ describeSocketSuite('prompt automation api', () => {
       'manual prompts released',
     );
 
-    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingFinal = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     const finalRows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
     const finalA = finalRows.find((p: any) => String(p?.id ?? '').trim() === manualAId);
     const finalB = finalRows.find((p: any) => String(p?.id ?? '').trim() === manualBId);
@@ -1598,52 +1798,76 @@ describeSocketSuite('prompt automation api', () => {
         },
       };
     });
-    const first = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-1',
-        automationLabel: 'Loop 1',
-        prompt: 'automation run one',
-        runs: 1,
-      }),
-    });
+    const first = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-1',
+          automationLabel: 'Loop 1',
+          prompt: 'automation run one',
+          runs: 1,
+        }),
+      },
+    );
     expect(first.r.status).toBe(202);
     expect(first.data?.job?.running).toBe(true);
 
-    const second = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'loop-2',
-        automationLabel: 'Loop 2',
-        prompt: 'automation run two',
-        runs: 1,
-      }),
-    });
+    const second = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'loop-2',
+          automationLabel: 'Loop 2',
+          prompt: 'automation run two',
+          runs: 1,
+        }),
+      },
+    );
     expect(second.r.status).toBe(202);
     expect(Number(second.data?.job?.queuedCount ?? 0)).toBeGreaterThan(0);
 
-    const manual = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ prompt: 'manual after queued automations' }),
-    });
+    const manual = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/prompt`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ prompt: 'manual after queued automations' }),
+      },
+    );
     expect(manual.r.status).toBe(202);
     const manualId = String(manual.data?.promptId ?? '').trim();
     expect(manualId.length).toBeGreaterThan(0);
-    const pendingBlocked = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
-    const pendingBlockedRows = Array.isArray(pendingBlocked.data?.pending) ? pendingBlocked.data.pending : [];
-    const blockedManual = pendingBlockedRows.find((p: any) => String(p?.id ?? '').trim() === manualId);
+    const pendingBlocked = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
+    const pendingBlockedRows = Array.isArray(pendingBlocked.data?.pending)
+      ? pendingBlocked.data.pending
+      : [];
+    const blockedManual = pendingBlockedRows.find(
+      (p: any) => String(p?.id ?? '').trim() === manualId,
+    );
     expect(String(blockedManual?.state ?? '')).toBe('queued');
     expect(Boolean(blockedManual?.blockedByAutomation)).toBe(true);
 
-    await setPendingPromptState({ droneId, chatName: 'default', promptId: 'blocking-prompt', state: 'failed' });
+    await setPendingPromptState({
+      droneId,
+      chatName: 'default',
+      promptId: 'blocking-prompt',
+      state: 'failed',
+    });
 
     await pollUntil(
       async () => {
-        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
-        return status.data?.job?.running === false && Number(status.data?.job?.queuedCount ?? 0) === 0;
+        const status = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+        );
+        return (
+          status.data?.job?.running === false && Number(status.data?.job?.queuedCount ?? 0) === 0
+        );
       },
       20_000,
       120,
@@ -1652,7 +1876,9 @@ describeSocketSuite('prompt automation api', () => {
 
     await pollUntil(
       async () => {
-        const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+        const pending = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+        );
         const rows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
         const manual = rows.find((p: any) => String(p?.id ?? '').trim() === manualId);
         return String(manual?.state ?? '') !== 'queued';
@@ -1662,7 +1888,9 @@ describeSocketSuite('prompt automation api', () => {
       'manual released after queued automations',
     );
 
-    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingFinal = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
     const loop2 = rows.find(
       (p: any) =>
@@ -1707,32 +1935,41 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'stopper',
-        automationLabel: 'Stopper',
-        prompt: 'do work',
-        onFailurePrompt: 'summarize the changes',
-        runs: 5,
-        stopPhrase: 'MOCK-RESPONSE',
-        stopPhraseCaseSensitive: false,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'stopper',
+          automationLabel: 'Stopper',
+          prompt: 'do work',
+          onFailurePrompt: 'summarize the changes',
+          runs: 5,
+          stopPhrase: 'MOCK-RESPONSE',
+          stopPhraseCaseSensitive: false,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
 
     await pollUntil(async () => {
-      const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+      const status = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+      );
       return status.data?.job?.running === false;
     }, 15_000);
 
-    const statusAfter = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+    const statusAfter = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+    );
     expect(Boolean(statusAfter.data?.job?.finishedEarly)).toBe(true);
     expect(Number(statusAfter.data?.job?.runsCompleted ?? 0)).toBe(1);
     expect(Number(statusAfter.data?.job?.runsTotal ?? 0)).toBe(1);
 
-    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingFinal = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
     const runRows = rows.filter(
       (p: any) =>
@@ -1748,7 +1985,9 @@ describeSocketSuite('prompt automation api', () => {
     );
     expect(runRows.length).toBe(1);
     expect(finalRows.length).toBeGreaterThan(0);
-    const finalMatchedRun = Number(finalRows[finalRows.length - 1]?.automation?.stopMatchedRunIndex ?? 0);
+    const finalMatchedRun = Number(
+      finalRows[finalRows.length - 1]?.automation?.stopMatchedRunIndex ?? 0,
+    );
     expect(finalMatchedRun).toBe(1);
   });
 
@@ -1777,29 +2016,38 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'strict-stopper',
-        automationLabel: 'Strict Stopper',
-        prompt: 'do work',
-        runs: 2,
-        stopPhrase: 'MOCK-RESPONSE',
-        stopPhraseCaseSensitive: true,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'strict-stopper',
+          automationLabel: 'Strict Stopper',
+          prompt: 'do work',
+          runs: 2,
+          stopPhrase: 'MOCK-RESPONSE',
+          stopPhraseCaseSensitive: true,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
 
     await pollUntil(async () => {
-      const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+      const status = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+      );
       return status.data?.job?.running === false;
     }, 15_000);
 
-    const statusAfter = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+    const statusAfter = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+    );
     expect(Boolean(statusAfter.data?.job?.finishedEarly)).toBe(false);
 
-    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingFinal = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
     const runRows = rows.filter(
       (p: any) =>
@@ -1843,26 +2091,33 @@ describeSocketSuite('prompt automation api', () => {
       return { stdout: `extra run ${seen}` };
     };
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'second-run-stopper',
-        automationLabel: 'Second Run Stopper',
-        prompt: 'stop-on-second',
-        runs: 3,
-        stopPhrase: 'STOP-PHRASE',
-        stopPhraseCaseSensitive: true,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'second-run-stopper',
+          automationLabel: 'Second Run Stopper',
+          prompt: 'stop-on-second',
+          runs: 3,
+          stopPhrase: 'STOP-PHRASE',
+          stopPhraseCaseSensitive: true,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
 
     await pollUntil(async () => {
-      const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+      const status = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+      );
       return status.data?.job?.running === false;
     }, 15_000);
 
-    const statusAfter = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+    const statusAfter = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+    );
     expect(Boolean(statusAfter.data?.job?.finishedEarly)).toBe(true);
     expect(Number(statusAfter.data?.job?.runsCompleted ?? 0)).toBe(2);
     expect(Number(statusAfter.data?.job?.runsTotal ?? 0)).toBe(2);
@@ -1893,40 +2148,52 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'runs-only-stopper',
-        automationLabel: 'Runs Only Stopper',
-        prompt: 'do work',
-        onFailurePrompt: 'summarize what happened',
-        runs: 3,
-        sleepBetweenRunsSeconds: 120,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'runs-only-stopper',
+          automationLabel: 'Runs Only Stopper',
+          prompt: 'do work',
+          onFailurePrompt: 'summarize what happened',
+          runs: 3,
+          sleepBetweenRunsSeconds: 120,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
 
     await pollUntil(
       async () => {
-        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
-        return status.data?.job?.running === true && Number(status.data?.job?.runsCompleted ?? 0) >= 1;
+        const status = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+        );
+        return (
+          status.data?.job?.running === true && Number(status.data?.job?.runsCompleted ?? 0) >= 1
+        );
       },
       15_000,
       120,
       'first automation run completed',
     );
 
-    const stopped = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ stopMode: 'runs-only', clearQueued: false }),
-    });
+    const stopped = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ stopMode: 'runs-only', clearQueued: false }),
+      },
+    );
     expect(stopped.r.status).toBe(200);
 
     await pollUntil(
       async () => {
-        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+        const status = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+        );
         return status.data?.job?.running === false;
       },
       15_000,
@@ -1936,7 +2203,9 @@ describeSocketSuite('prompt automation api', () => {
 
     await pollUntil(
       async () => {
-        const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+        const pending = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+        );
         const rows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
         return rows.some(
           (p: any) =>
@@ -1950,7 +2219,9 @@ describeSocketSuite('prompt automation api', () => {
       'final message enqueued',
     );
 
-    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingFinal = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
     const runRows = rows.filter(
       (p: any) =>
@@ -2004,38 +2275,50 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'runs-only-zero',
-        automationLabel: 'Runs Only Zero',
-        prompt: 'do work',
-        onFailurePrompt: 'summarize what happened',
-        runs: 3,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'runs-only-zero',
+          automationLabel: 'Runs Only Zero',
+          prompt: 'do work',
+          onFailurePrompt: 'summarize what happened',
+          runs: 3,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
     expect(started.data?.job?.running).toBe(true);
 
-    const stopped = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ stopMode: 'runs-only', clearQueued: true }),
-    });
+    const stopped = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/stop`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ stopMode: 'runs-only', clearQueued: true }),
+      },
+    );
     expect(stopped.r.status).toBe(200);
 
     await pollUntil(
       async () => {
-        const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
-        return status.data?.job?.running === false && Number(status.data?.job?.runsCompleted ?? -1) === 0;
+        const status = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+        );
+        return (
+          status.data?.job?.running === false && Number(status.data?.job?.runsCompleted ?? -1) === 0
+        );
       },
       15_000,
       120,
       'runs-only stopped before any run completed',
     );
 
-    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingFinal = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
     const finalRows = rows.filter(
       (p: any) =>
@@ -2062,25 +2345,32 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'lint-fixes',
-        automationLabel: 'Lint Fixes',
-        prompt: 'fix lint errors',
-        onFailurePrompt: 'Summarize what failed and what to try next.',
-        runs: 1,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'lint-fixes',
+          automationLabel: 'Lint Fixes',
+          prompt: 'fix lint errors',
+          onFailurePrompt: 'Summarize what failed and what to try next.',
+          runs: 1,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
 
     await pollUntil(async () => {
-      const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+      const status = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+      );
       return status.data?.job?.running === false;
     });
 
-    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingFinal = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
     const mainRows = rows.filter(
       (p: any) =>
@@ -2123,26 +2413,33 @@ describeSocketSuite('prompt automation api', () => {
       };
     });
 
-    const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        automationId: 'review-fixes',
-        automationLabel: 'Review Fixes',
-        prompt: 'find issues and fix them',
-        onFailurePrompt: 'can you give me a summary of what was fixed?',
-        runs: 2,
-      }),
-    });
+    const started = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          automationId: 'review-fixes',
+          automationLabel: 'Review Fixes',
+          prompt: 'find issues and fix them',
+          onFailurePrompt: 'can you give me a summary of what was fixed?',
+          runs: 2,
+        }),
+      },
+    );
     expect(started.r.status).toBe(202);
 
     await pollUntil(async () => {
-      const status = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+      const status = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+      );
       return status.data?.job?.running === false;
     }, 15_000);
 
     await pollUntil(async () => {
-      const pending = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+      const pending = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+      );
       const rows = Array.isArray(pending.data?.pending) ? pending.data.pending : [];
       return rows.some(
         (p: any) =>
@@ -2152,7 +2449,9 @@ describeSocketSuite('prompt automation api', () => {
       );
     }, 15_000);
 
-    const pendingFinal = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);
+    const pendingFinal = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`,
+    );
     const rows = Array.isArray(pendingFinal.data?.pending) ? pendingFinal.data.pending : [];
     const mainRows = rows.filter(
       (p: any) =>
@@ -2215,19 +2514,27 @@ describeSocketSuite('prompt automation api', () => {
 
     try {
       await readSseUntil(reader, streamState, (event) => event.event === 'connected', 'connected');
-      const snapshot = await readSseUntil(reader, streamState, (event) => event.event === 'snapshot', 'snapshot');
+      const snapshot = await readSseUntil(
+        reader,
+        streamState,
+        (event) => event.event === 'snapshot',
+        'snapshot',
+      );
       expect(snapshot.data?.job?.status).toBe('idle');
 
-      const started = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          automationId: 'sse-review',
-          automationLabel: 'SSE Review',
-          prompt: 'check status through sse',
-          runs: 1,
-        }),
-      });
+      const started = await apiFetch(
+        `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/start`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            automationId: 'sse-review',
+            automationLabel: 'SSE Review',
+            prompt: 'check status through sse',
+            runs: 1,
+          }),
+        },
+      );
       expect(started.r.status).toBe(202);
 
       const status = await readSseUntil(
@@ -2241,7 +2548,9 @@ describeSocketSuite('prompt automation api', () => {
       expect(['running', 'completed'].includes(String(status.data?.job?.status ?? ''))).toBe(true);
 
       await pollUntil(async () => {
-        const current = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`);
+        const current = await apiFetch(
+          `/api/drones/${encodeURIComponent(droneId)}/chats/default/automations/status`,
+        );
         return current.data?.job?.running === false;
       }, 10_000);
     } finally {

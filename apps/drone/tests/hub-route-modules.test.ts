@@ -1,10 +1,12 @@
 import { describe, expect, test } from 'bun:test';
 
 import { HubRouter } from '../src/hub/hub-router';
+import { createEditorRouteHandler } from '../src/hub/routes/editor-routes';
 import { registerFleetRoutes } from '../src/hub/routes/fleet-routes';
 import { registerMessageRoutes } from '../src/hub/routes/message-routes';
 import { registerOperationalRoutes } from '../src/hub/routes/operational-routes';
 import { registerSystemRoutes } from '../src/hub/routes/system-routes';
+import { createTerminalRouteHandler } from '../src/hub/routes/terminal-routes';
 
 function routeHarness(body: unknown = null) {
   const responses: Array<{ status: number; body: any }> = [];
@@ -18,6 +20,77 @@ function routeHarness(body: unknown = null) {
 }
 
 describe('extracted Hub route modules', () => {
+  test('delegates terminal routes and rejects invalid session names', async () => {
+    const responses: Array<{ status: number; body: any }> = [];
+    const response = {
+      writableEnded: false,
+      statusCode: 0,
+      setHeader: () => {},
+      end(data: string) {
+        responses.push({ status: this.statusCode, body: JSON.parse(data) });
+        this.writableEnded = true;
+      },
+    };
+    const handler = createTerminalRouteHandler({
+      isSafeTmuxSessionName: () => false,
+    } as any);
+
+    expect(
+      await handler({
+        req: { headers: {} } as any,
+        res: response as any,
+        url: new URL('http://hub.test/api/drones/alpha/terminal/not-safe'),
+        method: 'DELETE',
+        parts: ['api', 'drones', 'alpha', 'terminal', 'not-safe'],
+      }),
+    ).toBe(true);
+    expect(responses).toEqual([
+      { status: 400, body: { ok: false, error: 'invalid session name' } },
+    ]);
+  });
+
+  test('leaves unrelated requests unhandled by terminal and editor routes', async () => {
+    const request = {
+      req: { headers: {} } as any,
+      res: {} as any,
+      url: new URL('http://hub.test/api/health'),
+      method: 'GET',
+      parts: ['api', 'health'],
+    };
+
+    expect(await createTerminalRouteHandler({} as any)(request)).toBe(false);
+    expect(await createEditorRouteHandler({} as any)(request)).toBe(false);
+  });
+
+  test('delegates editor routes and validates the editor name', async () => {
+    const responses: Array<{ status: number; body: any }> = [];
+    const response = {
+      writableEnded: false,
+      statusCode: 0,
+      setHeader: () => {},
+      end(data: string) {
+        responses.push({ status: this.statusCode, body: JSON.parse(data) });
+        this.writableEnded = true;
+      },
+    };
+
+    expect(
+      await createEditorRouteHandler({} as any)({
+        req: { headers: {} } as any,
+        res: response as any,
+        url: new URL('http://hub.test/api/drones/alpha/open-editor?editor=vim'),
+        method: 'POST',
+        parts: ['api', 'drones', 'alpha', 'open-editor'],
+      }),
+    ).toBe(true);
+    expect(responses).toEqual([
+      {
+        status: 400,
+        body: { ok: false, error: 'invalid editor: vim (expected code|cursor)' },
+      },
+    ]);
+  });
+
   test('registers system and setup routes', async () => {
     const { router, request, responses } = routeHarness();
     registerSystemRoutes(router, {
