@@ -12,6 +12,7 @@ export type HubDatabaseFailureKind = 'native-binding' | 'open' | 'configuration'
 export type HubDatabaseMigration = {
   version: number;
   name: string;
+  legacyNames?: readonly string[];
   migrate: (connection: HubDatabaseConnection) => void;
 };
 
@@ -121,6 +122,16 @@ function validateMigrations(migrations: readonly HubDatabaseMigration[]): void {
     const name = migration.name.trim();
     if (!name) throw new Error(`Hub database migration ${migration.version} has no name`);
     if (names.has(name)) throw new Error(`Duplicate hub database migration name: ${name}`);
+    for (const legacyNameRaw of migration.legacyNames ?? []) {
+      const legacyName = legacyNameRaw.trim();
+      if (!legacyName) {
+        throw new Error(`Hub database migration ${migration.version} has an empty legacy name`);
+      }
+      if (names.has(legacyName) || legacyName === name) {
+        throw new Error(`Duplicate hub database migration name: ${legacyName}`);
+      }
+      names.add(legacyName);
+    }
     previousVersion = migration.version;
     names.add(name);
   }
@@ -129,7 +140,8 @@ function validateMigrations(migrations: readonly HubDatabaseMigration[]): void {
 /**
  * Applies all pending migrations atomically. Existing versions are verified by
  * name so changing an already-shipped migration fails loudly instead of
- * silently changing the meaning of the schema history.
+ * silently changing the meaning of the schema history. Explicit legacy names
+ * allow a known, behaviorally identical historical name to remain compatible.
  */
 export function applyHubDatabaseMigrations(
   connection: HubDatabaseConnection,
@@ -172,7 +184,10 @@ export function applyHubDatabaseMigrations(
       for (const migration of migrations) {
         const appliedName = appliedByVersion.get(migration.version);
         if (appliedName !== undefined) {
-          if (appliedName !== migration.name) {
+          if (
+            appliedName !== migration.name &&
+            !(migration.legacyNames ?? []).includes(appliedName)
+          ) {
             throw new Error(
               `Hub database migration ${migration.version} was applied as ${JSON.stringify(appliedName)}, not ${JSON.stringify(migration.name)}`,
             );

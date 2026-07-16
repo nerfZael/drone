@@ -130,6 +130,75 @@ describe('hub database foundation', () => {
     }
   });
 
+  test('accepts an explicitly declared legacy name without rerunning the migration', () => {
+    const connection = new Database(':memory:');
+    try {
+      let migrationRuns = 0;
+      applyHubDatabaseMigrations(
+        connection,
+        [
+          {
+            version: 1,
+            name: 'old migration name',
+            migrate(db) {
+              db.exec('CREATE TABLE legacy_name_probe (value TEXT NOT NULL)');
+            },
+          },
+        ],
+        'legacy-name-probe',
+      );
+
+      applyHubDatabaseMigrations(
+        connection,
+        [
+          {
+            version: 1,
+            name: 'canonical migration name',
+            legacyNames: ['old migration name'],
+            migrate() {
+              migrationRuns += 1;
+            },
+          },
+        ],
+        'legacy-name-probe',
+      );
+
+      assert.equal(migrationRuns, 0);
+      assert.deepEqual(
+        connection
+          .prepare(
+            "SELECT name FROM hub_schema_migrations WHERE scope = 'legacy-name-probe' AND version = 1",
+          )
+          .get(),
+        { name: 'old migration name' },
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
+  test('still rejects an undeclared migration rename', () => {
+    const connection = new Database(':memory:');
+    try {
+      applyHubDatabaseMigrations(
+        connection,
+        [{ version: 1, name: 'original name', migrate() {} }],
+        'rename-probe',
+      );
+      assert.throws(
+        () =>
+          applyHubDatabaseMigrations(
+            connection,
+            [{ version: 1, name: 'unexpected name', migrate() {} }],
+            'rename-probe',
+          ),
+        /was applied as "original name", not "unexpected name"/,
+      );
+    } finally {
+      connection.close();
+    }
+  });
+
   test('rolls back the complete migration batch when a migration fails', () => {
     const connection = new Database(':memory:');
     try {

@@ -14,6 +14,7 @@ import {
   IconChevron,
   IconClock,
   IconColumns,
+  IconDevices,
   IconDrone,
   IconEye,
   IconEyeOff,
@@ -73,7 +74,7 @@ import {
   type SidebarDragGroupRef,
   type SidebarGroupDragData,
 } from './drone-hub-dnd';
-import { SIDEBAR_VISIBLE_MULTI_CHAT_GROUP, type SidebarGroup } from './use-sidebar-view-model';
+import type { SidebarGroup } from './use-sidebar-view-model';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { useSidebarOptimisticGroups } from './use-sidebar-optimistic-groups';
 import type { MoveDronesToGroupResult } from './use-group-management';
@@ -286,7 +287,11 @@ function ReadOnlySidebarGroups({
                         displayName={displayName}
                         selected={selected}
                         highlighted={highlightedDroneIds.has(droneId)}
-                        active={selectedDrone === droneId && hasOnlyDefaultChat && activeChatName === 'default'}
+                        active={
+                          selectedDrone === droneId &&
+                          hasOnlyDefaultChat &&
+                          activeChatName === 'default'
+                        }
                         activeIndicatorStyle="edge"
                         leadingIcon={
                           <IconDrone className="h-3.5 w-3.5 text-[var(--muted-dim)] opacity-72" />
@@ -296,7 +301,11 @@ function ReadOnlySidebarGroups({
                         busy={busy && hasOnlyDefaultChat}
                         unreadAgentMessage={false}
                         onClick={(rowOpts) => {
-                          if (droneId) onSelectDroneCard(droneId, { ...rowOpts, orderedDroneIds: visibleDroneOrder });
+                          if (droneId)
+                            onSelectDroneCard(droneId, {
+                              ...rowOpts,
+                              orderedDroneIds: visibleDroneOrder,
+                            });
                         }}
                         draggable={false}
                         dragging={false}
@@ -398,7 +407,10 @@ function staticTreeFolderPath(node: SidebarTreeFolderNode): string {
   return String(node.groupPath ?? node.path ?? '').trim();
 }
 
-function flattenReadOnlyTreeDroneOrder(nodeTree: SidebarNodeTreeModel, collapsedGroups: Record<string, boolean>): string[] {
+function flattenReadOnlyTreeDroneOrder(
+  nodeTree: SidebarNodeTreeModel,
+  collapsedGroups: Record<string, boolean>,
+): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   const visit = (nodeId: string) => {
@@ -420,7 +432,10 @@ function flattenReadOnlyTreeDroneOrder(nodeTree: SidebarNodeTreeModel, collapsed
   return out;
 }
 
-function collectSidebarFolderDroneIds(nodeTree: SidebarNodeTreeModel, folderPathRaw: string): string[] {
+function collectSidebarFolderDroneIds(
+  nodeTree: SidebarNodeTreeModel,
+  folderPathRaw: string,
+): string[] {
   const folderPath = String(folderPathRaw ?? '').trim();
   if (!folderPath) return [];
   const folderNode = Object.values(nodeTree.nodesById).find(
@@ -527,7 +542,9 @@ function StaticReadOnlySidebarTree({
           unreadAgentMessage={
             hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true
           }
-          onClick={(rowOpts) => onSelectDroneCard(drone.id, { ...rowOpts, orderedDroneIds: visibleDroneOrder })}
+          onClick={(rowOpts) =>
+            onSelectDroneCard(drone.id, { ...rowOpts, orderedDroneIds: visibleDroneOrder })
+          }
           draggable={false}
           dragging={false}
         />
@@ -1381,7 +1398,6 @@ export type DroneSidebarProps = {
   groupMoveError: string | null;
   dronesLoading: boolean;
   sidebarDronesFilteredByRepo: DroneSummary[];
-  sidebarVisibleDrones: DroneSummary[];
   sidebarDrones: DroneSummary[];
   sidebarOptimisticDroneIdSet: Set<string>;
   selectedDroneSet: Set<string>;
@@ -1448,7 +1464,6 @@ export type DroneSidebarProps = {
   onToggleGroupCollapsed: (group: string) => void;
   onRenameGroup: (group: string, nextName?: string) => Promise<boolean> | boolean;
   onOpenGroupMultiChat: (group: string) => void;
-  onOpenVisibleMultiChat: () => void;
   onDeleteGroup: (
     group: string,
     count: number,
@@ -1471,7 +1486,6 @@ export function DroneSidebar({
   groupMoveError,
   dronesLoading,
   sidebarDronesFilteredByRepo,
-  sidebarVisibleDrones,
   sidebarDrones,
   sidebarOptimisticDroneIdSet,
   selectedDroneSet,
@@ -1519,7 +1533,6 @@ export function DroneSidebar({
   onToggleGroupCollapsed,
   onRenameGroup,
   onOpenGroupMultiChat,
-  onOpenVisibleMultiChat,
   onDeleteGroup,
   onPrepareDroneDragStart,
   onOpenReposModal,
@@ -1851,10 +1864,14 @@ export function DroneSidebar({
         const allSelected = folderDroneIds.every((droneId) => selectedDroneIds.includes(droneId));
         return allSelected
           ? selectedDroneIds.filter((droneId) => !folderSet.has(droneId))
-          : [...selectedDroneIds, ...folderDroneIds.filter((droneId) => !selectedDroneIds.includes(droneId))];
+          : [
+              ...selectedDroneIds,
+              ...folderDroneIds.filter((droneId) => !selectedDroneIds.includes(droneId)),
+            ];
       })();
       const toggledOff =
-        Boolean(opts?.toggle) && folderDroneIds.every((droneId) => selectedDroneIds.includes(droneId));
+        Boolean(opts?.toggle) &&
+        folderDroneIds.every((droneId) => selectedDroneIds.includes(droneId));
       if (toggledOff) {
         clearGroupedFolderSelection(path);
       } else {
@@ -2056,8 +2073,7 @@ export function DroneSidebar({
     data: { type: 'sidebar-create-group-drop' },
     disabled: !sidebarDndEnabled || isRepoGroupingMode,
   });
-  const sidebarVisibleDroneCount = sidebarVisibleDrones.length;
-  const sidebarVisibleMultiChatActive = selectedGroupMultiChat === SIDEBAR_VISIBLE_MULTI_CHAT_GROUP;
+  const devicesSettingsActive = appView === 'settings' && settingsActiveTab === 'devices';
   const sharedDroneTreeListProps = React.useMemo<SidebarDroneTreeListSharedProps>(
     () => ({
       droneById: sidebarDroneById,
@@ -2270,10 +2286,10 @@ export function DroneSidebar({
   const canChangeSidebarGroupingMode = sidebarCapabilities.actions && !sidebarGroupingModeOverride;
   const canChangeSidebarViewMode = !viewModeOverride;
   const hasSidebarLayoutOptions =
-    canChangeSidebarGroupingMode ||
-    canChangeSidebarViewMode ||
-    sidebarCapabilities.collapseControl;
-  const activeRepoDroneCount = activeRepoPath ? (droneCountByRepoPath.get(activeRepoPath) ?? 0) : dronesCount;
+    canChangeSidebarGroupingMode || canChangeSidebarViewMode || sidebarCapabilities.collapseControl;
+  const activeRepoDroneCount = activeRepoPath
+    ? (droneCountByRepoPath.get(activeRepoPath) ?? 0)
+    : dronesCount;
   const selectedRepoHasNoDrones = Boolean(activeRepoPath) && activeRepoDroneCount === 0;
   const recentFilterHidAllDrones =
     showRecentDronesOnly && dronesCount > 0 && sidebarDrones.length === 0;
@@ -2284,16 +2300,17 @@ export function DroneSidebar({
     activeRepoDroneCount > 0 &&
     sidebarDronesFilteredByRepo.length === 0 &&
     Boolean(activeRepoPath);
-  const selectedDronesRenaming = selectedDroneIds.some((droneId) => Boolean(renamingDrones[droneId]));
-  const selectedDronesActionBusy = selectedDroneIds.some((droneId) =>
-    Boolean(deletingDrones[droneId]) ||
-    Boolean(renamingDrones[droneId]) ||
-    Boolean(settingBaseImages[droneId]),
+  const selectedDronesRenaming = selectedDroneIds.some((droneId) =>
+    Boolean(renamingDrones[droneId]),
+  );
+  const selectedDronesActionBusy = selectedDroneIds.some(
+    (droneId) =>
+      Boolean(deletingDrones[droneId]) ||
+      Boolean(renamingDrones[droneId]) ||
+      Boolean(settingBaseImages[droneId]),
   );
   const renameSelectedDronesDisabled =
-    !sidebarCapabilities.actions ||
-    selectedDroneIds.length <= 1 ||
-    selectedDronesActionBusy;
+    !sidebarCapabilities.actions || selectedDroneIds.length <= 1 || selectedDronesActionBusy;
 
   return (
     <>
@@ -2376,7 +2393,11 @@ export function DroneSidebar({
                     }
                     aria-label={`Rename ${selectedDroneIds.length} selected drones`}
                   >
-                    {selectedDronesRenaming ? <IconSpinner className="opacity-80" /> : <IconPencil className="opacity-80" />}
+                    {selectedDronesRenaming ? (
+                      <IconSpinner className="opacity-80" />
+                    ) : (
+                      <IconPencil className="opacity-80" />
+                    )}
                   </button>
                 </div>
               )}
@@ -2388,19 +2409,19 @@ export function DroneSidebar({
               <div className="flex items-center gap-1 flex-shrink-0">
                 <button
                   type="button"
-                  onClick={onOpenVisibleMultiChat}
-                  disabled={sidebarVisibleDroneCount === 0}
+                  onClick={() => {
+                    setSettingsActiveTab('devices');
+                    setAppView('settings');
+                  }}
                   className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                    sidebarVisibleDroneCount === 0
-                      ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
-                      : sidebarVisibleMultiChatActive
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                    devicesSettingsActive
+                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
                   }`}
-                  title={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
-                  aria-label={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
+                  title="Open device settings"
+                  aria-label="Open device settings"
                 >
-                  <IconColumns className="opacity-80" />
+                  <IconDevices className="opacity-80" />
                 </button>
                 <div ref={headerActionsMenuRef} className="relative">
                   <button
@@ -2593,7 +2614,9 @@ export function DroneSidebar({
                     ) : null}
                   </div>
                 ) : null}
-                {!recentFilterHidAllDrones && !selectedRepoHasNoDrones && sidebarCapabilities.createDrones ? (
+                {!recentFilterHidAllDrones &&
+                !selectedRepoHasNoDrones &&
+                sidebarCapabilities.createDrones ? (
                   <div className="mt-4 text-[10px] text-[var(--muted-dim)]">
                     Or run{' '}
                     <code className="rounded border border-[rgba(167,139,250,.08)] bg-[rgba(167,139,250,.06)] px-1.5 py-0.5 text-[10px] text-[#C4B5FD]">
@@ -2615,7 +2638,9 @@ export function DroneSidebar({
                   className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
                   style={{ fontFamily: 'var(--display)' }}
                 >
-                  {recentFilterHidRepoDrones ? 'No recent drones for selected repo' : 'No drones for selected repo'}
+                  {recentFilterHidRepoDrones
+                    ? 'No recent drones for selected repo'
+                    : 'No drones for selected repo'}
                 </div>
                 {recentFilterHidRepoDrones ? (
                   <div className="mt-2 text-[10px] text-[var(--muted-dim)]">
@@ -3005,7 +3030,9 @@ export function DroneSidebar({
                         <button
                           type="button"
                           onClick={() =>
-                            setSidebarGroupingMode((prev) => (prev === 'groups' ? 'repos' : 'groups'))
+                            setSidebarGroupingMode((prev) =>
+                              prev === 'groups' ? 'repos' : 'groups',
+                            )
                           }
                           className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
                           role="menuitem"
@@ -3101,7 +3128,9 @@ export function DroneSidebar({
                         >
                           <span>{autoDelete ? 'Delete confirm off' : 'Delete confirm on'}</span>
                           <IconTrash
-                            className={autoDelete ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'}
+                            className={
+                              autoDelete ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
+                            }
                           />
                         </button>
                       ) : null}
@@ -3278,22 +3307,20 @@ export function DroneSidebar({
         {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? (
           <SidebarIconButton
             onClick={() => {
-              setSidebarCollapsed(false);
-              onOpenVisibleMultiChat();
+              setSettingsActiveTab('devices');
+              setAppView('settings');
             }}
             className={`border ${
-              sidebarVisibleDroneCount === 0
-                ? 'border-[var(--border-subtle)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
-                : sidebarVisibleMultiChatActive
-                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+              devicesSettingsActive
+                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
             }`}
-            title={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
-            ariaLabel={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
-            disabled={!collapsedRailInteractive || sidebarVisibleDroneCount === 0}
-            tabIndex={collapsedRailInteractive && sidebarVisibleDroneCount > 0 ? 0 : -1}
+            title="Open device settings"
+            ariaLabel="Open device settings"
+            disabled={!collapsedRailInteractive}
+            tabIndex={collapsedRailInteractive ? 0 : -1}
           >
-            <IconColumns className="opacity-80" />
+            <IconDevices className="opacity-80" />
           </SidebarIconButton>
         ) : null}
       </div>

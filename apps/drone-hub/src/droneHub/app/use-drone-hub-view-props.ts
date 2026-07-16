@@ -8,7 +8,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     groupMoveError,
     dronesLoading,
     sidebarDronesFilteredByRepo,
-    sidebarVisibleDrones,
     sidebarDrones,
     sidebarOptimisticDroneIdSet,
     selectedDroneSet,
@@ -56,7 +55,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     setCollapsedGroups,
     renameGroup,
     openGroupMultiChat,
-    openSidebarVisibleMultiChat,
     deleteGroup,
     prepareSidebarDroneDragStart,
     setReposModalOpen,
@@ -67,7 +65,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     groupMoveError,
     dronesLoading,
     sidebarDronesFilteredByRepo,
-    sidebarVisibleDrones,
     sidebarDrones,
     sidebarOptimisticDroneIdSet,
     selectedDroneSet,
@@ -101,8 +98,10 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     onSelectDroneChat: (droneId, chatName) => {
       selectDroneChat(droneId, chatName);
     },
-    onCreateDroneChat: async (drone, chatName, opts) => await createDroneChat(drone, chatName, opts),
-    onRenameDroneChat: async (droneId, chatName, newName) => await renameCanvasChat(droneId, chatName, newName),
+    onCreateDroneChat: async (drone, chatName, opts) =>
+      await createDroneChat(drone, chatName, opts),
+    onRenameDroneChat: async (droneId, chatName, newName) =>
+      await renameCanvasChat(droneId, chatName, newName),
     onDeleteDroneChat: async (droneId, chatName) => await deleteCanvasChat(droneId, chatName),
     onOpenCloneModal: openCloneModal,
     onRenameDrone: renameDrone,
@@ -124,9 +123,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     onRenameGroup: (group, nextName) => renameGroup(group, nextName),
     onOpenGroupMultiChat: (group) => {
       openGroupMultiChat(group);
-    },
-    onOpenVisibleMultiChat: () => {
-      openSidebarVisibleMultiChat();
     },
     onDeleteGroup: async (group, count, opts) => await deleteGroup(group, count, opts),
     onPrepareDroneDragStart: prepareSidebarDroneDragStart,
@@ -354,7 +350,8 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
       onNewCustomAgentLabelChange: setNewCustomAgentLabel,
       newCustomAgentCommand,
       onNewCustomAgentCommandChange: setNewCustomAgentCommand,
-      onDeleteCustomAgent: (id) => setCustomAgents((prev: any[]) => prev.filter((x) => x.id !== id)),
+      onDeleteCustomAgent: (id) =>
+        setCustomAgents((prev: any[]) => prev.filter((x) => x.id !== id)),
       onAddCustomAgent: handleAddCustomAgent,
       onRequestClose: () => setCustomAgentModalOpen(false),
     },
@@ -396,7 +393,8 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
           activeRepoPath,
           deletingRepos,
           onClose: () => setReposModalOpen(false),
-          onToggleActiveRepoPath: (path) => setActiveRepoPath((prev: string) => (prev === path ? '' : path)),
+          onToggleActiveRepoPath: (path) =>
+            setActiveRepoPath((prev: string) => (prev === path ? '' : path)),
           onDeleteRepo: (path) => {
             void deleteRepo(path);
           },
@@ -416,7 +414,9 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
         }
       : null,
     droneDeleteConfirmModalProps:
-      droneDeleteConfirm && Array.isArray(droneDeleteConfirm.drones) && droneDeleteConfirm.drones.length > 0
+      droneDeleteConfirm &&
+      Array.isArray(droneDeleteConfirm.drones) &&
+      droneDeleteConfirm.drones.length > 0
         ? {
             busy: false,
             deleteMode,
@@ -647,29 +647,28 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
 
   return {
     appView,
-    setupWelcomeProps:
-      setupStatusState.setupStatus?.shouldShowWelcome
-        ? {
-            setupStatus: setupStatusState.setupStatus,
-            setupStatusLoading: setupStatusState.setupStatusLoading,
-            setupStatusError: setupStatusState.setupStatusError,
-            dismissingWelcome: setupStatusState.dismissingWelcome,
-            onDismissWelcome: () => {
-              void setupStatusState.dismissWelcome();
-            },
-            onReload: () => {
-              void setupStatusState.reloadSetupStatus();
-            },
-            onOpenProfiles: () => {
-              setSettingsActiveTab('profiles');
-              setAppView('settings');
-            },
-            onOpenGeneralSettings: () => {
-              setSettingsActiveTab('general');
-              setAppView('settings');
-            },
-          }
-        : null,
+    setupWelcomeProps: setupStatusState.setupStatus?.shouldShowWelcome
+      ? {
+          setupStatus: setupStatusState.setupStatus,
+          setupStatusLoading: setupStatusState.setupStatusLoading,
+          setupStatusError: setupStatusState.setupStatusError,
+          dismissingWelcome: setupStatusState.dismissingWelcome,
+          onDismissWelcome: () => {
+            void setupStatusState.dismissWelcome();
+          },
+          onReload: () => {
+            void setupStatusState.reloadSetupStatus();
+          },
+          onOpenProfiles: () => {
+            setSettingsActiveTab('profiles');
+            setAppView('settings');
+          },
+          onOpenGeneralSettings: () => {
+            setSettingsActiveTab('general');
+            setAppView('settings');
+          },
+        }
+      : null,
     settingsViewProps: {
       requestJson,
       llm: llmSettingsState,
@@ -716,7 +715,10 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           draftCreateName,
           draftCreateGroup,
           draftCreateParentDroneLabel:
-            drones.find((drone: any) => String(drone?.id ?? '').trim() === String(draftCreateParentDroneId ?? '').trim())?.name ??
+            drones.find(
+              (drone: any) =>
+                String(drone?.id ?? '').trim() === String(draftCreateParentDroneId ?? '').trim(),
+            )?.name ??
             (String(draftCreateParentDroneId ?? '').trim() || null),
           draftCreateError,
           queuedPromptsByDroneChat,

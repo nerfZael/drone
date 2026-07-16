@@ -21,7 +21,6 @@ import Copy from 'lucide-react-native/icons/copy';
 import Plus from 'lucide-react-native/icons/plus';
 import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
 import Trash2 from 'lucide-react-native/icons/trash-2';
-import WifiOff from 'lucide-react-native/icons/wifi-off';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
 import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext';
 import {
@@ -519,12 +518,6 @@ function Shell() {
               <MoreVertical color={colors.text} size={19} strokeWidth={2.2} />
             </Pressable>
           ) : null}
-          {mesh.connectedDeviceIds.length === 0 ? (
-            <View style={styles.route}>
-              <WifiOff color={colors.warning} size={11} strokeWidth={2.2} />
-              <Text style={styles.routeText}>Offline</Text>
-            </View>
-          ) : null}
         </View>
       </View>
       <View style={styles.content}>{content}</View>
@@ -682,19 +675,6 @@ const styles = StyleSheet.create({
   actionMenuItemPressed: { backgroundColor: colors.whiteWash },
   actionMenuItemText: { color: colors.text, fontSize: 13, fontWeight: '700' },
   actionMenuItemTextDanger: { color: colors.danger },
-  route: {
-    marginLeft: 'auto',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-    borderColor: colors.warning,
-    borderWidth: 1,
-    borderRadius: 999,
-    paddingHorizontal: 9,
-    paddingVertical: 5,
-    backgroundColor: colors.warningDark,
-  },
-  routeText: { color: colors.warning, fontSize: 9, fontWeight: '800', letterSpacing: 0.2 },
   content: { flex: 1 },
   pairBack: { paddingHorizontal: 20, paddingTop: 14 },
   backButton: {

@@ -168,13 +168,14 @@ export function DevicesScreen() {
           />
         }
       >
-        <ErrorBanner message={error ?? mesh.error} />
+        <ErrorBanner message={error} />
         <View style={styles.list}>
           {orderedDevices.map((device) => {
             const self = device.id === mesh.identity?.id;
             const connected = self || mesh.connectedDeviceIds.includes(device.id);
             const selected = device.id === selectedDeviceId;
             const expanded = selected && permissionsExpanded;
+            const connectionError = self ? null : mesh.connectionErrorsByDevice[device.id];
             const DeviceIcon =
               self || /android|ios|phone/i.test(device.platform) ? Smartphone : Laptop;
             const Disclosure = expanded ? ChevronDown : ChevronRight;
@@ -210,6 +211,9 @@ export function DevicesScreen() {
                     <Text numberOfLines={1} style={[textStyles.mono, styles.deviceId]}>
                       {device.platform}
                     </Text>
+                    {connectionError ? (
+                      <Text style={styles.connectionError}>{connectionError}</Text>
+                    ) : null}
                   </View>
                   <View style={styles.status}>
                     <View style={[styles.dot, connected && styles.dotConnected]} />
@@ -217,7 +221,9 @@ export function DevicesScreen() {
                       {connected ? 'Online' : 'Offline'}
                     </Text>
                   </View>
-                  {!self ? <Disclosure color={colors.muted} size={15} strokeWidth={2} /> : null}
+                  <View style={styles.disclosureSlot}>
+                    {!self ? <Disclosure color={colors.muted} size={15} strokeWidth={2} /> : null}
+                  </View>
                 </Pressable>
 
                 {expanded ? (
@@ -393,6 +399,7 @@ const styles = StyleSheet.create({
   nameRow: { flexDirection: 'row', alignItems: 'center', gap: 7 },
   deviceName: { color: colors.text, fontSize: 14, fontWeight: '800', flexShrink: 1 },
   deviceId: { fontSize: 8 },
+  connectionError: { color: colors.warning, fontSize: 9, lineHeight: 13 },
   self: {
     color: colors.accent,
     backgroundColor: colors.accentDark,
@@ -407,6 +414,7 @@ const styles = StyleSheet.create({
   status: { flexDirection: 'row', alignItems: 'center', gap: 5 },
   statusText: { color: colors.muted, fontSize: 8, fontWeight: '800' },
   statusTextConnected: { color: colors.online },
+  disclosureSlot: { width: 15, alignItems: 'center', justifyContent: 'center' },
   permissionPanel: {
     marginTop: -1,
     padding: 12,

@@ -41,6 +41,7 @@ const MIGRATIONS: readonly HubDatabaseMigration[] = [
   {
     version: 2,
     name: 'remove obsolete orchestration audit',
+    legacyNames: ['remove obsolete fleet audit'],
     migrate(connection) {
       connection.exec(`
         DROP INDEX IF EXISTS workflow_fleet_audit_actor_time;
