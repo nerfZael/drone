@@ -183,41 +183,6 @@ type DroneRegistryV1 = {
       apiKey?: string;
       updatedAt?: string;
     };
-    voiceStream?: {
-      pairingPassword?: string;
-      updatedAt?: string;
-    };
-    desktopVoice?: {
-      modelId?: string;
-      updatedAt?: string;
-    };
-    voiceApproval?: {
-      triggerPhrase?: string;
-      unlockCode?: string;
-      lockCode?: string;
-      lockedOffCode?: string;
-      minDigits?: number;
-      maxDigits?: number;
-      stableMs?: number;
-      collectTimeoutMs?: number;
-      duplicateCooldownMs?: number;
-      finalizeCheckIntervalMs?: number;
-      postPromptCommandSuppressionMs?: number;
-      updatedAt?: string;
-    };
-    voiceTranscription?: {
-      finalMode?: 'full-recording' | 'segments';
-      updatedAt?: string;
-    };
-    voiceActivation?: {
-      normalAliases?: string[];
-      realTimeAliases?: string[];
-      updatedAt?: string;
-    };
-    voiceRealtime?: {
-      enabled?: boolean;
-      updatedAt?: string;
-    };
     filesystem?: {
       uploadMaxBytes?: number;
       updatedAt?: string;

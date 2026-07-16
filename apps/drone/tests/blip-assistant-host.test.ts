@@ -134,7 +134,7 @@ describe('Blip assistant host', () => {
     });
   });
 
-  test('persists externally produced realtime messages and publishes transcript changes', async () => {
+  test('persists externally produced messages and publishes transcript changes', async () => {
     await withTempDroneDataDir('blip-assistant-external-message-', async () => {
       const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
       const host = new BlipAssistantHost(async () => ({
@@ -145,16 +145,16 @@ describe('Blip assistant host', () => {
         tools: [],
       }));
       const events: any[] = [];
-      const unsubscribe = host.subscribeEvents('thread-realtime', (event) => events.push(event));
+      const unsubscribe = host.subscribeEvents('thread-external', (event) => events.push(event));
 
-      await host.appendExternalMessage('thread-realtime', { role: 'user', content: 'spoken request', timestamp: Date.now() });
-      await host.appendExternalMessage('thread-realtime', {
+      await host.appendExternalMessage('thread-external', { role: 'user', content: 'external request', timestamp: Date.now() });
+      await host.appendExternalMessage('thread-external', {
         role: 'assistant',
-        content: [{ type: 'text', text: 'spoken response' }],
+        content: [{ type: 'text', text: 'external response' }],
         timestamp: Date.now(),
       });
 
-      const page = await host.historyPage('thread-realtime', { limit: 10 });
+      const page = await host.historyPage('thread-external', { limit: 10 });
       expect(page.entries.map((entry) => entry.message.role)).toEqual(['user', 'assistant']);
       expect(events.filter((event) => event.type === 'transcript_changed').map((event) => event.role)).toEqual(['user', 'assistant']);
       unsubscribe();

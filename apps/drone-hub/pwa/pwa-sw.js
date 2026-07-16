@@ -5,9 +5,7 @@ const DRONE_HUB_DEV_WORKER = DRONE_HUB_SW_BUILD_ID === '__DRONE_HUB_BUILD_ID__';
 const SHELL_ASSETS = [
   '/',
   '/index.html',
-  '/remote.html',
   '/manifest.webmanifest',
-  '/remote-manifest.webmanifest',
   '/icons/drone-app-icon-32.png',
   '/icons/drone-app-icon-256.png',
   '/icons/drone-app-icon-512.png',
@@ -80,8 +78,7 @@ self.addEventListener('fetch', (event) => {
         const cached = await caches.match(request);
         if (cached) return cached;
         if (request.mode === 'navigate') {
-          const fallback = url.pathname === '/remote.html' ? '/remote.html' : '/index.html';
-          return (await caches.match(fallback)) || Response.error();
+          return (await caches.match('/index.html')) || Response.error();
         }
         return Response.error();
       }),

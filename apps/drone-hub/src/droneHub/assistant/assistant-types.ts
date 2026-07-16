@@ -12,8 +12,6 @@ export type AssistantThreadStatus =
 
 export type AssistantProviderId = 'openai' | 'gemini' | 'codex';
 export type AssistantPromptDeliveryMode = 'queue' | 'asap';
-export type AssistantPanelMode = 'normal' | 'voice';
-export type AssistantSystemPromptKind = 'normal' | 'voice';
 
 export type AssistantRunModel = {
   provider: AssistantProviderId;
@@ -46,8 +44,6 @@ export type AssistantThread = {
   title: string;
   createdAt: string;
   updatedAt: string;
-  voiceEnabled?: boolean;
-  voiceEnabledAt?: string | null;
   model: string;
   provider: AssistantProviderId;
   thinkingLevel: string;
@@ -135,14 +131,6 @@ export type AssistantSnapshot = {
 export type AssistantSystemPromptSettings = {
   ok: true;
   assistantSystemPrompt: {
-    prompt: string;
-    promptSource: 'settings' | 'default';
-    updatedAt: string | null;
-    defaultPrompt: string;
-    maxPromptChars: number;
-    runtimeAppendix: string;
-  };
-  assistantVoiceSystemPrompt: {
     prompt: string;
     promptSource: 'settings' | 'default';
     updatedAt: string | null;

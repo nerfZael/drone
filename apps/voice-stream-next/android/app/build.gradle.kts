@@ -43,12 +43,6 @@ android {
         }
     }
 
-    sourceSets {
-        getByName("main") {
-            assets.srcDir("../../../voice-stream/android/app/src/main/assets")
-        }
-    }
-
     if (releaseKeystorePath.isNotBlank() && releaseKeyAlias.isNotBlank() && releaseKeyPassword.isNotBlank() && releaseStorePassword.isNotBlank()) {
         signingConfigs {
             create("release") {

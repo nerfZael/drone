@@ -19,6 +19,7 @@
     "node": ">=18"
   },
   "scripts": {
+    "prebuild": "rimraf dist",
     "build": "tsc -p tsconfig.json",
     "postbuild": "node scripts/postbuild.cjs",
     "clean": "rimraf dist",
@@ -45,7 +46,6 @@
     "@mariozechner/pi-ai": "workspace:*",
     "@modelcontextprotocol/sdk": "1.29.0",
     "ai": "^6.0.77",
-    "avr-vad": "^1.0.10",
     "better-sqlite3": "^12.10.0",
     "commander": "^12.1.0",
     "dotenv": "^17.2.4",
@@ -56,8 +56,7 @@
     "zod": "^4.3.6"
   },
   "optionalDependencies": {
-    "electron": "31.7.7",
-    "vosk": "^0.3.39"
+    "electron": "31.7.7"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

@@ -2,7 +2,7 @@
 
 ## Status
 
-Active sequencing plan based on `DRONE_HUB_DEVICE_NETWORK_SPEC.md`. The focused prototype's Milestones 0 and 1 were implemented on 2026-07-13; release validation and later production-hardening phases remain.
+Active sequencing plan based on `DRONE_HUB_DEVICE_NETWORK_SPEC.md`. The focused prototype's Milestones 0 and 1 were implemented on 2026-07-13; the legacy browser client has been retired in favor of the Android app and device mesh, while release validation and later production-hardening phases remain.
 
 The approved prototype slice and its acceptance scenarios are defined in `DRONE_HUB_DEVICE_NETWORK_PROTOTYPE.md`.
 
@@ -142,7 +142,7 @@ A bridge peer should authenticate mesh members, choose a known next hop, and for
 - A user can express Phone-to-Desktop and Laptop-to-Desktop permissions differently.
 - Device names can change without changing identity or breaking grants.
 
-## Phase 4 — React Native replacement for Remote Hub
+## Phase 4 — React Native mobile app
 
 Ship Android first. Keep the shared protocol and application model platform-neutral, and run a small iOS technical validation for key storage, pairing, and encrypted peer sessions before making choices that would block a later iOS app.
 
@@ -167,13 +167,13 @@ Ship Android first. Keep the shared protocol and application model platform-neut
 4. Prompt and stop.
 5. Container creation.
 6. Host creation and permission configuration.
-7. Remaining Remote Hub panels that are still valuable on mobile.
+7. Remaining desktop panels that are valuable on mobile.
 
 Do not copy every desktop panel merely for parity. Mobile should keep a focused remote-control experience while using the same underlying operations.
 
 ### Exit criteria
 
-- The mobile app covers the Remote Hub workflows that users still depend on.
+- The mobile app covers the required mobile workflows.
 - Host drones are not hidden globally; they appear only when the target supports them and policy permits them.
 - Logging out or revoking mobile invalidates its network credentials, not just local UI state.
 - The active target is visible near every state-changing action.
@@ -255,21 +255,19 @@ Do not solve collisions by prefixing display names.
 - Desktop executing a tool does not gain access back to Phone or VPS.
 - Every tool card and audit entry identifies the resolved target and actor chain.
 
-## Phase 7 — Remote Hub retirement
+## Phase 7 — Legacy browser-client retirement (complete)
 
 ### Scope
 
-- Stop issuing new Remote Hub browser pairings once mobile parity is accepted.
-- Show an in-product migration notice and pairing path to Drone Hub mobile.
-- Provide a way to list and revoke old persisted Remote Hub sessions.
-- Remove ngrok's coupling to the Remote Hub mini-server while retaining ngrok as an optional mesh route provider.
-- Retain the old server behind an explicit temporary compatibility switch if needed.
-- Delete the Remote Hub proxy and PWA only after the announced migration window.
+- Browser pairing and its broad persisted sessions are no longer issued.
+- Mobile pairing is available through the Devices screen and device mesh.
+- ngrok is managed independently as an optional mesh route provider.
+- The legacy proxy, PWA, lifecycle controls, sessions, and compatibility endpoints have been deleted.
 
 ### Exit criteria
 
-- Required Remote Hub workflows exist in mobile or desktop device-network surfaces.
-- Existing broad browser sessions can be enumerated and revoked.
+- Required workflows exist in mobile or desktop device-network surfaces.
+- No broad browser-session authentication remains in the product.
 - Support documentation explains that not every device needs public ingress, but outbound-only devices need a reachable member path.
 - Removing the old proxy does not remove unrelated Hub SSE or local APIs.
 
@@ -343,7 +341,7 @@ These areas can later be developed in parallel once Phase 0 contracts are stable
 | Mesh transport | Membership records, pairing, gossip, direct connections, forwarding, route selection |
 | Desktop UX | Devices, grants, target selector, diagnostics |
 | Mobile | Native pairing, secure storage, focused control UI |
-| Migration | Remote Hub inventory, parity, session revocation, retirement |
+| Migration | Legacy-client inventory, parity, session revocation, retirement |
 
 The protocol and target-security contracts should land before other workstreams depend on them.
 
@@ -407,7 +405,5 @@ Mitigation: review operation-to-permission mappings, keep host creation separate
 1. Do the proposed 24-hour privileged-write and seven-day low-risk-read isolation windows match the desired security/availability balance?
 2. What exact actions may the optional offline recovery key authorize?
 3. Does the Noise/`snow` Rust core pass the Node and Android spike, packaging, test-vector, and license checks?
-4. Which exact Hub operations are required for Remote Hub replacement?
-5. May an administrator configure another target's policy while that target is offline, or must target-owned changes wait for it to reconnect?
-6. What audit retention is useful without collecting excessive sensitive metadata?
-7. How long will the old Remote Hub compatibility window remain open?
+4. May an administrator configure another target's policy while that target is offline, or must target-owned changes wait for it to reconnect?
+5. What audit retention is useful without collecting excessive sensitive metadata?

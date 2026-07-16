@@ -14,7 +14,6 @@ export const CHAT_IDLE_DEFAULT_IDLE_FOR_MS = 1000;
 export const CHAT_IDLE_SUBSCRIPTION_EXPIRES_AFTER_MS = 24 * 60 * 60 * 1000;
 export const CHAT_IDLE_MAX_SUBSCRIPTIONS = 200;
 export const CHAT_IDLE_MAX_TARGETS = 20;
-export const ASSISTANT_VOICE_AUTO_SPEAK_MAX_CHARS = 600;
 export const DRONE_READY_DEFAULT_TIMEOUT_MS = 10 * 60 * 1000;
 export const DRONE_READY_POLL_INTERVAL_MS = 250;
 export const ASSISTANT_BASH_DEFAULT_TIMEOUT_MS = 30 * 60_000;
@@ -59,7 +58,6 @@ export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'Creating or cloning drones, creating chats, creating groups, opening chats, highlighting drones, and reordering the sidebar do not require approval. Creating or cloning a drone and creating a group are global operations: when their tools are enabled, existing-drone read/write scope does not block them. Assistant-created drones must use the container (Docker) runtime. Renaming drones, changing drone groups, sending a user message to a drone, and running bash in a drone require user approval; explain briefly what you intend to do.',
   'File write tools require write access to the target drone and should be used carefully for concrete code or content edits.',
   'If an approval-gated write tool returns successfully, the user already approved that action. Do not ask for the same approval again.',
-  'Realtime threads can use speak to send short spoken replies back to the voice device that started the request.',
   'When creating a drone, omit fields you want inherited from the current open drone. Runtime is always container even if the source drone uses host runtime. Only set repoBranchSource=remote when the user asked for a remote branch and you have a remoteBranch value.',
   'Use clone_drone when the user asks for a copy of an existing ready container drone. Create and clone return after the new drone is ready; if you provided an initial message, subscribe to the new drone default chat when you need to resume after the drone responds.',
   'Do not claim a drone completed work unless the drone transcript or user says so.',
@@ -167,7 +165,7 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     name: 'create_new_thread',
     label: 'Create new thread',
     category: 'actions',
-    description: 'Open a fresh assistant thread or voice session.',
+    description: 'Open a fresh assistant thread.',
   },
   {
     name: 'list_targets',
@@ -290,12 +288,6 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     description: 'Cancel a durable chat-idle subscription.',
   },
   {
-    name: 'speak',
-    label: 'Speak',
-    category: 'drones',
-    description: 'Send a short spoken reply to the connected Android or desktop voice device.',
-  },
-  {
     name: 'create_drone',
     label: 'Create drone',
     category: 'drones',
@@ -403,8 +395,7 @@ export const ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_ALL_TOOL_NAMES.fil
     name !== 'get_system_prompt' &&
     name !== 'update_system_prompt' &&
     name !== 'set_thinking_level' &&
-    name !== 'create_new_thread' &&
-    name !== 'speak',
+    name !== 'create_new_thread',
 );
 export const ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES = [
   'transfer_files',
@@ -443,51 +434,6 @@ export const ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED
   ASSISTANT_PRE_WEB_SEARCH_LEGACY_DEFAULT_ENABLED_TOOL_NAMES.filter(
     (name) => name !== 'subscribe_to_any_chat_idle' && name !== 'subscribe_to_all_chats_idle',
   ).concat('subscribe_to_chats_idle');
-export const ASSISTANT_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [
-  ...ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES,
-  'set_thinking_level',
-  'create_new_thread',
-  'speak',
-];
-export const ASSISTANT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [
-  ...ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES,
-  'set_thinking_level',
-  'speak',
-];
-export const ASSISTANT_PRE_FETCH_CONTENT_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [
-  ...ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES,
-  'set_thinking_level',
-  'create_new_thread',
-  'speak',
-];
-export const ASSISTANT_PRE_FETCH_CONTENT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [
-  ...ASSISTANT_PRE_FETCH_CONTENT_DEFAULT_ENABLED_TOOL_NAMES,
-  'set_thinking_level',
-  'speak',
-];
-export const ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES =
-  [
-    ...ASSISTANT_PRE_FETCH_CONTENT_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
-    'set_thinking_level',
-    'speak',
-  ];
-export const ASSISTANT_PRE_WEB_SEARCH_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [
-  ...ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES,
-  'set_thinking_level',
-  'create_new_thread',
-  'speak',
-];
-export const ASSISTANT_PRE_WEB_SEARCH_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES = [
-  ...ASSISTANT_PRE_WEB_SEARCH_DEFAULT_ENABLED_TOOL_NAMES,
-  'set_thinking_level',
-  'speak',
-];
-export const ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_VOICE_DEFAULT_ENABLED_TOOL_NAMES =
-  [
-    ...ASSISTANT_PRE_WEB_SEARCH_PRE_CHAT_IDLE_SPLIT_LEGACY_DEFAULT_ENABLED_TOOL_NAMES,
-    'set_thinking_level',
-    'speak',
-  ];
 type AssistantModelOptionDefinition = {
   provider: LlmProviderId;
   id: string;

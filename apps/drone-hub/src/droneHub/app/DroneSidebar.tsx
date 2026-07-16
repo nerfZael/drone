@@ -24,7 +24,6 @@ import {
   IconPencil,
   IconPlus,
   IconPlusDouble,
-  IconRemote,
   IconSettings,
   IconSidebarCollapse,
   IconSidebarExpand,
@@ -2406,22 +2405,6 @@ export function DroneSidebar({
                   aria-label={`Open multi-chat for ${sidebarVisibleDroneCount} visible drone${sidebarVisibleDroneCount === 1 ? '' : 's'}`}
                 >
                   <IconColumns className="opacity-80" />
-                </button>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSettingsActiveTab('remote');
-                    setAppView('settings');
-                  }}
-                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                    appView === 'settings' && settingsActiveTab === 'remote'
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                  }`}
-                  title="Remote settings"
-                  aria-label="Remote settings"
-                >
-                  <IconRemote className="opacity-80" />
                 </button>
                 <div ref={headerActionsMenuRef} className="relative">
                   <button

@@ -9,7 +9,6 @@ import { SHORTCUT_DEFINITIONS, isShortcutMatch } from './shortcuts';
 import { isDroneStartingOrSeeding } from './helpers';
 import { computeTranscriptAutoScrollDecision, shouldDispatchEditableShortcutAction } from './lifecycle-effect-helpers';
 import { useDropdownDismiss } from '../../ui/dropdown';
-import { dispatchAssistantDesktopVoiceToggle } from '../assistant/desktop-assistant-voice';
 
 type Updater<T> = T | ((prev: T) => T);
 type Setter<T> = (next: Updater<T>) => void;
@@ -311,10 +310,6 @@ export function useDroneHubLifecycleEffects({
       },
       focusPrimaryChatInput: () => focusPrimaryChatInput(),
       toggleVoiceClipboardRecording: () => toggleVoiceClipboardRecording(),
-      toggleAssistantVoiceSession: () => {
-        dispatchAssistantDesktopVoiceToggle();
-        return true;
-      },
       markSelectedDronesUnread: () => onMarkSelectedDronesUnreadShortcut(),
       toggleSidebarCollapsed: () => {
         setSidebarCollapsed((prev) => !prev);

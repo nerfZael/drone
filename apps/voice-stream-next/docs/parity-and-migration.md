@@ -2,16 +2,16 @@
 
 ## Strategy
 
-Build Voice Stream Next in parallel. Keep the current system working. Move shared contracts into packages only when doing so reduces duplication without coupling the new product to the old implementation.
+Maintain Voice Stream as a standalone product. Move shared contracts into packages only when doing so reduces duplication without coupling Voice Stream to Drone Hub.
 
 ## Feature Parity Matrix
 
 | Area | Current System | Voice Stream Next Target | First Target |
 | --- | --- | --- | --- |
-| Android app | Exists in `apps/voice-stream` | New Android client | Yes |
-| Desktop voice | Exists inside Drone Hub | Separate Electron desktop voice client | Yes |
-| Voice server | Exists in `apps/voice-stream/server` | New Fastify backend | Yes |
-| Web dashboard | Exists only as current Drone Hub UI | New Vite dashboard | Yes |
+| Android app | Voice Stream Android client | Maintained Android client | Yes |
+| Desktop voice | Voice Stream Electron client | Maintained Electron client | Yes |
+| Voice server | Voice Stream Fastify backend | Maintained Fastify backend | Yes |
+| Web dashboard | Voice Stream Vite dashboard | Maintained Vite dashboard | Yes |
 | Pairing QR | Exists | Versioned pairing payload | Yes |
 | Pairing token | Exists | Per-device token model | Yes |
 | Wake phrase | Exists | Android and desktop behavior aligned | Yes |
@@ -60,7 +60,7 @@ Deliverables:
 
 Acceptance:
 
-- existing `apps/voice-stream` still runs
+- Voice Stream Next remains independent of Drone Hub
 - new server can start independently
 - Vite web dashboard can start independently
 - server creates or opens its SQLite database
@@ -105,7 +105,7 @@ Deliverables:
 Acceptance:
 
 - Android and desktop clients follow the same mode model
-- behavior matches the current voice stack unless intentionally changed
+- behavior remains consistent across Voice Stream clients unless intentionally changed
 - approval codes work without starting full audio streaming
 - per-user lock/unlock/off codes are seeded with defaults and editable in web settings
 - wake starts a recording/streaming session
@@ -176,36 +176,18 @@ Acceptance:
 
 Rules:
 
-- keep root `bun run voice-stream` pointed at the current app until cutover
-- add separate scripts only when implementation exists, such as `voice-stream-next`
-- do not rename `apps/voice-stream` during early phases
-- do not change Hub launch behavior until the new app has a compatibility mode
+- keep root Voice Stream scripts pointed at `apps/voice-stream-next`
+- keep Voice Stream release scripts independent of Drone Hub launch behavior
 
-## Cutover Options
+## Cutover Decision
 
-Option A: Keep both permanently.
-
-- current `apps/voice-stream` remains the Drone Hub bundled voice helper
-- Voice Stream Next is a standalone product
-
-Option B: Replace current app later.
-
-- Voice Stream Next reaches parity
-- Hub launch adapter switches to the new service
-- old app is renamed or archived after migration
-
-Option C: Hybrid.
-
-- keep old Android client support for a while
-- new service supports both old and new protocol versions
-
-Recommended default: Option C during transition, then decide between A and B after real usage.
+The legacy Drone Hub-bundled Voice Stream app has been removed. Voice Stream Next is the standalone product and Drone Hub retains only manual Groq transcription flows.
 
 ## Current Decisions
 
 - Internal monorepo name: `voice-stream-next`.
 - User-facing product name: Voice Stream.
-- Legacy app directory remains `apps/voice-stream`.
+- Product directory is `apps/voice-stream-next`.
 - Desktop app starts as Electron.
 - Electron app starts with a normal app window only.
 - Web dashboard is part of the product.

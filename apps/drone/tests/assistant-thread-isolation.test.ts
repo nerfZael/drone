@@ -84,10 +84,6 @@ function installFakeRuntime(
       };
       await this.emit({ type: 'message_update', message: this.state.streamingMessage });
       await handlers.onPrompt?.(prompt, this.run);
-      if (prompt.startsWith('speak:')) {
-        const speak = this.tools.find((tool) => tool?.name === 'speak');
-        await speak?.execute?.('tool_fake_speak', { text: prompt.slice('speak:'.length).trim() });
-      }
       this.state.streamingMessage = null;
       this.state.messages.push({
         role: 'assistant',
@@ -426,7 +422,7 @@ describe('assistant thread isolation', () => {
     });
   });
 
-  test('defaults new assistant and voice threads to limited write access', async () => {
+  test('defaults new assistant threads to limited write access', async () => {
     await withTempDroneDataDir('assistant-thread-access-defaults-', async () => {
       const service = makeService();
       installFakeRuntime(service, {});
@@ -455,173 +451,6 @@ describe('assistant thread isolation', () => {
         droneIds: ['drone-a'],
       });
 
-      const voice = await service.ensureLatestVoiceThread();
-      expect(voice.thread.accessScope).toMatchObject({
-        readMode: 'all',
-        writeMode: 'selected',
-        executeMode: 'selected',
-        droneIds: [],
-      });
-    });
-  });
-
-  test('voice assistant threads are tagged and get speak by default', async () => {
-    await withTempDroneDataDir('assistant-voice-thread-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
-
-      const normal = await service.createThread({ title: 'normal' });
-      let thread = normal.threads.find((item) => item.id === normal.activeThreadId) as any;
-      expect(thread.voiceEnabled).toBe(false);
-      expect(thread.enabledTools).not.toContain('speak');
-      expect(thread.enabledTools).not.toContain('set_thinking_level');
-      expect(thread.enabledTools).not.toContain('create_new_thread');
-
-      const voice = await service.ensureLatestVoiceThread();
-      expect(voice.created).toBe(true);
-      expect(voice.thread.voiceEnabled).toBe(true);
-      expect(voice.thread.enabledTools).toContain('speak');
-      expect(voice.thread.enabledTools).toContain('set_thinking_level');
-      expect(voice.thread.enabledTools).toContain('create_new_thread');
-
-      const reused = await service.ensureLatestVoiceThread();
-      expect(reused.created).toBe(false);
-      expect(reused.threadId).toBe(voice.threadId);
-
-      const disabled = await service.updateThread(voice.threadId, {
-        enabledTools: voice.thread.enabledTools.filter(
-          (name: string) => name !== 'set_thinking_level',
-        ),
-      });
-      thread = disabled.threads.find((item) => item.id === voice.threadId) as any;
-      expect(thread.enabledTools).not.toContain('set_thinking_level');
-      expect(thread.enabledTools).toContain('speak');
-      expect(thread.enabledTools).toContain('create_new_thread');
-
-      const reloaded = makeService();
-      const reloadedSnapshot = await reloaded.snapshot();
-      thread = reloadedSnapshot.threads.find((item) => item.id === voice.threadId) as any;
-      expect(thread.enabledTools).not.toContain('set_thinking_level');
-      expect(thread.enabledTools).toContain('create_new_thread');
-    });
-  });
-
-  test('realtime transcripts are delegated to canonical Blip history', async () => {
-    await withTempDroneDataDir('assistant-realtime-transcripts-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
-      const history: any[] = [];
-      service.setRealtimeHistoryDelegate(async (_threadId, message) => {
-        history.push(message);
-      });
-
-      const config = await service.ensureLatestVoiceThread({ title: 'Desktop realtime thread' });
-      await service.appendRealtimeMessage({
-        threadId: config.threadId,
-        role: 'user',
-        text: 'show me the drone list',
-      });
-      await service.appendRealtimeMessage({
-        threadId: config.threadId,
-        role: 'assistant',
-        text: 'I can do that.',
-      });
-
-      const snapshot = await service.threadSnapshot(config.threadId);
-      const thread = snapshot.threads.find((item) => item.id === config.threadId) as any;
-      expect(history.map((message) => message.role)).toEqual(['user', 'assistant']);
-      expect(history[0].content[0].text).toBe('show me the drone list');
-      expect(history[1].content[0].text).toBe('I can do that.');
-      expect(thread.messages).toHaveLength(0);
-      expect(thread.title).toBe('show me the drone list');
-    });
-  });
-
-  test('realtime transcript deltas appear as streaming messages until final transcript is appended', async () => {
-    await withTempDroneDataDir('assistant-realtime-streaming-transcripts-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
-      const history: any[] = [];
-      service.setRealtimeHistoryDelegate(async (_threadId, message) => {
-        history.push(message);
-      });
-
-      const config = await service.ensureLatestVoiceThread({ title: 'Desktop realtime thread' });
-      await service.updateRealtimeStreamingMessage({
-        threadId: config.threadId,
-        role: 'user',
-        text: 'show me',
-      });
-
-      const streaming = await service.threadSnapshot(config.threadId);
-      expect((streaming as any).streamingMessage?.role).toBe('user');
-      expect((streaming as any).streamingMessage?.content?.[0]?.text).toBe('show me');
-
-      await service.appendRealtimeMessage({
-        threadId: config.threadId,
-        role: 'user',
-        text: 'show me the drones',
-      });
-      const final = await service.threadSnapshot(config.threadId);
-      expect((final as any).streamingMessage).toBeUndefined();
-      const thread = final.threads.find((item) => item.id === config.threadId) as any;
-      expect(history).toHaveLength(1);
-      expect(history[0].role).toBe('user');
-      expect(history[0].content[0].text).toBe('show me the drones');
-      expect(thread.messages).toHaveLength(0);
-    });
-  });
-
-  test('realtime user and assistant transcript deltas can stream at the same time', async () => {
-    await withTempDroneDataDir('assistant-realtime-dual-streaming-transcripts-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
-      const history: any[] = [];
-      service.setRealtimeHistoryDelegate(async (_threadId, message) => {
-        history.push(message);
-      });
-
-      const config = await service.ensureLatestVoiceThread({ title: 'Desktop realtime thread' });
-      await service.updateRealtimeStreamingMessage({
-        threadId: config.threadId,
-        role: 'user',
-        text: 'count to ten',
-      });
-      await service.updateRealtimeStreamingMessage({
-        threadId: config.threadId,
-        role: 'assistant',
-        text: 'one two',
-      });
-
-      const streaming = await service.threadSnapshot(config.threadId);
-      expect((streaming as any).streamingMessages.map((message: any) => message.role)).toEqual([
-        'user',
-        'assistant',
-      ]);
-      expect(
-        (streaming as any).streamingMessages.map((message: any) => message.content?.[0]?.text),
-      ).toEqual(['count to ten', 'one two']);
-
-      await service.appendRealtimeMessage({
-        threadId: config.threadId,
-        role: 'user',
-        text: 'count to ten',
-      });
-      const userFinal = await service.threadSnapshot(config.threadId);
-      expect((userFinal as any).streamingMessages.map((message: any) => message.role)).toEqual([
-        'assistant',
-      ]);
-
-      await service.appendRealtimeMessage({
-        threadId: config.threadId,
-        role: 'assistant',
-        text: 'one two three',
-      });
-      const assistantFinal = await service.threadSnapshot(config.threadId);
-      expect((assistantFinal as any).streamingMessages).toBeUndefined();
-      const thread = assistantFinal.threads.find((item) => item.id === config.threadId) as any;
-      expect(history.map((message) => message.role)).toEqual(['user', 'assistant']);
-      expect(thread.messages).toHaveLength(0);
     });
   });
 

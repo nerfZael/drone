@@ -8,20 +8,17 @@ import { DeviceMeshSettingsTab } from './DeviceMeshSettingsTab';
 import { McpServersSection } from './McpServersSection';
 import { PlaybookSettingsSection } from './PlaybookSettingsSection';
 import { ProfilesSettingsTab } from './ProfilesSettingsTab';
-import { RemoteAccessSettingsTab } from './RemoteAccessSettingsTab';
 import { ShortcutSettingsSection } from './ShortcutSettingsSection';
 import { SkillLibrarySection } from './SkillLibrarySection';
 import { SyncSettingsTab } from './SyncSettingsTab';
 import { SystemLogsSettingsTab } from './SystemLogsSettingsTab';
 import { TrashBehaviorSettingsTab } from './TrashBehaviorSettingsTab';
-import { VoiceApprovalSettingsTab } from './VoiceApprovalSettingsTab';
 import { SETTINGS_TABS, type SettingsTabId } from './settings-tabs';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import { useAgentMessageAutoContinueSettings } from './use-agent-message-auto-continue-settings';
 import { useAgentSuggestionSettings } from './use-agent-suggestion-settings';
 import { useAgentsSettings } from './use-agents-settings';
 import type { UseDeleteActionSettingsResult } from './use-delete-action-settings';
-import { useDesktopVoiceModelSettings } from './use-desktop-voice-model-settings';
 import { useFilesystemSettings } from './use-filesystem-settings';
 import { useGithubSettings } from './use-github-settings';
 import type { UseHubLogsResult } from './use-hub-logs';
@@ -31,7 +28,6 @@ import { useProfileSettings } from './use-profile-settings';
 import { useRegistryBackupSettings } from './use-registry-backup-settings';
 import { useSkillLibrary } from './use-skill-library';
 import { useSyncSets } from './use-sync-sets';
-import { useVoiceApprovalSettings } from './use-voice-approval-settings';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 
@@ -84,23 +80,18 @@ export function SettingsView({
   const skillLibrary = useSkillLibrary(requestJson);
   const mcpServers = useMcpServers(requestJson);
   const filesystem = useFilesystemSettings(requestJson);
-  const desktopVoiceModel = useDesktopVoiceModelSettings(requestJson);
-  const voiceApproval = useVoiceApprovalSettings(requestJson);
   const syncSets = useSyncSets(requestJson);
   const profile = useProfileSettings(requestJson);
   const backups = useRegistryBackupSettings(requestJson);
 
   const settingsBusy =
     hubLogsState.hubLogsLoading ||
-    hubLogsState.androidLogsLoading ||
     github.githubSettingsLoading ||
     llm.llmSettingsLoading ||
     agentMessageAutoContinue.agentMessageAutoContinueSettingsLoading ||
     agentSuggestion.agentSuggestionSettingsLoading ||
     deleteAction.deleteSettingsLoading ||
     filesystem.filesystemSettingsLoading ||
-    desktopVoiceModel.desktopVoiceModelSettingsLoading ||
-    voiceApproval.voiceApprovalSettingsLoading ||
     syncSets.syncSetsLoading ||
     profile.profileSettingsLoading ||
     backups.backupSettingsLoading ||
@@ -112,8 +103,6 @@ export function SettingsView({
     llm.clearingGeminiSettings ||
     llm.savingGroqSettings ||
     llm.clearingGroqSettings ||
-    llm.savingVoiceStreamPairingPassword ||
-    llm.clearingVoiceStreamPairingPassword ||
     llm.savingLlmProvider ||
     agentMessageAutoContinue.savingAgentMessageAutoContinueSettings ||
     agentSuggestion.savingAgentSuggestionSettings ||
@@ -132,9 +121,6 @@ export function SettingsView({
     mcpServers.mcpAccessTokensSaving ||
     deleteAction.savingDeleteSettings ||
     filesystem.savingFilesystemSettings ||
-    desktopVoiceModel.installingDesktopVoiceModel ||
-    desktopVoiceModel.removingDesktopVoiceModel ||
-    voiceApproval.savingVoiceApprovalSettings ||
     syncSets.creatingSyncSet ||
     backups.savingBackupSettings ||
     backups.runningBackup ||
@@ -181,8 +167,6 @@ export function SettingsView({
     void github.loadGithubSettings();
     void deleteAction.loadDeleteSettings();
     void filesystem.loadFilesystemSettings();
-    void desktopVoiceModel.loadDesktopVoiceModelSettings();
-    void voiceApproval.loadVoiceApprovalSettings();
     void syncSets.loadSyncSets();
     void agents.loadAgentsSettings();
     void deleteAction.loadArchivedDrones();
@@ -190,11 +174,10 @@ export function SettingsView({
     void profile.loadProfileSettings();
     void backups.loadBackupSettings();
     void hubLogsState.loadHubLogs();
-    void hubLogsState.loadAndroidLogs();
     void skillLibrary.loadSkills();
     void skillLibrary.loadSkillSources();
     void mcpServers.loadMcpServers();
-  }, [agentMessageAutoContinue, agentSuggestion, agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, desktopVoiceModel, filesystem, github, hubLogsState, llm, mcpServers, profile, skillLibrary, syncSets, voiceApproval]);
+  }, [agentMessageAutoContinue, agentSuggestion, agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, filesystem, github, hubLogsState, llm, mcpServers, profile, skillLibrary, syncSets]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
@@ -203,7 +186,6 @@ export function SettingsView({
           github={github}
           llm={llm}
           filesystem={filesystem}
-          desktopVoiceModel={desktopVoiceModel}
           agentMessageAutoContinue={agentMessageAutoContinue}
           agentSuggestion={agentSuggestion}
           transcriptInlineImages={transcriptInlineImages}
@@ -213,10 +195,8 @@ export function SettingsView({
         />
       );
     }
-    if (activeTab === 'remote') return <RemoteAccessSettingsTab requestJson={requestJson} />;
     if (activeTab === 'devices') return <DeviceMeshSettingsTab requestJson={requestJson} />;
     if (activeTab === 'sync') return <SyncSettingsTab syncSets={syncSets} />;
-    if (activeTab === 'voice') return <VoiceApprovalSettingsTab voiceApproval={voiceApproval} />;
     if (activeTab === 'backups') return <BackupsSettingsTab backups={backups} />;
     if (activeTab === 'profiles') return <ProfilesSettingsTab profile={profile} />;
     if (activeTab === 'trash') return <TrashBehaviorSettingsTab deleteAction={deleteAction} />;

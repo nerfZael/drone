@@ -8,7 +8,7 @@ Responsibilities are separated as follows:
 
 - `device-mesh-http.ts`: pairing and administrator HTTP API;
 - `device-mesh-ingress.ts` and `device-mesh-ingress-http.ts`: the dedicated localhost listener, its small public route allowlist, local configuration API, and signed endpoint publication;
-- `device-mesh-ngrok.ts`: Device Mesh-specific ngrok detection and control state, kept separate from legacy Remote Hub state while reusing a running local ngrok agent when possible;
+- `device-mesh-ngrok.ts`: Device Mesh-specific ngrok detection and control state, with support for reusing a running local ngrok agent when possible;
 - `device-mesh-router.ts`, `device-mesh-request-client.ts`, `device-membership-synchronizer.ts`, and `device-route-manager.ts`: authenticated WSS, signed requests and topology synchronization, and bounded one-hop routing;
 - `device-mesh-store.ts` and `device-identity.ts`: local durable state and P-256 identity;
 - `device-mesh-audit-store.ts`: bounded target-side operation history;

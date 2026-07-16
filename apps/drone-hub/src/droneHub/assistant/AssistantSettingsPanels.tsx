@@ -4,7 +4,6 @@ import { IconWrench } from '../app/icons';
 
 import type {
   AssistantScopeMode,
-  AssistantSystemPromptKind,
   AssistantSystemPromptSettings,
   AssistantThreadSystemPromptSettings,
   AssistantToolSummary,
@@ -255,10 +254,8 @@ function AssistantPromptDiffView({ oldText, newText }: { oldText: string; newTex
 
 export function AssistantSystemPromptModal({
   mode,
-  globalPromptKind,
   settings,
   draft,
-  voiceDraft,
   threadSettings,
   threadDraft,
   loading,
@@ -268,9 +265,7 @@ export function AssistantSystemPromptModal({
   error,
   notice,
   onModeChange,
-  onGlobalPromptKindChange,
   onDraftChange,
-  onVoiceDraftChange,
   onThreadDraftChange,
   onUseGlobalForThread,
   onUseDefaultForGlobal,
@@ -280,10 +275,8 @@ export function AssistantSystemPromptModal({
   onPromoteThread,
 }: {
   mode: 'thread' | 'global';
-  globalPromptKind: AssistantSystemPromptKind;
   settings: AssistantSystemPromptSettings | null;
   draft: string;
-  voiceDraft: string;
   threadSettings: AssistantThreadSystemPromptSettings | null;
   threadDraft: string;
   loading: boolean;
@@ -293,9 +286,7 @@ export function AssistantSystemPromptModal({
   error: string | null;
   notice: string | null;
   onModeChange: (mode: 'thread' | 'global') => void;
-  onGlobalPromptKindChange: (kind: AssistantSystemPromptKind) => void;
   onDraftChange: (value: string) => void;
-  onVoiceDraftChange: (value: string) => void;
   onThreadDraftChange: (value: string) => void;
   onUseGlobalForThread: () => void;
   onUseDefaultForGlobal: () => void;
@@ -305,10 +296,7 @@ export function AssistantSystemPromptModal({
   onPromoteThread: () => void;
 }) {
   const [diffOpen, setDiffOpen] = React.useState(false);
-  const activeGlobalSettings =
-    globalPromptKind === 'voice'
-      ? settings?.assistantVoiceSystemPrompt
-      : settings?.assistantSystemPrompt;
+  const activeGlobalSettings = settings?.assistantSystemPrompt;
   const currentPrompt = activeGlobalSettings?.prompt ?? '';
   const currentThreadPrompt = threadSettings?.threadSystemPrompt.prompt ?? '';
   const currentGlobalPrompt = threadSettings?.threadSystemPrompt.globalPrompt ?? currentPrompt;
@@ -316,7 +304,7 @@ export function AssistantSystemPromptModal({
     (mode === 'thread'
       ? threadSettings?.threadSystemPrompt.maxPromptChars
       : activeGlobalSettings?.maxPromptChars) ?? 20_000;
-  const activeGlobalDraft = globalPromptKind === 'voice' ? voiceDraft : draft;
+  const activeGlobalDraft = draft;
   const globalDirty = activeGlobalDraft !== currentPrompt;
   const threadDirty = threadDraft !== currentThreadPrompt;
   const globalSaveDisabled = loading || saving || !globalDirty || !activeGlobalDraft.trim();
@@ -343,8 +331,7 @@ export function AssistantSystemPromptModal({
               Assistant system prompts
             </div>
             <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
-              Thread changes affect only the current thread. Global changes apply to new standard or
-              realtime threads.
+              Thread changes affect only the current thread. Global changes apply to new threads.
             </div>
           </div>
           <button
@@ -387,37 +374,15 @@ export function AssistantSystemPromptModal({
             </div>
           ) : null}
           <label className="flex min-h-0 flex-col gap-2">
-            {mode === 'global' ? (
-              <div className="mb-1 grid h-8 w-full max-w-[280px] grid-cols-2 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
-                {(['normal', 'voice'] as const).map((item) => (
-                  <button
-                    key={item}
-                    type="button"
-                    onClick={() => onGlobalPromptKindChange(item)}
-                    aria-pressed={globalPromptKind === item}
-                    className={`text-[10px] font-semibold uppercase tracking-wide ${
-                      globalPromptKind === item
-                        ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'text-[var(--muted)] hover:bg-[rgba(255,255,255,.025)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    {item === 'normal' ? 'Standard' : 'Realtime'}
-                  </button>
-                ))}
-              </div>
-            ) : null}
             <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">
-              {mode === 'global' && globalPromptKind === 'voice' ? 'Realtime prompt' : 'Prompt'}
+              Prompt
             </span>
             <textarea
               value={activeDraft}
               onChange={(event) =>
                 mode === 'thread'
                   ? onThreadDraftChange(event.target.value)
-                  : globalPromptKind === 'voice'
-                    ? onVoiceDraftChange(event.target.value)
-                    : onDraftChange(event.target.value)
+                  : onDraftChange(event.target.value)
               }
               disabled={loading || saving || threadSaving || promoting}
               maxLength={maxChars}
@@ -511,11 +476,7 @@ export function AssistantSystemPromptModal({
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
-                {saving
-                  ? 'Saving...'
-                  : globalPromptKind === 'voice'
-                    ? 'Save for new realtime threads'
-                    : 'Save for new standard threads'}
+                {saving ? 'Saving...' : 'Save for new threads'}
               </button>
             </>
           )}

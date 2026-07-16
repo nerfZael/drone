@@ -176,16 +176,6 @@ export function SystemLogsSettingsTab({
     loadHubLogs,
     copyHubLogs,
     handleHubLogsScroll,
-    androidLogs,
-    androidLogsLoading,
-    androidLogsError,
-    androidLogsNotice,
-    androidLogsExpanded,
-    androidLogsTextareaRef,
-    setAndroidLogsExpanded,
-    loadAndroidLogs,
-    copyAndroidLogs,
-    handleAndroidLogsScroll,
   } = hubLogsState;
 
   return (
@@ -209,28 +199,6 @@ export function SystemLogsSettingsTab({
         loadLogs={loadHubLogs}
         copyLogs={copyHubLogs}
         handleScroll={handleHubLogsScroll}
-        fallbackTailLines={hubLogsTailLines}
-        fallbackMaxBytes={hubLogsMaxBytes}
-      />
-      <LogPanel
-        title="Android voice logs"
-        description="Recent diagnostics uploaded by the Android Voice Stream app."
-        emptyLabel="No Android voice log file found yet."
-        loadingLabel="Loading Android voice logs..."
-        copyTitle="Copy Android voice logs"
-        refreshTitle="Refresh Android voice logs"
-        expandedLabel="Collapse Android voice logs"
-        collapsedLabel="Expand Android voice logs"
-        copiedNotice={androidLogsNotice}
-        logs={androidLogs}
-        loading={androidLogsLoading}
-        error={androidLogsError}
-        expanded={androidLogsExpanded}
-        textareaRef={androidLogsTextareaRef}
-        setExpanded={setAndroidLogsExpanded}
-        loadLogs={loadAndroidLogs}
-        copyLogs={copyAndroidLogs}
-        handleScroll={handleAndroidLogsScroll}
         fallbackTailLines={hubLogsTailLines}
         fallbackMaxBytes={hubLogsMaxBytes}
       />

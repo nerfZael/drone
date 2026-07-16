@@ -1,6 +1,5 @@
 import React from 'react';
 import { requestJson } from '../http';
-import { DesktopVoiceFloatingIndicator } from './DesktopVoiceFloatingIndicator';
 import {
   summarizeAssistantActivity,
   type AssistantActivityCounts,
@@ -67,7 +66,7 @@ export function shouldConnectMinimizedAssistantEvents({
 }
 
 function useMinimizedAssistantActivity(enabled: boolean, activityEnabled: boolean): AssistantActivityCounts {
-  const [counts, setCounts] = React.useState<AssistantActivityCounts>({ normal: 0, voice: 0, total: 0 });
+  const [counts, setCounts] = React.useState<AssistantActivityCounts>({ total: 0 });
   const [eventsConnected, setEventsConnected] = React.useState(false);
   const [documentHidden, setDocumentHidden] = React.useState(isDocumentHidden);
   const enabledRef = React.useRef(enabled);
@@ -96,7 +95,7 @@ function useMinimizedAssistantActivity(enabled: boolean, activityEnabled: boolea
       setCounts(summarizeAssistantActivity(snapshot));
     } catch {
       if (!enabledRef.current) return;
-      setCounts({ normal: 0, voice: 0, total: 0 });
+      setCounts({ total: 0 });
     }
   }, []);
 
@@ -125,7 +124,7 @@ function useMinimizedAssistantActivity(enabled: boolean, activityEnabled: boolea
         window.clearTimeout(refreshTimerRef.current);
         refreshTimerRef.current = null;
       }
-      setCounts({ normal: 0, voice: 0, total: 0 });
+      setCounts({ total: 0 });
       return;
     }
     if (!documentHidden) {
@@ -201,31 +200,17 @@ function useMinimizedAssistantActivity(enabled: boolean, activityEnabled: boolea
 function MinimizedAssistantActivityBadge({
   label,
   count,
-  tone,
 }: {
   label: string;
   count: number;
-  tone: 'normal' | 'voice';
 }) {
   if (count <= 0) return null;
   return (
     <span
-      className={`inline-flex h-5 min-w-5 items-center justify-center gap-1 rounded-full border px-1.5 text-[10px] font-semibold leading-none ${
-        tone === 'voice'
-          ? 'border-[rgba(74,222,128,.38)] bg-[rgba(74,222,128,.10)] text-[var(--green)]'
-          : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-      }`}
+      className="inline-flex h-5 min-w-5 items-center justify-center gap-1 rounded-full border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-1.5 text-[10px] font-semibold leading-none text-[var(--accent)]"
       title={`${count} active ${label}`}
       aria-label={`${count} active ${label}`}
     >
-      {tone === 'voice' ? (
-        <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
-          <rect x="9" y="3" width="6" height="11" rx="3" />
-          <path d="M5 11a7 7 0 0 0 14 0" />
-          <path d="M12 18v3" />
-          <path d="M8 21h8" />
-        </svg>
-      ) : null}
       <span>{count > 9 ? '9+' : count}</span>
     </span>
   );
@@ -259,7 +244,6 @@ export function FloatingAssistantDock({ embeddedVisible }: { embeddedVisible: bo
         data-floating-assistant-dock="minimized"
         className="absolute bottom-4 right-4 z-30 flex flex-col items-end gap-2.5 pointer-events-auto"
       >
-        <DesktopVoiceFloatingIndicator />
         <button
           type="button"
           onClick={() => {
@@ -286,8 +270,7 @@ export function FloatingAssistantDock({ embeddedVisible }: { embeddedVisible: bo
           </span>
           <span data-floating-assistant-label="true">Assistant</span>
           <span data-floating-assistant-compact-label="true" className="hidden">AI</span>
-          <MinimizedAssistantActivityBadge label="assistant threads" count={activityCounts.normal} tone="normal" />
-          <MinimizedAssistantActivityBadge label="voice assistant threads" count={activityCounts.voice} tone="voice" />
+          <MinimizedAssistantActivityBadge label="assistant threads" count={activityCounts.total} />
         </button>
       </div>
     );

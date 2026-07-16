@@ -76,7 +76,7 @@ export function shouldDispatchEditableShortcutAction(_args: EditableShortcutDisp
   const inDraftShortcutChatInput = targetInPrimaryChatInput || targetInCanvasMessageInput;
   const inVoiceShortcutChatInput = inDraftShortcutChatInput || targetInAssistantChatInput;
   if (matchedActionId === 'createDraftDrone') return inDraftShortcutChatInput;
-  if (matchedActionId === 'toggleVoiceClipboardRecording' || matchedActionId === 'toggleAssistantVoiceSession') {
+  if (matchedActionId === 'toggleVoiceClipboardRecording') {
     return inVoiceShortcutChatInput;
   }
   return false;

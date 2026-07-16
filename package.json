@@ -26,7 +26,6 @@
     "apk": "bun run drone:mobile:android:install",
     "drone-hub:app": "bun run --filter drone-hub build && bun run --filter drone build && node apps/drone/dist/cli.js hub app --static-ui-dir apps/drone-hub/dist",
     "drone:mobile:android:install": "bun run --filter @drone/device-protocol build && bun run --filter @drone/assistant-chat build && bun run --filter drone-hub-mobile android:native",
-    "voice-stream": "bun run --filter voice-stream dev",
     "vsn": "bun run --filter voice-stream-next dev",
     "vsn:apk": "bun run --filter voice-stream-next apk",
     "vsn:android": "bun run --filter voice-stream-next android:assembleDebug",
@@ -53,7 +52,6 @@
     "voice-stream-next:desktop:pack": "bun run --filter voice-stream-next desktop:pack",
     "voice-stream-next:server": "bun run --filter voice-stream-next dev:server",
     "voice-stream-next:web": "bun run --filter voice-stream-next dev:web",
-    "voice-stream:apk": "bun run --filter voice-stream apk",
     "looped": "bun run --cwd apps/looped dev --",
     "regression": "bun run build && bun run smoke && bun run test"
   },

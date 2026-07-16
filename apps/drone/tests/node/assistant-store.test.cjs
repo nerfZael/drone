@@ -3,8 +3,10 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 const { afterEach, describe, test } = require('node:test');
+const Database = require('better-sqlite3');
 
 const {
+  ASSISTANT_STORE_MIGRATIONS,
   loadAssistantState,
   resetAssistantStoreForTests,
   saveAssistantState,
@@ -47,7 +49,6 @@ function state(title = 'first') {
         title,
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-02T00:00:00.000Z',
-        voiceEnabled: false,
         provider: 'openai',
         model: 'gpt-5.5',
         thinkingLevel: 'off',
@@ -85,7 +86,6 @@ function state(title = 'first') {
         id: 'subscription-1',
         threadId: 'thread-1',
         toolCallId: 'tool-1',
-        voiceSource: null,
         mode: 'all',
         targets: [{ droneId: 'drone-1', chatName: 'default' }],
         createdAt: '2026-01-02T00:00:00.000Z',
@@ -129,6 +129,79 @@ afterEach(async () => {
 });
 
 describe('assistant SQLite store', () => {
+  test('upgrades historical migrations and clears only assistant-owned data', async () => {
+    const dataDir = useTempDataDir('voice-mode-upgrade');
+    const databasePath = path.join(dataDir, 'hub.sqlite');
+    const legacyDatabase = new Database(databasePath);
+    const initialMigration = ASSISTANT_STORE_MIGRATIONS.find((migration) => migration.version === 1);
+    assert.ok(initialMigration);
+    initialMigration.migrate(legacyDatabase);
+    legacyDatabase.exec(`
+      CREATE TABLE hub_schema_migrations (
+        scope TEXT NOT NULL,
+        version INTEGER NOT NULL,
+        name TEXT NOT NULL,
+        applied_at TEXT NOT NULL,
+        PRIMARY KEY (scope, version),
+        UNIQUE (scope, name)
+      );
+      CREATE TABLE assistant_reset_sentinel (value TEXT NOT NULL);
+      INSERT INTO assistant_reset_sentinel VALUES ('keep me');
+    `);
+    const insertMigration = legacyDatabase.prepare(
+      'INSERT INTO hub_schema_migrations (scope, version, name, applied_at) VALUES (?, ?, ?, ?)',
+    );
+    for (const migration of ASSISTANT_STORE_MIGRATIONS.filter((candidate) => candidate.version <= 4)) {
+      insertMigration.run('assistant', migration.version, migration.name, '2026-01-01T00:00:00.000Z');
+    }
+    legacyDatabase.prepare(`
+      INSERT INTO assistant_preferences (
+        singleton, active_thread_id, default_provider, default_model,
+        default_thinking_level, default_enabled_tools_json
+      ) VALUES (1, 'legacy-thread', 'openai', 'gpt-5.5', 'off', '[]')
+    `).run();
+    legacyDatabase.close();
+
+    const blipDatabase = new Database(path.join(dataDir, 'assistant-blip.sqlite'));
+    blipDatabase.exec(`
+      CREATE TABLE assistant_blip_sessions (id TEXT PRIMARY KEY);
+      CREATE TABLE assistant_blip_entries (id TEXT PRIMARY KEY);
+      CREATE TABLE assistant_blip_thread_bindings (thread_id TEXT PRIMARY KEY);
+      CREATE TABLE assistant_mcp_idle_subscriptions (id TEXT PRIMARY KEY);
+      INSERT INTO assistant_blip_sessions VALUES ('legacy-session');
+      INSERT INTO assistant_blip_entries VALUES ('legacy-entry');
+      INSERT INTO assistant_blip_thread_bindings VALUES ('legacy-thread');
+      INSERT INTO assistant_mcp_idle_subscriptions VALUES ('keep-subscription');
+    `);
+    blipDatabase.close();
+    fs.mkdirSync(path.join(dataDir, 'assistant-artifacts', 'legacy-thread'), { recursive: true });
+    fs.writeFileSync(path.join(dataDir, 'assistant-artifacts', 'legacy-thread', 'note.txt'), 'discard me');
+    fs.writeFileSync(path.join(dataDir, 'assistant.json'), JSON.stringify(state('discard me')));
+
+    assert.equal(await loadAssistantState(), null);
+    const database = requireHubDatabase();
+    const sentinel = database.read((connection) =>
+      connection.prepare('SELECT value FROM assistant_reset_sentinel').get(),
+    );
+    assert.equal(sentinel.value, 'keep me');
+    assert.deepEqual(
+      database.read((connection) =>
+        connection
+          .prepare("SELECT version, name FROM hub_schema_migrations WHERE scope = 'assistant' ORDER BY version")
+          .all(),
+      ),
+      ASSISTANT_STORE_MIGRATIONS.map(({ version, name }) => ({ version, name })),
+    );
+    const resetBlipDatabase = new Database(path.join(dataDir, 'assistant-blip.sqlite'));
+    assert.equal(resetBlipDatabase.prepare('SELECT COUNT(*) AS count FROM assistant_blip_sessions').get().count, 0);
+    assert.equal(resetBlipDatabase.prepare('SELECT COUNT(*) AS count FROM assistant_blip_entries').get().count, 0);
+    assert.equal(resetBlipDatabase.prepare('SELECT COUNT(*) AS count FROM assistant_blip_thread_bindings').get().count, 0);
+    assert.equal(resetBlipDatabase.prepare('SELECT COUNT(*) AS count FROM assistant_mcp_idle_subscriptions').get().count, 1);
+    resetBlipDatabase.close();
+    assert.equal(fs.existsSync(path.join(dataDir, 'assistant-artifacts')), false);
+    assert.equal(fs.existsSync(path.join(dataDir, 'assistant.json')), false);
+  });
+
   test('persists service settings canonically without recreating assistant.json', async () => {
     const dataDir = useTempDataDir('service');
     const service = assistantService();
@@ -144,25 +217,17 @@ describe('assistant SQLite store', () => {
     );
   });
 
-  test('migrates assistant.json once and preserves a fingerprint-backed recovery copy', async () => {
+  test('discards legacy assistant state without retaining a recovery copy', async () => {
     const dataDir = useTempDataDir('migration');
     const legacy = state('from legacy file');
     fs.writeFileSync(path.join(dataDir, 'assistant.json'), JSON.stringify(legacy));
 
-    assert.deepEqual(await loadAssistantState(), legacy);
+    assert.equal(await loadAssistantState(), null);
     assert.equal(fs.existsSync(path.join(dataDir, 'assistant.json')), false);
-    const backup = fs
-      .readdirSync(dataDir)
-      .find((name) => name.startsWith('assistant.json.migrated-') && name.endsWith('.bak'));
-    assert.ok(backup);
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(dataDir, backup), 'utf8')), legacy);
-    const metadata = requireHubDatabase().read((connection) =>
-      connection
-        .prepare("SELECT value FROM assistant_store_metadata WHERE key = 'legacy_import'")
-        .get(),
+    assert.equal(
+      fs.readdirSync(dataDir).some((name) => name.startsWith('assistant.json.migrated-')),
+      false,
     );
-    assert.equal(JSON.parse(metadata.value).path, path.join(dataDir, 'assistant.json'));
-    assert.equal(JSON.parse(metadata.value).sha256.length, 64);
   });
 
   test('does not re-import assistant.json after the canonical database is reopened', async () => {
@@ -174,7 +239,7 @@ describe('assistant SQLite store', () => {
 
     assert.equal((await loadAssistantState()).threads[0].title, 'canonical');
     assert.equal(fs.existsSync(path.join(dataDir, 'assistant.json')), false);
-    assert.ok(fs.readdirSync(dataDir).some((name) => name.startsWith('assistant.json.migrated-')));
+    assert.equal(fs.readdirSync(dataDir).some((name) => name.startsWith('assistant.json.migrated-')), false);
   });
 
   test('updates only changed rows and preserves unknown row fields', async () => {

@@ -25,8 +25,7 @@ The baseline describes the old assistant from the user's point of view. It does 
 | Artifact isolation | Files are private to a thread; paths cannot escape the artifact root; stale and ambiguous edits fail | `apps/drone/tests/assistant-artifacts.test.ts` |
 | Artifact uploads | Images and binary files retain bytes and MIME behavior; invalid batches do not leave partial files | `apps/drone/tests/assistant-artifact-uploads.test.ts` |
 | Chat attachments | Staged paths, text instructions, image flags, mixed inputs, and duplicate names remain deterministic | `apps/drone/tests/chat-attachments.test.ts` |
-| Prompt configuration | Normal and voice defaults, per-thread prompts, migrations, and tool toggles remain separate | `apps/drone/tests/assistant-system-prompt.test.ts` |
-| Standard and realtime voice | Voice tools, transcripts, streaming deltas, source routing, and normal thread persistence remain integrated | `apps/drone/tests/assistant-thread-isolation.test.ts` and `apps/drone/tests/openai-realtime-assistant.test.ts` |
+| Prompt configuration | The global default, per-thread prompts, migrations, and tool toggles remain separate | `apps/drone/tests/assistant-system-prompt.test.ts` |
 | Chat-idle continuation | Any/all waits, pending prompts, unknown targets, cancellation, non-blocking subscriptions, and firing behavior | `apps/drone/tests/assistant-chat-idle.test.ts` |
 | MCP authentication | Hub API and MCP credentials are separate; named tokens can be revoked; drone identities cannot be minted publicly | `apps/drone/tests/mcp-http-api.test.ts` |
 | MCP result helpers | Text, image, and summary result shapes remain stable | `apps/drone/tests/mcp-server.test.ts` |

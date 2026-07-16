@@ -201,7 +201,7 @@ describe('mobile drone sidebar model', () => {
     ]);
   });
 
-  test('matches Remote Hub ordering with newest drones first inside each tree level', () => {
+  test('orders newest drones first inside each tree level', () => {
     const drones = normalizeMobileDrones([
       { id: 'old', name: 'Old', repoPath: '/repo', createdAt: '2026-01-01T00:00:00Z' },
       { id: 'parent', name: 'Parent', repoPath: '/repo', createdAt: '2026-02-01T00:00:00Z' },

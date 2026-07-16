@@ -1,6 +1,6 @@
 import React from 'react';
 import { maybeExtractApiKey } from './helpers';
-import type { ApiKeySettingsResponse, LlmProviderId, LlmSettingsResponse, VoiceStreamPairingPasswordSettingsResponse } from './settings-types';
+import type { ApiKeySettingsResponse, LlmProviderId, LlmSettingsResponse } from './settings-types';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 type ApiKeyProviderId = 'openai' | 'gemini' | 'groq';
@@ -32,23 +32,15 @@ export type UseLlmSettingsResult = {
   clearingGroqSettings: boolean;
   showGroqKey: boolean;
   revealingGroqKey: boolean;
-  voiceStreamPairingPasswordDraft: string;
-  savingVoiceStreamPairingPassword: boolean;
-  clearingVoiceStreamPairingPassword: boolean;
-  showVoiceStreamPairingPassword: boolean;
-  revealingVoiceStreamPairingPassword: boolean;
   llmSettingsNotice: string | null;
   setLlmProviderDraft: React.Dispatch<React.SetStateAction<LlmProviderId>>;
   updateOpenAiSettingsDraft: (raw: string) => void;
   updateGeminiSettingsDraft: (raw: string) => void;
   updateGroqSettingsDraft: (raw: string) => void;
-  updateVoiceStreamPairingPasswordDraft: (raw: string) => void;
   loadLlmSettings: () => Promise<void>;
   saveLlmProviderSettings: () => Promise<void>;
   toggleApiKeyVisibility: (provider: ApiKeyProviderId) => Promise<void>;
   mutateApiKeySettings: (provider: ApiKeyProviderId, action: 'save' | 'clear') => Promise<void>;
-  toggleVoiceStreamPairingPasswordVisibility: () => Promise<void>;
-  mutateVoiceStreamPairingPasswordSettings: (action: 'save' | 'clear') => Promise<void>;
 };
 
 export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult {
@@ -75,12 +67,6 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
   const [clearingGroqSettings, setClearingGroqSettings] = React.useState(false);
   const [showGroqKey, setShowGroqKey] = React.useState(false);
   const [revealingGroqKey, setRevealingGroqKey] = React.useState(false);
-  const [voiceStreamPairingPasswordDraft, setVoiceStreamPairingPasswordDraft] = React.useState('');
-  const [voiceStreamPairingPasswordDraftLoadedFromSettings, setVoiceStreamPairingPasswordDraftLoadedFromSettings] = React.useState(false);
-  const [savingVoiceStreamPairingPassword, setSavingVoiceStreamPairingPassword] = React.useState(false);
-  const [clearingVoiceStreamPairingPassword, setClearingVoiceStreamPairingPassword] = React.useState(false);
-  const [showVoiceStreamPairingPassword, setShowVoiceStreamPairingPassword] = React.useState(false);
-  const [revealingVoiceStreamPairingPassword, setRevealingVoiceStreamPairingPassword] = React.useState(false);
   const [llmSettingsNotice, setLlmSettingsNotice] = React.useState<string | null>(null);
 
   const loadLlmSettings = React.useCallback(async () => {
@@ -318,99 +304,6 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
     setGroqSettingsDraft(maybeExtractApiKey(raw, 'groq'));
   }, []);
 
-  const updateVoiceStreamPairingPasswordDraft = React.useCallback((raw: string) => {
-    setVoiceStreamPairingPasswordDraftLoadedFromSettings(false);
-    setVoiceStreamPairingPasswordDraft(raw);
-  }, []);
-
-  const updateVoiceStreamPairingPasswordSettings = React.useCallback((data: VoiceStreamPairingPasswordSettingsResponse) => {
-    setLlmSettings((prev) =>
-      prev
-        ? {
-            ...prev,
-            voiceStreamPairingPassword: {
-              hasPassword: data.hasPassword,
-              source: data.source,
-              passwordHint: data.passwordHint,
-              updatedAt: data.updatedAt,
-            },
-          }
-        : prev,
-    );
-  }, []);
-
-  const toggleVoiceStreamPairingPasswordVisibility = React.useCallback(async () => {
-    if (showVoiceStreamPairingPassword) {
-      setShowVoiceStreamPairingPassword(false);
-      if (voiceStreamPairingPasswordDraftLoadedFromSettings) {
-        setVoiceStreamPairingPasswordDraft('');
-        setVoiceStreamPairingPasswordDraftLoadedFromSettings(false);
-      }
-      return;
-    }
-    if (!voiceStreamPairingPasswordDraft.trim() && llmSettings?.voiceStreamPairingPassword.hasPassword) {
-      setRevealingVoiceStreamPairingPassword(true);
-      setLlmSettingsError(null);
-      try {
-        const data = await requestJson<VoiceStreamPairingPasswordSettingsResponse>('/api/settings/voice-stream/pairing-password?reveal=1');
-        const password = String(data.password ?? '').trim();
-        if (!password) throw new Error('Voice Stream pairing password is unavailable.');
-        updateVoiceStreamPairingPasswordSettings(data);
-        setVoiceStreamPairingPasswordDraft(password);
-        setVoiceStreamPairingPasswordDraftLoadedFromSettings(true);
-      } catch (e: any) {
-        setLlmSettingsError(e?.message ?? String(e));
-        return;
-      } finally {
-        setRevealingVoiceStreamPairingPassword(false);
-      }
-    }
-    setShowVoiceStreamPairingPassword(true);
-  }, [
-    llmSettings?.voiceStreamPairingPassword.hasPassword,
-    requestJson,
-    showVoiceStreamPairingPassword,
-    updateVoiceStreamPairingPasswordSettings,
-    voiceStreamPairingPasswordDraft,
-    voiceStreamPairingPasswordDraftLoadedFromSettings,
-  ]);
-
-  const mutateVoiceStreamPairingPasswordSettings = React.useCallback(
-    async (action: 'save' | 'clear') => {
-      const password = voiceStreamPairingPasswordDraft.trim();
-      if (action === 'save' && !password) {
-        setLlmSettingsError('Voice Stream pairing password is required.');
-        return;
-      }
-      if (action === 'save') setSavingVoiceStreamPairingPassword(true);
-      else setClearingVoiceStreamPairingPassword(true);
-      setLlmSettingsError(null);
-      setLlmSettingsNotice(null);
-      try {
-        const data = await requestJson<VoiceStreamPairingPasswordSettingsResponse>('/api/settings/voice-stream/pairing-password', {
-          method: action === 'save' ? 'POST' : 'DELETE',
-          ...(action === 'save'
-            ? {
-                headers: { 'content-type': 'application/json' },
-                body: JSON.stringify({ password }),
-              }
-            : {}),
-        });
-        updateVoiceStreamPairingPasswordSettings(data);
-        setVoiceStreamPairingPasswordDraft('');
-        setVoiceStreamPairingPasswordDraftLoadedFromSettings(false);
-        setShowVoiceStreamPairingPassword(false);
-        setLlmSettingsNotice(action === 'save' ? 'Saved Voice Stream pairing password.' : 'Cleared Voice Stream pairing password.');
-      } catch (e: any) {
-        setLlmSettingsError(e?.message ?? String(e));
-      } finally {
-        if (action === 'save') setSavingVoiceStreamPairingPassword(false);
-        else setClearingVoiceStreamPairingPassword(false);
-      }
-    },
-    [requestJson, updateVoiceStreamPairingPasswordSettings, voiceStreamPairingPasswordDraft],
-  );
-
   return {
     llmSettings,
     llmSettingsLoading,
@@ -432,22 +325,14 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
     clearingGroqSettings,
     showGroqKey,
     revealingGroqKey,
-    voiceStreamPairingPasswordDraft,
-    savingVoiceStreamPairingPassword,
-    clearingVoiceStreamPairingPassword,
-    showVoiceStreamPairingPassword,
-    revealingVoiceStreamPairingPassword,
     llmSettingsNotice,
     setLlmProviderDraft,
     updateOpenAiSettingsDraft,
     updateGeminiSettingsDraft,
     updateGroqSettingsDraft,
-    updateVoiceStreamPairingPasswordDraft,
     loadLlmSettings,
     saveLlmProviderSettings,
     toggleApiKeyVisibility,
     mutateApiKeySettings,
-    toggleVoiceStreamPairingPasswordVisibility,
-    mutateVoiceStreamPairingPasswordSettings,
   };
 }

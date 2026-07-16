@@ -11,16 +11,10 @@ import {
   AGENT_SUGGESTION_POLICY_DEFAULT,
   AGENT_SUGGESTION_ENABLED_BY_DEFAULT,
   AGENT_SUGGESTION_POLICY_MAX_CHARS,
-  VOICE_APPROVAL_SETTINGS_DEFAULT,
-  VOICE_REALTIME_SETTINGS_DEFAULT,
   resolveAgentSuggestionSettingsResponse,
-  resolveEffectiveVoiceApprovalSettings,
-  resolveEffectiveVoiceRealtimeSettings,
   resolveNameSuggestionLlmSettings,
   upsertStoredProviderApiKey,
   upsertStoredAgentSuggestionSettings,
-  upsertStoredVoiceApprovalSettings,
-  upsertStoredVoiceRealtimeSettings,
 } from '../src/hub/hub-settings';
 import { getSocketListenSupport } from './socket-listen-support';
 
@@ -216,35 +210,6 @@ describe('assistant suggestion settings', () => {
   });
 });
 
-describe('voice approval settings', () => {
-  test('normalizes minimum digits down to the shortest configured code', async () => {
-    await withTempDroneDataDirAndEnv({}, async () => {
-      await upsertStoredVoiceApprovalSettings({
-        ...VOICE_APPROVAL_SETTINGS_DEFAULT,
-        unlockCode: '123',
-        minDigits: 4,
-        maxDigits: 4,
-      });
-
-      const settings = await resolveEffectiveVoiceApprovalSettings();
-      expect(settings.unlockCode).toBe('123');
-      expect(settings.minDigits).toBe(3);
-      expect(settings.maxDigits).toBe(4);
-    });
-  });
-});
-
-describe('voice realtime settings', () => {
-  test('persists the native provider and rejects unknown providers', async () => {
-    await withTempDroneDataDirAndEnv({}, async () => {
-      expect(await resolveEffectiveVoiceRealtimeSettings()).toMatchObject(VOICE_REALTIME_SETTINGS_DEFAULT);
-      await upsertStoredVoiceRealtimeSettings({ enabled: true, provider: 'native' });
-      expect(await resolveEffectiveVoiceRealtimeSettings()).toMatchObject({ enabled: true, provider: 'native', source: 'settings' });
-      await expect(upsertStoredVoiceRealtimeSettings({ enabled: true, provider: 'typo' })).rejects.toThrow('Invalid voice realtime settings');
-    });
-  });
-});
-
 describeSocketSuite('LLM settings api', () => {
   const token = 'test-token';
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-llm-settings-api-'));
@@ -254,9 +219,6 @@ describeSocketSuite('LLM settings api', () => {
   const droneDataDir = path.join(tempRoot, 'data', 'drone');
   let server: Awaited<ReturnType<typeof startDroneHubApiServer>> | null = null;
   let baseUrl = '';
-  let groqSettingsChangeNotifications = 0;
-  let voiceStreamPairingPasswordChangeNotifications = 0;
-  let voiceTranscriptionSettingsChangeNotifications = 0;
 
   const apiFetch = async (p: string, init?: RequestInit) => {
     const r = await fetch(`${baseUrl}${p}`, {
@@ -280,15 +242,6 @@ describeSocketSuite('LLM settings api', () => {
     server = await startDroneHubApiServer({
       port: 0,
       apiToken: token,
-      onGroqApiKeySettingsChanged: () => {
-        groqSettingsChangeNotifications += 1;
-      },
-      onVoiceStreamPairingPasswordSettingsChanged: () => {
-        voiceStreamPairingPasswordChangeNotifications += 1;
-      },
-      onVoiceTranscriptionSettingsChanged: () => {
-        voiceTranscriptionSettingsChangeNotifications += 1;
-      },
     });
     baseUrl = `http://${server.host}:${server.port}`;
   });
@@ -321,7 +274,6 @@ describeSocketSuite('LLM settings api', () => {
   });
 
   test('stores GROQ key for voice transcription settings', async () => {
-    const notificationCountBefore = groqSettingsChangeNotifications;
     const initial = await apiFetch('/api/settings/llm');
     expect(initial.r.status).toBe(200);
     expect(initial.data.groq.hasKey).toBe(false);
@@ -350,7 +302,6 @@ describeSocketSuite('LLM settings api', () => {
     expect(cleared.r.status).toBe(200);
     expect(cleared.data.hasKey).toBe(false);
     expect(cleared.data.source).toBeNull();
-    expect(groqSettingsChangeNotifications).toBe(notificationCountBefore + 2);
   });
 
   test('stores Exa key for assistant web tools', async () => {
@@ -376,87 +327,6 @@ describeSocketSuite('LLM settings api', () => {
     expect(cleared.r.status).toBe(200);
     expect(cleared.data.hasKey).toBe(false);
     expect(cleared.data.source).toBeNull();
-  });
-
-  test('stores Voice Stream pairing password settings', async () => {
-    const notificationCountBefore = voiceStreamPairingPasswordChangeNotifications;
-    const initial = await apiFetch('/api/settings/llm');
-    expect(initial.r.status).toBe(200);
-    expect(initial.data.voiceStreamPairingPassword.hasPassword).toBe(false);
-
-    const saved = await apiFetch('/api/settings/voice-stream/pairing-password', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ password: 'pair-password' }),
-    });
-    expect(saved.r.status).toBe(200);
-    expect(saved.data.hasPassword).toBe(true);
-    expect(saved.data.source).toBe('settings');
-    expect(saved.data.password).toBeUndefined();
-
-    const revealed = await apiFetch('/api/settings/voice-stream/pairing-password?reveal=1');
-    expect(revealed.r.status).toBe(200);
-    expect(revealed.data.password).toBe('pair-password');
-
-    const cleared = await apiFetch('/api/settings/voice-stream/pairing-password', { method: 'DELETE' });
-    expect(cleared.r.status).toBe(200);
-    expect(cleared.data.hasPassword).toBe(false);
-    expect(cleared.data.source).toBeNull();
-    expect(voiceStreamPairingPasswordChangeNotifications).toBe(notificationCountBefore + 2);
-  });
-
-  test('stores voice transcription finalization settings', async () => {
-    const notificationCountBefore = voiceTranscriptionSettingsChangeNotifications;
-    const initial = await apiFetch('/api/settings/voice-approval');
-    expect(initial.r.status).toBe(200);
-    expect(initial.data.voiceTranscription.finalMode).toBe('full-recording');
-    expect(initial.data.voiceTranscription.source).toBe('default');
-
-    const saved = await apiFetch('/api/settings/voice-approval', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        voiceApproval: initial.data.voiceApproval,
-        voiceTranscription: { finalMode: 'segments' },
-      }),
-    });
-    expect(saved.r.status).toBe(200);
-    expect(saved.data.voiceTranscription.finalMode).toBe('segments');
-    expect(saved.data.voiceTranscription.source).toBe('settings');
-    expect(voiceTranscriptionSettingsChangeNotifications).toBe(notificationCountBefore + 1);
-
-    const reset = await apiFetch('/api/settings/voice-approval', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ voiceTranscription: { finalMode: 'full-recording' } }),
-    });
-    expect(reset.r.status).toBe(200);
-    expect(reset.data.voiceTranscription.finalMode).toBe('full-recording');
-    expect(reset.data.voiceTranscription.source).toBe('default');
-    expect(voiceTranscriptionSettingsChangeNotifications).toBe(notificationCountBefore + 2);
-  });
-
-  test('normalizes voice approval digit bounds to configured codes', async () => {
-    const initial = await apiFetch('/api/settings/voice-approval');
-    expect(initial.r.status).toBe(200);
-
-    const saved = await apiFetch('/api/settings/voice-approval', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        voiceApproval: {
-          ...initial.data.voiceApproval,
-          unlockCode: '123',
-          minDigits: 4,
-          maxDigits: 4,
-        },
-      }),
-    });
-
-    expect(saved.r.status).toBe(200);
-    expect(saved.data.voiceApproval.unlockCode).toBe('123');
-    expect(saved.data.voiceApproval.minDigits).toBe(3);
-    expect(saved.data.voiceApproval.maxDigits).toBe(4);
   });
 
   test('reads and updates agent auto-continue settings', async () => {

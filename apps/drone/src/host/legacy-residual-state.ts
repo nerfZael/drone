@@ -13,10 +13,9 @@ const CANONICAL_TOP_LEVEL = new Set([
   'playbooks', 'repos', 'groups', 'playbookRunQueue',
 ]);
 const CANONICAL_SETTINGS = new Set([
-  'openai', 'gemini', 'groq', 'exa', 'voiceStream', 'llm', 'deleteAction',
-  'filesystem', 'voiceApproval', 'voiceTranscription', 'voiceActivation',
-  'voiceRealtime', 'agentMessageAutoContinue', 'agentSuggestion', 'kanbanBoard',
-  'taskPlaybookButtons', 'uiPreferences', 'desktopVoice', 'backups', 'agents',
+  'openai', 'gemini', 'groq', 'exa', 'llm', 'deleteAction', 'filesystem',
+  'agentMessageAutoContinue', 'agentSuggestion', 'kanbanBoard',
+  'taskPlaybookButtons', 'uiPreferences', 'backups', 'agents',
   'nonRepoEnvironment', 'syncSets',
 ]);
 

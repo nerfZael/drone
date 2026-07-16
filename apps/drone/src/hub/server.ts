@@ -275,35 +275,7 @@ import {
 } from './hub-format';
 import { readJsonBody, readRawBody, withCors } from './hub-http';
 import { createDroneHubMcpServer } from './mcp-server';
-import {
-  normalizeRemotePublicUrl,
-  pidIsRunning as remotePidIsRunning,
-  readRemoteHubState,
-} from './remote-state';
-import {
-  createRemoteHubPairing,
-  ensureDesiredRemoteHubDetached,
-  getRemoteHubPairingStatus,
-  redactRemoteHubState,
-  startRemoteHubDetached,
-  startRemoteNgrokTunnel,
-  stopRemoteHubDetached,
-} from './remote-control';
 import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from './groq-transcription';
-import { buildGroqTtsConfig, synthesizeTextWavWithGroq } from './groq-tts';
-import { DesktopVoiceService } from './desktop-voice-service';
-import { createNativeRealtimeVoiceSession } from './native-realtime-voice';
-import {
-  desktopVoiceModelStatus,
-  removeDesktopVoiceModel,
-  startDesktopVoiceModelInstall,
-} from './desktop-voice-models';
-import {
-  createOpenAiRealtimeAssistantSession,
-  createOpenAiRealtimeWebRtcAssistantSession,
-  type OpenAiRealtimeWebRtcAssistantSession,
-} from './openai-realtime-assistant';
-import { realtimeStopTranscript, realtimeStreamingTranscript } from './realtime-transcript';
 import {
   assertDroneDaemonRuntimeReady,
   resolveDroneDaemonRuntimeDir,
@@ -362,7 +334,6 @@ import {
 import {
   archiveRetentionMs,
   clearStoredProviderApiKey,
-  clearVoiceStreamPairingPassword,
   collectProviderApiKeyDiagnostics,
   FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
   FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
@@ -389,19 +360,14 @@ import {
   resolveEffectiveFilesystemSettings,
   resolveEffectiveDeleteActionSettings,
   resolveEffectiveLlmProvider,
-  resolveEffectiveVoiceApprovalSettings,
-  resolveEffectiveVoiceRealtimeSettings,
-  resolveEffectiveVoiceTranscriptionSettings,
   resolveFilesystemSettingsResponse,
   resolveEffectiveProviderApiKeySettings,
   resolveNameSuggestionLlmSettings,
   resolveExaApiKeySettings,
   resolveGroqApiKeySettings,
-  resolveVoiceStreamPairingPasswordSettings,
   resolveLlmSettingsResponse,
   resolveTaskPlaybookButtonSettingsResponse,
   resolveUiPreferencesSettingsResponse,
-  resolveVoiceApprovalSettingsResponse,
   transformStoredKanbanBoardSettings,
   upsertStoredDeleteActionSettings,
   upsertStoredFilesystemSettings,
@@ -410,11 +376,6 @@ import {
   upsertStoredAgentSuggestionSettings,
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
-  upsertStoredVoiceApprovalSettings,
-  upsertStoredVoiceActivationSettings,
-  upsertStoredVoiceRealtimeSettings,
-  upsertStoredVoiceTranscriptionSettings,
-  upsertVoiceStreamPairingPassword,
   upsertStoredTaskPlaybookButtonSettings,
   upsertStoredUiPreferencesSettings,
   type ArchiveRetentionId,
@@ -422,8 +383,6 @@ import {
   type LlmProviderId,
   type StoredApiKeyProviderId,
   type UiPreferencesSettings,
-  type VoiceRealtimeProvider,
-  voiceStreamPairingPasswordSettingsResponse,
 } from './hub-settings';
 import {
   createSkill,
@@ -540,7 +499,6 @@ import {
   summarizeAssistantChatIdle,
   type AssistantDroneSummary,
   type AssistantUiAction,
-  type AssistantVoiceSource,
 } from './assistant';
 import { BlipAssistantHost } from './assistant/blip-assistant-host';
 import { loadBlipMcp, loadBlipTools } from './assistant/blip-runtime-loader';
@@ -773,48 +731,6 @@ async function readHubLogTail(opts: { tailLines: number; maxBytes: number }) {
   return await readLogTail(droneRootPath('hub.log'), opts);
 }
 
-function resolveAndroidVoiceLogPath(): string {
-  const configured = String(process.env.DRONE_ANDROID_LOG_PATH ?? '').trim();
-  if (configured) return path.resolve(configured);
-
-  const candidates = [
-    path.resolve(
-      process.cwd(),
-      '..',
-      'voice-stream',
-      'server',
-      '.runtime',
-      'android-logs',
-      'drone-android.log',
-    ),
-    path.resolve(
-      process.cwd(),
-      'apps',
-      'voice-stream',
-      'server',
-      '.runtime',
-      'android-logs',
-      'drone-android.log',
-    ),
-    path.resolve(
-      __dirname,
-      '..',
-      '..',
-      '..',
-      'voice-stream',
-      'server',
-      '.runtime',
-      'android-logs',
-      'drone-android.log',
-    ),
-  ];
-  return candidates.find((candidate) => existsSync(candidate)) ?? candidates[0];
-}
-
-async function readAndroidVoiceLogTail(opts: { tailLines: number; maxBytes: number }) {
-  return await readLogTail(resolveAndroidVoiceLogPath(), opts);
-}
-
 function json(res: http.ServerResponse, status: number, body: any) {
   const data = JSON.stringify(body, null, 2);
   res.statusCode = status;
@@ -937,7 +853,6 @@ async function readManagedHubStateAtRoot(rootDir: string): Promise<ManagedHubSta
     apiPort,
     uiPort,
     containerMcp: parseManagedHubContainerMcpState(parsed.containerMcp),
-    voiceStream: parseManagedHubVoiceStreamState(parsed.voiceStream),
     startedAt: typeof parsed.startedAt === 'string' ? parsed.startedAt : new Date().toISOString(),
     logPath: typeof parsed.logPath === 'string' ? parsed.logPath : path.join(rootDir, 'hub.log'),
     launchEnv: parsed.launchEnv ?? null,
@@ -952,15 +867,6 @@ function parseManagedHubContainerMcpState(raw: unknown): ManagedHubState['contai
   const url = typeof value.url === 'string' ? value.url.trim() : '';
   if (!host || !Number.isFinite(port) || port <= 0 || !url) return null;
   return { host, port: Math.floor(port), url };
-}
-
-function parseManagedHubVoiceStreamState(raw: unknown): ManagedHubState['voiceStream'] {
-  if (!raw || typeof raw !== 'object') return null;
-  const value = raw as any;
-  const port = Number(value.port);
-  const url = typeof value.url === 'string' ? value.url : '';
-  if (!Number.isFinite(port) || port <= 0 || !url) return null;
-  return { port, url };
 }
 
 function profileSettingsErrorStatus(error: unknown): number {
@@ -16971,12 +16877,7 @@ export async function startDroneHubApiServer(opts: {
   apiToken: string;
   deviceMeshIngressPort?: number;
   mcpToken?: string;
-  voiceStreamUrl?: string | null;
   allowedOrigins?: string[];
-  onGroqApiKeySettingsChanged?: () => void | Promise<void>;
-  onVoiceStreamPairingPasswordSettingsChanged?: () => void | Promise<void>;
-  onVoiceApprovalSettingsChanged?: () => void | Promise<void>;
-  onVoiceTranscriptionSettingsChanged?: () => void | Promise<void>;
 }) {
   for (const timer of RECONCILE_RETRY_TIMERS.values()) {
     try {
@@ -16997,9 +16898,6 @@ export async function startDroneHubApiServer(opts: {
   const apiToken = String(opts.apiToken ?? '').trim();
   if (!apiToken) throw new Error('missing hub API token');
   const mcpToken = String(opts.mcpToken ?? '').trim();
-  const voiceStreamUrl = String(opts.voiceStreamUrl ?? '')
-    .trim()
-    .replace(/\/+$/, '');
   let actualPort = opts.port;
   const deviceMesh = await createDeviceMeshService({
     rootDir: droneRootPath('device-mesh'),
@@ -17007,39 +16905,6 @@ export async function startDroneHubApiServer(opts: {
     localHubBaseUrl: () => `http://127.0.0.1:${actualPort}`,
     ingressPort: opts.deviceMeshIngressPort,
   });
-
-  const notifyGroqApiKeySettingsChanged = () => {
-    if (!opts.onGroqApiKeySettingsChanged) return;
-    void Promise.resolve(opts.onGroqApiKeySettingsChanged()).catch((error: any) => {
-      hubLog('warn', 'Groq settings change hook failed', {
-        error: String(error?.message ?? error ?? ''),
-      });
-    });
-  };
-  const notifyVoiceStreamPairingPasswordSettingsChanged = () => {
-    if (!opts.onVoiceStreamPairingPasswordSettingsChanged) return;
-    void Promise.resolve(opts.onVoiceStreamPairingPasswordSettingsChanged()).catch((error: any) => {
-      hubLog('warn', 'Voice Stream pairing password settings change hook failed', {
-        error: String(error?.message ?? error ?? ''),
-      });
-    });
-  };
-  const notifyVoiceApprovalSettingsChanged = () => {
-    if (!opts.onVoiceApprovalSettingsChanged) return;
-    void Promise.resolve(opts.onVoiceApprovalSettingsChanged()).catch((error: any) => {
-      hubLog('warn', 'Voice approval settings change hook failed', {
-        error: String(error?.message ?? error ?? ''),
-      });
-    });
-  };
-  const notifyVoiceTranscriptionSettingsChanged = () => {
-    if (!opts.onVoiceTranscriptionSettingsChanged) return;
-    void Promise.resolve(opts.onVoiceTranscriptionSettingsChanged()).catch((error: any) => {
-      hubLog('warn', 'Voice transcription settings change hook failed', {
-        error: String(error?.message ?? error ?? ''),
-      });
-    });
-  };
 
   const allowedOrigins = new Set<string>();
   for (const o of opts.allowedOrigins ?? []) {
@@ -17505,111 +17370,6 @@ export async function startDroneHubApiServer(opts: {
     return data;
   };
 
-  const callVoiceStreamApi = async (pathname: string, body: any): Promise<any> => {
-    if (!voiceStreamUrl) throw new Error('Voice Stream server is not running.');
-    const response = await fetch(`${voiceStreamUrl}${pathname}`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${apiToken}`,
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(body ?? {}),
-    });
-    const text = await response.text();
-    let data: any = null;
-    if (text) {
-      try {
-        data = JSON.parse(text);
-      } catch {
-        data = { error: text };
-      }
-    }
-    if (!response.ok) {
-      const error = new Error(
-        data?.error ?? `${response.status} ${response.statusText}`,
-      ) as Error & { status?: number; data?: any };
-      error.status = response.status;
-      error.data = data;
-      throw error;
-    }
-    return data;
-  };
-
-  const voiceStreamMonitorWebSocketUrl = (): string => {
-    if (!voiceStreamUrl) throw new Error('Voice Stream server is not running.');
-    const u = new URL(voiceStreamUrl);
-    u.protocol = u.protocol === 'https:' ? 'wss:' : 'ws:';
-    u.pathname = '/monitor';
-    u.search = '';
-    u.hash = '';
-    return u.toString();
-  };
-
-  const voiceStreamPairingUrl = (): string => {
-    if (!voiceStreamUrl) throw new Error('Voice Stream server is not running.');
-    const u = new URL(voiceStreamUrl);
-    u.pathname = '/pair';
-    u.search = '';
-    u.hash = '';
-    return u.toString();
-  };
-
-  let desktopVoiceService!: DesktopVoiceService;
-  const speakToDesktopVoice = async (text: string): Promise<{ ok: true; target: 'desktop' }> => {
-    if (!(await desktopVoiceService.speak(text)))
-      throw new Error('Desktop voice frontend is not connected.');
-    return { ok: true, target: 'desktop' };
-  };
-  const desktopRealtimeAssistantInstructions = () =>
-    [
-      'You are Sebastian, the Drone Hub desktop voice assistant.',
-      'Keep spoken replies short and natural.',
-      'Use Drone Hub tools directly when they are needed, and summarize tool results briefly.',
-    ].join(' ');
-  const isAndroidSpeakUnavailable = (error: unknown): boolean => {
-    const anyError = error as any;
-    const message = String(anyError?.message ?? error ?? '');
-    const causeMessage = String(anyError?.cause?.message ?? '');
-    const causeCode = String(anyError?.cause?.code ?? '');
-    return (
-      message.includes('Voice Stream server is not running') ||
-      message.includes('fetch failed') ||
-      /ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT/.test(causeCode) ||
-      /ECONNREFUSED|ECONNRESET|EHOSTUNREACH|ENETUNREACH|ETIMEDOUT/.test(causeMessage) ||
-      (Number(anyError?.status) === 409 && /no android control client/i.test(message))
-    );
-  };
-  const speakToVoiceTarget = async ({
-    threadId,
-    text,
-    source,
-  }: {
-    threadId: string;
-    text: string;
-    source?: AssistantVoiceSource | null;
-  }) => {
-    if (source === 'desktop') {
-      try {
-        return await speakToDesktopVoice(text);
-      } catch (desktopError) {
-        try {
-          const result = await callVoiceStreamApi('/speak', { threadId, text });
-          return { ok: true, target: 'android', fallbackFrom: 'desktop', result };
-        } catch {
-          throw desktopError;
-        }
-      }
-    }
-    try {
-      const result = await callVoiceStreamApi('/speak', { threadId, text });
-      return { ok: true, target: 'android', result };
-    } catch (error) {
-      if ((source === 'android' || source == null) && isAndroidSpeakUnavailable(error))
-        return await speakToDesktopVoice(text);
-      throw error;
-    }
-  };
-
   function buildAssistantDroneSummariesFromRegistry(regAny: any): AssistantDroneSummary[] {
     const out: AssistantDroneSummary[] = [];
     const drones = regAny?.drones && typeof regAny.drones === 'object' ? regAny.drones : {};
@@ -17741,7 +17501,6 @@ export async function startDroneHubApiServer(opts: {
       await assistantRunDroneBash({ droneId, command, cwd, timeoutMs }),
     listDroneChangedFiles: async ({ droneId }) => await assistantListDroneChangedFiles({ droneId }),
   });
-  const nativeVoiceThreadIds = new Set<string>();
   const blipAssistantHost = new BlipAssistantHost(
     async (threadId) => {
       const snapshot = await assistantService.threadSnapshot(threadId);
@@ -17812,7 +17571,6 @@ export async function startDroneHubApiServer(opts: {
           ?.descriptor.id ?? targets[0]?.descriptor.id;
       const targetCatalog = new blipTools.WorkspaceTargetCatalog(targets, activeTargetId);
       const enabledTools = new Set(Array.isArray(thread.enabledTools) ? thread.enabledTools : []);
-      if (nativeVoiceThreadIds.has(threadId)) enabledTools.delete('speak');
       const workspaceTools = blipTools
         .createWorkspaceTargetTools({
           profile: 'no-shell-workspace-write',
@@ -17941,26 +17699,6 @@ export async function startDroneHubApiServer(opts: {
           },
         },
         {
-          name: 'speak',
-          label: 'Speak',
-          description: 'Send a short spoken reply to the voice device that started this thread.',
-          parameters: {
-            type: 'object',
-            properties: { text: { type: 'string' } },
-            required: ['text'],
-            additionalProperties: false,
-          },
-          execute: async (_callId: string, args: any) => {
-            const text = String(args?.text ?? '').trim();
-            if (!text) throw new Error('missing text');
-            const result = await speakToVoiceTarget({ threadId, text, source: null });
-            return {
-              content: [{ type: 'text' as const, text: 'Spoken reply sent.' }],
-              details: result,
-            };
-          },
-        },
-        {
           name: 'web_search',
           label: 'Web search',
           description: 'Search the web for current information and source URLs.',
@@ -18038,17 +17776,10 @@ export async function startDroneHubApiServer(opts: {
         provider: thread.provider,
         model: thread.model,
         thinkingLevel: thread.thinkingLevel,
-        promptDeliveryMode: nativeVoiceThreadIds.has(threadId) ? 'asap' : thread.promptDeliveryMode,
-        systemPrompt: [
-          assistantService.resolvedSystemPrompt(threadId, {
-            multipleWorkspaceTargets: targetCatalog.size() > 1,
-          }),
-          nativeVoiceThreadIds.has(threadId)
-            ? 'You are in native realtime voice mode. Your response text is spoken automatically. Keep spoken updates concise and do not call the speak tool.'
-            : '',
-        ]
-          .filter(Boolean)
-          .join('\n\n'),
+        promptDeliveryMode: thread.promptDeliveryMode,
+        systemPrompt: assistantService.resolvedSystemPrompt(threadId, {
+          multipleWorkspaceTargets: targetCatalog.size() > 1,
+        }),
         tools,
         toolProviders: [enabledMcpProvider],
         onResponse: async (response: any, model: any) => {
@@ -18158,14 +17889,6 @@ export async function startDroneHubApiServer(opts: {
   assistantService.setTextPromptDelegate(async (threadId, prompt) => {
     await blipAssistantHost.promptThread(threadId, prompt);
   });
-  assistantService.setRealtimeHistoryDelegate(async (threadId, message) => {
-    await blipAssistantHost.appendExternalMessage(threadId, message);
-  });
-  assistantService.setRealtimeToolDelegate({
-    catalog: (threadId) => blipAssistantHost.toolCatalog(threadId),
-    execute: (threadId, callId, toolName, args, signal) =>
-      blipAssistantHost.executeTool(threadId, callId, toolName, args, signal),
-  });
   type AssistantPromptInput =
     | string
     | { text: string; images: Array<{ type: 'image'; data: string; mimeType: string }> };
@@ -18254,414 +17977,6 @@ export async function startDroneHubApiServer(opts: {
         error: error?.message ?? String(error),
       });
     });
-  let desktopVoicePatchSessionId: string | null = null;
-  let desktopVoiceRealtimeProvider: VoiceRealtimeProvider = 'openai';
-  let desktopRealtimeWebRtcSession: OpenAiRealtimeWebRtcAssistantSession | null = null;
-  let desktopRealtimeWebRtcSessionGeneration = 0;
-  const cancelDesktopRealtimeWebRtcSession = async (): Promise<void> => {
-    desktopRealtimeWebRtcSessionGeneration += 1;
-    const session = desktopRealtimeWebRtcSession;
-    desktopRealtimeWebRtcSession = null;
-    if (!session) return;
-    await session.cancel();
-  };
-  desktopVoiceService = new DesktopVoiceService({
-    transcribeWav: async (wav) => {
-      const groqSettings = await resolveGroqApiKeySettings();
-      if (!groqSettings.apiKey)
-        throw new Error('GROQ API key is not configured. Add it in Drone Hub settings.');
-      return await transcribeAudioWithGroq({
-        audio: wav,
-        apiKey: groqSettings.apiKey,
-        mimeType: 'audio/wav',
-      });
-    },
-    submitAssistantPrompt: async (prompt) => {
-      await assistantService.submitVoicePrompt({
-        prompt,
-        title: 'Desktop voice thread',
-        source: 'desktop',
-      });
-    },
-    startRealtimeAssistant: async (callbacks) => {
-      if (desktopVoiceRealtimeProvider === 'native') {
-        const voiceThread = await assistantService.ensureLatestVoiceThread({
-          title: 'Desktop realtime thread',
-        });
-        const threadId = voiceThread.threadId;
-        nativeVoiceThreadIds.add(threadId);
-        blipAssistantHost.invalidateThread(threadId);
-        hubLog('info', 'desktop native realtime assistant session starting', {
-          threadId,
-          vad: 'silero-v5',
-          stt: 'groq',
-          tts: 'groq',
-        });
-        try {
-          const session = await createNativeRealtimeVoiceSession({
-            callbacks,
-            transcribePcm: async (wav, signal) => {
-              const groqSettings = await resolveGroqApiKeySettings();
-              if (!groqSettings.apiKey)
-                throw new Error('GROQ API key is not configured. Add it in Drone Hub settings.');
-              return (
-                await transcribeAudioWithGroq({
-                  audio: wav,
-                  apiKey: groqSettings.apiKey,
-                  mimeType: 'audio/wav',
-                  signal,
-                })
-              ).text;
-            },
-            synthesizeSpeech: async (text, signal) => {
-              const groqSettings = await resolveGroqApiKeySettings();
-              const apiKey =
-                String(process.env.GROQ_TTS_API_KEY ?? '').trim() || groqSettings.apiKey;
-              if (!apiKey)
-                throw new Error('GROQ API key is not configured. Add it in Drone Hub settings.');
-              return await synthesizeTextWavWithGroq(text, buildGroqTtsConfig({ apiKey }), signal);
-            },
-            isAssistantRunning: () => blipAssistantHost.isThreadRunning(threadId),
-            submitPrompt: async (prompt) => await blipAssistantHost.promptThread(threadId, prompt),
-            interruptAssistant: () => blipAssistantHost.abortThread(threadId),
-            interruptWithPrompt: async (prompt) =>
-              await blipAssistantHost.interruptThreadWithPrompt(threadId, prompt),
-            steerPrompt: (prompt) => blipAssistantHost.steerThread(threadId, prompt),
-            subscribeAssistantEvents: (listener) =>
-              blipAssistantHost.subscribeEvents(threadId, listener),
-          });
-          return {
-            ...session,
-            cancel: async () => {
-              try {
-                await session.cancel();
-              } finally {
-                nativeVoiceThreadIds.delete(threadId);
-                blipAssistantHost.invalidateThread(threadId);
-              }
-            },
-          };
-        } catch (error) {
-          nativeVoiceThreadIds.delete(threadId);
-          blipAssistantHost.invalidateThread(threadId);
-          throw error;
-        }
-      }
-      const openaiSettings = await resolveEffectiveProviderApiKeySettings('openai');
-      if (!openaiSettings.apiKey)
-        throw new Error('OpenAI API key is not configured. Add it in Drone Hub settings.');
-      const realtimeConfig = await assistantService.realtimeSessionConfig({ source: 'desktop' });
-      let realtimeThreadId = realtimeConfig.threadId;
-      hubLog('info', 'desktop realtime assistant session starting', {
-        model: String(
-          process.env.DRONE_HUB_OPENAI_REALTIME_MODEL ??
-            process.env.OPENAI_REALTIME_MODEL ??
-            'gpt-realtime-2',
-        ),
-        credentialSource: openaiSettings.source,
-        threadId: realtimeThreadId,
-        toolCount: realtimeConfig.tools.length,
-      });
-      return await createOpenAiRealtimeAssistantSession({
-        apiKey: openaiSettings.apiKey,
-        instructions: [desktopRealtimeAssistantInstructions(), realtimeConfig.instructions].join(
-          '\n\n',
-        ),
-        tools: realtimeConfig.tools,
-        executeTool: async (call) => {
-          const result = await assistantService.executeRealtimeTool({
-            threadId: realtimeThreadId,
-            toolCallId: call.id,
-            toolName: call.name,
-            arguments: call.arguments,
-            source: 'desktop',
-          });
-          const nextThreadId = String((result.result as any)?.threadId ?? '').trim();
-          if (nextThreadId) realtimeThreadId = nextThreadId;
-          return result.output;
-        },
-        callbacks: {
-          ...callbacks,
-          onUserTranscriptDelta: async (delta) => {
-            await callbacks.onUserTranscriptDelta?.(delta);
-            const transcript = realtimeStreamingTranscript(delta.text);
-            if (transcript.stop && !transcript.hasText) {
-              await assistantService.clearRealtimeStreamingMessage({ threadId: realtimeThreadId });
-              return;
-            }
-            if (!transcript.hasText) return;
-            await assistantService.updateRealtimeStreamingMessage({
-              threadId: realtimeThreadId,
-              role: 'user',
-              text: transcript.text,
-            });
-          },
-          onUserTranscript: async (text) => {
-            const stopTranscript = realtimeStopTranscript(text);
-            await callbacks.onUserTranscript?.(text);
-            if (stopTranscript.stop) {
-              await assistantService.clearRealtimeStreamingMessage({ threadId: realtimeThreadId });
-              if (stopTranscript.hasText) {
-                await assistantService.appendRealtimeMessage({
-                  threadId: realtimeThreadId,
-                  role: 'user',
-                  text: stopTranscript.text,
-                });
-              }
-              return;
-            }
-            await assistantService.appendRealtimeMessage({
-              threadId: realtimeThreadId,
-              role: 'user',
-              text,
-            });
-          },
-          onUserSpeechStarted: async () => {
-            await callbacks.onUserSpeechStarted?.();
-            await assistantService.clearRealtimeStreamingMessage({ threadId: realtimeThreadId });
-          },
-          onAssistantTranscriptDelta: async (delta) => {
-            await callbacks.onAssistantTranscriptDelta?.(delta);
-            await assistantService.updateRealtimeStreamingMessage({
-              threadId: realtimeThreadId,
-              role: 'assistant',
-              text: delta.text,
-            });
-          },
-          onAssistantTranscript: async (text) => {
-            await callbacks.onAssistantTranscript?.(text);
-            await assistantService.appendRealtimeMessage({
-              threadId: realtimeThreadId,
-              role: 'assistant',
-              text,
-            });
-          },
-        },
-      });
-    },
-    realtimeProvider: () => desktopVoiceRealtimeProvider,
-    realtimeWebRtcAvailable: () => desktopVoiceRealtimeProvider === 'openai',
-    cancelRealtimeWebRtcAssistant: cancelDesktopRealtimeWebRtcSession,
-    startChatPatch: async () => {
-      desktopVoicePatchSessionId = beginVoicePatchSession('desktop').sessionId;
-    },
-    submitChatPatch: async (prompt) => {
-      const sessionId = desktopVoicePatchSessionId;
-      desktopVoicePatchSessionId = null;
-      await submitVoicePatchPrompt(prompt, 'desktop', sessionId);
-    },
-    abortChatPatch: async () => {
-      const sessionId = desktopVoicePatchSessionId;
-      desktopVoicePatchSessionId = null;
-      endVoicePatchSession('desktop', 'aborted', sessionId);
-    },
-    synthesizeSpeechWav: async (text) => {
-      const groqSettings = await resolveGroqApiKeySettings();
-      const apiKey = String(process.env.GROQ_TTS_API_KEY ?? '').trim() || groqSettings.apiKey;
-      if (!apiKey) throw new Error('GROQ API key is not configured. Add it in Drone Hub settings.');
-      return await synthesizeTextWavWithGroq(text.slice(0, 4_000), buildGroqTtsConfig({ apiKey }));
-    },
-  });
-  const reloadDesktopVoiceApprovalSettings = async () => {
-    desktopVoiceService.setApprovalSettings(await resolveEffectiveVoiceApprovalSettings());
-  };
-  const reloadDesktopVoiceTranscriptionSettings = async () => {
-    desktopVoiceService.setVoiceTranscriptionSettings(
-      await resolveEffectiveVoiceTranscriptionSettings(),
-    );
-  };
-  const reloadDesktopVoiceRealtimeSettings = async () => {
-    const settings = await resolveEffectiveVoiceRealtimeSettings();
-    const previous = desktopVoiceService.snapshot().realtime;
-    const providerChanged = desktopVoiceRealtimeProvider !== settings.provider;
-    if (providerChanged || (previous.enabled && !settings.enabled)) {
-      await desktopVoiceService.stopRealtimeAssistantSession();
-    }
-    desktopVoiceRealtimeProvider = settings.provider;
-    desktopVoiceService.setRealtimeAssistantEnabled(settings.enabled);
-  };
-  const desktopVoiceRequestMeta = (req: http.IncomingMessage): Record<string, unknown> => ({
-    mode: desktopVoiceService.snapshot().mode,
-    target: desktopVoiceService.snapshot().transcript.target,
-    realtimeEnabled: desktopVoiceService.snapshot().realtime.enabled,
-    webRtcSessionId:
-      String(req.headers['x-drone-desktop-voice-webrtc-session-id'] ?? '').slice(0, 80) || null,
-    referer: String(req.headers.referer ?? req.headers.referrer ?? '').slice(0, 200) || null,
-    userAgent: String(req.headers['user-agent'] ?? '').slice(0, 200) || null,
-  });
-  const logDesktopVoiceControl = (
-    req: http.IncomingMessage,
-    action: string,
-    extra?: Record<string, unknown>,
-  ): void => {
-    hubLog('info', `desktop voice ${action} requested`, {
-      ...desktopVoiceRequestMeta(req),
-      ...(extra ?? {}),
-    });
-  };
-  const createDesktopRealtimeWebRtcSession = async (
-    sdpOffer: string,
-  ): Promise<OpenAiRealtimeWebRtcAssistantSession> => {
-    const openaiSettings = await resolveEffectiveProviderApiKeySettings('openai');
-    if (!openaiSettings.apiKey)
-      throw new Error('OpenAI API key is not configured. Add it in Drone Hub settings.');
-    const realtimeConfig = await assistantService.realtimeSessionConfig({ source: 'desktop' });
-    let realtimeThreadId = realtimeConfig.threadId;
-    hubLog('info', 'desktop realtime assistant WebRTC session starting', {
-      model: String(
-        process.env.DRONE_HUB_OPENAI_REALTIME_MODEL ??
-          process.env.OPENAI_REALTIME_MODEL ??
-          'gpt-realtime-2',
-      ),
-      credentialSource: openaiSettings.source,
-      threadId: realtimeThreadId,
-      toolCount: realtimeConfig.tools.length,
-    });
-    await cancelDesktopRealtimeWebRtcSession();
-    const generation = desktopRealtimeWebRtcSessionGeneration;
-    const isCurrentGeneration = (): boolean =>
-      desktopRealtimeWebRtcSessionGeneration === generation;
-    let createdSession: OpenAiRealtimeWebRtcAssistantSession | null = null;
-    const realtimeCallbacks = desktopVoiceService.createRealtimeAssistantCallbacks();
-    const persistRealtimeTranscript = {
-      onUserTranscriptDelta: async (delta: { text: string }) => {
-        if (!isCurrentGeneration()) return;
-        await realtimeCallbacks.onUserTranscriptDelta?.(delta);
-        const transcript = realtimeStreamingTranscript(delta.text);
-        if (transcript.stop && !transcript.hasText) {
-          await assistantService.clearRealtimeStreamingMessage({ threadId: realtimeThreadId });
-          return;
-        }
-        if (!transcript.hasText) return;
-        await assistantService.updateRealtimeStreamingMessage({
-          threadId: realtimeThreadId,
-          role: 'user',
-          text: transcript.text,
-        });
-      },
-      onUserTranscript: async (text: string) => {
-        if (!isCurrentGeneration()) return;
-        const stopTranscript = realtimeStopTranscript(text);
-        await realtimeCallbacks.onUserTranscript?.(text);
-        if (stopTranscript.stop) {
-          await assistantService.clearRealtimeStreamingMessage({ threadId: realtimeThreadId });
-          if (stopTranscript.hasText) {
-            await assistantService.appendRealtimeMessage({
-              threadId: realtimeThreadId,
-              role: 'user',
-              text: stopTranscript.text,
-            });
-          }
-          return;
-        }
-        await assistantService.appendRealtimeMessage({
-          threadId: realtimeThreadId,
-          role: 'user',
-          text,
-        });
-      },
-      onUserSpeechStarted: async () => {
-        if (!isCurrentGeneration()) return;
-        await realtimeCallbacks.onUserSpeechStarted?.();
-        await assistantService.clearRealtimeStreamingMessage({ threadId: realtimeThreadId });
-      },
-      onAssistantTranscriptDelta: async (delta: { text: string }) => {
-        if (!isCurrentGeneration()) return;
-        await realtimeCallbacks.onAssistantTranscriptDelta?.(delta);
-        await assistantService.updateRealtimeStreamingMessage({
-          threadId: realtimeThreadId,
-          role: 'assistant',
-          text: delta.text,
-        });
-      },
-      onAssistantTranscript: async (text: string) => {
-        if (!isCurrentGeneration()) return;
-        await realtimeCallbacks.onAssistantTranscript?.(text);
-        await assistantService.appendRealtimeMessage({
-          threadId: realtimeThreadId,
-          role: 'assistant',
-          text,
-        });
-      },
-    };
-    const session = await createOpenAiRealtimeWebRtcAssistantSession({
-      apiKey: openaiSettings.apiKey,
-      sdpOffer,
-      instructions: [desktopRealtimeAssistantInstructions(), realtimeConfig.instructions].join(
-        '\n\n',
-      ),
-      tools: realtimeConfig.tools,
-      executeTool: async (call) => {
-        if (!isCurrentGeneration())
-          throw new Error('Desktop assistant voice WebRTC session is no longer active.');
-        const result = await assistantService.executeRealtimeTool({
-          threadId: realtimeThreadId,
-          toolCallId: call.id,
-          toolName: call.name,
-          arguments: call.arguments,
-          source: 'desktop',
-        });
-        const nextThreadId = String((result.result as any)?.threadId ?? '').trim();
-        if (nextThreadId) realtimeThreadId = nextThreadId;
-        return result.output;
-      },
-      callbacks: {
-        ...realtimeCallbacks,
-        ...persistRealtimeTranscript,
-        onError: async (message) => {
-          await realtimeCallbacks.onError?.(message);
-          if (createdSession && desktopRealtimeWebRtcSession === createdSession)
-            desktopRealtimeWebRtcSession = null;
-        },
-        onClose: async () => {
-          await realtimeCallbacks.onClose?.();
-          if (createdSession && desktopRealtimeWebRtcSession === createdSession)
-            desktopRealtimeWebRtcSession = null;
-        },
-      },
-    });
-    createdSession = session;
-    const status = desktopVoiceService.snapshot();
-    if (
-      desktopRealtimeWebRtcSessionGeneration !== generation ||
-      status.mode !== 'recording' ||
-      status.transcript.target !== 'assistant' ||
-      status.realtime.enabled !== true
-    ) {
-      await session.cancel();
-      throw new Error('Desktop assistant voice WebRTC setup was cancelled.');
-    }
-    desktopRealtimeWebRtcSession = session;
-    return session;
-  };
-  void reloadDesktopVoiceApprovalSettings().catch((error: any) => {
-    hubLog('warn', 'Failed to apply desktop voice approval settings', {
-      error: String(error?.message ?? error ?? ''),
-    });
-  });
-  void reloadDesktopVoiceTranscriptionSettings().catch((error: any) => {
-    hubLog('warn', 'Failed to apply desktop voice transcription settings', {
-      error: String(error?.message ?? error ?? ''),
-    });
-  });
-  void reloadDesktopVoiceRealtimeSettings().catch((error: any) => {
-    hubLog('warn', 'Failed to apply desktop voice realtime settings', {
-      error: String(error?.message ?? error ?? ''),
-    });
-  });
-
-  type VoicePatchState = {
-    active: boolean;
-    sessionId: string | null;
-    source: string | null;
-    droneId: string | null;
-    droneName: string | null;
-    chatName: string | null;
-    startedAt: string | null;
-    updatedAt: string;
-    message: string;
-  };
-
   let activeAssistantContext: {
     activeDroneId: string | null;
     activeDroneName: string | null;
@@ -18673,145 +17988,6 @@ export async function startDroneHubApiServer(opts: {
     activeChatName: null,
     appView: null,
   };
-  let voicePatchState: VoicePatchState = {
-    active: false,
-    sessionId: null,
-    source: null,
-    droneId: null,
-    droneName: null,
-    chatName: null,
-    startedAt: null,
-    updatedAt: nowIso(),
-    message: 'Voice patch is idle.',
-  };
-  const voicePatchSessions = new Map<string, VoicePatchState>();
-  const voicePatchSubscribers = new Set<http.ServerResponse>();
-
-  function emitVoicePatchState(): void {
-    for (const subscriber of Array.from(voicePatchSubscribers)) {
-      if (subscriber.destroyed || subscriber.writableEnded) {
-        voicePatchSubscribers.delete(subscriber);
-        continue;
-      }
-      subscriber.write(`event: voice_patch_status\n`);
-      subscriber.write(`data: ${JSON.stringify(voicePatchState)}\n\n`);
-    }
-  }
-
-  function setVoicePatchState(next: VoicePatchState): VoicePatchState {
-    voicePatchState = next;
-    emitVoicePatchState();
-    return voicePatchState;
-  }
-
-  function latestVoicePatchSession(): VoicePatchState | null {
-    let latest: VoicePatchState | null = null;
-    for (const session of voicePatchSessions.values()) {
-      latest = session;
-    }
-    return latest;
-  }
-
-  function beginVoicePatchSession(sourceRaw: unknown, sessionIdRaw?: unknown): VoicePatchState {
-    const droneId = String(activeAssistantContext.activeDroneId ?? '').trim();
-    const droneName = String(activeAssistantContext.activeDroneName ?? '').trim();
-    const chatName = String(activeAssistantContext.activeChatName ?? '').trim() || 'default';
-    if (!droneId) throw new Error('No active drone chat is open.');
-    const source = String(sourceRaw ?? '').trim() || 'unknown';
-    const sessionId = String(sessionIdRaw ?? '').trim() || crypto.randomUUID();
-    const at = nowIso();
-    const next = {
-      active: true,
-      sessionId,
-      source,
-      droneId,
-      droneName: droneName || droneId,
-      chatName,
-      startedAt: at,
-      updatedAt: at,
-      message: `Patching into ${droneName || droneId} / ${chatName}.`,
-    };
-    voicePatchSessions.set(sessionId, next);
-    return setVoicePatchState(next);
-  }
-
-  function endVoicePatchSession(
-    sourceRaw: unknown,
-    reason = 'idle',
-    sessionIdRaw?: unknown,
-  ): VoicePatchState {
-    const sessionId = String(sessionIdRaw ?? '').trim();
-    const target = sessionId ? voicePatchSessions.get(sessionId) : voicePatchState;
-    if (sessionId) {
-      voicePatchSessions.delete(sessionId);
-    } else if (voicePatchState.sessionId) {
-      voicePatchSessions.delete(voicePatchState.sessionId);
-    }
-    if (sessionId && voicePatchState.sessionId !== sessionId) {
-      return voicePatchState;
-    }
-    const remainingActive = latestVoicePatchSession();
-    if (remainingActive) return setVoicePatchState(remainingActive);
-    const source =
-      String(sourceRaw ?? '').trim() || target?.source || voicePatchState.source || 'unknown';
-    const at = nowIso();
-    return setVoicePatchState({
-      active: false,
-      sessionId: target?.sessionId ?? voicePatchState.sessionId,
-      source,
-      droneId: target?.droneId ?? voicePatchState.droneId,
-      droneName: target?.droneName ?? voicePatchState.droneName,
-      chatName: target?.chatName ?? voicePatchState.chatName,
-      startedAt: target?.startedAt ?? voicePatchState.startedAt,
-      updatedAt: at,
-      message:
-        reason === 'sent'
-          ? 'Voice patch sent.'
-          : reason === 'aborted'
-            ? 'Voice patch cancelled.'
-            : reason === 'closed'
-              ? 'Voice patch stream closed.'
-              : 'Voice patch is idle.',
-    });
-  }
-
-  async function submitVoicePatchPrompt(
-    promptRaw: unknown,
-    sourceRaw: unknown,
-    sessionIdRaw?: unknown,
-  ): Promise<{
-    ok: true;
-    droneId: string;
-    chatName: string;
-    promptId: string;
-    pendingState?: string | null;
-    blockedByAutomation?: boolean;
-  }> {
-    const prompt = String(promptRaw ?? '').trim();
-    if (!prompt) throw new Error('Patch transcript is empty.');
-    const sessionId = String(sessionIdRaw ?? '').trim();
-    const target = sessionId
-      ? voicePatchSessions.get(sessionId)
-      : voicePatchState.active
-        ? voicePatchState
-        : null;
-    if (!target) throw new Error('Voice patch session is no longer active.');
-    const droneId = String(target.droneId ?? '').trim();
-    const chatName = String(target.chatName ?? '').trim() || 'default';
-    if (!droneId) throw new Error('No active drone chat is open.');
-    const result = await createOrEnqueuePromptUnified({ droneId, chatName, prompt, cwd: null });
-    if (result.kind === 'error') throw new Error(result.error);
-    endVoicePatchSession(sourceRaw, 'sent', target.sessionId);
-    return {
-      ok: true,
-      droneId,
-      chatName,
-      promptId: result.id,
-      pendingState: result.pendingState,
-      blockedByAutomation: result.blockedByAutomation,
-    };
-  }
-
   function writeAssistantSseEvent(res: http.ServerResponse, event: string, data: any): void {
     if (res.destroyed || res.writableEnded) return;
     res.write(`event: ${event}\n`);
@@ -20328,459 +19504,6 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
-      if (pathname === '/api/remote-access/status' && method === 'GET') {
-        const ensured = await ensureDesiredRemoteHubDetached({ cliFilename: process.argv[1] });
-        const remoteState = ensured.state ? null : await readRemoteHubState();
-        const running = Boolean(
-          ensured.state || (remoteState && remotePidIsRunning(remoteState.pid)),
-        );
-        json(res, 200, {
-          ok: true,
-          running,
-          desired: ensured.desired === true,
-          ensuring: ensured.started === true,
-          error: ensured.error ?? null,
-          state:
-            ensured.state ?? (running && remoteState ? redactRemoteHubState(remoteState) : null),
-        });
-        return;
-      }
-
-      if (pathname === '/api/remote-access/ngrok-url' && method === 'GET') {
-        const port = Number(u.searchParams.get('port') ?? 8790);
-        if (!Number.isInteger(port) || port <= 0 || port > 65535) {
-          json(res, 400, { ok: false, error: 'invalid port' });
-          return;
-        }
-
-        const addrMatchesPort = (rawAddr: unknown): boolean => {
-          const addr = String(rawAddr ?? '').trim();
-          if (!addr) return false;
-          try {
-            const parsed = new URL(addr.includes('://') ? addr : `http://${addr}`);
-            return Number(parsed.port) === port;
-          } catch {
-            return new RegExp(`(^|:)${port}($|/)`).test(addr);
-          }
-        };
-
-        try {
-          const controller = new AbortController();
-          const timeout = setTimeout(() => controller.abort(), 1200);
-          const response = await fetch('http://127.0.0.1:4040/api/tunnels', {
-            signal: controller.signal,
-          });
-          clearTimeout(timeout);
-          const data = (await response.json()) as any;
-          const tunnels: any[] = Array.isArray(data?.tunnels) ? data.tunnels : [];
-          const matches = tunnels
-            .filter((tunnel) => addrMatchesPort(tunnel?.config?.addr))
-            .map((tunnel) => normalizeRemotePublicUrl(tunnel?.public_url))
-            .filter(Boolean) as string[];
-          const https = matches.find((candidate) => candidate.startsWith('https://'));
-          json(res, 200, { ok: true, url: https ?? matches[0] ?? null });
-        } catch (e: any) {
-          json(res, 200, {
-            ok: true,
-            url: null,
-            error: `ngrok inspector not reachable at http://127.0.0.1:4040 (${e?.message ?? String(e)})`,
-          });
-        }
-        return;
-      }
-
-      if (pathname === '/api/remote-access/ngrok/start' && method === 'POST') {
-        try {
-          const body = await readJsonBody(req);
-          const result = await startRemoteNgrokTunnel(body?.port ?? 8790);
-          json(res, 200, result);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/remote-access/start' && method === 'POST') {
-        try {
-          const body = await readJsonBody(req);
-          const result = await startRemoteHubDetached({
-            port: body?.port ?? 8790,
-            host: body?.host ?? '127.0.0.1',
-            publicUrl: body?.publicUrl ?? null,
-            cliFilename: process.argv[1],
-            force: body?.force === true,
-          });
-          json(res, 200, { ok: true, ...result });
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/remote-access/stop' && method === 'POST') {
-        try {
-          const result = await stopRemoteHubDetached();
-          json(res, 200, { ok: true, ...result });
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/remote-access/pairing' && method === 'POST') {
-        const remoteState = await readRemoteHubState();
-        if (!remoteState || !remotePidIsRunning(remoteState.pid)) {
-          json(res, 409, { ok: false, error: 'remote Hub is not running' });
-          return;
-        }
-        try {
-          json(res, 200, await createRemoteHubPairing(remoteState));
-        } catch (e: any) {
-          json(res, 502, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/remote-access/pairing-status' && method === 'POST') {
-        const remoteState = await readRemoteHubState();
-        if (!remoteState || !remotePidIsRunning(remoteState.pid)) {
-          json(res, 409, { ok: false, error: 'remote Hub is not running' });
-          return;
-        }
-        try {
-          const body = await readJsonBody(req);
-          json(res, 200, await getRemoteHubPairingStatus(remoteState, body?.token));
-        } catch (e: any) {
-          json(res, 502, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/status' && method === 'GET') {
-        json(res, 200, desktopVoiceService.snapshot());
-        return;
-      }
-
-      if (
-        pathname === '/api/assistant/desktop-voice/realtime/webrtc-session' &&
-        method === 'POST'
-      ) {
-        try {
-          logDesktopVoiceControl(req, 'webrtc-session');
-          const status = desktopVoiceService.snapshot();
-          if (status.realtime.enabled !== true) {
-            json(res, 409, { ok: false, error: 'Realtime assistant voice is off.' });
-            return;
-          }
-          if (status.mode !== 'recording' || status.transcript.target !== 'assistant') {
-            json(res, 409, {
-              ok: false,
-              error: 'Desktop assistant voice is not waiting for a realtime WebRTC session.',
-            });
-            return;
-          }
-          const browserSessionId = String(
-            req.headers['x-drone-desktop-voice-webrtc-session-id'] ?? '',
-          ).trim();
-          if (!desktopVoiceService.isCurrentRealtimeWebRtcBrowserSession(browserSessionId)) {
-            json(res, 409, {
-              ok: false,
-              error: 'Desktop assistant voice WebRTC session is stale.',
-            });
-            return;
-          }
-          const sdpOffer = (await readRawBody(req, { maxBytes: 512 * 1024 })).toString('utf8');
-          if (!sdpOffer.trim()) throw new Error('WebRTC SDP offer is empty.');
-          const session = await createDesktopRealtimeWebRtcSession(sdpOffer);
-          desktopVoiceService.markRealtimeWebRtcAssistantConnected();
-          hubLog('info', 'desktop voice WebRTC session ready', {
-            mode: desktopVoiceService.snapshot().mode,
-            callId: session.callId,
-          });
-          json(res, 200, {
-            ok: true,
-            callId: session.callId,
-            sdpAnswer: session.sdpAnswer,
-          });
-        } catch (e: any) {
-          hubLog('warn', 'desktop voice WebRTC session request failed', {
-            ...desktopVoiceRequestMeta(req),
-            error: e?.message ?? String(e),
-          });
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/realtime' && method === 'POST') {
-        try {
-          const body = await readJsonBody(req);
-          logDesktopVoiceControl(req, 'realtime-toggle', { enabled: body?.enabled === true });
-          const current = await resolveEffectiveVoiceRealtimeSettings();
-          await upsertStoredVoiceRealtimeSettings({
-            enabled: body?.enabled === true,
-            provider: current.provider,
-          });
-          await reloadDesktopVoiceRealtimeSettings();
-          json(res, 200, desktopVoiceService.snapshot());
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/realtime/text' && method === 'POST') {
-        try {
-          const body = await readJsonBody(req);
-          const accepted = await desktopVoiceService.sendRealtimeText(body?.text);
-          if (!accepted) throw new Error('Native realtime voice is not currently listening.');
-          json(res, 202, { ok: true });
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/realtime/pcm' && method === 'POST') {
-        try {
-          const pcm = await readRawBody(req, { maxBytes: 256 * 1024 });
-          const accepted = await desktopVoiceService.appendRealtimePcm(pcm);
-          if (!accepted)
-            throw new Error('Native realtime voice is not currently accepting microphone audio.');
-          json(res, 202, { ok: true });
-        } catch (e: any) {
-          json(res, 409, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/toggle' && method === 'POST') {
-        try {
-          logDesktopVoiceControl(req, 'toggle');
-          const status = desktopVoiceService.toggle();
-          hubLog('info', 'desktop voice toggle completed', {
-            mode: status.mode,
-            target: status.transcript.target,
-          });
-          json(res, 200, status);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/start-recording' && method === 'POST') {
-        try {
-          logDesktopVoiceControl(req, 'start-recording');
-          const status = await desktopVoiceService.startAssistantRecordingNow();
-          hubLog('info', 'desktop voice start-recording completed', {
-            mode: status.mode,
-            target: status.transcript.target,
-          });
-          json(res, 200, status);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/clipboard-toggle' && method === 'POST') {
-        const apiReceivedUnixMs = Date.now();
-        const requestId =
-          String(req.headers['x-drone-voice-clipboard-request-id'] ?? '').trim() || undefined;
-        const clientUnixMsRaw = Number.parseInt(
-          String(req.headers['x-drone-voice-clipboard-client-unix-ms'] ?? ''),
-          10,
-        );
-        const clientUnixMs = Number.isFinite(clientUnixMsRaw) ? clientUnixMsRaw : undefined;
-        console.log('[desktop-voice] clipboard-toggle api received', {
-          requestId: requestId ?? null,
-          clientToApiMs: clientUnixMs ? apiReceivedUnixMs - clientUnixMs : null,
-        });
-        try {
-          const status = await desktopVoiceService.toggleClipboardRecording({
-            requestId,
-            clientUnixMs,
-            apiReceivedUnixMs,
-          });
-          console.log('[desktop-voice] clipboard-toggle api responding', {
-            requestId: requestId ?? null,
-            elapsedMs: Date.now() - apiReceivedUnixMs,
-            mode: status.clipboard.mode,
-            message: status.clipboard.message,
-          });
-          json(res, 200, status);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/clipboard-cancel' && method === 'POST') {
-        const apiReceivedUnixMs = Date.now();
-        const requestId =
-          String(req.headers['x-drone-voice-clipboard-request-id'] ?? '').trim() || undefined;
-        const clientUnixMsRaw = Number.parseInt(
-          String(req.headers['x-drone-voice-clipboard-client-unix-ms'] ?? ''),
-          10,
-        );
-        const clientUnixMs = Number.isFinite(clientUnixMsRaw) ? clientUnixMsRaw : undefined;
-        console.log('[desktop-voice] clipboard-cancel api received', {
-          requestId: requestId ?? null,
-          clientToApiMs: clientUnixMs ? apiReceivedUnixMs - clientUnixMs : null,
-        });
-        try {
-          const status = desktopVoiceService.cancelClipboardRecording();
-          console.log('[desktop-voice] clipboard-cancel api responding', {
-            requestId: requestId ?? null,
-            elapsedMs: Date.now() - apiReceivedUnixMs,
-            mode: status.clipboard.mode,
-          });
-          json(res, 200, status);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/off' && method === 'POST') {
-        logDesktopVoiceControl(req, 'off');
-        const status = desktopVoiceService.stop();
-        hubLog('info', 'desktop voice off completed', {
-          mode: status.mode,
-          target: status.transcript.target,
-        });
-        json(res, 200, status);
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/stop' && method === 'POST') {
-        try {
-          logDesktopVoiceControl(req, 'stop');
-          const status = desktopVoiceService.snapshot();
-          const nextStatus =
-            status.mode === 'recording' || status.mode === 'transcribing'
-              ? await desktopVoiceService.cancelActiveRecording()
-              : desktopVoiceService.stop();
-          hubLog('info', 'desktop voice stop completed', {
-            previousMode: status.mode,
-            behavior:
-              status.mode === 'recording' || status.mode === 'transcribing'
-                ? 'cancel-recording'
-                : 'off',
-            mode: nextStatus.mode,
-            target: nextStatus.transcript.target,
-          });
-          json(res, 200, nextStatus);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/cancel-recording' && method === 'POST') {
-        try {
-          logDesktopVoiceControl(req, 'cancel-recording');
-          const statusBefore = desktopVoiceService.snapshot();
-          const currentWebRtcSessionId =
-            desktopVoiceService.currentRealtimeWebRtcBrowserSessionId();
-          if (
-            statusBefore.mode === 'recording' &&
-            statusBefore.transcript.target === 'assistant' &&
-            currentWebRtcSessionId &&
-            !desktopVoiceService.isCurrentRealtimeWebRtcBrowserSession(
-              req.headers['x-drone-desktop-voice-webrtc-session-id'],
-            )
-          ) {
-            hubLog('info', 'desktop voice stale cancel-recording ignored', {
-              ...desktopVoiceRequestMeta(req),
-              currentWebRtcSessionId,
-            });
-            json(res, 200, statusBefore);
-            return;
-          }
-          const status = await desktopVoiceService.cancelActiveRecording();
-          hubLog('info', 'desktop voice cancel-recording completed', {
-            mode: status.mode,
-            target: status.transcript.target,
-          });
-          json(res, 200, status);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/client-event' && method === 'POST') {
-        try {
-          const body = await readJsonBody(req);
-          hubLog('info', 'desktop voice browser event', {
-            ...desktopVoiceRequestMeta(req),
-            event: String(body?.event ?? '').slice(0, 120),
-            message: String(body?.message ?? '').slice(0, 500) || null,
-          });
-          json(res, 200, { ok: true });
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/desktop-voice/events' && method === 'GET') {
-        res.statusCode = 200;
-        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-        res.setHeader('cache-control', 'no-cache, no-transform');
-        res.setHeader('connection', 'keep-alive');
-        req.socket.setTimeout(0);
-        (res as any).flushHeaders?.();
-        writeAssistantSseEvent(res, 'connected', { ok: true, at: new Date().toISOString() });
-        const unsubscribe = desktopVoiceService.subscribe((event) => {
-          if (event.type === 'desktop_voice_local_cue') {
-            writeAssistantSseEvent(res, event.type, { cue: event.cue });
-          } else if (event.type === 'desktop_voice_clipboard_result') {
-            writeAssistantSseEvent(res, event.type, { text: event.text });
-          } else if (event.type === 'desktop_voice_transcript_segment') {
-            writeAssistantSseEvent(res, event.type, { text: event.text });
-          } else if (event.type === 'desktop_voice_speak') {
-            writeAssistantSseEvent(res, event.type, { text: event.text });
-          } else if (event.type === 'desktop_voice_speak_audio') {
-            writeAssistantSseEvent(res, event.type, {
-              text: event.text,
-              contentType: event.contentType,
-              audioBase64: event.audioBase64,
-            });
-          } else if (event.type === 'desktop_voice_stop_audio') {
-            writeAssistantSseEvent(res, event.type, {});
-          } else if (event.type === 'desktop_voice_webrtc_start') {
-            writeAssistantSseEvent(res, event.type, { sessionId: event.sessionId });
-          } else if (event.type === 'desktop_voice_webrtc_stop') {
-            writeAssistantSseEvent(res, event.type, {});
-          } else if (
-            event.type === 'desktop_voice_native_mic_start' ||
-            event.type === 'desktop_voice_native_mic_stop'
-          ) {
-            writeAssistantSseEvent(res, event.type, {});
-          } else {
-            writeAssistantSseEvent(res, event.type, event.status);
-          }
-        });
-        const keepAlive = setInterval(() => {
-          if (res.destroyed || res.writableEnded) return;
-          res.write(': keepalive\n\n');
-        }, 25_000);
-        (keepAlive as any).unref?.();
-        let cleanedUp = false;
-        const cleanup = () => {
-          if (cleanedUp) return;
-          cleanedUp = true;
-          clearInterval(keepAlive);
-          unsubscribe();
-        };
-        req.on('close', cleanup);
-        res.on('close', cleanup);
-        return;
-      }
-
       if (pathname === '/api/assistant/system-prompt') {
         if (method === 'GET') {
           json(res, 200, await assistantService.systemPromptSettings());
@@ -20834,234 +19557,6 @@ export async function startDroneHubApiServer(opts: {
         };
         req.on('close', cleanup);
         res.on('close', cleanup);
-        return;
-      }
-
-      if (pathname === '/api/assistant/voice/pairing-url' && method === 'GET') {
-        if (!voiceStreamUrl) {
-          json(res, 503, { ok: false, error: 'Voice Stream server is not running.' });
-          return;
-        }
-        json(res, 200, { ok: true, url: voiceStreamPairingUrl() });
-        return;
-      }
-
-      if (pathname === '/api/assistant/voice/transcript/events' && method === 'GET') {
-        if (!voiceStreamUrl) {
-          json(res, 503, { ok: false, error: 'Voice Stream server is not running.' });
-          return;
-        }
-        res.statusCode = 200;
-        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-        res.setHeader('cache-control', 'no-cache, no-transform');
-        res.setHeader('connection', 'keep-alive');
-        req.socket.setTimeout(0);
-        (res as any).flushHeaders?.();
-        writeAssistantSseEvent(res, 'connected', { ok: true, at: new Date().toISOString() });
-
-        let cleanedUp = false;
-        let monitor: WebSocket | null = null;
-        const keepAlive = setInterval(() => {
-          if (res.destroyed || res.writableEnded) return;
-          res.write(': keepalive\n\n');
-        }, 25_000);
-        (keepAlive as any).unref?.();
-        const cleanup = () => {
-          if (cleanedUp) return;
-          cleanedUp = true;
-          clearInterval(keepAlive);
-          try {
-            monitor?.close(1000, 'Hub SSE closed');
-          } catch {
-            // ignore
-          }
-        };
-
-        try {
-          monitor = new WebSocket(voiceStreamMonitorWebSocketUrl());
-        } catch (e: any) {
-          writeAssistantSseEvent(res, 'voice_transcript_status', {
-            type: 'transcript_status',
-            configured: false,
-            status: 'error',
-            message: e?.message ?? String(e),
-          });
-          cleanup();
-          res.end();
-          return;
-        }
-
-        monitor.on('open', () => {
-          writeAssistantSseEvent(res, 'voice_transcript_status', {
-            type: 'transcript_status',
-            configured: true,
-            status: 'connected',
-            message: 'Connected to Voice Stream transcript monitor.',
-          });
-        });
-        monitor.on('message', (data, isBinary) => {
-          if (isBinary) return;
-          let message: any = null;
-          try {
-            message = JSON.parse(data.toString('utf8'));
-          } catch {
-            return;
-          }
-          if (message?.type === 'transcript_segment') {
-            writeAssistantSseEvent(res, 'voice_transcript_segment', message);
-            return;
-          }
-          if (message?.type === 'transcript_status') {
-            writeAssistantSseEvent(res, 'voice_transcript_status', message);
-            return;
-          }
-          if (message?.type === 'android_status') {
-            writeAssistantSseEvent(res, 'voice_android_status', message);
-          }
-        });
-        monitor.on('error', (error) => {
-          writeAssistantSseEvent(res, 'voice_transcript_status', {
-            type: 'transcript_status',
-            configured: false,
-            status: 'error',
-            message: String((error as any)?.message ?? error ?? 'Voice Stream monitor failed.'),
-          });
-        });
-        monitor.on('close', () => {
-          if (!cleanedUp) {
-            writeAssistantSseEvent(res, 'voice_transcript_status', {
-              type: 'transcript_status',
-              configured: false,
-              status: 'disconnected',
-              message: 'Voice Stream transcript monitor disconnected.',
-            });
-            cleanup();
-            res.end();
-          }
-        });
-        req.on('close', cleanup);
-        res.on('close', cleanup);
-        return;
-      }
-
-      if (pathname === '/api/assistant/voice/connect' && method === 'POST') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        try {
-          json(res, 200, await assistantService.ensureLatestVoiceThread({ title: body?.title }));
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/voice/message' && method === 'POST') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        try {
-          json(
-            res,
-            202,
-            await assistantService.submitVoicePrompt({
-              prompt: body?.prompt ?? body?.message,
-              title: body?.title,
-              source: 'android',
-              deliveryMode: body?.deliveryMode,
-            }),
-          );
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/voice/patch-status' && method === 'GET') {
-        json(res, 200, { ok: true, patch: voicePatchState });
-        return;
-      }
-
-      if (pathname === '/api/assistant/voice/patch-status/events' && method === 'GET') {
-        res.statusCode = 200;
-        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-        res.setHeader('cache-control', 'no-cache, no-transform');
-        res.setHeader('connection', 'keep-alive');
-        req.socket.setTimeout(0);
-        (res as any).flushHeaders?.();
-        voicePatchSubscribers.add(res);
-        res.write(`event: connected\n`);
-        res.write(`data: ${JSON.stringify({ ok: true, at: nowIso() })}\n\n`);
-        res.write(`event: voice_patch_status\n`);
-        res.write(`data: ${JSON.stringify(voicePatchState)}\n\n`);
-        const keepAlive = setInterval(() => {
-          if (res.destroyed || res.writableEnded) return;
-          res.write(': keepalive\n\n');
-        }, 25_000);
-        (keepAlive as any).unref?.();
-        const cleanup = () => {
-          clearInterval(keepAlive);
-          voicePatchSubscribers.delete(res);
-        };
-        req.on('close', cleanup);
-        res.on('close', cleanup);
-        return;
-      }
-
-      if (pathname === '/api/assistant/voice/patch-state' && method === 'POST') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        try {
-          const active = Boolean(body?.active);
-          const reason = String(body?.reason ?? '').trim() || 'aborted';
-          const sessionId = String(body?.sessionId ?? '').trim();
-          const patch = active
-            ? beginVoicePatchSession(body?.source, body?.sessionId)
-            : sessionId || voicePatchState.active
-              ? endVoicePatchSession(body?.source, reason, body?.sessionId)
-              : voicePatchState;
-          json(res, 200, { ok: true, ...patch });
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/voice/patch-message' && method === 'POST') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        try {
-          json(
-            res,
-            202,
-            await submitVoicePatchPrompt(
-              body?.prompt ?? body?.message,
-              body?.source,
-              body?.sessionId,
-            ),
-          );
-        } catch (e: any) {
-          endVoicePatchSession(body?.source, 'aborted', body?.sessionId);
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
         return;
       }
 
@@ -21940,7 +20435,6 @@ export async function startDroneHubApiServer(opts: {
               : provider === 'exa'
                 ? await resolveExaApiKeySettings()
                 : await resolveEffectiveProviderApiKeySettings(provider as LlmProviderId);
-          if (provider === 'groq') notifyGroqApiKeySettingsChanged();
           json(res, 200, {
             ok: true,
             ...providerKeySettingsResponse(resolved),
@@ -21960,99 +20454,10 @@ export async function startDroneHubApiServer(opts: {
               : provider === 'exa'
                 ? await resolveExaApiKeySettings()
                 : await resolveEffectiveProviderApiKeySettings(provider as LlmProviderId);
-          if (provider === 'groq') notifyGroqApiKeySettingsChanged();
           json(res, 200, {
             ok: true,
             ...providerKeySettingsResponse(resolved),
           });
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/voice-stream/pairing-password') {
-        if (method === 'GET') {
-          const resolved = await resolveVoiceStreamPairingPasswordSettings();
-          json(res, 200, {
-            ok: true,
-            ...voiceStreamPairingPasswordSettingsResponse(resolved, {
-              includePassword: u.searchParams.get('reveal') === '1',
-            }),
-          });
-          return;
-        }
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          const password = normalizeApiKey(body?.password);
-          if (!password) {
-            json(res, 400, { ok: false, error: 'Pairing password is required.' });
-            return;
-          }
-          await upsertVoiceStreamPairingPassword(password);
-          const resolved = await resolveVoiceStreamPairingPasswordSettings();
-          notifyVoiceStreamPairingPasswordSettingsChanged();
-          json(res, 200, {
-            ok: true,
-            ...voiceStreamPairingPasswordSettingsResponse(resolved),
-          });
-          return;
-        }
-        if (method === 'DELETE') {
-          await clearVoiceStreamPairingPassword();
-          const resolved = await resolveVoiceStreamPairingPasswordSettings();
-          notifyVoiceStreamPairingPasswordSettingsChanged();
-          json(res, 200, {
-            ok: true,
-            ...voiceStreamPairingPasswordSettingsResponse(resolved),
-          });
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/desktop-voice/model') {
-        if (method === 'GET') {
-          json(res, 200, desktopVoiceModelStatus());
-          return;
-        }
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch {
-            body = {};
-          }
-          try {
-            json(
-              res,
-              202,
-              await startDesktopVoiceModelInstall(String(body?.modelId ?? '').trim() || undefined),
-            );
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-        if (method === 'DELETE') {
-          try {
-            let body: any = null;
-            try {
-              body = await readJsonBody(req);
-            } catch {
-              body = {};
-            }
-            json(
-              res,
-              200,
-              await removeDesktopVoiceModel(String(body?.modelId ?? '').trim() || undefined),
-            );
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          }
           return;
         }
       }
@@ -22216,58 +20621,6 @@ export async function startDroneHubApiServer(opts: {
             json(res, 200, { ...(await resolveRegistryBackupStatusResponse()), createdBackup });
           } catch (e: any) {
             json(res, 500, { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/voice-approval') {
-        if (method === 'GET') {
-          json(res, 200, await resolveVoiceApprovalSettingsResponse());
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            const voiceApprovalPayload =
-              body?.voiceApproval ?? (body?.voiceTranscription == null ? body : null);
-            if (voiceApprovalPayload != null) {
-              await upsertStoredVoiceApprovalSettings(voiceApprovalPayload);
-              await reloadDesktopVoiceApprovalSettings();
-              notifyVoiceApprovalSettingsChanged();
-            }
-            if (body?.voiceTranscription != null) {
-              await upsertStoredVoiceTranscriptionSettings(body.voiceTranscription);
-              await reloadDesktopVoiceTranscriptionSettings();
-              notifyVoiceTranscriptionSettingsChanged();
-            }
-            if (body?.voiceActivation != null) {
-              await upsertStoredVoiceActivationSettings(body.voiceActivation);
-              notifyVoiceApprovalSettingsChanged();
-            }
-            if (body?.voiceRealtime != null) {
-              await upsertStoredVoiceRealtimeSettings(body.voiceRealtime);
-              await reloadDesktopVoiceRealtimeSettings();
-              notifyVoiceApprovalSettingsChanged();
-            }
-            if (
-              voiceApprovalPayload == null &&
-              body?.voiceTranscription == null &&
-              body?.voiceActivation == null &&
-              body?.voiceRealtime == null
-            ) {
-              throw new Error('No voice settings payload provided');
-            }
-            json(res, 200, await resolveVoiceApprovalSettingsResponse());
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
           }
           return;
         }
@@ -22623,10 +20976,6 @@ export async function startDroneHubApiServer(opts: {
                 previousRootDir,
               },
             });
-            await reloadDesktopVoiceApprovalSettings();
-            await reloadDesktopVoiceTranscriptionSettings();
-            notifyVoiceApprovalSettingsChanged();
-            notifyVoiceTranscriptionSettingsChanged();
             json(res, 200, {
               ok: true,
               ...(await listProfilesState()),
@@ -22802,30 +21151,6 @@ export async function startDroneHubApiServer(opts: {
           );
           try {
             const out = await readHubLogTail({ maxBytes, tailLines });
-            json(res, 200, { ok: true, ...out, maxBytes, tailLines });
-          } catch (e: any) {
-            json(res, 500, { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/android/logs') {
-        if (method === 'GET') {
-          const maxBytes = clampIntParam(
-            u.searchParams.get('maxBytes'),
-            HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,
-            1,
-            HUB_SETTINGS_LOG_MAX_BYTES,
-          );
-          const tailLines = clampIntParam(
-            u.searchParams.get('tail'),
-            HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES,
-            1,
-            HUB_SETTINGS_LOG_MAX_TAIL_LINES,
-          );
-          try {
-            const out = await readAndroidVoiceLogTail({ maxBytes, tailLines });
             json(res, 200, { ok: true, ...out, maxBytes, tailLines });
           } catch (e: any) {
             json(res, 500, { ok: false, error: e?.message ?? String(e) });

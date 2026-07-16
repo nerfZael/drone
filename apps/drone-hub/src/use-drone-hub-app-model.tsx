@@ -922,24 +922,8 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     },
     [setNameSuggestToast],
   );
-  const updateShortcutVoiceToast = React.useCallback(
-    (id: string, voiceLevel: number, patch: { message?: string; title?: string; tone?: 'success' | 'error'; voiceActive?: boolean } = {}) => {
-      setNameSuggestToast((current) => {
-        if (!current || current.id !== id) return current;
-        return {
-          ...current,
-          ...patch,
-          voiceLevel: Math.max(0, Math.min(1, Number(voiceLevel) || 0)),
-        };
-      });
-    },
-    [setNameSuggestToast],
-  );
-
   const { toggleVoiceClipboardRecording } = useVoiceClipboardRecorder({
-    requestJson,
     showToast: showShortcutToast,
-    updateVoiceToast: updateShortcutVoiceToast,
   });
   const {
     deletingDrones,

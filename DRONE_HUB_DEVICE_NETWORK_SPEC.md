@@ -19,7 +19,7 @@ Examples:
 - `Desktop -> VPS`: administer all drones.
 - `VPS -> Desktop`: no access, even though Desktop can access VPS.
 
-The React Native app should replace Remote Hub. It should use the same device protocol and permission model as desktop Drone Hub, not a second remote-only API.
+The React Native app uses the same device protocol and permission model as desktop Drone Hub, not a second mobile-only API.
 
 The network should be self-hosted and peer-to-peer, with no separate coordination service and no required account. A user adds the URL or local address of one existing device, the two installations mutually authenticate and approve the relationship, and the signed membership update propagates to the rest of the user's device network.
 
@@ -38,7 +38,7 @@ Devices with a public URL, ngrok URL, public IP, or reachable LAN address accept
 - Give users a clear audit trail of remote actions and denials.
 - Let a Drone Hub assistant use explicitly allowed tools across several target devices.
 - Let every assistant thread narrow or remove cross-device access without changing the permanent device grants.
-- Replace the current Remote Hub rather than maintain two remote products.
+- Maintain one native mobile product on the shared device protocol.
 
 ## Non-goals for the first release
 
@@ -105,7 +105,7 @@ It may host container drones, host drones, or both, depending on its local setup
 
 ### 2. Drone Hub mobile
 
-The React Native app replaces Remote Hub. It is a first-class network device, not a web session attached to one Hub.
+The React Native app is a first-class network device, not a web session attached to one Hub.
 
 Initial responsibilities:
 
@@ -138,7 +138,7 @@ A forwarding peer must not receive another device's Hub API token, decrypt forwa
 
 ### 4. Shared device protocol package
 
-A small shared package should own versioned message schemas and validation for desktop, mobile, and mesh code. This prevents the current Remote Hub pattern from growing into separate, loosely matched APIs.
+A small shared package should own versioned message schemas and validation for desktop, mobile, and mesh code. This prevents separate, loosely matched APIs from growing across clients.
 
 The protocol package should contain data contracts, not target-specific business logic.
 
@@ -717,7 +717,7 @@ The pairing flow should be mutual and short-lived:
 5. The approving administrator signs the new membership certificate and shares the current signed mesh records.
 6. Both devices record a pairing audit event.
 
-An invite should expire within a few minutes, be single-use, and become useless after confirmation or cancellation. Scanning a QR must not immediately create a broad authenticated browser session as the current Remote Hub flow does.
+An invite should expire within a few minutes, be single-use, and become useless after confirmation or cancellation. Scanning a QR must not immediately create a broad authenticated session.
 
 For a new desktop without a camera, let it display a code that an existing trusted device confirms.
 
@@ -881,21 +881,13 @@ Do not store full prompts or transcripts in a general security audit log by defa
 
 - Existing Hub domain operations and drone lifecycle services remain the target's local execution layer.
 - Existing SSE drone and chat events can feed the target-side event adapter.
-- Current QR generation and remote-access UX provide useful pairing UI lessons.
+- Current device-mesh QR generation and Devices UX provide the pairing UI foundation.
 - The Voice Stream Next extension bridge demonstrates that an outbound WebSocket device can receive typed requests and return bounded results.
 - Existing Drone SDK types can inform operation names and result schemas.
 
 ### What should not become the new boundary
 
-The current Remote Hub server:
-
-- authenticates a browser with one broad persisted cookie;
-- proxies a static allowlist of Hub HTTP routes;
-- has one permission level for all paired sessions;
-- filters out host drones instead of expressing a permission;
-- is tied to one Hub and one public URL.
-
-That is appropriate as a limited bridge, but it should not be expanded into the multi-device security layer. The new target command handler should use typed operations and per-source policies.
+A broad browser session or static allowlist of proxied Hub HTTP routes must not become the multi-device security layer. The target command handler uses typed operations and per-source policies.
 
 The Voice Stream Next bridge is useful evidence but should not be imported as the Drone Hub network wholesale. It currently routes extension calls through a central server and is designed around a different product and user model.
 
@@ -937,7 +929,7 @@ The first useful release should include:
 - target-side enforcement and audit;
 - actor-chain fields in the protocol so later assistant delegation cannot be mistaken for ordinary device access;
 - no offline command queue;
-- clear migration path from Remote Hub.
+- no dependency on a separate browser proxy or broad remote session.
 
 This slice directly supports the Phone, Laptop, Desktop, and VPS examples as long as each outbound-only device can reach at least one currently connected public, ngrok, or LAN member.
 
@@ -962,7 +954,7 @@ This slice directly supports the Phone, Laptop, Desktop, and VPS examples as lon
 4. Make permissions directional, deny-by-default, and enforced on the target.
 5. Split host creation from container creation from the beginning.
 6. Use typed operations rather than remotely proxying Hub HTTP routes.
-7. Make the React Native app the replacement for Remote Hub.
+7. Keep the React Native app on the shared first-class device protocol.
 8. Pairing grants membership and basic visibility, not broad control.
 9. Do not allow transitive device permissions.
 10. Use compound device-and-resource IDs throughout the UI and protocol.

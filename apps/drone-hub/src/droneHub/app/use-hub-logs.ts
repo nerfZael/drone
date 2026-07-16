@@ -16,16 +16,6 @@ export type UseHubLogsResult = {
   loadHubLogs: () => Promise<void>;
   copyHubLogs: () => Promise<void>;
   handleHubLogsScroll: (e: React.UIEvent<HTMLTextAreaElement>) => void;
-  androidLogs: HubLogsResponse | null;
-  androidLogsLoading: boolean;
-  androidLogsError: string | null;
-  androidLogsNotice: string | null;
-  androidLogsExpanded: boolean;
-  androidLogsTextareaRef: React.RefObject<HTMLTextAreaElement>;
-  setAndroidLogsExpanded: React.Dispatch<React.SetStateAction<boolean>>;
-  loadAndroidLogs: () => Promise<void>;
-  copyAndroidLogs: () => Promise<void>;
-  handleAndroidLogsScroll: (e: React.UIEvent<HTMLTextAreaElement>) => void;
 };
 
 export function useHubLogs(opts: {
@@ -43,13 +33,6 @@ export function useHubLogs(opts: {
   const [hubLogsExpanded, setHubLogsExpanded] = React.useState(false);
   const [hubLogsPinnedToBottom, setHubLogsPinnedToBottom] = React.useState(true);
   const hubLogsTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
-  const [androidLogs, setAndroidLogs] = React.useState<HubLogsResponse | null>(null);
-  const [androidLogsLoading, setAndroidLogsLoading] = React.useState(false);
-  const [androidLogsError, setAndroidLogsError] = React.useState<string | null>(null);
-  const [androidLogsNotice, setAndroidLogsNotice] = React.useState<string | null>(null);
-  const [androidLogsExpanded, setAndroidLogsExpanded] = React.useState(false);
-  const [androidLogsPinnedToBottom, setAndroidLogsPinnedToBottom] = React.useState(true);
-  const androidLogsTextareaRef = React.useRef<HTMLTextAreaElement | null>(null);
 
   const loadHubLogs = React.useCallback(async () => {
     setHubLogsLoading(true);
@@ -79,39 +62,10 @@ export function useHubLogs(opts: {
     setHubLogsPinnedToBottom((prev) => (prev === pinned ? prev : pinned));
   }, []);
 
-  const loadAndroidLogs = React.useCallback(async () => {
-    setAndroidLogsLoading(true);
-    setAndroidLogsError(null);
-    setAndroidLogsNotice(null);
-    try {
-      const data = await requestJson<HubLogsResponse>(`/api/settings/android/logs?tail=${tailLines}&maxBytes=${maxBytes}`);
-      setAndroidLogs(data);
-    } catch (e: any) {
-      setAndroidLogsError(e?.message ?? String(e));
-    } finally {
-      setAndroidLogsLoading(false);
-    }
-  }, [maxBytes, requestJson, tailLines]);
-
-  const copyAndroidLogs = React.useCallback(async () => {
-    const text = String(androidLogs?.text ?? '');
-    if (!text.trim()) return;
-    await copyText(text);
-    setAndroidLogsNotice('Copied Android logs.');
-  }, [androidLogs?.text, copyText]);
-
-  const handleAndroidLogsScroll = React.useCallback((e: React.UIEvent<HTMLTextAreaElement>) => {
-    const el = e.currentTarget;
-    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
-    const pinned = distanceFromBottom <= 8;
-    setAndroidLogsPinnedToBottom((prev) => (prev === pinned ? prev : pinned));
-  }, []);
-
   React.useEffect(() => {
     if (appView !== 'settings') return;
     void loadHubLogs();
-    void loadAndroidLogs();
-  }, [appView, loadAndroidLogs, loadHubLogs]);
+  }, [appView, loadHubLogs]);
 
   React.useEffect(() => {
     if (!hubLogsExpanded) return;
@@ -120,14 +74,6 @@ export function useHubLogs(opts: {
     if (!el) return;
     el.scrollTop = el.scrollHeight;
   }, [hubLogs?.text, hubLogsExpanded, hubLogsPinnedToBottom]);
-
-  React.useEffect(() => {
-    if (!androidLogsExpanded) return;
-    if (!androidLogsPinnedToBottom) return;
-    const el = androidLogsTextareaRef.current;
-    if (!el) return;
-    el.scrollTop = el.scrollHeight;
-  }, [androidLogs?.text, androidLogsExpanded, androidLogsPinnedToBottom]);
 
   return {
     hubLogs,
@@ -140,15 +86,5 @@ export function useHubLogs(opts: {
     loadHubLogs,
     copyHubLogs,
     handleHubLogsScroll,
-    androidLogs,
-    androidLogsLoading,
-    androidLogsError,
-    androidLogsNotice,
-    androidLogsExpanded,
-    androidLogsTextareaRef,
-    setAndroidLogsExpanded,
-    loadAndroidLogs,
-    copyAndroidLogs,
-    handleAndroidLogsScroll,
   };
 }

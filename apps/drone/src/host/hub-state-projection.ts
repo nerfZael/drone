@@ -74,20 +74,12 @@ function overlayCanonicalSettings(registry: any): void {
       continue;
     }
     switch (row.setting_key) {
-      case 'voice-stream.pairing-password':
-        if (value?.password) settings.voiceStream = { pairingPassword: value.password, updatedAt };
-        else delete settings.voiceStream;
-        break;
       case 'llm.provider':
         if (value?.provider) settings.llm = { provider: value.provider, updatedAt };
         else delete settings.llm;
         break;
       case 'delete-action': setOrDelete(settings, 'deleteAction', value, updatedAt); break;
       case 'filesystem': setOrDelete(settings, 'filesystem', value, updatedAt); break;
-      case 'voice-approval': setOrDelete(settings, 'voiceApproval', value, updatedAt); break;
-      case 'voice-transcription': setOrDelete(settings, 'voiceTranscription', value, updatedAt); break;
-      case 'voice-activation': setOrDelete(settings, 'voiceActivation', value, updatedAt); break;
-      case 'voice-realtime': setOrDelete(settings, 'voiceRealtime', value, updatedAt); break;
       case 'agent-message-auto-continue': setOrDelete(settings, 'agentMessageAutoContinue', value, updatedAt); break;
       case 'agent-suggestion': setOrDelete(settings, 'agentSuggestion', value, updatedAt); break;
       case 'kanban-board': setOrDelete(settings, 'kanbanBoard', value, updatedAt); break;
@@ -96,7 +88,6 @@ function overlayCanonicalSettings(registry: any): void {
         else settings.taskPlaybookButtons = { items: value, updatedAt };
         break;
       case 'ui-preferences': setOrDelete(settings, 'uiPreferences', value, updatedAt); break;
-      case 'desktop-voice.model': setOrDelete(settings, 'desktopVoice', value, updatedAt); break;
       case 'registry-backups': setOrDelete(settings, 'backups', value, updatedAt); break;
       case 'agents.default': setOrDelete(settings, 'agents', value, updatedAt); break;
       case 'environment.non-repository': setOrDelete(settings, 'nonRepoEnvironment', value, updatedAt); break;

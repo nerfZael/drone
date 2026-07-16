@@ -21,12 +21,9 @@ function detachedHubStartArgs(cliPath, env = process.env, platform = process.pla
     String(env.DRONE_HUB_APP_CONTAINER_MCP_HOST || defaultContainerMcpHost),
     '--container-mcp-port',
     String(env.DRONE_HUB_APP_CONTAINER_MCP_PORT || '8788'),
-    '--voice-stream-port',
-    String(env.DRONE_HUB_APP_VOICE_STREAM_PORT || '3199'),
     ...optionalArg('--static-ui-dir', env.DRONE_HUB_STATIC_UI_DIR),
     ...optionalArg('--container-mcp-url', env.DRONE_HUB_APP_CONTAINER_MCP_URL),
   ];
-  if (env.DRONE_HUB_APP_NO_VOICE_STREAM === '1') args.push('--no-voice-stream');
   return args;
 }
 

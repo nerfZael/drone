@@ -28,7 +28,7 @@ Resolved:
 
 - Internal monorepo name: `voice-stream-next`.
 - User-facing product name: Voice Stream.
-- Current legacy directory remains `apps/voice-stream`.
+- Voice Stream remains self-contained in `apps/voice-stream-next`.
 
 Deferred:
 
@@ -38,7 +38,7 @@ Deferred:
 
 Resolved:
 
-- Match the current voice stack first.
+- Keep behavior consistent across current Voice Stream clients first.
 - Keep the same wake/sleep/status/approval phrases initially.
 - Approval codes remain numeric.
 - Lock, unlock, and off codes are per-user settings from the start.
@@ -127,8 +127,7 @@ Resolved:
 
 Context:
 
-- `apps/voice-stream/server/src/stt.ts` is the current legacy server's speech-to-text provider logic.
-- `apps/voice-stream/server/src/tts.ts` is the current legacy server's text-to-speech provider logic.
+- Voice Stream Next server modules own speech-to-text and text-to-speech provider logic.
 - Extracting means moving reusable pieces from those files into a shared package.
 - Starting fresh means implementing the new Fastify backend without depending on those files, while reusing the ideas and behavior.
 

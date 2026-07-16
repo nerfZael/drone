@@ -1,4 +1,3 @@
-import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
@@ -10,6 +9,10 @@ import {
   type HubDatabaseConnection,
   type HubDatabaseMigration,
 } from './hub-database';
+import {
+  removeLegacyAssistantStateFiles,
+  resetExternalAssistantData,
+} from './assistant-data-reset';
 import { droneRootPath } from './paths';
 
 export type StoredAssistantState = {
@@ -22,29 +25,25 @@ export type StoredAssistantState = {
   fetchContentToolMigrationApplied?: boolean;
   systemPrompt?: string;
   systemPromptUpdatedAt?: string;
-  voiceSystemPrompt?: string;
-  voiceSystemPromptUpdatedAt?: string;
   updatedAt?: string;
 };
 
 const ASSISTANT_STATE_FILE_NAME = 'assistant.json';
 const ASSISTANT_MIGRATION_SCOPE = 'assistant';
 
-export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
-  {
-    version: 1,
-    name: 'normalized assistant state',
-    migrate(connection) {
-      connection.exec(`
+function createAssistantSchema(connection: HubDatabaseConnection): void {
+  connection.exec(`
         CREATE TABLE assistant_preferences (
           singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
           active_thread_id TEXT,
+          default_provider TEXT,
+          default_model TEXT,
+          default_thinking_level TEXT,
+          default_enabled_tools_json TEXT,
           web_search_tool_migration_applied INTEGER,
           fetch_content_tool_migration_applied INTEGER,
           system_prompt TEXT,
           system_prompt_updated_at TEXT,
-          voice_system_prompt TEXT,
-          voice_system_prompt_updated_at TEXT,
           state_updated_at TEXT
         );
 
@@ -54,8 +53,6 @@ export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
           title TEXT,
           created_at TEXT,
           updated_at TEXT,
-          voice_enabled INTEGER,
-          voice_enabled_at TEXT,
           model TEXT,
           provider TEXT,
           thinking_level TEXT,
@@ -90,7 +87,6 @@ export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
           model TEXT,
           thinking_level TEXT,
           delivery_mode TEXT,
-          voice_source TEXT,
           extra_json TEXT NOT NULL
         );
         CREATE INDEX assistant_queued_prompts_thread_ordinal_idx
@@ -101,7 +97,6 @@ export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
           ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
           thread_id TEXT NOT NULL REFERENCES assistant_threads(id) ON DELETE CASCADE,
           tool_call_id TEXT,
-          voice_source TEXT,
           mode TEXT,
           targets_json TEXT NOT NULL,
           created_at TEXT,
@@ -123,31 +118,61 @@ export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
           value TEXT NOT NULL,
           updated_at TEXT NOT NULL
         );
-      `);
-    },
+  `);
+}
+
+export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
+  {
+    version: 1,
+    name: 'normalized assistant state',
+    migrate: createAssistantSchema,
   },
   {
     version: 2,
     name: 'assistant default model',
-    migrate(connection) {
-      connection.exec(`
-        ALTER TABLE assistant_preferences ADD COLUMN default_provider TEXT;
-        ALTER TABLE assistant_preferences ADD COLUMN default_model TEXT;
-      `);
+    migrate() {
+      // Kept for compatibility with databases that applied the original
+      // migration. The replacement v1 schema already includes these columns.
     },
   },
   {
     version: 3,
     name: 'assistant default reasoning',
-    migrate(connection) {
-      connection.exec('ALTER TABLE assistant_preferences ADD COLUMN default_thinking_level TEXT;');
+    migrate() {
+      // Historical migration retained so existing schema history stays valid.
     },
   },
   {
     version: 4,
     name: 'assistant default tools',
+    migrate() {
+      // Historical migration retained so existing schema history stays valid.
+    },
+  },
+  {
+    version: 5,
+    name: 'reset assistant state after removing voice modes',
     migrate(connection) {
-      connection.exec('ALTER TABLE assistant_preferences ADD COLUMN default_enabled_tools_json TEXT;');
+      connection.exec(`
+        DROP TABLE IF EXISTS assistant_messages;
+        DROP TABLE IF EXISTS assistant_queued_prompts;
+        DROP TABLE IF EXISTS assistant_chat_idle_subscriptions;
+        DROP TABLE IF EXISTS assistant_threads;
+        DROP TABLE IF EXISTS assistant_preferences;
+        DROP TABLE IF EXISTS assistant_store_metadata;
+      `);
+      createAssistantSchema(connection);
+    },
+  },
+  {
+    version: 6,
+    name: 'remove external assistant data after voice modes',
+    migrate(connection) {
+      connection
+        .prepare(
+          "INSERT INTO assistant_store_metadata (key, value, updated_at) VALUES ('assistant_data_reset_pending', '1', ?)",
+        )
+        .run(new Date().toISOString());
     },
   },
 ];
@@ -162,8 +187,6 @@ type PreferenceRow = {
   fetch_content_tool_migration_applied: number | null;
   system_prompt: string | null;
   system_prompt_updated_at: string | null;
-  voice_system_prompt: string | null;
-  voice_system_prompt_updated_at: string | null;
   state_updated_at: string | null;
 };
 
@@ -173,8 +196,6 @@ type ThreadRow = {
   title: string | null;
   created_at: string | null;
   updated_at: string | null;
-  voice_enabled: number | null;
-  voice_enabled_at: string | null;
   model: string | null;
   provider: string | null;
   thinking_level: string | null;
@@ -202,7 +223,6 @@ type QueuedPromptRow = {
   model: string | null;
   thinking_level: string | null;
   delivery_mode: string | null;
-  voice_source: string | null;
   extra_json: string;
 };
 type SubscriptionRow = {
@@ -210,7 +230,6 @@ type SubscriptionRow = {
   ordinal: number;
   thread_id: string;
   tool_call_id: string | null;
-  voice_source: string | null;
   mode: string | null;
   targets_json: string;
   created_at: string | null;
@@ -293,8 +312,8 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       singleton, active_thread_id, default_provider, default_model, default_thinking_level, default_enabled_tools_json,
       web_search_tool_migration_applied,
       fetch_content_tool_migration_applied, system_prompt, system_prompt_updated_at,
-      voice_system_prompt, voice_system_prompt_updated_at, state_updated_at
-    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      state_updated_at
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(singleton) DO UPDATE SET
       active_thread_id = excluded.active_thread_id,
       default_provider = excluded.default_provider,
@@ -305,8 +324,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       fetch_content_tool_migration_applied = excluded.fetch_content_tool_migration_applied,
       system_prompt = excluded.system_prompt,
       system_prompt_updated_at = excluded.system_prompt_updated_at,
-      voice_system_prompt = excluded.voice_system_prompt,
-      voice_system_prompt_updated_at = excluded.voice_system_prompt_updated_at,
       state_updated_at = excluded.state_updated_at
     WHERE active_thread_id IS NOT excluded.active_thread_id
        OR default_provider IS NOT excluded.default_provider
@@ -317,8 +334,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
        OR fetch_content_tool_migration_applied IS NOT excluded.fetch_content_tool_migration_applied
        OR system_prompt IS NOT excluded.system_prompt
        OR system_prompt_updated_at IS NOT excluded.system_prompt_updated_at
-       OR voice_system_prompt IS NOT excluded.voice_system_prompt
-       OR voice_system_prompt_updated_at IS NOT excluded.voice_system_prompt_updated_at
        OR state_updated_at IS NOT excluded.state_updated_at
   `,
     )
@@ -332,8 +347,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       optionalBoolean(state.fetchContentToolMigrationApplied),
       optionalText(state.systemPrompt),
       optionalText(state.systemPromptUpdatedAt),
-      optionalText(state.voiceSystemPrompt),
-      optionalText(state.voiceSystemPromptUpdatedAt),
       optionalText(state.updatedAt),
     );
 
@@ -343,15 +356,14 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
   ).map((row) => row.id);
   const upsertThread = connection.prepare(`
     INSERT INTO assistant_threads (
-      id, ordinal, title, created_at, updated_at, voice_enabled, voice_enabled_at,
+      id, ordinal, title, created_at, updated_at,
       model, provider, thinking_level, system_prompt, system_prompt_updated_at,
       enabled_tools_json, access_scope_json, auto_approve, prompt_delivery_mode,
       status, error, extra_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       ordinal = excluded.ordinal, title = excluded.title, created_at = excluded.created_at,
-      updated_at = excluded.updated_at, voice_enabled = excluded.voice_enabled,
-      voice_enabled_at = excluded.voice_enabled_at, model = excluded.model,
+      updated_at = excluded.updated_at, model = excluded.model,
       provider = excluded.provider, thinking_level = excluded.thinking_level,
       system_prompt = excluded.system_prompt,
       system_prompt_updated_at = excluded.system_prompt_updated_at,
@@ -361,7 +373,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       error = excluded.error, extra_json = excluded.extra_json
     WHERE ordinal IS NOT excluded.ordinal OR title IS NOT excluded.title
        OR created_at IS NOT excluded.created_at OR updated_at IS NOT excluded.updated_at
-       OR voice_enabled IS NOT excluded.voice_enabled OR voice_enabled_at IS NOT excluded.voice_enabled_at
        OR model IS NOT excluded.model OR provider IS NOT excluded.provider
        OR thinking_level IS NOT excluded.thinking_level OR system_prompt IS NOT excluded.system_prompt
        OR system_prompt_updated_at IS NOT excluded.system_prompt_updated_at
@@ -378,20 +389,20 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
   const upsertQueuedPrompt = connection.prepare(`
     INSERT INTO assistant_queued_prompts (
       id, thread_id, ordinal, prompt, attachments_json, prompt_images_json, created_at,
-      provider, model, thinking_level, delivery_mode, voice_source, extra_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      provider, model, thinking_level, delivery_mode, extra_json
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       thread_id = excluded.thread_id, ordinal = excluded.ordinal, prompt = excluded.prompt,
       attachments_json = excluded.attachments_json, prompt_images_json = excluded.prompt_images_json,
       created_at = excluded.created_at, provider = excluded.provider, model = excluded.model,
       thinking_level = excluded.thinking_level, delivery_mode = excluded.delivery_mode,
-      voice_source = excluded.voice_source, extra_json = excluded.extra_json
+      extra_json = excluded.extra_json
     WHERE thread_id IS NOT excluded.thread_id OR ordinal IS NOT excluded.ordinal
        OR prompt IS NOT excluded.prompt OR attachments_json IS NOT excluded.attachments_json
        OR prompt_images_json IS NOT excluded.prompt_images_json OR created_at IS NOT excluded.created_at
        OR provider IS NOT excluded.provider OR model IS NOT excluded.model
        OR thinking_level IS NOT excluded.thinking_level OR delivery_mode IS NOT excluded.delivery_mode
-       OR voice_source IS NOT excluded.voice_source OR extra_json IS NOT excluded.extra_json
+       OR extra_json IS NOT excluded.extra_json
   `);
 
   for (const [ordinal, thread] of threads.entries()) {
@@ -404,8 +415,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       optionalText(thread.title),
       optionalText(thread.createdAt),
       optionalText(thread.updatedAt),
-      optionalBoolean(thread.voiceEnabled),
-      optionalText(thread.voiceEnabledAt),
       optionalText(thread.model),
       optionalText(thread.provider),
       optionalText(thread.thinkingLevel),
@@ -422,8 +431,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
         'title',
         'createdAt',
         'updatedAt',
-        'voiceEnabled',
-        'voiceEnabledAt',
         'model',
         'provider',
         'thinkingLevel',
@@ -471,7 +478,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
         optionalText(prompt.model),
         optionalText(prompt.thinkingLevel),
         optionalText(prompt.deliveryMode),
-        optionalText(prompt.voiceSource),
         extraJson(prompt, [
           'id',
           'prompt',
@@ -482,7 +488,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
           'model',
           'thinkingLevel',
           'deliveryMode',
-          'voiceSource',
         ]),
       );
     }
@@ -505,22 +510,20 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
   ).map((row) => row.id);
   const upsertSubscription = connection.prepare(`
     INSERT INTO assistant_chat_idle_subscriptions (
-      id, ordinal, thread_id, tool_call_id, voice_source, mode, targets_json,
+      id, ordinal, thread_id, tool_call_id, mode, targets_json,
       created_at, expires_at, idle_for_ms, status, idle_since, fired_at,
       cancelled_at, expired_at, last_result_json, extra_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       ordinal = excluded.ordinal, thread_id = excluded.thread_id,
-      tool_call_id = excluded.tool_call_id, voice_source = excluded.voice_source,
-      mode = excluded.mode, targets_json = excluded.targets_json,
+      tool_call_id = excluded.tool_call_id, mode = excluded.mode, targets_json = excluded.targets_json,
       created_at = excluded.created_at, expires_at = excluded.expires_at,
       idle_for_ms = excluded.idle_for_ms, status = excluded.status,
       idle_since = excluded.idle_since, fired_at = excluded.fired_at,
       cancelled_at = excluded.cancelled_at, expired_at = excluded.expired_at,
       last_result_json = excluded.last_result_json, extra_json = excluded.extra_json
     WHERE ordinal IS NOT excluded.ordinal OR thread_id IS NOT excluded.thread_id
-       OR tool_call_id IS NOT excluded.tool_call_id OR voice_source IS NOT excluded.voice_source
-       OR mode IS NOT excluded.mode OR targets_json IS NOT excluded.targets_json
+       OR tool_call_id IS NOT excluded.tool_call_id OR mode IS NOT excluded.mode OR targets_json IS NOT excluded.targets_json
        OR created_at IS NOT excluded.created_at OR expires_at IS NOT excluded.expires_at
        OR idle_for_ms IS NOT excluded.idle_for_ms OR status IS NOT excluded.status
        OR idle_since IS NOT excluded.idle_since OR fired_at IS NOT excluded.fired_at
@@ -537,7 +540,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       ordinal,
       threadId,
       optionalText(subscription.toolCallId),
-      optionalText(subscription.voiceSource),
       optionalText(subscription.mode),
       json(subscription.targets),
       optionalText(subscription.createdAt),
@@ -553,7 +555,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
         'id',
         'threadId',
         'toolCallId',
-        'voiceSource',
         'mode',
         'targets',
         'createdAt',
@@ -612,7 +613,6 @@ function readStateRows(connection: HubDatabaseConnection): StoredAssistantState 
         model: row.model ?? undefined,
         thinkingLevel: row.thinking_level ?? undefined,
         deliveryMode: row.delivery_mode ?? undefined,
-        voiceSource: row.voice_source ?? undefined,
       }),
     );
     promptsByThread.set(row.thread_id, list);
@@ -624,8 +624,6 @@ function readStateRows(connection: HubDatabaseConnection): StoredAssistantState 
       title: row.title ?? undefined,
       createdAt: row.created_at ?? undefined,
       updatedAt: row.updated_at ?? undefined,
-      voiceEnabled: row.voice_enabled == null ? undefined : row.voice_enabled === 1,
-      voiceEnabledAt: row.voice_enabled_at ?? undefined,
       model: row.model ?? undefined,
       provider: row.provider ?? undefined,
       thinkingLevel: row.thinking_level ?? undefined,
@@ -651,7 +649,6 @@ function readStateRows(connection: HubDatabaseConnection): StoredAssistantState 
       id: row.id,
       threadId: row.thread_id,
       toolCallId: row.tool_call_id,
-      voiceSource: row.voice_source,
       mode: row.mode ?? undefined,
       targets: JSON.parse(row.targets_json),
       createdAt: row.created_at ?? undefined,
@@ -690,8 +687,6 @@ function readStateRows(connection: HubDatabaseConnection): StoredAssistantState 
         : preferences.fetch_content_tool_migration_applied === 1,
     systemPrompt: preferences.system_prompt ?? undefined,
     systemPromptUpdatedAt: preferences.system_prompt_updated_at ?? undefined,
-    voiceSystemPrompt: preferences.voice_system_prompt ?? undefined,
-    voiceSystemPromptUpdatedAt: preferences.voice_system_prompt_updated_at ?? undefined,
     updatedAt: preferences.state_updated_at ?? undefined,
   });
 }
@@ -700,81 +695,26 @@ function assistantStatePath(): string {
   return droneRootPath(ASSISTANT_STATE_FILE_NAME);
 }
 
-async function readLegacyState(): Promise<{
-  state: StoredAssistantState;
-  sha256: string;
-} | null> {
-  try {
-    const bytes = await fs.readFile(assistantStatePath());
-    const parsed = JSON.parse(bytes.toString('utf8'));
-    return parsed && typeof parsed === 'object'
-      ? {
-          state: parsed as StoredAssistantState,
-          sha256: crypto.createHash('sha256').update(bytes).digest('hex'),
-        }
-      : null;
-  } catch (error: any) {
-    if (String(error?.code ?? '') === 'ENOENT') return null;
-    throw error;
-  }
-}
-
-async function archiveLegacyState(): Promise<string | null> {
-  const source = assistantStatePath();
-  const stamp = new Date().toISOString().replace(/[:.]/g, '-');
-  for (let attempt = 0; ; attempt += 1) {
-    const suffix = attempt === 0 ? stamp : `${stamp}-${attempt}`;
-    const destination = `${source}.migrated-${suffix}.bak`;
-    try {
-      await fs.rename(source, destination);
-      return destination;
-    } catch (error: any) {
-      const code = String(error?.code ?? '');
-      if (code === 'ENOENT') return null;
-      if (code === 'EEXIST') continue;
-      throw error;
-    }
-  }
-}
-
 async function initializeStore(database: HubDatabase): Promise<void> {
   database.read(ensureAssistantSchema);
-  const canonicalExists = database.read(
-    (connection) =>
-      connection
-        .prepare('SELECT 1 AS found FROM assistant_preferences WHERE singleton = 1')
-        .get() !== undefined,
-  );
-  if (!canonicalExists) {
-    const legacy = await readLegacyState();
-    if (legacy) {
-      await database.writeTransaction('migrate assistant.json', (connection) => {
-        const alreadyImported = connection
-          .prepare('SELECT 1 AS found FROM assistant_preferences WHERE singleton = 1')
-          .get();
-        if (alreadyImported) return;
-        writeStateRows(connection, legacy.state);
-        connection
-          .prepare(
-            "INSERT OR REPLACE INTO assistant_store_metadata (key, value, updated_at) VALUES ('legacy_import', ?, ?)",
-          )
-          .run(
-            JSON.stringify({ path: assistantStatePath(), sha256: legacy.sha256 }),
-            new Date().toISOString(),
-          );
-      });
-    }
-  }
-
-  const backupPath = await archiveLegacyState();
-  if (backupPath) {
-    await database.writeTransaction('record assistant.json backup', (connection) => {
+  const resetPending = database.read((connection) =>
+    Boolean(
       connection
         .prepare(
-          "INSERT OR REPLACE INTO assistant_store_metadata (key, value, updated_at) VALUES ('legacy_backup', ?, ?)",
+          "SELECT 1 AS found FROM assistant_store_metadata WHERE key = 'assistant_data_reset_pending'",
         )
-        .run(backupPath, new Date().toISOString());
+        .get(),
+    ),
+  );
+  if (resetPending) {
+    await resetExternalAssistantData();
+    await database.writeTransaction('complete assistant data reset', (connection) => {
+      connection
+        .prepare("DELETE FROM assistant_store_metadata WHERE key = 'assistant_data_reset_pending'")
+        .run();
     });
+  } else {
+    await removeLegacyAssistantStateFiles();
   }
 }
 

@@ -2,49 +2,48 @@ import { describe, expect, test } from 'bun:test';
 import { summarizeAssistantActivity } from '../src/droneHub/assistant/assistant-activity';
 
 describe('assistant activity summary', () => {
-  test('counts active normal and voice threads without rendering zero buckets', () => {
+  test('counts active threads', () => {
     expect(
       summarizeAssistantActivity({
         threads: [
-          { id: 'normal-running', status: 'running' },
-          { id: 'voice-waiting', status: 'waiting_for_chats_idle', voiceEnabled: true },
-          { id: 'normal-idle', status: 'idle' },
-          { id: 'voice-error', status: 'error', voiceEnabled: true },
+          { id: 'running', status: 'running' },
+          { id: 'waiting', status: 'waiting_for_chats_idle' },
+          { id: 'idle', status: 'idle' },
+          { id: 'error', status: 'error' },
         ],
       }),
-    ).toEqual({ normal: 1, voice: 1, total: 2 });
+    ).toEqual({ total: 2 });
   });
 
   test('deduplicates running models, thread state, and active chat idle subscriptions', () => {
     expect(
       summarizeAssistantActivity({
         threads: [
-          { id: 'normal-active', status: 'running' },
-          { id: 'voice-subscribed', status: 'idle', voiceEnabled: true },
-          { id: 'normal-fired', status: 'idle' },
+          { id: 'active', status: 'running' },
+          { id: 'subscribed', status: 'idle' },
+          { id: 'fired', status: 'idle' },
         ],
         runningModels: {
-          'normal-active': { model: 'codex' },
+          active: { model: 'codex' },
           'missing-thread': { model: 'codex' },
         },
         chatIdleSubscriptions: [
-          { threadId: 'voice-subscribed', status: 'active' },
-          { threadId: 'normal-fired', status: 'fired' },
-          { threadId: 'normal-active', status: 'active' },
+          { threadId: 'subscribed', status: 'active' },
+          { threadId: 'fired', status: 'fired' },
+          { threadId: 'active', status: 'active' },
         ],
       }),
-    ).toEqual({ normal: 2, voice: 1, total: 3 });
+    ).toEqual({ total: 3 });
   });
 
   test('returns empty counts when nothing is active', () => {
     expect(
       summarizeAssistantActivity({
         threads: [
-          { id: 'normal-idle', status: 'idle' },
-          { id: 'voice-idle', status: 'idle', voiceEnabled: true },
+          { id: 'idle', status: 'idle' },
         ],
-        chatIdleSubscriptions: [{ threadId: 'voice-idle', status: 'expired' }],
+        chatIdleSubscriptions: [{ threadId: 'idle', status: 'expired' }],
       }),
-    ).toEqual({ normal: 0, voice: 0, total: 0 });
+    ).toEqual({ total: 0 });
   });
 });

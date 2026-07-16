@@ -91,9 +91,6 @@ export function ChatInput({
   automationActions,
   automationMenuLabel = 'Automations',
   lockComposerWhileAutomationActive = true,
-  voicePatchActive = false,
-  voicePatchCancelling = false,
-  onCancelVoicePatch,
   onSend,
   onPublish,
   publishing = false,
@@ -116,9 +113,6 @@ export function ChatInput({
   automationActions?: ChatInputAutomationAction[];
   automationMenuLabel?: string;
   lockComposerWhileAutomationActive?: boolean;
-  voicePatchActive?: boolean;
-  voicePatchCancelling?: boolean;
-  onCancelVoicePatch?: () => Promise<void> | void;
   onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onPublish?: () => Promise<boolean> | boolean;
   publishing?: boolean;
@@ -644,39 +638,8 @@ export function ChatInput({
             dragActive ? 'border-[var(--accent)]' : 'border-[var(--border)]'
           }`}
         >
-          {voicePatchActive && (
-            <div className="pointer-events-none absolute -inset-px rounded-lg border border-[rgba(80,220,160,.85)] shadow-[0_0_22px_rgba(80,220,160,.35),inset_0_0_18px_rgba(80,220,160,.12)]" />
-          )}
           {/* Top accent line */}
           <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-[var(--user-muted)] to-transparent opacity-25" />
-          {voicePatchActive && (
-            <div
-              className="absolute right-3 top-2 z-10 inline-flex items-center gap-1.5 rounded border border-[rgba(80,220,160,.45)] bg-[rgba(12,38,30,.92)] px-2 py-1 text-[9px] font-semibold uppercase text-[rgb(118,245,184)] shadow-[0_0_18px_rgba(80,220,160,.22)]"
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              <span className="h-1.5 w-1.5 rounded-full bg-[rgb(118,245,184)] shadow-[0_0_10px_rgba(118,245,184,.9)]" />
-              Patch Live
-              {onCancelVoicePatch ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void onCancelVoicePatch();
-                  }}
-                  disabled={voicePatchCancelling}
-                  className={`ml-1 rounded border px-1.5 py-0.5 text-[8px] font-semibold uppercase transition-colors ${
-                    voicePatchCancelling
-                      ? 'cursor-not-allowed border-[rgba(118,245,184,.18)] text-[rgba(118,245,184,.45)]'
-                      : 'border-[rgba(118,245,184,.35)] text-[rgb(178,255,218)] hover:border-[rgba(248,113,113,.55)] hover:bg-[rgba(248,113,113,.12)] hover:text-[rgb(252,165,165)]'
-                  }`}
-                  title="Cancel patch me mode for this chat"
-                  aria-label="Cancel patch me mode for this chat"
-                >
-                  {voicePatchCancelling ? '...' : 'Cancel'}
-                </button>
-              ) : null}
-            </div>
-          )}
-
           {attachmentsOn && attachments.length > 0 && (
             <div className="px-3 pt-3">
               <div className="flex items-center justify-between gap-2">

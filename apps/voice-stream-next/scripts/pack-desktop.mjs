@@ -113,7 +113,7 @@ function copyRuntimePackage(packageName, fromDir = appDir) {
 }
 
 function runPackager() {
-  const modelPath = path.resolve(repoRoot, 'apps/voice-stream/android/app/src/main/assets/model-en-us');
+  const modelPath = path.resolve(repoRoot, 'apps/voice-stream-next/android/app/src/main/assets/model-en-us');
   const desktopBuildConfigPath = writeDesktopBuildConfig();
   const electronPackagerBin = path.join(packageRoot('@electron/packager'), 'bin', 'electron-packager.js');
   const args = [

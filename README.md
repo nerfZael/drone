@@ -5,7 +5,6 @@ A Bun + Turborepo monorepo for running and managing **agent-enabled “drone” 
 - **`dvm`** (`apps/dvm`): CLI for managing Docker containers as “VM-like” machines, including tmux-backed persistent sessions and optional agent setup.
 - **`drone`** (`apps/drone`): host CLI + in-container daemon that exposes a local REST API for controlling processes/sessions inside a container (implemented on top of `dvm`).
 - **`drone-hub`** (`apps/drone-hub`): web UI for listing/grouping drones and interacting with them (Vite/React).
-- **`voice-stream`** (`apps/voice-stream`): Android voice capture app plus a Node.js WebSocket server for APK download, pairing, monitoring, and optional Groq STT/TTS.
 - **`looped`** (`apps/looped`): scaffolded minimal loop harness wrapper for repeatedly running an agentic CLI prompt.
 - **`drone-sdk`** (`packages/drone-sdk`): TypeScript SDK for creating drones, working with groups and chats, and sending prompts through Drone Hub.
 
@@ -14,7 +13,6 @@ A Bun + Turborepo monorepo for running and managing **agent-enabled “drone” 
 - **`apps/dvm/`**: DVM CLI and scripts
 - **`apps/drone/`**: Drone CLI + daemon
 - **`apps/drone-hub/`**: Drone Hub UI
-- **`apps/voice-stream/`**: Android app and voice stream server
 - **`apps/looped/`**: Looped CLI scaffold
 - **`packages/drone-sdk/`**: Drone SDK package
 
@@ -68,7 +66,7 @@ Typical flow:
 # create a drone container + start its daemon + register it locally
 drone create <name>
 
-# start the Hub UI/API and Voice Stream server (detached)
+# start the Hub UI/API (detached)
 drone hub
 ```
 
@@ -100,17 +98,11 @@ bun run dvm -- --help
 # drone dev (ts-node)
 bun run drone -- --help
 
-# voice-stream server
-bun run voice-stream
-
 # Voice Stream Next backend + web dashboard
 bun run vsn
 
 # Voice Stream Next desktop client
 bun run vsn:desktop
-
-# voice-stream Android debug APK
-ANDROID_HOME=/path/to/android-sdk bun run voice-stream:apk
 
 # looped dev (ts-node)
 bun run looped -- --help
@@ -127,5 +119,4 @@ For details, see `apps/drone/README.md`.
 - **Drone**: `apps/drone/README.md`
 - **DVM**: `apps/dvm/README.md`
 - **Drone Hub UI**: `apps/drone-hub/README.md`
-- **Voice Stream**: `apps/voice-stream/README.md`
 - **Looped**: `apps/looped/README.md`

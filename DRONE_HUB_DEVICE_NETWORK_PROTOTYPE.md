@@ -1080,7 +1080,7 @@ application payloads until destination-only encryption is implemented.
 - quorum-based administration;
 - automatic assistant target selection;
 - several remote workspace or drone targets in one thread;
-- full Remote Hub panel parity;
+- full desktop panel parity on mobile;
 - dynamically downloaded capability code;
 - remote-provided interface code;
 - a capability marketplace or general plugin runtime;
@@ -1113,4 +1113,4 @@ Only after Milestones 0 through 3 should the project decide whether to add:
 - local aliases;
 - recovery-key UX;
 - iOS;
-- broader Remote Hub parity.
+- broader mobile and desktop cross-device parity.

@@ -81,29 +81,6 @@ async function assertBlipBundleHasErrorDetails(root) {
   }
 }
 
-async function copyDesktopVoiceVoskModel(root) {
-  const source = path.resolve(
-    root,
-    '..',
-    'voice-stream',
-    'android',
-    'app',
-    'src',
-    'main',
-    'assets',
-    'model-en-us',
-  );
-  const target = path.join(root, 'dist', 'assets', 'vosk-model-en-us');
-  try {
-    await fs.access(path.join(source, 'am', 'final.mdl'));
-  } catch {
-    return;
-  }
-  await fs.rm(target, { recursive: true, force: true });
-  await fs.mkdir(path.dirname(target), { recursive: true });
-  await fs.cp(source, target, { recursive: true });
-}
-
 async function ensureBlipBundleDependenciesBuilt(root) {
   const repoRoot = path.resolve(root, '../..');
   runOrThrow('bun', workspaceBuildArgs('@mariozechner/pi-ai'), { cwd: repoRoot });
@@ -147,7 +124,6 @@ async function main() {
   await ensureBlipBundleDependenciesBuilt(root);
   runOrThrow('bun', blipBundleArgs(root), { cwd: root });
   await assertBlipBundleHasErrorDetails(root);
-  await copyDesktopVoiceVoskModel(root);
   await copyDroneHubElectronMain(root);
   await copyBuiltDroneHubUi(root);
   await chmodExecutableBestEffort(path.join(root, 'dist', 'blip.js'));

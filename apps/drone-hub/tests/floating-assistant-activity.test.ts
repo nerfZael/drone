@@ -8,10 +8,6 @@ mock.module(new URL('../src/droneHub/assistant/AssistantDock.tsx', import.meta.u
   AssistantDock: () => null,
 }));
 
-mock.module(new URL('../src/droneHub/assistant/DesktopVoiceFloatingIndicator.tsx', import.meta.url).pathname, () => ({
-  DesktopVoiceFloatingIndicator: () => null,
-}));
-
 beforeAll(async () => {
   helpers = await import('../src/droneHub/assistant/FloatingAssistantDock');
 });

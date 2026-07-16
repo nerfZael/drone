@@ -379,7 +379,7 @@ export class DeviceMeshHttp {
     });
     const claimed = (await claimedResponse.json().catch(() => ({}))) as any;
     if (!claimedResponse.ok)
-      throw new Error(String(claimed?.error ?? 'remote Hub rejected the pairing code'));
+      throw new Error(String(claimed?.error ?? 'destination Hub rejected the pairing code'));
     const pendingId = String(claimed.pendingId ?? '');
     while (Date.now() < Date.parse(payload.expiresAt) + 60_000) {
       await new Promise((resolve) => setTimeout(resolve, 2_000));
@@ -389,7 +389,7 @@ export class DeviceMeshHttp {
       const status = (await statusResponse.json().catch(() => ({}))) as any;
       if (!statusResponse.ok)
         throw new Error(String(status?.error ?? 'could not read pairing approval'));
-      if (status.status === 'rejected') throw new Error('the remote Hub rejected this device');
+      if (status.status === 'rejected') throw new Error('the destination Hub rejected this device');
       if (status.status !== 'approved') continue;
       const approval = status.approval as PairingApproval;
       await this.store.update((current) => {

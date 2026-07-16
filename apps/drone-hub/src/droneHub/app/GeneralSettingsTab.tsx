@@ -2,7 +2,6 @@ import React from 'react';
 import { bytesToMaxMiB, bytesToMinMiB, bytesToNearestMiB, miBToBytes } from './filesystem-size-utils';
 import type { UseAgentMessageAutoContinueSettingsResult } from './use-agent-message-auto-continue-settings';
 import type { UseAgentSuggestionSettingsResult } from './use-agent-suggestion-settings';
-import type { UseDesktopVoiceModelSettingsResult } from './use-desktop-voice-model-settings';
 import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
 import type { UseGithubSettingsResult } from './use-github-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
@@ -18,7 +17,6 @@ type GeneralSettingsTabProps = {
   github: UseGithubSettingsResult;
   llm: UseLlmSettingsResult;
   filesystem: UseFilesystemSettingsResult;
-  desktopVoiceModel: UseDesktopVoiceModelSettingsResult;
   agentMessageAutoContinue: UseAgentMessageAutoContinueSettingsResult;
   agentSuggestion: UseAgentSuggestionSettingsResult;
   transcriptInlineImages: boolean;
@@ -31,7 +29,6 @@ export function GeneralSettingsTab({
   github,
   llm,
   filesystem,
-  desktopVoiceModel,
   agentMessageAutoContinue,
   agentSuggestion,
   transcriptInlineImages,
@@ -60,23 +57,15 @@ export function GeneralSettingsTab({
     clearingGroqSettings,
     showGroqKey,
     revealingGroqKey,
-    voiceStreamPairingPasswordDraft,
-    savingVoiceStreamPairingPassword,
-    clearingVoiceStreamPairingPassword,
-    showVoiceStreamPairingPassword,
-    revealingVoiceStreamPairingPassword,
     llmSettingsNotice,
     setLlmProviderDraft,
     updateOpenAiSettingsDraft,
     updateGeminiSettingsDraft,
     updateGroqSettingsDraft,
-    updateVoiceStreamPairingPasswordDraft,
     loadLlmSettings,
     saveLlmProviderSettings,
     toggleApiKeyVisibility,
     mutateApiKeySettings,
-    toggleVoiceStreamPairingPasswordVisibility,
-    mutateVoiceStreamPairingPasswordSettings,
   } = llm;
   const {
     filesystemSettings,
@@ -88,16 +77,6 @@ export function GeneralSettingsTab({
     setUploadMaxMiBDraft,
     saveFilesystemSettings,
   } = filesystem;
-  const {
-    desktopVoiceModelSettings,
-    desktopVoiceModelSettingsLoading,
-    desktopVoiceModelSettingsError,
-    desktopVoiceModelSettingsNotice,
-    installingDesktopVoiceModel,
-    removingDesktopVoiceModel,
-    loadDesktopVoiceModelSettings,
-    installDesktopVoiceModel,
-  } = desktopVoiceModel;
   const {
     agentMessageAutoContinueSettings,
     agentMessageAutoContinueSettingsLoading,
@@ -335,164 +314,6 @@ export function GeneralSettingsTab({
           </button>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-            Voice Stream QR password
-          </div>
-          {llmSettings?.voiceStreamPairingPassword.hasPassword ? (
-            <div className="text-[11px] text-[var(--muted-dim)]">
-              {llmSettings.voiceStreamPairingPassword.passwordHint ?? 'hidden'}
-              {llmSettings.voiceStreamPairingPassword.updatedAt ? ` • Updated ${new Date(llmSettings.voiceStreamPairingPassword.updatedAt).toLocaleString()}` : ''}
-              {llmSettings.voiceStreamPairingPassword.source === 'environment' ? ' • From environment' : ''}
-            </div>
-          ) : (
-            <div className="text-[11px] text-[var(--muted-dim)]">No pairing password configured.</div>
-          )}
-          <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
-            Protects the Voice Stream pairing QR page. Changing it restarts Voice Stream.
-          </div>
-          <div className="flex items-center gap-2">
-            <input
-              value={voiceStreamPairingPasswordDraft}
-              onChange={(e) => updateVoiceStreamPairingPasswordDraft(e.target.value)}
-              type="text"
-              autoComplete="off"
-              name="voice-stream-pairing-password"
-              spellCheck={false}
-              style={({ WebkitTextSecurity: showVoiceStreamPairingPassword ? 'none' : 'disc' } as React.CSSProperties)}
-              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
-              placeholder="Pairing page password"
-              disabled={savingVoiceStreamPairingPassword || clearingVoiceStreamPairingPassword || revealingVoiceStreamPairingPassword}
-            />
-            <button
-              type="button"
-              onClick={() => void toggleVoiceStreamPairingPasswordVisibility()}
-              disabled={savingVoiceStreamPairingPassword || clearingVoiceStreamPairingPassword || revealingVoiceStreamPairingPassword}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                savingVoiceStreamPairingPassword || clearingVoiceStreamPairingPassword || revealingVoiceStreamPairingPassword
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {revealingVoiceStreamPairingPassword ? 'Loading…' : showVoiceStreamPairingPassword ? 'Hide' : 'Show'}
-            </button>
-          </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void mutateVoiceStreamPairingPasswordSettings('save')}
-              disabled={!voiceStreamPairingPasswordDraft.trim() || savingVoiceStreamPairingPassword || clearingVoiceStreamPairingPassword}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                !voiceStreamPairingPasswordDraft.trim() || savingVoiceStreamPairingPassword || clearingVoiceStreamPairingPassword
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {savingVoiceStreamPairingPassword ? 'Saving…' : 'Save'}
-            </button>
-            <button
-              type="button"
-              onClick={() => void mutateVoiceStreamPairingPasswordSettings('clear')}
-              disabled={clearingVoiceStreamPairingPassword || savingVoiceStreamPairingPassword || !llmSettings?.voiceStreamPairingPassword.hasPassword}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                clearingVoiceStreamPairingPassword || savingVoiceStreamPairingPassword || !llmSettings?.voiceStreamPairingPassword.hasPassword
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {clearingVoiceStreamPairingPassword ? 'Clearing…' : 'Clear'}
-            </button>
-          </div>
-        </div>
-
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-            Desktop voice trigger model
-          </div>
-          {desktopVoiceModelSettingsError && (
-            <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
-              {desktopVoiceModelSettingsError}
-            </div>
-          )}
-          {desktopVoiceModelSettingsNotice && (
-            <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
-              {desktopVoiceModelSettingsNotice}
-            </div>
-          )}
-          {desktopVoiceModelSettingsLoading && !desktopVoiceModelSettings ? (
-            <div className="text-[12px] text-[var(--muted-dim)]">Loading desktop voice model status…</div>
-          ) : (
-            <>
-              <div className="text-[12px] leading-relaxed text-[var(--fg-secondary)]">
-                Uses a local Vosk constrained-grammar trigger model for approval codes, wake, and sleep phrases. This does not require an API key.
-              </div>
-              <div className="text-[11px] text-[var(--muted-dim)]">
-                Status:{' '}
-                <span className="text-[var(--fg-secondary)]">
-                  {desktopVoiceModelSettings?.state === 'installed'
-                    ? 'Installed'
-                    : desktopVoiceModelSettings?.state === 'installing'
-                      ? 'Installing'
-                      : desktopVoiceModelSettings?.state === 'error'
-                        ? 'Install failed'
-                        : 'Not installed'}
-                </span>
-                {desktopVoiceModelSettings?.modelDir ? ` • ${desktopVoiceModelSettings.modelDir}` : ''}
-              </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {(desktopVoiceModelSettings?.catalog ?? []).map((model) => {
-                  const selected = desktopVoiceModelSettings?.selectedModelId === model.id;
-                  const effective = desktopVoiceModelSettings?.effectiveModelId === model.id;
-                  const installing = desktopVoiceModelSettings?.installingModelId === model.id || (installingDesktopVoiceModel && !selected);
-                  const disabled = installingDesktopVoiceModel || removingDesktopVoiceModel || Boolean(desktopVoiceModelSettings?.installing);
-                  return (
-                    <button
-                      key={model.id}
-                      type="button"
-                      onClick={() => void installDesktopVoiceModel(model.id)}
-                      disabled={disabled || selected}
-                      className={`min-h-[86px] rounded border px-3 py-3 text-left transition-all ${
-                        selected
-                          ? 'border-[var(--accent)] bg-[rgba(52,211,153,.10)] text-[var(--fg)]'
-                          : disabled
-                            ? 'opacity-50 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                            : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--fg-secondary)] hover:bg-[var(--hover)] hover:border-[var(--border)]'
-                      }`}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className="text-[12px] font-semibold">{model.label}</span>
-                        <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                          {installing ? 'Installing' : selected ? 'Selected' : model.bundled ? 'Bundled' : 'Install'}
-                        </span>
-                      </div>
-                      <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
-                        {model.size} • {model.language}{effective && !selected ? ' • active fallback' : ''}
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <button
-                  type="button"
-                  onClick={() => void loadDesktopVoiceModelSettings()}
-                  disabled={desktopVoiceModelSettingsLoading}
-                  className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                    desktopVoiceModelSettingsLoading
-                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                  }`}
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  Refresh
-                </button>
-              </div>
-            </>
-          )}
-        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">

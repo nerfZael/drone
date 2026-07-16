@@ -1,8 +1,8 @@
 # Voice Stream Next
 
-Voice Stream Next is the planned parallel voice and assistant product for Drone. It is intentionally separate from the current `apps/voice-stream` implementation so the existing Android voice, desktop voice, assistant side panel, and Drone Hub workflow can keep working while the new product is designed and built.
+Voice Stream Next is the standalone voice and assistant product for Drone. It is intentionally separate from Drone Hub and owns its Android, desktop, web, and server voice implementations.
 
-This directory is the parallel Voice Stream product. It should not affect the current monorepo build, Hub launch flow, or legacy Android APK.
+This directory should not affect the Drone Hub launch flow or the DroneHub Android app.
 
 Internal monorepo name: `voice-stream-next`.
 
@@ -23,19 +23,11 @@ Build a standalone voice product with:
 - a clean protocol between clients and the service
 - no required Drone Hub integration during the first development phase
 
-Drone Hub integration should come later through explicit adapters, after the new product reaches enough feature parity to replace or coexist with the current voice stack.
+Drone Hub integration is provided only through explicit adapters. Drone Hub does not launch or own this product's voice runtime.
 
 ## Current Baseline
 
-The existing working system remains:
-
-```text
-apps/voice-stream       # current Android app and voice server
-apps/drone              # current Hub API, assistant runtime, desktop voice service
-apps/drone-hub          # current React UI and assistant side panel
-```
-
-Voice Stream Next should not import implementation code from `apps/voice-stream` directly. Code that is truly shared should move into stable `packages/*` modules or shared test fixtures.
+Voice Stream Next is self-contained under `apps/voice-stream-next`. Code shared with other products belongs in stable `packages/*` modules or shared test fixtures.
 
 ## Docs
 

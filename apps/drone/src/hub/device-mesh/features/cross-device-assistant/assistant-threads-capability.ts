@@ -129,7 +129,7 @@ async function submitPrompt(
         if (chunk.done) return;
       }
     } catch {
-      // The request has already been acknowledged; realtime thread changes carry later state.
+      // The request has already been acknowledged; later thread changes carry the updated state.
     }
   };
   for (;;) {

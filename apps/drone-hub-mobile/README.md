@@ -1,6 +1,6 @@
 # Drone Hub Mobile
 
-Android-first React Native client for the Drone Hub device mesh. It is an Expo development-build project, not a WebView around Remote Hub.
+Android-first React Native client for the Drone Hub device mesh. It is an Expo development-build project with native device-mesh pairing.
 
 From the monorepo root:
 

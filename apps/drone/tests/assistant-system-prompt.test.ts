@@ -21,7 +21,7 @@ describe('assistant system prompt settings', () => {
         droneIds: [],
       });
       const prompt = service.resolvedSystemPrompt(snapshot.activeThreadId);
-      expect(prompt).toContain('Current existing-drone access scope: read=all drones; write=no selected drones.');
+      expect(prompt).toContain('Current existing-drone access scope: read=all drones; write=no selected drones; execute=no selected drones.');
       expect(prompt).toContain('This scope does not restrict enabled global creation tools such as create_drone, clone_drone, or create_group.');
     });
   });
@@ -61,27 +61,21 @@ describe('assistant system prompt settings', () => {
     });
   });
 
-  test('persists normal and voice defaults in the canonical assistant store and applies them to new threads', async () => {
+  test('persists the assistant default in the canonical store and applies it to new threads', async () => {
     await withTempDroneDataDir('assistant-system-prompts-', async () => {
       const service = makeAssistantService();
-      await service.updateSystemPrompt({ prompt: 'Normal assistant prompt.' });
-      const settings = await service.updateSystemPrompt({ promptType: 'voice', prompt: 'Voice assistant prompt.' });
-      expect(settings.assistantSystemPrompt.prompt).toBe('Normal assistant prompt.');
-      expect(settings.assistantVoiceSystemPrompt.prompt).toBe('Voice assistant prompt.');
+      const settings = await service.updateSystemPrompt({ prompt: 'Assistant prompt.' });
+      expect(settings.assistantSystemPrompt.prompt).toBe('Assistant prompt.');
 
-      const normalSnapshot = await service.createThread({ title: 'normal' });
-      const normalThread = normalSnapshot.threads.find((thread) => thread.id === normalSnapshot.activeThreadId) as any;
-      expect(normalThread.systemPrompt).toBe('Normal assistant prompt.');
-      const voice = await service.ensureLatestVoiceThread({ title: 'voice' });
-      expect(voice.thread.systemPrompt).toBe('Voice assistant prompt.');
+      const snapshot = await service.createThread({ title: 'thread' });
+      const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
+      expect(thread.systemPrompt).toBe('Assistant prompt.');
 
       const stored = await loadAssistantState();
-      expect(stored?.systemPrompt).toBe('Normal assistant prompt.');
-      expect(stored?.voiceSystemPrompt).toBe('Voice assistant prompt.');
+      expect(stored?.systemPrompt).toBe('Assistant prompt.');
 
       const reloaded = await makeAssistantService().systemPromptSettings();
-      expect(reloaded.assistantSystemPrompt.prompt).toBe('Normal assistant prompt.');
-      expect(reloaded.assistantVoiceSystemPrompt.prompt).toBe('Voice assistant prompt.');
+      expect(reloaded.assistantSystemPrompt.prompt).toBe('Assistant prompt.');
     });
   });
 

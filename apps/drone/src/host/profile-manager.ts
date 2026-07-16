@@ -50,10 +50,6 @@ export type HubState = {
     port: number;
     url: string;
   } | null;
-  voiceStream?: {
-    port: number;
-    url: string;
-  } | null;
   startedAt: string;
   logPath: string;
   launchEnv: HubLaunchEnvSnapshot | null;
@@ -171,7 +167,6 @@ async function readHubState(rootDir?: string): Promise<HubState | null> {
       apiPort,
       uiPort,
       containerMcp: parseHubContainerMcpState(parsed.containerMcp),
-      voiceStream: parseHubVoiceStreamState(parsed.voiceStream),
       startedAt: typeof parsed.startedAt === 'string' ? parsed.startedAt : new Date().toISOString(),
       logPath: typeof parsed.logPath === 'string' ? parsed.logPath : path.join(droneDir(rootDir), 'hub.log'),
       launchEnv: parsed.launchEnv ?? null,
@@ -189,15 +184,6 @@ function parseHubContainerMcpState(raw: unknown): HubState['containerMcp'] {
   const url = typeof value.url === 'string' ? value.url.trim() : '';
   if (!host || !Number.isFinite(port) || port <= 0 || !url) return null;
   return { host, port: Math.floor(port), url };
-}
-
-function parseHubVoiceStreamState(raw: unknown): HubState['voiceStream'] {
-  if (!raw || typeof raw !== 'object') return null;
-  const value = raw as any;
-  const port = Number(value.port);
-  const url = typeof value.url === 'string' ? value.url : '';
-  if (!Number.isFinite(port) || port <= 0 || !url) return null;
-  return { port, url };
 }
 
 async function writeHubState(state: HubState, rootDir?: string): Promise<void> {

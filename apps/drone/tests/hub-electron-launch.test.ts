@@ -20,7 +20,6 @@ describe('Drone Hub Electron background launch', () => {
         DRONE_HUB_APP_PORT: '0',
         DRONE_HUB_APP_API_PORT: '8787',
         DRONE_HUB_APP_HOST: '127.0.0.1',
-        DRONE_HUB_APP_NO_VOICE_STREAM: '1',
         DRONE_HUB_STATIC_UI_DIR: '/app/hub-ui',
       },
       'linux',
@@ -29,7 +28,6 @@ describe('Drone Hub Electron background launch', () => {
     expect(args.slice(0, 3)).toEqual(['/app/cli.js', 'hub', 'start']);
     expect(args).toContain('--ui-mode');
     expect(args).toContain('static');
-    expect(args).toContain('--no-voice-stream');
     expect(args).toContain('/app/hub-ui');
     expect(args).not.toContain('run');
     expect(args).not.toContain('--ready-json');

@@ -101,7 +101,6 @@ import type {
   AssistantDroneReference,
   AssistantMessage,
   AssistantModelOption,
-  AssistantPanelMode,
   AssistantPromptDeliveryMode,
   AssistantProviderId,
   AssistantRunModel,
@@ -110,7 +109,6 @@ import type {
   AssistantScopeMode,
   AssistantScopeUpdateResult,
   AssistantSnapshot,
-  AssistantSystemPromptKind,
   AssistantSystemPromptSettings,
   AssistantThread,
   AssistantThreadStatus,
@@ -118,24 +116,7 @@ import type {
   AssistantToolSummary,
   PendingAssistantScopeSave,
 } from './assistant-types';
-import {
-  canSendAssistantDesktopVoiceRealtimeText,
-  desktopAssistantVoiceControlLabel,
-  desktopAssistantVoiceControlTitle,
-  desktopAssistantVoiceHeardText,
-  dispatchAssistantDesktopVoiceOff,
-  dispatchAssistantDesktopVoiceRealtimeToggle,
-  dispatchAssistantDesktopVoiceStartRecording,
-  dispatchAssistantDesktopVoiceToggle,
-  isDesktopAssistantVoiceActive,
-  isDesktopAssistantVoiceBusy,
-  sendAssistantDesktopVoiceRealtimeText,
-  subscribeAssistantDesktopVoiceStatus,
-  type DesktopAssistantVoiceStatus,
-} from './desktop-assistant-voice';
-
 const ASSISTANT_THREAD_SIDEBAR_OPEN_STORAGE_KEY = 'droneHub.assistant.threadSidebarOpen';
-const ASSISTANT_THREAD_MODE_STORAGE_KEY = 'droneHub.assistant.threadMode';
 const ASSISTANT_FILES_OPEN_STORAGE_KEY = 'droneHub.assistant.filesOpen';
 /** Distance from bottom (px) below which we treat the assistant transcript as "pinned" for auto-scroll. */
 const ASSISTANT_SCROLL_BOTTOM_THRESHOLD_PX = 48;
@@ -161,11 +142,6 @@ const ASSISTANT_PROVIDERS: Array<{ id: AssistantProviderId; label: string; title
 function readInitialThreadSidebarOpen(): boolean {
   if (typeof window === 'undefined') return true;
   return window.localStorage.getItem(ASSISTANT_THREAD_SIDEBAR_OPEN_STORAGE_KEY) !== '0';
-}
-
-function readInitialAssistantPanelMode(): AssistantPanelMode {
-  if (typeof window === 'undefined') return 'normal';
-  return window.localStorage.getItem(ASSISTANT_THREAD_MODE_STORAGE_KEY) === 'voice' ? 'voice' : 'normal';
 }
 
 function readInitialFilesOpen(): boolean {
@@ -381,7 +357,6 @@ export function AssistantDock() {
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
   const [attachmentDragActive, setAttachmentDragActive] = React.useState(false);
   const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(readInitialThreadSidebarOpen);
-  const [assistantPanelMode, setAssistantPanelMode] = React.useState<AssistantPanelMode>(readInitialAssistantPanelMode);
   const [filesOpen, setFilesOpen] = React.useState(readInitialFilesOpen);
   const [artifactFiles, setArtifactFiles] = React.useState<AssistantArtifactSummary[]>([]);
   const [selectedArtifactPath, setSelectedArtifactPath] = React.useState<string | null>(null);
@@ -406,10 +381,8 @@ export function AssistantDock() {
   const [defaultToolsBusy, setDefaultToolsBusy] = React.useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = React.useState(false);
   const [systemPromptMode, setSystemPromptMode] = React.useState<'thread' | 'global'>('thread');
-  const [systemPromptGlobalKind, setSystemPromptGlobalKind] = React.useState<AssistantSystemPromptKind>('normal');
   const [systemPromptSettings, setSystemPromptSettings] = React.useState<AssistantSystemPromptSettings | null>(null);
   const [systemPromptDraft, setSystemPromptDraft] = React.useState('');
-  const [voiceSystemPromptDraft, setVoiceSystemPromptDraft] = React.useState('');
   const [threadSystemPromptSettings, setThreadSystemPromptSettings] = React.useState<AssistantThreadSystemPromptSettings | null>(null);
   const [threadSystemPromptDraft, setThreadSystemPromptDraft] = React.useState('');
   const [systemPromptLoading, setSystemPromptLoading] = React.useState(false);
@@ -422,14 +395,6 @@ export function AssistantDock() {
   const [assistantEventsUnavailable, setAssistantEventsUnavailable] = React.useState(
     () => typeof window === 'undefined' || typeof window.EventSource === 'undefined',
   );
-  const [voiceTranscriptionActive, setVoiceTranscriptionActive] = React.useState(false);
-  const [voiceAndroidMode, setVoiceAndroidMode] = React.useState('');
-  const [voiceAndroidStatus, setVoiceAndroidStatus] = React.useState('');
-  const [voiceDraftActive, setVoiceDraftActive] = React.useState(false);
-  const [desktopVoiceStatus, setDesktopVoiceStatus] = React.useState<DesktopAssistantVoiceStatus>({
-    mode: 'off',
-    message: 'Desktop voice is off.',
-  });
   const selectedDrone = useDroneHubUiStore((state) => state.selectedDrone);
   const selectedChat = useDroneHubUiStore((state) => state.selectedChat);
   const appView = useDroneHubUiStore((state) => state.appView);
@@ -461,10 +426,6 @@ export function AssistantDock() {
   const enabledToolDraftNamesRef = React.useRef<string[]>([]);
   const defaultEnabledToolDraftNamesRef = React.useRef<string[]>([]);
   const assistantEventRefreshTimerRef = React.useRef<number | null>(null);
-  const draftRef = React.useRef('');
-  const voiceDraftActiveRef = React.useRef(false);
-  const voiceDraftTextRef = React.useRef('');
-  const voiceEnabledRef = React.useRef(false);
   const { isOver: scopeDropIsOver, setNodeRef: setScopeDropNodeRef } = useDroppable({
     id: 'assistant-drone-scope-drop',
     data: { type: 'assistant-drone-scope-drop' },
@@ -506,13 +467,8 @@ export function AssistantDock() {
   }, [updateAssistantPinned]);
 
   const visibleThreads = React.useMemo(() => {
-    const threads = snapshot?.threads ?? [];
-    return assistantThreadsByCreatedAtNewestFirst(
-      threads.filter((thread) =>
-        assistantPanelMode === 'voice' ? Boolean(thread.voiceEnabled) : !thread.voiceEnabled,
-      ),
-    );
-  }, [assistantPanelMode, snapshot?.threads]);
+    return assistantThreadsByCreatedAtNewestFirst(snapshot?.threads ?? []);
+  }, [snapshot?.threads]);
 
   const activeThread = React.useMemo(() => {
     if (!snapshot) return null;
@@ -521,19 +477,10 @@ export function AssistantDock() {
   const activeThreadId = activeThread?.id ?? '';
   activeThreadIdRef.current = activeThreadId;
   const autoApprove = Boolean(activeThread?.autoApprove);
-  const voiceEnabled = Boolean(activeThread?.voiceEnabled);
-  voiceEnabledRef.current = voiceEnabled;
   const blipSession = useBlipThreadSession(activeThreadId, Boolean(activeThread));
   React.useEffect(() => {
     if (activeThreadId) void blipSession.refreshHistory({ quiet: true });
   }, [activeThread?.updatedAt, activeThreadId, blipSession.refreshHistory]);
-  React.useEffect(() => {
-    if (!voiceEnabled || desktopVoiceStatus.mode !== 'recording' || !activeThreadId || typeof window === 'undefined') return;
-    const refreshHistory = () => void blipSession.refreshHistory({ quiet: true });
-    refreshHistory();
-    const timer = window.setInterval(refreshHistory, 750);
-    return () => window.clearInterval(timer);
-  }, [activeThreadId, blipSession.refreshHistory, desktopVoiceStatus.mode, voiceEnabled]);
   const loadOlderMessages = React.useCallback(async () => {
     const node = scrollRef.current;
     const previousHeight = node?.scrollHeight ?? 0;
@@ -545,8 +492,6 @@ export function AssistantDock() {
       current.scrollTop = previousTop + Math.max(0, current.scrollHeight - previousHeight);
     });
   }, [blipSession]);
-  const realtimeTextReady = voiceEnabled && canSendAssistantDesktopVoiceRealtimeText();
-  const realtimeTextBlocked = voiceEnabled && !realtimeTextReady;
   const promptDeliveryMode: AssistantPromptDeliveryMode = activeThread?.promptDeliveryMode === 'asap' ? 'asap' : 'queue';
   const activeAccessScope: AssistantAccessScope | null = activeThread?.accessScope ?? snapshot?.accessScope ?? null;
   const activeAccessScopeDroneIdsKey = activeAccessScope?.droneIds?.join('\u0000') ?? '';
@@ -709,10 +654,6 @@ export function AssistantDock() {
   }, [applySnapshot]);
 
   React.useEffect(() => {
-    draftRef.current = draft;
-  }, [draft]);
-
-  React.useEffect(() => {
     attachmentsRef.current = attachments;
   }, [attachments]);
 
@@ -734,32 +675,6 @@ export function AssistantDock() {
     return () => {
       revokeAssistantAttachmentPreviewUrls(attachmentsRef.current);
     };
-  }, []);
-
-  React.useEffect(() => {
-    voiceDraftActiveRef.current = voiceDraftActive;
-  }, [voiceDraftActive]);
-
-  React.useEffect(() => subscribeAssistantDesktopVoiceStatus(setDesktopVoiceStatus), []);
-
-  React.useEffect(() => {
-    if (!voiceEnabled) {
-      setVoiceTranscriptionActive(false);
-      setVoiceAndroidMode('');
-      setVoiceAndroidStatus('');
-    }
-  }, [voiceEnabled]);
-
-  const appendVoiceTranscriptSegment = React.useCallback((textRaw: unknown, options?: { requireVoiceEnabled?: boolean }) => {
-    const text = String(textRaw ?? '').trim();
-    if (!text || (options?.requireVoiceEnabled !== false && !voiceEnabledRef.current)) return;
-    const currentDraft = draftRef.current;
-    if (currentDraft.trim() && !voiceDraftActiveRef.current) return;
-    const next = currentDraft.trim() ? `${currentDraft.trimEnd()}\n${text}` : text;
-    voiceDraftTextRef.current = next.trim();
-    voiceDraftActiveRef.current = true;
-    setVoiceDraftActive(true);
-    setDraft(next);
   }, []);
 
   const scheduleAssistantEventRefresh = React.useCallback(() => {
@@ -787,7 +702,6 @@ export function AssistantDock() {
       ]);
       setSystemPromptSettings(data);
       setSystemPromptDraft(data.assistantSystemPrompt.prompt);
-      setVoiceSystemPromptDraft(data.assistantVoiceSystemPrompt.prompt);
       setThreadSystemPromptSettings(threadData);
       setThreadSystemPromptDraft(threadData?.threadSystemPrompt.prompt ?? '');
     } catch (err: any) {
@@ -799,7 +713,6 @@ export function AssistantDock() {
 
   const openSystemPromptEditor = React.useCallback(() => {
     setSystemPromptMode('thread');
-    setSystemPromptGlobalKind(voiceEnabledRef.current ? 'voice' : 'normal');
     setSystemPromptOpen(true);
     void loadSystemPromptSettings();
   }, [loadSystemPromptSettings]);
@@ -809,21 +722,16 @@ export function AssistantDock() {
     setSystemPromptError(null);
     setSystemPromptNotice(null);
     try {
-      const promptType = systemPromptGlobalKind;
-      const prompt = promptType === 'voice' ? voiceSystemPromptDraft : systemPromptDraft;
       const data = await requestJson<AssistantSystemPromptSettings>('/api/assistant/system-prompt', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ prompt, promptType }),
+        body: JSON.stringify({ prompt: systemPromptDraft }),
       });
       setSystemPromptSettings(data);
       setSystemPromptDraft(data.assistantSystemPrompt.prompt);
-      setVoiceSystemPromptDraft(data.assistantVoiceSystemPrompt.prompt);
       setThreadSystemPromptSettings((prev) => {
         if (!prev) return prev;
-        const activeThreadUsesSavedPromptType = Boolean(activeThread?.voiceEnabled) === (promptType === 'voice');
-        if (!activeThreadUsesSavedPromptType) return prev;
-        const savedSettings = promptType === 'voice' ? data.assistantVoiceSystemPrompt : data.assistantSystemPrompt;
+        const savedSettings = data.assistantSystemPrompt;
         const promptSource =
           prev.threadSystemPrompt.prompt === savedSettings.prompt
             ? savedSettings.promptSource === 'default'
@@ -841,13 +749,13 @@ export function AssistantDock() {
           },
         };
       });
-      setSystemPromptNotice(promptType === 'voice' ? 'Saved. New realtime assistant threads will use this prompt.' : 'Saved. New standard assistant threads will use this prompt.');
+      setSystemPromptNotice('Saved. New assistant threads will use this prompt.');
     } catch (err: any) {
       setSystemPromptError(err?.message ?? String(err));
     } finally {
       setSystemPromptSaving(false);
     }
-  }, [activeThread?.voiceEnabled, systemPromptDraft, systemPromptGlobalKind, voiceSystemPromptDraft]);
+  }, [systemPromptDraft]);
 
   const saveThreadSystemPromptSettings = React.useCallback(async () => {
     const threadId = activeThreadIdRef.current;
@@ -888,16 +796,15 @@ export function AssistantDock() {
       });
       setSystemPromptSettings(data);
       setSystemPromptDraft(data.assistantSystemPrompt.prompt);
-      setVoiceSystemPromptDraft(data.assistantVoiceSystemPrompt.prompt);
       await loadSystemPromptSettings();
-      setSystemPromptNotice(activeThread?.voiceEnabled ? 'Promoted. New realtime assistant threads will use this prompt.' : 'Promoted. New standard assistant threads will use this prompt.');
+      setSystemPromptNotice('Promoted. New assistant threads will use this prompt.');
       void refresh();
     } catch (err: any) {
       setSystemPromptError(err?.message ?? String(err));
     } finally {
       setPromoteSystemPromptSaving(false);
     }
-  }, [activeThread?.voiceEnabled, loadSystemPromptSettings, refresh, threadSystemPromptDraft]);
+  }, [loadSystemPromptSettings, refresh, threadSystemPromptDraft]);
 
   React.useEffect(() => {
     void refresh();
@@ -936,51 +843,6 @@ export function AssistantDock() {
   }, [scheduleAssistantEventRefresh]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') return;
-    let closed = false;
-    const source = new window.EventSource('/api/assistant/voice/transcript/events');
-    source.addEventListener('voice_transcript_segment', (event) => {
-      if (closed) return;
-      try {
-        const data = JSON.parse((event as MessageEvent).data);
-        appendVoiceTranscriptSegment(data?.text);
-      } catch {
-        // Ignore malformed transcript messages.
-      }
-    });
-    source.addEventListener('voice_transcript_status', (event) => {
-      if (closed) return;
-      try {
-        const data = JSON.parse((event as MessageEvent).data);
-        const status = String(data?.status ?? '').trim();
-        setVoiceTranscriptionActive(status === 'collecting' || status === 'transcribing');
-      } catch {
-        // Ignore malformed status messages.
-      }
-    });
-    source.addEventListener('voice_android_status', (event) => {
-      if (closed) return;
-      try {
-        const data = JSON.parse((event as MessageEvent).data);
-        setVoiceAndroidMode(String(data?.mode ?? '').trim());
-        setVoiceAndroidStatus(String(data?.status ?? '').trim());
-      } catch {
-        // Ignore malformed Android status messages.
-      }
-    });
-    source.onerror = () => {
-      if (closed) return;
-      setVoiceTranscriptionActive(false);
-      setVoiceAndroidMode('');
-      setVoiceAndroidStatus('');
-    };
-    return () => {
-      closed = true;
-      source.close();
-    };
-  }, [appendVoiceTranscriptSegment]);
-
-  React.useEffect(() => {
     return () => {
       if (assistantEventRefreshTimerRef.current != null) {
         window.clearTimeout(assistantEventRefreshTimerRef.current);
@@ -988,23 +850,6 @@ export function AssistantDock() {
       }
     };
   }, []);
-
-  React.useEffect(() => {
-    if (!voiceDraftActive) return;
-    const voiceText = voiceDraftTextRef.current.trim();
-    if (!voiceText) return;
-    const normalizedVoiceText = voiceText.replace(/\s+/g, ' ').trim().toLowerCase();
-    const delivered = (blipSession.messages as AssistantMessage[]).some((message) => {
-      if (message.role !== 'user') return false;
-      const normalizedMessageText = messageText(message).replace(/\s+/g, ' ').trim().toLowerCase();
-      return normalizedMessageText === normalizedVoiceText || normalizedMessageText.includes(normalizedVoiceText);
-    });
-    if (!delivered) return;
-    setDraft((current) => (current.trim() === voiceText ? '' : current));
-    voiceDraftTextRef.current = '';
-    voiceDraftActiveRef.current = false;
-    setVoiceDraftActive(false);
-  }, [blipSession.messages, voiceDraftActive]);
 
   const hasAssistantBackgroundActivity =
     Object.keys(snapshot?.runningModels ?? {}).length > 0 ||
@@ -1046,11 +891,6 @@ export function AssistantDock() {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem(ASSISTANT_THREAD_SIDEBAR_OPEN_STORAGE_KEY, threadSidebarOpen ? '1' : '0');
   }, [threadSidebarOpen]);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(ASSISTANT_THREAD_MODE_STORAGE_KEY, assistantPanelMode);
-  }, [assistantPanelMode]);
 
   React.useEffect(() => {
     if (!systemPromptOpen) return;
@@ -1298,8 +1138,6 @@ export function AssistantDock() {
         body: JSON.stringify({
           activeDroneId: activeDroneId || null,
           activeChatName: activeDroneId ? String(selectedChat ?? '').trim() || 'default' : null,
-          voiceEnabled: assistantPanelMode === 'voice',
-          title: assistantPanelMode === 'voice' ? 'Realtime thread' : undefined,
         }),
       });
       if (!snapshotMutationCurrent(requestSeq)) return;
@@ -1309,27 +1147,7 @@ export function AssistantDock() {
     } catch (err: any) {
       if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     }
-  }, [applySnapshot, assistantPanelMode, beginSnapshotMutation, selectedChat, selectedDrone, selectedDroneChatOpen, snapshotMutationCurrent]);
-
-  const openVoicePairing = React.useCallback(async () => {
-    const popup = typeof window === 'undefined' ? null : window.open('about:blank', '_blank');
-    if (popup) popup.opener = null;
-    try {
-      const data = await requestJson<{ ok: true; url: string }>('/api/assistant/voice/pairing-url');
-      if (popup) {
-        popup.location.href = data.url;
-      } else if (typeof window !== 'undefined') {
-        window.open(data.url, '_blank', 'noopener,noreferrer');
-      }
-    } catch (err: any) {
-      try {
-        popup?.close();
-      } catch {
-        // ignore
-      }
-      setError(err?.message ?? String(err));
-    }
-  }, []);
+  }, [applySnapshot, beginSnapshotMutation, selectedChat, selectedDrone, selectedDroneChatOpen, snapshotMutationCurrent]);
 
   const selectThread = React.useCallback(async (thread: AssistantThread) => {
     updateThreadRequestRef.current += 1;
@@ -1384,7 +1202,7 @@ export function AssistantDock() {
     }
   }, [applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
-  const updateThread = React.useCallback(async (patch: Partial<Pick<AssistantThread, 'title' | 'model' | 'provider' | 'thinkingLevel' | 'autoApprove' | 'promptDeliveryMode' | 'enabledTools' | 'voiceEnabled'>>) => {
+  const updateThread = React.useCallback(async (patch: Partial<Pick<AssistantThread, 'title' | 'model' | 'provider' | 'thinkingLevel' | 'autoApprove' | 'promptDeliveryMode' | 'enabledTools'>>) => {
     if (!activeThread) return;
     const requestId = updateThreadRequestRef.current + 1;
     updateThreadRequestRef.current = requestId;
@@ -1401,7 +1219,7 @@ export function AssistantDock() {
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
-  const attachmentControlsLocked = !activeThread || voiceEnabled || assistantChatIdleHold;
+  const attachmentControlsLocked = !activeThread || assistantChatIdleHold;
   const imageAttachmentCount = React.useMemo(
     () => attachments.filter((attachment) => attachment.kind === 'image').length,
     [attachments],
@@ -1572,27 +1390,6 @@ export function AssistantDock() {
     const requestSeq = beginSnapshotMutation();
     setError(null);
     setAttachmentError(null);
-    if (activeThread.voiceEnabled) {
-      if (attachmentSnapshot.length > 0) {
-        if (snapshotMutationCurrent(requestSeq)) setAttachmentError('Realtime voice threads do not support file attachments yet.');
-        return;
-      }
-      try {
-        if (!sendAssistantDesktopVoiceRealtimeText(prompt)) {
-          if (snapshotMutationCurrent(requestSeq)) setError('Realtime voice is not connected. Start realtime voice before sending text in this thread.');
-          return;
-        }
-        if (!snapshotMutationCurrent(requestSeq)) return;
-        setDraft('');
-        setReferencedDrones([]);
-        scrollAssistantToBottom({ force: true });
-        refocusInputWhenIdleRef.current = true;
-        void refresh({ silent: true });
-      } catch (err: any) {
-        if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
-      }
-      return;
-    }
     if (!(await waitForScopeSave())) return;
     if (!snapshotMutationCurrent(requestSeq)) return;
     setDraft('');
@@ -1814,7 +1611,7 @@ export function AssistantDock() {
     if (!activeThread) return [];
     const configured = Array.isArray(activeThread.enabledTools)
       ? activeThread.enabledTools
-      : toolNames.filter((name) => name !== 'get_system_prompt' && name !== 'update_system_prompt' && name !== 'set_thinking_level' && name !== 'speak');
+      : toolNames.filter((name) => name !== 'get_system_prompt' && name !== 'update_system_prompt' && name !== 'set_thinking_level');
     return configured.filter((name) => toolNames.includes(name));
   }, [activeThread, availableTools]);
   const availableToolNamesKey = React.useMemo(() => availableTools.map((tool) => tool.name).join('\u0000'), [availableTools]);
@@ -2017,18 +1814,11 @@ export function AssistantDock() {
       threads={visibleThreads}
       activeThreadId={activeThread?.id ?? null}
       dockSide={threadSidebarDockSide}
-      mode={assistantPanelMode}
       onCreateThread={() => void createThread()}
       onSelectThread={(thread) => void selectThread(thread)}
       onDockSideChange={setThreadSidebarDockSide}
       onRenameThread={renameThread}
       onDeleteThread={(thread) => void deleteThread(thread)}
-      onModeChange={setAssistantPanelMode}
-      onOpenPairing={() => void openVoicePairing()}
-      desktopVoiceStatus={desktopVoiceStatus}
-      onToggleDesktopVoice={dispatchAssistantDesktopVoiceToggle}
-      onStartDesktopVoiceRecording={dispatchAssistantDesktopVoiceStartRecording}
-      onStopDesktopVoice={dispatchAssistantDesktopVoiceOff}
       onCollapse={() => setThreadSidebarOpen(false)}
     />
   ) : null;
@@ -2086,70 +1876,6 @@ export function AssistantDock() {
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               {activeThread ? <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${assistantThreadStatusTone(activeThread.status)}`} /> : null}
               <span className="truncate">{assistantThreadStatusLabel(activeThread?.status, loading ? 'loading' : 'idle')}</span>
-              {voiceEnabled && voiceAndroidMode === 'awake' ? (
-                <span
-                  className="inline-flex h-5 flex-shrink-0 items-center gap-1 rounded-full border border-[rgba(74,222,128,.32)] bg-[rgba(74,222,128,.08)] px-1.5 text-[9px] font-semibold text-[var(--green)]"
-                  title={voiceAndroidStatus || 'Android app awake and waiting for wake phrase'}
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-[var(--green)]" />
-                  Awake
-                </span>
-              ) : null}
-              {voiceEnabled && voiceAndroidMode === 'recording' ? (
-                <span
-                  className="inline-flex h-5 flex-shrink-0 items-center gap-1 rounded-full border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-1.5 text-[9px] font-semibold text-[var(--accent)] shadow-[0_0_14px_rgba(59,130,246,.28)]"
-                  title={voiceAndroidStatus || 'Android app recording audio'}
-                >
-                  <span className="relative flex h-1.5 w-1.5">
-                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-[var(--accent)] opacity-60" />
-                    <span className="relative inline-flex h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />
-                  </span>
-                  Recording
-                </span>
-              ) : null}
-              {voiceEnabled && voiceTranscriptionActive ? (
-                <span
-                  className="relative ml-0.5 inline-flex h-5 w-5 flex-shrink-0 items-center justify-center rounded-full border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_18px_rgba(59,130,246,.42)]"
-                  title="Voice transcription active"
-                  role="img"
-                  aria-label="Voice transcription active"
-                >
-                  <span className="absolute inset-0 rounded-full bg-[var(--accent)] opacity-20 animate-ping" />
-                  <svg viewBox="0 0 24 24" aria-hidden="true" className="relative h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2">
-                    <rect x="9" y="3" width="6" height="11" rx="3" />
-                    <path d="M5 11a7 7 0 0 0 14 0" />
-                    <path d="M12 18v3" />
-                    <path d="M8 21h8" />
-                  </svg>
-                </span>
-              ) : null}
-              {desktopVoiceStatus.mode !== 'off' ? (
-                <span
-                  className={`inline-flex h-5 flex-shrink-0 items-center gap-1 rounded-full border px-1.5 text-[9px] font-semibold ${
-                    desktopVoiceStatus.mode === 'error'
-                      ? 'border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] text-[var(--red)]'
-                      : desktopVoiceStatus.mode === 'sleeping'
-                        ? 'border-[rgba(148,163,184,.36)] bg-[rgba(148,163,184,.08)] text-[var(--muted)]'
-                      : desktopVoiceStatus.mode === 'recording' || desktopVoiceStatus.mode === 'transcribing'
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[rgba(74,222,128,.32)] bg-[rgba(74,222,128,.08)] text-[var(--green)]'
-                  }`}
-                  title={desktopVoiceStatus.message}
-                >
-                  <span
-                    className={`h-1.5 w-1.5 rounded-full ${
-                      desktopVoiceStatus.mode === 'recording' || desktopVoiceStatus.mode === 'transcribing'
-                        ? 'animate-pulse bg-[var(--accent)]'
-                        : desktopVoiceStatus.mode === 'error'
-                          ? 'bg-[var(--red)]'
-                          : desktopVoiceStatus.mode === 'sleeping'
-                            ? 'bg-[var(--muted)]'
-                          : 'bg-[var(--green)]'
-                    }`}
-                  />
-                  Desktop
-                </span>
-              ) : null}
             </div>
           </div>
           {!threadSidebarOpen ? (
@@ -2251,26 +1977,6 @@ export function AssistantDock() {
             aria-label="Assistant settings"
           >
             <IconSettings className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => void updateThread({ voiceEnabled: !voiceEnabled })}
-            disabled={!activeThread}
-            aria-pressed={voiceEnabled}
-            aria-label="Toggle realtime thread mode"
-            title={voiceEnabled ? 'Realtime mode is on' : 'Realtime mode is off'}
-            className={`h-8 w-8 flex-shrink-0 rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
-              voiceEnabled
-                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
-            }`}
-          >
-            <svg viewBox="0 0 24 24" aria-hidden="true" className="mx-auto h-4 w-4" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="9" y="3" width="6" height="11" rx="3" />
-              <path d="M5 11a7 7 0 0 0 14 0" />
-              <path d="M12 18v3" />
-              <path d="M8 21h8" />
-            </svg>
           </button>
           <button
             type="button"
@@ -2736,15 +2442,7 @@ export function AssistantDock() {
             ref={inputRef}
             data-chat-input-focus-id="assistant-chat"
             value={draft}
-            onChange={(event) => {
-              const next = event.target.value;
-              setDraft(next);
-              if (voiceDraftActiveRef.current && next.trim() !== voiceDraftTextRef.current.trim()) {
-                voiceDraftActiveRef.current = false;
-                voiceDraftTextRef.current = '';
-                setVoiceDraftActive(false);
-              }
-            }}
+            onChange={(event) => setDraft(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
@@ -2755,13 +2453,9 @@ export function AssistantDock() {
               event.stopPropagation();
               handleAssistantPaste(event);
             }}
-            disabled={!activeThread || realtimeTextBlocked}
+            disabled={!activeThread}
             placeholder={
-              realtimeTextBlocked
-                ? desktopVoiceStatus.realtime?.enabled === true
-                  ? 'Start realtime voice to type in this thread'
-                  : 'Turn on realtime voice to type in this thread'
-                : assistantChatIdleHold
+              assistantChatIdleHold
                 ? 'Stop subscription below to send a message'
                 : running
                   ? promptDeliveryMode === 'asap'
@@ -2789,14 +2483,6 @@ export function AssistantDock() {
             >
               Running {activeRunningModelLabel}
             </span>
-          ) : voiceDraftActive ? (
-            <span
-              className="absolute bottom-2 left-10 max-w-[calc(100%-190px)] truncate rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]"
-              title="Voice transcript draft"
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              Voice draft
-            </span>
           ) : null}
           <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
             {running || assistantChatIdleHold ? (
@@ -2816,7 +2502,7 @@ export function AssistantDock() {
               <button
                 type="button"
                 onClick={() => void sendPrompt()}
-                disabled={(!draft.trim() && attachments.length === 0 && referencedDrones.length === 0) || !activeThread || scopeSyncBusy || realtimeTextBlocked}
+                disabled={(!draft.trim() && attachments.length === 0 && referencedDrones.length === 0) || !activeThread || scopeSyncBusy}
                 className="h-7 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)] disabled:opacity-40"
                 style={{ fontFamily: 'var(--display)' }}
               >
@@ -2833,10 +2519,8 @@ export function AssistantDock() {
       {systemPromptOpen ? (
         <AssistantSystemPromptModal
           mode={systemPromptMode}
-          globalPromptKind={systemPromptGlobalKind}
           settings={systemPromptSettings}
           draft={systemPromptDraft}
-          voiceDraft={voiceSystemPromptDraft}
           threadSettings={threadSystemPromptSettings}
           threadDraft={threadSystemPromptDraft}
           loading={systemPromptLoading}
@@ -2846,19 +2530,10 @@ export function AssistantDock() {
           error={systemPromptError}
           notice={systemPromptNotice}
           onModeChange={setSystemPromptMode}
-          onGlobalPromptKindChange={setSystemPromptGlobalKind}
           onDraftChange={setSystemPromptDraft}
-          onVoiceDraftChange={setVoiceSystemPromptDraft}
           onThreadDraftChange={setThreadSystemPromptDraft}
           onUseGlobalForThread={() => setThreadSystemPromptDraft(threadSystemPromptSettings?.threadSystemPrompt.globalPrompt ?? '')}
-          onUseDefaultForGlobal={() => {
-            const defaultPrompt =
-              systemPromptGlobalKind === 'voice'
-                ? systemPromptSettings?.assistantVoiceSystemPrompt.defaultPrompt
-                : systemPromptSettings?.assistantSystemPrompt.defaultPrompt;
-            if (systemPromptGlobalKind === 'voice') setVoiceSystemPromptDraft(defaultPrompt ?? '');
-            else setSystemPromptDraft(defaultPrompt ?? '');
-          }}
+          onUseDefaultForGlobal={() => setSystemPromptDraft(systemPromptSettings?.assistantSystemPrompt.defaultPrompt ?? '')}
           onClose={() => setSystemPromptOpen(false)}
           onSaveGlobal={() => void saveSystemPromptSettings()}
           onSaveThread={() => void saveThreadSystemPromptSettings()}

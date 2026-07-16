@@ -8,7 +8,6 @@ export type AssistantActivityThreadStatus =
 export type AssistantActivityThread = {
   id?: string;
   status?: AssistantActivityThreadStatus | string;
-  voiceEnabled?: boolean;
 };
 
 export type AssistantActivitySnapshot = {
@@ -21,8 +20,6 @@ export type AssistantActivitySnapshot = {
 };
 
 export type AssistantActivityCounts = {
-  normal: number;
-  voice: number;
   total: number;
 };
 
@@ -33,13 +30,11 @@ function normalizeId(value: unknown): string {
 }
 
 export function summarizeAssistantActivity(snapshot: AssistantActivitySnapshot | null | undefined): AssistantActivityCounts {
-  const threadById = new Map<string, AssistantActivityThread>();
   const activeThreadIds = new Set<string>();
 
   for (const thread of snapshot?.threads ?? []) {
     const threadId = normalizeId(thread?.id);
     if (!threadId) continue;
-    threadById.set(threadId, thread);
     if (ACTIVE_THREAD_STATUSES.has(String(thread?.status ?? '').trim())) {
       activeThreadIds.add(threadId);
     }
@@ -56,16 +51,5 @@ export function summarizeAssistantActivity(snapshot: AssistantActivitySnapshot |
     if (threadId) activeThreadIds.add(threadId);
   }
 
-  let normal = 0;
-  let voice = 0;
-  for (const threadId of activeThreadIds) {
-    if (threadById.get(threadId)?.voiceEnabled) voice += 1;
-    else normal += 1;
-  }
-
-  return {
-    normal,
-    voice,
-    total: normal + voice,
-  };
+  return { total: activeThreadIds.size };
 }

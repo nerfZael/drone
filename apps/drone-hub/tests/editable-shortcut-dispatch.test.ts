@@ -79,33 +79,6 @@ describe('editable shortcut dispatch', () => {
     expect(out).toBe(false);
   });
 
-  test('allows assistant voice shortcut from chat inputs', () => {
-    expect(
-      shouldDispatchEditableShortcutAction({
-        matchedActionId: 'toggleAssistantVoiceSession',
-        targetInPrimaryChatInput: true,
-        targetInCanvasMessageInput: false,
-        targetInAssistantChatInput: false,
-      }),
-    ).toBe(true);
-    expect(
-      shouldDispatchEditableShortcutAction({
-        matchedActionId: 'toggleAssistantVoiceSession',
-        targetInPrimaryChatInput: false,
-        targetInCanvasMessageInput: true,
-        targetInAssistantChatInput: false,
-      }),
-    ).toBe(true);
-    expect(
-      shouldDispatchEditableShortcutAction({
-        matchedActionId: 'toggleAssistantVoiceSession',
-        targetInPrimaryChatInput: false,
-        targetInCanvasMessageInput: false,
-        targetInAssistantChatInput: true,
-      }),
-    ).toBe(true);
-  });
-
   test('does not allow create-chat shortcut from chat inputs', () => {
     expect(
       shouldDispatchEditableShortcutAction({

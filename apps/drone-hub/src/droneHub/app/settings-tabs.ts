@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'devices' | 'remote' | 'voice' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'mcp' | 'agents' | 'system';
+export type SettingsTabId = 'general' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'mcp' | 'agents' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -17,18 +17,6 @@ export const SETTINGS_TABS: Array<{
     label: 'Devices',
     title: 'Device mesh',
     description: 'Pair trusted computers and phones, then grant operations per destination.',
-  },
-  {
-    id: 'remote',
-    label: 'Remote',
-    title: 'Remote access',
-    description: 'Pair a phone or remote browser to the trimmed container-drone Hub.',
-  },
-  {
-    id: 'voice',
-    label: 'Voice',
-    title: 'Voice approval',
-    description: 'Tune approval phrase, unlock/off codes, and collection timing for desktop and Android voice.',
   },
   {
     id: 'sync',

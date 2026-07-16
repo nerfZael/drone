@@ -6,7 +6,6 @@ export type ShortcutActionId =
   | 'openKanbanBoard'
   | 'focusPrimaryChatInput'
   | 'toggleVoiceClipboardRecording'
-  | 'toggleAssistantVoiceSession'
   | 'markSelectedDronesUnread'
   | 'toggleSidebarCollapsed'
   | 'toggleRightPanelOpen'
@@ -72,11 +71,6 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'toggleVoiceClipboardRecording',
     label: 'Record voice to clipboard',
     description: 'Starts or stops a microphone recording, transcribes it with GROQ, and copies the result.',
-  },
-  {
-    id: 'toggleAssistantVoiceSession',
-    label: 'Toggle assistant voice',
-    description: 'Starts desktop assistant voice listening, begins recording, or stops and sends the current voice prompt.',
   },
   {
     id: 'markSelectedDronesUnread',
@@ -148,7 +142,6 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   openKanbanBoard: { key: 'y', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleVoiceClipboardRecording: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  toggleAssistantVoiceSession: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: true },
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleRightPanelOpen: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -221,7 +214,6 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     openKanbanBoard: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openKanbanBoard),
     focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
     toggleVoiceClipboardRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleVoiceClipboardRecording),
-    toggleAssistantVoiceSession: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleAssistantVoiceSession),
     markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),
     toggleSidebarCollapsed: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed),
     toggleRightPanelOpen: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelOpen),

@@ -1,7 +1,6 @@
 import type { LlmProviderId } from '../hub-settings';
 
 export type AssistantThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
-export type AssistantVoiceSource = 'android' | 'desktop';
 
 export type AssistantDroneSummary = {
   id: string;
@@ -143,33 +142,9 @@ export type AssistantToolSummary = {
   group?: { kind: 'mcp'; id: string; label: string };
 };
 
-export type AssistantRealtimeFunctionTool = {
-  type: 'function';
-  name: string;
-  description?: string;
-  parameters: Record<string, unknown>;
-};
-export type AssistantRealtimeSessionConfig = {
-  ok: true;
-  threadId: string;
-  created: boolean;
-  instructions: string;
-  tools: AssistantRealtimeFunctionTool[];
-};
-export type AssistantRealtimeToolExecutionResult = {
-  ok: true;
-  threadId: string;
-  toolCallId: string;
-  toolName: string;
-  output: string;
-  result: unknown;
-};
-export type AssistantRealtimeMessageRole = 'user' | 'assistant';
-
 export type AssistantSystemPromptSettings = {
   ok: true;
   assistantSystemPrompt: PromptSetting;
-  assistantVoiceSystemPrompt: PromptSetting;
 };
 type PromptSetting = {
   prompt: string;

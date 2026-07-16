@@ -178,7 +178,7 @@ drone purge --orphans
 drone purge --orphans --apply
 drone purge --orphans --apply --keep-volume
 
-# start the local Drone Hub and Voice Stream server (detached by default)
+# start the local Drone Hub (detached by default)
 drone hub
 
 # inside a drone/container: inspect fleet access and queue fleet actions
@@ -190,8 +190,6 @@ fleet read --from reviewer-1 --chat default --limit 20
 # explicitly manage the detached Hub
 drone hub start --port 5174 --api-port 0 --host 127.0.0.1
 drone hub restart --container-mcp-host 172.17.0.1 --container-mcp-port 8788 --container-mcp-url http://host.docker.internal:8788/mcp
-drone hub start --voice-stream-port 3199
-drone hub start --no-voice-stream
 drone hub stop
 drone hub restart
 ```
@@ -206,23 +204,6 @@ hosts, that MCP listener binds to the Docker bridge address `172.17.0.1` by defa
 `--container-mcp-host` / `DRONE_HUB_CONTAINER_MCP_BIND_HOST` to override it for custom Docker,
 Podman, or Docker Desktop networking. Use `drone hub restart` when changing MCP bind/projection
 settings on an already-running Hub.
-
-When the Hub starts Voice Stream, it passes the GROQ API key saved in Drone Hub settings to the Voice Stream process. Saving or clearing the Hub GROQ key restarts the Voice Stream process so the key change takes effect. Standalone Voice Stream runs still read `GROQ_API_KEY` / `GROQ_TTS_API_KEY` from the environment.
-
-### Desktop assistant voice
-
-Drone Hub desktop voice uses the host microphone from the Node.js Hub process. Local wake, sleep, and approval-code recognition uses the same bundled Vosk constrained-grammar model as the Android app, so it does not need an API key or a paid service. Assistant prompt transcription still uses the GROQ key saved in Hub settings.
-
-The bundled Android Vosk model is copied into the Hub build. To override it before starting the Hub:
-
-```bash
-export DRONE_DESKTOP_VOICE_VOSK_MODEL_DIR=/path/to/vosk-model-en-us
-drone hub restart
-```
-
-The model directory should match the Android Vosk asset layout and include `am/final.mdl`, `graph/HCLr.fst`, `graph/Gr.fst`, and `conf/model.conf`.
-
-Host microphone capture uses `parecord`, `arecord`, or PulseAudio `ffmpeg` on Linux, and AVFoundation `ffmpeg` on macOS. Override capture with `DRONE_DESKTOP_VOICE_CAPTURE_CMD` if the default input selection is wrong.
 
 ### Drone Hub grouping
 

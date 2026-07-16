@@ -1092,7 +1092,6 @@ function resolveVoskModelPath() {
     path.join(process.resourcesPath || '', 'model-en-us'),
     path.join(process.resourcesPath || '', 'vosk-model-en-us'),
     path.resolve(__dirname, '../android/app/src/main/assets/model-en-us'),
-    path.resolve(__dirname, '../../voice-stream/android/app/src/main/assets/model-en-us'),
   ].filter(Boolean);
 
   return candidates.find((candidate) => hasRequiredVoskModelFiles(candidate)) || '';

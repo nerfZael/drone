@@ -50,7 +50,6 @@ The CLI and Drone Hub are hosts around the same runtime. They inject their own t
 - Making every host use the same storage backend or UI.
 - Treating hidden tools as a security boundary.
 - Exposing the entire host filesystem by default.
-- Replacing realtime voice transport solely for architectural symmetry.
 - Powering the assistant panel by spawning the Blip CLI.
 
 ## Current State
@@ -166,7 +165,7 @@ Owns the Drone Hub embedding and concrete implementations injected into Blip:
 - Target discovery and active-target catalog behavior.
 - Permission and approval brokering.
 - Versioned runtime-event and paginated-history transport.
-- App-context, web, voice, realtime voice, and UI-control providers.
+- App-context, web, and UI-control providers.
 - MCP client setup and principal propagation.
 
 These modules depend on `@blip/core` and `@blip/tools`; the reverse dependency is forbidden.
@@ -401,13 +400,9 @@ It must not construct another agent loop or duplicate workspace tools.
 
 During migration, keep the current AssistantDock shell while moving its transcript to versioned Blip events and paginated session queries. Drone Hub should project only host-owned metadata such as thread controls, approvals, targets, and artifacts.
 
-## 10. Voice And Realtime Voice
+## 10. Voice
 
-Normal text assistant threads use Blip directly.
-
-Realtime voice may keep a separate transport, but it must share the canonical tool catalog, target resolution, permission policy, session persistence, and tool execution events. It translates loaded tools into realtime function definitions and executes them through the shared executor instead of maintaining another catalog.
-
-Voice-only tools such as `speak` and automatic spoken replies remain host behavior.
+Drone Hub assistant threads are text-only and use Blip directly. Manual microphone recording is transcribed through Groq into the normal chat composer; it does not create a separate assistant mode or transport.
 
 ## Migration Plan
 
@@ -447,7 +442,7 @@ Exit when current AssistantDock streaming, stop, queueing, steering, approvals, 
 
 The Blip host is the only text-assistant path. Thread-to-session bindings, transcripts, runtime events, and Hub thread metadata are stored in `assistant-blip.sqlite`; no assistant session or transcript files are written. A compatibility projector supplies the existing AssistantDock snapshot shape, including streaming text, persisted messages, status, errors, and pending approvals. Attachments continue to use Hub artifact storage, inline images are passed into Blip, and configuration changes invalidate the cached Blip handle before the next prompt.
 
-Drone/chat/group/repository/whiteboard actions come from the MCP provider. Canonical workspace tools dispatch to Drone Hub-owned drone and artifact targets. Remaining app-only tools stay in the Hub provider. Realtime voice keeps its audio transport but loads and executes the same Blip tool catalog. Existing legacy thread messages are intentionally not copied into new Blip sessions.
+Drone/chat/group/repository/whiteboard actions come from the MCP provider. Canonical workspace tools dispatch to Drone Hub-owned drone and artifact targets. Remaining app-only tools stay in the Hub provider. Existing legacy thread messages are intentionally not copied into new Blip sessions.
 
 ### Phase 5: Migrate Assistant State — Complete As A Clean Cutover
 
@@ -461,11 +456,11 @@ After parity, remove the old agent construction, custom assistant tool catalog, 
 
 Keep only the Blip host, target adapters, policy, storage, and app-specific providers. Remove the temporary projector in Phase 7.
 
-The old Pi text-agent construction, prompt pump, runtime queues, and monolithic custom tool catalog have been removed. Drone Hub now supplies only app context, web tools, target executors, permission projection, artifacts, and voice metadata. Hub domain operations and durable chat-idle subscriptions come from MCP; filesystem operations come from the canonical workspace tools and Hub-owned targets. Local and remote targets share the parser and operation model exported by `@blip/tools` for patches. Realtime voice loads and executes the same catalog through the Blip host instead of rebuilding the legacy catalog.
+The old Pi text-agent construction, prompt pump, runtime queues, monolithic custom tool catalog, and conversational voice modes have been removed. Drone Hub now supplies only app context, web tools, target executors, permission projection, and artifacts. Hub domain operations and durable chat-idle subscriptions come from MCP; filesystem operations come from the canonical workspace tools and Hub-owned targets. Local and remote targets share the parser and operation model exported by `@blip/tools` for patches.
 
 ### Phase 7: Simplify The Frontend — Complete
 
-The browser-safe `@blip/protocol` package now owns versioned runtime events, prompt-stream envelopes, and paginated history contracts. AssistantDock keeps Hub snapshots only for Hub-owned thread settings, scopes, models, approvals, artifacts, and voice metadata. Text messages and run state come from `useBlipThreadSession`, which consumes direct versioned Blip events over the prompt stream and a reconnectable per-thread event stream, deduplicates delivery, and loads SQLite history in bounded pages.
+The browser-safe `@blip/protocol` package now owns versioned runtime events, prompt-stream envelopes, and paginated history contracts. AssistantDock keeps Hub snapshots only for Hub-owned thread settings, scopes, models, approvals, and artifacts. Text messages and run state come from `useBlipThreadSession`, which consumes direct versioned Blip events over the prompt stream and a reconnectable per-thread event stream, deduplicates delivery, and loads SQLite history in bounded pages.
 
 The compatibility projector and per-event snapshot writes have been removed. The latest 80 messages load initially, older pages load on demand without moving the user's scroll position, and overview generation reads the native Blip history. The remaining large presentational pieces in AssistantDock can be split further as ordinary UI maintenance; they no longer interpret or own agent runtime state.
 
@@ -481,7 +476,7 @@ Before removing the old runtime, confirm:
 - Local, host, drone, and artifact operations land in the displayed target.
 - Read-all/write-selected, empty write scope, approvals, and auto-approve are enforced server-side.
 - Images, uploads, pasted text, private artifacts, revision-safe edits, and retention work.
-- Standard and realtime voice use the shared executor and policy.
+- Standard assistant threads use the shared executor and policy.
 - Drone and chat actions work through MCP.
 - Chat-idle continuation resumes the correct session once and survives restart.
 - Loading, empty, disabled, waiting, stopped, disconnected, and error states remain explicit.

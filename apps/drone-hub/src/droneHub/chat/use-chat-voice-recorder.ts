@@ -144,16 +144,16 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
   }, [setStatusValue, stopCapture]);
 
   const startRecording = React.useCallback(async () => {
-    if (statusRef.current !== 'idle') return;
+    if (statusRef.current !== 'idle') return false;
     if (!navigator.mediaDevices?.getUserMedia) {
       onError('Browser microphone recording is not available here.');
-      return;
+      return false;
     }
     const AudioContextCtor =
       window.AudioContext ?? (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
     if (!AudioContextCtor) {
       onError('Browser microphone recording is not available here.');
-      return;
+      return false;
     }
 
     const startId = startIdRef.current + 1;
@@ -191,7 +191,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
       };
       if (startIdRef.current !== startId) {
         stopCapture(capture);
-        return;
+        return false;
       }
       source.connect(processor);
       processor.connect(output);
@@ -200,6 +200,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
       pendingStream = null;
       pendingContext = null;
       setStatusValue('recording');
+      return true;
     } catch (err: any) {
       if (pendingStream) pendingStream.getTracks().forEach((track) => track.stop());
       if (pendingContext) void pendingContext.close().catch(() => undefined);
@@ -209,6 +210,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
         setStatusValue('idle');
         onError(voiceStartFailureMessage(err));
       }
+      return false;
     }
   }, [onError, setStatusValue, stopCapture]);
 

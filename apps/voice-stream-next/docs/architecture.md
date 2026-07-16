@@ -1,6 +1,6 @@
 # Voice Stream Next Architecture
 
-## Proposed Directory Shape
+## Directory Shape
 
 ```text
 apps/voice-stream-next/
@@ -10,31 +10,23 @@ apps/voice-stream-next/
     architecture.md
     parity-and-migration.md
     open-questions.md
-  android/          # future Kotlin Android app
-  desktop/          # future Electron desktop voice client
-  web/              # future Vite web dashboard
-  server/           # future Fastify backend
+  android/          # Kotlin Android app and bundled Vosk assets
+  desktop/          # Electron desktop voice client
+  web/              # Vite web dashboard
+  server/           # Fastify backend
 ```
 
-The directory is documentation-only at first. Add `package.json`, Gradle files, and workspace wiring only when implementation starts.
+The application, its build configuration, and all runtime assets are owned by this directory.
 
-## Relationship To Existing Code
+## Product Boundary
 
-Current production path:
-
-```text
-apps/voice-stream
-apps/drone
-apps/drone-hub
-```
-
-New parallel path:
+Voice Stream lives at:
 
 ```text
 apps/voice-stream-next
 ```
 
-The new path should not break or rename the current path. The current Drone Hub CLI still launches the existing `apps/voice-stream` app.
+Drone Hub and DroneHub Mobile are separate products. The Drone Hub CLI does not launch Voice Stream, and Voice Stream owns its own Android and desktop voice runtimes.
 
 ## Target Runtime Model
 
@@ -177,7 +169,7 @@ Risky shared candidates:
 - Android wake-word implementation
 - desktop microphone implementation
 - current Hub-specific assistant routes
-- current `apps/voice-stream` server internals
+- Voice Stream server provider internals
 
 Potential packages:
 
@@ -200,7 +192,7 @@ Fixtures are useful because TypeScript, Kotlin, and Electron can all run their o
 
 TTS means text-to-speech: generating spoken audio from text. STT means speech-to-text: turning microphone audio into transcript text.
 
-The current legacy app has `apps/voice-stream/server/src/stt.ts` and `apps/voice-stream/server/src/tts.ts`. Those files contain the current server-side speech-to-text and text-to-speech provider logic. We can either extract parts of them later into shared packages, or let the new Fastify service start fresh and only copy ideas. Starting fresh is likely simpler until the new backend shape is clear.
+Speech-to-text and text-to-speech provider logic lives in the Voice Stream Next Fastify service. Any implementation later shared with another product should move into a stable package rather than coupling application directories.
 
 Protocol schemas should live in a TypeScript package first, then Kotlin models can be generated or manually mirrored once the shapes settle.
 
@@ -416,4 +408,4 @@ Reasons:
 
 ## Compatibility Rule
 
-The existing app remains the source of truth until Voice Stream Next reaches parity. No current Hub launch path should depend on this directory.
+Voice Stream Next is the source of truth for the Voice Stream product. No Drone Hub launch path should depend on this directory, and Voice Stream Next must not depend on removed Drone Hub voice implementations.

@@ -12,10 +12,10 @@ Electron Voice Client  ---> Voice Stream Next backend ---> future Drone Hub adap
 Web Dashboard          /
 ```
 
-## Non-Goals For The First Phase
+## Product Boundaries
 
-- Do not replace the current `apps/voice-stream` app.
-- Do not remove or rewrite current desktop voice inside Drone Hub.
+- Do not add conversational voice modes back into Drone Hub.
+- Do not couple Voice Stream runtime code to Drone Hub.
 - Do not require Drone Hub to run.
 - Do not require Docker, dvm, tmux, repo access, or terminal access.
 - Do not build a custom auth system. Use Clerk for user login and identity.
@@ -50,8 +50,8 @@ Later usage:
 
 ## Product Principles
 
-- Current voice stack must keep working.
-- New product can evolve independently.
+- Released Voice Stream clients must keep working.
+- The product can evolve independently.
 - Android and desktop should share behavior where practical.
 - Shared behavior should be captured as protocol, fixtures, and tests before shared implementation.
 - Drone Hub integration should be an adapter, not a core dependency.
@@ -92,7 +92,7 @@ Owns:
 - Electron app shell
 - host microphone capture
 - local wake/lock/status/approval detection where possible
-- the same main listening behavior as the current voice stack
+- the same main listening behavior as the Android Voice Stream client
 - local cue playback
 - optional tray/menu-bar UX later
 - audio stream transport to the voice service
@@ -240,7 +240,7 @@ Initial command set:
 
 Approval codes remain numeric for assistant approvals. Sleep unlock and shutdown use spoken phrases. The sleep lock code still uses the approval-code digit flow to enter sleep from awake. Phrases and the lock code are per-user settings with the values above as defaults. Users can edit them from web settings.
 
-Behavior should match the current voice stack unless a later spec calls out a deliberate change. Do not add a new push-to-talk-first interaction model in the initial product.
+Behavior should remain consistent across current Voice Stream clients unless a later spec calls out a deliberate change. Do not add a new push-to-talk-first interaction model without an explicit product decision.
 
 ## Audio Requirements
 
@@ -311,4 +311,4 @@ Diagnostics must not require Drone Hub.
 - Approval-code flow works on both clients.
 - Web dashboard supports login, assistant threads, settings, transcripts, and log viewing.
 - Admin users can view connected devices in the lightweight monitor.
-- Existing `apps/voice-stream`, Drone Hub desktop voice, and assistant side panel keep working unchanged.
+- Voice Stream Android, desktop, web, and server clients work independently of Drone Hub.
