@@ -13,6 +13,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AlertTriangle from 'lucide-react-native/icons/triangle-alert';
 import { colors, radii } from '../theme';
 
+type ButtonIcon = React.ComponentType<{
+  color?: string;
+  size?: number;
+  strokeWidth?: number;
+}>;
+
 export function Card({ children, style }: { children: any; style?: ViewStyle }) {
   return <View style={[styles.card, style]}>{children}</View>;
 }
@@ -27,6 +33,7 @@ export function Button({
   disabled,
   loading,
   tone = 'accent',
+  icon: Icon,
   style,
 }: {
   children: string;
@@ -34,8 +41,12 @@ export function Button({
   disabled?: boolean;
   loading?: boolean;
   tone?: 'accent' | 'quiet' | 'danger';
+  icon?: ButtonIcon;
   style?: ViewStyle;
 }) {
+  const foreground =
+    tone === 'accent' ? colors.crust : tone === 'danger' ? colors.danger : colors.text;
+
   return (
     <Pressable
       disabled={disabled || loading}
@@ -49,12 +60,17 @@ export function Button({
       ]}
     >
       {loading ? (
-        <ActivityIndicator
-          color={tone === 'accent' ? colors.background : colors.text}
-          size="small"
-        />
+        <ActivityIndicator color={foreground} size="small" />
+      ) : Icon ? (
+        <Icon color={foreground} size={16} strokeWidth={2.3} />
       ) : null}
-      <Text style={[styles.buttonText, tone === 'accent' && styles.accentButtonText]}>
+      <Text
+        style={[
+          styles.buttonText,
+          tone === 'accent' && styles.accentButtonText,
+          tone === 'danger' && styles.dangerButtonText,
+        ]}
+      >
         {children}
       </Text>
     </Pressable>
@@ -228,7 +244,7 @@ export const textStyles: Record<string, TextStyle> = {
 
 const buttonTones = StyleSheet.create({
   accent: { backgroundColor: colors.accent, borderColor: colors.accent },
-  quiet: { backgroundColor: colors.surface0, borderColor: colors.border },
+  quiet: { backgroundColor: 'transparent', borderColor: colors.borderStrong },
   danger: { backgroundColor: colors.dangerDark, borderColor: colors.dangerBorder },
 });
 
@@ -253,19 +269,20 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   button: {
-    minHeight: 44,
+    minHeight: 46,
     borderWidth: 1,
-    borderRadius: radii.medium,
-    paddingHorizontal: 17,
+    borderRadius: 10,
+    paddingHorizontal: 18,
     alignItems: 'center',
     justifyContent: 'center',
     flexDirection: 'row',
     gap: 8,
   },
-  buttonText: { color: colors.text, fontSize: 13, fontWeight: '800', letterSpacing: 0.1 },
+  buttonText: { color: colors.text, fontSize: 14, fontWeight: '700', letterSpacing: 0.1 },
   accentButtonText: { color: colors.crust },
+  dangerButtonText: { color: colors.danger },
   disabled: { opacity: 0.45 },
-  pressed: { opacity: 0.72 },
+  pressed: { opacity: 0.76, transform: [{ scale: 0.985 }] },
   error: {
     backgroundColor: colors.dangerDark,
     borderColor: colors.dangerBorder,

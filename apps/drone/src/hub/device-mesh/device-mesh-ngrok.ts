@@ -119,15 +119,6 @@ export class DeviceMeshNgrok {
     alreadyRunning: boolean;
   }> {
     const current = await this.readState();
-    if (current?.mode === 'process' && current.port === port && isRunning(current.pid)) {
-      return {
-        ok: true,
-        logPath: current.logPath,
-        pid: current.pid,
-        agentManaged: false,
-        alreadyRunning: true,
-      };
-    }
     const detected = await detectDeviceMeshNgrokUrl(port);
     if (detected.url) {
       return {
@@ -284,10 +275,19 @@ export class DeviceMeshNgrok {
     if (state?.mode === 'agent') {
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), 1_200);
-      const response = await fetch(
-        `http://127.0.0.1:${state.inspectorPort}/api/tunnels/${encodeURIComponent(state.name)}`,
-        { method: 'DELETE', signal: controller.signal },
-      ).finally(() => clearTimeout(timeout));
+      let response: Response;
+      try {
+        response = await fetch(
+          `http://127.0.0.1:${state.inspectorPort}/api/tunnels/${encodeURIComponent(state.name)}`,
+          { method: 'DELETE', signal: controller.signal },
+        );
+      } catch {
+        // A missing inspector means the agent and its tunnel are already gone. Treat stale
+        // persisted agent state as stopped so start() can launch a replacement process.
+        return;
+      } finally {
+        clearTimeout(timeout);
+      }
       if (response.status !== 204 && response.status !== 404) {
         throw new Error(`ngrok agent returned HTTP ${response.status} while stopping the tunnel`);
       }

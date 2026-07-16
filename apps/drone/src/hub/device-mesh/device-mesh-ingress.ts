@@ -122,11 +122,8 @@ export class DeviceMeshIngress {
       }
       if (this.config.endpointSource === 'ngrok') {
         this.ngrokDetection = await detectDeviceMeshNgrokUrl(this.listener.port);
-        if (this.ngrokDetection.url && this.ngrokDetection.url !== this.config.publicEndpoint) {
-          this.config.publicEndpoint = normalizeEndpoint(this.ngrokDetection.url);
-          this.config.updatedAt = new Date().toISOString();
-          await this.writeConfig();
-        }
+        if (this.ngrokDetection.url) await this.applyNgrokEndpoint(this.ngrokDetection.url);
+        else await this.recoverManagedNgrok();
       }
       this.error = null;
       await this.announceEndpoint(this.config.publicEndpoint);
@@ -199,15 +196,7 @@ export class DeviceMeshIngress {
     await this.writeConfig();
     await this.announceEndpoint(null);
     this.refreshNgrokMonitor();
-
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
-      const detection = await detectDeviceMeshNgrokUrl(this.listener.port);
-      this.ngrokDetection = detection;
-      if (!detection.url) continue;
-      await this.applyNgrokEndpoint(detection.url);
-      break;
-    }
+    await this.waitForManagedNgrokEndpoint();
     return { status: this.status(), process };
   }
 
@@ -298,6 +287,46 @@ export class DeviceMeshIngress {
     this.ngrokDetection = detection;
     if (detection.url && detection.url !== this.config.publicEndpoint) {
       await this.applyNgrokEndpoint(detection.url);
+      return;
+    }
+    if (!detection.url) await this.recoverManagedNgrok();
+  }
+
+  private async recoverManagedNgrok(): Promise<void> {
+    if (!this.listener || this.config.endpointSource !== 'ngrok') return;
+    if (this.config.publicEndpoint) {
+      this.config.publicEndpoint = null;
+      this.config.updatedAt = new Date().toISOString();
+      await this.writeConfig();
+      await this.announceEndpoint(null);
+    }
+    try {
+      await this.ngrok.start(this.listener.port);
+    } catch (error: any) {
+      this.ngrokDetection = {
+        url: null,
+        error: `could not start ngrok: ${error?.message ?? String(error)}`,
+      };
+      return;
+    }
+    await this.waitForManagedNgrokEndpoint();
+  }
+
+  private async waitForManagedNgrokEndpoint(): Promise<void> {
+    if (!this.listener || this.config.endpointSource !== 'ngrok') return;
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      if (attempt > 0) await new Promise((resolve) => setTimeout(resolve, 500));
+      const detection = await detectDeviceMeshNgrokUrl(this.listener.port);
+      this.ngrokDetection = detection;
+      if (!detection.url) continue;
+      await this.applyNgrokEndpoint(detection.url);
+      return;
+    }
+    if (!this.ngrokDetection.error) {
+      this.ngrokDetection = {
+        url: null,
+        error: 'ngrok started, but no tunnel URL appeared. Check the mesh ngrok log.',
+      };
     }
   }
 

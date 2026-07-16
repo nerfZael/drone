@@ -1,10 +1,14 @@
 import React from 'react';
 import { ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import Activity from 'lucide-react-native/icons/activity';
 import Bot from 'lucide-react-native/icons/bot';
+import Check from 'lucide-react-native/icons/check';
 import Link2 from 'lucide-react-native/icons/link-2';
+import Star from 'lucide-react-native/icons/star';
 import Smartphone from 'lucide-react-native/icons/smartphone';
+import Trash2 from 'lucide-react-native/icons/trash-2';
 import { TopTabs, type TopTabOption } from '../components/TopTabs';
-import { Button, Card, ConfirmDialog, ErrorBanner, Label, textStyles } from '../components/Ui';
+import { Button, ConfirmDialog, ErrorBanner, Label, textStyles } from '../components/Ui';
 import { useMesh } from '../mesh/MeshContext';
 import { colors } from '../theme';
 import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSettingsCard';
@@ -74,16 +78,22 @@ export function SettingsScreen({
     setChecking(false);
   };
 
+  const visibleError = error ?? mesh.error;
+
   return (
     <View style={styles.shell}>
       <TopTabs value={tab} options={SETTINGS_TABS} onChange={onTabChange} />
       <ScrollView keyboardShouldPersistTaps="handled" contentContainerStyle={styles.page}>
-        <ErrorBanner message={error ?? mesh.error} />
+        {visibleError ? (
+          <View style={styles.errorBanner}>
+            <ErrorBanner message={visibleError} />
+          </View>
+        ) : null}
         {tab === 'assistant' ? (
           <LocalAssistantSettingsCard />
         ) : tab === 'devices' ? (
           <>
-            <Card style={styles.flatCard}>
+            <View style={styles.section}>
               <Label>This phone</Label>
               <TextInput
                 value={phoneName}
@@ -94,9 +104,11 @@ export function SettingsScreen({
                 autoCorrect={false}
                 maxLength={80}
                 style={styles.nameInput}
+                underlineColorAndroid="transparent"
               />
               <Text style={textStyles.mono}>{mesh.identity?.id}</Text>
               <Button
+                icon={Check}
                 onPress={() => void renamePhone()}
                 disabled={!phoneName.trim() || phoneName.trim() === currentPhoneName}
                 loading={renaming}
@@ -104,69 +116,90 @@ export function SettingsScreen({
               >
                 Save phone name
               </Button>
-            </Card>
-            <Card style={styles.flatCard}>
+            </View>
+            <View style={styles.section}>
               <Label>Device network</Label>
               <Text style={[textStyles.mono, styles.network]}>{mesh.profile?.networkId}</Text>
-            </Card>
-            <View style={styles.routes}>
-              {(mesh.profile?.connections ?? []).map((connection) => (
-                <Card key={connection.deviceId} style={styles.flatCard}>
-                  <View style={styles.routeHead}>
-                    <Text style={textStyles.heading}>
-                      {mesh.devices.find((device) => device.id === connection.deviceId)?.name ??
-                        connection.deviceId}
-                    </Text>
-                    <View style={styles.routeStatus}>
-                      <Text style={styles.role}>{connection.role}</Text>
-                      <Text style={styles.result}>
-                        {results[connection.deviceId] ??
-                          (mesh.connectedDeviceIds.includes(connection.deviceId)
-                            ? 'CONNECTED'
-                            : 'OFFLINE')}
-                      </Text>
-                    </View>
-                  </View>
-                  <Text style={[textStyles.mono, styles.endpoint]}>{connection.endpoint}</Text>
-                  {connection.role === 'backup' ? (
-                    <View style={styles.primaryAction}>
-                      <Button
-                        tone="quiet"
-                        onPress={() => void mesh.makePrimary(connection.deviceId)}
-                      >
-                        Make primary bridge
-                      </Button>
-                    </View>
-                  ) : null}
-                </Card>
-              ))}
             </View>
-            <Button onPress={() => void diagnose()} loading={checking}>
-              Run connection check
-            </Button>
+            <View style={styles.section}>
+              <Label>Connections</Label>
+              <View style={styles.routes}>
+                {(mesh.profile?.connections ?? []).map((connection, index) => (
+                  <View
+                    key={connection.deviceId}
+                    style={[styles.route, index > 0 && styles.routeDivider]}
+                  >
+                    <View style={styles.routeHead}>
+                      <Text style={textStyles.heading}>
+                        {mesh.devices.find((device) => device.id === connection.deviceId)?.name ??
+                          connection.deviceId}
+                      </Text>
+                      <View style={styles.routeStatus}>
+                        <Text style={styles.role}>{connection.role}</Text>
+                        <Text style={styles.result}>
+                          {results[connection.deviceId] ??
+                            (mesh.connectedDeviceIds.includes(connection.deviceId)
+                              ? 'CONNECTED'
+                              : 'OFFLINE')}
+                        </Text>
+                      </View>
+                    </View>
+                    <Text style={[textStyles.mono, styles.endpoint]}>{connection.endpoint}</Text>
+                    {connection.role === 'backup' ? (
+                      <View style={styles.primaryAction}>
+                        <Button
+                          tone="quiet"
+                          icon={Star}
+                          onPress={() => void mesh.makePrimary(connection.deviceId)}
+                          style={styles.inlineButton}
+                        >
+                          Make primary bridge
+                        </Button>
+                      </View>
+                    ) : null}
+                  </View>
+                ))}
+              </View>
+              <Button
+                tone="quiet"
+                icon={Activity}
+                onPress={() => void diagnose()}
+                loading={checking}
+                style={styles.checkButton}
+              >
+                Run connection check
+              </Button>
+            </View>
           </>
         ) : (
           <>
-            <Card style={styles.flatCard}>
+            <View style={styles.section}>
               <Label>Device mesh</Label>
               <Text style={textStyles.body}>
                 Pair another Hub without removing your existing routes and permissions.
               </Text>
               <View style={styles.meshActions}>
-                <Button onPress={onPair}>Pair another Hub</Button>
-                <Button tone="danger" onPress={() => setConfirmForget(true)}>
+                <Button icon={Link2} onPress={onPair} style={styles.meshButton}>
+                  Pair another Hub
+                </Button>
+                <Button
+                  tone="danger"
+                  icon={Trash2}
+                  onPress={() => setConfirmForget(true)}
+                  style={styles.meshButton}
+                >
                   Forget mesh
                 </Button>
               </View>
-            </Card>
-            <Card style={styles.flatCard}>
+            </View>
+            <View style={styles.section}>
               <Label>Security</Label>
               <Text style={[textStyles.body, styles.security]}>
                 The private identity is encrypted by Android secure storage. Requests are signed,
                 expire after one minute, and are checked again on the target. Provider credential
                 copies are encrypted specifically for this phone before forwarding.
               </Text>
-            </Card>
+            </View>
           </>
         )}
       </ScrollView>
@@ -199,29 +232,33 @@ export function SettingsScreen({
 
 const styles = StyleSheet.create({
   shell: { flex: 1 },
-  page: { paddingHorizontal: 12, paddingTop: 10, paddingBottom: 28, gap: 10 },
-  flatCard: {
-    borderRadius: 6,
-    padding: 14,
-    shadowOpacity: 0,
-    elevation: 0,
+  page: { paddingHorizontal: 18, paddingBottom: 28 },
+  errorBanner: { marginTop: 10 },
+  section: {
+    paddingVertical: 18,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.border,
   },
   nameInput: {
     minHeight: 44,
     color: colors.text,
-    backgroundColor: colors.panel,
     borderColor: colors.border,
-    borderWidth: 1,
-    borderRadius: 6,
-    paddingHorizontal: 12,
-    fontSize: 15,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 0,
+    paddingVertical: 9,
+    fontSize: 16,
     fontWeight: '700',
-    marginTop: 8,
+    marginTop: 6,
     marginBottom: 8,
   },
-  renameButton: { marginTop: 12 },
+  renameButton: { alignSelf: 'flex-start', marginTop: 14 },
   network: { marginTop: 7, color: colors.accent },
-  routes: { gap: 9 },
+  routes: { marginTop: 8 },
+  route: { paddingVertical: 12 },
+  routeDivider: {
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: colors.border,
+  },
   routeHead: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -239,6 +276,9 @@ const styles = StyleSheet.create({
   result: { color: colors.online, fontSize: 9, fontWeight: '900', maxWidth: '45%' },
   endpoint: { marginTop: 8 },
   primaryAction: { marginTop: 12 },
+  inlineButton: { alignSelf: 'flex-start' },
+  checkButton: { alignSelf: 'flex-start', marginTop: 10 },
   security: { marginTop: 8 },
-  meshActions: { gap: 9, marginTop: 14 },
+  meshActions: { flexDirection: 'row', gap: 9, marginTop: 16 },
+  meshButton: { flex: 1, paddingHorizontal: 10 },
 });

@@ -1,13 +1,12 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
-import { Button, Card, ErrorBanner, Label, textStyles } from '../components/Ui';
+import Check from 'lucide-react-native/icons/check';
+import Trash2 from 'lucide-react-native/icons/trash-2';
+import { Button, ErrorBanner, Label, textStyles } from '../components/Ui';
 import { ProviderCredentialImport } from '../provider-credentials/ProviderCredentialImport';
 import { colors } from '../theme';
-import {
-  assistantReasoningName,
-  compactAssistantModelName,
-} from './AssistantComposer';
+import { assistantReasoningName, compactAssistantModelName } from './AssistantComposer';
 import { AssistantModelPicker } from './AssistantModelPicker';
 import {
   clearLocalAssistantApiKey,
@@ -75,7 +74,7 @@ export function LocalAssistantSettingsCard() {
   };
 
   return (
-    <Card style={styles.card}>
+    <View style={styles.section}>
       <Label>Assistant on this phone</Label>
       <Text style={[textStyles.heading, styles.title]}>Direct model connection</Text>
       <Text style={textStyles.body}>
@@ -134,12 +133,18 @@ export function LocalAssistantSettingsCard() {
         ) : null}
       </View>
       <View style={styles.actions}>
-        <Button loading={busy} onPress={() => void save()} style={styles.actionButton}>
+        <Button
+          icon={Check}
+          loading={busy}
+          onPress={() => void save()}
+          style={styles.actionButton}
+        >
           Save assistant settings
         </Button>
         {provider === 'openai' && hasApiKey ? (
           <Button
             tone="danger"
+            icon={Trash2}
             style={styles.clearButton}
             onPress={() =>
               void clearLocalAssistantApiKey()
@@ -155,6 +160,7 @@ export function LocalAssistantSettingsCard() {
         ) : provider === 'codex' && hasCodexAuth ? (
           <Button
             tone="danger"
+            icon={Trash2}
             style={styles.clearButton}
             onPress={() =>
               void clearLocalAssistantCodexAuth()
@@ -199,12 +205,12 @@ export function LocalAssistantSettingsCard() {
           if (selection === 'reasoning') setModelOpen(false);
         }}
       />
-    </Card>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: { borderRadius: 6, padding: 14, shadowOpacity: 0, elevation: 0 },
+  section: { paddingVertical: 18 },
   title: { marginTop: 6, marginBottom: 7 },
   providerChoices: { flexDirection: 'row', gap: 8, marginTop: 14 },
   providerButton: { flex: 1, minHeight: 40 },
@@ -217,7 +223,7 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.background,
+    backgroundColor: colors.whiteWashSoft,
   },
   modelCopy: { flex: 1, minWidth: 0 },
   modelFieldLabel: { color: colors.accent, fontSize: 8, fontWeight: '900', letterSpacing: 1 },
@@ -227,14 +233,14 @@ const styles = StyleSheet.create({
     borderRadius: 6,
     borderWidth: 1,
     borderColor: colors.border,
-    backgroundColor: colors.background,
+    backgroundColor: colors.whiteWashSoft,
     color: colors.text,
     paddingHorizontal: 12,
     fontSize: 13,
   },
   actions: { gap: 8, marginTop: 10 },
-  actionButton: { flex: 1 },
-  clearButton: { minHeight: 40 },
+  actionButton: { alignSelf: 'stretch' },
+  clearButton: { alignSelf: 'flex-start', minHeight: 42 },
   state: { color: colors.warning, fontSize: 10, fontWeight: '800', marginTop: 10 },
   saved: { color: colors.online },
   pressed: { opacity: 0.72 },

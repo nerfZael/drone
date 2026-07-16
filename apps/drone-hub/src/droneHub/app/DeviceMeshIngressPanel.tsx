@@ -233,8 +233,10 @@ export function DeviceMeshIngressPanel({
             ? 'Manual endpoint: Drone Hub will keep using this URL until you change it.'
             : 'Set a manual HTTPS URL, detect an existing ngrok tunnel, or start one here.'}
       </div>
-      {error || status.error ? (
-        <div className="mt-2 text-[11px] text-[var(--red)]">{error ?? status.error}</div>
+      {error || status.error || (status.endpointSource === 'ngrok' && status.ngrok.error) ? (
+        <div className="mt-2 text-[11px] text-[var(--red)]">
+          {error ?? status.error ?? status.ngrok.error}
+        </div>
       ) : null}
     </div>
   );
