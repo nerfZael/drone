@@ -24,6 +24,7 @@ export type PendingDevice = {
   requestedAt: string;
   approval: PairingApproval | null;
   rejectedAt: string | null;
+  resolvedAt: string | null;
 };
 
 export type DeviceMeshState = {

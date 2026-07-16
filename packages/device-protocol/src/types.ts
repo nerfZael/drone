@@ -61,7 +61,11 @@ export type PairingPayload = {
 export type PairingClaim = {
   token: string;
   claimSecret: string;
+  inviterDeviceId: string;
+  endpoint: string;
+  expiresAt: string;
   device: DevicePublicIdentity;
+  signature: string;
 };
 
 export type PairingApproval = {

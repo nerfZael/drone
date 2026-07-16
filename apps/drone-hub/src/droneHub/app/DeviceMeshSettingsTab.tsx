@@ -333,7 +333,8 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                     Scan or copy to another Hub
                   </div>
                   <p className="mt-1 text-[12px] text-[var(--muted)]">
-                    The request still has to be approved below. This code expires at{' '}
+                    Known devices reconnect after proving their existing key. New devices still
+                    require approval below. This code expires at{' '}
                     {new Date(mesh.invitation.expiresAt).toLocaleTimeString()}.
                   </p>
                   <textarea
@@ -390,13 +391,18 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
           </section>
 
           {mesh.status?.pending.map((pending) => {
-            const selected = pendingSelections[pending.id] ?? new Set<string>();
+            const existing = mesh.status?.devices.find(
+              (device) => device.id === pending.device.id && !device.revokedAt,
+            );
+            const selected =
+              pendingSelections[pending.id] ?? operationsFromGrants(existing?.grants ?? []);
+            const administrator = pendingAdmins[pending.id] ?? existing?.administrator ?? false;
             return (
               <section key={pending.id} className="border-t border-[rgba(250,204,21,.38)] py-4">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--yellow)]">
-                      Approval requested
+                      {existing ? 'Connection recovery' : 'Approval requested'}
                     </div>
                     <h3 className="mt-1 text-[15px] font-semibold text-[var(--fg)]">
                       {pending.device.name}
@@ -405,31 +411,42 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                       {pending.device.platform}
                     </div>
                   </div>
-                  <div className="text-[11px] text-[var(--muted)]">Default: deny all controls</div>
+                  <div className="text-[11px] text-[var(--muted)]">
+                    {existing ? 'Existing permissions are preserved' : 'Default: deny all controls'}
+                  </div>
                 </div>
-                <div className="mt-4">
-                  <PermissionGrid
-                    capabilities={mesh.status!.capabilities}
-                    selected={selected}
-                    onChange={(next) =>
-                      setPendingSelections((current) => ({ ...current, [pending.id]: next }))
-                    }
-                  />
-                </div>
-                <label className="mt-3 flex items-center gap-2 text-[11px] text-[var(--muted)]">
-                  <input
-                    type="checkbox"
-                    checked={pendingAdmins[pending.id] === true}
-                    onChange={(event) =>
-                      setPendingAdmins((current) => ({
-                        ...current,
-                        [pending.id]: event.target.checked,
-                      }))
-                    }
-                  />
-                  Make this device an administrator. Administrators can invite devices and receive
-                  separately granted provider credential copies.
-                </label>
+                {existing ? (
+                  <p className="mt-4 text-[11px] leading-relaxed text-[var(--muted)]">
+                    This request only repairs connectivity. Change this device's permissions later
+                    from Trusted devices.
+                  </p>
+                ) : (
+                  <>
+                    <div className="mt-4">
+                      <PermissionGrid
+                        capabilities={mesh.status!.capabilities}
+                        selected={selected}
+                        onChange={(next) =>
+                          setPendingSelections((current) => ({ ...current, [pending.id]: next }))
+                        }
+                      />
+                    </div>
+                    <label className="mt-3 flex items-center gap-2 text-[11px] text-[var(--muted)]">
+                      <input
+                        type="checkbox"
+                        checked={administrator}
+                        onChange={(event) =>
+                          setPendingAdmins((current) => ({
+                            ...current,
+                            [pending.id]: event.target.checked,
+                          }))
+                        }
+                      />
+                      Make this device an administrator. Administrators can invite devices and
+                      receive separately granted provider credential copies.
+                    </label>
+                  </>
+                )}
                 <div className="mt-4 flex gap-2">
                   <button
                     type="button"
@@ -438,7 +455,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                       void mesh.approve(
                         pending.id,
                         grantsFromOperations(mesh.status!.capabilities, selected),
-                        pendingAdmins[pending.id] === true,
+                        administrator,
                       )
                     }
                     className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"

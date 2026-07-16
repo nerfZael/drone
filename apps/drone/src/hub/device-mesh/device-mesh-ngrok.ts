@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { commandForPid, isNgrokHttpCommand } from '../../host/process-inspection';
 
 type NgrokProcessState = {
   version: 1;
@@ -22,6 +23,12 @@ type NgrokAgentState = {
 };
 
 type NgrokState = NgrokProcessState | NgrokAgentState;
+
+type DeviceMeshNgrokDependencies = {
+  isProcessRunning?: (pid: number) => boolean;
+  commandForPid?: (pid: number) => Promise<string | null>;
+  stopProcess?: (pid: number) => Promise<void>;
+};
 
 export type NgrokDetection = {
   url: string | null;
@@ -106,7 +113,10 @@ export class DeviceMeshNgrok {
   private readonly statePath: string;
   private readonly logPath: string;
 
-  constructor(rootDir: string) {
+  constructor(
+    rootDir: string,
+    private readonly dependencies: DeviceMeshNgrokDependencies = {},
+  ) {
     this.statePath = path.join(rootDir, 'ngrok.json');
     this.logPath = path.join(rootDir, 'ngrok.log');
   }
@@ -268,8 +278,17 @@ export class DeviceMeshNgrok {
   }
 
   private async stopState(state: NgrokState | null): Promise<void> {
-    if (state?.mode === 'process' && isRunning(state.pid)) {
-      await this.stopProcess(state.pid);
+    const processIsRunning = this.dependencies.isProcessRunning ?? isRunning;
+    if (state?.mode === 'process' && processIsRunning(state.pid)) {
+      const readCommand = this.dependencies.commandForPid ?? commandForPid;
+      const command = await readCommand(state.pid);
+      if (!command) {
+        throw new Error(
+          `could not verify managed ngrok process ${state.pid}; refusing to signal it`,
+        );
+      }
+      if (!isNgrokHttpCommand(command, state.port)) return;
+      await (this.dependencies.stopProcess ?? ((pid) => this.stopProcess(pid)))(state.pid);
       return;
     }
     if (state?.mode === 'agent') {
@@ -295,6 +314,7 @@ export class DeviceMeshNgrok {
   }
 
   private async stopProcess(pid: number): Promise<void> {
+    const processIsRunning = this.dependencies.isProcessRunning ?? isRunning;
     try {
       process.kill(pid, 'SIGTERM');
     } catch (error: any) {
@@ -302,10 +322,10 @@ export class DeviceMeshNgrok {
       return;
     }
     const deadline = Date.now() + 2_000;
-    while (Date.now() < deadline && isRunning(pid)) {
+    while (Date.now() < deadline && processIsRunning(pid)) {
       await new Promise((resolve) => setTimeout(resolve, 50));
     }
-    if (!isRunning(pid)) return;
+    if (!processIsRunning(pid)) return;
     try {
       process.kill(pid, 'SIGKILL');
     } catch (error: any) {

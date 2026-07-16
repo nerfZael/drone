@@ -29,6 +29,7 @@ export async function createDeviceMeshService(options: {
   const identity = await loadOrCreateDeviceIdentity(options.rootDir);
   const store = new DeviceMeshStore(path.join(options.rootDir, 'state.json'), identity);
   await store.read();
+  await store.prunePairingState();
   const capabilities = new CapabilityRegistry();
   let router: DeviceMeshRouter;
   capabilities.register(
@@ -59,6 +60,7 @@ export async function createDeviceMeshService(options: {
   ];
   let ingress: DeviceMeshIngress;
   const httpHandler = new DeviceMeshHttp(
+    identity,
     store,
     capabilities,
     router,
@@ -78,6 +80,7 @@ export async function createDeviceMeshService(options: {
     (endpoint) => router.announceEndpoint(endpoint),
   );
   extensions.push(new DeviceMeshIngressHttp(ingress));
+  let pairingPruneTimer: ReturnType<typeof setInterval> | null = null;
 
   return {
     handleHttp: (request: http.IncomingMessage, response: http.ServerResponse, url: URL) =>
@@ -87,8 +90,15 @@ export async function createDeviceMeshService(options: {
     start: async () => {
       router.start();
       await ingress.start();
+      pairingPruneTimer = setInterval(
+        () => void store.prunePairingState().catch(() => undefined),
+        10 * 60_000,
+      );
+      pairingPruneTimer.unref?.();
     },
     close: async () => {
+      if (pairingPruneTimer) clearInterval(pairingPruneTimer);
+      pairingPruneTimer = null;
       await ingress.close();
       await capabilities.close();
       router.close();

@@ -2,18 +2,22 @@ import crypto from 'node:crypto';
 import type http from 'node:http';
 import QRCode from 'qrcode';
 import {
+  pairingClaimSigningText,
   parsePairingPayload,
   WORKSPACE_CAPABILITY,
   type CapabilityGrant,
   type DevicePublicIdentity,
   type MeshDevice,
   type PairingApproval,
+  type PairingClaim,
   type PairingPayload,
 } from '@drone/device-protocol';
 import { CapabilityRegistry } from './capability-registry';
 import { DeviceMeshAuditStore } from './device-mesh-audit-store';
+import { signDeviceText, type LocalDeviceIdentity, verifyDeviceText } from './device-identity';
 import { DeviceMeshRouter } from './device-mesh-router';
 import { DeviceMeshStore } from './device-mesh-store';
+import type { PendingDevice } from './device-mesh-types';
 
 export function deviceMeshJson(response: http.ServerResponse, status: number, body: unknown): void {
   response.statusCode = status;
@@ -145,6 +149,7 @@ export class DeviceMeshHttp {
   >();
 
   constructor(
+    private readonly identity: LocalDeviceIdentity,
     private readonly store: DeviceMeshStore,
     private readonly capabilities: CapabilityRegistry,
     private readonly router: DeviceMeshRouter,
@@ -330,18 +335,41 @@ export class DeviceMeshHttp {
     const body = await readBody(request);
     const token = String(body.token ?? '');
     const claimSecret = String(body.claimSecret ?? '');
+    const signature = String(body.signature ?? '');
     if (token.length < 20 || claimSecret.length < 20)
       throw new Error('pairing credentials are invalid');
     const device = publicIdentity(body.device);
+    let verifiedClaim: Omit<PairingClaim, 'signature'> | null = null;
+    if (signature) {
+      verifiedClaim = {
+        token,
+        claimSecret,
+        inviterDeviceId: String(body.inviterDeviceId ?? ''),
+        endpoint: publicEndpoint(body.endpoint),
+        expiresAt: String(body.expiresAt ?? ''),
+        device,
+      };
+      if (!verifyDeviceText(device.publicKey, pairingClaimSigningText(verifiedClaim), signature))
+        throw new Error('pairing identity proof is invalid');
+    }
     const pendingId = await this.store.update((state) => {
       const invitation = Object.values(state.invitations).find((item) =>
         safeEqual(item.tokenHash, secretHash(token)),
       );
       if (!invitation || invitation.claimedAt || Date.parse(invitation.expiresAt) <= Date.now())
         throw new Error('pairing invitation is invalid or expired');
+      if (
+        verifiedClaim &&
+        (verifiedClaim.inviterDeviceId !== state.selfDeviceId ||
+          verifiedClaim.endpoint !== invitation.endpoint ||
+          verifiedClaim.expiresAt !== invitation.expiresAt)
+      )
+        throw new Error('pairing claim does not match its invitation');
+      const existing = state.devices[device.id];
+      if (existing?.revokedAt) throw new Error('this device has been revoked');
       invitation.claimedAt = new Date().toISOString();
       const id = crypto.randomUUID();
-      state.pending[id] = {
+      const pending: PendingDevice = {
         id,
         invitationId: invitation.id,
         claimSecretHash: secretHash(claimSecret),
@@ -349,7 +377,19 @@ export class DeviceMeshHttp {
         requestedAt: new Date().toISOString(),
         approval: null,
         rejectedAt: null,
+        resolvedAt: null,
       };
+      state.pending[id] = pending;
+      if (existing && verifiedClaim) {
+        pending.approval = {
+          networkId: state.networkId,
+          device: existing,
+          devices: Object.values(state.devices).map((item) => deviceForPeer(item, existing.id)),
+          capabilities: this.capabilities.list(),
+          endpoint: invitation.endpoint,
+        };
+        pending.resolvedAt = new Date().toISOString();
+      }
       return id;
     });
     json(response, 202, { ok: true, pendingId });
@@ -371,11 +411,31 @@ export class DeviceMeshHttp {
   private async runJoin(joinId: string, payload: PairingPayload): Promise<void> {
     const state = await this.store.read();
     const self = state.devices[state.selfDeviceId];
+    const established = Object.keys(state.devices).some(
+      (deviceId) => deviceId !== state.selfDeviceId,
+    );
+    const inviter = state.devices[payload.inviterDeviceId];
+    if (established && (!inviter || inviter.revokedAt)) {
+      throw new Error(
+        'this pairing code is not from a device in the current mesh; leave the current mesh before joining another one',
+      );
+    }
     const claimSecret = crypto.randomBytes(32).toString('base64url');
+    const unsignedClaim: Omit<PairingClaim, 'signature'> = {
+      token: payload.token,
+      claimSecret,
+      inviterDeviceId: payload.inviterDeviceId,
+      endpoint: payload.endpoint,
+      expiresAt: payload.expiresAt,
+      device: self,
+    };
     const claimedResponse = await fetch(`${payload.endpoint}/api/device-mesh/invitations/claim`, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ token: payload.token, claimSecret, device: self }),
+      body: JSON.stringify({
+        ...unsignedClaim,
+        signature: signDeviceText(this.identity, pairingClaimSigningText(unsignedClaim)),
+      }),
     });
     const claimed = (await claimedResponse.json().catch(() => ({}))) as any;
     if (!claimedResponse.ok)
@@ -393,10 +453,10 @@ export class DeviceMeshHttp {
       if (status.status !== 'approved') continue;
       const approval = status.approval as PairingApproval;
       await this.store.update((current) => {
-        const established = Object.keys(current.devices).some(
+        const currentEstablished = Object.keys(current.devices).some(
           (deviceId) => deviceId !== current.selfDeviceId,
         );
-        if (established && current.networkId !== approval.networkId)
+        if (currentEstablished && current.networkId !== approval.networkId)
           throw new Error('this Hub already belongs to a different device mesh');
         current.networkId = approval.networkId;
         for (const incoming of approval.devices) {
@@ -454,7 +514,11 @@ export class DeviceMeshHttp {
       if (!pending || pending.rejectedAt) throw new Error('pending device not found');
       const at = new Date().toISOString();
       const existing = state.devices[pending.device.id];
+      if (existing?.revokedAt) throw new Error('this device has been revoked');
+      const invitation = state.invitations[pending.invitationId];
+      if (!invitation) throw new Error('pairing invitation not found');
       if (
+        !existing &&
         Object.values(state.devices).some(
           (item) =>
             item.id !== pending.device.id &&
@@ -463,17 +527,18 @@ export class DeviceMeshHttp {
         )
       )
         throw new Error('device names must be unique; rename the joining device and try again');
-      const device: MeshDevice = {
-        ...pending.device,
-        administrator: body.administrator === true,
-        grants: normalizeGrants(body.grants, this.capabilities),
-        endpoints: existing?.endpoints ?? [],
-        revokedAt: null,
-        addedAt: existing?.addedAt ?? at,
-        updatedAt: at,
-      };
+      const device: MeshDevice = existing
+        ? { ...existing, revokedAt: null }
+        : {
+            ...pending.device,
+            administrator: body.administrator === true,
+            grants: normalizeGrants(body.grants, this.capabilities),
+            endpoints: [],
+            revokedAt: null,
+            addedAt: at,
+            updatedAt: at,
+          };
       state.devices[device.id] = device;
-      const invitation = state.invitations[pending.invitationId];
       pending.approval = {
         networkId: state.networkId,
         device,
@@ -481,6 +546,7 @@ export class DeviceMeshHttp {
         capabilities: this.capabilities.list(),
         endpoint: invitation.endpoint,
       };
+      pending.resolvedAt = at;
       return pending.approval;
     });
     await this.router.broadcastMembership();
@@ -492,6 +558,7 @@ export class DeviceMeshHttp {
       const pending = state.pending[pendingId];
       if (!pending) throw new Error('pending device not found');
       pending.rejectedAt = new Date().toISOString();
+      pending.resolvedAt = pending.rejectedAt;
     });
     json(response, 200, { ok: true });
   }

@@ -9,6 +9,10 @@ function now(): string {
   return new Date().toISOString();
 }
 
+const TERMINAL_PAIRING_RETENTION_MS = 10 * 60_000;
+const PENDING_PAIRING_RETENTION_MS = 60 * 60_000;
+const EXPIRED_INVITATION_RETENTION_MS = 10 * 60_000;
+
 export class DeviceMeshStore {
   private state: DeviceMeshState | null = null;
   private writes: Promise<void> = Promise.resolve();
@@ -23,6 +27,9 @@ export class DeviceMeshStore {
     try {
       this.state = JSON.parse(await fs.readFile(this.statePath, 'utf8')) as DeviceMeshState;
       this.state.routes ??= {};
+      this.state.invitations ??= {};
+      this.state.pending ??= {};
+      for (const pending of Object.values(this.state.pending)) pending.resolvedAt ??= null;
       if (this.state.selfDeviceId !== this.identity.id || !this.state.devices[this.identity.id]) {
         throw new Error(
           'device mesh identity does not match its state; restore the original identity or remove the device-mesh data directory',
@@ -82,6 +89,39 @@ export class DeviceMeshStore {
         : { ...device, grants: [] };
       return true;
     });
+  }
+
+  async prunePairingState(at = Date.now()): Promise<boolean> {
+    const state = await this.read();
+    let changed = false;
+    for (const [id, pending] of Object.entries(state.pending)) {
+      const invitation = state.invitations[pending.invitationId];
+      const requestedAt = Date.parse(pending.requestedAt);
+      const resolvedAt = Date.parse(
+        pending.resolvedAt ?? pending.rejectedAt ?? pending.requestedAt,
+      );
+      const terminal = Boolean(pending.approval || pending.rejectedAt);
+      const stale =
+        !invitation ||
+        (terminal
+          ? !Number.isFinite(resolvedAt) || at - resolvedAt > TERMINAL_PAIRING_RETENTION_MS
+          : !Number.isFinite(requestedAt) || at - requestedAt > PENDING_PAIRING_RETENTION_MS);
+      if (!stale) continue;
+      delete state.pending[id];
+      changed = true;
+    }
+    const referencedInvitations = new Set(
+      Object.values(state.pending).map((pending) => pending.invitationId),
+    );
+    for (const [id, invitation] of Object.entries(state.invitations)) {
+      if (referencedInvitations.has(id)) continue;
+      const expiresAt = Date.parse(invitation.expiresAt);
+      if (Number.isFinite(expiresAt) && at - expiresAt <= EXPIRED_INVITATION_RETENTION_MS) continue;
+      delete state.invitations[id];
+      changed = true;
+    }
+    if (changed) await this.persist();
+    return changed;
   }
 
   private async persist(): Promise<void> {

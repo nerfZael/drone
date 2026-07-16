@@ -1,14 +1,18 @@
 import { afterEach, describe, expect, test } from 'bun:test';
+import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { pairingClaimSigningText, type PairingClaim } from '@drone/device-protocol';
 import { createDeviceMeshService } from '../src/hub/device-mesh';
+import { loadOrCreateDeviceIdentity, signDeviceText } from '../src/hub/device-mesh/device-identity';
 
 type TestHub = {
   url: string;
   ingressUrl: string;
   token: string;
+  service: Awaited<ReturnType<typeof createDeviceMeshService>>;
   close(): Promise<void>;
 };
 
@@ -48,6 +52,7 @@ async function startHub(): Promise<TestHub> {
     url,
     ingressUrl,
     token,
+    service,
     async close() {
       await service.close();
       await new Promise<void>((resolve) => server.close(() => resolve()));
@@ -84,6 +89,39 @@ async function waitFor<T>(read: () => Promise<T | null>): Promise<T> {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error('condition timed out');
+}
+
+async function pairHubs(
+  inviter: TestHub,
+  joining: TestHub,
+  grants = [{ capability: 'drone-control', version: 1, operations: ['drones.list'] }],
+  administrator = true,
+): Promise<{ joiningDeviceId: string }> {
+  const joiningBeforePair = await adminJson(joining, '/api/device-mesh');
+  await adminJson(joining, `/api/device-mesh/devices/${joiningBeforePair.selfDeviceId}`, {
+    method: 'PUT',
+    body: JSON.stringify({ name: `Joining Hub ${joiningBeforePair.selfDeviceId.slice(-6)}` }),
+  });
+  const invitation = await adminJson(inviter, '/api/device-mesh/invitations', {
+    method: 'POST',
+  });
+  const join = await adminJson(joining, '/api/device-mesh/joins', {
+    method: 'POST',
+    body: JSON.stringify({ payload: JSON.stringify(invitation.payload) }),
+  });
+  const pending = await waitFor(async () => {
+    const status = await adminJson(inviter, '/api/device-mesh');
+    return status.pending[0] ?? null;
+  });
+  await adminJson(inviter, `/api/device-mesh/pending/${pending.id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ administrator, grants }),
+  });
+  await waitFor(async () => {
+    const status = await adminJson(joining, `/api/device-mesh/joins/${join.joinId}`);
+    return status.status === 'approved' ? status : null;
+  });
+  return { joiningDeviceId: pending.device.id };
 }
 
 afterEach(async () => {
@@ -145,5 +183,242 @@ describe('desktop device pairing', () => {
     expect(
       joiningStatus.devices.find((device: any) => device.id === pending.device.id).grants,
     ).toEqual([]);
+  });
+
+  test('recognizes a signed existing device and preserves its permissions without approval', async () => {
+    const inviter = await startHub();
+    const joining = await startHub();
+    const { joiningDeviceId } = await pairHubs(inviter, joining);
+
+    const invitation = await adminJson(inviter, '/api/device-mesh/invitations', {
+      method: 'POST',
+    });
+    const recovery = await adminJson(joining, '/api/device-mesh/joins', {
+      method: 'POST',
+      body: JSON.stringify({ payload: JSON.stringify(invitation.payload) }),
+    });
+    await waitFor(async () => {
+      const status = await adminJson(joining, `/api/device-mesh/joins/${recovery.joinId}`);
+      return status.status === 'approved' ? status : null;
+    });
+
+    const status = await adminJson(inviter, '/api/device-mesh');
+    expect(status.pending).toEqual([]);
+    expect(status.devices.find((device: any) => device.id === joiningDeviceId)).toMatchObject({
+      administrator: true,
+      grants: [{ capability: 'drone-control', version: 1, operations: ['drones.list'] }],
+    });
+  });
+
+  test('rejects a copied device identity without its private-key proof', async () => {
+    const inviter = await startHub();
+    const joining = await startHub();
+    const { joiningDeviceId } = await pairHubs(inviter, joining);
+    const invitation = await adminJson(inviter, '/api/device-mesh/invitations', {
+      method: 'POST',
+    });
+    const status = await adminJson(inviter, '/api/device-mesh');
+    const copiedDevice = status.devices.find((device: any) => device.id === joiningDeviceId);
+    const attackerRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-mesh-attacker-'));
+    try {
+      const attacker = await loadOrCreateDeviceIdentity(attackerRoot);
+      const unsigned: Omit<PairingClaim, 'signature'> = {
+        token: invitation.payload.token,
+        claimSecret: crypto.randomBytes(32).toString('base64url'),
+        inviterDeviceId: invitation.payload.inviterDeviceId,
+        endpoint: invitation.payload.endpoint,
+        expiresAt: invitation.payload.expiresAt,
+        device: copiedDevice,
+      };
+      const response = await fetch(`${inviter.ingressUrl}/api/device-mesh/invitations/claim`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          ...unsigned,
+          signature: signDeviceText(attacker, pairingClaimSigningText(unsigned)),
+        }),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: 'pairing identity proof is invalid' });
+      expect((await adminJson(inviter, '/api/device-mesh')).pending).toEqual([]);
+    } finally {
+      await fs.rm(attackerRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('does not allow a revoked device to recover through a fresh invitation', async () => {
+    const inviter = await startHub();
+    const joining = await startHub();
+    const { joiningDeviceId } = await pairHubs(inviter, joining);
+    await adminJson(inviter, `/api/device-mesh/devices/${joiningDeviceId}`, {
+      method: 'DELETE',
+    });
+    const invitation = await adminJson(inviter, '/api/device-mesh/invitations', {
+      method: 'POST',
+    });
+    const recovery = await adminJson(joining, '/api/device-mesh/joins', {
+      method: 'POST',
+      body: JSON.stringify({ payload: JSON.stringify(invitation.payload) }),
+    });
+    const failed = await waitFor(async () => {
+      const status = await adminJson(joining, `/api/device-mesh/joins/${recovery.joinId}`);
+      return status.status === 'failed' ? status : null;
+    });
+    expect(failed.error).toContain('revoked');
+    expect((await adminJson(inviter, '/api/device-mesh')).pending).toEqual([]);
+  });
+
+  test('does not consume an unrelated mesh invitation before discovering a network mismatch', async () => {
+    const inviter = await startHub();
+    const joining = await startHub();
+    const unrelated = await startHub();
+    await pairHubs(inviter, joining);
+    const invitation = await adminJson(unrelated, '/api/device-mesh/invitations', {
+      method: 'POST',
+    });
+    const recovery = await adminJson(joining, '/api/device-mesh/joins', {
+      method: 'POST',
+      body: JSON.stringify({ payload: JSON.stringify(invitation.payload) }),
+    });
+    const failed = await waitFor(async () => {
+      const status = await adminJson(joining, `/api/device-mesh/joins/${recovery.joinId}`);
+      return status.status === 'failed' ? status : null;
+    });
+    expect(failed.error).toContain('not from a device in the current mesh');
+    expect((await adminJson(unrelated, '/api/device-mesh')).pending).toEqual([]);
+  });
+
+  test('defensively preserves grants when a legacy pending request targets an existing device', async () => {
+    const inviter = await startHub();
+    const joining = await startHub();
+    const { joiningDeviceId } = await pairHubs(inviter, joining);
+    const invitation = await adminJson(inviter, '/api/device-mesh/invitations', {
+      method: 'POST',
+    });
+    const beforeRecovery = await adminJson(inviter, '/api/device-mesh');
+    const existing = beforeRecovery.devices.find((device: any) => device.id === joiningDeviceId);
+    const duplicateName = beforeRecovery.devices.find(
+      (device: any) => device.id === beforeRecovery.selfDeviceId,
+    ).name;
+    const legacyClaim = await fetch(`${inviter.ingressUrl}/api/device-mesh/invitations/claim`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        token: invitation.payload.token,
+        claimSecret: crypto.randomBytes(32).toString('base64url'),
+        device: { ...existing, name: duplicateName },
+      }),
+    });
+    expect(legacyClaim.status).toBe(202);
+    const { pendingId } = await legacyClaim.json();
+    await adminJson(inviter, `/api/device-mesh/pending/${pendingId}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ administrator: false, grants: [] }),
+    });
+    const status = await adminJson(inviter, '/api/device-mesh');
+    expect(status.devices.find((device: any) => device.id === joiningDeviceId)).toMatchObject({
+      name: existing.name,
+      administrator: true,
+      grants: [{ capability: 'drone-control', version: 1, operations: ['drones.list'] }],
+    });
+  });
+
+  test('rejects a pending request with a missing invitation without adding its device', async () => {
+    const hub = await startHub();
+    const unknownRoot = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-mesh-unknown-'));
+    try {
+      const unknown = await loadOrCreateDeviceIdentity(unknownRoot);
+      const pendingId = crypto.randomUUID();
+      await hub.service.store.update((state) => {
+        state.pending[pendingId] = {
+          id: pendingId,
+          invitationId: 'missing-invitation',
+          claimSecretHash: 'missing-invitation-secret',
+          device: unknown,
+          requestedAt: new Date().toISOString(),
+          approval: null,
+          rejectedAt: null,
+          resolvedAt: null,
+        };
+      });
+      const response = await fetch(`${hub.url}/api/device-mesh/pending/${pendingId}/approve`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${hub.token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ administrator: true, grants: [] }),
+      });
+      expect(response.status).toBe(400);
+      expect(await response.json()).toMatchObject({ error: 'pairing invitation not found' });
+      expect(
+        (await adminJson(hub, '/api/device-mesh')).devices.some(
+          (candidate: any) => candidate.id === unknown.id,
+        ),
+      ).toBe(false);
+    } finally {
+      await fs.rm(unknownRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('prunes expired invitations and stale pairing requests while retaining active ones', async () => {
+    const hub = await startHub();
+    const state = await hub.service.store.read();
+    const self = state.devices[state.selfDeviceId];
+    const now = Date.now();
+    await hub.service.store.update((current) => {
+      for (const [id, ageMs, terminal] of [
+        ['stale-terminal', 20 * 60_000, true],
+        ['stale-pending', 2 * 60 * 60_000, false],
+        ['active-pending', 5 * 60_000, false],
+      ] as const) {
+        current.invitations[id] = {
+          id,
+          tokenHash: `${id}-token`,
+          endpoint: hub.ingressUrl,
+          createdAt: new Date(now - ageMs).toISOString(),
+          expiresAt: new Date(now - ageMs + 60_000).toISOString(),
+          claimedAt: new Date(now - ageMs).toISOString(),
+        };
+        current.pending[id] = {
+          id,
+          invitationId: id,
+          claimSecretHash: `${id}-secret`,
+          device: self,
+          requestedAt: new Date(now - ageMs).toISOString(),
+          approval: terminal
+            ? {
+                networkId: current.networkId,
+                device: self,
+                devices: [self],
+                capabilities: [],
+                endpoint: hub.ingressUrl,
+              }
+            : null,
+          rejectedAt: null,
+          resolvedAt: terminal ? new Date(now - ageMs).toISOString() : null,
+        };
+      }
+      current.pending['orphan-pending'] = {
+        id: 'orphan-pending',
+        invitationId: 'missing-invitation',
+        claimSecretHash: 'orphan-secret',
+        device: self,
+        requestedAt: new Date(now).toISOString(),
+        approval: null,
+        rejectedAt: null,
+        resolvedAt: null,
+      };
+    });
+
+    expect(await hub.service.store.prunePairingState(now)).toBe(true);
+    const pruned = await hub.service.store.read();
+    expect(Object.keys(pruned.pending)).toContain('active-pending');
+    expect(Object.keys(pruned.pending)).not.toContain('stale-terminal');
+    expect(Object.keys(pruned.pending)).not.toContain('stale-pending');
+    expect(Object.keys(pruned.pending)).not.toContain('orphan-pending');
+    expect(Object.keys(pruned.invitations)).toContain('active-pending');
+    expect(Object.keys(pruned.invitations)).not.toContain('stale-terminal');
+    expect(Object.keys(pruned.invitations)).not.toContain('stale-pending');
   });
 });

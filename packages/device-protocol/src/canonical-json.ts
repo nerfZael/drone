@@ -22,6 +22,25 @@ export function capabilityRequestSigningText(
   return `drone-device-request-v1\n${canonicalJson(request)}`;
 }
 
+export function pairingClaimSigningText(
+  claim: Omit<import('./types').PairingClaim, 'signature'>,
+): string {
+  const key = claim.device.publicKey;
+  return `drone-device-pairing-claim-v1\n${canonicalJson({
+    token: claim.token,
+    claimSecret: claim.claimSecret,
+    inviterDeviceId: claim.inviterDeviceId,
+    endpoint: claim.endpoint.replace(/\/+$/, ''),
+    expiresAt: claim.expiresAt,
+    device: {
+      id: claim.device.id,
+      name: claim.device.name,
+      platform: claim.device.platform,
+      publicKey: { crv: key.crv, kty: key.kty, x: key.x, y: key.y },
+    },
+  })}`;
+}
+
 export function socketAuthSigningText(deviceId: string, nonce: string): string {
   return `drone-device-auth-v1\n${deviceId}\n${nonce}`;
 }

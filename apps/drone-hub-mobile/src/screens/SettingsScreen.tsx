@@ -176,11 +176,12 @@ export function SettingsScreen({
             <View style={styles.section}>
               <Label>Device mesh</Label>
               <Text style={textStyles.body}>
-                Pair another Hub without removing your existing routes and permissions.
+                Replace an unreachable Hub route by scanning a fresh code. Your existing device
+                identity and permissions are preserved.
               </Text>
               <View style={styles.meshActions}>
                 <Button icon={Link2} onPress={onPair} style={styles.meshButton}>
-                  Pair another Hub
+                  Update connection
                 </Button>
                 <Button
                   tone="danger"

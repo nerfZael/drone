@@ -10,6 +10,7 @@ import { colors } from '../theme';
 
 export function PairScreen({ onComplete }: { onComplete(): void }) {
   const mesh = useMesh();
+  const updatingConnection = Boolean(mesh.profile);
   const [permission, requestPermission] = useCameraPermissions();
   const [code, setCode] = React.useState('');
   const [scanning, setScanning] = React.useState(false);
@@ -27,7 +28,11 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
     setPairing(true);
     setScanning(false);
     setError(null);
-    setStatus('Request sent. Approve this phone on the other Hub.');
+    setStatus(
+      updatingConnection
+        ? 'Verifying this phone and updating its saved connection…'
+        : 'Request sent. Approve this new phone on the other Hub.',
+    );
     abort.current = new AbortController();
     try {
       await mesh.pair(readPairingCode(raw.trim()), abort.current.signal);
@@ -62,10 +67,13 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
         </View>
         <View style={styles.heroCopy}>
           <Label>Private device mesh</Label>
-          <Text style={[textStyles.title, styles.title]}>Pair without an account.</Text>
+          <Text style={[textStyles.title, styles.title]}>
+            {updatingConnection ? 'Update a connection.' : 'Pair without an account.'}
+          </Text>
           <Text style={textStyles.body}>
-            Scan a short-lived code from a Drone Hub computer. That computer must approve this phone
-            before anything is shared.
+            {updatingConnection
+              ? 'Scan a fresh code from a Hub you already trust. Your phone proves its existing identity, updates the route, and keeps its permissions.'
+              : 'Scan a short-lived code from a Drone Hub computer. That computer must approve this phone before anything is shared.'}
           </Text>
         </View>
       </View>
@@ -88,14 +96,16 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
             <View style={styles.cardIcon}>
               <QrCode color={colors.accentAlt} size={18} strokeWidth={2.2} />
             </View>
-            <Text style={textStyles.heading}>Add your first route</Text>
+            <Text style={textStyles.heading}>
+              {updatingConnection ? 'Replace an unreachable route' : 'Add your first route'}
+            </Text>
           </View>
           <Text style={[textStyles.body, styles.copy]}>
             The QR code contains an address and one-time secret. Your permanent private key stays in
-            Android secure storage.
+            Android secure storage and signs the connection request.
           </Text>
           <Button onPress={() => void openScanner()} disabled={pairing}>
-            Scan pairing QR
+            {updatingConnection ? 'Scan connection QR' : 'Scan pairing QR'}
           </Button>
           <View style={styles.divider}>
             <View style={styles.line} />
@@ -105,7 +115,7 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
           <TextInput
             value={code}
             onChangeText={setCode}
-            placeholder="Paste pairing JSON"
+            placeholder={updatingConnection ? 'Paste connection JSON' : 'Paste pairing JSON'}
             placeholderTextColor={colors.subtle}
             multiline
             autoCapitalize="none"
@@ -118,7 +128,7 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
             disabled={!code.trim()}
             loading={pairing}
           >
-            Request approval
+            {updatingConnection ? 'Update connection' : 'Request approval'}
           </Button>
         </Card>
       )}

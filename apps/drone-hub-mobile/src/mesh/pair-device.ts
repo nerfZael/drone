@@ -1,6 +1,8 @@
 import * as Crypto from 'expo-crypto';
 import {
+  pairingClaimSigningText,
   parsePairingPayload,
+  type PairingClaim,
   type PairingApproval,
   type PairingPayload,
 } from '@drone/device-protocol';
@@ -92,10 +94,21 @@ export async function claimPairing(
     (text, byte) => `${text}${byte.toString(16).padStart(2, '0')}`,
     '',
   );
+  const unsignedClaim: Omit<PairingClaim, 'signature'> = {
+    token: payload.token,
+    claimSecret,
+    inviterDeviceId: payload.inviterDeviceId,
+    endpoint: payload.endpoint,
+    expiresAt: payload.expiresAt,
+    device: identity,
+  };
   const response = await fetch(`${payload.endpoint}/api/device-mesh/invitations/claim`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ token: payload.token, claimSecret, device: identity }),
+    body: JSON.stringify({
+      ...unsignedClaim,
+      signature: await identity.sign(pairingClaimSigningText(unsignedClaim)),
+    }),
   });
   const body = await responseJson(response);
   return { pendingId: String(body.pendingId), claimSecret };

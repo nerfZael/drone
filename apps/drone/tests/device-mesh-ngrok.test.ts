@@ -7,6 +7,92 @@ import { DeviceMeshIngress } from '../src/hub/device-mesh/device-mesh-ingress';
 import { DeviceMeshNgrok } from '../src/hub/device-mesh/device-mesh-ngrok';
 
 describe('device mesh ngrok control', () => {
+  test('does not signal a recycled PID from persisted process state', async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-mesh-ngrok-'));
+    const statePath = path.join(rootDir, 'ngrok.json');
+    await fs.writeFile(
+      statePath,
+      JSON.stringify({
+        version: 1,
+        mode: 'process',
+        pid: 4242,
+        port: 8791,
+        startedAt: new Date().toISOString(),
+        logPath: path.join(rootDir, 'ngrok.log'),
+      }),
+    );
+    let stopped = false;
+    try {
+      const ngrok = new DeviceMeshNgrok(rootDir, {
+        isProcessRunning: () => true,
+        commandForPid: async () => 'node unrelated-server.js',
+        stopProcess: async () => {
+          stopped = true;
+        },
+      });
+      await ngrok.stop();
+      expect(stopped).toBe(false);
+      await expect(fs.access(statePath)).rejects.toBeDefined();
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('preserves process state when ownership cannot be verified', async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-mesh-ngrok-'));
+    const statePath = path.join(rootDir, 'ngrok.json');
+    await fs.writeFile(
+      statePath,
+      JSON.stringify({
+        version: 1,
+        mode: 'process',
+        pid: 4242,
+        port: 8791,
+        startedAt: new Date().toISOString(),
+        logPath: path.join(rootDir, 'ngrok.log'),
+      }),
+    );
+    try {
+      const ngrok = new DeviceMeshNgrok(rootDir, {
+        isProcessRunning: () => true,
+        commandForPid: async () => null,
+      });
+      await expect(ngrok.stop()).rejects.toThrow('refusing to signal it');
+      expect(JSON.parse(await fs.readFile(statePath, 'utf8')).pid).toBe(4242);
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
+  test('signals a verified managed ngrok process', async () => {
+    const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-mesh-ngrok-'));
+    await fs.writeFile(
+      path.join(rootDir, 'ngrok.json'),
+      JSON.stringify({
+        version: 1,
+        mode: 'process',
+        pid: 4242,
+        port: 8791,
+        startedAt: new Date().toISOString(),
+        logPath: path.join(rootDir, 'ngrok.log'),
+      }),
+    );
+    const stopped: number[] = [];
+    try {
+      const ngrok = new DeviceMeshNgrok(rootDir, {
+        isProcessRunning: () => true,
+        commandForPid: async () => '/usr/local/bin/ngrok http 8791',
+        stopProcess: async (pid) => {
+          stopped.push(pid);
+        },
+      });
+      await ngrok.stop();
+      expect(stopped).toEqual([4242]);
+    } finally {
+      await fs.rm(rootDir, { recursive: true, force: true });
+    }
+  });
+
   test('reuses a running local agent and removes only its own tunnel', async () => {
     const rootDir = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-mesh-ngrok-'));
     const originalFetch = globalThis.fetch;

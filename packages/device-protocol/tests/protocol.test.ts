@@ -3,6 +3,7 @@ import {
   canonicalJson,
   DRONE_CONTROL_CAPABILITY,
   isGranted,
+  pairingClaimSigningText,
   parsePairingPayload,
   PROVIDER_CREDENTIALS_CAPABILITY,
   runWorkspaceCommandJob,
@@ -91,6 +92,37 @@ describe('device protocol', () => {
         expiresAt: 'now',
       }),
     ).toThrow('origin');
+  });
+
+  test('pairing identity proofs canonicalize public identity and endpoint details', () => {
+    const claim = {
+      token: 'pairing-token',
+      claimSecret: 'claim-secret',
+      inviterDeviceId: 'device_desktop',
+      endpoint: 'https://desktop.example.test/',
+      expiresAt: '2026-07-16T18:00:00.000Z',
+      device: {
+        id: 'device_phone',
+        name: 'Phone',
+        platform: 'android' as const,
+        publicKey: { kty: 'EC', crv: 'P-256', x: 'x', y: 'y' },
+      },
+    };
+    expect(pairingClaimSigningText(claim)).toBe(
+      pairingClaimSigningText({
+        ...claim,
+        endpoint: 'https://desktop.example.test',
+        device: {
+          ...claim.device,
+          publicKey: {
+            ...claim.device.publicKey,
+            ext: true,
+            key_ops: ['verify'],
+          },
+          ignoredBySigningText: true,
+        },
+      }),
+    );
   });
 
   test('consumes asynchronous command output until the job completes', async () => {

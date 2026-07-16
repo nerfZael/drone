@@ -13,6 +13,7 @@ import {
 } from '../security/device-identity';
 import { MeshSocket } from './MeshSocket';
 import { claimPairing, validatePairingApproval, waitForPairingApproval } from './pair-device';
+import { assertKnownRecoveryTarget } from './pairing-recovery';
 import {
   clearMeshProfile,
   loadMeshProfile,
@@ -309,13 +310,14 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     async (payload: PairingPayload, signal: AbortSignal) => {
       if (!identity) throw new Error('Device identity is not ready');
       setError(null);
+      const current = await loadMeshProfile();
+      assertKnownRecoveryTarget(payload, current);
       const claim = await claimPairing(payload, identity);
       const approval: PairingApproval = await validatePairingApproval(
         payload,
         await waitForPairingApproval(payload, claim.pendingId, claim.claimSecret, signal),
         identity,
       );
-      const current = await loadMeshProfile();
       if (current && current.networkId !== approval.networkId)
         throw new Error('Forget the current mesh before joining another one');
       const existingConnections = (current?.connections ?? []).filter(

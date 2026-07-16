@@ -263,7 +263,9 @@ function Shell() {
     },
   ];
   const title = pairingVisible
-    ? 'Pair device'
+    ? mesh.profile
+      ? 'Update connection'
+      : 'Pair device'
     : (
         {
           assistant: 'Assistant',
