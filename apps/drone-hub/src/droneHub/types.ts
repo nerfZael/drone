@@ -668,13 +668,6 @@ export type PlaybookDefinition = {
   updatedAt?: string;
 };
 
-export type TaskPlaybookButton = {
-  id: string;
-  label: string;
-  playbookId: string;
-  taskTypeIds: string[];
-};
-
 export type PlaybookRunSummary = {
   id: string;
   droneId: string;

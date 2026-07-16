@@ -35,7 +35,6 @@ function createControllerHarness(opts?: {
   const syncSkillLibraryCalls: any[] = [];
   const syncMcpServersCalls: any[] = [];
   const syncSharedPathsCalls: any[] = [];
-  const syncTaskStateCalls: any[] = [];
   const runNodeCliCalls: string[][] = [];
   const pendingPromptPumpCalls: any[] = [];
   const events: string[] = [];
@@ -110,10 +109,6 @@ function createControllerHarness(opts?: {
       syncSharedPathsCalls.push(opts);
       events.push('sync:shared-paths');
     },
-    syncTaskStateSnapshotToDrone: async (droneId, droneEntry) => {
-      syncTaskStateCalls.push({ droneId, droneEntry });
-      events.push('sync:task-state');
-    },
   });
 
   return {
@@ -125,7 +120,6 @@ function createControllerHarness(opts?: {
     syncSkillLibraryCalls,
     syncMcpServersCalls,
     syncSharedPathsCalls,
-    syncTaskStateCalls,
     runNodeCliCalls,
     pendingPromptPumpCalls,
     events,
@@ -159,7 +153,7 @@ describe('drone provisioning controller', () => {
         return (
           !reg?.pending?.['drone-1'] &&
           String(reg?.drones?.['drone-1']?.name ?? '') === 'auth-bugfix' &&
-          harness.syncTaskStateCalls.length > 0
+          harness.syncSharedPathsCalls.length > 0
         );
       });
 
@@ -169,7 +163,6 @@ describe('drone provisioning controller', () => {
         id: 'drone-1',
         name: 'auth-bugfix',
       });
-      expect(harness.syncTaskStateCalls).toHaveLength(1);
       expect(harness.syncSkillLibraryCalls).toHaveLength(1);
       expect(harness.syncMcpServersCalls).toHaveLength(1);
       expect(harness.syncSharedPathsCalls).toHaveLength(1);
@@ -209,8 +202,7 @@ describe('drone provisioning controller', () => {
         const reg: any = await loadRegistry();
         return (
           !reg?.pending?.['drone-race'] &&
-          Boolean(reg?.drones?.['drone-race']) &&
-          harness.syncTaskStateCalls.length > 0
+          Boolean(reg?.drones?.['drone-race'])
         );
       });
 
@@ -425,16 +417,15 @@ describe('drone provisioning controller', () => {
 
       await waitFor(async () => {
         const reg: any = await loadRegistry();
-        return !reg?.pending?.['drone-image-first'] && Boolean(reg?.drones?.['drone-image-first']) && harness.syncTaskStateCalls.length > 0;
+        return (
+          !reg?.pending?.['drone-image-first'] &&
+          Boolean(reg?.drones?.['drone-image-first']) &&
+          harness.setChatAgentConfigCalls.length > 0
+        );
       });
 
       const reg: any = await loadRegistry();
       expect(reg?.drones?.['drone-image-first']?.chats?.default).toMatchObject({
-        agent: { kind: 'builtin', id: 'codex' },
-        model: 'gpt-5.4',
-      });
-      expect(harness.syncTaskStateCalls).toHaveLength(1);
-      expect(harness.syncTaskStateCalls[0]?.droneEntry?.chats?.default).toMatchObject({
         agent: { kind: 'builtin', id: 'codex' },
         model: 'gpt-5.4',
       });

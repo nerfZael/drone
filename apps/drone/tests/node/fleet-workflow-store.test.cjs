@@ -116,18 +116,6 @@ test('queue enqueue is idempotent under concurrency and restart recovers in-flig
   assert.equal(recovered.state, 'queued');
   assert.equal(recovered.inFlightCount, 0);
 });
-test('audit is append-only, idempotent, and ordered newest first', async () => {
-  use('audit');
-  const s = await getFleetWorkflowStore();
-  const base = { actor: 'a', actorName: 'A', action: 'send_message', status: 'accepted', meta: {} };
-  await s.appendAudit({ id: 'one', at: '2026-01-01T00:00:00.000Z', ...base });
-  await s.appendAudit({ id: 'two', at: '2026-01-01T00:00:01.000Z', ...base });
-  await s.appendAudit({ id: 'one', at: '2026-01-01T00:00:00.000Z', ...base });
-  assert.deepEqual(
-    s.listAudit().map((e) => e.id),
-    ['two', 'one'],
-  );
-});
 test('workflow cache follows data-dir switching', async () => {
   use('one');
   let s = await getFleetWorkflowStore();
@@ -136,5 +124,4 @@ test('workflow cache follows data-dir switching', async () => {
   use('two');
   s = await getFleetWorkflowStore();
   assert.deepEqual(s.listQueue(true), []);
-  assert.deepEqual(s.listAudit(), []);
 });

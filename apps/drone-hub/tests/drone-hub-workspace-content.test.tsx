@@ -43,10 +43,6 @@ mock.module('../src/droneHub/app/DraftChatWorkspace', () => ({
   DraftChatWorkspace: mockedView('draft'),
 }));
 
-mock.module('../src/droneHub/app/KanbanBoardWorkspace', () => ({
-  KanbanBoardWorkspace: mockedView('kanban'),
-}));
-
 mock.module('../src/droneHub/app/PlaybookRunsWorkspace', () => ({
   PlaybookRunsWorkspace: mockedView('playbook'),
 }));
@@ -67,7 +63,6 @@ function baseProps(overrides: Partial<DroneHubWorkspaceContentProps> = {}): Dron
     setupWelcomeProps: null,
     settingsViewProps: {} as DroneHubWorkspaceContentProps['settingsViewProps'],
     draftChatWorkspaceProps: null,
-    kanbanBoardWorkspaceProps: null,
     playbookRunsWorkspaceProps: null,
     groupMultiChatWorkspaceProps: null,
     noDroneSelectedStateProps: {} as DroneHubWorkspaceContentProps['noDroneSelectedStateProps'],
@@ -92,7 +87,7 @@ async function renderSettled(props: DroneHubWorkspaceContentProps): Promise<stri
 
 describe('DroneHubWorkspaceContent lazy workspace views', () => {
   test('shows the workspace fallback while a lazy branch is loading', () => {
-    const html = renderWorkspace(baseProps({ kanbanBoardWorkspaceProps: {} as DroneHubWorkspaceContentProps['kanbanBoardWorkspaceProps'] }));
+    const html = renderWorkspace(baseProps({ playbookRunsWorkspaceProps: {} as DroneHubWorkspaceContentProps['playbookRunsWorkspaceProps'] }));
     expect(html).toContain('Loading workspace...');
   });
 
@@ -104,7 +99,6 @@ describe('DroneHubWorkspaceContent lazy workspace views', () => {
 
   test.each([
     ['draft', { draftChatWorkspaceProps: {} as DroneHubWorkspaceContentProps['draftChatWorkspaceProps'] }],
-    ['kanban', { kanbanBoardWorkspaceProps: {} as DroneHubWorkspaceContentProps['kanbanBoardWorkspaceProps'] }],
     ['playbook', { playbookRunsWorkspaceProps: {} as DroneHubWorkspaceContentProps['playbookRunsWorkspaceProps'] }],
     ['group', { groupMultiChatWorkspaceProps: {} as DroneHubWorkspaceContentProps['groupMultiChatWorkspaceProps'] }],
     [

@@ -35,12 +35,11 @@ Each aggregate has one canonical owner:
 - `host/assistant-store.ts`: assistant preferences, threads, messages, prompts, and subscriptions
 - `host/hub-settings-repository.ts`: provider secrets and all Hub/UI/voice/agent/backup settings, one row per key
 - `host/catalog-store.ts`: groups, repositories, skills, MCP servers and tokens, and playbooks
-- `host/fleet-workflow-store.ts`: sync sets, durable playbook work, and append-only workflow audit
+- `host/fleet-workflow-store.ts`: sync sets and durable playbook work (the filename is retained for database migration compatibility)
 - `host/hub-outbox.ts`: post-commit notifications and background effects
 
 Cross-domain group rename/delete is coordinated by `hub/group-orchestration.ts`, which
-composes catalog subtree changes, lifecycle membership batches, and canonical Kanban
-transforms without returning to a global aggregate.
+composes catalog subtree changes and lifecycle membership batches without returning to a global aggregate.
 
 Application commands compose repository changes with an outbox append in the same SQLite
 transaction. External effects are dispatched after commit using FIFO claims, leases,
@@ -114,11 +113,11 @@ Compatibility follows these rules:
 4. The old file-lock implementation is available only when the native SQLite binding is
    unavailable, principally for the existing Bun test/fallback path.
 5. No new domain or high-frequency state may be added to the residual JSON shape.
-6. On production Node, `updateRegistry()` rejects mutations to every canonical namespace,
-   canonical setting, and fleet audit with `CanonicalRegistryMutationError`; the surrounding
+6. On production Node, `updateRegistry()` rejects mutations to every canonical namespace and
+   canonical setting with `CanonicalRegistryMutationError`; the surrounding
    residual transaction rolls back.
 
-The production lifecycle, prompt, settings, catalog, workflow, Kanban, CLI, provisioning,
+The production lifecycle, prompt, settings, catalog, workflow, CLI, provisioning,
 group-orchestration, active-chat, archived-chat, and permanent-drone-deletion paths now call
 canonical owners directly. The former lifecycle/chat registry-mutation translator has been
 deleted. Searches still find `updateRegistry()` in compatibility-only features and explicit

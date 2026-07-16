@@ -10,9 +10,6 @@ import { normalizeDroneRuntime } from '../host/runtime';
 import { normalizeDisabledRepoKeys, normalizeEnvVarMap } from './environment-config';
 import {
   fleetActorConfig,
-  sanitizeFleetCapabilities,
-  sanitizeFleetQuotas,
-  sanitizeFleetReadScopes,
   setFleetActorConfig,
 } from './fleet-helpers';
 import {
@@ -77,7 +74,6 @@ type DroneProvisioningControllerDeps = {
   syncRepoAgentsInstructionsForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncSkillLibraryForDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
   syncSharedPathsToDrone: (opts: { droneId: string; droneEntry: any }) => Promise<void>;
-  syncTaskStateSnapshotToDrone: (droneId: string, droneEntry: any) => Promise<void>;
 };
 
 function normalizeIsoTimestamp(raw: unknown, fallback: string): string {
@@ -281,11 +277,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
               typeof fleetMeta.createdAt === 'string' && fleetMeta.createdAt.trim()
                 ? String(fleetMeta.createdAt).trim()
                 : current.createdAt,
-            enabled: fleetMeta.enabled === true,
-            capabilities: sanitizeFleetCapabilities(fleetMeta.capabilities),
-            readScopes: sanitizeFleetReadScopes(fleetMeta.readScopes),
             assigned: fleetMeta.assigned,
-            quotas: sanitizeFleetQuotas(fleetMeta.quotas),
           });
         }
         if (environment && typeof environment === 'object') {
@@ -650,7 +642,6 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       const regAfterCreate: any = await loadRegistry();
       const createdDrone = findDroneEntryByIdentity(regAfterCreate, pendingDroneId)?.entry ?? null;
       if (createdDrone) {
-        await deps.syncTaskStateSnapshotToDrone(pendingDroneId, createdDrone);
         await deps.syncSkillLibraryForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
         await deps.syncMcpServersForDrone({ droneId: pendingDroneId, droneEntry: createdDrone });
         await deps.syncSharedPathsToDrone({ droneId: pendingDroneId, droneEntry: createdDrone });

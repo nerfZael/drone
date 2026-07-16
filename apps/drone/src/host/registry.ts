@@ -216,44 +216,6 @@ type DroneRegistryV1 = {
       content?: string;
       updatedAt?: string;
     };
-    kanbanBoard?: {
-      taskTypes?: Array<{
-        id?: string;
-        label?: string;
-        active?: boolean;
-      }>;
-      lanes?: Array<{
-        id?: string;
-        title?: string;
-        cards?: Array<{
-          id?: string;
-          title?: string;
-          description?: string;
-          typeId?: string;
-          createdAt?: string;
-          updatedAt?: string;
-          repoPath?: string;
-          droneId?: string;
-          droneName?: string;
-          playbookId?: string;
-          playbookLabel?: string;
-          chatName?: string;
-          prompt?: string;
-          promptId?: string;
-          messageId?: string;
-        }>;
-      }>;
-      updatedAt?: string;
-    };
-    taskPlaybookButtons?: {
-      items?: Array<{
-        id?: string;
-        label?: string;
-        playbookId?: string;
-        taskTypeIds?: string[];
-      }>;
-      updatedAt?: string;
-    };
     uiPreferences?: {
       sidebarGroupingMode?: 'groups' | 'repos';
       sidebarDensityMode?: 'compact' | 'default' | 'comfortable';
@@ -1173,13 +1135,13 @@ async function assertRegistryFleetWriteAllowed(next: DroneRegistry): Promise<voi
 
   const previousSnapshotPath = await saveRegistryGuardSnapshotBestEffort('before', previous);
   const nextSnapshotPath = await saveRegistryGuardSnapshotBestEffort('after', next);
-  const stack = new Error('registry fleet write guard callsite').stack
+  const stack = new Error('registry write guard callsite').stack
     ?.split('\n')
     .slice(2, 9)
     .map((line) => line.trim())
     .filter(Boolean);
   const audit = {
-    event: dropsToEmpty ? 'empty-fleet-write' : 'severe-fleet-drop',
+    event: dropsToEmpty ? 'empty-registry-write' : 'severe-registry-drop',
     before,
     after,
     previousSnapshotPath,
@@ -1190,15 +1152,15 @@ async function assertRegistryFleetWriteAllowed(next: DroneRegistry): Promise<voi
 
   if (dropsToEmpty && !override) {
     await appendRegistryWriteAuditBestEffort({ ...audit, blocked: true });
-    await appendRegistryHubLogBestEffort('error', 'registry fleet write blocked', { ...audit, blocked: true });
+    await appendRegistryHubLogBestEffort('error', 'registry write blocked', { ...audit, blocked: true });
     throw new Error(
-      `refusing to overwrite registry fleet with zero entries (before=${before.total}, after=${after.total}); ` +
+      `refusing to overwrite registry with zero drone entries (before=${before.total}, after=${after.total}); ` +
         'set DRONE_ALLOW_EMPTY_REGISTRY_WRITE=1 only for an intentional recovery or reset',
     );
   }
 
   await appendRegistryWriteAuditBestEffort({ ...audit, blocked: false });
-  await appendRegistryHubLogBestEffort('warn', 'registry severe fleet drop allowed', { ...audit, blocked: false });
+  await appendRegistryHubLogBestEffort('warn', 'severe registry drop allowed', { ...audit, blocked: false });
 }
 
 function registriesEqual(a: DroneRegistry, b: DroneRegistry): boolean {

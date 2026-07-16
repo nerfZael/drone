@@ -55,33 +55,10 @@ export function hostDroneDaemonLogPath(droneIdRaw: string): string {
   return path.join(hostDroneRootPath(droneIdRaw), 'daemon.log');
 }
 
-export function installFleetCliScript(opts?: { runtimeDir?: string; binPath?: string }): string {
-  const runtimeDir = String(opts?.runtimeDir ?? '/dvm-data/drone/dist').trim() || '/dvm-data/drone/dist';
-  const binPath = String(opts?.binPath ?? '/usr/local/bin/fleet').trim() || '/usr/local/bin/fleet';
-  const fleetJs = path.posix.join(runtimeDir, 'fleet.js');
+export function removeRetiredContainerCliScripts(): string {
   return [
     'set -euo pipefail',
-    `mkdir -p ${shellQuote(path.posix.dirname(binPath))}`,
-    `cat > ${shellQuote(binPath)} <<'EOF'`,
-    '#!/usr/bin/env bash',
-    `exec node ${shellQuote(fleetJs)} "$@"`,
-    'EOF',
-    `chmod 755 ${shellQuote(binPath)}`,
-  ].join('\n');
-}
-
-export function installTasksCliScript(opts?: { runtimeDir?: string; binPath?: string }): string {
-  const runtimeDir = String(opts?.runtimeDir ?? '/dvm-data/drone/dist').trim() || '/dvm-data/drone/dist';
-  const binPath = String(opts?.binPath ?? '/usr/local/bin/tasks').trim() || '/usr/local/bin/tasks';
-  const tasksJs = path.posix.join(runtimeDir, 'tasks.js');
-  return [
-    'set -euo pipefail',
-    `mkdir -p ${shellQuote(path.posix.dirname(binPath))}`,
-    `cat > ${shellQuote(binPath)} <<'EOF'`,
-    '#!/usr/bin/env bash',
-    `exec node ${shellQuote(tasksJs)} "$@"`,
-    'EOF',
-    `chmod 755 ${shellQuote(binPath)}`,
+    'rm -f /usr/local/bin/fleet /usr/local/bin/tasks',
   ].join('\n');
 }
 

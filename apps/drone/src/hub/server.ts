@@ -49,8 +49,7 @@ import {
   buildContainerDroneDaemonLaunchScript,
   DRONE_DAEMON_SESSION_NAME,
   installBlipCliScript,
-  installFleetCliScript,
-  installTasksCliScript,
+  removeRetiredContainerCliScripts,
   normalizeDroneRuntime,
   type DroneRuntime,
 } from '../host/runtime';
@@ -84,15 +83,6 @@ import {
   dvmSessionType,
 } from '../host/dvm';
 import {
-  fleetPolicySet as droneFleetPolicySet,
-  tasksStateSet as droneTasksStateSet,
-  tasksPendingCreateAck as droneTasksPendingCreateAck,
-  tasksPendingCreateList as droneTasksPendingCreateList,
-  tasksPendingDeleteAck as droneTasksPendingDeleteAck,
-  tasksPendingDeleteList as droneTasksPendingDeleteList,
-  fleetRequestClaim as droneFleetRequestClaim,
-  fleetRequestList as droneFleetRequestList,
-  fleetRequestResolve as droneFleetRequestResolve,
   procStart,
   procStop,
   promptEnqueue as dronePromptEnqueue,
@@ -107,7 +97,6 @@ import {
   DEFAULT_DRONE_NAME_MODEL_ID,
   jobsPlanFromAgentMessage,
   suggestDroneNameFromMessage,
-  suggestTaskTitleFromMessage,
 } from './jobs-from-message';
 import { buildAutoRenamedChatCandidate, isGeneratedChatName } from './chat-auto-rename';
 import { createDeviceMeshService } from './device-mesh';
@@ -179,18 +168,6 @@ import {
   type AgentTurnRuntimeMetadata,
 } from './builtin-transcript-sessions';
 import { normalizeAgentPlan, sameAgentPlan, type AgentPlan } from './agent-plan';
-import {
-  appendTaskToBoard,
-  fallbackTaskTypeId,
-  findScopedTaskById,
-  getTaskBoardStateFromRegistry,
-  listScopedTasksForDroneScope,
-  normalizeTaskTitle,
-  removeTasksForScope,
-  normalizeTaskTypeId,
-  removeScopedTaskFromBoard,
-  type TaskBoardCard,
-} from './task-board';
 import {
   normalizeAgentsMarkdown,
   normalizeRepoAgentsMode,
@@ -339,7 +316,6 @@ import {
   FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
   normalizeAgentMessageAutoContinuePrompt,
   normalizeAgentSuggestionPolicyMarkdown,
-  KanbanBoardSettingsConflictError,
   UiPreferencesSettingsConflictError,
   UiPreferencesSettingsValidationError,
   hubLog,
@@ -355,7 +331,6 @@ import {
   resolveAgentSuggestionSettingsResponse,
   resolveEffectiveAgentMessageAutoContinueSettings,
   resolveEffectiveAgentSuggestionSettings,
-  resolveKanbanBoardSettingsResponse,
   resolveDeleteActionSettingsResponse,
   resolveEffectiveFilesystemSettings,
   resolveEffectiveDeleteActionSettings,
@@ -366,17 +341,13 @@ import {
   resolveExaApiKeySettings,
   resolveGroqApiKeySettings,
   resolveLlmSettingsResponse,
-  resolveTaskPlaybookButtonSettingsResponse,
   resolveUiPreferencesSettingsResponse,
-  transformStoredKanbanBoardSettings,
   upsertStoredDeleteActionSettings,
   upsertStoredFilesystemSettings,
-  upsertStoredKanbanBoardSettings,
   upsertStoredAgentMessageAutoContinueSettings,
   upsertStoredAgentSuggestionSettings,
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
-  upsertStoredTaskPlaybookButtonSettings,
   upsertStoredUiPreferencesSettings,
   type ArchiveRetentionId,
   type ArchiveRuntimePolicy,
@@ -425,29 +396,12 @@ import {
   previewSkillFromSource,
 } from './skill-sources';
 import {
-  decodeFleetCursor,
-  effectiveFleetLimits,
-  encodeFleetCursor,
   fleetActorConfig,
   fleetActorPayload,
-  fleetAuditList,
-  fleetChildrenForActor,
   fleetDescendantIdsForActor,
-  fleetTargetAllowedForRead,
-  fleetTargetAllowedForSend,
-  sanitizeFleetCapabilities,
-  sanitizeFleetQuotas,
-  sanitizeFleetReadScopes,
   setFleetActorConfig,
-  transcriptTurnsToFleetMessages,
 } from './fleet-helpers';
 import { pruneMissingRegistryDrones } from './stale-registry-prune';
-import {
-  FLEET_API_VERSION,
-  FLEET_CAPABILITY_CREATE,
-  FLEET_CAPABILITY_READ,
-  FLEET_CAPABILITY_SEND,
-} from '../fleet/contracts';
 import {
   applyDroneDisplayNameAcrossLifecycleEntries,
   findDroneEntryByIdentity,
@@ -473,11 +427,6 @@ import {
 } from './drone-lifecycle-service';
 import { permanentlyDeleteCanonicalDrone } from './drone-deletion-service';
 import { readCanonicalActiveDroneModel } from './canonical-drone-read-model';
-import {
-  FleetSnapshotDeliveryCache,
-  loadFleetReconcilerSnapshot,
-  type FleetReconcilerSnapshot,
-} from './fleet-reconciler-model';
 import {
   commitDroneMetadataPatch,
   renameDroneDisplayName,
@@ -1354,19 +1303,12 @@ async function resolveDroneOrRejectUpgrade(
   });
 }
 
-const FLEET_AUDIT_MAX_EVENTS = 500;
-const FLEET_RECONCILE_INTERVAL_MS = 1500;
-const FLEET_TASK_IDLE_POLL_INTERVAL_MS = 15_000;
-const FLEET_TASK_ACTIVE_POLL_INTERVAL_MS = 5_000;
-
-let FLEET_RECONCILE_INTERVAL: ReturnType<typeof setInterval> | null = null;
-let FLEET_RECONCILE_BUSY = false;
-let FLEET_TASK_POLL_LAST_COMPLETED_AT = 0;
-let FLEET_TASK_KNOWN_ACTOR_IDS = new Set<string>();
-const FLEET_SNAPSHOT_DELIVERY_CACHE = new FleetSnapshotDeliveryCache();
+const PLAYBOOK_RUN_QUEUE_INTERVAL_MS = 1500;
+let PLAYBOOK_RUN_QUEUE_INTERVAL: ReturnType<typeof setInterval> | null = null;
+let PLAYBOOK_RUN_QUEUE_BUSY = false;
 const PROMPT_SKILL_SYNC_WARNINGS = new Set<string>();
 
-async function fleetWorkflowStoreOrCompatibility(): Promise<FleetWorkflowStore | null> {
+async function workflowStoreOrCompatibility(): Promise<FleetWorkflowStore | null> {
   try {
     return await getFleetWorkflowStore();
   } catch (error) {
@@ -1375,810 +1317,20 @@ async function fleetWorkflowStoreOrCompatibility(): Promise<FleetWorkflowStore |
   }
 }
 
-async function appendFleetAuditEvent(event: {
-  actor: string;
-  actorName: string;
-  action: 'create_child' | 'send_message' | 'read_messages' | 'stop_chat';
-  status: 'accepted' | 'rejected';
-  target?: string | null;
-  targetName?: string | null;
-  reason?: string | null;
-  meta?: Record<string, unknown>;
-}): Promise<void> {
-  const regAny = await loadRegistry();
-  const store = await fleetWorkflowStoreOrCompatibility();
-  const record = {
-    id: `fleet-audit-${crypto.randomBytes(8).toString('hex')}`,
-    at: nowIso(),
-    actor: event.actor,
-    actorName: event.actorName,
-    action: event.action,
-    target: event.target ?? null,
-    targetName: event.targetName ?? null,
-    status: event.status,
-    reason: event.reason ?? null,
-    meta: event.meta ?? {},
-  };
-  if (store) {
-    await store.backfillAudit(fleetAuditList(regAny));
-    await store.appendAudit(record);
-    return;
-  }
-  await updateRegistry((regAny: any) => {
-    const audit = fleetAuditList(regAny);
-    audit.unshift({
-      id: `fleet-audit-${crypto.randomBytes(8).toString('hex')}`,
-      at: nowIso(),
-      actor: event.actor,
-      actorName: event.actorName,
-      action: event.action,
-      target: event.target ?? null,
-      targetName: event.targetName ?? null,
-      status: event.status,
-      reason: event.reason ?? null,
-      meta: event.meta ?? {},
-    });
-    regAny.fleet.audit = audit.slice(0, FLEET_AUDIT_MAX_EVENTS);
-  });
-}
-
-async function canonicalFleetAudit(
-  opts: {
-    actor?: string;
-    target?: string;
-    action?: string;
-    status?: string;
-    limit?: number;
-    since?: string;
-  } = {},
-) {
-  const regAny = await loadRegistry();
-  const store = await fleetWorkflowStoreOrCompatibility();
-  if (!store) return fleetAuditList(regAny);
-  await store.backfillAudit(fleetAuditList(regAny));
-  return store.listAudit(opts);
-}
-
-async function listFleetMessagesForTarget(targetId: string, chatNameRaw: unknown) {
-  const resolved = await resolveDroneOrPendingForReadRef(targetId);
-  if (!resolved) throw new Error(`unknown drone: ${targetId}`);
-  const chatName = normalizeChatName(chatNameRaw);
-  if (resolved.kind === 'pending') return [];
-  await ensureChatEntry({ droneId: resolved.id, chatName });
-  await reconcileChatFromDaemon({ droneId: resolved.id, chatName }).catch(() => {});
-  const regAny: any = await loadRegistry();
-  const chat = regAny?.drones?.[resolved.id]?.chats?.[chatName] ?? null;
-  const turns = Array.isArray(chat?.turns) ? chat.turns : [];
-  return transcriptTurnsToFleetMessages(chatName, turns);
-}
-
-function buildTaskStateSnapshotForDrone(regAny: any, droneId: string, droneEntry: any) {
-  const playbook = playbookMetaFromEntry(droneEntry?.playbook);
-  const repoPath = String(droneEntry?.repoPath ?? '').trim();
-  const board = getTaskBoardStateFromRegistry(regAny);
-  const tasks = listScopedTasksForDroneScope(board, repoPath, playbook?.id).map((item) => ({
-    id: item.id,
-    title: item.title,
-    description: item.description,
-    typeId: item.typeId,
-    typeLabel: item.typeLabel,
-    laneId: item.laneId,
-    laneTitle: item.laneTitle,
-    ...(item.playbookId ? { playbookId: item.playbookId } : {}),
-    ...(item.playbookLabel ? { playbookLabel: item.playbookLabel } : {}),
-    ...(item.prompt ? { prompt: item.prompt } : {}),
-    ...(item.promptId ? { promptId: item.promptId } : {}),
-    ...(item.messageId ? { messageId: item.messageId } : {}),
-    ...(item.chatName ? { chatName: item.chatName } : {}),
-    createdAt: item.createdAt,
-    updatedAt: item.updatedAt,
-    ...(item.droneId ? { droneId: item.droneId } : {}),
-    ...(item.droneName ? { droneName: item.droneName } : {}),
-  }));
-  return {
-    enabled: true,
-    actor: {
-      id: droneId,
-      name: String(droneEntry?.name ?? droneId).trim() || droneId,
-    },
-    playbook: playbook
-      ? {
-          id: playbook.id,
-          label: playbook.label,
-        }
-      : null,
-    repoPath: repoPath || null,
-    taskTypes: board.taskTypes,
-    tasks,
-    updatedAt:
-      tasks.length > 0
-        ? tasks.reduce((latest, item) => {
-            const current = Date.parse(String(item.updatedAt ?? item.createdAt ?? ''));
-            return Number.isFinite(current) && current > latest ? current : latest;
-          }, 0) > 0
-          ? new Date(
-              tasks.reduce((latest, item) => {
-                const current = Date.parse(String(item.updatedAt ?? item.createdAt ?? ''));
-                return Number.isFinite(current) && current > latest ? current : latest;
-              }, 0),
-            ).toISOString()
-          : nowIso()
-        : nowIso(),
-  };
-}
-
-type ResolvedFleetDaemon = Awaited<ReturnType<typeof resolveDroneDaemonClientForEntry>>;
-
-async function syncFleetPolicySnapshotToDrone(
-  actorId: string,
-  actorEntry: any,
-  snapshot?: FleetReconcilerSnapshot,
-  daemonOverride?: ResolvedFleetDaemon,
-  deliveryCache?: FleetSnapshotDeliveryCache,
-): Promise<void> {
+async function runPlaybookRunQueueCycle(): Promise<void> {
+  if (PLAYBOOK_RUN_QUEUE_BUSY) return;
+  PLAYBOOK_RUN_QUEUE_BUSY = true;
   try {
-    const regAny = snapshot ?? (await loadFleetReconcilerSnapshot());
-    const actorConfig = fleetActorConfig(actorEntry);
-    const limits = effectiveFleetLimits(actorEntry);
-    const actorPayload = fleetActorPayload(regAny, actorId);
-    const payload = {
-      apiVersion: FLEET_API_VERSION,
-      enabled: actorConfig.enabled,
-      actor: {
-        id: actorId,
-        name: String(actorEntry?.name ?? actorId),
-      },
-      relationships: {
-        children: (actorPayload?.relationships?.children ?? []).map((item: any) => ({
-          id: String(item?.id ?? '').trim(),
-          name: String(item?.name ?? '').trim(),
-        })),
-        assigned: (actorPayload?.relationships?.assigned ?? []).map((item: any) => ({
-          id: String(item?.id ?? '').trim(),
-          name: String(item?.name ?? '').trim(),
-        })),
-      },
-      capabilities: actorConfig.capabilities,
-      readScopes: actorConfig.readScopes,
-      sendScopes: ['children', 'assigned'],
-      limits,
-    };
-    const fingerprint = JSON.stringify(payload);
-    const cacheKey = `policy\0${actorId}`;
-    if (deliveryCache && !deliveryCache.needsDelivery(cacheKey, fingerprint)) return;
-    const daemon =
-      daemonOverride === undefined
-        ? await resolveDroneDaemonClientForEntry(actorEntry)
-        : daemonOverride;
-    if (!daemon) return;
-    await droneFleetPolicySet(daemon.client, payload);
-    deliveryCache?.markDelivered(cacheKey, fingerprint);
-  } catch {
-    // ignore (best-effort sync)
-  }
-}
-
-async function syncTaskStateSnapshotToDrone(
-  droneId: string,
-  droneEntry: any,
-  snapshot?: FleetReconcilerSnapshot,
-  daemonOverride?: ResolvedFleetDaemon,
-  deliveryCache?: FleetSnapshotDeliveryCache,
-): Promise<void> {
-  try {
-    const regAny = snapshot ?? (await loadFleetReconcilerSnapshot());
-    const payload = buildTaskStateSnapshotForDrone(regAny, droneId, droneEntry);
-    const { updatedAt: _updatedAt, ...stablePayload } = payload;
-    const fingerprint = JSON.stringify(stablePayload);
-    const cacheKey = `tasks\0${droneId}`;
-    if (deliveryCache && !deliveryCache.needsDelivery(cacheKey, fingerprint)) return;
-    const daemon =
-      daemonOverride === undefined
-        ? await resolveDroneDaemonClientForEntry(droneEntry)
-        : daemonOverride;
-    if (!daemon) return;
-    await droneTasksStateSet(daemon.client, payload);
-    deliveryCache?.markDelivered(cacheKey, fingerprint);
-  } catch {
-    // ignore (best-effort sync)
-  }
-}
-
-async function drainPendingTaskCreatesForDrone(
-  droneId: string,
-  droneEntry: any,
-  snapshot?: FleetReconcilerSnapshot,
-  daemonOverride?: ResolvedFleetDaemon,
-): Promise<boolean> {
-  try {
-    const daemon =
-      daemonOverride === undefined
-        ? await resolveDroneDaemonClientForEntry(droneEntry)
-        : daemonOverride;
-    if (!daemon) return false;
-    const pending = await droneTasksPendingCreateList(daemon.client).catch(() => null);
-    const requests = Array.isArray(pending?.requests) ? pending.requests : [];
-    if (requests.length === 0) return false;
-    const acceptedIds = new Set<string>();
-    const registrySnapshot = snapshot ?? (await loadFleetReconcilerSnapshot());
-    const droneSnapshot = registrySnapshot?.drones?.[droneId] ?? null;
-    if (!droneSnapshot) return true;
-    const playbook = playbookMetaFromEntry(droneSnapshot?.playbook);
-    const repoPath = String(droneSnapshot?.repoPath ?? '').trim();
-    await transformStoredKanbanBoardSettings((currentBoard) => {
-      let board = currentBoard;
-      const fallbackType = fallbackTaskTypeId(board.taskTypes);
-      for (const request of requests) {
-        const requestId = String(request?.id ?? '').trim();
-        const title = normalizeTaskTitle(request?.title ?? '');
-        if (!requestId || !title) continue;
-        const requestedType = normalizeTaskTypeId(request?.typeId ?? '') || fallbackType;
-        const typeId = board.taskTypes.some(
-          (item) => item.id === requestedType && item.active !== false,
-        )
-          ? requestedType
-          : fallbackType;
-        const createdAt =
-          typeof request?.createdAt === 'string' && request.createdAt.trim()
-            ? request.createdAt.trim()
-            : nowIso();
-        board = appendTaskToBoard(board, {
-          id: crypto.randomUUID(),
-          title,
-          description: String(request?.description ?? ''),
-          typeId,
-          createdAt,
-          updatedAt: createdAt,
-          scopeType: repoPath ? 'repo' : 'global',
-          ...(repoPath ? { scopeValue: repoPath } : {}),
-          repoPath,
-          droneId,
-          droneName: String(droneSnapshot?.name ?? droneId).trim() || droneId,
-          ...(playbook
-            ? {
-                playbookId: playbook.id,
-                playbookLabel: playbook.label,
-              }
-            : {}),
-        });
-        acceptedIds.add(requestId);
-      }
-      return board;
-    });
-    if (acceptedIds.size === 0) return true;
-    for (const requestId of acceptedIds) {
-      await droneTasksPendingCreateAck(daemon.client, requestId, {}).catch(() => {});
-    }
-    const regLatest = await loadFleetReconcilerSnapshot();
-    const latestDrone = regLatest?.drones?.[droneId] ?? null;
-    if (latestDrone) await syncTaskStateSnapshotToDrone(droneId, latestDrone, regLatest, daemon);
-    return true;
-  } catch {
-    // ignore (best-effort sync)
-    return false;
-  }
-}
-
-async function drainPendingTaskDeletesForDrone(
-  droneId: string,
-  droneEntry: any,
-  snapshot?: FleetReconcilerSnapshot,
-  daemonOverride?: ResolvedFleetDaemon,
-): Promise<boolean> {
-  try {
-    const daemon =
-      daemonOverride === undefined
-        ? await resolveDroneDaemonClientForEntry(droneEntry)
-        : daemonOverride;
-    if (!daemon) return false;
-    const pending = await droneTasksPendingDeleteList(daemon.client).catch(() => null);
-    const requests = Array.isArray(pending?.requests) ? pending.requests : [];
-    if (requests.length === 0) return false;
-    const acknowledgedIds = new Set<string>();
-    let boardChanged = false;
-    const registrySnapshot = snapshot ?? (await loadFleetReconcilerSnapshot());
-    const droneSnapshot = registrySnapshot?.drones?.[droneId] ?? null;
-    if (!droneSnapshot) return true;
-    const playbook = playbookMetaFromEntry(droneSnapshot?.playbook);
-    const repoPath = String(droneSnapshot?.repoPath ?? '').trim();
-    await transformStoredKanbanBoardSettings((currentBoard) => {
-      let board = currentBoard;
-      for (const request of requests) {
-        const requestId = String(request?.id ?? '').trim();
-        const taskId = String(request?.taskId ?? '').trim();
-        if (!requestId || !taskId) continue;
-        const removed = removeScopedTaskFromBoard(board, taskId, playbook?.id ?? '', repoPath);
-        board = removed.board;
-        if (removed.removed) boardChanged = true;
-        acknowledgedIds.add(requestId);
-      }
-      return board;
-    });
-    if (acknowledgedIds.size === 0) return true;
-    for (const requestId of acknowledgedIds) {
-      await droneTasksPendingDeleteAck(daemon.client, requestId, {}).catch(() => {});
-    }
-    if (!boardChanged) return true;
-    const regLatest = await loadFleetReconcilerSnapshot();
-    const latestDrone = regLatest?.drones?.[droneId] ?? null;
-    if (latestDrone) await syncTaskStateSnapshotToDrone(droneId, latestDrone, regLatest, daemon);
-    return true;
-  } catch {
-    // ignore (best-effort sync)
-    return false;
+    await drainPlaybookRunLaunchQueue();
+  } finally {
+    PLAYBOOK_RUN_QUEUE_BUSY = false;
   }
 }
 
 function fleetError(message: string, status: number = 400): Error & { status?: number } {
-  const err = new Error(message) as Error & { status?: number };
-  err.status = status;
-  return err;
-}
-
-async function processFleetRequest(
-  actorId: string,
-  actorEntry: any,
-  request: any,
-): Promise<unknown> {
-  const regAny: any = await loadRegistry();
-  const actorEntryLatest = findDroneEntryByIdentity(regAny, actorId)?.entry ?? actorEntry;
-  const actorName = String(actorEntryLatest?.name ?? actorId);
-  const actorConfig = fleetActorConfig(actorEntryLatest);
-  const limits = effectiveFleetLimits(actorEntryLatest);
-  const action = String(request?.type ?? '').trim() as
-    | 'create_child'
-    | 'send_message'
-    | 'read_messages'
-    | 'stop_chat';
-  const reject = async (
-    message: string,
-    status: number = 400,
-    target?: { id: string; name: string } | null,
-  ): Promise<never> => {
-    await appendFleetAuditEvent({
-      actor: actorId,
-      actorName,
-      action,
-      status: 'rejected',
-      target: target?.id ?? null,
-      targetName: target?.name ?? null,
-      reason: message,
-      meta: { requestId: String(request?.id ?? '') },
-    });
-    throw fleetError(message, status);
-  };
-
-  if (!actorConfig.enabled) {
-    await reject('fleet mode is disabled for this drone', 403);
-  }
-
-  if (action === 'create_child') {
-    if (!actorConfig.capabilities.includes(FLEET_CAPABILITY_CREATE))
-      await reject('missing capability: drone:create', 403);
-    const name = normalizeDroneDisplayName((request?.payload as any)?.name);
-    const groupRaw =
-      typeof (request?.payload as any)?.group === 'string'
-        ? String((request.payload as any).group).trim()
-        : '';
-    const group = groupRaw || String(actorEntryLatest?.group ?? '').trim() || '';
-    const cloneParent = (request?.payload as any)?.cloneParent === true;
-    const sourceEnvironment =
-      actorEntryLatest?.environment && typeof actorEntryLatest.environment === 'object'
-        ? {
-            vars: normalizeEnvVarMap((actorEntryLatest.environment as any)?.vars),
-            useRepoVars: (actorEntryLatest.environment as any)?.useRepoVars === true,
-            disabledRepoKeys: normalizeDisabledRepoKeys(
-              (actorEntryLatest.environment as any)?.disabledRepoKeys,
-            ),
-            updatedAt:
-              typeof (actorEntryLatest.environment as any)?.updatedAt === 'string'
-                ? String((actorEntryLatest.environment as any).updatedAt).trim() || null
-                : null,
-          }
-        : null;
-    const sourceChatEntry = actorEntryLatest?.chats?.default ?? null;
-    const sourceChatAgent = sourceChatEntry
-      ? inferChatAgent(sourceChatEntry, actorEntryLatest)
-      : null;
-    const sourceChatModel = normalizeChatModel(sourceChatEntry?.model);
-    if (findDroneIdByRef(regAny, name)) await reject(`drone already exists: ${name}`, 409);
-    const children = fleetChildrenForActor(regAny, actorId);
-    if (children.length >= limits.maxChildren)
-      await reject(`child limit reached (${limits.maxChildren})`, 429);
-    const creationsLastHour = (
-      await canonicalFleetAudit({
-        actor: actorId,
-        action: 'create_child',
-        status: 'accepted',
-        since: new Date(Date.now() - 60 * 60 * 1000).toISOString(),
-        limit: 1000,
-      })
-    ).length;
-    if (creationsLastHour >= limits.maxCreationsPerHour)
-      await reject(`creation rate limit reached (${limits.maxCreationsPerHour}/hour)`, 429);
-    const pendingGlobal = Object.keys(regAny?.pending ?? {}).length;
-    if (pendingGlobal >= limits.maxPendingCreationsGlobal)
-      await reject(
-        `global pending creation limit reached (${limits.maxPendingCreationsGlobal})`,
-        429,
-      );
-    const childId = makeDroneIdentity();
-    const at = nowIso();
-    if (group) await ensureCanonicalGroup(group, at);
-    await upsertCanonicalDroneLifecycle('pending', childId, {
-      id: childId,
-      name,
-      group: group || undefined,
-      runtime: droneRuntime(actorEntryLatest),
-      repoPath: String(actorEntryLatest?.repoPath ?? '').trim(),
-      containerPort: Number(actorEntryLatest?.containerPort ?? 7777),
-      build: false,
-      createdAt: at,
-      updatedAt: at,
-      phase: 'starting',
-      message: 'Starting…',
-      ...(cloneParent ? { cloneFrom: actorId, cloneChats: false } : {}),
-      ...(cloneParent && sourceEnvironment ? { environment: sourceEnvironment } : {}),
-      ...(cloneParent && (sourceChatAgent || sourceChatModel)
-        ? {
-            seed: {
-              chatName: 'default',
-              ...(sourceChatAgent ? { agent: sourceChatAgent } : {}),
-              ...(sourceChatModel ? { model: sourceChatModel } : {}),
-            },
-          }
-        : {}),
-      fleet: setFleetActorConfig(
-        {},
-        {
-          createdBy: actorId,
-          createdAt: at,
-          enabled: false,
-          capabilities: [],
-          readScopes: ['children'],
-          assigned: [],
-          quotas: {},
-        },
-      ).fleet,
-    });
-    enqueueProvisioning(childId);
-    await appendFleetAuditEvent({
-      actor: actorId,
-      actorName,
-      action: 'create_child',
-      status: 'accepted',
-      target: childId,
-      targetName: name,
-      meta: {
-        requestId: String(request?.id ?? ''),
-        group: group || null,
-        cloneParent,
-      },
-    });
-    return { child: { id: childId, name, group: group || null, phase: 'starting', cloneParent } };
-  }
-
-  if (action === 'send_message') {
-    if (!actorConfig.capabilities.includes(FLEET_CAPABILITY_SEND))
-      await reject('missing capability: drone:message:send', 403);
-    const targetRef = String((request?.payload as any)?.to ?? '').trim();
-    const targetFound = findDroneIdByRef(regAny, targetRef);
-    if (!targetFound) await reject(`unknown drone: ${targetRef}`, 404);
-    const targetResolved = targetFound!;
-    const targetEntry =
-      regAny?.drones?.[targetResolved.id] ?? regAny?.pending?.[targetResolved.id] ?? null;
-    const target = { id: targetResolved.id, name: String(targetEntry?.name ?? targetResolved.id) };
-    const childIds = new Set(fleetChildrenForActor(regAny, actorId).map((item) => item.id));
-    if (
-      !(
-        targetResolved.id === actorId ||
-        childIds.has(targetResolved.id) ||
-        fleetTargetAllowedForSend(actorEntry, actorId, targetResolved.id)
-      )
-    ) {
-      await reject(`target not allowed: ${target.name}`, 403, target);
-    }
-    const message = String((request?.payload as any)?.message ?? '').trim();
-    if (!message) await reject('missing message', 400, target);
-    if (Buffer.byteLength(message, 'utf8') > limits.maxMessageSizeBytes) {
-      await reject(`message too large (max ${limits.maxMessageSizeBytes} bytes)`, 413, target);
-    }
-    const messagesLastMinute = (
-      await canonicalFleetAudit({
-        actor: actorId,
-        action: 'send_message',
-        status: 'accepted',
-        since: new Date(Date.now() - 60 * 1000).toISOString(),
-        limit: 1000,
-      })
-    ).length;
-    if (messagesLastMinute >= limits.maxMessagesPerMinute) {
-      await reject(
-        `message rate limit reached (${limits.maxMessagesPerMinute}/minute)`,
-        429,
-        target,
-      );
-    }
-    const chatName = normalizeChatName((request?.payload as any)?.chat ?? 'default');
-    const enqueued = await createOrEnqueuePromptUnified({
-      id: String(request?.id ?? '').trim() || undefined,
-      droneId: targetResolved.id,
-      chatName,
-      prompt: message,
-      allowQueued: false,
-    });
-    if (enqueued.kind !== 'enqueued') await reject(enqueued.error, enqueued.status, target);
-    const enqueuedResult = enqueued as Extract<typeof enqueued, { kind: 'enqueued' }>;
-    await appendFleetAuditEvent({
-      actor: actorId,
-      actorName,
-      action: 'send_message',
-      status: 'accepted',
-      target: target.id,
-      targetName: target.name,
-      meta: {
-        requestId: String(request?.id ?? ''),
-        chat: chatName,
-        promptId: enqueuedResult.id,
-        pendingState: enqueuedResult.pendingState,
-        messagePreview: message.length > 400 ? `${message.slice(0, 397)}...` : message,
-      },
-    });
-    return {
-      target,
-      chat: chatName,
-      promptId: enqueuedResult.id,
-      pendingState: enqueuedResult.pendingState,
-    };
-  }
-
-  if (action === 'stop_chat') {
-    if (!actorConfig.capabilities.includes(FLEET_CAPABILITY_SEND))
-      await reject('missing capability: drone:message:send', 403);
-    const targetRef = String((request?.payload as any)?.to ?? '').trim();
-    const targetFound = findDroneIdByRef(regAny, targetRef);
-    if (!targetFound) await reject(`unknown drone: ${targetRef}`, 404);
-    const targetResolved = targetFound!;
-    const targetEntry =
-      regAny?.drones?.[targetResolved.id] ?? regAny?.pending?.[targetResolved.id] ?? null;
-    const target = { id: targetResolved.id, name: String(targetEntry?.name ?? targetResolved.id) };
-    const childIds = new Set(fleetChildrenForActor(regAny, actorId).map((item) => item.id));
-    if (
-      !(
-        targetResolved.id === actorId ||
-        childIds.has(targetResolved.id) ||
-        fleetTargetAllowedForSend(actorEntry, actorId, targetResolved.id)
-      )
-    ) {
-      await reject(`target not allowed: ${target.name}`, 403, target);
-    }
-    const liveTarget = regAny?.drones?.[targetResolved.id] ?? null;
-    if (!liveTarget) await reject(`drone "${target.name}" is still starting`, 409, target);
-    const chatName = normalizeChatName((request?.payload as any)?.chat ?? 'default');
-    const result = await stopChatResponse({
-      droneId: targetResolved.id,
-      chatName,
-      droneEntry: liveTarget,
-    });
-    await appendFleetAuditEvent({
-      actor: actorId,
-      actorName,
-      action: 'stop_chat',
-      status: 'accepted',
-      target: target.id,
-      targetName: target.name,
-      meta: {
-        requestId: String(request?.id ?? ''),
-        chat: chatName,
-        mode: result.mode,
-        stopped: result.stopped,
-        stoppedCount: result.stoppedPromptIds.length,
-        clearedCount: result.clearedPromptIds.length,
-      },
-    });
-    return {
-      target,
-      chat: chatName,
-      mode: result.mode,
-      stopped: result.stopped,
-      stoppedPromptIds: result.stoppedPromptIds,
-      clearedPromptIds: result.clearedPromptIds,
-      ...(result.sessionName ? { sessionName: result.sessionName } : {}),
-    };
-  }
-
-  if (!actorConfig.capabilities.includes(FLEET_CAPABILITY_READ))
-    await reject('missing capability: drone:message:read', 403);
-  const sourceRef = String((request?.payload as any)?.from ?? '').trim();
-  const sourceFound = findDroneIdByRef(regAny, sourceRef);
-  if (!sourceFound) await reject(`unknown drone: ${sourceRef}`, 404);
-  const sourceResolved = sourceFound!;
-  const sourceEntry =
-    regAny?.drones?.[sourceResolved.id] ?? regAny?.pending?.[sourceResolved.id] ?? null;
-  const source = { id: sourceResolved.id, name: String(sourceEntry?.name ?? sourceResolved.id) };
-  if (!fleetTargetAllowedForRead(regAny, actorEntry, actorId, sourceResolved.id)) {
-    await reject(`read not allowed for target: ${source.name}`, 403, source);
-  }
-  const chatName = normalizeChatName((request?.payload as any)?.chat ?? 'default');
-  const order: 'asc' | 'desc' =
-    String((request?.payload as any)?.order ?? 'desc')
-      .trim()
-      .toLowerCase() === 'asc'
-      ? 'asc'
-      : 'desc';
-  const limit = clampInt(
-    Number((request?.payload as any)?.limit ?? limits.defaultReadPageSize),
-    1,
-    limits.maxReadPageSize,
-  );
-  const startIndex = decodeFleetCursor((request?.payload as any)?.cursor, order);
-  const messages = await listFleetMessagesForTarget(sourceResolved.id, chatName);
-  const sorted = [...messages].sort((a, b) =>
-    order === 'asc'
-      ? Date.parse(a.createdAt) - Date.parse(b.createdAt)
-      : Date.parse(b.createdAt) - Date.parse(a.createdAt),
-  );
-  const items: typeof sorted = [];
-  let returnedChars = 0;
-  let truncated = false;
-  let nextIndex = startIndex;
-  for (let index = startIndex; index < sorted.length && items.length < limit; index += 1) {
-    const item = sorted[index];
-    const content = String(item?.content ?? '');
-    const nextChars = returnedChars + content.length;
-    if (nextChars > limits.maxReadChars) {
-      if (items.length === 0 && limits.maxReadChars > 0) {
-        items.push({ ...item, content: content.slice(0, limits.maxReadChars) });
-        returnedChars = limits.maxReadChars;
-        nextIndex = index + 1;
-      }
-      truncated = true;
-      break;
-    }
-    items.push(item);
-    returnedChars = nextChars;
-    nextIndex = index + 1;
-  }
-  const hasMore = nextIndex < sorted.length;
-  await appendFleetAuditEvent({
-    actor: actorId,
-    actorName,
-    action: 'read_messages',
-    status: 'accepted',
-    target: source.id,
-    targetName: source.name,
-    meta: {
-      requestId: String(request?.id ?? ''),
-      chat: chatName,
-      returned: items.length,
-      returnedChars,
-      truncated,
-    },
-  });
-  return {
-    source,
-    chat: chatName,
-    order,
-    items,
-    nextCursor: hasMore ? encodeFleetCursor(nextIndex, order) : null,
-    hasMore,
-    truncated,
-    budget: {
-      maxChars: limits.maxReadChars,
-      returnedChars,
-    },
-  };
-}
-
-async function runFleetReconcilerCycle(): Promise<void> {
-  if (FLEET_RECONCILE_BUSY) return;
-  FLEET_RECONCILE_BUSY = true;
-  try {
-    await drainPlaybookRunLaunchQueue();
-    const regAny = await loadFleetReconcilerSnapshot();
-    const actorIds = new Set(Object.keys(regAny.drones ?? {}));
-    FLEET_SNAPSHOT_DELIVERY_CACHE.prune(actorIds);
-    const hasNewActor = Array.from(actorIds).some(
-      (actorId) => !FLEET_TASK_KNOWN_ACTOR_IDS.has(actorId),
-    );
-    FLEET_TASK_KNOWN_ACTOR_IDS = actorIds;
-    const pollTasks =
-      hasNewActor ||
-      Date.now() - FLEET_TASK_POLL_LAST_COMPLETED_AT >= FLEET_TASK_IDLE_POLL_INTERVAL_MS;
-    let taskWorkObserved = false;
-    for (const [actorId, actorEntry] of Object.entries(regAny?.drones ?? {})) {
-      const fleetEnabled = fleetActorConfig(actorEntry).enabled;
-      let daemon: Awaited<ReturnType<typeof resolveDroneDaemonClientForEntry>> | null = null;
-      if (pollTasks || fleetEnabled) {
-        try {
-          daemon = await resolveDroneDaemonClientForEntry(actorEntry);
-        } catch {
-          daemon = null;
-        }
-      }
-      const daemonOverride = pollTasks || fleetEnabled ? daemon : undefined;
-      await syncFleetPolicySnapshotToDrone(
-        String(actorId),
-        actorEntry,
-        regAny,
-        daemonOverride,
-        FLEET_SNAPSHOT_DELIVERY_CACHE,
-      );
-      await syncTaskStateSnapshotToDrone(
-        String(actorId),
-        actorEntry,
-        regAny,
-        daemonOverride,
-        FLEET_SNAPSHOT_DELIVERY_CACHE,
-      );
-      if (pollTasks) {
-        const created = await drainPendingTaskCreatesForDrone(
-          String(actorId),
-          actorEntry,
-          regAny,
-          daemon,
-        );
-        const deleted = await drainPendingTaskDeletesForDrone(
-          String(actorId),
-          actorEntry,
-          regAny,
-          daemon,
-        );
-        taskWorkObserved ||= created || deleted;
-      }
-      if (!daemon) continue;
-      if (!fleetEnabled) continue;
-      let requests: any[] = [];
-      try {
-        const [queued, running] = await Promise.all([
-          droneFleetRequestList(daemon.client, { state: 'queued' }).catch(() => ({ requests: [] })),
-          droneFleetRequestList(daemon.client, { state: 'running' }).catch(() => ({
-            requests: [],
-          })),
-        ]);
-        requests = [
-          ...(Array.isArray(queued?.requests) ? queued.requests : []),
-          ...(Array.isArray(running?.requests) ? running.requests : []),
-        ];
-      } catch {
-        requests = [];
-      }
-      for (const request of requests) {
-        const requestId = String(request?.id ?? '').trim();
-        if (!requestId) continue;
-        try {
-          const claimed = await droneFleetRequestClaim(daemon.client, requestId).catch(() => null);
-          const claimedRequest = claimed?.request ?? null;
-          if (!claimedRequest || String(claimedRequest?.state ?? '') !== 'running') continue;
-          const result = await processFleetRequest(String(actorId), actorEntry, claimedRequest);
-          await droneFleetRequestResolve(daemon.client, requestId, { state: 'done', result });
-        } catch (error: any) {
-          const message = error?.message ?? String(error);
-          await droneFleetRequestResolve(daemon.client, requestId, {
-            state: 'failed',
-            error: message,
-          }).catch(() => {});
-          hubLog('warn', 'fleet request failed', {
-            actorId: String(actorId),
-            requestId,
-            error: message,
-          });
-        }
-      }
-    }
-    // Measure the interval from completion. Large fleets can take longer than
-    // the nominal interval to scan; measuring from start would make every
-    // subsequent reconciler cycle immediately launch another full task scan.
-    if (pollTasks) {
-      const nextIntervalMs = taskWorkObserved
-        ? FLEET_TASK_ACTIVE_POLL_INTERVAL_MS
-        : FLEET_TASK_IDLE_POLL_INTERVAL_MS;
-      FLEET_TASK_POLL_LAST_COMPLETED_AT =
-        Date.now() - (FLEET_TASK_IDLE_POLL_INTERVAL_MS - nextIntervalMs);
-    }
-  } finally {
-    FLEET_RECONCILE_BUSY = false;
-  }
+  const error = new Error(message) as Error & { status?: number };
+  error.status = status;
+  return error;
 }
 
 async function handleFsUploadRoute(opts: {
@@ -5811,28 +4963,6 @@ type PlaybookDefinition = {
   updatedAt?: string;
 };
 
-type TaskTemplateContext = {
-  task: {
-    id: string;
-    title: string;
-    description: string;
-    typeId: string;
-    typeLabel: string;
-    laneId: string;
-    laneTitle: string;
-    repoPath: string;
-    droneId: string;
-    droneName: string;
-    playbookId: string;
-    playbookLabel: string;
-    chatName: string;
-    prompt: string;
-    promptId: string;
-    messageId: string;
-    createdAt: string;
-    updatedAt: string;
-  };
-};
 
 type PlaybookRunStatus = 'starting' | 'running' | 'completed' | 'failed';
 type PlaybookRunQueueState = 'queued' | 'waiting' | 'launching' | 'error';
@@ -6020,93 +5150,6 @@ async function reconcilePendingHostMirrorApply(opts: {
       error: e?.message ?? String(e),
     };
   }
-}
-
-function buildTaskTemplateContext(
-  task: ReturnType<typeof findScopedTaskById>,
-): TaskTemplateContext | null {
-  if (!task) return null;
-  return {
-    task: {
-      id: task.id,
-      title: task.title,
-      description: task.description,
-      typeId: task.typeId,
-      typeLabel: task.typeLabel,
-      laneId: task.laneId,
-      laneTitle: task.laneTitle,
-      repoPath: String(task.repoPath ?? '').trim(),
-      droneId: String(task.droneId ?? '').trim(),
-      droneName: String(task.droneName ?? '').trim(),
-      playbookId: String(task.playbookId ?? '').trim(),
-      playbookLabel: String(task.playbookLabel ?? '').trim(),
-      chatName: String(task.chatName ?? '').trim(),
-      prompt: String(task.prompt ?? ''),
-      promptId: String(task.promptId ?? '').trim(),
-      messageId: String(task.messageId ?? '').trim(),
-      createdAt: task.createdAt,
-      updatedAt: task.updatedAt,
-    },
-  };
-}
-
-function resolveTaskTemplatePath(
-  context: TaskTemplateContext,
-  keyPathRaw: string,
-): { found: boolean; value: string } {
-  const keyPath = String(keyPathRaw ?? '').trim();
-  if (!keyPath) return { found: false, value: '' };
-  const parts = keyPath.split('.').filter(Boolean);
-  let current: unknown = context;
-  for (const part of parts) {
-    if (!current || typeof current !== 'object' || Array.isArray(current))
-      return { found: false, value: '' };
-    if (!Object.prototype.hasOwnProperty.call(current, part)) return { found: false, value: '' };
-    current = (current as Record<string, unknown>)[part];
-  }
-  if (current == null) return { found: true, value: '' };
-  if (typeof current === 'string') return { found: true, value: current };
-  if (typeof current === 'number' || typeof current === 'boolean')
-    return { found: true, value: String(current) };
-  return { found: true, value: '' };
-}
-
-function renderTaskTemplateString(
-  raw: unknown,
-  context: TaskTemplateContext | null | undefined,
-): string {
-  const source = String(raw ?? '');
-  if (!context || !source.includes('{{')) return source;
-  return source.replace(/\{\{\s*([a-zA-Z0-9_.-]+)\s*\}\}/g, (match, keyPath) => {
-    const resolved = resolveTaskTemplatePath(context, keyPath);
-    return resolved.found ? resolved.value : match;
-  });
-}
-
-function renderPlaybookMessagesForTask(
-  playbook: PlaybookDefinition,
-  context: TaskTemplateContext | null,
-): PlaybookMessageDefinition[] {
-  return playbook.messages
-    .map((message) => ({
-      ...message,
-      prompt: renderTaskTemplateString(message.prompt, context),
-    }))
-    .filter((message) => message.prompt.trim().length > 0);
-}
-
-function renderPlaybookActionsForTask(
-  playbook: PlaybookDefinition,
-  context: TaskTemplateContext | null,
-): Array<{ id: string; label: string; messages: string[] }> {
-  return playbook.actions
-    .map((action) => ({
-      ...action,
-      messages: action.messages
-        .map((message) => renderTaskTemplateString(message, context))
-        .filter((message) => message.trim().length > 0),
-    }))
-    .filter((action) => action.label.trim().length > 0 && action.messages.length > 0);
 }
 
 const PLAYBOOK_LABEL_MAX_CHARS = 72;
@@ -6598,7 +5641,7 @@ function writePlaybookRunQueueItems(regAny: any, itemsRaw: PlaybookRunQueueItem[
 }
 
 async function canonicalPlaybookQueueItems(registry?: any): Promise<PlaybookRunQueueItem[]> {
-  const store = await fleetWorkflowStoreOrCompatibility();
+  const store = await workflowStoreOrCompatibility();
   if (!store) return readPlaybookRunQueueItems(registry ?? (await loadRegistry()));
   if (!store.isQueueBackfilled()) {
     const legacyRegistry = registry?.playbookRunQueue
@@ -6612,7 +5655,7 @@ async function canonicalPlaybookQueueItems(registry?: any): Promise<PlaybookRunQ
 }
 
 async function enqueueCanonicalPlaybookQueueItem(item: PlaybookRunQueueItem): Promise<void> {
-  const store = await fleetWorkflowStoreOrCompatibility();
+  const store = await workflowStoreOrCompatibility();
   if (store) {
     if (!store.isQueueBackfilled()) {
       await store.backfillQueue(readPlaybookRunQueueItems(await loadRegistryCompatibilityBase()));
@@ -6898,7 +5941,7 @@ async function drainPlaybookRunLaunchQueue(): Promise<void> {
     }
   }
   const items = await canonicalPlaybookQueueItems(regLatest);
-  const store = await fleetWorkflowStoreOrCompatibility();
+  const store = await workflowStoreOrCompatibility();
   const claimedSerialPlaybookIds = new Set<string>();
   const plans: Array<{
     queueItemId: string;
@@ -8905,145 +7948,6 @@ function droneChatStopError(reason: DroneChatStopReason): string {
   return reason === 'restart'
     ? STOPPED_BY_LIFECYCLE_RESTART_ERROR
     : STOPPED_BY_LIFECYCLE_STOP_ERROR;
-}
-
-type FleetWorkDerivedState = 'queued' | 'running' | 'failed' | 'stuck';
-
-function deriveFleetWorkState(item: PendingPrompt): FleetWorkDerivedState {
-  if (item.state === 'failed') return 'failed';
-  const staleState = stalePendingPromptState({
-    state: item.state,
-    updatedAt: item.updatedAt,
-    at: item.at,
-    enqueueTimeoutMs: defaultPromptEnqueueTimeoutMs(),
-  });
-  if (staleState === 'sending' || staleState === 'sent') return 'stuck';
-  if (item.state === 'queued') return 'queued';
-  return 'running';
-}
-
-function buildFleetWorkPayload(regAny: any) {
-  const items: Array<{
-    key: string;
-    source: 'drone' | 'startup';
-    droneId: string;
-    droneName: string;
-    chatName: string;
-    promptId: string;
-    prompt: string;
-    cwd?: string | null;
-    at: string;
-    updatedAt: string | null;
-    state: PendingPromptState;
-    derivedState: FleetWorkDerivedState;
-    error: string | null;
-    runtime: DroneRuntime;
-    blockedByAutomation: boolean;
-    attachmentsCount: number;
-    canCancel: boolean;
-    canRetry: boolean;
-  }> = [];
-
-  for (const [droneIdRaw, entry] of Object.entries(regAny?.drones ?? {}) as Array<[string, any]>) {
-    const droneId = normalizeDroneIdentity(droneIdRaw);
-    if (!droneId || !entry || typeof entry !== 'object') continue;
-    const droneName = String(entry?.name ?? droneId).trim() || droneId;
-    const runtime = droneRuntime(entry);
-    const chats =
-      entry?.chats && typeof entry.chats === 'object' ? Object.entries(entry.chats) : [];
-    for (const [chatNameRaw, chatEntry] of chats as Array<[string, any]>) {
-      const chatName = normalizeChatName(chatNameRaw);
-      if (!chatName) continue;
-      for (const item of pendingPromptsFromChatEntry(chatEntry)) {
-        const derivedState = deriveFleetWorkState(item);
-        const attachmentsCount = Array.isArray(item.attachments) ? item.attachments.length : 0;
-        items.push({
-          key: `${droneId}:${chatName}:${item.id}`,
-          source: 'drone',
-          droneId,
-          droneName,
-          chatName,
-          promptId: item.id,
-          prompt: item.prompt,
-          ...(typeof item.cwd === 'string' || item.cwd === null ? { cwd: item.cwd } : {}),
-          at: item.at,
-          updatedAt: item.updatedAt ?? null,
-          state: item.state,
-          derivedState,
-          error: typeof item.error === 'string' ? item.error : null,
-          runtime,
-          blockedByAutomation: Boolean(item.blockedByAutomation),
-          attachmentsCount,
-          canCancel: item.state === 'queued',
-          canRetry:
-            !item.automation &&
-            item.state === 'failed' &&
-            attachmentsCount === 0 &&
-            Boolean(item.prompt.trim()),
-        });
-      }
-    }
-  }
-
-  for (const [droneIdRaw, pendingEntry] of Object.entries(regAny?.pending ?? {}) as Array<
-    [string, any]
-  >) {
-    const droneId = normalizeDroneIdentity(droneIdRaw);
-    if (!droneId || regAny?.drones?.[droneId]) continue;
-    const droneName = String(pendingEntry?.name ?? droneId).trim() || droneId;
-    const runtime = normalizeDroneRuntime((pendingEntry as any)?.runtime);
-    for (const item of normalizePendingStartupPrompts(
-      (pendingEntry as any)?.startupQueuedPrompts,
-    )) {
-      const pendingPrompt = startupPromptToPendingPrompt(item);
-      items.push({
-        key: `${droneId}:${item.chatName}:${item.id}`,
-        source: 'startup',
-        droneId,
-        droneName,
-        chatName: item.chatName,
-        promptId: item.id,
-        prompt: item.prompt,
-        ...(typeof pendingPrompt.cwd === 'string' || pendingPrompt.cwd === null
-          ? { cwd: pendingPrompt.cwd }
-          : {}),
-        at: pendingPrompt.at,
-        updatedAt: pendingPrompt.updatedAt ?? null,
-        state: pendingPrompt.state,
-        derivedState: deriveFleetWorkState(pendingPrompt),
-        error: typeof pendingPrompt.error === 'string' ? pendingPrompt.error : null,
-        runtime,
-        blockedByAutomation: false,
-        attachmentsCount: 0,
-        canCancel: false,
-        canRetry: pendingPrompt.state === 'failed' && Boolean(pendingPrompt.prompt.trim()),
-      });
-    }
-  }
-
-  const rank = { stuck: 0, running: 1, queued: 2, failed: 3 } satisfies Record<
-    FleetWorkDerivedState,
-    number
-  >;
-  items.sort((a, b) => {
-    const byState = rank[a.derivedState] - rank[b.derivedState];
-    if (byState !== 0) return byState;
-    const aMs = Date.parse(a.updatedAt ?? a.at ?? '');
-    const bMs = Date.parse(b.updatedAt ?? b.at ?? '');
-    return (Number.isFinite(bMs) ? bMs : 0) - (Number.isFinite(aMs) ? aMs : 0);
-  });
-
-  return {
-    ok: true as const,
-    counts: {
-      total: items.length,
-      queued: items.filter((item) => item.derivedState === 'queued').length,
-      running: items.filter((item) => item.derivedState === 'running').length,
-      failed: items.filter((item) => item.derivedState === 'failed').length,
-      stuck: items.filter((item) => item.derivedState === 'stuck').length,
-    },
-    items,
-  };
 }
 
 async function clearDroneHubState(droneIdRaw: string): Promise<void> {
@@ -12634,14 +11538,6 @@ function getPromptEnqueueDisposition(opts: {
   };
 }
 
-function describePromptEnqueueConflict(disposition: PromptEnqueueDisposition): string {
-  if (disposition.blockedByAutomation) return 'message would be queued behind automation';
-  if (disposition.hasPriorActive || disposition.waitingForSession)
-    return 'chat already has a pending message awaiting a response';
-  if (disposition.hasPriorQueued) return 'chat already has a queued message';
-  return 'message would be queued';
-}
-
 type UnifiedPromptCreateOpts = {
   group?: string | null;
   repoPath?: string | null;
@@ -12658,7 +11554,6 @@ async function createOrEnqueuePromptUnified(opts: {
   automation?: PromptAutomationMeta | null;
   cwd?: string | null;
   submittedAt?: string | null;
-  allowQueued?: boolean;
   mark?: (name: string) => void;
 }): Promise<
   | { kind: 'enqueued'; id: string; pendingState: PendingPromptState; blockedByAutomation: boolean }
@@ -12682,10 +11577,6 @@ async function createOrEnqueuePromptUnified(opts: {
   );
   let regSnap: any = await loadRegistry();
   opts.mark?.('loadRegistry');
-  if (opts.allowQueued === false && regSnap?.pending?.[droneId] && !regSnap?.drones?.[droneId]) {
-    regSnap = await loadRegistry();
-    opts.mark?.('reloadRegistry');
-  }
   if (regSnap?.drones?.[droneId]) {
     let liveDroneEntry = regSnap?.drones?.[droneId] ?? null;
     if (!liveDroneEntry) return { kind: 'error', status: 404, error: `unknown drone: ${droneId}` };
@@ -12708,22 +11599,6 @@ async function createOrEnqueuePromptUnified(opts: {
           'Docker snapshot is in progress for this chat; wait for it to finish before sending another message',
       };
     }
-    if (opts.allowQueued === false) {
-      const disposition = getPromptEnqueueDisposition({
-        droneId,
-        chatName,
-        droneEntry: liveDroneEntry,
-        chatEntry,
-        automation: opts.automation,
-      });
-      if (disposition.defer) {
-        return {
-          kind: 'error',
-          status: 409,
-          error: `${describePromptEnqueueConflict(disposition)}; fleet send requires immediate delivery`,
-        };
-      }
-    }
     const r = await enqueuePrompt({
       id: fallbackId,
       droneId,
@@ -12733,7 +11608,7 @@ async function createOrEnqueuePromptUnified(opts: {
       automation: opts.automation,
       cwd: opts.cwd ?? null,
       submittedAt: opts.submittedAt ?? null,
-      deliveryMode: opts.allowQueued === false || isAutomationPrompt ? 'immediate' : 'background',
+      deliveryMode: isAutomationPrompt ? 'immediate' : 'background',
       mark: opts.mark,
     });
     return {
@@ -12747,13 +11622,6 @@ async function createOrEnqueuePromptUnified(opts: {
   // If the drone is still provisioning, stage prompt rows on the pending entry and
   // migrate them into normal chat `pendingPrompts` once startup finishes.
   if (regSnap?.pending?.[droneId] && !regSnap?.drones?.[droneId]) {
-    if (opts.allowQueued === false) {
-      return {
-        kind: 'error',
-        status: 409,
-        error: `drone "${droneId}" is still starting; fleet send requires immediate delivery`,
-      };
-    }
     if (attachments.length > 0) {
       return {
         kind: 'error',
@@ -12842,7 +11710,6 @@ const { dequeueProvisioning, enqueueProvisioning, enqueueProvisioningForAllPendi
     syncRepoAgentsInstructionsForDrone,
     syncSkillLibraryForDrone,
     syncSharedPathsToDrone: (opts) => syncSetService.applyAllSyncSetsToDrone(opts),
-    syncTaskStateSnapshotToDrone,
   });
 
 function resolveDroneCliPath(): string {
@@ -12914,26 +11781,15 @@ async function upgradeDroneDaemonInContainer(opts: {
         'failed activating staged daemon runtime in container',
     );
   }
-  const installFleetCli = await dvmExec(opts.containerName, 'bash', [
+  const removeRetiredClis = await dvmExec(opts.containerName, 'bash', [
     '-lc',
-    installFleetCliScript(),
+    removeRetiredContainerCliScripts(),
   ]);
-  if (installFleetCli.code !== 0) {
+  if (removeRetiredClis.code !== 0) {
     throw new Error(
-      installFleetCli.stderr ||
-        installFleetCli.stdout ||
-        'failed installing fleet CLI in container',
-    );
-  }
-  const installTasksCli = await dvmExec(opts.containerName, 'bash', [
-    '-lc',
-    installTasksCliScript(),
-  ]);
-  if (installTasksCli.code !== 0) {
-    throw new Error(
-      installTasksCli.stderr ||
-        installTasksCli.stdout ||
-        'failed installing tasks CLI in container',
+      removeRetiredClis.stderr ||
+        removeRetiredClis.stdout ||
+        'failed removing retired CLIs from container',
     );
   }
   const installBlipCli = await dvmExec(opts.containerName, 'bash', ['-lc', installBlipCliScript()]);
@@ -13867,9 +12723,6 @@ async function removeDroneById(opts: { id: string; keepVolume: boolean; forget: 
     removedRegistry = (await permanentlyDeleteCanonicalDrone({ droneId, lifecycleState: 'real' }))
       .removedLifecycle;
     if (removedRegistry) {
-      await transformStoredKanbanBoardSettings(
-        (board) => removeTasksForScope(board, 'drone', droneId).board,
-      );
       await revokeMcpAccessTokensForDrone(droneId);
       await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, {
         droneId,
@@ -14353,9 +13206,6 @@ async function archiveDroneById(opts: {
     archiveRetention: retention,
     archiveRuntimePolicy: runtimePolicy,
   });
-  await transformStoredKanbanBoardSettings(
-    (board) => removeTasksForScope(board, 'drone', droneId).board,
-  );
   return {
     hadEntry: true,
     archived: true,
@@ -14892,7 +13742,7 @@ async function ensureChatEntry(opts: { droneId: string; chatName: string }): Pro
     if (!drone) throw new Error(`unknown drone: ${opts.droneId}`);
     drone.chats = drone.chats ?? {};
     if (!drone.chats[opts.chatName]) {
-      // Fleet-created drones default to Codex; other drones keep Cursor.
+      // Child drones default to Codex; other drones keep Cursor.
       // NOTE: chatId is intentionally omitted (it is created lazily on first prompt).
       drone.chats[opts.chatName] = buildNewChatEntry({
         droneEntry: drone,
@@ -17019,17 +15869,17 @@ export async function startDroneHubApiServer(opts: {
     }
   }
   triggerArchiveCleanup('startup');
-  if (!FLEET_RECONCILE_INTERVAL) {
-    FLEET_RECONCILE_INTERVAL = setInterval(() => {
-      void runFleetReconcilerCycle();
-    }, FLEET_RECONCILE_INTERVAL_MS);
+  if (!PLAYBOOK_RUN_QUEUE_INTERVAL) {
+    PLAYBOOK_RUN_QUEUE_INTERVAL = setInterval(() => {
+      void runPlaybookRunQueueCycle();
+    }, PLAYBOOK_RUN_QUEUE_INTERVAL_MS);
     try {
-      (FLEET_RECONCILE_INTERVAL as any).unref?.();
+      (PLAYBOOK_RUN_QUEUE_INTERVAL as any).unref?.();
     } catch {
       // ignore
     }
   }
-  void runFleetReconcilerCycle();
+  void runPlaybookRunQueueCycle();
   startRegistryBackupScheduler();
 
   type TerminalWebSocketContext = {
@@ -21082,58 +19932,6 @@ export async function startDroneHubApiServer(opts: {
         }
       }
 
-      if (pathname === '/api/settings/kanban-board') {
-        if (method === 'GET') {
-          json(res, 200, await resolveKanbanBoardSettingsResponse());
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            await upsertStoredKanbanBoardSettings(body?.kanbanBoard, body?.expectedUpdatedAt);
-          } catch (e: any) {
-            if (e instanceof KanbanBoardSettingsConflictError) {
-              json(res, 409, {
-                ok: false,
-                error: e.message,
-                kanbanBoard: e.board,
-                updatedAt: e.updatedAt,
-              });
-              return;
-            }
-            throw e;
-          }
-          json(res, 200, await resolveKanbanBoardSettingsResponse());
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/task-playbook-buttons') {
-        if (method === 'GET') {
-          json(res, 200, await resolveTaskPlaybookButtonSettingsResponse());
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          await upsertStoredTaskPlaybookButtonSettings(body?.taskPlaybookButtons);
-          json(res, 200, await resolveTaskPlaybookButtonSettingsResponse());
-          return;
-        }
-      }
 
       if (pathname === '/api/settings/hub/logs') {
         if (method === 'GET') {
@@ -21588,193 +20386,7 @@ export async function startDroneHubApiServer(opts: {
         }
       }
 
-      // POST /api/tasks/title-from-message
-      // Suggests a human-readable task title from pasted task text.
-      if (method === 'POST' && pathname === '/api/tasks/title-from-message') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        const message = String(body?.message ?? '').trim();
-        if (!message) {
-          json(res, 400, { ok: false, error: 'missing message' });
-          return;
-        }
-        const sourceRaw = typeof body?.source === 'string' ? body.source.trim() : '';
-        const source = sourceRaw ? sourceRaw.slice(0, 64) : null;
-        const messageLength = message.length;
-
-        let selectedProvider: LlmProviderId | null = null;
-        try {
-          const { provider } = await resolveEffectiveLlmProvider();
-          selectedProvider = provider;
-          const resolved = await resolveEffectiveProviderApiKeySettings(provider);
-          if (!resolved.apiKey) {
-            await logProviderApiKeyResolution(
-              'warn',
-              'task-title-from-message rejected: missing provider key',
-              provider,
-              {
-                pathname,
-                method,
-                source,
-                messageLength,
-              },
-            );
-            json(res, 412, {
-              ok: false,
-              error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
-            });
-            return;
-          }
-          const title = await suggestTaskTitleFromMessage(message, {
-            provider,
-            apiKey: resolved.apiKey,
-          });
-          if (source) {
-            hubLog('info', 'task-title-from-message suggested', {
-              provider,
-              source,
-              suggestedTitle: title,
-              messageLength,
-            });
-          }
-          json(res, 200, { ok: true, title });
-          return;
-        } catch (e: any) {
-          if (selectedProvider) {
-            await logProviderApiKeyResolution(
-              'error',
-              'task-title-from-message request failed',
-              selectedProvider,
-              {
-                pathname,
-                method,
-                source,
-                messageLength,
-                model: String(process.env.DRONE_HUB_TASK_TITLE_MODEL ?? '').trim() || null,
-                error: e?.message ?? String(e),
-              },
-            );
-          } else {
-            hubLog('error', 'task-title-from-message request failed', {
-              ...llmProviderEnvLogMeta(),
-              source,
-              messageLength,
-              model: String(process.env.DRONE_HUB_TASK_TITLE_MODEL ?? '').trim() || null,
-              error: e?.message ?? String(e),
-            });
-          }
-          json(res, 500, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-      }
-
       const parts = pathname.split('/').filter(Boolean);
-
-      // POST /api/tasks/:taskId/run-button/:buttonId
-      if (
-        method === 'POST' &&
-        parts.length === 5 &&
-        parts[0] === 'api' &&
-        parts[1] === 'tasks' &&
-        parts[3] === 'run-button'
-      ) {
-        const taskId = String(decodeURIComponent(parts[2] ?? '')).trim();
-        const buttonId = String(decodeURIComponent(parts[4] ?? '')).trim();
-        if (!taskId) {
-          json(res, 400, { ok: false, error: 'missing task id' });
-          return;
-        }
-        if (!buttonId) {
-          json(res, 400, { ok: false, error: 'missing button id' });
-          return;
-        }
-        const regAny: any = await loadRegistry();
-        const board = getTaskBoardStateFromRegistry(regAny);
-        const task = findScopedTaskById(board, taskId);
-        if (!task) {
-          json(res, 404, { ok: false, error: `unknown task: ${taskId}` });
-          return;
-        }
-        const repoPath = String(task.repoPath ?? '').trim();
-        if (!repoPath) {
-          json(res, 409, { ok: false, error: 'task does not have a repo path' });
-          return;
-        }
-        if (!path.isAbsolute(repoPath)) {
-          json(res, 409, { ok: false, error: 'task repo path must be absolute' });
-          return;
-        }
-        const taskButtons = (await resolveTaskPlaybookButtonSettingsResponse()).taskPlaybookButtons;
-        const button = taskButtons.find((item) => item.id === buttonId) ?? null;
-        if (!button) {
-          json(res, 404, { ok: false, error: `unknown task playbook button: ${buttonId}` });
-          return;
-        }
-        if (!button.taskTypeIds.includes(task.typeId)) {
-          json(res, 409, {
-            ok: false,
-            error: `button "${button.label}" is not available for task type "${task.typeId}"`,
-          });
-          return;
-        }
-        const playbook =
-          (await listCanonicalPlaybookDefinitions()).find(
-            (item) => item.id === button.playbookId,
-          ) ?? null;
-        if (!playbook) {
-          json(res, 404, { ok: false, error: `unknown playbook: ${button.playbookId}` });
-          return;
-        }
-        const taskTemplateContext = buildTaskTemplateContext(task);
-        const renderedMessages = renderPlaybookMessagesForTask(playbook, taskTemplateContext);
-        const renderedActions = renderPlaybookActionsForTask(playbook, taskTemplateContext);
-        if (renderedMessages.length === 0) {
-          json(res, 409, {
-            ok: false,
-            error: 'rendered playbook messages are empty for this task',
-          });
-          return;
-        }
-        try {
-          const launched = await startPlaybookRunLaunch({
-            playbookId: playbook.id,
-            repoPath,
-            pullHostBranchBeforeCreate: false,
-            renderedMessages,
-            renderedActions,
-          });
-          json(res, 202, {
-            ...launched,
-            ok: true,
-            taskId: task.id,
-            button: {
-              id: button.id,
-              label: button.label,
-            },
-          });
-          return;
-        } catch (e: any) {
-          json(
-            res,
-            /unknown playbook/i.test(e?.message ?? '')
-              ? 404
-              : /playbook has no messages/i.test(e?.message ?? '')
-                ? 409
-                : 500,
-            {
-              ok: false,
-              error: e?.message ?? String(e),
-            },
-          );
-          return;
-        }
-      }
 
       if (parts.length === 3 && parts[0] === 'api' && parts[1] === 'skills') {
         const skillId = decodeURIComponent(parts[2]);
@@ -21928,7 +20540,6 @@ export async function startDroneHubApiServer(opts: {
           return;
         }
       }
-
       if (
         parts.length === 4 &&
         parts[0] === 'api' &&
@@ -22264,18 +20875,6 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
-      // GET /api/fleet/work
-      if (
-        method === 'GET' &&
-        parts.length === 3 &&
-        parts[0] === 'api' &&
-        parts[1] === 'fleet' &&
-        parts[2] === 'work'
-      ) {
-        const regAny: any = await loadRegistry();
-        json(res, 200, buildFleetWorkPayload(regAny));
-        return;
-      }
 
       // GET /api/fleet/actors/:drone
       if (
@@ -22297,63 +20896,6 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
-      // POST /api/fleet/actors/:drone/config
-      if (
-        method === 'POST' &&
-        parts.length === 5 &&
-        parts[0] === 'api' &&
-        parts[1] === 'fleet' &&
-        parts[2] === 'actors' &&
-        parts[4] === 'config'
-      ) {
-        const droneRef = decodeURIComponent(parts[3]);
-        const resolved = await resolveDroneOrRespond(res, droneRef);
-        if (!resolved) return;
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (error: any) {
-          json(res, 400, { ok: false, error: error?.message ?? String(error) });
-          return;
-        }
-        try {
-          await updateDroneFleetMetadata({
-            droneId: resolved.id,
-            transform: (fleet) => {
-              const current = fleetActorConfig({ fleet });
-              return setFleetActorConfig(
-                { fleet },
-                {
-                  enabled: body?.enabled == null ? current.enabled : body.enabled === true,
-                  capabilities: Array.isArray(body?.capabilities)
-                    ? sanitizeFleetCapabilities(body.capabilities)
-                    : current.capabilities,
-                  readScopes: Array.isArray(body?.readScopes)
-                    ? sanitizeFleetReadScopes(body.readScopes)
-                    : current.readScopes,
-                  assigned: current.assigned,
-                  quotas:
-                    body?.quotas && typeof body.quotas === 'object' && !Array.isArray(body.quotas)
-                      ? sanitizeFleetQuotas(body.quotas)
-                      : current.quotas,
-                  createdBy: current.createdBy,
-                  createdAt: current.createdAt,
-                },
-              ).fleet;
-            },
-          });
-          const regAny: any = await loadRegistry();
-          const actor = regAny?.drones?.[resolved.id] ?? null;
-          if (actor) await syncFleetPolicySnapshotToDrone(resolved.id, actor);
-          json(res, 200, fleetActorPayload(regAny, resolved.id));
-        } catch (error: any) {
-          json(res, Number((error as any)?.status ?? 500), {
-            ok: false,
-            error: error?.message ?? String(error),
-          });
-        }
-        return;
-      }
 
       // POST /api/fleet/actors/:drone/parent
       if (
@@ -22381,14 +20923,8 @@ export async function startDroneHubApiServer(opts: {
               ? body.parent.trim()
               : String(body.parent ?? '').trim();
         try {
-          let previousParentId: string | null = null;
           let nextParentId: string | null = null;
           const regSnapshot = await loadRegistry();
-          const current = fleetActorConfig(resolved.drone);
-          previousParentId =
-            typeof current.createdBy === 'string' && current.createdBy.trim()
-              ? current.createdBy.trim()
-              : null;
           if (!parentRef) {
             nextParentId = null;
           } else {
@@ -22404,35 +20940,8 @@ export async function startDroneHubApiServer(opts: {
           }
           await updateDroneFleetMetadata({
             droneId: resolved.id,
-            transform: (fleet) => {
-              const latest = fleetActorConfig({ fleet });
-              return setFleetActorConfig(
-                { fleet },
-                {
-                  enabled: latest.enabled,
-                  capabilities: latest.capabilities,
-                  readScopes: latest.readScopes,
-                  assigned: latest.assigned,
-                  quotas: latest.quotas,
-                  createdBy: nextParentId,
-                  createdAt: latest.createdAt,
-                },
-              ).fleet;
-            },
+            transform: (fleet) => ({ ...fleet, createdBy: nextParentId }),
           });
-          const regAny: any = await loadRegistry();
-          const idsToSync = Array.from(
-            new Set(
-              [resolved.id, previousParentId, nextParentId]
-                .map((item) => String(item ?? '').trim())
-                .filter(Boolean),
-            ),
-          );
-          for (const actorId of idsToSync) {
-            const actor = regAny?.drones?.[actorId] ?? null;
-            if (!actor) continue;
-            await syncFleetPolicySnapshotToDrone(actorId, actor);
-          }
           json(res, 200, { ok: true, id: resolved.id, parentId: nextParentId });
         } catch (error: any) {
           json(res, Number((error as any)?.status ?? 500), {
@@ -22477,29 +20986,10 @@ export async function startDroneHubApiServer(opts: {
             droneId: resolved.id,
             transform: (fleet) => {
               const current = fleetActorConfig({ fleet });
-              return setFleetActorConfig(
-                { fleet },
-                {
-                  enabled: true,
-                  capabilities: Array.from(
-                    new Set([
-                      ...current.capabilities,
-                      FLEET_CAPABILITY_SEND,
-                      FLEET_CAPABILITY_READ,
-                    ]),
-                  ),
-                  readScopes: Array.from(new Set([...current.readScopes, 'assigned'])),
-                  assigned: Array.from(new Set([...current.assigned, targetFound.id])),
-                  quotas: current.quotas,
-                  createdBy: current.createdBy,
-                  createdAt: current.createdAt,
-                },
-              ).fleet;
+              return { ...fleet, assigned: Array.from(new Set([...current.assigned, targetFound.id])) };
             },
           });
           const regAny: any = await loadRegistry();
-          const actor = regAny?.drones?.[resolved.id] ?? null;
-          if (actor) await syncFleetPolicySnapshotToDrone(resolved.id, actor);
           json(res, 200, fleetActorPayload(regAny, resolved.id));
         } catch (error: any) {
           json(res, Number((error as any)?.status ?? 500), {
@@ -22531,23 +21021,10 @@ export async function startDroneHubApiServer(opts: {
             droneId: resolved.id,
             transform: (fleet) => {
               const current = fleetActorConfig({ fleet });
-              return setFleetActorConfig(
-                { fleet },
-                {
-                  enabled: current.enabled,
-                  capabilities: current.capabilities,
-                  readScopes: current.readScopes,
-                  assigned: current.assigned.filter((id) => id !== targetId),
-                  quotas: current.quotas,
-                  createdBy: current.createdBy,
-                  createdAt: current.createdAt,
-                },
-              ).fleet;
+              return { ...fleet, assigned: current.assigned.filter((id) => id !== targetId) };
             },
           });
           const regAny: any = await loadRegistry();
-          const actor = regAny?.drones?.[resolved.id] ?? null;
-          if (actor) await syncFleetPolicySnapshotToDrone(resolved.id, actor);
           json(res, 200, fleetActorPayload(regAny, resolved.id));
         } catch (error: any) {
           json(res, Number((error as any)?.status ?? 500), {
@@ -22558,29 +21035,6 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
-      // GET /api/fleet/audit
-      if (
-        method === 'GET' &&
-        parts.length === 3 &&
-        parts[0] === 'api' &&
-        parts[1] === 'fleet' &&
-        parts[2] === 'audit'
-      ) {
-        const actorFilter = String(u.searchParams.get('actor') ?? '').trim();
-        const targetFilter = String(u.searchParams.get('target') ?? '').trim();
-        const actionFilter = String(u.searchParams.get('action') ?? '').trim();
-        const statusFilter = String(u.searchParams.get('status') ?? '').trim();
-        const limit = clampInt(Number(u.searchParams.get('limit') ?? 100), 1, 200);
-        const items = await canonicalFleetAudit({
-          actor: actorFilter,
-          target: targetFilter,
-          action: actionFilter,
-          status: statusFilter,
-          limit,
-        });
-        json(res, 200, { ok: true, items });
-        return;
-      }
 
       // GET /api/playbooks
       if (
@@ -22883,7 +21337,7 @@ export async function startDroneHubApiServer(opts: {
           updatedAt: nowIso(),
         } satisfies PlaybookRunQueueItem;
         await enqueueCanonicalPlaybookQueueItem(queueItem);
-        void runFleetReconcilerCycle();
+        void runPlaybookRunQueueCycle();
         json(res, 202, {
           ok: true,
           queued: true,
@@ -22976,7 +21430,7 @@ export async function startDroneHubApiServer(opts: {
           json(res, 400, { ok: false, error: 'missing queue item id' });
           return;
         }
-        const store = await fleetWorkflowStoreOrCompatibility();
+        const store = await workflowStoreOrCompatibility();
         const removed = store
           ? await store.cancelQueue(queueItemId)
           : await updateRegistry((regLatest: any) => {
@@ -22988,7 +21442,7 @@ export async function startDroneHubApiServer(opts: {
               );
               return found;
             });
-        if (removed) void runFleetReconcilerCycle();
+        if (removed) void runPlaybookRunQueueCycle();
         json(
           res,
           removed ? 200 : 404,
@@ -23017,7 +21471,7 @@ export async function startDroneHubApiServer(opts: {
         }
         const playbookId = typeof body?.playbookId === 'string' ? body.playbookId.trim() : '';
         const repoPath = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
-        const store = await fleetWorkflowStoreOrCompatibility();
+        const store = await workflowStoreOrCompatibility();
         const removed = store
           ? await store.clearQueue({ playbookId, repoPath })
           : await updateRegistry((regLatest: any) => {
@@ -23033,7 +21487,7 @@ export async function startDroneHubApiServer(opts: {
               );
               return matching.length;
             });
-        if (removed > 0) void runFleetReconcilerCycle();
+        if (removed > 0) void runPlaybookRunQueueCycle();
         json(res, 200, {
           ok: true,
           removed,
@@ -23367,11 +21821,7 @@ export async function startDroneHubApiServer(opts: {
                     {
                       createdBy: fleetParentId,
                       createdAt: at,
-                      enabled: false,
-                      capabilities: [],
-                      readScopes: ['children'],
                       assigned: [],
-                      quotas: {},
                     },
                   ).fleet,
                 }
@@ -23902,11 +22352,7 @@ export async function startDroneHubApiServer(opts: {
                         {
                           createdBy: fleetParentId,
                           createdAt: at,
-                          enabled: false,
-                          capabilities: [],
-                          readScopes: ['children'],
                           assigned: [],
-                          quotas: {},
                         },
                       ).fleet,
                     }
@@ -34589,17 +33035,14 @@ export async function startDroneHubApiServer(opts: {
         }
         ARCHIVE_CLEANUP_INTERVAL = null;
       }
-      if (FLEET_RECONCILE_INTERVAL) {
+      if (PLAYBOOK_RUN_QUEUE_INTERVAL) {
         try {
-          clearInterval(FLEET_RECONCILE_INTERVAL);
+          clearInterval(PLAYBOOK_RUN_QUEUE_INTERVAL);
         } catch {
           // ignore
         }
-        FLEET_RECONCILE_INTERVAL = null;
+        PLAYBOOK_RUN_QUEUE_INTERVAL = null;
       }
-      FLEET_SNAPSHOT_DELIVERY_CACHE.clear();
-      FLEET_TASK_POLL_LAST_COMPLETED_AT = 0;
-      FLEET_TASK_KNOWN_ACTOR_IDS = new Set<string>();
       if (droneStatusRefreshTimer) {
         try {
           clearInterval(droneStatusRefreshTimer);

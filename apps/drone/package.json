@@ -4,9 +4,7 @@
   "description": "Drone: per-container agent wrapper daemon + host CLI (via dvm)",
   "bin": {
     "drone": "dist/cli.js",
-    "drone-hub-mcp-server": "dist/hub/mcp-server.js",
-    "fleet": "dist/fleet.js",
-    "tasks": "dist/tasks.js"
+    "drone-hub-mcp-server": "dist/hub/mcp-server.js"
   },
   "main": "dist/cli.js",
   "type": "commonjs",

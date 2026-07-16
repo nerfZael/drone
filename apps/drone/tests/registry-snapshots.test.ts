@@ -62,7 +62,7 @@ describe('registry hourly snapshots', () => {
     });
   });
 
-  test('blocks accidental bulk fleet overwrite to empty registry', async () => {
+  test('blocks accidental bulk overwrite to an empty registry', async () => {
     await withTempDroneDataDir('drone-registry-empty-guard-', async (droneDataDir) => {
       await updateRegistry((reg: any) => {
         reg.drones = {};
@@ -87,7 +87,7 @@ describe('registry hourly snapshots', () => {
           reg.pending = {};
           reg.archived = {};
         }),
-      ).rejects.toThrow(/refusing to overwrite registry fleet with zero entries/);
+      ).rejects.toThrow(/refusing to overwrite registry with zero drone entries/);
 
       const guardSnapshots = fs
         .readdirSync(droneDataDir)
@@ -100,8 +100,8 @@ describe('registry hourly snapshots', () => {
 
       const hubLogPath = path.join(droneDataDir, 'hub.log');
       const hubLog = fs.readFileSync(hubLogPath, 'utf8');
-      expect(hubLog).toContain('registry fleet write blocked');
-      expect(hubLog).toContain('"event":"empty-fleet-write"');
+      expect(hubLog).toContain('registry write blocked');
+      expect(hubLog).toContain('"event":"empty-registry-write"');
     });
   });
 });

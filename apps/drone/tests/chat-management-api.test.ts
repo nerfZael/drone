@@ -333,7 +333,7 @@ describeSocketSuite('chat management api', () => {
     expect((listed.data?.chats ?? []).includes('review')).toBe(true);
   });
 
-  test('defaults fleet-created drones to codex when materializing chats', async () => {
+  test('defaults child drones to codex when materializing chats', async () => {
     const droneId = 'drone-chat-fleet-default';
     const now = new Date().toISOString();
     await updateRegistry((reg: any) => {
@@ -1187,7 +1187,7 @@ describeSocketSuite('chat management api', () => {
     expect(state.data?.pending).toEqual(pending.data?.pending);
   });
 
-  test('does not surface completed transcript prompts as pending or fleet work', async () => {
+  test('does not surface completed transcript prompts as pending', async () => {
     const droneId = 'completed-prompt-hidden';
     await seedDrone(droneId);
 
@@ -1222,12 +1222,6 @@ describeSocketSuite('chat management api', () => {
     expect(pending.data?.ok).toBe(true);
     expect(pending.data?.pending).toEqual([]);
 
-    const fleetWork = await apiFetch('/api/fleet/work');
-    expect(fleetWork.r.status).toBe(200);
-    expect(fleetWork.data?.ok).toBe(true);
-    expect(Array.isArray(fleetWork.data?.items)).toBe(true);
-    expect((fleetWork.data?.items ?? []).some((item: any) => item?.droneId === droneId && item?.promptId === 'prompt-1')).toBe(false);
-    expect(Number(fleetWork.data?.counts?.stuck ?? 0)).toBe(0);
   });
 
   test('renames pending drones before startup completes', async () => {

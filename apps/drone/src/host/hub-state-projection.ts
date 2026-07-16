@@ -3,11 +3,10 @@ import {
   getDroneLifecycleRepository,
   type CanonicalDroneLifecycleRecord,
 } from './drone-lifecycle-repository';
-import { getFleetWorkflowStore, type FleetAuditRecord, type WorkflowQueueItem } from './fleet-workflow-store';
+import { getFleetWorkflowStore, type WorkflowQueueItem } from './fleet-workflow-store';
 import { getHubDatabase } from './hub-database';
 import { getPromptQueueRepository, type PromptQueueItem } from './prompt-queue-repository';
 import { loadRegistryCompatibilityBase, type DroneRegistry } from './registry';
-import { fleetAuditList } from '../hub/fleet-helpers';
 import { listStoredTokensFromRegistry } from '../hub/mcp-tokens';
 import { listMcpServersFromRegistry } from '../hub/mcp-servers';
 import { listSkillsFromRegistry } from '../hub/skills';
@@ -82,11 +81,6 @@ function overlayCanonicalSettings(registry: any): void {
       case 'filesystem': setOrDelete(settings, 'filesystem', value, updatedAt); break;
       case 'agent-message-auto-continue': setOrDelete(settings, 'agentMessageAutoContinue', value, updatedAt); break;
       case 'agent-suggestion': setOrDelete(settings, 'agentSuggestion', value, updatedAt); break;
-      case 'kanban-board': setOrDelete(settings, 'kanbanBoard', value, updatedAt); break;
-      case 'task-playbook-buttons':
-        if (value == null) delete settings.taskPlaybookButtons;
-        else settings.taskPlaybookButtons = { items: value, updatedAt };
-        break;
       case 'ui-preferences': setOrDelete(settings, 'uiPreferences', value, updatedAt); break;
       case 'registry-backups': setOrDelete(settings, 'backups', value, updatedAt); break;
       case 'agents.default': setOrDelete(settings, 'agents', value, updatedAt); break;
@@ -256,7 +250,6 @@ export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Pro
   const workflows = await getFleetWorkflowStore();
   await workflows.backfillSyncSets(readStoredSyncSets(base));
   await workflows.backfillQueue(legacyQueue(base));
-  await workflows.backfillAudit(fleetAuditList(base) as FleetAuditRecord[]);
   const syncSets = workflows.listSyncSets();
   base.settings ??= {};
   base.settings.syncSets = {
@@ -271,8 +264,6 @@ export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Pro
   );
   if (queueItems.length > 0) base.playbookRunQueue = { items: queueItems };
   else delete base.playbookRunQueue;
-  base.fleet ??= {};
-  base.fleet.audit = workflows.listAudit({ limit: 1000 });
   overlayCanonicalSettings(base);
   return base as DroneRegistry;
 }

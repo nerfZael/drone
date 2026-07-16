@@ -38,6 +38,16 @@ const MIGRATIONS: readonly HubDatabaseMigration[] = [
     `);
     },
   },
+  {
+    version: 2,
+    name: 'remove obsolete orchestration audit',
+    migrate(connection) {
+      connection.exec(`
+        DROP INDEX IF EXISTS workflow_fleet_audit_actor_time;
+        DROP TABLE IF EXISTS workflow_fleet_audit;
+      `);
+    },
+  },
 ];
 
 export type WorkflowSyncSet = {
@@ -63,19 +73,6 @@ export type WorkflowQueueItem = {
   state?: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   [key: string]: unknown;
 };
-export type FleetAuditRecord = {
-  id: string;
-  at: string;
-  actor: string;
-  actorName: string;
-  action: string;
-  target?: string | null;
-  targetName?: string | null;
-  status: string;
-  reason?: string | null;
-  meta?: Record<string, unknown>;
-};
-
 function json(value: unknown): string {
   const out = JSON.stringify(value);
   if (out === undefined) throw new Error('workflow value must be JSON serializable');
@@ -386,54 +383,6 @@ export class FleetWorkflowStore {
     });
   }
 
-  backfillAudit(records: FleetAuditRecord[]): Promise<boolean> {
-    return this.database.writeTransaction('backfill fleet audit', (c) => {
-      if (this.backfilled(c, 'fleet-audit')) return false;
-      for (const r of records) this.insertAudit(c, r);
-      this.finishBackfill(c, 'fleet-audit');
-      return true;
-    });
-  }
-  appendAudit(record: FleetAuditRecord): Promise<void> {
-    return this.database.writeTransaction('append fleet audit', (c) => {
-      this.insertAudit(c, record);
-    });
-  }
-  listAudit(
-    opts: {
-      actor?: string;
-      target?: string;
-      action?: string;
-      status?: string;
-      limit?: number;
-      since?: string;
-    } = {},
-  ): FleetAuditRecord[] {
-    return this.database.read((c) => {
-      const limit = Math.max(1, Math.min(1000, opts.limit ?? 100));
-      const rows = c
-        .prepare(
-          `SELECT * FROM workflow_fleet_audit WHERE (?='' OR actor=? OR actor_name=?) AND (?='' OR target=? OR target_name=?) AND (?='' OR action=?) AND (?='' OR status=?) AND (?='' OR at>=?) ORDER BY at DESC,sequence DESC LIMIT ?`,
-        )
-        .all(
-          opts.actor ?? '',
-          opts.actor ?? '',
-          opts.actor ?? '',
-          opts.target ?? '',
-          opts.target ?? '',
-          opts.target ?? '',
-          opts.action ?? '',
-          opts.action ?? '',
-          opts.status ?? '',
-          opts.status ?? '',
-          opts.since ?? '',
-          opts.since ?? '',
-          limit,
-        ) as any[];
-      return rows.map(this.auditFromRow);
-    });
-  }
-
   private queueState(
     r: WorkflowQueueItem,
   ): 'queued' | 'running' | 'completed' | 'cancelled' | 'failed' {
@@ -442,34 +391,6 @@ export class FleetWorkflowStore {
     if (r.inFlightCount > 0) return 'running';
     return r.launchedCount >= r.requestedCount ? 'completed' : 'queued';
   }
-  private insertAudit(c: HubDatabaseConnection, r: FleetAuditRecord) {
-    c.prepare(
-      `INSERT OR IGNORE INTO workflow_fleet_audit(event_id,at,actor,actor_name,action,target,target_name,status,reason,meta_json)VALUES(?,?,?,?,?,?,?,?,?,?)`,
-    ).run(
-      r.id,
-      r.at,
-      r.actor,
-      r.actorName,
-      r.action,
-      r.target ?? null,
-      r.targetName ?? null,
-      r.status,
-      r.reason ?? null,
-      json(r.meta ?? {}),
-    );
-  }
-  private auditFromRow = (r: any): FleetAuditRecord => ({
-    id: r.event_id,
-    at: r.at,
-    actor: r.actor,
-    actorName: r.actor_name,
-    action: r.action,
-    target: r.target,
-    targetName: r.target_name,
-    status: r.status,
-    reason: r.reason,
-    meta: parse(r.meta_json),
-  });
   private backfilled(c: HubDatabaseConnection, d: string) {
     return Boolean(c.prepare('SELECT 1 FROM workflow_backfills WHERE domain=?').get(d));
   }

@@ -11,15 +11,6 @@ import {
   type HubSettingRecord,
 } from '../host/hub-settings-repository';
 import { loadRegistry, updateRegistry, type DroneRegistry } from '../host/registry';
-import {
-  normalizeTaskTypeId,
-  persistTaskBoardState,
-  sanitizeTaskBoardState,
-  type TaskBoardCard as KanbanBoardCard,
-  type TaskBoardLane as KanbanBoardLane,
-  type TaskBoardState as KanbanBoardSettings,
-  type TaskBoardTaskType as KanbanBoardTaskType,
-} from './task-board';
 
 const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
 
@@ -137,13 +128,6 @@ export type EffectiveAgentSuggestionSettings = {
   updatedAt: string | null;
   policyFingerprint: string;
 };
-export type { KanbanBoardTaskType, KanbanBoardCard, KanbanBoardLane, KanbanBoardSettings };
-export type TaskPlaybookButtonSettings = Array<{
-  id: string;
-  label: string;
-  playbookId: string;
-  taskTypeIds: string[];
-}>;
 export type UiAutomationSleepUnit = 'seconds' | 'minutes' | 'hours' | 'days';
 export type UiAutomationConfig = {
   id: string;
@@ -243,8 +227,6 @@ const UI_AUTOMATION_LABEL_MAX_CHARS = 72;
 const UI_AUTOMATION_PROMPT_MAX_CHARS = 8_000;
 const UI_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS = 8_000;
 const UI_AUTOMATION_MAX_ITEMS = 40;
-const TASK_PLAYBOOK_BUTTON_LABEL_MAX_CHARS = 48;
-const TASK_PLAYBOOK_BUTTON_MAX_ITEMS = 60;
 
 export function parseLlmProvider(raw: unknown): LlmProviderId | null {
   const s = String(raw ?? '')
@@ -477,35 +459,6 @@ function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
   };
 }
 
-function normalizeTaskPlaybookButtonLabel(value: unknown): string {
-  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, TASK_PLAYBOOK_BUTTON_LABEL_MAX_CHARS);
-}
-
-function sanitizeTaskPlaybookButtonSettings(value: unknown): TaskPlaybookButtonSettings {
-  const list = Array.isArray(value) ? value : [];
-  const out: TaskPlaybookButtonSettings = [];
-  const seen = new Set<string>();
-  for (const item of list) {
-    const raw = item && typeof item === 'object' && !Array.isArray(item) ? (item as Record<string, unknown>) : {};
-    const id = String(raw.id ?? '').trim() || crypto.randomUUID();
-    if (!id || seen.has(id)) continue;
-    const label = normalizeTaskPlaybookButtonLabel(raw.label);
-    const playbookId = String(raw.playbookId ?? '').trim();
-    const taskTypeIds = Array.isArray(raw.taskTypeIds)
-      ? Array.from(new Set(raw.taskTypeIds.map((entry) => normalizeTaskTypeId(entry)).filter(Boolean)))
-      : [];
-    if (!label || !playbookId || taskTypeIds.length === 0) continue;
-    seen.add(id);
-    out.push({
-      id,
-      label,
-      playbookId,
-      taskTypeIds,
-    });
-    if (out.length >= TASK_PLAYBOOK_BUTTON_MAX_ITEMS) break;
-  }
-  return out;
-}
 
 function apiKeyHint(apiKey: string | null): string | null {
   const key = normalizeApiKey(apiKey);
@@ -521,8 +474,6 @@ const SETTING_KEYS = {
   filesystem: 'filesystem',
   agentMessageAutoContinue: 'agent-message-auto-continue',
   agentSuggestion: 'agent-suggestion',
-  kanbanBoard: 'kanban-board',
-  taskPlaybookButtons: 'task-playbook-buttons',
 } as const;
 
 type LegacySetting<T> = { value: T; updatedAt: string | null };
@@ -1227,129 +1178,6 @@ export async function resolveAgentSuggestionSettingsResponse(): Promise<{
   };
 }
 
-async function getStoredKanbanBoardSettings(): Promise<{ board: KanbanBoardSettings; updatedAt: string | null }> {
-  const record = await getCanonicalSetting<KanbanBoardSettings>(SETTING_KEYS.kanbanBoard, (reg) => {
-    const raw = reg.settings?.kanbanBoard;
-    return raw === undefined
-      ? null
-      : { value: sanitizeTaskBoardState(raw), updatedAt: legacyUpdatedAt(raw) };
-  });
-  return {
-    board: sanitizeTaskBoardState(record?.value),
-    updatedAt: record?.updatedAt ?? null,
-  };
-}
-
-/**
- * Atomically transforms the canonical Kanban board.
- *
- * Reading first completes the one-time legacy registry backfill. The repository
- * update then creates a canonical row even when no legacy value exists, so a
- * later stale registry projection cannot resurrect old board state.
- */
-export async function transformStoredKanbanBoardSettings(
-  transform: (board: KanbanBoardSettings) => KanbanBoardSettings,
-): Promise<{ board: KanbanBoardSettings; updatedAt: string | null }> {
-  await getStoredKanbanBoardSettings();
-  const record = await (await getHubSettingsRepository()).update<KanbanBoardSettings>(SETTING_KEYS.kanbanBoard, (current) => {
-    const board = sanitizeTaskBoardState(current?.value);
-    return sanitizeTaskBoardState(transform(board));
-  });
-  // Bun does not have the native SQLite projection yet. Keep its legacy read
-  // model synchronized explicitly; production Node writes only the canonical row.
-  if ((globalThis as any).Bun) {
-    await updateRegistry((registry) => {
-      persistTaskBoardState(registry, record.value);
-    });
-  }
-  return {
-    board: sanitizeTaskBoardState(record.value),
-    updatedAt: record.updatedAt,
-  };
-}
-
-export class KanbanBoardSettingsConflictError extends Error {
-  readonly board: KanbanBoardSettings;
-  readonly updatedAt: string | null;
-
-  constructor(board: KanbanBoardSettings, updatedAt: string | null) {
-    super('kanban board changed on the server');
-    this.name = 'KanbanBoardSettingsConflictError';
-    this.board = board;
-    this.updatedAt = updatedAt;
-  }
-}
-
-export async function upsertStoredKanbanBoardSettings(boardRaw: unknown, expectedUpdatedAtRaw?: unknown): Promise<void> {
-  const board = sanitizeTaskBoardState(boardRaw);
-  const updatedAt = new Date().toISOString();
-  const expectedUpdatedAt =
-    expectedUpdatedAtRaw === undefined
-      ? undefined
-      : typeof expectedUpdatedAtRaw === 'string' && expectedUpdatedAtRaw.trim()
-        ? expectedUpdatedAtRaw.trim()
-        : null;
-  await getStoredKanbanBoardSettings();
-  await (await getHubSettingsRepository()).update<KanbanBoardSettings>(SETTING_KEYS.kanbanBoard, (current) => {
-    const currentUpdatedAt = current?.updatedAt ?? null;
-    if (expectedUpdatedAt !== undefined && expectedUpdatedAt !== currentUpdatedAt) {
-      throw new KanbanBoardSettingsConflictError(sanitizeTaskBoardState(current?.value), currentUpdatedAt);
-    }
-    return board;
-  }, { updatedAt });
-}
-
-export async function resolveKanbanBoardSettingsResponse(): Promise<{
-  ok: true;
-  kanbanBoard: KanbanBoardSettings;
-  updatedAt: string | null;
-}> {
-  const stored = await getStoredKanbanBoardSettings();
-  return {
-    ok: true,
-    kanbanBoard: stored.board,
-    updatedAt: stored.updatedAt,
-  };
-}
-
-async function getStoredTaskPlaybookButtonSettings(): Promise<{ taskPlaybookButtons: TaskPlaybookButtonSettings; updatedAt: string | null }> {
-  const record = await getCanonicalSetting<TaskPlaybookButtonSettings>(SETTING_KEYS.taskPlaybookButtons, (reg) => {
-    const raw = reg.settings?.taskPlaybookButtons;
-    return raw === undefined
-      ? null
-      : { value: sanitizeTaskPlaybookButtonSettings(raw.items), updatedAt: legacyUpdatedAt(raw) };
-  });
-  return {
-    taskPlaybookButtons: sanitizeTaskPlaybookButtonSettings(record?.value),
-    updatedAt: record?.updatedAt ?? null,
-  };
-}
-
-export async function upsertStoredTaskPlaybookButtonSettings(valueRaw: unknown): Promise<void> {
-  const taskPlaybookButtons = sanitizeTaskPlaybookButtonSettings(valueRaw);
-  await putCanonicalSetting(
-    SETTING_KEYS.taskPlaybookButtons,
-    taskPlaybookButtons.map((item) => ({
-      id: item.id,
-      label: item.label,
-      playbookId: item.playbookId,
-      taskTypeIds: item.taskTypeIds.slice(),
-    })),
-  );
-}
-
-export async function resolveTaskPlaybookButtonSettingsResponse(): Promise<{
-  ok: true;
-  taskPlaybookButtons: TaskPlaybookButtonSettings;
-  updatedAt: string | null;
-}> {
-  const stored = await getStoredTaskPlaybookButtonSettings();
-  return {
-    ok: true,
-    taskPlaybookButtons: stored.taskPlaybookButtons,
-    updatedAt: stored.updatedAt,
-  };
-}
 
 const UI_PREFERENCES_SETTING_KEY = 'ui-preferences';
 

@@ -47,8 +47,7 @@ import {
   buildContainerDroneDaemonLaunchScript,
   DRONE_DAEMON_SESSION_NAME,
   installBlipCliScript,
-  installFleetCliScript,
-  installTasksCliScript,
+  removeRetiredContainerCliScripts,
   missingHostDependencyMessage,
   normalizeDroneRuntime,
   type DroneRuntime,
@@ -1337,7 +1336,7 @@ function parseGithubSlug(remoteUrl: string | null): { owner: string; repo: strin
 
 async function ensureDaemonBuilt(_repoPath: string) {
   const runtimeDir = resolveDroneDaemonRuntimeDir();
-  for (const fileName of ['daemon.js', 'fleet.js', 'tasks.js', 'blip.js']) {
+  for (const fileName of ['daemon.js', 'blip.js']) {
     const filePath = path.join(runtimeDir, fileName);
     try {
       await fs.stat(filePath);
@@ -1742,13 +1741,9 @@ createCommand
       throw new Error(clearDaemonRuntime.stderr || clearDaemonRuntime.stdout || 'failed clearing daemon runtime in container');
     }
     await dvmCopyToContainer(containerName, resolveDroneDaemonRuntimeDir(), '/dvm-data/drone/dist', { clean: false });
-    const installFleetCli = await dvmExec(containerName, 'bash', ['-lc', installFleetCliScript()]);
-    if (installFleetCli.code !== 0) {
-      throw new Error(installFleetCli.stderr || installFleetCli.stdout || 'failed installing fleet CLI in container');
-    }
-    const installTasksCli = await dvmExec(containerName, 'bash', ['-lc', installTasksCliScript()]);
-    if (installTasksCli.code !== 0) {
-      throw new Error(installTasksCli.stderr || installTasksCli.stdout || 'failed installing tasks CLI in container');
+    const removeRetiredClis = await dvmExec(containerName, 'bash', ['-lc', removeRetiredContainerCliScripts()]);
+    if (removeRetiredClis.code !== 0) {
+      throw new Error(removeRetiredClis.stderr || removeRetiredClis.stdout || 'failed removing retired CLIs from container');
     }
     const installBlipCli = await dvmExec(containerName, 'bash', ['-lc', installBlipCliScript()]);
     if (installBlipCli.code !== 0) {

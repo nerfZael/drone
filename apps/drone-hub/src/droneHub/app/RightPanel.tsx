@@ -9,7 +9,6 @@ export type RightPanelTabId =
   | 'editor'
   | 'preview'
   | 'links'
-  | 'fleet'
   | 'changes'
   | 'prs'
   | 'canvas'

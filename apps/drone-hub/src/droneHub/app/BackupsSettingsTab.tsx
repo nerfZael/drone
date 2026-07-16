@@ -89,7 +89,7 @@ function BackupManifestRow({ manifest }: { manifest: RegistryBackupManifest }) {
         {manifest.reason && <div className="mt-1 text-[#fbbf24]">{manifest.reason}</div>}
       </div>
       <div className="text-[var(--muted)]">
-        <span className="text-[var(--fg-secondary)]">{manifest.counts.total}</span> fleet entries
+        <span className="text-[var(--fg-secondary)]">{manifest.counts.total}</span> drone entries
       </div>
     </div>
   );
@@ -137,7 +137,7 @@ export function BackupsSettingsTab({ backups }: BackupsSettingsTabProps) {
               Registry backups
             </div>
             <div className="mt-1 text-[11px] leading-relaxed text-[var(--muted-dim)]">
-              SQLite backups plus registry JSON exports, with suspicious empty-fleet states quarantined.
+              SQLite backups plus registry JSON exports, with suspicious empty-registry states quarantined.
             </div>
           </div>
           <button

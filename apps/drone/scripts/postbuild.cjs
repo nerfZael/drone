@@ -3,26 +3,6 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs/promises');
 const path = require('node:path');
 
-function fleetBundleArgs(root) {
-  return [
-    'build',
-    path.join(root, 'src', 'fleet.ts'),
-    '--target=node',
-    '--format=cjs',
-    `--outfile=${path.join(root, 'dist', 'fleet.js')}`,
-  ];
-}
-
-function tasksBundleArgs(root) {
-  return [
-    'build',
-    path.join(root, 'src', 'tasks.ts'),
-    '--target=node',
-    '--format=cjs',
-    `--outfile=${path.join(root, 'dist', 'tasks.js')}`,
-  ];
-}
-
 function blipBundleArgs(root) {
   return [
     'build',
@@ -117,9 +97,7 @@ async function copyBuiltDroneHubUi(root) {
 async function main() {
   const root = path.resolve(__dirname, '..');
   await removeFileBestEffort(path.join(root, 'dist', 'fleet.js'));
-  runOrThrow('bun', fleetBundleArgs(root), { cwd: root });
   await removeFileBestEffort(path.join(root, 'dist', 'tasks.js'));
-  runOrThrow('bun', tasksBundleArgs(root), { cwd: root });
   await removeFileBestEffort(path.join(root, 'dist', 'blip.js'));
   await ensureBlipBundleDependenciesBuilt(root);
   runOrThrow('bun', blipBundleArgs(root), { cwd: root });
@@ -130,14 +108,10 @@ async function main() {
   await chmodExecutableBestEffort(path.join(root, 'dist', 'cli.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'daemon.js'));
   await chmodExecutableBestEffort(path.join(root, 'dist', 'hub', 'mcp-server.js'));
-  await chmodExecutableBestEffort(path.join(root, 'dist', 'fleet.js'));
-  await chmodExecutableBestEffort(path.join(root, 'dist', 'tasks.js'));
 }
 
 module.exports = {
   blipBundleArgs,
-  fleetBundleArgs,
-  tasksBundleArgs,
 };
 
 if (require.main === module) {

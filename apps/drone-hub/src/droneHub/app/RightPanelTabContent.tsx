@@ -28,7 +28,6 @@ const loadAssistantDock = async () => (await import('../assistant/AssistantDock'
 const loadDroneCanvasDock = async () => (await import('../canvas/DroneCanvasDock')).DroneCanvasDock;
 const loadDroneChangesDock = async () => (await import('../changes/DroneChangesDock')).DroneChangesDock;
 const loadDroneEnvDock = async () => (await import('../env/DroneEnvDock')).DroneEnvDock;
-const loadDroneFleetDock = async () => (await import('../fleet/DroneFleetDock')).DroneFleetDock;
 const loadDroneLinksDock = async () => (await import('../overview/DroneLinksDock')).DroneLinksDock;
 const loadDronePreviewDock = async () => (await import('../overview/DronePreviewDock')).DronePreviewDock;
 const loadDroneTerminalDock = async () => (await import('../terminal/DroneTerminalDock')).DroneTerminalDock;
@@ -429,21 +428,6 @@ export function RightPanelTabContent({
         <PaneModule tab={tab} load={loadDroneEnvDock}>
           {(DroneEnvDock) => (
             <DroneEnvDock
-              droneId={drone.id}
-              droneName={drone.name}
-              disabled={disabled}
-              hubPhase={drone.hubPhase}
-              hubMessage={drone.hubMessage}
-            />
-          )}
-        </PaneModule>
-      );
-
-    case 'fleet':
-      return (
-        <PaneModule tab={tab} load={loadDroneFleetDock}>
-          {(DroneFleetDock) => (
-            <DroneFleetDock
               droneId={drone.id}
               droneName={drone.name}
               disabled={disabled}

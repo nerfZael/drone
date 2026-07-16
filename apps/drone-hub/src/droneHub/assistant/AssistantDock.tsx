@@ -399,7 +399,6 @@ export function AssistantDock() {
   const selectedChat = useDroneHubUiStore((state) => state.selectedChat);
   const appView = useDroneHubUiStore((state) => state.appView);
   const draftChat = useDroneHubUiStore((state) => state.draftChat);
-  const kanbanBoardOpen = useDroneHubUiStore((state) => state.kanbanBoardOpen);
   const playbookRunsOpen = useDroneHubUiStore((state) => state.playbookRunsOpen);
   const selectedGroupMultiChat = useDroneHubUiStore((state) => state.selectedGroupMultiChat);
   const threadSidebarDockSide = useDroneHubUiStore((state) => state.assistantThreadSidebarDockSide);
@@ -1122,7 +1121,6 @@ export function AssistantDock() {
     selectedDrone &&
       appView === 'workspace' &&
       !draftChat &&
-      !kanbanBoardOpen &&
       !playbookRunsOpen &&
       !selectedGroupMultiChat,
   );

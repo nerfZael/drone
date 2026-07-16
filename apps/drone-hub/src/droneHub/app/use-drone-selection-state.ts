@@ -25,8 +25,7 @@ type UseDroneSelectionStateArgs = {
   selectedDrone: string | null;
   selectedDroneIds: string[];
   selectedChat: string;
-  fleetDashboardOpen: boolean;
-  kanbanBoardOpen: boolean;
+  homeOpen: boolean;
   playbookRunsOpen: boolean;
   draftChat: { prompt: unknown | null } | null;
   droneById: Record<string, DroneSummary>;
@@ -40,14 +39,13 @@ type UseDroneSelectionStateArgs = {
   resetGroupDndState: () => void;
   setGroupMoveError: React.Dispatch<React.SetStateAction<string | null>>;
   setAppView: React.Dispatch<React.SetStateAction<'workspace' | 'settings'>>;
-  setFleetDashboardOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setHomeOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setDraftChat: React.Dispatch<React.SetStateAction<any>>;
   setDraftCreateOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setDraftCreateError: React.Dispatch<React.SetStateAction<string | null>>;
   setSelectedDrone: React.Dispatch<React.SetStateAction<string | null>>;
   setSelectedDroneIds: React.Dispatch<React.SetStateAction<string[]>>;
   setSelectedGroupMultiChat: React.Dispatch<React.SetStateAction<string | null>>;
-  setKanbanBoardOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setPlaybookRunsOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setSelectedChat: React.Dispatch<React.SetStateAction<string>>;
 };
@@ -57,8 +55,7 @@ export function useDroneSelectionState({
   selectedDrone,
   selectedDroneIds,
   selectedChat,
-  fleetDashboardOpen,
-  kanbanBoardOpen,
+  homeOpen,
   playbookRunsOpen,
   draftChat,
   droneById,
@@ -72,14 +69,13 @@ export function useDroneSelectionState({
   resetGroupDndState,
   setGroupMoveError,
   setAppView,
-  setFleetDashboardOpen,
+  setHomeOpen,
   setDraftChat,
   setDraftCreateOpen,
   setDraftCreateError,
   setSelectedDrone,
   setSelectedDroneIds,
   setSelectedGroupMultiChat,
-  setKanbanBoardOpen,
   setPlaybookRunsOpen,
   setSelectedChat,
 }: UseDroneSelectionStateArgs) {
@@ -143,8 +139,7 @@ export function useDroneSelectionState({
         selectedDroneIds.length === 1 &&
         selectedDroneIds[0] === id &&
         (String(selectedChat ?? '').trim() || 'default') === nextChat &&
-        !fleetDashboardOpen &&
-        !kanbanBoardOpen &&
+        !homeOpen &&
         !playbookRunsOpen &&
         !draftChat;
       // Manual card selection should always override any temporary preferred auto-selection.
@@ -155,9 +150,8 @@ export function useDroneSelectionState({
         return;
       }
       setAppView('workspace');
-      setFleetDashboardOpen(false);
+      setHomeOpen(false);
       setSelectedGroupMultiChat(null);
-      setKanbanBoardOpen(false);
       setPlaybookRunsOpen(false);
       setDraftChat(null);
       setDraftCreateOpen(false);
@@ -182,8 +176,7 @@ export function useDroneSelectionState({
     [
       orderedDroneIds,
       draftChat,
-      fleetDashboardOpen,
-      kanbanBoardOpen,
+      homeOpen,
       playbookRunsOpen,
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
@@ -194,11 +187,10 @@ export function useDroneSelectionState({
       selectedDroneIds,
       selectionAnchorRef,
       setAppView,
-      setFleetDashboardOpen,
+      setHomeOpen,
       setDraftChat,
       setDraftCreateError,
       setDraftCreateOpen,
-      setKanbanBoardOpen,
       setSelectedChat,
       setSelectedDrone,
       setSelectedDroneIds,
@@ -232,11 +224,7 @@ export function useDroneSelectionState({
 
   // Auto-select first drone (and recover from deletions).
   React.useEffect(() => {
-    if (fleetDashboardOpen) {
-      clearSelectedDroneState();
-      return;
-    }
-    if (kanbanBoardOpen) {
+    if (homeOpen) {
       clearSelectedDroneState();
       return;
     }
@@ -296,10 +284,9 @@ export function useDroneSelectionState({
   }, [
     clearSelectedDroneState,
     draftChat,
-    fleetDashboardOpen,
+    homeOpen,
     dronesFilteredByRepoIdSet,
     visibleDronesFilteredByRepo,
-    kanbanBoardOpen,
     playbookRunsOpen,
     preferredSelectedDroneHoldUntilRef,
     preferredSelectedDroneRef,

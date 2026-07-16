@@ -39,10 +39,9 @@ type UseWorkspaceNavigationActionsArgs = {
   setCreateMessageSuffixRows: React.Dispatch<React.SetStateAction<string[]>>;
   setCloneIncludeChats: React.Dispatch<React.SetStateAction<boolean>>;
   setChatHeaderRepoPath: React.Dispatch<React.SetStateAction<string>>;
-  setFleetDashboardOpen: React.Dispatch<React.SetStateAction<boolean>>;
+  setHomeOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setSelectedDrone: React.Dispatch<React.SetStateAction<string | null>>;
   setSelectedDroneIds: React.Dispatch<React.SetStateAction<string[]>>;
-  setKanbanBoardOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setPlaybookRunsOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setSelectedChat: React.Dispatch<React.SetStateAction<string>>;
   resetDraftNameSuggestSeq: () => void;
@@ -90,10 +89,9 @@ export function useWorkspaceNavigationActions({
   setCreateMessageSuffixRows,
   setCloneIncludeChats,
   setChatHeaderRepoPath,
-  setFleetDashboardOpen,
+  setHomeOpen,
   setSelectedDrone,
   setSelectedDroneIds,
-  setKanbanBoardOpen,
   setPlaybookRunsOpen,
   setSelectedChat,
   resetDraftNameSuggestSeq,
@@ -127,7 +125,6 @@ export function useWorkspaceNavigationActions({
   const openCreateModal = React.useCallback(() => {
     if (creating) return;
     setAppView('workspace');
-    setKanbanBoardOpen(false);
     setPlaybookRunsOpen(false);
     setDraftChat(null);
     resetDraftCreateState();
@@ -155,7 +152,6 @@ export function useWorkspaceNavigationActions({
     normalizeCreateRepoPath,
     resetDraftCreateState,
     setAppView,
-    setKanbanBoardOpen,
     setPlaybookRunsOpen,
     setCloneIncludeChats,
     setCloneSourceId,
@@ -185,9 +181,8 @@ export function useWorkspaceNavigationActions({
       setChatHeaderRepoPath('');
     }
     setAppView('workspace');
-    setKanbanBoardOpen(false);
     setPlaybookRunsOpen(false);
-    setFleetDashboardOpen(false);
+    setHomeOpen(false);
     setCreateOpen(false);
     setCreateError(null);
     resetDraftCreateState();
@@ -212,9 +207,8 @@ export function useWorkspaceNavigationActions({
     resetDraftCreateState,
     setAppView,
     setChatHeaderRepoPath,
-    setKanbanBoardOpen,
     setPlaybookRunsOpen,
-    setFleetDashboardOpen,
+    setHomeOpen,
     setCreateError,
     setCreateOpen,
     setCreatePersistVolume,
@@ -237,10 +231,9 @@ export function useWorkspaceNavigationActions({
       const sourceRuntime = String(source?.runtime ?? 'container').trim().toLowerCase();
       if (sourceRuntime === 'host') return;
       setAppView('workspace');
-      setKanbanBoardOpen(false);
       setPlaybookRunsOpen(false);
       setDraftChat(null);
-      setFleetDashboardOpen(false);
+      setHomeOpen(false);
       resetDraftCreateState();
       setCreateError(null);
       setCreateMode('clone');
@@ -268,9 +261,8 @@ export function useWorkspaceNavigationActions({
       renamingDrones,
       resetDraftCreateState,
       setAppView,
-      setKanbanBoardOpen,
       setPlaybookRunsOpen,
-      setFleetDashboardOpen,
+      setHomeOpen,
       setCloneIncludeChats,
       setCloneSourceId,
       setCreateError,
@@ -284,7 +276,7 @@ export function useWorkspaceNavigationActions({
       setCreateOpen,
       setCreateRepoPath,
       setDraftChat,
-      setFleetDashboardOpen,
+      setHomeOpen,
       suggestCloneName,
     ],
   );
@@ -299,8 +291,7 @@ export function useWorkspaceNavigationActions({
       setCreateOpen(false);
       setCreateError(null);
       resetDraftCreateState();
-      setKanbanBoardOpen(false);
-      setFleetDashboardOpen(false);
+      setHomeOpen(false);
       setPlaybookRunsOpen(true);
       clearSidebarSelection();
     },

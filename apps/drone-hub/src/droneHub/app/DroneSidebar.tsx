@@ -10,7 +10,6 @@ import {
 } from '../../ui/dropdown';
 import {
   IconAutoMinimize,
-  IconBoard,
   IconChatThread,
   IconChevron,
   IconClock,
@@ -1411,7 +1410,6 @@ export type DroneSidebarProps = {
   draftSidebarPlaceholder: DraftSidebarPlaceholder | null;
   onOpenDraftChatComposer: () => void;
   onOpenCreateModal: () => void;
-  onOpenKanbanBoard: () => void;
   onOpenPlaybookRuns: () => void;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
@@ -1502,7 +1500,6 @@ export function DroneSidebar({
   draftSidebarPlaceholder,
   onOpenDraftChatComposer,
   onOpenCreateModal,
-  onOpenKanbanBoard,
   onOpenPlaybookRuns,
   onSelectDroneCard,
   onSelectDroneChat,
@@ -1551,7 +1548,6 @@ export function DroneSidebar({
     selectedDrone,
     selectedChat,
     selectedGroupMultiChat,
-    kanbanBoardOpen,
     playbookRunsOpen,
     sidebarReposCollapsed,
     sidebarAutoMinimize,
@@ -2435,22 +2431,6 @@ export function DroneSidebar({
                           type="button"
                           onClick={() => {
                             setHeaderActionsMenuOpen(false);
-                            onOpenKanbanBoard();
-                          }}
-                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                          role="menuitem"
-                        >
-                          <span>Open task board</span>
-                          <IconBoard
-                            className={
-                              kanbanBoardOpen ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
-                            }
-                          />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHeaderActionsMenuOpen(false);
                             onOpenPlaybookRuns();
                           }}
                           className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
@@ -2590,25 +2570,6 @@ export function DroneSidebar({
                     ) : null}
                     {sidebarCapabilities.headerActions ? (
                       <>
-                        <button
-                          type="button"
-                          onClick={onOpenKanbanBoard}
-                          className={`inline-flex h-[30px] w-full items-center gap-2 rounded border px-3 text-[11px] transition-all ${
-                            kanbanBoardOpen
-                              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
-                          }`}
-                          title="Open task board"
-                          aria-label="Open task board"
-                        >
-                          <IconBoard className="opacity-80" />
-                          <span
-                            className="font-semibold uppercase tracking-wide"
-                            style={{ fontFamily: 'var(--display)' }}
-                          >
-                            Open task board
-                          </span>
-                        </button>
                         <button
                           type="button"
                           onClick={onOpenPlaybookRuns}
@@ -3293,25 +3254,6 @@ export function DroneSidebar({
             tabIndex={collapsedRailInteractive ? 0 : -1}
           >
             <IconPlusDouble className="opacity-80" />
-          </SidebarIconButton>
-        ) : null}
-        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? (
-          <SidebarIconButton
-            onClick={() => {
-              setSidebarCollapsed(false);
-              onOpenKanbanBoard();
-            }}
-            className={`border ${
-              kanbanBoardOpen
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-            }`}
-            title="Open task board"
-            ariaLabel="Open task board"
-            disabled={!collapsedRailInteractive}
-            tabIndex={collapsedRailInteractive ? 0 : -1}
-          >
-            <IconBoard className="opacity-80" />
           </SidebarIconButton>
         ) : null}
         {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? (

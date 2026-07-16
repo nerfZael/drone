@@ -37,7 +37,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     draftSidebarPlaceholder,
     openDraftChatComposer,
     openCreateModal,
-    openKanbanBoard,
     openPlaybookRuns,
     selectDroneCard,
     selectDroneChat,
@@ -97,7 +96,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     draftSidebarPlaceholder,
     onOpenDraftChatComposer: openDraftChatComposer,
     onOpenCreateModal: openCreateModal,
-    onOpenKanbanBoard: openKanbanBoard,
     onOpenPlaybookRuns: openPlaybookRuns,
     onSelectDroneCard: selectDroneCard,
     onSelectDroneChat: (droneId, chatName) => {
@@ -262,8 +260,6 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
     droppedDroneTargetLabel,
     droppedDroneRows,
     assignDroppedDronesToTarget,
-    probeRepoChangesFromDrone,
-    syncDroppedDroneIntoTarget,
     setNameSuggestToast,
   } = args;
 
@@ -445,13 +441,10 @@ export function useDroneHubOverlaysProps(args: any): DroneHubOverlaysProps {
     droneDropActionModalProps:
       droneDropActionModal && droppedDroneTarget && droppedDroneRows.length > 0
         ? {
-            targetDroneId: droppedDroneTarget.id,
             targetDroneLabel: droppedDroneTargetLabel || droppedDroneTarget.id,
             droppedDrones: droppedDroneRows,
             onAssignAll: assignDroppedDronesToTarget,
-            onProbeSyncStatus: probeRepoChangesFromDrone,
             onRequestClose: closeDroneDropActionModal,
-            onSyncDrone: syncDroppedDroneIntoTarget,
           }
         : null,
   };
@@ -475,21 +468,7 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     activeRepoPath,
     settingsActiveTab,
     settingsPlaybookFocusId,
-    kanbanBoardOpen,
     playbookRunsOpen,
-    kanbanBoard,
-    onKanbanBoardChange,
-    taskPlaybookButtons,
-    taskPlaybookButtonsLoading,
-    taskPlaybookButtonsSaving,
-    taskPlaybookButtonsError,
-    onTaskPlaybookButtonsChange,
-    boardLoading,
-    boardSaving,
-    boardError,
-    boardUpdatedAt,
-    reloadBoard,
-    suggestKanbanCardTitleFromPaste,
     createRuntime,
     createAsDraft,
     createPersistVolume,
@@ -555,7 +534,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     unreadAgentMessageByChatNodeId,
     openDraftChatComposer,
     openCreateModal,
-    openKanbanBoard,
     openPlaybookRuns,
     openPlaybookRunArtifact,
     currentDrone,
@@ -664,7 +642,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     rightPanelOpenRequestSeq,
     renderRightPanelTabContent,
     renderPersistentPreviewContent,
-    setKanbanBoardOpen,
     setPlaybookRunsOpen,
   } = args;
 
@@ -760,51 +737,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           onCreateEmptyDrone: () => createDroneFromDraft({ createMode: 'without-chat' }),
         }
       : null,
-    kanbanBoardWorkspaceProps: kanbanBoardOpen
-      ? {
-          initialRepoPath: activeRepoPath,
-          registeredRepoPaths,
-          groupScopeNames: registryGroupNames,
-          availableScopeDrones: drones.map((drone: any) => ({
-            id: String(drone?.id ?? '').trim(),
-            name: String(drone?.name ?? '').trim(),
-            group: typeof drone?.group === 'string' ? drone.group : null,
-            repoPath: String(drone?.repoPath ?? '').trim(),
-          })).filter((drone: any) => drone.id),
-          currentScopeGroupName:
-            typeof selectedGroupMultiChatData?.group === 'string' && !selectedGroupMultiChatData.group.startsWith('__sidebar-')
-              ? selectedGroupMultiChatData.group
-              : null,
-          currentScopeDroneId: String(currentDrone?.id ?? '').trim() || null,
-          board: kanbanBoard,
-          taskPlaybookButtons,
-          taskPlaybookButtonsLoading,
-          taskPlaybookButtonsSaving,
-          taskPlaybookButtonsError,
-          spawnAgentMenuEntries,
-          spawnAgentConfig,
-          createRepoMenuEntries,
-          boardLoading,
-          boardSaving,
-          boardError,
-          boardUpdatedAt,
-          onReloadBoard: reloadBoard,
-          onOpenCustomAgentModal: () => setCustomAgentModalOpen(true),
-          onSuggestCardTitleFromPaste: suggestKanbanCardTitleFromPaste,
-          availableDroneIds: drones.map((drone: any) => String(drone?.id ?? '').trim()).filter(Boolean),
-          onOpenTaskDrone: (droneId: string) => {
-            setKanbanBoardOpen(false);
-            selectDroneCard(droneId);
-          },
-          onOpenTaskRun: (droneId: string, chatName: string) => {
-            setKanbanBoardOpen(false);
-            selectDroneChat(droneId, chatName);
-          },
-          onBoardChange: onKanbanBoardChange,
-          onTaskPlaybookButtonsChange,
-          onClose: () => setKanbanBoardOpen(false),
-        }
-      : null,
     playbookRunsWorkspaceProps: playbookRunsOpen
       ? {
           initialRepoPath: activeRepoPath,
@@ -849,7 +781,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
       dronesError,
       onOpenDraftChatComposer: openDraftChatComposer,
       onOpenCreateModal: openCreateModal,
-      onOpenKanbanBoard: openKanbanBoard,
       onOpenPlaybookRuns: openPlaybookRuns,
     },
     renderPersistentPreviewContent,

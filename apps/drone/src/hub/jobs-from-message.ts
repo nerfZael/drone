@@ -22,10 +22,6 @@ function defaultDroneNameModelId(provider: LlmProviderId): string {
   return provider === 'gemini' ? defaultHubLlmModelId(provider, 'standard') : DEFAULT_DRONE_NAME_MODEL_ID;
 }
 
-function defaultTaskTitleModelId(provider: LlmProviderId): string {
-  return defaultHubLlmModelId(provider, 'small');
-}
-
 function toDashCase(raw: string): string {
   const s = String(raw ?? '').trim().toLowerCase();
   const cleaned = s
@@ -320,54 +316,6 @@ export async function suggestDroneNameFromMessage(
   return name.slice(0, 48).replace(/-+$/g, '');
 }
 
-export async function suggestTaskTitleFromMessage(
-  message: string,
-  opts?: { provider?: LlmProviderId; apiKey?: string },
-): Promise<string> {
-  const text = String(message ?? '').trim();
-  if (!text) throw new Error('missing message');
-
-  const runtime = await resolveHubLlmRuntime(opts);
-  const modelId = String(process.env.DRONE_HUB_TASK_TITLE_MODEL ?? '').trim() || defaultTaskTitleModelId(runtime.provider);
-  const outputSchema = runtime.z.object({
-    title: runtime.z.string().min(1).describe('Short human-readable task title, max 72 chars.'),
-  });
-
-  const system = [
-    'You generate concise task titles for kanban cards.',
-    'Return only the structured output required by the schema.',
-    'Rules:',
-    '- Use plain human-readable text, not dash-case.',
-    '- Keep it specific and compact.',
-    '- Prefer 2 to 6 words when possible.',
-    '- Do not include filler like "task", "ticket", or "request" unless necessary.',
-    '- Do not end with punctuation.',
-    '- Max length 72 characters.',
-  ].join('\n');
-
-  let object: any = null;
-  try {
-    const out = await runtime.generateObject({
-      model: runtime.modelFactory(modelId),
-      schema: outputSchema,
-      system,
-      prompt: `Message:\n${text}`,
-      temperature: 0.2,
-      maxRetries: 1,
-    });
-    object = out.object;
-  } catch (e: any) {
-    const msg = e?.message ?? String(e);
-    throw new Error(`${providerDisplayName(runtime.provider)} task title suggestion failed (model: ${modelId}): ${msg}`);
-  }
-
-  const title = String(object?.title ?? '')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/[.!?]+$/g, '');
-  if (!title) throw new Error('LLM returned no valid task title');
-  return title.length > 72 ? `${title.slice(0, 69).trimEnd()}...` : title;
-}
 
 export async function jobsFromAgentMessage(message: string): Promise<JobSpec[]> {
   const r = await jobsPlanFromAgentMessage(message);

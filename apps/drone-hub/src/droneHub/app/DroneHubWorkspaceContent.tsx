@@ -3,7 +3,6 @@ import { NoDroneSelectedState } from './NoDroneSelectedState';
 import { SettingsView } from './SettingsView';
 import { DraftChatWorkspace, type DraftChatWorkspace as DraftChatWorkspaceComponent } from './DraftChatWorkspace';
 import type { GroupMultiChatWorkspace as GroupMultiChatWorkspaceComponent } from './GroupMultiChatWorkspace';
-import type { KanbanBoardWorkspace as KanbanBoardWorkspaceComponent } from './KanbanBoardWorkspace';
 import type { PlaybookRunsWorkspace as PlaybookRunsWorkspaceComponent } from './PlaybookRunsWorkspace';
 import { SelectedDroneWorkspace, type SelectedDroneWorkspace as SelectedDroneWorkspaceComponent } from './SelectedDroneWorkspace';
 import type { SetupWelcomeView as SetupWelcomeViewComponent } from './SetupWelcomeView';
@@ -13,11 +12,6 @@ import { FloatingAssistantDock } from '../assistant/FloatingAssistantDock';
 const SetupWelcomeView = React.lazy(async () => {
   const module = await import('./SetupWelcomeView');
   return { default: module.SetupWelcomeView };
-});
-
-const KanbanBoardWorkspace = React.lazy(async () => {
-  const module = await import('./KanbanBoardWorkspace');
-  return { default: module.KanbanBoardWorkspace };
 });
 
 const PlaybookRunsWorkspace = React.lazy(async () => {
@@ -35,7 +29,6 @@ export type DroneHubWorkspaceContentProps = {
   setupWelcomeProps: React.ComponentProps<typeof SetupWelcomeViewComponent> | null;
   settingsViewProps: React.ComponentProps<typeof SettingsView>;
   draftChatWorkspaceProps: React.ComponentProps<typeof DraftChatWorkspaceComponent> | null;
-  kanbanBoardWorkspaceProps: React.ComponentProps<typeof KanbanBoardWorkspaceComponent> | null;
   playbookRunsWorkspaceProps: React.ComponentProps<typeof PlaybookRunsWorkspaceComponent> | null;
   groupMultiChatWorkspaceProps: React.ComponentProps<typeof GroupMultiChatWorkspaceComponent> | null;
   noDroneSelectedStateProps: React.ComponentProps<typeof NoDroneSelectedState>;
@@ -66,7 +59,6 @@ export function DroneHubWorkspaceContent({
   setupWelcomeProps,
   settingsViewProps,
   draftChatWorkspaceProps,
-  kanbanBoardWorkspaceProps,
   playbookRunsWorkspaceProps,
   groupMultiChatWorkspaceProps,
   noDroneSelectedStateProps,
@@ -106,8 +98,6 @@ export function DroneHubWorkspaceContent({
       <SettingsView {...settingsViewProps} />
     ) : draftChatWorkspaceProps ? (
       <DraftChatWorkspace {...draftChatWorkspaceProps} />
-    ) : kanbanBoardWorkspaceProps ? (
-      <KanbanBoardWorkspace {...kanbanBoardWorkspaceProps} />
     ) : playbookRunsWorkspaceProps ? (
       <PlaybookRunsWorkspace {...playbookRunsWorkspaceProps} />
     ) : groupMultiChatWorkspaceProps ? (

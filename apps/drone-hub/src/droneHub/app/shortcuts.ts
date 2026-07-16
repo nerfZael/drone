@@ -1,9 +1,8 @@
 export type ShortcutActionId =
-  | 'openFleetDashboard'
+  | 'openHome'
   | 'createDraftDrone'
   | 'createChildDraftDrone'
   | 'createDroneChat'
-  | 'openKanbanBoard'
   | 'focusPrimaryChatInput'
   | 'toggleVoiceClipboardRecording'
   | 'markSelectedDronesUnread'
@@ -38,7 +37,7 @@ export type ShortcutDefinition = {
 
 export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
   {
-    id: 'openFleetDashboard',
+    id: 'openHome',
     label: 'Open home',
     description: 'Clears the current drone selection and returns to the home screen.',
   },
@@ -56,11 +55,6 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     id: 'createDroneChat',
     label: 'Create new chat',
     description: 'Creates a new chat on the selected drone, opens it immediately, and focuses the composer.',
-  },
-  {
-    id: 'openKanbanBoard',
-    label: 'Open task board',
-    description: 'Opens the full-window Kanban board.',
   },
   {
     id: 'focusPrimaryChatInput',
@@ -135,11 +129,10 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
 ];
 
 const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
-  openFleetDashboard: { key: 'v', mod: false, ctrl: false, meta: false, alt: false, shift: false },
+  openHome: { key: 'v', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDraftDrone: { key: 'tab', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createChildDraftDrone: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   createDroneChat: { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  openKanbanBoard: { key: 'y', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   focusPrimaryChatInput: { key: 'enter', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleVoiceClipboardRecording: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -207,11 +200,10 @@ function cloneShortcutBinding(binding: ShortcutBinding | null): ShortcutBinding 
 
 export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
   return {
-    openFleetDashboard: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openFleetDashboard),
+    openHome: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openHome),
     createDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDraftDrone),
     createChildDraftDrone: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createChildDraftDrone),
     createDroneChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.createDroneChat),
-    openKanbanBoard: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openKanbanBoard),
     focusPrimaryChatInput: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.focusPrimaryChatInput),
     toggleVoiceClipboardRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleVoiceClipboardRecording),
     markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),

@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { assertDroneDaemonRuntimeReady, resolveDroneDaemonJsPath, resolveDroneDaemonRuntimeDir } from '../src/hub/drone-daemon-runtime';
+import { removeRetiredContainerCliScripts } from '../src/host/runtime';
 
 const tmpRoots: string[] = [];
 
@@ -18,6 +19,10 @@ afterEach(async () => {
 });
 
 describe('drone daemon runtime resolution', () => {
+  test('removes retired fleet and task wrappers during container runtime refresh', () => {
+    expect(removeRetiredContainerCliScripts()).toContain('rm -f /usr/local/bin/fleet /usr/local/bin/tasks');
+  });
+
   test('resolves built runtime when Hub runs from source/dev mode', async () => {
     const root = await makeTempRepo();
     const sourceHubDir = path.join(root, 'src', 'hub');
@@ -36,12 +41,9 @@ describe('drone daemon runtime resolution', () => {
     await expect(assertDroneDaemonRuntimeReady(root)).rejects.toThrow(/bun run --filter drone build/);
   });
 
-  test('requires all container wrapper entrypoints in the built runtime', async () => {
+  test('requires the daemon and supported container CLI entrypoint in the built runtime', async () => {
     const root = await makeTempRepo();
     await fs.writeFile(path.join(root, 'daemon.js'), 'module.exports = {};\n');
-    await fs.writeFile(path.join(root, 'fleet.js'), 'module.exports = {};\n');
-    await fs.writeFile(path.join(root, 'tasks.js'), 'module.exports = {};\n');
-
     await expect(assertDroneDaemonRuntimeReady(root)).rejects.toThrow(/blip\.js/);
 
     await fs.writeFile(path.join(root, 'blip.js'), 'module.exports = {};\n');

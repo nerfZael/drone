@@ -550,14 +550,12 @@ export function SelectedDroneWorkspace({
     onFleetDropDragLeave,
     onFleetDropDragOver,
     onFleetDropDrop,
-    openFleetTab,
     setFleetDropNodeRef,
   } = useFleetAssignmentDropState({
     currentDrone,
     currentDroneLabel,
     openDroneErrorModal,
     onRequestDropActions,
-    requestRightPanelTab,
   });
   const compactRepoPath = String(currentDrone.repoPath ?? '').trim();
   const compactRepoLabel = compactRepoPath ? repoPathLabel(compactRepoPath) : '';
@@ -1171,9 +1169,7 @@ export function SelectedDroneWorkspace({
                     />
                   )}
                   {showFleetBadge ? (
-                    <button
-                      type="button"
-                      onClick={openFleetTab}
+                    <div
                       className={cn(
                         'inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold transition-all',
                         fleetBadgeDropActive
@@ -1183,15 +1179,15 @@ export function SelectedDroneWorkspace({
                             : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]',
                       )}
                       title={fleetBadgeError ? `${fleetBadgeTitle} ${fleetBadgeError}` : fleetBadgeTitle}
-                      aria-label={`${fleetBadgeSummaryText}. Open Fleet tab or drop drones here to choose assign or sync actions.`}
+                      aria-label={`${fleetBadgeSummaryText}. Drop drones here to assign them.`}
                     >
                       <span className="uppercase tracking-[0.12em]" style={{ fontFamily: 'var(--display)' }}>
-                        Fleet
+                        Relationships
                       </span>
                       <span className="font-mono text-[10px] text-inherit">
-                        {fleetBadgeAssigning ? 'Opening…' : fleetBadgeSummaryText}
+                        {fleetBadgeAssigning ? 'Assigning…' : fleetBadgeSummaryText}
                       </span>
-                    </button>
+                    </div>
                   ) : null}
                 </div>
                 {compactRepoPath || showCompactRuntimeMetadata ? (

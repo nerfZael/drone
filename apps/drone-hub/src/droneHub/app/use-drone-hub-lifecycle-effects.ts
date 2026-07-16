@@ -35,11 +35,10 @@ type UseDroneHubLifecycleEffectsArgs = {
   setHeaderOverflowOpen: Setter<boolean>;
   droneErrorModal: DroneErrorModalState | null;
   setDroneErrorModal: Setter<DroneErrorModalState | null>;
-  openFleetDashboard: () => void;
+  openHome: () => void;
   openDraftChatComposer: (opts?: { repoPath?: string | null; group?: string | null }) => void;
   openChildDraftChatComposer: () => boolean;
   createDroneChatFromShortcut: () => Promise<boolean>;
-  openKanbanBoard: () => void;
   openGroupMultiChat: (group: string) => void;
   openSidebarVisibleMultiChat: () => void;
   toggleTldrFromShortcut: () => void;
@@ -105,11 +104,10 @@ export function useDroneHubLifecycleEffects({
   setHeaderOverflowOpen,
   droneErrorModal,
   setDroneErrorModal,
-  openFleetDashboard,
+  openHome,
   openDraftChatComposer,
   openChildDraftChatComposer,
   createDroneChatFromShortcut,
-  openKanbanBoard,
   openGroupMultiChat,
   openSidebarVisibleMultiChat,
   toggleTldrFromShortcut,
@@ -266,8 +264,8 @@ export function useDroneHubLifecycleEffects({
     };
 
     const shortcutActionHandlers: Record<ShortcutActionId, (event: KeyboardEvent) => boolean> = {
-      openFleetDashboard: () => {
-        openFleetDashboard();
+      openHome: () => {
+        openHome();
         return true;
       },
       toggleTldr: () => {
@@ -302,10 +300,6 @@ export function useDroneHubLifecycleEffects({
           if (!created) return;
           focusPrimaryChatInputWithRetry();
         })();
-        return true;
-      },
-      openKanbanBoard: () => {
-        openKanbanBoard();
         return true;
       },
       focusPrimaryChatInput: () => focusPrimaryChatInput(),
@@ -442,11 +436,10 @@ export function useDroneHubLifecycleEffects({
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [
     currentDrone,
-    openFleetDashboard,
+    openHome,
     openDraftChatComposer,
     openChildDraftChatComposer,
     createDroneChatFromShortcut,
-    openKanbanBoard,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
     rightPanelBottomTab,

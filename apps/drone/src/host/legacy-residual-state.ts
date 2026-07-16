@@ -14,8 +14,8 @@ const CANONICAL_TOP_LEVEL = new Set([
 ]);
 const CANONICAL_SETTINGS = new Set([
   'openai', 'gemini', 'groq', 'exa', 'llm', 'deleteAction', 'filesystem',
-  'agentMessageAutoContinue', 'agentSuggestion', 'kanbanBoard',
-  'taskPlaybookButtons', 'uiPreferences', 'backups', 'agents',
+  'agentMessageAutoContinue', 'agentSuggestion',
+  'uiPreferences', 'backups', 'agents',
   'nonRepoEnvironment', 'syncSets',
 ]);
 
@@ -51,9 +51,6 @@ function changedCanonicalPaths(beforeRaw: unknown, afterRaw: unknown): string[] 
   for (const key of CANONICAL_SETTINGS) {
     if (JSON.stringify(beforeSettings[key]) !== JSON.stringify(afterSettings[key])) changed.push(`settings.${key}`);
   }
-  if (JSON.stringify(objectRecord(before.fleet).audit) !== JSON.stringify(objectRecord(after.fleet).audit)) {
-    changed.push('fleet.audit');
-  }
   return changed;
 }
 
@@ -69,9 +66,6 @@ export function stripCanonicalOwnedRegistryState(registry: DroneRegistry | Recor
     Object.entries(objectRecord(source.settings)).filter(([key]) => !CANONICAL_SETTINGS.has(key)),
   );
   if (Object.keys(settings).length > 0) residual.settings = settings;
-  const fleet = { ...objectRecord(source.fleet) };
-  delete fleet.audit;
-  if (Object.keys(fleet).length > 0) residual.fleet = fleet;
   return residual as LegacyResidualState;
 }
 
@@ -83,7 +77,7 @@ export function mergeRegistryResidualState(
   const base = objectRecord(clone(canonicalBase));
   const residual = objectRecord(clone(residualRaw));
   for (const key of Object.keys(base)) {
-    if (key === 'version' || key === 'settings' || key === 'fleet' || CANONICAL_TOP_LEVEL.has(key)) continue;
+    if (key === 'version' || key === 'settings' || CANONICAL_TOP_LEVEL.has(key)) continue;
     delete base[key];
   }
   for (const [key, value] of Object.entries(residual)) {
@@ -94,12 +88,6 @@ export function mergeRegistryResidualState(
     Object.entries(objectRecord(base.settings)).filter(([key]) => CANONICAL_SETTINGS.has(key)),
   );
   base.settings = { ...canonicalSettings, ...objectRecord(residual.settings) };
-  const canonicalFleet = objectRecord(base.fleet);
-  base.fleet = {
-    ...(Array.isArray(canonicalFleet.audit) ? { audit: canonicalFleet.audit } : {}),
-    ...objectRecord(residual.fleet),
-  };
-  if (Object.keys(base.fleet).length === 0) delete base.fleet;
   base.version = 2;
   return base as DroneRegistry;
 }

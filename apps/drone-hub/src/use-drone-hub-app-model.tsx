@@ -43,8 +43,6 @@ import { useGroupBroadcast } from './droneHub/app/use-group-broadcast';
 import { useGroupManagement } from './droneHub/app/use-group-management';
 import { useJobsWorkflow } from './droneHub/app/use-jobs-workflow';
 import { useLlmSettings } from './droneHub/app/use-llm-settings';
-import { useKanbanBoardSettings } from './droneHub/app/use-kanban-board-settings';
-import { useTaskPlaybookButtonSettings } from './droneHub/app/use-task-playbook-button-settings';
 import { useUiPreferencesSettings } from './droneHub/app/use-ui-preferences-settings';
 import { removeDroneIdsFromSidebarNodeOrderByParent } from './droneHub/app/sidebar-node-order';
 import { useDeleteActionSettings } from './droneHub/app/use-delete-action-settings';
@@ -202,11 +200,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     showHiddenSidebarGroups,
     autoDelete,
     terminalEmulator,
-    fleetDashboardOpen,
+    homeOpen,
     selectedDrone,
     selectedDroneIds,
     selectedGroupMultiChat,
-    kanbanBoardOpen,
     playbookRunsOpen,
     selectedChat,
     draftChat,
@@ -242,11 +239,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSidebarNodeOrderByParent,
     setSidebarChatOrderByDrone,
     setHiddenSidebarGroups,
-    setFleetDashboardOpen,
+    setHomeOpen,
     setSelectedDrone,
     setSelectedDroneIds,
     setSelectedGroupMultiChat,
-    setKanbanBoardOpen,
     setPlaybookRunsOpen,
     setGroupBroadcastExpanded,
     setSelectedChat,
@@ -578,28 +574,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const previousBusyChatNodeIdSetRef = React.useRef<Set<string>>(new Set());
   const droneIdentityByNameRef = React.useRef<Record<string, string>>({});
   const llmSettingsState = useLlmSettings(requestJson);
-  const {
-    board,
-    boardLoading,
-    boardSaving,
-    boardError,
-    boardUpdatedAt,
-    reloadBoard,
-    onBoardChange,
-  } = useKanbanBoardSettings({
-    enabled: kanbanBoardOpen,
-    requestJson,
-  });
-  const {
-    taskPlaybookButtons,
-    taskPlaybookButtonsLoading,
-    taskPlaybookButtonsSaving,
-    taskPlaybookButtonsError,
-    onTaskPlaybookButtonsChange,
-  } = useTaskPlaybookButtonSettings({
-    enabled: kanbanBoardOpen,
-    requestJson,
-  });
   const { reloadUiPreferences } = useUiPreferencesSettings({ requestJson });
   const deleteActionSettingsState = useDeleteActionSettings(requestJson);
   const setupStatusState = useSetupStatus(requestJson);
@@ -623,26 +597,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     };
   }, []);
 
-  const suggestKanbanCardTitleFromPaste = React.useCallback(
-    async (descriptionRaw: string): Promise<string | null> => {
-      const description = String(descriptionRaw ?? '').trim();
-      if (!description) return null;
-      const selectedProvider = llmSettings?.provider?.selected ?? 'openai';
-      const selectedSettings = selectedProvider === 'gemini' ? llmSettings?.gemini : selectedProvider === 'codex' ? llmSettings?.codex : llmSettings?.openai;
-      if (!selectedSettings?.hasKey) return null;
-      const data = await requestJson<{ ok: true; title: string }>('/api/tasks/title-from-message', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          message: description,
-          source: 'kanban-paste-title',
-        }),
-      });
-      const title = String((data as any)?.title ?? '').trim();
-      return title || null;
-    },
-    [llmSettings, requestJson],
-  );
   const hubLogsState = useHubLogs({
     appView,
     requestJson,
@@ -1249,10 +1203,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setCreateMessageSuffixRows,
       setCloneIncludeChats,
       setChatHeaderRepoPath,
-      setFleetDashboardOpen,
+      setHomeOpen,
       setSelectedDrone,
       setSelectedDroneIds,
-      setKanbanBoardOpen,
       setPlaybookRunsOpen,
       setSelectedChat,
       resetDraftNameSuggestSeq: () => {
@@ -1284,16 +1237,15 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSelectedDrone,
     setSelectedDroneIds,
   ]);
-  const openKanbanBoard = React.useCallback(() => {
+  const openHome = React.useCallback(() => {
     setAppView('workspace');
     setCreateOpen(false);
     setCreateError(null);
     closeDraftCreateSurface();
-    setFleetDashboardOpen(false);
+    setHomeOpen(true);
     setPlaybookRunsOpen(false);
     setSelectedGroupMultiChat(null);
     resetSidebarDroneSelection();
-    setKanbanBoardOpen(true);
   }, [
     closeDraftCreateSurface,
     preferredSelectedDroneHoldUntilRef,
@@ -1306,39 +1258,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftChat,
     setDraftCreateError,
     setDraftCreateOpen,
-    setFleetDashboardOpen,
-    setKanbanBoardOpen,
-    setPlaybookRunsOpen,
-    setSelectedChat,
-    setSelectedDrone,
-    setSelectedDroneIds,
-    setSelectedGroupMultiChat,
-  ]);
-
-  const openFleetDashboard = React.useCallback(() => {
-    setAppView('workspace');
-    setCreateOpen(false);
-    setCreateError(null);
-    closeDraftCreateSurface();
-    setFleetDashboardOpen(true);
-    setPlaybookRunsOpen(false);
-    setSelectedGroupMultiChat(null);
-    resetSidebarDroneSelection();
-    setKanbanBoardOpen(false);
-  }, [
-    closeDraftCreateSurface,
-    preferredSelectedDroneHoldUntilRef,
-    preferredSelectedDroneRef,
-    resetSidebarDroneSelection,
-    selectionAnchorRef,
-    setAppView,
-    setCreateError,
-    setCreateOpen,
-    setDraftChat,
-    setDraftCreateError,
-    setDraftCreateOpen,
-    setFleetDashboardOpen,
-    setKanbanBoardOpen,
+    setHomeOpen,
     setPlaybookRunsOpen,
     setSelectedChat,
     setSelectedDrone,
@@ -1351,31 +1271,28 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const group = String(groupRaw ?? '').trim();
       if (!group) return;
       setAppView('workspace');
-      setKanbanBoardOpen(false);
       setDraftChat(null);
       setDraftCreateOpen(false);
       setDraftCreateError(null);
-      setFleetDashboardOpen(false);
+      setHomeOpen(false);
       setSelectedGroupMultiChat(group);
     },
-    [setAppView, setDraftChat, setDraftCreateError, setDraftCreateOpen, setFleetDashboardOpen, setKanbanBoardOpen, setSelectedGroupMultiChat],
+    [setAppView, setDraftChat, setDraftCreateError, setDraftCreateOpen, setHomeOpen, setSelectedGroupMultiChat],
   );
   const openSidebarVisibleMultiChat = React.useCallback(() => {
     if (sidebarVisibleDrones.length === 0) return;
     setAppView('workspace');
-    setKanbanBoardOpen(false);
     setDraftChat(null);
     setDraftCreateOpen(false);
     setDraftCreateError(null);
-    setFleetDashboardOpen(false);
+    setHomeOpen(false);
     setSelectedGroupMultiChat(SIDEBAR_VISIBLE_MULTI_CHAT_GROUP);
   }, [
     setAppView,
     setDraftChat,
     setDraftCreateError,
     setDraftCreateOpen,
-    setFleetDashboardOpen,
-    setKanbanBoardOpen,
+    setHomeOpen,
     setSelectedGroupMultiChat,
     sidebarVisibleDrones.length,
   ]);
@@ -1462,8 +1379,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedDrone,
     selectedDroneIds,
     selectedChat,
-    fleetDashboardOpen,
-    kanbanBoardOpen,
+    homeOpen,
     playbookRunsOpen,
     draftChat,
     droneById,
@@ -1477,14 +1393,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     resetGroupDndState,
     setGroupMoveError,
     setAppView,
-    setFleetDashboardOpen,
+    setHomeOpen,
     setDraftChat,
     setDraftCreateOpen,
     setDraftCreateError,
     setSelectedDrone,
     setSelectedDroneIds,
     setSelectedGroupMultiChat,
-    setKanbanBoardOpen,
     setPlaybookRunsOpen,
     setSelectedChat,
   });
@@ -1896,8 +1811,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     repoTransferPeers,
     pullRepoChangesFromDrone,
     applyRepoChangesToDrone,
-    probeRepoChangesFromDrone,
-    syncRepoChangesIntoDrone,
     reseedRepo,
   } = useWorkspaceActions({
     autoDelete,
@@ -1944,20 +1857,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setDroneDropActionModal(null);
     }
   }, [droppedDroneRows.length, droppedDroneTarget, droneDropActionModal]);
-  const syncDroppedDroneIntoTarget = React.useCallback(
-    async (sourceDroneIdRaw: string, targetDroneIdRaw: string) => {
-      const sourceDroneId = String(sourceDroneIdRaw ?? '').trim();
-      const targetDroneId = String(targetDroneIdRaw ?? '').trim();
-      const result = await syncRepoChangesIntoDrone(sourceDroneId, targetDroneId);
-      const errorMessage = String(result.error ?? '').trim();
-      if (!result.ok && errorMessage) {
-        const targetDrone = droneById[targetDroneId] ?? null;
-        if (targetDrone) openDroneErrorModal(targetDrone, errorMessage, result.meta ?? null);
-      }
-      return result;
-    },
-    [droneById, openDroneErrorModal, syncRepoChangesIntoDrone],
-  );
   const {
     selectedGroupMultiChatData,
     groupBroadcastPromptError,
@@ -2767,7 +2666,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const assignCanvasDronesToOwner = React.useCallback(
     async (ownerDroneIdRaw: string, targetDroneIdsRaw: string[]): Promise<{ ok: boolean; error?: string | null }> => {
       const ownerDroneId = String(ownerDroneIdRaw ?? '').trim();
-      if (!ownerDroneId) return { ok: false, error: 'Missing fleet owner.' };
+      if (!ownerDroneId) return { ok: false, error: 'Missing relationship owner.' };
       try {
         const latest = await assignFleetTargets(ownerDroneId, targetDroneIdsRaw);
         if (latest) dispatchFleetAssignmentUpdated({ ownerDroneId, actor: latest });
@@ -3220,11 +3119,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setHeaderOverflowOpen,
     droneErrorModal,
     setDroneErrorModal,
-    openFleetDashboard,
+    openHome,
     openDraftChatComposer,
     openChildDraftChatComposer,
     createDroneChatFromShortcut,
-    openKanbanBoard,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
     toggleTldrFromShortcut,
@@ -3770,7 +3668,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     draftSidebarPlaceholder,
     openDraftChatComposer,
     openCreateModal,
-    openKanbanBoard,
     openPlaybookRuns,
     selectDroneCard,
     selectDroneChat,
@@ -3923,8 +3820,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     droppedDroneTargetLabel,
     droppedDroneRows,
     assignDroppedDronesToTarget,
-    probeRepoChangesFromDrone,
-    syncDroppedDroneIntoTarget,
     setNameSuggestToast,
   });
 
@@ -3941,20 +3836,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     onReplayOnboarding: requestGuidedOnboardingReplay,
     onResetOnboarding: resetGuidedOnboardingDismissals,
     draftChat,
-    kanbanBoardOpen,
-    kanbanBoard: board,
-    onKanbanBoardChange: onBoardChange,
-    taskPlaybookButtons,
-    taskPlaybookButtonsLoading,
-    taskPlaybookButtonsSaving,
-    taskPlaybookButtonsError,
-    onTaskPlaybookButtonsChange,
-    boardLoading,
-    boardSaving,
-    boardError,
-    boardUpdatedAt,
-    reloadBoard,
-    suggestKanbanCardTitleFromPaste,
     createRuntime,
     createAsDraft,
     createPersistVolume,
@@ -4016,7 +3897,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     unreadAgentMessageByChatNodeId,
     openDraftChatComposer,
     openCreateModal,
-    openKanbanBoard,
     openPlaybookRuns,
     openPlaybookRunArtifact,
     activeRepoPath,
@@ -4152,7 +4032,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rightPanelOpenRequestSeq,
     renderRightPanelTabContent,
     renderPersistentPreviewContent,
-    setKanbanBoardOpen,
     setPlaybookRunsOpen,
   });
 

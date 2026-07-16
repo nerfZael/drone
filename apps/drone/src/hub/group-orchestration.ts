@@ -7,8 +7,6 @@ import {
   listCanonicalGroups,
   renameCanonicalGroupTree,
 } from './groups-repositories';
-import { transformStoredKanbanBoardSettings } from './hub-settings';
-import type { TaskBoardState } from './task-board';
 
 type ActiveLifecycleMembership = {
   state: 'real' | 'pending';
@@ -34,30 +32,6 @@ function rewriteGroupPathPrefix(pathRaw: unknown, oldName: string, newName: stri
   const path = normalizeGroupName(pathRaw);
   if (path === oldName) return newName;
   return `${newName}/${path.slice(oldName.length + 1)}`;
-}
-
-function renameGroupTaskSubtree(board: TaskBoardState, oldName: string, newName: string): TaskBoardState {
-  return {
-    taskTypes: board.taskTypes.slice(),
-    lanes: board.lanes.map((lane) => ({
-      ...lane,
-      cards: lane.cards.map((card) => {
-        if (card.scopeType !== 'group' || !isSameOrDescendantGroupPath(card.scopeValue, oldName)) return card;
-        return { ...card, scopeValue: rewriteGroupPathPrefix(card.scopeValue, oldName, newName) };
-      }),
-    })),
-  };
-}
-
-function removeGroupTaskSubtree(board: TaskBoardState, groupName: string): TaskBoardState {
-  return {
-    taskTypes: board.taskTypes.slice(),
-    lanes: board.lanes.map((lane) => ({
-      ...lane,
-      cards: lane.cards.filter((card) =>
-        card.scopeType !== 'group' || !isSameOrDescendantGroupPath(card.scopeValue, groupName)),
-    })),
-  };
 }
 
 async function activeLifecycleMemberships(): Promise<ActiveLifecycleMembership[]> {
@@ -116,7 +90,6 @@ export async function renameCanonicalGroupOrchestration(
       group: rewriteGroupPathPrefix(membership.group, oldName, newName),
     }));
   await setDroneGroupMetadataBatch(updates, { ensureGroups: false });
-  await transformStoredKanbanBoardSettings((board) => renameGroupTaskSubtree(board, oldName, newName));
   return {
     ok: true,
     movedDrones: updates.filter((update) => update.state === 'real').length,
@@ -128,6 +101,5 @@ export async function deleteCanonicalGroupArtifacts(groupNameRaw: string): Promi
   const groupName = normalizeGroupName(groupNameRaw);
   const removedGroupNames = await deleteCanonicalGroupTree(groupName);
   if (removedGroupNames.length === 0) return [];
-  await transformStoredKanbanBoardSettings((board) => removeGroupTaskSubtree(board, groupName));
   return removedGroupNames;
 }

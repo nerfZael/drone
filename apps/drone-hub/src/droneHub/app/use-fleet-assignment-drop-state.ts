@@ -2,7 +2,6 @@ import React from 'react';
 import { useDndMonitor, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
 import type { DroneSummary } from '../types';
 import { fetchFleetActor, type FleetActorPayload } from '../fleet/fleet-api';
-import type { RightPanelTab } from './app-config';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from './drone-hub-dnd';
 import { assignedDroneIdsFromData, resolveAssignedDroneIdsFromTransfer } from './drone-hub-dnd-utils';
 import {
@@ -19,13 +18,11 @@ export function useFleetAssignmentDropState({
   currentDroneLabel,
   openDroneErrorModal,
   onRequestDropActions,
-  requestRightPanelTab,
 }: {
   currentDrone: DroneSummary;
   currentDroneLabel: string;
   openDroneErrorModal: (drone: DroneSummary, message: string, meta: null) => void;
   onRequestDropActions: (targetDroneId: string, sourceDroneIds: string[]) => { ok: boolean; error?: string | null };
-  requestRightPanelTab: (tab: RightPanelTab) => void;
 }) {
   const activeSidebarDrag = useDroneHubActiveDrag();
   const fleetDropId = React.useMemo(() => `fleet-assignment-drop:${currentDrone.id}`, [currentDrone.id]);
@@ -77,10 +74,6 @@ export function useFleetAssignmentDropState({
     },
     [currentDrone.id],
   );
-
-  const openFleetTab = React.useCallback(() => {
-    requestRightPanelTab('fleet');
-  }, [requestRightPanelTab]);
 
   React.useEffect(() => {
     fleetBadgeDataRef.current = fleetBadgeData;
@@ -168,8 +161,8 @@ export function useFleetAssignmentDropState({
     },
   });
 
-  const fleetChildrenCount = Math.max(0, Number(fleetBadgeData?.usage.childrenCount ?? 0) || 0);
-  const fleetAssignedCount = Math.max(0, Number(fleetBadgeData?.usage.assignedCount ?? 0) || 0);
+  const fleetChildrenCount = fleetBadgeData?.relationships.children.length ?? 0;
+  const fleetAssignedCount = fleetBadgeData?.relationships.assigned.length ?? 0;
   const sidebarDraggedDroneIds = React.useMemo(
     () =>
       assignedDroneIdsFromData(activeSidebarDrag).filter((droneId) => droneId && droneId !== currentDrone.id),
@@ -187,8 +180,8 @@ export function useFleetAssignmentDropState({
     fleetBadgeNativeDropActive ||
     String(canvasAssignmentPreview?.overDroneId ?? '').trim() === currentDrone.id;
   const fleetBadgeTitle = fleetBadgeDropActive
-    ? `Drop drones here to choose what to do with them in ${currentDroneLabel}.`
-    : `Open Fleet tab for ${currentDroneLabel}. Drop drones here to assign or sync them.`;
+    ? `Drop drones here to assign them to ${currentDroneLabel}.`
+    : `Relationship summary for ${currentDroneLabel}. Drop drones here to assign them.`;
   const fleetBadgeSummaryText =
     fleetBadgeLoading && !fleetBadgeData
       ? 'Loading…'
@@ -196,8 +189,8 @@ export function useFleetAssignmentDropState({
         ? `${fleetChildrenCount} child${fleetChildrenCount === 1 ? '' : 'ren'} · ${fleetAssignedCount} assigned`
         : 'Unavailable';
   const fleetDropHintText = fleetBadgeDropActive
-    ? `Release to choose an action for ${fleetDropHintCount} drone${fleetDropHintCount === 1 ? '' : 's'} in ${currentDroneLabel}.`
-    : `Drop ${fleetDropHintCount} drone${fleetDropHintCount === 1 ? '' : 's'} anywhere in this chat to assign or sync them with ${currentDroneLabel}.`;
+    ? `Release to assign ${fleetDropHintCount} drone${fleetDropHintCount === 1 ? '' : 's'} to ${currentDroneLabel}.`
+    : `Drop ${fleetDropHintCount} drone${fleetDropHintCount === 1 ? '' : 's'} anywhere in this chat to assign them to ${currentDroneLabel}.`;
 
   const onFleetDropDragOver = React.useCallback(
     (event: React.DragEvent<HTMLElement>) => {
@@ -235,7 +228,6 @@ export function useFleetAssignmentDropState({
     onFleetDropDragLeave,
     onFleetDropDragOver,
     onFleetDropDrop,
-    openFleetTab,
     setFleetDropNodeRef,
   };
 }

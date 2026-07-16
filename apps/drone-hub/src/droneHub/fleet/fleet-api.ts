@@ -2,31 +2,7 @@ import { requestJson } from '../http';
 
 export type FleetActorPayload = {
   ok: true;
-  apiVersion: string;
   actor: { id: string; name: string };
-  config: {
-    enabled: boolean;
-    capabilities: string[];
-    readScopes: string[];
-    quotas: Record<string, number>;
-  };
-  limits: {
-    maxChildren: number;
-    maxCreationsPerHour: number;
-    maxPendingCreationsGlobal: number;
-    maxMessagesPerMinute: number;
-    maxMessageSizeBytes: number;
-    maxReadPageSize: number;
-    defaultReadPageSize: number;
-    maxReadChars: number;
-  };
-  usage: {
-    childrenCount: number;
-    assignedCount: number;
-    creationsLastHour: number;
-    messagesLastMinute: number;
-    pendingCreationsGlobal: number;
-  };
   relationships: {
     children: Array<{ id: string; name: string; kind: 'real' | 'pending'; phase?: string | null }>;
     assigned: Array<{ id: string; name: string; kind: 'real' | 'pending' }>;

@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconBoard, IconDrone, IconList, IconPlus, IconPlusDouble } from './icons';
+import { IconDrone, IconList, IconPlus, IconPlusDouble } from './icons';
 
 export type NoDroneSelectedStateProps = {
   dronesLoading: boolean;
@@ -7,7 +7,6 @@ export type NoDroneSelectedStateProps = {
   dronesError: string | null | undefined;
   onOpenDraftChatComposer: () => void;
   onOpenCreateModal: () => void;
-  onOpenKanbanBoard: () => void;
   onOpenPlaybookRuns: () => void;
 };
 
@@ -17,7 +16,6 @@ export function NoDroneSelectedState({
   dronesError,
   onOpenDraftChatComposer,
   onOpenCreateModal,
-  onOpenKanbanBoard,
   onOpenPlaybookRuns,
 }: NoDroneSelectedStateProps) {
   const hasDrones = sidebarDroneCount > 0;
@@ -70,13 +68,6 @@ export function NoDroneSelectedState({
             title="Create multiple"
             description="Prepare several workspaces in one pass."
             onClick={onOpenCreateModal}
-          />
-          <LaunchAction
-            icon={<IconBoard className="h-4 w-4" />}
-            eyebrow="Plan"
-            title="Open task board"
-            description="Shape tasks before assigning work."
-            onClick={onOpenKanbanBoard}
           />
           <LaunchAction
             icon={<IconList className="h-4 w-4" />}

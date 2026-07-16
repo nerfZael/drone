@@ -2,13 +2,13 @@ import { describe, expect, test } from 'bun:test';
 import { fleetActorConfig } from '../src/hub/fleet-helpers';
 
 describe('fleetActorConfig defaults', () => {
-  test('defaults missing capabilities to create, send, and read', () => {
+  test('defaults missing relationship fields', () => {
     const config = fleetActorConfig({});
-    expect(config.capabilities).toEqual(['drone:create', 'drone:message:send', 'drone:message:read']);
+    expect(config).toEqual({ assigned: [], createdBy: null, createdAt: null });
   });
 
-  test('preserves explicit empty capabilities', () => {
-    const config = fleetActorConfig({ fleet: { capabilities: [] } });
-    expect(config.capabilities).toEqual([]);
+  test('normalizes assigned and parent relationships', () => {
+    const config = fleetActorConfig({ fleet: { assigned: [' child ', '', 'child'], createdBy: ' parent ' } });
+    expect(config).toEqual({ assigned: ['child'], createdBy: 'parent', createdAt: null });
   });
 });

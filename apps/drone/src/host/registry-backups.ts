@@ -509,7 +509,7 @@ async function createRegistryBackupUnlocked(kind: 'hourly' | 'daily' | 'manual',
       prefix: suspectPrefix,
       scheduledKind: kind,
       scheduledBucket: bucket,
-      reason: `empty registry while previous healthy backup had ${latestHealthy.counts.total} fleet entries`,
+      reason: `empty registry while previous healthy backup had ${latestHealthy.counts.total} drone entries`,
     });
     await pruneRegistryBackups(settings);
     return suspect;

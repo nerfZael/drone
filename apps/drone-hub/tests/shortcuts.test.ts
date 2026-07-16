@@ -35,14 +35,6 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
-    expect(defaults.openKanbanBoard).toEqual({
-      key: 'y',
-      mod: false,
-      ctrl: false,
-      meta: false,
-      alt: false,
-      shift: false,
-    });
     expect(defaults.focusPrimaryChatInput).toEqual({
       key: 'enter',
       mod: false,
