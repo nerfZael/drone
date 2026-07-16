@@ -1,8 +1,13 @@
 import type http from 'node:http';
+import type { z } from 'zod';
+
+import { describeHubError, InvalidRequestError } from './domain-errors';
+import type { HubJsonResponder } from './hub-http';
+import { parseRequestSchema } from './request-schema';
 
 export type HubHttpMethod = 'DELETE' | 'GET' | 'PATCH' | 'POST' | 'PUT';
 
-export type HubJsonResponder = (res: http.ServerResponse, status: number, body: unknown) => void;
+export type { HubJsonResponder } from './hub-http';
 
 export type HubJsonBodyReader = (req: http.IncomingMessage) => Promise<unknown>;
 
@@ -28,6 +33,10 @@ export type HubRouteContext = {
   params: Readonly<Record<string, string>>;
   json: (status: number, body: unknown) => void;
   readJson: <T = any>() => Promise<T>;
+  readJsonSchema: <Schema extends z.ZodType>(
+    schema: Schema,
+    label?: string,
+  ) => Promise<z.output<Schema>>;
   fail: (status: number, message: string, details?: Record<string, unknown>) => never;
 };
 
@@ -208,16 +217,31 @@ export class HubRouter {
             try {
               return (await this.readJsonBody(req)) as T;
             } catch (error: any) {
+              // Keep the legacy response body for plain JSON routes. Schema-aware
+              // routes opt into the richer InvalidRequestError descriptor below.
               throw new HubHttpError(400, error?.message ?? String(error));
             }
+          },
+          readJsonSchema: async (schema, label) => {
+            let body: unknown;
+            try {
+              body = await this.readJsonBody(req);
+            } catch (error: any) {
+              throw new InvalidRequestError(error?.message ?? String(error));
+            }
+            return parseRequestSchema(schema, body, label);
           },
           fail: (status, message, details) => {
             throw new HubHttpError(status, message, details);
           },
         });
       } catch (error) {
-        if (!(error instanceof HubHttpError)) throw error;
-        json(error.status, error.body);
+        if (error instanceof HubHttpError) json(error.status, error.body);
+        else {
+          const descriptor = describeHubError(error);
+          if (descriptor.statusCode >= 500) throw error;
+          json(descriptor.statusCode, descriptor.body);
+        }
       }
       return true;
     }
