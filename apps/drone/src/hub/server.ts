@@ -251,6 +251,14 @@ import {
   shellQuoteIfNeeded,
 } from './hub-format';
 import { readJsonBody, readRawBody, withCors } from './hub-http';
+import { HubRouter } from './hub-router';
+import { registerAssistantRoutes } from './routes/assistant-routes';
+import { registerCatalogRoutes } from './routes/catalog-routes';
+import { registerGroupRoutes } from './routes/group-routes';
+import { registerPlaybookRoutes } from './routes/playbook-routes';
+import { registerRepositoryRoutes } from './routes/repository-routes';
+import { registerSettingsRoutes } from './routes/settings-routes';
+import { registerWhiteboardRoutes } from './routes/whiteboard-routes';
 import { createDroneHubMcpServer } from './mcp-server';
 import { GROQ_TRANSCRIPTION_MAX_BYTES, transcribeAudioWithGroq } from './groq-transcription';
 import {
@@ -447,7 +455,6 @@ import {
   HubAssistantService,
   summarizeAssistantChatIdle,
   type AssistantDroneSummary,
-  type AssistantUiAction,
 } from './assistant';
 import { BlipAssistantHost } from './assistant/blip-assistant-host';
 import { loadBlipMcp, loadBlipTools } from './assistant/blip-runtime-loader';
@@ -4962,7 +4969,6 @@ type PlaybookDefinition = {
   createdAt: string;
   updatedAt?: string;
 };
-
 
 type PlaybookRunStatus = 'starting' | 'running' | 'completed' | 'failed';
 type PlaybookRunQueueState = 'queued' | 'waiting' | 'launching' | 'error';
@@ -16827,17 +16833,6 @@ export async function startDroneHubApiServer(opts: {
         error: error?.message ?? String(error),
       });
     });
-  let activeAssistantContext: {
-    activeDroneId: string | null;
-    activeDroneName: string | null;
-    activeChatName: string | null;
-    appView: string | null;
-  } = {
-    activeDroneId: null,
-    activeDroneName: null,
-    activeChatName: null,
-    appView: null,
-  };
   function writeAssistantSseEvent(res: http.ServerResponse, event: string, data: any): void {
     if (res.destroyed || res.writableEnded) return;
     res.write(`event: ${event}\n`);
@@ -18189,6 +18184,454 @@ export async function startDroneHubApiServer(opts: {
       : await createMcpServer(payload);
   };
 
+  const apiRouter = new HubRouter(json, readJsonBody);
+
+  apiRouter.get('/api/health', ({ json: respond }) => {
+    respond(200, { ok: true });
+  });
+
+  apiRouter.get('/api/version', async ({ json: respond }) => {
+    let mtime: string | null = null;
+    try {
+      const st = await fs.stat(__filename);
+      mtime = st.mtime.toISOString();
+    } catch {
+      // ignore
+    }
+    respond(200, {
+      ok: true,
+      buildId: HUB_API_BUILD_ID,
+      loadedAt: HUB_API_LOADED_AT,
+      pid: process.pid,
+      node: process.version,
+      file: __filename,
+      fileMtime: mtime,
+      hasDisplay: Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY),
+      hasDbus: Boolean(process.env.DBUS_SESSION_BUS_ADDRESS),
+      env: {
+        display: process.env.DISPLAY ?? null,
+        waylandDisplay: process.env.WAYLAND_DISPLAY ?? null,
+        xdgRuntimeDir: process.env.XDG_RUNTIME_DIR ?? null,
+        xdgSessionType: process.env.XDG_SESSION_TYPE ?? null,
+        desktopSession: process.env.DESKTOP_SESSION ?? null,
+      },
+    });
+  });
+
+  apiRouter.get('/api/setup/status', async ({ json: respond }) => {
+    respond(200, await resolveSetupStatusResponse());
+  });
+
+  apiRouter.post('/api/setup/welcome/dismiss', async ({ json: respond }) => {
+    const activeProfile = await readActiveProfileName();
+    const scopeKey = resolveHubSetupScopeKey(activeProfile);
+    const next = await dismissWelcomeForScope(scopeKey);
+    respond(200, {
+      ok: true,
+      welcomeDismissedAt: next.welcomeDismissedAtByScope[scopeKey] ?? null,
+    });
+  });
+
+  registerSettingsRoutes(apiRouter, {
+    resolveGroqApiKeySettings,
+    resolveExaApiKeySettings,
+    resolveEffectiveProviderApiKeySettings,
+    logProviderApiKeyResolution,
+    providerKeySettingsResponse,
+    normalizeApiKey,
+    upsertStoredProviderApiKey,
+    clearStoredProviderApiKey,
+    resolveLlmSettingsResponse,
+    parseLlmProvider,
+    upsertStoredLlmProvider,
+    resolveGithubSettingsResponse,
+    resolveDeleteActionSettingsResponse,
+    readManagedHubStateAtRootOrFallback,
+    parseDroneDeleteMode,
+    parseArchiveRetentionId,
+    parseArchiveRuntimePolicy,
+    upsertStoredDeleteActionSettings,
+    resolveFilesystemSettingsResponse,
+    parseFilesystemUploadMaxBytes,
+    upsertStoredFilesystemSettings,
+    FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
+    FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
+    resolveRegistryBackupStatusResponse,
+    upsertStoredRegistryBackupSettings,
+    createRegistryBackup,
+    resolveAgentMessageAutoContinueSettingsResponse,
+    normalizeAgentMessageAutoContinuePrompt,
+    upsertStoredAgentMessageAutoContinueSettings,
+    resolveAgentSuggestionSettingsResponse,
+    normalizeAgentSuggestionPolicyMarkdown,
+    upsertStoredAgentSuggestionSettings,
+    defaultAgentsPayload,
+    normalizeAgentsMarkdown,
+    upsertCanonicalDefaultAgentsConfig,
+    loadRegistry,
+    syncSetService,
+    parseSyncSetMutationInput,
+    buildStoredSyncSet,
+    ensureSyncSetSourceIsReadable,
+    ensureHubManagedSyncSetSourceDir,
+    removeHubManagedSyncSetSourceDir,
+    nowIso,
+    listProfilesState,
+    createManagedProfile,
+    useManagedProfile,
+    renameManagedProfile,
+    deleteManagedProfile,
+    profileSettingsErrorStatus,
+    apiToken,
+    droneRootPath,
+    resolveUiPreferencesSettingsResponse,
+    upsertStoredUiPreferencesSettings,
+    clampIntParam,
+    readHubLogTail,
+    HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,
+    HUB_SETTINGS_LOG_MAX_BYTES,
+    HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES,
+    HUB_SETTINGS_LOG_MAX_TAIL_LINES,
+  });
+
+  registerCatalogRoutes(apiRouter, {
+    mcpToken,
+    upsertDroneHubMcpServerPreset,
+  });
+
+  const errorMessage = (error: any): string => error?.message ?? String(error);
+  const normalizeMessageContext = (body: any) => ({
+    prompt: typeof body?.prompt === 'string' ? body.prompt : '',
+    response: String(body?.response ?? '').trim(),
+    context: (Array.isArray(body?.context) ? body.context : [])
+      .map((turn: any) => ({
+        turn: typeof turn?.turn === 'number' ? turn.turn : Number(turn?.turn ?? 0) || 0,
+        prompt: String(turn?.prompt ?? ''),
+        response: String(turn?.response ?? ''),
+      }))
+      .filter((turn: any) => typeof turn.response === 'string'),
+  });
+
+  apiRouter.post(
+    '/api/tldr/from-message',
+    async ({ method, url, readJson, fail, json: respond }) => {
+      const input = normalizeMessageContext(await readJson());
+      if (!input.response) return fail(400, 'missing response');
+
+      let selectedProvider: LlmProviderId | null = null;
+      try {
+        const { provider } = await resolveEffectiveLlmProvider();
+        selectedProvider = provider;
+        const resolved = await resolveEffectiveProviderApiKeySettings(provider);
+        if (!resolved.apiKey) {
+          await logProviderApiKeyResolution(
+            'warn',
+            'tldr/from-message rejected: missing provider key',
+            provider,
+            { pathname: url.pathname, method },
+          );
+          respond(412, {
+            ok: false,
+            error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
+          });
+          return;
+        }
+        const tldr = await tldrFromAgentMessage(input, {
+          provider,
+          apiKey: resolved.apiKey,
+        });
+        respond(200, { ok: true, tldr });
+      } catch (error: any) {
+        const details = {
+          model: String(process.env.DRONE_HUB_TLDR_MODEL ?? '').trim() || null,
+          error: errorMessage(error),
+        };
+        if (selectedProvider) {
+          await logProviderApiKeyResolution(
+            'error',
+            'tldr/from-message request failed',
+            selectedProvider,
+            { pathname: url.pathname, method, ...details },
+          );
+        } else {
+          hubLog('error', 'tldr/from-message request failed', {
+            ...llmProviderEnvLogMeta(),
+            ...details,
+          });
+        }
+        respond(500, { ok: false, error: errorMessage(error) });
+      }
+    },
+  );
+
+  apiRouter.post(
+    '/api/agent-suggestion/from-message',
+    async ({ method, url, readJson, fail, json: respond }) => {
+      const input = normalizeMessageContext(await readJson());
+      if (!input.response) return fail(400, 'missing response');
+
+      let selectedProvider: LlmProviderId | null = null;
+      try {
+        const { provider } = await resolveEffectiveLlmProvider();
+        selectedProvider = provider;
+        const resolved = await resolveEffectiveProviderApiKeySettings(provider);
+        if (!resolved.apiKey) {
+          await logProviderApiKeyResolution(
+            'warn',
+            'agent-suggestion/from-message rejected: missing provider key',
+            provider,
+            { pathname: url.pathname, method },
+          );
+          respond(412, {
+            ok: false,
+            error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
+          });
+          return;
+        }
+        const settings = await resolveEffectiveAgentSuggestionSettings();
+        const result = await suggestReplyToAgentMessage(
+          { ...input, policyMarkdown: settings.policyMarkdown },
+          { provider, apiKey: resolved.apiKey },
+        );
+        respond(200, {
+          ok: true,
+          outcome: result.outcome,
+          suggestion: result.outcome === 'suggest' ? result.suggestion : null,
+          reason: result.reason,
+          kind: result.kind,
+          policyFingerprint: settings.policyFingerprint,
+        });
+      } catch (error: any) {
+        const details = {
+          model: String(process.env.DRONE_HUB_AGENT_SUGGESTION_MODEL ?? '').trim() || null,
+          error: errorMessage(error),
+        };
+        if (selectedProvider) {
+          await logProviderApiKeyResolution(
+            'error',
+            'agent-suggestion/from-message request failed',
+            selectedProvider,
+            { pathname: url.pathname, method, ...details },
+          );
+        } else {
+          hubLog('error', 'agent-suggestion/from-message request failed', {
+            ...llmProviderEnvLogMeta(),
+            ...details,
+          });
+        }
+        respond(500, { ok: false, error: errorMessage(error) });
+      }
+    },
+  );
+
+  apiRouter.post(
+    '/api/jobs/from-message',
+    async ({ method, url, readJson, fail, json: respond }) => {
+      const message = String((await readJson<any>())?.message ?? '').trim();
+      if (!message) return fail(400, 'missing message');
+
+      let selectedProvider: LlmProviderId | null = null;
+      try {
+        const { provider } = await resolveEffectiveLlmProvider();
+        selectedProvider = provider;
+        const resolved = await resolveEffectiveProviderApiKeySettings(provider);
+        if (!resolved.apiKey) {
+          await logProviderApiKeyResolution(
+            'warn',
+            'jobs/from-message rejected: missing provider key',
+            provider,
+            { pathname: url.pathname, method },
+          );
+          respond(412, {
+            ok: false,
+            error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
+          });
+          return;
+        }
+        const plan = await jobsPlanFromAgentMessage(message, {
+          provider,
+          apiKey: resolved.apiKey,
+        });
+        respond(200, {
+          ok: true,
+          group: typeof plan?.group === 'string' ? plan.group : 'jobs',
+          jobs: Array.isArray(plan?.jobs) ? plan.jobs : [],
+        });
+      } catch (error: any) {
+        if (selectedProvider) {
+          await logProviderApiKeyResolution(
+            'error',
+            'jobs/from-message request failed',
+            selectedProvider,
+            { pathname: url.pathname, method, error: errorMessage(error) },
+          );
+        }
+        respond(500, { ok: false, error: errorMessage(error) });
+      }
+    },
+  );
+
+  apiRouter.post(
+    '/api/drones/name-from-message',
+    async ({ method, url, readJson, fail, json: respond }) => {
+      const body = await readJson<any>();
+      const message = String(body?.message ?? '').trim();
+      if (!message) return fail(400, 'missing message');
+
+      const sourceRaw = typeof body?.source === 'string' ? body.source.trim() : '';
+      const source = sourceRaw ? sourceRaw.slice(0, 64) : null;
+      const requestedDroneId = normalizeDroneIdentity(String(body?.droneId ?? '').trim()) || null;
+      const messageLength = message.length;
+      let selectedProvider: LlmProviderId | null = null;
+      try {
+        const { provider, ...resolved } = await resolveNameSuggestionLlmSettings();
+        selectedProvider = provider;
+        if (!resolved.apiKey) {
+          await logProviderApiKeyResolution(
+            'warn',
+            'name-from-message rejected: missing Codex connection and OpenAI key',
+            provider,
+            { pathname: url.pathname, method, source, requestedDroneId, messageLength },
+          );
+          respond(412, {
+            ok: false,
+            error: 'Connect Codex or configure an OpenAI API key in Settings.',
+          });
+          return;
+        }
+        const name = await suggestDroneNameFromMessage(message, {
+          provider,
+          apiKey: resolved.apiKey,
+        });
+        if (source || requestedDroneId) {
+          hubLog('info', 'name-from-message suggested', {
+            provider,
+            source,
+            requestedDroneId,
+            suggestedName: name,
+            messageLength,
+          });
+        }
+        respond(200, { ok: true, name });
+      } catch (error: any) {
+        const details = {
+          source,
+          requestedDroneId,
+          messageLength,
+          model: DEFAULT_DRONE_NAME_MODEL_ID,
+          error: errorMessage(error),
+        };
+        if (selectedProvider) {
+          await logProviderApiKeyResolution(
+            'error',
+            'name-from-message request failed',
+            selectedProvider,
+            { pathname: url.pathname, method, ...details },
+          );
+        } else {
+          hubLog('error', 'name-from-message request failed', {
+            ...llmProviderEnvLogMeta(),
+            ...details,
+          });
+        }
+        respond(500, { ok: false, error: errorMessage(error) });
+      }
+    },
+  );
+
+  registerAssistantRoutes(apiRouter, {
+    assistantService,
+    blipAssistantHost,
+    nowIso,
+    writeAssistantSseEvent,
+    resolveDroneOrPendingForReadRef,
+    requireWhiteboardStore,
+    assistantPromptDrains,
+    startAssistantPromptDrain,
+    validateAssistantPromptImages,
+    saveAssistantArtifactUploads,
+    hubLog,
+  });
+
+  registerWhiteboardRoutes(apiRouter, {
+    nowIso,
+    writeHubSseEvent,
+    subscribeWhiteboardChanges,
+    emitWhiteboardChange,
+  });
+
+  registerRepositoryRoutes(apiRouter, {
+    normalizeBuiltinAgentId,
+    modelCatalogCacheKey,
+    latestChatModelDiscoveryByAgent,
+    loadRegistry,
+    droneRuntime,
+    discoverAndRememberModelsForBuiltinAgent,
+    listCanonicalRepositories,
+    gitListRemoteBranches,
+    removeCanonicalRepository,
+    withCanonicalRepositories,
+    repoEnvironmentPayload,
+    normalizeEnvVarMap,
+    nowIso,
+    upsertCanonicalNonRepoEnvironmentConfig,
+    updateCanonicalRepositoryEnvironment,
+    repoAgentsPayload,
+    normalizeRepoAgentsMode,
+    normalizeAgentsMarkdown,
+    updateCanonicalRepositoryAgents,
+  });
+
+  registerPlaybookRoutes(apiRouter, {
+    listCanonicalPlaybookDefinitions,
+    normalizePlaybookLabel,
+    normalizePlaybookAgent,
+    parseChatModelForUpdate,
+    normalizePlaybookMessages,
+    normalizePlaybookArtifacts,
+    normalizePlaybookActions,
+    nowIso,
+    getCatalogStore,
+    catalogPlaybookRecord,
+    updateRegistry,
+    normalizePlaybookDefinitions,
+    parsePullHostBranchBeforeCreate,
+    PLAYBOOK_RUN_QUEUE_BATCH_MIN,
+    PLAYBOOK_RUN_QUEUE_BATCH_MAX,
+    startPlaybookRunLaunch,
+    formatPullHostBranchBeforeCreateError,
+    enqueueCanonicalPlaybookQueueItem,
+    runPlaybookRunQueueCycle,
+    loadRegistry,
+    normalizeDroneIdentity,
+    playbookMetaFromEntry,
+    normalizeDroneEntryKind,
+    summarizePlaybookRunEntry,
+    normalizeDroneRuntime,
+    summarizePlaybookRunQueueItems,
+    workflowStoreOrCompatibility,
+    readPlaybookRunQueueItems,
+    writePlaybookRunQueueItems,
+  });
+
+  registerGroupRoutes(apiRouter, {
+    loadRegistry,
+    listCanonicalGroups,
+    listAllKnownGroups,
+    normalizeGroupName,
+    isUngroupedGroupName,
+    validateGroupNameOrThrow,
+    nowIso,
+    ensureCanonicalGroup,
+    renameCanonicalGroupOrchestration,
+    isSameOrDescendantGroupPath,
+    normalizeDroneIdentity,
+    deleteCanonicalGroupArtifacts,
+    dequeueProvisioning,
+    removeDroneById,
+    deleteCanonicalDroneLifecycleBatch,
+  });
+
   const server = http.createServer(async (req, res) => {
     try {
       const method = (req.method ?? 'GET').toUpperCase();
@@ -18226,39 +18669,7 @@ export async function startDroneHubApiServer(opts: {
         }
       }
 
-      if (method === 'GET' && pathname === '/api/health') {
-        json(res, 200, { ok: true });
-        return;
-      }
-
-      if (method === 'GET' && pathname === '/api/version') {
-        let mtime: string | null = null;
-        try {
-          const st = await fs.stat(__filename);
-          mtime = st.mtime.toISOString();
-        } catch {
-          // ignore
-        }
-        json(res, 200, {
-          ok: true,
-          buildId: HUB_API_BUILD_ID,
-          loadedAt: HUB_API_LOADED_AT,
-          pid: process.pid,
-          node: process.version,
-          file: __filename,
-          fileMtime: mtime,
-          hasDisplay: Boolean(process.env.DISPLAY || process.env.WAYLAND_DISPLAY),
-          hasDbus: Boolean(process.env.DBUS_SESSION_BUS_ADDRESS),
-          env: {
-            display: process.env.DISPLAY ?? null,
-            waylandDisplay: process.env.WAYLAND_DISPLAY ?? null,
-            xdgRuntimeDir: process.env.XDG_RUNTIME_DIR ?? null,
-            xdgSessionType: process.env.XDG_SESSION_TYPE ?? null,
-            desktopSession: process.env.DESKTOP_SESSION ?? null,
-          },
-        });
-        return;
-      }
+      if (await apiRouter.handle(req, res, u)) return;
 
       if (pathname === '/api/chats/idle/status' && method === 'POST') {
         let body: any = null;
@@ -18354,2527 +18765,7 @@ export async function startDroneHubApiServer(opts: {
         return;
       }
 
-      if (pathname === '/api/assistant/system-prompt') {
-        if (method === 'GET') {
-          json(res, 200, await assistantService.systemPromptSettings());
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            json(res, 200, await assistantService.updateSystemPrompt(body ?? {}));
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/assistant/threads' && method === 'GET') {
-        json(res, 200, await assistantService.snapshot('compact'));
-        return;
-      }
-
-      if (pathname === '/api/assistant/events' && method === 'GET') {
-        res.statusCode = 200;
-        res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-        res.setHeader('cache-control', 'no-cache, no-transform');
-        res.setHeader('connection', 'keep-alive');
-        req.socket.setTimeout(0);
-        (res as any).flushHeaders?.();
-        writeAssistantSseEvent(res, 'connected', { ok: true, at: new Date().toISOString() });
-        const unsubscribe = assistantService.subscribeChanges((event) => {
-          writeAssistantSseEvent(res, 'assistant_change', event);
-        });
-        const keepAlive = setInterval(() => {
-          if (res.destroyed || res.writableEnded) return;
-          res.write(': keepalive\n\n');
-        }, 25_000);
-        (keepAlive as any).unref?.();
-        let cleanedUp = false;
-        const cleanup = () => {
-          if (cleanedUp) return;
-          cleanedUp = true;
-          clearInterval(keepAlive);
-          unsubscribe();
-        };
-        req.on('close', cleanup);
-        res.on('close', cleanup);
-        return;
-      }
-
-      if (pathname === '/api/assistant/threads' && method === 'POST') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        const cloneThreadId = String(body?.cloneThreadId ?? '').trim();
-        if (!cloneThreadId) {
-          json(res, 201, await assistantService.createThread(body ?? {}));
-          return;
-        }
-        let clonedThreadId = '';
-        try {
-          if (blipAssistantHost.isThreadRunning(cloneThreadId))
-            throw new Error('Stop this assistant thread before cloning it');
-          const snapshot = await assistantService.cloneThread(cloneThreadId, body ?? {});
-          clonedThreadId = snapshot.activeThreadId;
-          await blipAssistantHost.cloneThread(cloneThreadId, clonedThreadId);
-          json(res, 201, snapshot);
-        } catch (e: any) {
-          if (clonedThreadId) {
-            await blipAssistantHost.deleteThread(clonedThreadId).catch(() => undefined);
-            await assistantService.deleteThread(clonedThreadId).catch(() => undefined);
-          }
-          json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, {
-            ok: false,
-            error: e?.message ?? String(e),
-          });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/default-model' && method === 'POST') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-          json(res, 200, await assistantService.updateDefaultModel(body ?? {}));
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/default-tools' && method === 'POST') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-          json(res, 200, await assistantService.updateDefaultEnabledTools(body ?? {}));
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      if (pathname === '/api/assistant/context' && method === 'POST') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        activeAssistantContext = {
-          activeDroneId: String(body?.activeDroneId ?? '').trim() || null,
-          activeDroneName: String(body?.activeDroneName ?? '').trim() || null,
-          activeChatName: String(body?.activeChatName ?? '').trim() || null,
-          appView: String(body?.appView ?? '').trim() || null,
-        };
-        assistantService.updateAppContext(body ?? {});
-        json(res, 200, { ok: true });
-        return;
-      }
-
-      if (pathname === '/api/assistant/ui-action' && method === 'POST') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        try {
-          const rawAction =
-            body?.uiAction && typeof body.uiAction === 'object' ? body.uiAction : body;
-          const actionType = String(rawAction?.type ?? '').trim();
-          const at = new Date().toISOString();
-          let uiAction: AssistantUiAction;
-
-          if (actionType === 'open_drone_chat') {
-            const droneRef = String(rawAction?.droneId ?? rawAction?.drone ?? '').trim();
-            const resolved = await resolveDroneOrPendingForReadRef(droneRef);
-            if (!resolved) throw new Error(`unknown drone: ${droneRef || 'missing drone'}`);
-            const droneId = resolved.id;
-            const chatName =
-              String(rawAction?.chatName ?? rawAction?.chat ?? '').trim() || 'default';
-            uiAction = { type: 'open_drone_chat', droneId, droneIds: [droneId], chatName, at };
-          } else if (actionType === 'highlight_drones') {
-            const rawDroneRefs = [
-              ...(Array.isArray(rawAction?.droneIds) ? rawAction.droneIds : []),
-              ...(Array.isArray(rawAction?.drones) ? rawAction.drones : []),
-              rawAction?.droneId,
-              rawAction?.drone,
-            ];
-            const droneRefs = Array.from(
-              new Set(
-                rawDroneRefs.map((item: unknown) => String(item ?? '').trim()).filter(Boolean),
-              ),
-            );
-            const droneIds: string[] = [];
-            for (const droneRef of droneRefs) {
-              const resolved = await resolveDroneOrPendingForReadRef(droneRef);
-              if (!resolved) throw new Error(`unknown drone: ${droneRef}`);
-              if (!droneIds.includes(resolved.id)) droneIds.push(resolved.id);
-            }
-            if (droneIds.length === 0) throw new Error('droneIds is required');
-            const durationRaw = Number(rawAction?.durationMs);
-            const durationMs = Number.isFinite(durationRaw)
-              ? Math.max(1000, Math.min(60_000, Math.floor(durationRaw)))
-              : 10_000;
-            uiAction = { type: 'highlight_drones', droneIds, durationMs, at };
-          } else if (actionType === 'open_whiteboard') {
-            const whiteboardId =
-              String(rawAction?.whiteboardId ?? rawAction?.id ?? '').trim() || 'main';
-            const whiteboard = requireWhiteboardStore().get(whiteboardId);
-            if (!whiteboard) throw new Error(`unknown whiteboard: ${whiteboardId}`);
-            uiAction = { type: 'open_whiteboard', whiteboardId: whiteboard.id, at };
-          } else if (actionType === 'close_whiteboard') {
-            uiAction = { type: 'close_whiteboard', at };
-          } else {
-            throw new Error(`unsupported ui action: ${actionType || 'missing type'}`);
-          }
-
-          json(
-            res,
-            200,
-            assistantService.emitExternalUiAction(
-              uiAction,
-              String(body?.threadId ?? '').trim() || undefined,
-            ),
-          );
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-        }
-        return;
-      }
-
-      {
-        const whiteboardParts = pathname.split('/').filter(Boolean);
-        if (
-          whiteboardParts.length >= 2 &&
-          whiteboardParts[0] === 'api' &&
-          whiteboardParts[1] === 'whiteboards'
-        ) {
-          if (whiteboardParts.length === 3 && whiteboardParts[2] === 'events' && method === 'GET') {
-            res.statusCode = 200;
-            res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-            res.setHeader('cache-control', 'no-cache, no-transform');
-            res.setHeader('connection', 'keep-alive');
-            req.socket.setTimeout(0);
-            (res as any).flushHeaders?.();
-            writeHubSseEvent(res, 'connected', { ok: true, at: nowIso() });
-            const unsubscribe = subscribeWhiteboardChanges((event) => {
-              writeHubSseEvent(res, 'whiteboard_change', event);
-            });
-            const keepAlive = setInterval(() => {
-              if (res.destroyed || res.writableEnded) return;
-              res.write(': keepalive\n\n');
-            }, 25_000);
-            (keepAlive as any).unref?.();
-            let cleanedUp = false;
-            const cleanup = () => {
-              if (cleanedUp) return;
-              cleanedUp = true;
-              clearInterval(keepAlive);
-              unsubscribe();
-            };
-            req.on('close', cleanup);
-            res.on('close', cleanup);
-            return;
-          }
-
-          const store = requireWhiteboardStore();
-
-          if (whiteboardParts.length === 2 && method === 'GET') {
-            json(res, 200, {
-              ok: true,
-              whiteboards: store.list({
-                scopeType: u.searchParams.get('scopeType') ?? undefined,
-                scopeValue: u.searchParams.get('scopeValue') ?? undefined,
-              }),
-            });
-            return;
-          }
-
-          if (whiteboardParts.length === 2 && method === 'POST') {
-            let body: any = null;
-            try {
-              body = await readJsonBody(req);
-            } catch (e: any) {
-              json(res, 400, { ok: false, error: e?.message ?? String(e) });
-              return;
-            }
-            try {
-              const whiteboard = store.create(body ?? {});
-              emitWhiteboardChange({
-                whiteboardId: whiteboard.id,
-                version: whiteboard.version,
-                reason: 'created',
-                source: body?.actorId ?? 'ui',
-              });
-              json(res, 201, { ok: true, whiteboard });
-            } catch (e: any) {
-              json(res, Number(e?.statusCode ?? 0) || 400, {
-                ok: false,
-                error: e?.message ?? String(e),
-              });
-            }
-            return;
-          }
-
-          if (whiteboardParts.length === 4 && whiteboardParts[3] === 'image' && method === 'GET') {
-            const whiteboardId = decodeURIComponent(whiteboardParts[2] ?? '');
-            const whiteboard =
-              whiteboardId === 'main'
-                ? (store.get(whiteboardId) ?? store.ensureDefault())
-                : store.get(whiteboardId);
-            if (!whiteboard) {
-              json(res, 404, { ok: false, error: `whiteboard not found: ${whiteboardId}` });
-              return;
-            }
-            try {
-              const image = renderWhiteboardPng(whiteboard, {
-                padding: u.searchParams.get('padding') ?? undefined,
-                maxWidth: u.searchParams.get('maxWidth') ?? undefined,
-                maxHeight: u.searchParams.get('maxHeight') ?? undefined,
-                backgroundColor: u.searchParams.get('backgroundColor') ?? undefined,
-              });
-              const { data, ...metadata } = image;
-              json(res, 200, { ok: true, data, metadata });
-            } catch (e: any) {
-              json(res, Number(e?.statusCode ?? 0) || 400, {
-                ok: false,
-                error: e?.message ?? String(e),
-              });
-            }
-            return;
-          }
-
-          if (whiteboardParts.length === 3) {
-            const whiteboardId = decodeURIComponent(whiteboardParts[2] ?? '');
-
-            if (method === 'GET') {
-              const whiteboard = store.get(whiteboardId);
-              if (!whiteboard) {
-                json(res, 404, { ok: false, error: `whiteboard not found: ${whiteboardId}` });
-                return;
-              }
-              json(res, 200, { ok: true, whiteboard });
-              return;
-            }
-
-            if (method === 'PATCH') {
-              let body: any = null;
-              try {
-                body = await readJsonBody(req);
-              } catch (e: any) {
-                json(res, 400, { ok: false, error: e?.message ?? String(e) });
-                return;
-              }
-              try {
-                const whiteboard =
-                  Array.isArray(body?.operations) && body.operations.length > 0
-                    ? store.applyOperations(whiteboardId, body.operations, body?.actorId ?? 'ui')
-                    : store.save(whiteboardId, {
-                        baseVersion: body?.baseVersion,
-                        scene: body?.scene,
-                        title: body?.title,
-                        actorId: body?.actorId ?? 'ui',
-                      });
-                emitWhiteboardChange({
-                  whiteboardId: whiteboard.id,
-                  version: whiteboard.version,
-                  reason: 'updated',
-                  source: body?.actorId ?? 'ui',
-                });
-                json(res, 200, { ok: true, whiteboard });
-              } catch (e: any) {
-                json(res, Number(e?.statusCode ?? 0) || 400, {
-                  ok: false,
-                  error: e?.message ?? String(e),
-                });
-              }
-              return;
-            }
-
-            if (method === 'DELETE') {
-              try {
-                const result = store.delete(whiteboardId);
-                if (result.deleted)
-                  emitWhiteboardChange({
-                    whiteboardId: result.id,
-                    version: null,
-                    reason: 'deleted',
-                    source: 'ui',
-                  });
-                json(res, 200, { ok: true, ...result });
-              } catch (e: any) {
-                json(res, Number(e?.statusCode ?? 0) || 400, {
-                  ok: false,
-                  error: e?.message ?? String(e),
-                });
-              }
-              return;
-            }
-          }
-        }
-      }
-
-      if (pathname === '/api/assistant/scope' && method === 'POST') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        try {
-          const accessScope = await assistantService.updateAccessScope(body ?? {});
-          blipAssistantHost?.invalidateAll();
-          json(res, 200, { ok: true, accessScope });
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        return;
-      }
-
-      {
-        const assistantParts = pathname.split('/').filter(Boolean);
-        if (
-          assistantParts.length >= 4 &&
-          assistantParts[0] === 'api' &&
-          assistantParts[1] === 'assistant' &&
-          assistantParts[2] === 'threads'
-        ) {
-          const threadId = decodeURIComponent(assistantParts[3] ?? '');
-
-          if (assistantParts.length === 5 && assistantParts[4] === 'events' && method === 'GET') {
-            try {
-              await assistantService.threadSnapshot(threadId);
-            } catch {
-              json(res, 404, { ok: false, error: `unknown assistant thread: ${threadId}` });
-              return;
-            }
-            res.statusCode = 200;
-            res.setHeader('content-type', 'text/event-stream; charset=utf-8');
-            res.setHeader('cache-control', 'no-cache, no-transform');
-            res.setHeader('connection', 'keep-alive');
-            req.socket.setTimeout(0);
-            (res as any).flushHeaders?.();
-            const unsubscribe = blipAssistantHost.subscribeEvents(threadId, (event) => {
-              writeAssistantSseEvent(res, 'blip_event', {
-                type: 'blip_event',
-                version: 1,
-                threadId,
-                event,
-              });
-            });
-            writeAssistantSseEvent(res, 'connected', {
-              type: 'connected',
-              version: 1,
-              threadId,
-              running: blipAssistantHost.isThreadRunning(threadId),
-              at: nowIso(),
-            });
-            const keepAlive = setInterval(() => {
-              if (!res.destroyed && !res.writableEnded) res.write(': keepalive\n\n');
-            }, 25_000);
-            (keepAlive as any).unref?.();
-            const cleanup = () => {
-              clearInterval(keepAlive);
-              unsubscribe();
-            };
-            req.once('close', cleanup);
-            res.once('close', cleanup);
-            return;
-          }
-
-          if (assistantParts.length === 5 && assistantParts[4] === 'history' && method === 'GET') {
-            try {
-              await assistantService.threadSnapshot(threadId);
-              const beforeRaw = Number(u.searchParams.get('before'));
-              const limitRaw = Number(u.searchParams.get('limit'));
-              json(
-                res,
-                200,
-                await blipAssistantHost.historyPage(threadId, {
-                  ...(Number.isFinite(beforeRaw) && beforeRaw > 0 ? { before: beforeRaw } : {}),
-                  ...(Number.isFinite(limitRaw) && limitRaw > 0 ? { limit: limitRaw } : {}),
-                }),
-              );
-            } catch (e: any) {
-              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, {
-                ok: false,
-                error: e?.message ?? String(e),
-              });
-            }
-            return;
-          }
-
-          if (
-            assistantParts.length === 6 &&
-            assistantParts[4] === 'messages' &&
-            method === 'DELETE'
-          ) {
-            const messageId = decodeURIComponent(assistantParts[5] ?? '');
-            try {
-              await assistantService.threadSnapshot(threadId);
-              await blipAssistantHost.deleteMessage(
-                threadId,
-                messageId,
-                u.searchParams.get('following') === 'true',
-              );
-              await assistantService.notifyCanonicalHistoryChanged(threadId);
-              json(res, 200, { ok: true, deleted: true, threadId, messageId });
-            } catch (e: any) {
-              const detail = String(e?.message ?? e);
-              json(res, /unknown (assistant thread|assistant message)/i.test(detail) ? 404 : 400, {
-                ok: false,
-                error: detail,
-              });
-            }
-            return;
-          }
-
-          if (assistantParts.length === 4 && method === 'GET') {
-            try {
-              json(res, 200, await assistantService.threadSnapshot(threadId));
-            } catch (e: any) {
-              json(res, 404, { ok: false, error: `unknown assistant thread: ${threadId}` });
-            }
-            return;
-          }
-
-          if (assistantParts.length === 4 && method === 'PATCH') {
-            let body: any = null;
-            try {
-              body = await readJsonBody(req);
-            } catch (e: any) {
-              json(res, 400, { ok: false, error: e?.message ?? String(e) });
-              return;
-            }
-            try {
-              const snapshot = await assistantService.updateThread(threadId, body ?? {});
-              blipAssistantHost.invalidateThread(threadId);
-              json(res, 200, snapshot);
-            } catch (e: any) {
-              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, {
-                ok: false,
-                error: e?.message ?? String(e),
-              });
-            }
-            return;
-          }
-
-          if (assistantParts.length === 4 && method === 'DELETE') {
-            try {
-              await assistantService.threadSnapshot(threadId);
-              await blipAssistantHost.deleteThread(threadId);
-              const result = await assistantService.deleteThread(threadId);
-              json(res, 200, result);
-            } catch (e: any) {
-              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, {
-                ok: false,
-                error: e?.message ?? String(e),
-              });
-            }
-            return;
-          }
-
-          if (
-            assistantParts.length === 5 &&
-            assistantParts[4] === 'activate' &&
-            method === 'POST'
-          ) {
-            try {
-              const snapshot = await assistantService.activateThread(threadId);
-              json(res, 200, snapshot);
-            } catch (e: any) {
-              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, {
-                ok: false,
-                error: e?.message ?? String(e),
-              });
-            }
-            return;
-          }
-
-          if (assistantParts.length === 5 && assistantParts[4] === 'stop' && method === 'POST') {
-            try {
-              blipAssistantHost.stopThread(threadId);
-              json(res, 200, await assistantService.stopThread(threadId));
-            } catch (e: any) {
-              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, {
-                ok: false,
-                error: e?.message ?? String(e),
-              });
-            }
-            return;
-          }
-
-          if (assistantParts.length === 5 && assistantParts[4] === 'system-prompt') {
-            if (method === 'GET') {
-              try {
-                json(res, 200, await assistantService.threadSystemPromptSettings(threadId));
-              } catch (e: any) {
-                json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, {
-                  ok: false,
-                  error: e?.message ?? String(e),
-                });
-              }
-              return;
-            }
-
-            if (method === 'POST') {
-              let body: any = null;
-              try {
-                body = await readJsonBody(req);
-              } catch (e: any) {
-                json(res, 400, { ok: false, error: e?.message ?? String(e) });
-                return;
-              }
-              try {
-                const result = await assistantService.updateThreadSystemPrompt(
-                  threadId,
-                  body ?? {},
-                );
-                blipAssistantHost?.invalidateThread(threadId);
-                json(res, 200, result);
-              } catch (e: any) {
-                json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, {
-                  ok: false,
-                  error: e?.message ?? String(e),
-                });
-              }
-              return;
-            }
-          }
-
-          if (
-            assistantParts.length === 5 &&
-            assistantParts[4] === 'promote-system-prompt' &&
-            method === 'POST'
-          ) {
-            let body: any = null;
-            try {
-              body = await readJsonBody(req);
-            } catch (e: any) {
-              json(res, 400, { ok: false, error: e?.message ?? String(e) });
-              return;
-            }
-            try {
-              json(
-                res,
-                200,
-                await assistantService.promoteThreadSystemPrompt(threadId, body ?? {}),
-              );
-            } catch (e: any) {
-              json(res, /unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400, {
-                ok: false,
-                error: e?.message ?? String(e),
-              });
-            }
-            return;
-          }
-
-          if (
-            assistantParts.length === 5 &&
-            assistantParts[4] === 'artifacts' &&
-            method === 'GET'
-          ) {
-            try {
-              json(res, 200, {
-                ok: true,
-                threadId,
-                files: await assistantService.listArtifactFiles(threadId),
-              });
-            } catch (e: any) {
-              const statusCode =
-                Number(e?.statusCode ?? 0) ||
-                (/unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400);
-              json(res, statusCode, { ok: false, error: e?.message ?? String(e) });
-            }
-            return;
-          }
-
-          if (
-            assistantParts.length === 6 &&
-            assistantParts[4] === 'artifacts' &&
-            assistantParts[5] === 'file' &&
-            method === 'GET'
-          ) {
-            try {
-              const artifactPath = u.searchParams.get('path') ?? '';
-              json(res, 200, {
-                ok: true,
-                threadId,
-                file: await assistantService.readArtifactFile(threadId, artifactPath),
-              });
-            } catch (e: any) {
-              const statusCode =
-                Number(e?.statusCode ?? 0) ||
-                (/unknown assistant thread/i.test(String(e?.message ?? e)) ? 404 : 400);
-              json(res, statusCode, { ok: false, error: e?.message ?? String(e) });
-            }
-            return;
-          }
-
-          if (assistantParts.length === 5 && assistantParts[4] === 'prompt' && method === 'POST') {
-            let body: any = null;
-            try {
-              body = await readJsonBody(req);
-            } catch (e: any) {
-              json(res, 400, { ok: false, error: e?.message ?? String(e) });
-              return;
-            }
-
-            res.statusCode = 200;
-            res.setHeader('content-type', 'application/x-ndjson; charset=utf-8');
-            res.setHeader('cache-control', 'no-cache, no-transform');
-            res.setHeader('connection', 'keep-alive');
-            req.socket.setTimeout(0);
-            const writeEvent = (event: any) => {
-              if (res.destroyed) return;
-              res.write(`${JSON.stringify(event)}\n`);
-            };
-            const keepAlive = setInterval(() => {
-              writeEvent({ type: 'heartbeat', at: nowIso() });
-            }, 15_000);
-            (keepAlive as any).unref?.();
-            try {
-              {
-                let prompt = String(body?.prompt ?? '').trim();
-                const attachments = Array.isArray(body?.attachments) ? body.attachments : [];
-                const promptImages = validateAssistantPromptImages(
-                  attachments.filter((item: any) => item?.disposition === 'prompt'),
-                );
-                const artifactUploads = attachments.filter(
-                  (item: any) => item?.disposition !== 'prompt',
-                );
-                const uploaded = await saveAssistantArtifactUploads(threadId, artifactUploads);
-                if (uploaded.length > 0) {
-                  const references = uploaded.map((file) => `- ${file.path}`).join('\n');
-                  prompt = `${prompt}${prompt ? '\n\n' : ''}Attached assistant files:\n${references}`;
-                }
-                if (!prompt && promptImages.length === 0) throw new Error('missing prompt');
-                const threadSnapshot = await assistantService.threadSnapshot(threadId);
-                const threadMetadata = threadSnapshot.threads.find(
-                  (thread) => thread.id === threadId,
-                );
-                const requestedTitle = String(body?.prompt ?? '')
-                  .replace(/\s+/g, ' ')
-                  .trim();
-                if (threadMetadata?.title === 'New thread' && requestedTitle) {
-                  await assistantService.updateThread(threadId, {
-                    title: requestedTitle.slice(0, 80),
-                  });
-                }
-                const promptInput: AssistantPromptInput =
-                  promptImages.length > 0 ? { text: prompt, images: promptImages } : prompt;
-                const shouldQueue =
-                  threadMetadata?.promptDeliveryMode !== 'asap' &&
-                  (assistantPromptDrains.has(threadId) ||
-                    blipAssistantHost.isThreadRunning(threadId));
-                if (shouldQueue) {
-                  const queued = await assistantService.enqueueThreadPrompt(threadId, {
-                    prompt,
-                    promptImages,
-                  });
-                  const drain = startAssistantPromptDrain(threadId);
-                  void drain.promise.catch((error: any) => {
-                    hubLog('warn', 'assistant queued prompt drain failed', {
-                      threadId,
-                      error: error?.message ?? String(error),
-                    });
-                  });
-                  writeEvent({ type: 'queued', threadId, prompt: queued });
-                } else if (
-                  threadMetadata?.promptDeliveryMode === 'asap' &&
-                  blipAssistantHost.isThreadRunning(threadId)
-                ) {
-                  writeEvent({ type: 'accepted', threadId });
-                  await blipAssistantHost.promptThread(threadId, promptInput, async (event) => {
-                    writeEvent({ type: 'blip_event', version: 1, threadId, event });
-                  });
-                } else {
-                  const drain = startAssistantPromptDrain(threadId, {
-                    input: promptInput,
-                    onEvent: async (event) => {
-                      writeEvent({ type: 'blip_event', version: 1, threadId, event });
-                    },
-                  });
-                  if (!drain.started) {
-                    const queued = await assistantService.enqueueThreadPrompt(threadId, {
-                      prompt,
-                      promptImages,
-                    });
-                    writeEvent({ type: 'queued', threadId, prompt: queued });
-                  } else {
-                    writeEvent({ type: 'accepted', threadId });
-                    void drain.promise.catch((error: any) => {
-                      hubLog('warn', 'assistant prompt drain failed', {
-                        threadId,
-                        error: error?.message ?? String(error),
-                      });
-                    });
-                    await drain.initialPromise;
-                  }
-                }
-              }
-              writeEvent({ type: 'done' });
-            } catch (e: any) {
-              writeEvent({ type: 'error', error: e?.message ?? String(e) });
-            } finally {
-              clearInterval(keepAlive);
-              res.end();
-            }
-            return;
-          }
-
-          if (
-            assistantParts.length === 6 &&
-            assistantParts[4] === 'queued' &&
-            method === 'DELETE'
-          ) {
-            const promptId = decodeURIComponent(assistantParts[5] ?? '');
-            try {
-              json(res, 200, await assistantService.cancelQueuedPrompt(threadId, promptId));
-            } catch (e: any) {
-              const message = String(e?.message ?? e);
-              json(
-                res,
-                /unknown queued assistant prompt/i.test(message)
-                  ? 404
-                  : /already running/i.test(message)
-                    ? 409
-                    : 400,
-                {
-                  ok: false,
-                  error: e?.message ?? String(e),
-                },
-              );
-            }
-            return;
-          }
-
-          if (
-            assistantParts.length === 7 &&
-            assistantParts[4] === 'approvals' &&
-            (assistantParts[6] === 'approve' || assistantParts[6] === 'deny') &&
-            method === 'POST'
-          ) {
-            const approvalId = decodeURIComponent(assistantParts[5] ?? '');
-            try {
-              json(
-                res,
-                200,
-                await assistantService.approve(
-                  approvalId,
-                  assistantParts[6] === 'approve',
-                  threadId,
-                ),
-              );
-            } catch (e: any) {
-              json(res, /unknown approval/i.test(String(e?.message ?? e)) ? 404 : 400, {
-                ok: false,
-                error: e?.message ?? String(e),
-              });
-            }
-            return;
-          }
-        }
-      }
-
-      if (pathname === '/api/setup/status' && method === 'GET') {
-        json(res, 200, await resolveSetupStatusResponse());
-        return;
-      }
-
-      if (pathname === '/api/setup/welcome/dismiss' && method === 'POST') {
-        const activeProfile = await readActiveProfileName();
-        const next = await dismissWelcomeForScope(resolveHubSetupScopeKey(activeProfile));
-        const welcomeDismissedAt =
-          next.welcomeDismissedAtByScope[resolveHubSetupScopeKey(activeProfile)] ?? null;
-        json(res, 200, {
-          ok: true,
-          welcomeDismissedAt,
-        });
-        return;
-      }
-
-      if (
-        pathname === '/api/settings/openai' ||
-        pathname === '/api/settings/gemini' ||
-        pathname === '/api/settings/codex' ||
-        pathname === '/api/settings/groq' ||
-        pathname === '/api/settings/exa'
-      ) {
-        const provider = pathname.endsWith('/gemini')
-          ? 'gemini'
-          : pathname.endsWith('/codex')
-            ? 'codex'
-            : pathname.endsWith('/groq')
-              ? 'groq'
-              : pathname.endsWith('/exa')
-                ? 'exa'
-                : 'openai';
-        if (method === 'GET') {
-          const resolved =
-            provider === 'groq'
-              ? await resolveGroqApiKeySettings()
-              : provider === 'exa'
-                ? await resolveExaApiKeySettings()
-                : await resolveEffectiveProviderApiKeySettings(provider as LlmProviderId);
-          const revealApiKey = u.searchParams.get('reveal') === '1';
-          if (!resolved.apiKey && provider !== 'groq' && provider !== 'exa') {
-            await logProviderApiKeyResolution(
-              'warn',
-              'settings provider lookup resolved without API key',
-              provider as LlmProviderId,
-              {
-                pathname,
-                method,
-              },
-            );
-          }
-          json(res, 200, {
-            ok: true,
-            ...providerKeySettingsResponse(resolved, {
-              includeApiKey: provider !== 'codex' && revealApiKey,
-            }),
-          });
-          return;
-        }
-
-        if (method === 'POST') {
-          if (provider === 'codex') {
-            json(res, 400, {
-              ok: false,
-              error:
-                'Codex uses local Codex CLI authentication. Run `codex` on the Hub host to sign in.',
-            });
-            return;
-          }
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          const apiKey = normalizeApiKey(body?.apiKey);
-          if (!apiKey) {
-            json(res, 400, { ok: false, error: 'API key is required.' });
-            return;
-          }
-          await upsertStoredProviderApiKey(provider as StoredApiKeyProviderId, apiKey);
-          const resolved =
-            provider === 'groq'
-              ? await resolveGroqApiKeySettings()
-              : provider === 'exa'
-                ? await resolveExaApiKeySettings()
-                : await resolveEffectiveProviderApiKeySettings(provider as LlmProviderId);
-          json(res, 200, {
-            ok: true,
-            ...providerKeySettingsResponse(resolved),
-          });
-          return;
-        }
-
-        if (method === 'DELETE') {
-          if (provider === 'codex') {
-            json(res, 400, { ok: false, error: 'Codex credentials are managed by the Codex CLI.' });
-            return;
-          }
-          await clearStoredProviderApiKey(provider as StoredApiKeyProviderId);
-          const resolved =
-            provider === 'groq'
-              ? await resolveGroqApiKeySettings()
-              : provider === 'exa'
-                ? await resolveExaApiKeySettings()
-                : await resolveEffectiveProviderApiKeySettings(provider as LlmProviderId);
-          json(res, 200, {
-            ok: true,
-            ...providerKeySettingsResponse(resolved),
-          });
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/llm') {
-        if (method === 'GET') {
-          const data = await resolveLlmSettingsResponse();
-          const selectedProvider = data.provider.selected;
-          const selectedProviderSettings =
-            selectedProvider === 'openai'
-              ? data.openai
-              : selectedProvider === 'gemini'
-                ? data.gemini
-                : data.codex;
-          if (!selectedProviderSettings.hasKey) {
-            await logProviderApiKeyResolution(
-              'warn',
-              'settings llm lookup resolved without selected provider key',
-              selectedProvider,
-              {
-                pathname,
-                method,
-                providerSource: data.provider.source,
-              },
-            );
-          }
-          json(res, 200, data);
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          const provider = parseLlmProvider(body?.provider);
-          if (!provider) {
-            json(res, 400, { ok: false, error: 'provider must be openai, gemini, or codex' });
-            return;
-          }
-          await upsertStoredLlmProvider(provider);
-          json(res, 200, await resolveLlmSettingsResponse());
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/github') {
-        if (method === 'GET') {
-          json(res, 200, await resolveGithubSettingsResponse());
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/delete-action') {
-        if (method === 'GET') {
-          json(res, 200, await resolveDeleteActionSettingsResponse());
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          const mode = parseDroneDeleteMode(body?.mode);
-          const archiveRetention = parseArchiveRetentionId(body?.archiveRetention);
-          const archiveRuntimePolicy = parseArchiveRuntimePolicy(body?.archiveRuntimePolicy);
-          if (!mode) {
-            json(res, 400, { ok: false, error: 'mode must be permanent or archive' });
-            return;
-          }
-          if (body?.archiveRetention != null && !archiveRetention) {
-            json(res, 400, { ok: false, error: 'archiveRetention must be one of: 1h, 8h, 1d, 1w' });
-            return;
-          }
-          if (body?.archiveRuntimePolicy != null && !archiveRuntimePolicy) {
-            json(res, 400, {
-              ok: false,
-              error: 'archiveRuntimePolicy must be one of: keep-running, stop',
-            });
-            return;
-          }
-          await upsertStoredDeleteActionSettings({
-            mode,
-            archiveRetention: archiveRetention ?? undefined,
-            archiveRuntimePolicy: archiveRuntimePolicy ?? undefined,
-          });
-          json(res, 200, await resolveDeleteActionSettingsResponse());
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/filesystem') {
-        if (method === 'GET') {
-          json(res, 200, await resolveFilesystemSettingsResponse());
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          const uploadMaxBytes = parseFilesystemUploadMaxBytes(body?.uploadMaxBytes);
-          if (!uploadMaxBytes) {
-            json(res, 400, {
-              ok: false,
-              error: `uploadMaxBytes must be an integer between ${FILESYSTEM_UPLOAD_MAX_BYTES_MIN} and ${FILESYSTEM_UPLOAD_MAX_BYTES_MAX}`,
-            });
-            return;
-          }
-          await upsertStoredFilesystemSettings({ uploadMaxBytes });
-          json(res, 200, await resolveFilesystemSettingsResponse());
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/backups') {
-        if (method === 'GET') {
-          json(res, 200, await resolveRegistryBackupStatusResponse());
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            await upsertStoredRegistryBackupSettings({
-              enabled: body?.enabled,
-              hourlyEnabled: body?.hourlyEnabled,
-              dailyEnabled: body?.dailyEnabled,
-              hourlyRetentionHours: body?.hourlyRetentionHours,
-              dailyRetentionDays: body?.dailyRetentionDays,
-            });
-            json(res, 200, await resolveRegistryBackupStatusResponse());
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/backups/run') {
-        if (method === 'POST') {
-          try {
-            const createdBackup = await createRegistryBackup('manual', { force: true });
-            json(res, 200, { ...(await resolveRegistryBackupStatusResponse()), createdBackup });
-          } catch (e: any) {
-            json(res, 500, { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/agent-message-auto-continue') {
-        if (method === 'GET') {
-          json(res, 200, await resolveAgentMessageAutoContinueSettingsResponse());
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          const prompt = normalizeAgentMessageAutoContinuePrompt(body?.prompt);
-          if (
-            body != null &&
-            typeof body === 'object' &&
-            Object.prototype.hasOwnProperty.call(body, 'enabledByDefault') &&
-            body.enabledByDefault !== true &&
-            body.enabledByDefault !== false &&
-            body.enabledByDefault !== null
-          ) {
-            json(res, 400, { ok: false, error: 'enabledByDefault must be a boolean' });
-            return;
-          }
-          await upsertStoredAgentMessageAutoContinueSettings({
-            prompt: prompt || undefined,
-            enabledByDefault:
-              body != null &&
-              typeof body === 'object' &&
-              Object.prototype.hasOwnProperty.call(body, 'enabledByDefault')
-                ? body.enabledByDefault === true
-                : undefined,
-          });
-          json(res, 200, await resolveAgentMessageAutoContinueSettingsResponse());
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/agent-suggestion') {
-        if (method === 'GET') {
-          json(res, 200, await resolveAgentSuggestionSettingsResponse());
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          const policyMarkdown = normalizeAgentSuggestionPolicyMarkdown(body?.policyMarkdown);
-          if (
-            body != null &&
-            typeof body === 'object' &&
-            Object.prototype.hasOwnProperty.call(body, 'enabledByDefault') &&
-            body.enabledByDefault !== true &&
-            body.enabledByDefault !== false &&
-            body.enabledByDefault !== null
-          ) {
-            json(res, 400, { ok: false, error: 'enabledByDefault must be a boolean' });
-            return;
-          }
-          await upsertStoredAgentSuggestionSettings({
-            policyMarkdown: policyMarkdown || undefined,
-            enabledByDefault:
-              body != null &&
-              typeof body === 'object' &&
-              Object.prototype.hasOwnProperty.call(body, 'enabledByDefault')
-                ? body.enabledByDefault === true
-                : undefined,
-          });
-          json(res, 200, await resolveAgentSuggestionSettingsResponse());
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/agents') {
-        if (method === 'GET') {
-          const regAny: any = await loadRegistry();
-          json(res, 200, await defaultAgentsPayload(regAny));
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          const content = normalizeAgentsMarkdown(body?.content);
-          await upsertCanonicalDefaultAgentsConfig(content);
-
-          const regAny: any = await loadRegistry();
-          json(res, 200, await defaultAgentsPayload(regAny));
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/sync-sets') {
-        if (method === 'GET') {
-          const regAny: any = await loadRegistry();
-          const storedSyncSets = await syncSetService.storedSyncSets(regAny);
-          json(res, 200, {
-            ok: true,
-            syncSets: await syncSetService.buildViewsFromRegistry(regAny),
-            updatedAt: storedSyncSets.reduce(
-              (latest, item) => (!latest || item.updatedAt > latest ? item.updatedAt : latest),
-              null as string | null,
-            ),
-          });
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          let input: ParsedSyncSetMutationInput;
-          try {
-            input = parseSyncSetMutationInput(body);
-            await ensureSyncSetSourceIsReadable(input);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          const createdAt = nowIso();
-          const syncSetId = `sync-${crypto.randomBytes(8).toString('hex')}`;
-          const createdManagedSourceDir = input.sourceType === 'hub-managed';
-          if (input.sourceType === 'hub-managed') {
-            await ensureHubManagedSyncSetSourceDir(syncSetId);
-          }
-          try {
-            await syncSetService.createSyncSet(
-              buildStoredSyncSet({
-                id: syncSetId,
-                label: input.label,
-                sourceType: input.sourceType,
-                sourcePath: input.sourcePath,
-                targetPath: input.targetPath,
-                applyToHost: input.applyToHost,
-                createdAt,
-                updatedAt: createdAt,
-              }),
-            );
-          } catch (e) {
-            if (createdManagedSourceDir) {
-              await removeHubManagedSyncSetSourceDir(syncSetId);
-            }
-            throw e;
-          }
-          const regAny: any = await loadRegistry();
-          const storedSyncSets = await syncSetService.storedSyncSets(regAny);
-          json(res, 201, {
-            ok: true,
-            syncSets: await syncSetService.buildViewsFromRegistry(regAny),
-            updatedAt: storedSyncSets.reduce(
-              (latest, item) => (!latest || item.updatedAt > latest ? item.updatedAt : latest),
-              null as string | null,
-            ),
-          });
-          return;
-        }
-      }
-
-      const syncSetApplyMatch = pathname.match(/^\/api\/settings\/sync-sets\/([^/]+)\/apply$/);
-      if (syncSetApplyMatch) {
-        if (method === 'POST') {
-          try {
-            const result = await syncSetService.applySyncSetToAllExistingTargets(
-              decodeURIComponent(syncSetApplyMatch[1]),
-            );
-            json(res, 200, {
-              ok: true,
-              syncSet: result.syncSetView,
-              appliedDrones: result.appliedDrones,
-              totalDrones: result.totalDrones,
-              appliedHost: result.appliedHost,
-              failures: result.failures,
-              versionId: result.snapshot.versionId,
-              sourcePath: result.snapshot.sourcePath,
-              fileCount: result.snapshot.fileCount,
-              totalBytes: result.snapshot.totalBytes,
-            });
-          } catch (e: any) {
-            const message = e?.message ?? String(e);
-            const status = /^unknown sync set: /.test(String(message)) ? 404 : 400;
-            json(res, status, { ok: false, error: message });
-          }
-          return;
-        }
-      }
-
-      const syncSetMatch = pathname.match(/^\/api\/settings\/sync-sets\/([^/]+)$/);
-      if (syncSetMatch) {
-        const syncSetId = decodeURIComponent(syncSetMatch[1]);
-        if (method === 'PATCH') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          let input: ParsedSyncSetMutationInput;
-          try {
-            input = parseSyncSetMutationInput(body);
-            await ensureSyncSetSourceIsReadable(input);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          let notFound = false;
-          const updatedAt = nowIso();
-          const existingRegAny: any = await loadRegistry();
-          const existingSyncSets = await syncSetService.storedSyncSets(existingRegAny);
-          if (findStoredSyncSetIndex(existingSyncSets, syncSetId) < 0) {
-            json(res, 404, { ok: false, error: `unknown sync set: ${syncSetId}` });
-            return;
-          }
-          if (input.sourceType === 'hub-managed') {
-            await ensureHubManagedSyncSetSourceDir(syncSetId);
-          }
-          {
-            const existing = existingSyncSets.find((item) => item.id === syncSetId)!;
-            const materialChanged =
-              existing.sourceType !== input.sourceType ||
-              (existing.sourcePath ?? null) !== (input.sourcePath ?? null) ||
-              existing.targetPath !== input.targetPath ||
-              existing.applyToHost !== input.applyToHost;
-            const nextExisting = materialChanged
-              ? {
-                  ...existing,
-                  lastAppliedVersionId: null,
-                  lastAppliedAt: null,
-                  targetStatus: {},
-                }
-              : existing;
-            await syncSetService.updateSyncSet(
-              buildStoredSyncSet({
-                id: existing.id,
-                label: input.label,
-                sourceType: input.sourceType,
-                sourcePath: input.sourcePath,
-                targetPath: input.targetPath,
-                applyToHost: input.applyToHost,
-                createdAt: existing.createdAt,
-                updatedAt,
-                existing: nextExisting,
-              }),
-            );
-          }
-          if (notFound) {
-            json(res, 404, { ok: false, error: `unknown sync set: ${syncSetId}` });
-            return;
-          }
-          const regAny: any = await loadRegistry();
-          const storedSyncSets = await syncSetService.storedSyncSets(regAny);
-          json(res, 200, {
-            ok: true,
-            syncSets: await syncSetService.buildViewsFromRegistry(regAny),
-            updatedAt: storedSyncSets.reduce(
-              (latest, item) => (!latest || item.updatedAt > latest ? item.updatedAt : latest),
-              null as string | null,
-            ),
-          });
-          return;
-        }
-
-        if (method === 'DELETE') {
-          const removed = await syncSetService.deleteSyncSet(syncSetId);
-          if (!removed) {
-            json(res, 404, { ok: false, error: `unknown sync set: ${syncSetId}` });
-            return;
-          }
-          await removeHubManagedSyncSetSourceDir(syncSetId);
-          const regAny: any = await loadRegistry();
-          const storedSyncSets = await syncSetService.storedSyncSets(regAny);
-          json(res, 200, {
-            ok: true,
-            syncSets: await syncSetService.buildViewsFromRegistry(regAny),
-            updatedAt: storedSyncSets.reduce(
-              (latest, item) => (!latest || item.updatedAt > latest ? item.updatedAt : latest),
-              null as string | null,
-            ),
-          });
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/profiles') {
-        if (method === 'GET') {
-          json(res, 200, { ok: true, ...(await listProfilesState()) });
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            const created = await createManagedProfile(body?.name, {
-              use: false,
-              stopCurrentHub: false,
-            });
-            json(res, 201, {
-              ok: true,
-              ...(await listProfilesState()),
-              createdProfile: created.created,
-            });
-          } catch (e: any) {
-            json(res, profileSettingsErrorStatus(e), { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/profiles/activate') {
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          const previousRootDir = droneRootPath();
-          try {
-            const currentHubState = await readManagedHubStateAtRootOrFallback(previousRootDir, req);
-            const activated = await useManagedProfile(body?.name, {
-              stopCurrentHub: false,
-              syncRunningHubState: {
-                state: currentHubState,
-                apiToken,
-                previousRootDir,
-              },
-            });
-            json(res, 200, {
-              ok: true,
-              ...(await listProfilesState()),
-              activeProfile: activated.activeProfile,
-              activatedProfile: activated.activeProfile,
-              reloadRequired: true,
-            });
-          } catch (e: any) {
-            json(res, profileSettingsErrorStatus(e), { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/profiles/rename') {
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          const previousRootDir = droneRootPath();
-          try {
-            const currentHubState = await readManagedHubStateAtRootOrFallback(previousRootDir, req);
-            const renamed = await renameManagedProfile(body?.name, body?.nextName, {
-              syncRunningHubState: {
-                state: currentHubState,
-                apiToken,
-                previousRootDir,
-              },
-            });
-            json(res, 200, {
-              ok: true,
-              ...(await listProfilesState()),
-              renamedFrom: renamed.renamedFrom,
-              renamedTo: renamed.renamedTo,
-              reloadRequired:
-                renamed.activeProfile === renamed.renamedTo &&
-                renamed.renamedFrom !== renamed.renamedTo,
-            });
-          } catch (e: any) {
-            json(res, profileSettingsErrorStatus(e), { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-      }
-
-      const profileDeleteMatch = pathname.match(/^\/api\/settings\/profiles\/([^/]+)$/);
-      if (profileDeleteMatch) {
-        if (method === 'DELETE') {
-          try {
-            const deleted = await deleteManagedProfile(decodeURIComponent(profileDeleteMatch[1]));
-            json(res, 200, {
-              ok: true,
-              ...(await listProfilesState()),
-              deletedProfile: deleted.deleted,
-              removedContainers: deleted.removedContainers,
-              removedHostRoots: deleted.removedHostRoots,
-            });
-          } catch (e: any) {
-            json(res, profileSettingsErrorStatus(e), { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/settings/ui-preferences') {
-        if (method === 'GET') {
-          json(res, 200, await resolveUiPreferencesSettingsResponse());
-          return;
-        }
-
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            await upsertStoredUiPreferencesSettings(body?.uiPreferences, body?.expectedVersion);
-          } catch (e: any) {
-            if (e instanceof UiPreferencesSettingsConflictError) {
-              json(res, 409, {
-                ok: false,
-                error: e.message,
-                uiPreferences: e.uiPreferences,
-                updatedAt: e.updatedAt,
-                version: e.version,
-              });
-              return;
-            }
-            if (e instanceof UiPreferencesSettingsValidationError) {
-              json(res, 400, { ok: false, error: e.message });
-              return;
-            }
-            throw e;
-          }
-          json(res, 200, await resolveUiPreferencesSettingsResponse());
-          return;
-        }
-      }
-
-
-      if (pathname === '/api/settings/hub/logs') {
-        if (method === 'GET') {
-          const maxBytes = clampIntParam(
-            u.searchParams.get('maxBytes'),
-            HUB_SETTINGS_LOG_DEFAULT_MAX_BYTES,
-            1,
-            HUB_SETTINGS_LOG_MAX_BYTES,
-          );
-          const tailLines = clampIntParam(
-            u.searchParams.get('tail'),
-            HUB_SETTINGS_LOG_DEFAULT_TAIL_LINES,
-            1,
-            HUB_SETTINGS_LOG_MAX_TAIL_LINES,
-          );
-          try {
-            const out = await readHubLogTail({ maxBytes, tailLines });
-            json(res, 200, { ok: true, ...out, maxBytes, tailLines });
-          } catch (e: any) {
-            json(res, 500, { ok: false, error: e?.message ?? String(e) });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/skills') {
-        if (method === 'GET') {
-          json(res, 200, { ok: true, skills: await listSkills() });
-          return;
-        }
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            json(res, 201, { ok: true, skill: await createSkill(body) });
-          } catch (e: any) {
-            const msg = e?.message ?? String(e);
-            const code = /already exists|duplicate/i.test(msg)
-              ? 409
-              : /missing |invalid /i.test(msg)
-                ? 400
-                : 500;
-            json(res, code, { ok: false, error: msg });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/mcp-servers') {
-        if (method === 'GET') {
-          json(res, 200, { ok: true, servers: await listMcpServers() });
-          return;
-        }
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            json(res, 201, { ok: true, server: await createMcpServer(body) });
-          } catch (e: any) {
-            const msg = e?.message ?? String(e);
-            const code = /already exists|duplicate/i.test(msg)
-              ? 409
-              : /missing |invalid /i.test(msg)
-                ? 400
-                : 500;
-            json(res, code, { ok: false, error: msg });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/mcp-servers/drone-hub-preset' && method === 'POST') {
-        try {
-          json(res, 200, { ok: true, server: await upsertDroneHubMcpServerPreset() });
-        } catch (e: any) {
-          const msg = e?.message ?? String(e);
-          json(res, /not enabled/i.test(msg) ? 503 : 500, { ok: false, error: msg });
-        }
-        return;
-      }
-
-      if (pathname === '/api/mcp-tokens') {
-        if (method === 'GET') {
-          json(res, 200, { ok: true, tokens: await listMcpAccessTokens() });
-          return;
-        }
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            if (body?.kind != null && body.kind !== 'host') {
-              json(res, 400, { ok: false, error: 'MCP token API only creates host tokens' });
-              return;
-            }
-            const created = await createMcpAccessToken({
-              name: String(body?.name ?? '').trim(),
-              kind: 'host',
-              signingSecret: mcpToken,
-            });
-            json(res, 201, { ok: true, token: created.token, tokenValue: created.tokenValue });
-          } catch (e: any) {
-            const msg = e?.message ?? String(e);
-            json(res, /missing |too long/i.test(msg) ? 400 : 500, { ok: false, error: msg });
-          }
-          return;
-        }
-      }
-
-      if (pathname === '/api/skill-sources' && method === 'GET') {
-        json(res, 200, { ok: true, sources: listSkillSources() });
-        return;
-      }
-
-      // POST /api/tldr/from-message
-      // Summarizes an agent response in chat context (short Markdown TLDR).
-      if (method === 'POST' && pathname === '/api/tldr/from-message') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        const response = String(body?.response ?? '').trim();
-        const prompt = typeof body?.prompt === 'string' ? body.prompt : '';
-        const context = Array.isArray(body?.context) ? body.context : [];
-        if (!response) {
-          json(res, 400, { ok: false, error: 'missing response' });
-          return;
-        }
-
-        let selectedProvider: LlmProviderId | null = null;
-        try {
-          const { provider } = await resolveEffectiveLlmProvider();
-          selectedProvider = provider;
-          const resolved = await resolveEffectiveProviderApiKeySettings(provider);
-          if (!resolved.apiKey) {
-            await logProviderApiKeyResolution(
-              'warn',
-              'tldr/from-message rejected: missing provider key',
-              provider,
-              {
-                pathname,
-                method,
-              },
-            );
-            json(res, 412, {
-              ok: false,
-              error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
-            });
-            return;
-          }
-          const tldr = await tldrFromAgentMessage(
-            {
-              prompt,
-              response,
-              context: context
-                .map((t: any) => ({
-                  turn: typeof t?.turn === 'number' ? t.turn : Number(t?.turn ?? 0) || 0,
-                  prompt: String(t?.prompt ?? ''),
-                  response: String(t?.response ?? ''),
-                }))
-                .filter((t: any) => typeof t?.response === 'string'),
-            },
-            { provider, apiKey: resolved.apiKey },
-          );
-          json(res, 200, { ok: true, tldr });
-          return;
-        } catch (e: any) {
-          if (selectedProvider) {
-            await logProviderApiKeyResolution(
-              'error',
-              'tldr/from-message request failed',
-              selectedProvider,
-              {
-                pathname,
-                method,
-                model: String(process.env.DRONE_HUB_TLDR_MODEL ?? '').trim() || null,
-                error: e?.message ?? String(e),
-              },
-            );
-          } else {
-            hubLog('error', 'tldr/from-message request failed', {
-              ...llmProviderEnvLogMeta(),
-              model: String(process.env.DRONE_HUB_TLDR_MODEL ?? '').trim() || null,
-              error: e?.message ?? String(e),
-            });
-          }
-          json(res, 500, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-      }
-
-      // POST /api/agent-suggestion/from-message
-      // Suggests the most likely next user reply to an agent response, or no suggestion when silence is better.
-      if (method === 'POST' && pathname === '/api/agent-suggestion/from-message') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        const response = String(body?.response ?? '').trim();
-        const prompt = typeof body?.prompt === 'string' ? body.prompt : '';
-        const context = Array.isArray(body?.context) ? body.context : [];
-        if (!response) {
-          json(res, 400, { ok: false, error: 'missing response' });
-          return;
-        }
-
-        let selectedProvider: LlmProviderId | null = null;
-        try {
-          const { provider } = await resolveEffectiveLlmProvider();
-          selectedProvider = provider;
-          const resolved = await resolveEffectiveProviderApiKeySettings(provider);
-          if (!resolved.apiKey) {
-            await logProviderApiKeyResolution(
-              'warn',
-              'agent-suggestion/from-message rejected: missing provider key',
-              provider,
-              {
-                pathname,
-                method,
-              },
-            );
-            json(res, 412, {
-              ok: false,
-              error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
-            });
-            return;
-          }
-          const settings = await resolveEffectiveAgentSuggestionSettings();
-          const result = await suggestReplyToAgentMessage(
-            {
-              prompt,
-              response,
-              context: context
-                .map((t: any) => ({
-                  turn: typeof t?.turn === 'number' ? t.turn : Number(t?.turn ?? 0) || 0,
-                  prompt: String(t?.prompt ?? ''),
-                  response: String(t?.response ?? ''),
-                }))
-                .filter((t: any) => typeof t?.response === 'string'),
-              policyMarkdown: settings.policyMarkdown,
-            },
-            { provider, apiKey: resolved.apiKey },
-          );
-          json(res, 200, {
-            ok: true,
-            outcome: result.outcome,
-            suggestion: result.outcome === 'suggest' ? result.suggestion : null,
-            reason: result.reason,
-            kind: result.kind,
-            policyFingerprint: settings.policyFingerprint,
-          });
-          return;
-        } catch (e: any) {
-          if (selectedProvider) {
-            await logProviderApiKeyResolution(
-              'error',
-              'agent-suggestion/from-message request failed',
-              selectedProvider,
-              {
-                pathname,
-                method,
-                model: String(process.env.DRONE_HUB_AGENT_SUGGESTION_MODEL ?? '').trim() || null,
-                error: e?.message ?? String(e),
-              },
-            );
-          } else {
-            hubLog('error', 'agent-suggestion/from-message request failed', {
-              ...llmProviderEnvLogMeta(),
-              model: String(process.env.DRONE_HUB_AGENT_SUGGESTION_MODEL ?? '').trim() || null,
-              error: e?.message ?? String(e),
-            });
-          }
-          json(res, 500, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-      }
-
-      // POST /api/jobs/from-message
-      // Converts an agent message into one or more "jobs" (dash-case name + title + details).
-      if (method === 'POST' && pathname === '/api/jobs/from-message') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        const message = String(body?.message ?? '').trim();
-        if (!message) {
-          json(res, 400, { ok: false, error: 'missing message' });
-          return;
-        }
-
-        let selectedProvider: LlmProviderId | null = null;
-        try {
-          const { provider } = await resolveEffectiveLlmProvider();
-          selectedProvider = provider;
-          const resolved = await resolveEffectiveProviderApiKeySettings(provider);
-          if (!resolved.apiKey) {
-            await logProviderApiKeyResolution(
-              'warn',
-              'jobs/from-message rejected: missing provider key',
-              provider,
-              {
-                pathname,
-                method,
-              },
-            );
-            json(res, 412, {
-              ok: false,
-              error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
-            });
-            return;
-          }
-          const plan = await jobsPlanFromAgentMessage(message, {
-            provider,
-            apiKey: resolved.apiKey,
-          });
-          const group = typeof plan?.group === 'string' ? plan.group : 'jobs';
-          const jobs = Array.isArray(plan?.jobs) ? plan.jobs : [];
-          json(res, 200, { ok: true, group, jobs });
-          return;
-        } catch (e: any) {
-          if (selectedProvider) {
-            await logProviderApiKeyResolution(
-              'error',
-              'jobs/from-message request failed',
-              selectedProvider,
-              {
-                pathname,
-                method,
-                error: e?.message ?? String(e),
-              },
-            );
-          }
-          json(res, 500, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-      }
-
-      // POST /api/drones/name-from-message
-      // Suggests a dash-case drone name from a user message.
-      if (method === 'POST' && pathname === '/api/drones/name-from-message') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        const message = String(body?.message ?? '').trim();
-        if (!message) {
-          json(res, 400, { ok: false, error: 'missing message' });
-          return;
-        }
-        const sourceRaw = typeof body?.source === 'string' ? body.source.trim() : '';
-        const source = sourceRaw ? sourceRaw.slice(0, 64) : null;
-        const requestedDroneIdRaw = normalizeDroneIdentity(String(body?.droneId ?? '').trim());
-        const requestedDroneId = requestedDroneIdRaw ? requestedDroneIdRaw : null;
-        const messageLength = message.length;
-
-        let selectedProvider: LlmProviderId | null = null;
-        try {
-          const { provider, ...resolved } = await resolveNameSuggestionLlmSettings();
-          selectedProvider = provider;
-          if (!resolved.apiKey) {
-            await logProviderApiKeyResolution(
-              'warn',
-              'name-from-message rejected: missing Codex connection and OpenAI key',
-              provider,
-              {
-                pathname,
-                method,
-                source,
-                requestedDroneId,
-                messageLength,
-              },
-            );
-            json(res, 412, {
-              ok: false,
-              error: 'Connect Codex or configure an OpenAI API key in Settings.',
-            });
-            return;
-          }
-          const name = await suggestDroneNameFromMessage(message, {
-            provider,
-            apiKey: resolved.apiKey,
-          });
-          if (source || requestedDroneId) {
-            hubLog('info', 'name-from-message suggested', {
-              provider,
-              source,
-              requestedDroneId,
-              suggestedName: name,
-              messageLength,
-            });
-          }
-          json(res, 200, { ok: true, name });
-          return;
-        } catch (e: any) {
-          if (selectedProvider) {
-            await logProviderApiKeyResolution(
-              'error',
-              'name-from-message request failed',
-              selectedProvider,
-              {
-                pathname,
-                method,
-                source,
-                requestedDroneId,
-                messageLength,
-                model: DEFAULT_DRONE_NAME_MODEL_ID,
-                error: e?.message ?? String(e),
-              },
-            );
-          } else {
-            hubLog('error', 'name-from-message request failed', {
-              ...llmProviderEnvLogMeta(),
-              source,
-              requestedDroneId,
-              messageLength,
-              model: DEFAULT_DRONE_NAME_MODEL_ID,
-              error: e?.message ?? String(e),
-            });
-          }
-          json(res, 500, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-      }
-
       const parts = pathname.split('/').filter(Boolean);
-
-      if (parts.length === 3 && parts[0] === 'api' && parts[1] === 'skills') {
-        const skillId = decodeURIComponent(parts[2]);
-        if (method === 'GET') {
-          const skill = await getSkillById(skillId);
-          if (!skill) {
-            json(res, 404, { ok: false, error: `unknown skill: ${skillId}` });
-            return;
-          }
-          json(res, 200, { ok: true, skill });
-          return;
-        }
-        if (method === 'PUT') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            json(res, 200, { ok: true, skill: await updateSkillRecord(skillId, body) });
-          } catch (e: any) {
-            const msg = e?.message ?? String(e);
-            const code = /unknown skill/i.test(msg)
-              ? 404
-              : /already exists|duplicate/i.test(msg)
-                ? 409
-                : /missing |invalid /i.test(msg)
-                  ? 400
-                  : 500;
-            json(res, code, { ok: false, error: msg });
-          }
-          return;
-        }
-        if (method === 'DELETE') {
-          const deleted = await deleteSkillRecord(skillId);
-          if (!deleted) {
-            json(res, 404, { ok: false, error: `unknown skill: ${skillId}` });
-            return;
-          }
-          json(res, 200, { ok: true, deleted: true, id: skillId });
-          return;
-        }
-      }
-
-      if (parts.length === 3 && parts[0] === 'api' && parts[1] === 'mcp-servers') {
-        const serverId = decodeURIComponent(parts[2]);
-        if (method === 'GET') {
-          const server = await getMcpServerById(serverId);
-          if (!server) {
-            json(res, 404, { ok: false, error: `unknown MCP server: ${serverId}` });
-            return;
-          }
-          json(res, 200, { ok: true, server });
-          return;
-        }
-        if (method === 'PUT') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            json(res, 200, { ok: true, server: await updateMcpServerRecord(serverId, body) });
-          } catch (e: any) {
-            const msg = e?.message ?? String(e);
-            const code = /unknown MCP server/i.test(msg)
-              ? 404
-              : /already exists|duplicate/i.test(msg)
-                ? 409
-                : /missing |invalid /i.test(msg)
-                  ? 400
-                  : 500;
-            json(res, code, { ok: false, error: msg });
-          }
-          return;
-        }
-        if (method === 'DELETE') {
-          const deleted = await deleteMcpServerRecord(serverId);
-          if (!deleted) {
-            json(res, 404, { ok: false, error: `unknown MCP server: ${serverId}` });
-            return;
-          }
-          json(res, 200, { ok: true, deleted: true, id: serverId });
-          return;
-        }
-      }
-
-      if (parts.length >= 3 && parts[0] === 'api' && parts[1] === 'mcp-tokens') {
-        const tokenId = decodeURIComponent(parts[2]);
-        if (parts.length === 4 && parts[3] === 'regenerate' && method === 'POST') {
-          try {
-            const existing = await getMcpAccessTokenById(tokenId);
-            if (!existing) {
-              json(res, 404, { ok: false, error: `unknown MCP token: ${tokenId}` });
-              return;
-            }
-            if (existing.kind !== 'host') {
-              json(res, 400, {
-                ok: false,
-                error: 'Only host MCP tokens can be regenerated from settings',
-              });
-              return;
-            }
-            const result = await regenerateMcpAccessToken(tokenId, mcpToken);
-            json(res, 200, { ok: true, token: result.token, tokenValue: result.tokenValue });
-          } catch (e: any) {
-            const msg = e?.message ?? String(e);
-            json(res, /unknown MCP token/i.test(msg) ? 404 : 500, { ok: false, error: msg });
-          }
-          return;
-        }
-        if (parts.length === 3 && method === 'DELETE') {
-          const token = await revokeMcpAccessToken(tokenId);
-          if (!token) {
-            json(res, 404, { ok: false, error: `unknown MCP token: ${tokenId}` });
-            return;
-          }
-          json(res, 200, { ok: true, token });
-          return;
-        }
-      }
-
-      if (
-        parts.length === 4 &&
-        parts[0] === 'api' &&
-        parts[1] === 'skill-sources' &&
-        parts[3] === 'skills'
-      ) {
-        const sourceId = decodeURIComponent(parts[2]);
-        if (method === 'GET') {
-          const forceRefresh = parseBoolParam(u.searchParams.get('refresh'), false);
-          try {
-            json(res, 200, {
-              ok: true,
-              sourceId,
-              skills: await listSkillSourceCandidates(sourceId, fetch, { forceRefresh }),
-            });
-          } catch (e: any) {
-            const msg = e?.message ?? String(e);
-            const code = /unknown skill source/i.test(msg)
-              ? 404
-              : /invalid /i.test(msg)
-                ? 400
-                : 502;
-            json(res, code, { ok: false, error: msg });
-          }
-          return;
-        }
-      }
-      if (
-        parts.length === 4 &&
-        parts[0] === 'api' &&
-        parts[1] === 'skill-sources' &&
-        parts[3] === 'preview'
-      ) {
-        const sourceId = decodeURIComponent(parts[2]);
-        if (method === 'GET') {
-          const sourcePath = String(u.searchParams.get('path') ?? '').trim();
-          try {
-            json(res, 200, {
-              ok: true,
-              preview: await previewSkillFromSource({
-                sourceId,
-                path: sourcePath,
-              }),
-            });
-          } catch (e: any) {
-            const msg = e?.message ?? String(e);
-            const code = /unknown skill source|unknown source skill path/i.test(msg)
-              ? 404
-              : /missing |invalid /i.test(msg)
-                ? 400
-                : 502;
-            json(res, code, { ok: false, error: msg });
-          }
-          return;
-        }
-      }
-
-      if (
-        parts.length === 4 &&
-        parts[0] === 'api' &&
-        parts[1] === 'skill-sources' &&
-        parts[3] === 'import'
-      ) {
-        const sourceId = decodeURIComponent(parts[2]);
-        if (method === 'POST') {
-          let body: any = null;
-          try {
-            body = await readJsonBody(req);
-          } catch (e: any) {
-            json(res, 400, { ok: false, error: e?.message ?? String(e) });
-            return;
-          }
-          try {
-            json(res, 201, {
-              ok: true,
-              skill: await importSkillFromSource({
-                sourceId,
-                path: body?.path,
-              }),
-            });
-          } catch (e: any) {
-            const msg = e?.message ?? String(e);
-            const code = /unknown skill source|unknown source skill path/i.test(msg)
-              ? 404
-              : /missing |invalid /i.test(msg)
-                ? 400
-                : /already exists|duplicate/i.test(msg)
-                  ? 409
-                  : /not importable/i.test(msg)
-                    ? 422
-                    : 502;
-            json(res, code, { ok: false, error: msg });
-          }
-          return;
-        }
-      }
-
-      // GET /api/model-catalog?agent=<builtin>&runtime=<container|host>&refresh=1
-      // Returns the latest model discovery for an agent CLI and can refresh it against an
-      // existing drone without mutating that drone's chat configuration.
-      if (
-        method === 'GET' &&
-        parts.length === 2 &&
-        parts[0] === 'api' &&
-        parts[1] === 'model-catalog'
-      ) {
-        const agentId = normalizeBuiltinAgentId(u.searchParams.get('agent'));
-        const runtime: DroneRuntime =
-          String(u.searchParams.get('runtime') ?? '').trim() === 'host' ? 'host' : 'container';
-        const forceRefresh = parseBoolParam(u.searchParams.get('refresh'), false);
-        if (!agentId) {
-          json(res, 400, { ok: false, error: 'A builtin agent is required.' });
-          return;
-        }
-        const cacheKey = modelCatalogCacheKey(runtime, agentId);
-        const cached = latestChatModelDiscoveryByAgent.get(cacheKey);
-        if (!forceRefresh && cached) {
-          json(res, 200, {
-            ok: true,
-            agent: agentId,
-            runtime,
-            models: cached.models,
-            source: 'cache',
-            discoveredAt: new Date(cached.atMs).toISOString(),
-          });
-          return;
-        }
-        const registry: any = await loadRegistry();
-        const candidate = Object.entries<any>(registry?.drones ?? {}).find(
-          ([, drone]) => droneRuntime(drone) === runtime,
-        );
-        if (!candidate) {
-          json(res, 200, {
-            ok: true,
-            agent: agentId,
-            runtime,
-            models: cached?.models ?? [],
-            source: cached ? 'cache' : 'none',
-            discoveredAt: cached ? new Date(cached.atMs).toISOString() : null,
-            error: `No ${runtime} drone is available for model discovery.`,
-          });
-          return;
-        }
-        const [droneId, drone] = candidate;
-        const discovered = await discoverAndRememberModelsForBuiltinAgent({
-          containerName: String(drone?.containerName ?? drone?.name ?? droneId).trim() || droneId,
-          containerPort: Number(drone?.containerPort ?? 7777),
-          runtime,
-          droneName: droneId,
-          chatName: '__model_catalog__',
-          agentId,
-          forceRefresh,
-        });
-        json(res, 200, {
-          ok: true,
-          agent: agentId,
-          runtime,
-          models: discovered.models,
-          source: discovered.source,
-          discoveredAt: discovered.discoveredAt,
-          ...(discovered.error ? { error: discovered.error } : {}),
-        });
-        return;
-      }
-
-      // GET /api/repos
-      // Lists repositories registered via `drone repo`.
-      if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'repos') {
-        const list = (await listCanonicalRepositories()).map((repo) => ({
-          path: repo.path,
-          addedAt: repo.addedAt ?? null,
-          remoteUrl: repo.remoteUrl ?? null,
-          github: repo.github ?? null,
-        }));
-        json(res, 200, { ok: true, repos: list, count: list.length });
-        return;
-      }
-
-      // GET /api/repos/branches?repoPath=<absolute-path>
-      if (
-        method === 'GET' &&
-        parts.length === 3 &&
-        parts[0] === 'api' &&
-        parts[1] === 'repos' &&
-        parts[2] === 'branches'
-      ) {
-        const repoPath = String(u.searchParams.get('repoPath') ?? '').trim();
-        if (!repoPath) {
-          json(res, 400, { ok: false, error: 'missing repoPath' });
-          return;
-        }
-        if (!path.isAbsolute(repoPath)) {
-          json(res, 400, { ok: false, error: 'invalid repoPath (expected absolute path)' });
-          return;
-        }
-        try {
-          const listed = await gitListRemoteBranches(repoPath);
-          json(res, 200, {
-            ok: true,
-            repoRoot: listed.repoRoot,
-            hostBranch: listed.hostBranch,
-            remoteBranches: listed.remoteBranches.map((entry) => ({
-              name: entry.ref,
-              remote: entry.remote,
-              branch: entry.branch,
-              headSha: entry.oid,
-            })),
-          });
-          return;
-        } catch (e: any) {
-          const msg = e?.message ?? String(e);
-          json(res, /git repository|git root|missing repo path/i.test(msg) ? 409 : 500, {
-            ok: false,
-            error: msg,
-          });
-          return;
-        }
-      }
-
-      // DELETE /api/repos?path=<repoPath>
-      // Removes a registered repo.
-      if (method === 'DELETE' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'repos') {
-        const target = String(u.searchParams.get('path') ?? '').trim();
-        if (!target) {
-          json(res, 400, { ok: false, error: 'missing path' });
-          return;
-        }
-        if (!path.isAbsolute(target)) {
-          json(res, 400, { ok: false, error: 'invalid path (expected absolute path)' });
-          return;
-        }
-
-        const removed = await removeCanonicalRepository(target);
-
-        json(res, 200, { ok: true, removed, path: target });
-        return;
-      }
-
-      // GET /api/repo-env?repoPath=<absolute-path-or-empty>
-      if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'repo-env') {
-        const repoPath = u.searchParams.has('repoPath')
-          ? String(u.searchParams.get('repoPath') ?? '')
-          : '';
-        const regAny: any = repoPath ? await withCanonicalRepositories() : await loadRegistry();
-        json(res, 200, await repoEnvironmentPayload(regAny, repoPath));
-        return;
-      }
-
-      // POST /api/repo-env
-      if (
-        method === 'POST' &&
-        parts.length === 2 &&
-        parts[0] === 'api' &&
-        parts[1] === 'repo-env'
-      ) {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        const repoPath = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
-        if (repoPath && !path.isAbsolute(repoPath)) {
-          json(res, 400, {
-            ok: false,
-            error: 'invalid repoPath (expected absolute path or empty string)',
-          });
-          return;
-        }
-        const vars = normalizeEnvVarMap(body?.vars);
-        const autoApplyToNewContainerDrones = body?.autoApplyToNewContainerDrones === true;
-        const updatedAt = nowIso();
-
-        if (!repoPath) {
-          await upsertCanonicalNonRepoEnvironmentConfig({
-            vars,
-            autoApplyToNewContainerDrones,
-          });
-        } else {
-          await updateCanonicalRepositoryEnvironment(
-            repoPath,
-            {
-              vars,
-              autoApplyToNewContainerDrones,
-              updatedAt,
-            },
-            updatedAt,
-          );
-        }
-
-        const regAny: any = repoPath ? await withCanonicalRepositories() : await loadRegistry();
-        json(res, 200, await repoEnvironmentPayload(regAny, repoPath));
-        return;
-      }
-
-      // GET /api/repo-agents?repoPath=<absolute-path>
-      if (
-        method === 'GET' &&
-        parts.length === 2 &&
-        parts[0] === 'api' &&
-        parts[1] === 'repo-agents'
-      ) {
-        const repoPath = String(u.searchParams.get('repoPath') ?? '').trim();
-        if (!repoPath) {
-          json(res, 400, { ok: false, error: 'missing repoPath' });
-          return;
-        }
-        if (!path.isAbsolute(repoPath)) {
-          json(res, 400, { ok: false, error: 'invalid repoPath (expected absolute path)' });
-          return;
-        }
-        const regAny: any = await withCanonicalRepositories();
-        json(res, 200, repoAgentsPayload(regAny, repoPath));
-        return;
-      }
-
-      // POST /api/repo-agents
-      if (
-        method === 'POST' &&
-        parts.length === 2 &&
-        parts[0] === 'api' &&
-        parts[1] === 'repo-agents'
-      ) {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        const repoPath = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
-        if (!repoPath) {
-          json(res, 400, { ok: false, error: 'missing repoPath' });
-          return;
-        }
-        if (!path.isAbsolute(repoPath)) {
-          json(res, 400, { ok: false, error: 'invalid repoPath (expected absolute path)' });
-          return;
-        }
-
-        const mode = normalizeRepoAgentsMode(body?.mode);
-        const content = normalizeAgentsMarkdown(body?.content);
-        const updatedAt = nowIso();
-
-        await updateCanonicalRepositoryAgents(
-          repoPath,
-          {
-            mode,
-            content,
-            updatedAt,
-          },
-          updatedAt,
-        );
-
-        const regAny: any = await withCanonicalRepositories();
-        json(res, 200, repoAgentsPayload(regAny, repoPath));
-        return;
-      }
-
 
       // GET /api/fleet/actors/:drone
       if (
@@ -20895,7 +18786,6 @@ export async function startDroneHubApiServer(opts: {
         }
         return;
       }
-
 
       // POST /api/fleet/actors/:drone/parent
       if (
@@ -20986,7 +18876,10 @@ export async function startDroneHubApiServer(opts: {
             droneId: resolved.id,
             transform: (fleet) => {
               const current = fleetActorConfig({ fleet });
-              return { ...fleet, assigned: Array.from(new Set([...current.assigned, targetFound.id])) };
+              return {
+                ...fleet,
+                assigned: Array.from(new Set([...current.assigned, targetFound.id])),
+              };
             },
           });
           const regAny: any = await loadRegistry();
@@ -21032,468 +18925,6 @@ export async function startDroneHubApiServer(opts: {
             error: error?.message ?? String(error),
           });
         }
-        return;
-      }
-
-
-      // GET /api/playbooks
-      if (
-        method === 'GET' &&
-        parts.length === 2 &&
-        parts[0] === 'api' &&
-        parts[1] === 'playbooks'
-      ) {
-        json(res, 200, { ok: true, playbooks: await listCanonicalPlaybookDefinitions() });
-        return;
-      }
-
-      // POST /api/playbooks
-      if (
-        method === 'POST' &&
-        parts.length === 2 &&
-        parts[0] === 'api' &&
-        parts[1] === 'playbooks'
-      ) {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        const label = normalizePlaybookLabel(body?.label ?? '');
-        const agent = normalizePlaybookAgent(body?.agent);
-        let model: string | null = null;
-        try {
-          model = agent.kind === 'builtin' ? parseChatModelForUpdate(body?.model) : null;
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        const messages = normalizePlaybookMessages(body?.messages);
-        const artifacts = normalizePlaybookArtifacts(body?.artifacts);
-        const actions = normalizePlaybookActions(body?.actions);
-        if (!label) {
-          json(res, 400, { ok: false, error: 'missing label' });
-          return;
-        }
-        if (messages.length === 0) {
-          json(res, 400, { ok: false, error: 'add at least one message' });
-          return;
-        }
-        const id = crypto.randomUUID();
-        const at = nowIso();
-        await listCanonicalPlaybookDefinitions();
-        const playbook = {
-          id,
-          label,
-          agent,
-          ...(model ? { model } : {}),
-          messages,
-          artifacts,
-          actions,
-          createdAt: at,
-          updatedAt: at,
-        };
-        try {
-          await (await getCatalogStore()).putPlaybook(catalogPlaybookRecord(playbook));
-        } catch (error) {
-          if (!(globalThis as any).Bun) throw error;
-          await updateRegistry((regAny: any) => {
-            regAny.playbooks = regAny.playbooks ?? {};
-            regAny.playbooks[id] = playbook;
-          });
-        }
-        json(res, 201, {
-          ok: true,
-          playbook: normalizePlaybookDefinitions({ playbooks: { [id]: playbook } })[0] ?? null,
-        });
-        return;
-      }
-
-      // DELETE /api/playbooks
-      if (
-        method === 'DELETE' &&
-        parts.length === 2 &&
-        parts[0] === 'api' &&
-        parts[1] === 'playbooks'
-      ) {
-        try {
-          await listCanonicalPlaybookDefinitions();
-          await (await getCatalogStore()).clearPlaybooks();
-        } catch (error) {
-          if (!(globalThis as any).Bun) throw error;
-          await updateRegistry((regAny: any) => {
-            regAny.playbooks = {};
-          });
-        }
-        json(res, 200, { ok: true });
-        return;
-      }
-
-      // POST /api/playbooks/:id
-      if (
-        method === 'POST' &&
-        parts.length === 3 &&
-        parts[0] === 'api' &&
-        parts[1] === 'playbooks'
-      ) {
-        const playbookId = String(decodeURIComponent(parts[2] ?? '')).trim();
-        if (!playbookId) {
-          json(res, 400, { ok: false, error: 'missing playbook id' });
-          return;
-        }
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        const label = normalizePlaybookLabel(body?.label ?? '');
-        const agent = normalizePlaybookAgent(body?.agent);
-        let model: string | null = null;
-        try {
-          model = agent.kind === 'builtin' ? parseChatModelForUpdate(body?.model) : null;
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        const messages = normalizePlaybookMessages(body?.messages);
-        const artifacts = normalizePlaybookArtifacts(body?.artifacts);
-        const actions = normalizePlaybookActions(body?.actions);
-        if (!label) {
-          json(res, 400, { ok: false, error: 'missing label' });
-          return;
-        }
-        if (messages.length === 0) {
-          json(res, 400, { ok: false, error: 'add at least one message' });
-          return;
-        }
-        const current =
-          (await listCanonicalPlaybookDefinitions()).find((item) => item.id === playbookId) ?? null;
-        if (!current) {
-          json(res, 404, { ok: false, error: `unknown playbook: ${playbookId}` });
-          return;
-        }
-        const playbook = {
-          id: playbookId,
-          label,
-          agent,
-          ...(model ? { model } : {}),
-          messages,
-          artifacts,
-          actions,
-          createdAt: current.createdAt,
-          updatedAt: nowIso(),
-        };
-        try {
-          await (await getCatalogStore()).putPlaybook(catalogPlaybookRecord(playbook));
-        } catch (error) {
-          if (!(globalThis as any).Bun) throw error;
-          await updateRegistry((regAny: any) => {
-            regAny.playbooks = regAny.playbooks ?? {};
-            regAny.playbooks[playbookId] = playbook;
-          });
-        }
-        json(res, 200, {
-          ok: true,
-          playbook:
-            normalizePlaybookDefinitions({ playbooks: { [playbookId]: playbook } })[0] ?? null,
-        });
-        return;
-      }
-
-      // DELETE /api/playbooks/:id
-      if (
-        method === 'DELETE' &&
-        parts.length === 3 &&
-        parts[0] === 'api' &&
-        parts[1] === 'playbooks'
-      ) {
-        const playbookId = String(decodeURIComponent(parts[2] ?? '')).trim();
-        if (!playbookId) {
-          json(res, 400, { ok: false, error: 'missing playbook id' });
-          return;
-        }
-        let removed = false;
-        try {
-          await listCanonicalPlaybookDefinitions();
-          const store = await getCatalogStore();
-          removed = await store.deletePlaybook(playbookId);
-        } catch (error) {
-          if (!(globalThis as any).Bun) throw error;
-          removed = await updateRegistry((regAny: any) => {
-            if (!regAny?.playbooks?.[playbookId]) return false;
-            delete regAny.playbooks[playbookId];
-            return true;
-          });
-        }
-        if (!removed) {
-          json(res, 404, { ok: false, error: `unknown playbook: ${playbookId}` });
-          return;
-        }
-        json(res, 200, { ok: true, id: playbookId });
-        return;
-      }
-
-      // POST /api/playbooks/:id/run
-      if (
-        method === 'POST' &&
-        parts.length === 4 &&
-        parts[0] === 'api' &&
-        parts[1] === 'playbooks' &&
-        parts[3] === 'run'
-      ) {
-        const playbookId = String(decodeURIComponent(parts[2] ?? '')).trim();
-        if (!playbookId) {
-          json(res, 400, { ok: false, error: 'missing playbook id' });
-          return;
-        }
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        let repoPath = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
-        if (!repoPath) {
-          json(res, 400, { ok: false, error: 'missing repoPath' });
-          return;
-        }
-        if (!path.isAbsolute(repoPath)) {
-          json(res, 400, { ok: false, error: 'invalid repoPath (expected absolute path)' });
-          return;
-        }
-        const pullHostBranchBeforeCreate = parsePullHostBranchBeforeCreate(
-          body?.pullHostBranchBeforeCreate,
-        );
-        const requestedCount = Math.max(
-          PLAYBOOK_RUN_QUEUE_BATCH_MIN,
-          Math.min(PLAYBOOK_RUN_QUEUE_BATCH_MAX, Math.floor(Number(body?.count ?? 1) || 1)),
-        );
-        const serializeFirstMessageGroup = body?.serializeFirstMessageGroup === true;
-        const playbook =
-          (await listCanonicalPlaybookDefinitions()).find((item) => item.id === playbookId) ?? null;
-        if (!playbook) {
-          json(res, 404, { ok: false, error: `unknown playbook: ${playbookId}` });
-          return;
-        }
-        if (playbook.messages.length === 0) {
-          json(res, 409, { ok: false, error: 'playbook has no messages' });
-          return;
-        }
-        const shouldQueue = serializeFirstMessageGroup || requestedCount > 1;
-        if (!shouldQueue) {
-          try {
-            json(
-              res,
-              202,
-              await startPlaybookRunLaunch({
-                playbookId: playbook.id,
-                repoPath,
-                pullHostBranchBeforeCreate,
-              }),
-            );
-            return;
-          } catch (e: any) {
-            if (pullHostBranchBeforeCreate) {
-              const pullError = formatPullHostBranchBeforeCreateError(e);
-              json(res, pullError.status, {
-                ok: false,
-                error: `Failed to pull host branch before launching playbook: ${pullError.message}`,
-                code: 'host_branch_pull_before_playbook_run_failed',
-                reason: pullError.reason,
-              });
-              return;
-            }
-            json(
-              res,
-              /unknown playbook/i.test(e?.message ?? '')
-                ? 404
-                : /playbook has no messages/i.test(e?.message ?? '')
-                  ? 409
-                  : 500,
-              {
-                ok: false,
-                error: e?.message ?? String(e),
-              },
-            );
-            return;
-          }
-        }
-        const queueItem = {
-          id: crypto.randomUUID(),
-          playbookId: playbook.id,
-          playbookLabel: playbook.label,
-          repoPath,
-          requestedCount,
-          launchedCount: 0,
-          inFlightCount: 0,
-          serializeFirstMessageGroup,
-          pullHostBranchBeforeCreate,
-          createdAt: nowIso(),
-          updatedAt: nowIso(),
-        } satisfies PlaybookRunQueueItem;
-        await enqueueCanonicalPlaybookQueueItem(queueItem);
-        void runPlaybookRunQueueCycle();
-        json(res, 202, {
-          ok: true,
-          queued: true,
-          queueItem: {
-            ...queueItem,
-            remainingCount: queueItem.requestedCount,
-            state: serializeFirstMessageGroup ? 'waiting' : 'queued',
-          },
-          playbookId: playbook.id,
-          playbookLabel: playbook.label,
-          repoPath,
-        });
-        return;
-      }
-
-      // GET /api/playbook-runs
-      if (
-        method === 'GET' &&
-        parts.length === 2 &&
-        parts[0] === 'api' &&
-        parts[1] === 'playbook-runs'
-      ) {
-        const repoPath = u.searchParams.has('repoPath')
-          ? String(u.searchParams.get('repoPath') ?? '').trim()
-          : '';
-        const regAny: any = await loadRegistry();
-        const byId = new Map<string, ReturnType<typeof summarizePlaybookRunEntry>>();
-        for (const [rawId, pendingEntry] of Object.entries(regAny?.pending ?? {})) {
-          const droneId = normalizeDroneIdentity((pendingEntry as any)?.id ?? rawId);
-          const playbook = playbookMetaFromEntry((pendingEntry as any)?.playbook);
-          if (!droneId || !playbook) continue;
-          if (normalizeDroneEntryKind((pendingEntry as any)?.kind) !== 'playbook-run') continue;
-          const entryRepoPath = String((pendingEntry as any)?.repoPath ?? '').trim();
-          if (repoPath && repoPath !== entryRepoPath) continue;
-          byId.set(
-            droneId,
-            summarizePlaybookRunEntry({
-              droneId,
-              name: String((pendingEntry as any)?.name ?? droneId).trim() || droneId,
-              createdAt: String((pendingEntry as any)?.createdAt ?? nowIso()),
-              repoPath: entryRepoPath,
-              runtime: normalizeDroneRuntime((pendingEntry as any)?.runtime),
-              playbook,
-              pendingEntry,
-            }),
-          );
-        }
-        for (const [rawId, droneEntry] of Object.entries(regAny?.drones ?? {})) {
-          const droneId = normalizeDroneIdentity((droneEntry as any)?.id ?? rawId);
-          const playbook = playbookMetaFromEntry((droneEntry as any)?.playbook);
-          if (!droneId || !playbook) continue;
-          if (normalizeDroneEntryKind((droneEntry as any)?.kind) !== 'playbook-run') continue;
-          const entryRepoPath = String((droneEntry as any)?.repoPath ?? '').trim();
-          if (repoPath && repoPath !== entryRepoPath) continue;
-          byId.set(
-            droneId,
-            summarizePlaybookRunEntry({
-              droneId,
-              name: String((droneEntry as any)?.name ?? droneId).trim() || droneId,
-              createdAt: String((droneEntry as any)?.createdAt ?? nowIso()),
-              repoPath: entryRepoPath,
-              runtime: normalizeDroneRuntime((droneEntry as any)?.runtime),
-              playbook,
-              droneEntry,
-            }),
-          );
-        }
-        const runs = Array.from(byId.values()).sort(
-          (a, b) =>
-            Date.parse(b.updatedAt) - Date.parse(a.updatedAt) ||
-            Date.parse(b.createdAt) - Date.parse(a.createdAt),
-        );
-        const queue = (await summarizePlaybookRunQueueItems(regAny)).filter(
-          (item) => !repoPath || item.repoPath === repoPath,
-        );
-        json(res, 200, { ok: true, runs, queue });
-        return;
-      }
-
-      // DELETE /api/playbook-runs/queue/:id
-      if (
-        method === 'DELETE' &&
-        parts.length === 4 &&
-        parts[0] === 'api' &&
-        parts[1] === 'playbook-runs' &&
-        parts[2] === 'queue'
-      ) {
-        const queueItemId = String(decodeURIComponent(parts[3] ?? '')).trim();
-        if (!queueItemId) {
-          json(res, 400, { ok: false, error: 'missing queue item id' });
-          return;
-        }
-        const store = await workflowStoreOrCompatibility();
-        const removed = store
-          ? await store.cancelQueue(queueItemId)
-          : await updateRegistry((regLatest: any) => {
-              const items = readPlaybookRunQueueItems(regLatest);
-              const found = items.some((item) => item.id === queueItemId);
-              writePlaybookRunQueueItems(
-                regLatest,
-                items.filter((item) => item.id !== queueItemId),
-              );
-              return found;
-            });
-        if (removed) void runPlaybookRunQueueCycle();
-        json(
-          res,
-          removed ? 200 : 404,
-          removed
-            ? { ok: true, removed: true, id: queueItemId }
-            : { ok: false, error: `unknown queue item: ${queueItemId}` },
-        );
-        return;
-      }
-
-      // POST /api/playbook-runs/queue/clear
-      if (
-        method === 'POST' &&
-        parts.length === 4 &&
-        parts[0] === 'api' &&
-        parts[1] === 'playbook-runs' &&
-        parts[2] === 'queue' &&
-        parts[3] === 'clear'
-      ) {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-        const playbookId = typeof body?.playbookId === 'string' ? body.playbookId.trim() : '';
-        const repoPath = typeof body?.repoPath === 'string' ? body.repoPath.trim() : '';
-        const store = await workflowStoreOrCompatibility();
-        const removed = store
-          ? await store.clearQueue({ playbookId, repoPath })
-          : await updateRegistry((regLatest: any) => {
-              const items = readPlaybookRunQueueItems(regLatest);
-              const matching = items.filter(
-                (item) =>
-                  (!playbookId || item.playbookId === playbookId) &&
-                  (!repoPath || item.repoPath === repoPath),
-              );
-              writePlaybookRunQueueItems(
-                regLatest,
-                items.filter((item) => !matching.includes(item)),
-              );
-              return matching.length;
-            });
-        if (removed > 0) void runPlaybookRunQueueCycle();
-        json(res, 200, {
-          ok: true,
-          removed,
-          ...(playbookId ? { playbookId } : {}),
-          ...(repoPath ? { repoPath } : {}),
-        });
         return;
       }
 
@@ -29332,280 +26763,6 @@ export async function startDroneHubApiServer(opts: {
           return;
         }
         json(res, 200, { ok: true, id: r.droneId, deletedChat: r.chatName });
-        return;
-      }
-
-      // GET /api/groups
-      // Groups are host-side metadata in the registry file and persist even if empty.
-      if (method === 'GET' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'groups') {
-        const regAny: any = await loadRegistry();
-        const names = Array.from(
-          new Set([
-            ...(await listCanonicalGroups()).map((group) => group.name),
-            ...listAllKnownGroups({ ...regAny, groups: {} }),
-          ]),
-        ).sort((a, b) => a.localeCompare(b));
-        const canonicalGroups = new Map(
-          (await listCanonicalGroups()).map((group) => [group.name, group]),
-        );
-
-        const counts = new Map<string, { drones: number; pending: number }>();
-        for (const d of Object.values(regAny.drones ?? {}) as any[]) {
-          const g = normalizeGroupName(d?.group);
-          if (!g || isUngroupedGroupName(g)) continue;
-          const cur = counts.get(g) ?? { drones: 0, pending: 0 };
-          cur.drones += 1;
-          counts.set(g, cur);
-        }
-        for (const d of Object.values(regAny.pending ?? {}) as any[]) {
-          const g = normalizeGroupName(d?.group);
-          if (!g || isUngroupedGroupName(g)) continue;
-          const cur = counts.get(g) ?? { drones: 0, pending: 0 };
-          cur.pending += 1;
-          counts.set(g, cur);
-        }
-
-        const groups = names.map((name) => {
-          const entry = canonicalGroups.get(name) ?? null;
-          const c = counts.get(name) ?? { drones: 0, pending: 0 };
-          return {
-            name,
-            createdAt: typeof entry?.createdAt === 'string' ? String(entry.createdAt) : null,
-            updatedAt: typeof entry?.updatedAt === 'string' ? String(entry.updatedAt) : null,
-            droneCount: c.drones,
-            pendingCount: c.pending,
-            totalCount: c.drones + c.pending,
-          };
-        });
-
-        json(res, 200, { ok: true, groups, total: groups.length });
-        return;
-      }
-
-      // POST /api/groups
-      // Create an empty group entry (independent of drone count).
-      if (method === 'POST' && parts.length === 2 && parts[0] === 'api' && parts[1] === 'groups') {
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        let name = '';
-        try {
-          name = validateGroupNameOrThrow(
-            body?.name ?? body?.group ?? body?.groupName ?? body?.groupId ?? '',
-            'group name',
-          );
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        const at = nowIso();
-        if ((await listCanonicalGroups()).some((group) => group.name === name)) {
-          json(res, 409, { ok: false, error: `group already exists: ${name}` });
-          return;
-        }
-        await ensureCanonicalGroup(name, at);
-
-        json(res, 201, { ok: true, name, createdAt: at });
-        return;
-      }
-
-      // POST /api/groups/:group/rename
-      // Renames a group path and migrates exact + descendant drone assignments to the new prefix.
-      if (
-        method === 'POST' &&
-        parts.length === 4 &&
-        parts[0] === 'api' &&
-        parts[1] === 'groups' &&
-        parts[3] === 'rename'
-      ) {
-        const oldNameRaw = decodeURIComponent(parts[2]);
-        const oldName = normalizeGroupName(oldNameRaw);
-        if (!oldName) {
-          json(res, 400, { ok: false, error: 'invalid group name' });
-          return;
-        }
-        if (isUngroupedGroupName(oldName)) {
-          json(res, 400, { ok: false, error: 'cannot rename Ungrouped' });
-          return;
-        }
-
-        let body: any = null;
-        try {
-          body = await readJsonBody(req);
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        let newName = '';
-        try {
-          newName = validateGroupNameOrThrow(body?.newName ?? body?.name ?? '', 'newName');
-        } catch (e: any) {
-          json(res, 400, { ok: false, error: e?.message ?? String(e) });
-          return;
-        }
-
-        if (oldName === newName) {
-          json(res, 200, { ok: true, oldName, newName, renamed: false, reason: 'same-name' });
-          return;
-        }
-
-        const result = await renameCanonicalGroupOrchestration(oldName, newName, nowIso());
-
-        if (!result.ok) {
-          json(res, result.status ?? 500, {
-            ok: false,
-            error: result.error ?? 'failed to rename group',
-          });
-          return;
-        }
-
-        json(res, 200, {
-          ok: true,
-          oldName,
-          newName,
-          renamed: true,
-          movedDrones: result.movedDrones,
-          movedPending: result.movedPending,
-        });
-        return;
-      }
-
-      // DELETE /api/groups/:group?keepVolume=0|1&forget=0|1&repoPath=<absolute-path>
-      // NOTE: Without repoPath, deleting a group path deletes all drones inside that subtree
-      // and removes matching group entries. With repoPath, only drones attached to that repo
-      // are deleted and the global group entry is kept for other repos.
-      if (
-        method === 'DELETE' &&
-        parts.length === 3 &&
-        parts[0] === 'api' &&
-        parts[1] === 'groups'
-      ) {
-        const groupRaw = decodeURIComponent(parts[2]);
-        const group = groupRaw.trim();
-        if (!group) {
-          json(res, 400, { ok: false, error: 'invalid group name' });
-          return;
-        }
-
-        const keepVolume = parseBoolParam(u.searchParams.get('keepVolume'), false);
-        const forget = parseBoolParam(u.searchParams.get('forget'), true);
-        const wantsUngrouped = isUngroupedGroupName(group);
-        const scopedRepoPath = String(u.searchParams.get('repoPath') ?? '').trim();
-
-        const regAny: any = await loadRegistry();
-        const groupExists =
-          !wantsUngrouped &&
-          (await listCanonicalGroups()).some((entry) =>
-            isSameOrDescendantGroupPath(entry.name, group),
-          );
-
-        const realTargets = (Object.entries(regAny.drones ?? {}) as Array<[string, any]>)
-          .map(([id, d]) => ({
-            id: normalizeDroneIdentity(id),
-            name: String(d?.name ?? '').trim(),
-            group: String(d?.group ?? '').trim(),
-            repoPath: String(d?.repoPath ?? '').trim(),
-          }))
-          .filter((t) => Boolean(t.id))
-          .filter((t) => !scopedRepoPath || t.repoPath === scopedRepoPath)
-          .filter((t) => {
-            if (wantsUngrouped) return !t.group || isUngroupedGroupName(t.group);
-            return isSameOrDescendantGroupPath(t.group, group);
-          });
-
-        const pendingTargets = (Object.entries(regAny.pending ?? {}) as Array<[string, any]>)
-          .map(([id, d]) => ({
-            id: normalizeDroneIdentity(id),
-            name: String(d?.name ?? '').trim(),
-            group: String(d?.group ?? '').trim(),
-            repoPath: String(d?.repoPath ?? '').trim(),
-          }))
-          .filter((t) => Boolean(t.id))
-          .filter((t) => !scopedRepoPath || t.repoPath === scopedRepoPath)
-          .filter((t) => {
-            if (wantsUngrouped) return !t.group || isUngroupedGroupName(t.group);
-            return isSameOrDescendantGroupPath(t.group, group);
-          });
-
-        const targetById = new Map<string, { id: string; name: string }>();
-        for (const t of [...realTargets, ...pendingTargets]) {
-          if (!t.id) continue;
-          if (!targetById.has(t.id)) targetById.set(t.id, { id: t.id, name: t.name || t.id });
-        }
-        const targets = Array.from(targetById.values()).sort((a, b) =>
-          (a.name || a.id).localeCompare(b.name || b.id),
-        );
-
-        // Allow deleting an explicitly-created empty group only for global group deletion.
-        if (targets.length === 0) {
-          if (scopedRepoPath || !groupExists) {
-            json(res, 404, { ok: false, error: `unknown group (or empty): ${group}` });
-            return;
-          }
-          try {
-            await deleteCanonicalGroupArtifacts(group);
-          } catch {
-            // ignore
-          }
-          json(res, 200, { ok: true, group, removed: [], total: 0, deletedGroup: true });
-          return;
-        }
-
-        const removed: Array<{ id: string; name: string }> = [];
-        const pendingDeleted: string[] = [];
-        const errors: Array<{ id: string; name: string; error: string; removedRegistry: boolean }> =
-          [];
-
-        for (const t of targets) {
-          const id = t.id;
-          const name = t.name;
-          if (regAny?.pending?.[id] && !regAny?.drones?.[id]) {
-            pendingDeleted.push(id);
-            removed.push({ id, name });
-            dequeueProvisioning(id);
-            continue;
-          }
-          const r = await removeDroneById({ id, keepVolume, forget });
-          if (r.removeErr) {
-            errors.push({ id, name, error: r.removeErr, removedRegistry: r.removedRegistry });
-            continue;
-          }
-          removed.push({ id, name });
-        }
-
-        if (errors.length > 0) {
-          json(res, 500, { ok: false, group, removed, errors, total: targets.length });
-          return;
-        }
-
-        // Persist any pending deletions and remove the group entry (if any).
-        try {
-          await deleteCanonicalDroneLifecycleBatch(
-            pendingDeleted.map((droneId) => ({ state: 'pending', droneId })),
-            { ignoreMissing: true },
-          );
-          if (!scopedRepoPath && !wantsUngrouped) {
-            await deleteCanonicalGroupArtifacts(group);
-          }
-        } catch {
-          // ignore (drones are already deleted)
-        }
-
-        json(res, 200, {
-          ok: true,
-          group,
-          removed,
-          total: targets.length,
-          deletedGroup: !scopedRepoPath && !wantsUngrouped,
-          ...(scopedRepoPath ? { repoPath: scopedRepoPath } : {}),
-        });
         return;
       }
 
