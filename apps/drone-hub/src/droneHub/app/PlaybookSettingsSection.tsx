@@ -33,14 +33,16 @@ type PlaybookSettingsSectionProps = {
 };
 
 function playbookAgentKey(agent: ChatAgentConfig | null | undefined): string {
+  if (agent?.kind === 'native') return 'native';
   if (agent?.kind === 'builtin') return `builtin:${agent.id}`;
   if (agent?.kind === 'custom') return `custom:${agent.id}`;
   return 'builtin:cursor';
 }
 
 function playbookAgentLabel(agent: ChatAgentConfig | null | undefined, customAgents: CustomAgentProfile[]): string {
+  if (agent?.kind === 'native') return 'Built-in';
   if (agent?.kind === 'builtin') {
-    return BUILTIN_AGENT_OPTIONS.find((option) => option.agent.id === agent.id)?.label ?? `Builtin: ${agent.id}`;
+    return BUILTIN_AGENT_OPTIONS.find((option) => option.agent.kind === 'builtin' && option.agent.id === agent.id)?.label ?? `Builtin: ${agent.id}`;
   }
   if (agent?.kind === 'custom') {
     const local = customAgents.find((item) => item.id === agent.id) ?? null;
@@ -368,7 +370,8 @@ export function PlaybookSettingsSection({
             const expanded = Boolean(expandedByClientId[playbook.clientId]);
             const selectedAgentKey = playbookAgentKey(playbook.agent);
             const selectedAgentLabel = playbookAgentLabel(playbook.agent, customAgents);
-            const customAgentMissing = playbook.agent.kind === 'custom' && !customAgents.some((agent) => agent.id === playbook.agent.id);
+            const customAgentId = playbook.agent.kind === 'custom' ? playbook.agent.id : null;
+            const customAgentMissing = Boolean(customAgentId && !customAgents.some((agent) => agent.id === customAgentId));
             return (
               <div
                 key={playbook.clientId}

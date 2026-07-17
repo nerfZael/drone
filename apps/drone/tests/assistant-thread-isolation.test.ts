@@ -141,6 +141,41 @@ async function markDroneReady(input: {
 }
 
 describe('assistant thread isolation', () => {
+  test('native drone chats replace disposable standalone threads and keep owner access', async () => {
+    await withTempDroneDataDir('assistant-native-owner-', async () => {
+      const service = makeService();
+      await service.createThread({ title: 'disposable' });
+      const snapshot = await service.ensureNativeThread({
+        id: 'chat-stable-id',
+        droneId: 'drone-1',
+        chatName: 'default',
+      });
+      expect(snapshot.threads.map((thread: any) => thread.id)).toEqual(['chat-stable-id']);
+      const thread = snapshot.threads[0] as any;
+      expect(thread.ownerDroneId).toBe('drone-1');
+      expect(thread.ownerChatName).toBe('default');
+      expect(thread.accessScope.droneIds).toContain('drone-1');
+    });
+  });
+
+  test('does not cap the number of native drone chats', async () => {
+    await withTempDroneDataDir('assistant-native-unlimited-', async () => {
+      const service = makeService();
+      for (let index = 0; index < 40; index += 1) {
+        await service.ensureNativeThread({
+          id: `chat-${index}`,
+          droneId: `drone-${index}`,
+          chatName: 'default',
+        });
+      }
+
+      const snapshot = await service.snapshot('compact');
+      expect(snapshot.threads).toHaveLength(40);
+      expect(snapshot.threads.map((thread) => thread.id)).toContain('chat-0');
+      expect(snapshot.threads.map((thread) => thread.id)).toContain('chat-39');
+    });
+  });
+
   test('clones thread conversation and settings without pending work', async () => {
     await withTempDroneDataDir('assistant-thread-clone-', async () => {
       const service = makeService();
@@ -480,6 +515,45 @@ describe('assistant thread isolation', () => {
       await service.notifyRuntimeEvent(threadId, { type: 'session_finished' });
       const finished = await service.threadSnapshot(threadId);
       expect(finished.threads.find((thread) => thread.id === threadId)?.status).toBe('idle');
+    });
+  });
+
+  test('keeps native prompt failures visible without leaving the chat busy', async () => {
+    await withTempDroneDataDir('assistant-native-runtime-error-', async () => {
+      const service = makeService();
+      const created = await service.ensureNativeThread({
+        id: 'native-error-chat',
+        droneId: 'drone-1',
+        chatName: 'default',
+      });
+      const threadId = created.activeThreadId;
+
+      await service.notifyRuntimeEvent(threadId, { type: 'session_started' });
+      await service.notifyRuntimeEvent(threadId, {
+        type: 'session_error',
+        error: 'provider unavailable',
+      });
+      await service.notifyRuntimeEvent(threadId, {
+        type: 'session_finished',
+        status: 'error',
+      });
+
+      expect(await service.nativeThreadIsBusy(threadId)).toBe(false);
+      expect(await service.nativeThreadError(threadId)).toBe('provider unavailable');
+      let snapshot = await service.threadSnapshot(threadId);
+      expect(snapshot.threads.find((thread) => thread.id === threadId)?.status).toBe('error');
+
+      await service.beginNativeThreadPrompt(threadId);
+      expect(await service.nativeThreadError(threadId)).toBe('');
+      snapshot = await service.threadSnapshot(threadId);
+      expect(snapshot.threads.find((thread) => thread.id === threadId)?.status).toBe('idle');
+
+      const queued = await service.enqueueThreadPrompt(threadId, { prompt: 'retry' });
+      await service.claimNextQueuedPrompt(threadId);
+      await service.failQueuedPrompt(threadId, queued.id, new Error('retry failed'));
+      expect(await service.nativeThreadIsBusy(threadId)).toBe(false);
+      expect(await service.nativeThreadHasHistory(threadId)).toBe(true);
+      expect(await service.nativeThreadError(threadId)).toBe('retry failed');
     });
   });
 

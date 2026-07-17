@@ -42,6 +42,7 @@ export type LocalAssistantThread = {
   status: 'idle' | 'running' | 'error';
   error: string | null;
   autoApprove?: boolean;
+  artifactWorkspace?: boolean;
   workspaceTargets: LocalWorkspaceTarget[];
   messages: LocalAssistantMessage[];
   queuedPrompts: LocalAssistantQueuedPrompt[];

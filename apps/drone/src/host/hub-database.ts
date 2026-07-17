@@ -79,6 +79,7 @@ function looksLikeNativeBindingFailure(error: unknown): boolean {
     message.includes('node_module_version') ||
     message.includes('napi_register_module') ||
     message.includes('native module') ||
+    (message.includes("'better-sqlite3' is not yet supported") && message.includes('bun')) ||
     message.includes('could not locate the bindings file') ||
     message.includes('invalid elf header') ||
     message.includes('dlopen')

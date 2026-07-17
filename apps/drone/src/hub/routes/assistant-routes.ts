@@ -98,28 +98,11 @@ export function registerAssistantRoutes(
   });
 
   apiRouter.post('/api/assistant/threads', async ({ readJson, json: respond }) => {
-    const body = await readJson<any>();
-    const cloneThreadId = String(body?.cloneThreadId ?? '').trim();
-    if (!cloneThreadId) {
-      respond(201, await assistantService.createThread(body ?? {}));
-      return;
-    }
-    let clonedThreadId = '';
-    try {
-      if (blipAssistantHost.isThreadRunning(cloneThreadId)) {
-        throw new Error('Stop this assistant thread before cloning it');
-      }
-      const snapshot = await assistantService.cloneThread(cloneThreadId, body ?? {});
-      clonedThreadId = snapshot.activeThreadId;
-      await blipAssistantHost.cloneThread(cloneThreadId, clonedThreadId);
-      respond(201, snapshot);
-    } catch (error: any) {
-      if (clonedThreadId) {
-        await blipAssistantHost.deleteThread(clonedThreadId).catch(() => undefined);
-        await assistantService.deleteThread(clonedThreadId).catch(() => undefined);
-      }
-      respondAssistantError(respond, error);
-    }
+    await readJson<any>();
+    respond(410, {
+      ok: false,
+      error: 'Standalone agent sessions were removed. Create a drone chat instead.',
+    });
   });
 
   apiRouter.post('/api/assistant/default-model', async ({ readJson, json: respond }) => {

@@ -5,6 +5,7 @@ import type { RightPanelTabId } from './RightPanel';
 import type { StartupSeedState } from './app-types';
 
 export const BUILTIN_AGENT_OPTIONS: Array<{ key: string; label: string; agent: ChatAgentConfig }> = [
+  { key: 'native', label: 'Built-in', agent: { kind: 'native' } },
   { key: 'builtin:cursor', label: 'Cursor Agent', agent: { kind: 'builtin', id: 'cursor' } },
   { key: 'builtin:codex', label: 'Codex', agent: { kind: 'builtin', id: 'codex' } },
   { key: 'builtin:claude', label: 'Claude Code', agent: { kind: 'builtin', id: 'claude' } },
@@ -47,7 +48,6 @@ export const RIGHT_PANEL_TABS: RightPanelTab[] = [
   'prs',
   'canvas',
   'whiteboard',
-  'assistant',
 ];
 export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   terminal: 'Terminal',
@@ -60,7 +60,6 @@ export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   prs: 'PRs',
   canvas: 'Canvas',
   whiteboard: 'Whiteboard',
-  assistant: 'Assistant',
 };
 export function rightPanelTabsForRuntime(runtimeRaw: unknown): RightPanelTab[] {
   void runtimeRaw;

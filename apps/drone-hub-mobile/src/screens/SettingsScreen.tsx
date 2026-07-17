@@ -16,7 +16,7 @@ import { LocalAssistantSettingsCard } from '../local-assistant/LocalAssistantSet
 export type SettingsTab = 'assistant' | 'devices' | 'pairing';
 
 const SETTINGS_TABS: Array<TopTabOption<SettingsTab>> = [
-  { value: 'assistant', label: 'Assistant', icon: Bot },
+  { value: 'assistant', label: 'Built-in', icon: Bot },
   { value: 'devices', label: 'Devices', icon: Smartphone },
   { value: 'pairing', label: 'Pairing', icon: Link2 },
 ];

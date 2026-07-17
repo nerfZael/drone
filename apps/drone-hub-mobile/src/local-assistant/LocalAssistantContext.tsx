@@ -29,7 +29,7 @@ import {
 } from './local-blip-storage';
 import { messagesAfterDeletion } from './assistant-message-deletion';
 
-type LocalAssistantContextValue = {
+export type LocalAssistantContextValue = {
   threads: LocalAssistantThread[];
   activeThreadId: string;
   loading: boolean;
@@ -50,6 +50,7 @@ type LocalAssistantContextValue = {
       thinkingLevel?: LocalAssistantThinkingLevel;
       workspaceTargets?: LocalWorkspaceTarget[];
       autoApprove?: boolean;
+      artifactWorkspace?: boolean;
     },
   ): Promise<void>;
   resolveApproval(threadId: string, approvalId: string, approved: boolean): void;
@@ -211,7 +212,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         throw new Error('Stop the assistant before deleting messages');
       }
       const current = threadsRef.current.find((thread) => thread.id === threadId);
-      if (!current) throw new Error('Local assistant thread was not found');
+      if (!current) throw new Error('Built-in chat was not found');
       const messages = messagesAfterDeletion(current.messages, messageId, deleteFollowing);
       if (!messages) throw new Error('Assistant message was not found');
 
@@ -233,7 +234,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       if (abortRef.current?.threadId === threadId)
         throw new Error('Stop this thread before cloning it');
       const source = threadsRef.current.find((thread) => thread.id === threadId);
-      if (!source) throw new Error('Local assistant thread was not found');
+      if (!source) throw new Error('Built-in chat was not found');
       const now = new Date().toISOString();
       const thread: LocalAssistantThread = {
         ...source,
@@ -269,6 +270,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         thinkingLevel?: LocalAssistantThinkingLevel;
         workspaceTargets?: LocalWorkspaceTarget[];
         autoApprove?: boolean;
+        artifactWorkspace?: boolean;
       },
     ) => {
       const current = threadsRef.current.find((thread) => thread.id === threadId);
@@ -282,6 +284,9 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
           ? { workspaceTargets: cleanLocalWorkspaceTargets(patch.workspaceTargets) }
           : {}),
         ...(patch.autoApprove !== undefined ? { autoApprove: patch.autoApprove === true } : {}),
+        ...(patch.artifactWorkspace !== undefined
+          ? { artifactWorkspace: patch.artifactWorkspace === true }
+          : {}),
         updatedAt: new Date().toISOString(),
       });
       if (patch.autoApprove === true) {
@@ -301,7 +306,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       const prompt = rawPrompt.trim();
       if (!prompt) return;
       const current = threadsRef.current.find((thread) => thread.id === threadId);
-      if (!current) throw new Error('Local assistant thread was not found');
+      if (!current) throw new Error('Built-in chat was not found');
       if (abortRef.current) {
         const queued: LocalAssistantQueuedPrompt = {
           id: `mobile_queued_${Crypto.randomUUID()}`,
@@ -345,14 +350,14 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
           throw new Error('Add an OpenAI API key in Settings before sending a prompt');
         if (!mesh.identity) throw new Error('Phone device identity is not ready');
         const latest = threadsRef.current.find((thread) => thread.id === threadId);
-        if (!latest) throw new Error('Local assistant thread was not found');
+        if (!latest) throw new Error('Built-in chat was not found');
         running = await persistRunning({
           model: latest.model || settings.model,
           status: 'running',
           error: null,
           messages: [...latest.messages, userMessage(prompt)],
         });
-        if (!running) throw new Error('Local assistant thread was not found');
+        if (!running) throw new Error('Built-in chat was not found');
         const workspaceRuntime = createWorkspaceToolRuntime(running, mesh.request);
         const messages = await runMobileBlip({
           provider: settings.provider,
@@ -508,7 +513,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
           queuedPrompts: current.queuedPrompts.filter((prompt) => prompt.id !== promptId),
         };
       });
-      if (!result) throw new Error('Local assistant thread was not found');
+      if (!result) throw new Error('Built-in chat was not found');
     },
     [mutateThread],
   );

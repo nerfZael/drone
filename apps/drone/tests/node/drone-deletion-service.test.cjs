@@ -209,6 +209,7 @@ test('permanent deletion atomically clears every chat aggregate and blocks stale
       { scope: 'chats', version: 2 },
       { scope: 'chats', version: 3 },
       { scope: 'chats', version: 4 },
+      { scope: 'chats', version: 5 },
       { scope: 'prompts', version: 1 },
       { scope: 'prompts', version: 2 },
     ],

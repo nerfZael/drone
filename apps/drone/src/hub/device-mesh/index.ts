@@ -12,7 +12,6 @@ import { DeviceMeshRouter } from './device-mesh-router';
 import { DeviceMeshStore } from './device-mesh-store';
 import { DeviceRouteManager } from './device-route-manager';
 import { createDroneControlCapability } from './drone-control-capability';
-import { createAssistantThreadsCapability } from './features/cross-device-assistant/assistant-threads-capability';
 import { CrossDeviceAssistantPolicyHttp } from './features/cross-device-assistant/policy-http';
 import { CrossDeviceAssistantPolicyStore } from './features/cross-device-assistant/policy-store';
 import { RemoteWorkspaceTarget } from './features/cross-device-assistant/remote-workspace-target';
@@ -46,7 +45,6 @@ export async function createDeviceMeshService(options: {
     path.join(options.rootDir, 'cross-device-assistant.json'),
   );
   const localHubAccess = { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken };
-  capabilities.register(createAssistantThreadsCapability(localHubAccess, assistantPolicies));
   capabilities.register(createWorkspaceCapability(assistantPolicies));
   capabilities.register(createProviderCredentialsCapability(identity));
   const routeManager = new DeviceRouteManager(identity, store);
@@ -114,13 +112,6 @@ export async function createDeviceMeshService(options: {
     store,
     onAssistantPolicyChange: (listener: (threadIds: string[]) => void) =>
       assistantPolicies.onChange(listener),
-    broadcastAssistantThreadChange: (payload: Record<string, any>) =>
-      router.broadcastCapabilityEvent(
-        'assistant-threads',
-        'threads.changed',
-        payload,
-        'threads.list',
-      ),
     broadcastDroneListChange: (payload: Record<string, any>) =>
       router.broadcastCapabilityEvent('drone-control', 'drones.changed', payload, 'drones.list'),
     broadcastDroneChatChange: (payload: Record<string, any>) =>

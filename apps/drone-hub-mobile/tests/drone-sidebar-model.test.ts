@@ -14,19 +14,31 @@ describe('mobile drone sidebar model', () => {
     expect(normalizeMobileDroneCreateModelCatalog({
       models: [
         {
+          provider: 'codex',
           id: 'gpt-5.2-codex',
           label: 'GPT-5.2 Codex',
           reasoningLevels: ['low', 'medium', 'high', 'high'],
           defaultReasoningLevel: 'medium',
         },
-        { id: 'gpt-5.2-codex', label: 'duplicate' },
+        { provider: 'codex', id: 'gpt-5.2-codex', label: 'duplicate' },
+        { provider: 'openai', id: 'gpt-5.2-codex', label: 'OpenAI variant' },
       ],
-    })).toEqual([{
-      id: 'gpt-5.2-codex',
-      label: 'GPT-5.2 Codex',
-      reasoningLevels: ['low', 'medium', 'high'],
-      defaultReasoningLevel: 'medium',
-    }]);
+    })).toEqual([
+      {
+        provider: 'codex',
+        id: 'gpt-5.2-codex',
+        label: 'GPT-5.2 Codex',
+        reasoningLevels: ['low', 'medium', 'high'],
+        defaultReasoningLevel: 'medium',
+      },
+      {
+        provider: 'openai',
+        id: 'gpt-5.2-codex',
+        label: 'OpenAI variant',
+        reasoningLevels: [],
+        defaultReasoningLevel: '',
+      },
+    ]);
   });
   test('names a newly cloned chat after the highest existing chat number', () => {
     expect(suggestNextMobileDroneChatName([])).toBe('chat-1');

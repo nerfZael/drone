@@ -7,7 +7,6 @@ import type { PlaybookRunsWorkspace as PlaybookRunsWorkspaceComponent } from './
 import { SelectedDroneWorkspace, type SelectedDroneWorkspace as SelectedDroneWorkspaceComponent } from './SelectedDroneWorkspace';
 import type { SetupWelcomeView as SetupWelcomeViewComponent } from './SetupWelcomeView';
 import type { AppView } from './app-types';
-import { FloatingAssistantDock } from '../assistant/FloatingAssistantDock';
 
 const SetupWelcomeView = React.lazy(async () => {
   const module = await import('./SetupWelcomeView');
@@ -74,23 +73,6 @@ export function DroneHubWorkspaceContent({
     activeDroneId: null,
     previewVisible: false,
   });
-  const [embeddedAssistantPanelVisible, setEmbeddedAssistantPanelVisible] = React.useState(false);
-  const selectedWorkspaceDroneId = selectedDroneWorkspaceProps?.currentDrone.id ?? null;
-  React.useEffect(() => {
-    setEmbeddedAssistantPanelVisible(false);
-  }, [selectedWorkspaceDroneId]);
-  React.useEffect(() => {
-    if (selectedDroneWorkspaceProps?.rightPanelOpen) return;
-    setEmbeddedAssistantPanelVisible(false);
-  }, [selectedDroneWorkspaceProps?.rightPanelOpen]);
-  const assistantTabSelected = Boolean(
-    selectedDroneWorkspaceProps?.rightPanelTab === 'assistant' ||
-      (selectedDroneWorkspaceProps?.rightPanelSplit && selectedDroneWorkspaceProps?.rightPanelBottomTab === 'assistant'),
-  );
-  const assistantEmbeddedVisible = Boolean(
-    selectedDroneWorkspaceProps?.rightPanelOpen && (embeddedAssistantPanelVisible || assistantTabSelected),
-  );
-
   const workspaceContent =
     setupWelcomeProps && appView !== 'settings' ? (
       <SetupWelcomeView {...setupWelcomeProps} />
@@ -106,7 +88,6 @@ export function DroneHubWorkspaceContent({
       <SelectedDroneWorkspace
         {...selectedDroneWorkspaceProps}
         onPersistentPreviewHostChange={setPreviewHostState}
-        onEmbeddedAssistantVisibleChange={setEmbeddedAssistantPanelVisible}
       />
     ) : (
       <NoDroneSelectedState {...noDroneSelectedStateProps} />
@@ -123,7 +104,6 @@ export function DroneHubWorkspaceContent({
           {renderPersistentPreviewContent(previewHostState.activeDroneId, previewHostState.previewVisible)}
         </div>
       </div>
-      <FloatingAssistantDock embeddedVisible={assistantEmbeddedVisible} />
     </div>
   );
 }

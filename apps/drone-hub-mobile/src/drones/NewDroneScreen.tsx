@@ -30,9 +30,10 @@ export type MobileDroneCreateMode = 'with-chat' | 'without-chat';
 export type MobileDroneCreateRuntime = 'container' | 'host';
 export type MobileDroneCreateBranchSource = 'host' | 'remote';
 export type MobileDroneAgentPermissionMode = 'full-access' | 'read-only';
-export type MobileBuiltinAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
+export type MobileDroneAgentId = 'native' | 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
 
-const AGENTS: Array<{ id: MobileBuiltinAgentId; label: string }> = [
+const AGENTS: Array<{ id: MobileDroneAgentId; label: string }> = [
+  { id: 'native', label: 'Built-in' },
   { id: 'cursor', label: 'Cursor Agent' },
   { id: 'codex', label: 'Codex' },
   { id: 'claude', label: 'Claude Code' },
@@ -51,7 +52,8 @@ export type MobileDroneCreatePayload = {
   repoBranchSource: MobileDroneCreateBranchSource;
   pullHostBranchBeforeCreate: boolean;
   remoteBranch?: string;
-  seedAgent?: { kind: 'builtin'; id: MobileBuiltinAgentId };
+  seedAgent?: { kind: 'native' } | { kind: 'builtin'; id: Exclude<MobileDroneAgentId, 'native'> };
+  seedProvider?: string;
   seedModel?: string;
   seedReasoning?: string;
   seedAgentPermissionMode?: MobileDroneAgentPermissionMode;
@@ -64,9 +66,10 @@ export type MobileDroneCreateDefaults = {
   runtime?: MobileDroneCreateRuntime;
   group?: string;
   repoPath?: string;
-  agent?: MobileBuiltinAgentId;
+  agent?: MobileDroneAgentId;
   agentPermissionMode?: MobileDroneAgentPermissionMode;
   model?: string;
+  provider?: string;
   reasoning?: string;
 };
 
@@ -228,6 +231,7 @@ export function NewDroneScreen({
   draft,
   requestError,
   initialValues,
+  localDevice = false,
   onDetectModels,
   onLoadRepoBranches,
   onCreate,
@@ -238,8 +242,9 @@ export function NewDroneScreen({
   draft: boolean;
   requestError: string | null;
   initialValues?: MobileDroneCreateDefaults;
+  localDevice?: boolean;
   onDetectModels(
-    agent: MobileBuiltinAgentId,
+    agent: MobileDroneAgentId,
     runtime: MobileDroneCreateRuntime,
     refresh?: boolean,
   ): Promise<MobileDroneCreateModel[]>;
@@ -250,14 +255,14 @@ export function NewDroneScreen({
     initialValues?.mode ?? 'with-chat',
   );
   const [runtime, setRuntime] = React.useState<MobileDroneCreateRuntime>(
-    initialValues?.runtime ?? 'container',
+    localDevice ? 'host' : (initialValues?.runtime ?? 'container'),
   );
   const [persistVolume, setPersistVolume] = React.useState(false);
   const [name, setName] = React.useState('');
   const [group, setGroup] = React.useState(initialValues?.group ?? '');
   const [detailsOpen, setDetailsOpen] = React.useState(false);
-  const [agent, setAgent] = React.useState<MobileBuiltinAgentId>(
-    initialValues?.agent ?? 'cursor',
+  const [agent, setAgent] = React.useState<MobileDroneAgentId>(
+    localDevice ? 'native' : (initialValues?.agent ?? 'native'),
   );
   const [agentPickerOpen, setAgentPickerOpen] = React.useState(false);
   const [agentPermissionMode, setAgentPermissionMode] =
@@ -265,6 +270,7 @@ export function NewDroneScreen({
       initialValues?.agentPermissionMode ?? 'full-access',
     );
   const [model, setModel] = React.useState(initialValues?.model ?? '');
+  const [modelProvider, setModelProvider] = React.useState(initialValues?.provider ?? '');
   const [reasoning, setReasoning] = React.useState(initialValues?.reasoning ?? '');
   const [models, setModels] = React.useState<MobileDroneCreateModel[]>([]);
   const [modelsLoading, setModelsLoading] = React.useState(false);
@@ -287,18 +293,21 @@ export function NewDroneScreen({
   const composerFocusedRef = React.useRef(false);
   const selectedRepo = repos.find((repo) => repo.path === repoPath) ?? null;
   const readOnlySupported = agent === 'codex' || agent === 'blip';
-  const selectedModel = models.find((option) => option.id === model) ?? null;
+  const selectedModel =
+    models.find(
+      (option) => option.id === model && (!modelProvider || option.provider === modelProvider),
+    ) ?? null;
   const modelChoices = React.useMemo<AssistantModelChoice[]>(
     () =>
       models.flatMap((option) =>
         option.reasoningLevels.length > 0
           ? option.reasoningLevels.map((thinkingLevel) => ({
-              provider: agent,
+              provider: option.provider || agent,
               id: option.id,
               name: option.label,
               thinkingLevel,
             }))
-          : [{ provider: agent, id: option.id, name: option.label }],
+          : [{ provider: option.provider || agent, id: option.id, name: option.label }],
       ),
     [agent, models],
   );
@@ -306,6 +315,14 @@ export function NewDroneScreen({
   const scrollMessageIntoView = React.useCallback(() => {
     requestAnimationFrame(() => pageRef.current?.scrollToEnd({ animated: true }));
   }, []);
+
+  React.useEffect(() => {
+    if (!localDevice) return;
+    setRuntime('host');
+    setAgent('native');
+    setRepoPath('');
+    setPersistVolume(false);
+  }, [localDevice]);
 
   React.useEffect(() => {
     const subscription = Keyboard.addListener('keyboardDidShow', () => {
@@ -402,11 +419,12 @@ export function NewDroneScreen({
     setBranchPickerOpen(false);
   };
 
-  const chooseAgent = (nextAgent: MobileBuiltinAgentId) => {
+  const chooseAgent = (nextAgent: MobileDroneAgentId) => {
     if (nextAgent !== agent) {
       modelRequestId.current += 1;
       setModels([]);
       setModel('');
+      setModelProvider('');
       setReasoning('');
       setAgent(nextAgent);
     }
@@ -437,7 +455,12 @@ export function NewDroneScreen({
       ...(effectiveBranchSource === 'remote' && remoteBranch ? { remoteBranch } : {}),
       ...(mode === 'with-chat'
         ? {
-            seedAgent: { kind: 'builtin' as const, id: agent },
+            seedAgent: agent === 'native'
+              ? { kind: 'native' as const }
+              : { kind: 'builtin' as const, id: agent },
+            ...(agent === 'native' && modelProvider.trim()
+              ? { seedProvider: modelProvider.trim() }
+              : {}),
             ...(model.trim() ? { seedModel: model.trim() } : {}),
             ...(reasoning.trim() ? { seedReasoning: reasoning.trim() } : {}),
             ...(agentPermissionMode === 'read-only'
@@ -495,16 +518,19 @@ export function NewDroneScreen({
                   modelRequestId.current += 1;
                   setModels([]);
                   setModel('');
+                  setModelProvider('');
                   setReasoning('');
                 }
                 setRuntime(value);
                 if (value === 'host') setBranchSource('host');
               }}
               disabled={busy}
-              options={[
-                { value: 'container', label: 'Container' },
-                { value: 'host', label: 'Host' },
-              ]}
+              options={localDevice
+                ? [{ value: 'host', label: 'Host' }]
+                : [
+                    { value: 'container', label: 'Container' },
+                    { value: 'host', label: 'Host' },
+                  ]}
             />
           </View>
           {runtime === 'container' ? (
@@ -730,8 +756,8 @@ export function NewDroneScreen({
                     <Pressable
                       accessibilityRole="button"
                       accessibilityLabel="Choose agent"
-                      accessibilityState={{ expanded: agentPickerOpen, disabled: busy }}
-                      disabled={busy}
+                      accessibilityState={{ expanded: agentPickerOpen, disabled: busy || localDevice }}
+                      disabled={busy || localDevice}
                       onPress={() => setAgentPickerOpen((open) => !open)}
                       style={({ pressed }) => [
                         styles.agentPickerTrigger,
@@ -770,7 +796,7 @@ export function NewDroneScreen({
                   </View>
                   {agentPickerOpen ? (
                     <View accessibilityRole="radiogroup" style={styles.agentOptions}>
-                      {AGENTS.map((option) => {
+                      {(localDevice ? AGENTS.filter((option) => option.id === 'native') : AGENTS).map((option) => {
                         const active = option.id === agent;
                         return (
                           <Pressable
@@ -815,7 +841,7 @@ export function NewDroneScreen({
                   ) : null}
                   <AssistantModelPicker
                     open={modelPickerOpen}
-                    currentProvider={agent}
+                    currentProvider={modelProvider || agent}
                     currentModel={model}
                     currentThinkingLevel={reasoning}
                     options={modelChoices}
@@ -823,7 +849,10 @@ export function NewDroneScreen({
                     showReasoning={Boolean(selectedModel?.reasoningLevels.length)}
                     onClose={() => setModelPickerOpen(false)}
                     onSelect={(choice, selection) => {
-                      if (selection === 'model') setModel(choice.id);
+                      if (selection === 'model') {
+                        setModel(choice.id);
+                        setModelProvider(choice.provider);
+                      }
                       if (choice.thinkingLevel) setReasoning(choice.thinkingLevel);
                     }}
                   />

@@ -4,7 +4,7 @@ import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import {
-  ASSISTANT_THREADS_CAPABILITY,
+  DRONE_CONTROL_CAPABILITY,
   capabilityRequestSigningText,
   routeAnnouncementSigningText,
   socketServerAuthSigningText,
@@ -182,23 +182,23 @@ describe('device mesh signatures', () => {
         updatedAt: at,
       } as const;
       await store.upsertDiscoveredDevice(remoteDevice);
-      const capability = createDeviceCoreCapability(store, () => [ASSISTANT_THREADS_CAPABILITY]);
+      const capability = createDeviceCoreCapability(store, () => [DRONE_CONTROL_CAPABILITY]);
       const context = { sourceDevice: remoteDevice, requestId: 'request-access' };
       const result: any = await capability.invoke(
         'device.access.update-self',
         {
           grants: [
             {
-              capability: 'assistant-threads',
+              capability: 'drone-control',
               version: 1,
-              operations: ['threads.list', 'not-an-operation'],
+              operations: ['drones.list', 'not-an-operation'],
             },
           ],
         },
         context,
       );
       expect(result.grants).toEqual([
-        { capability: 'assistant-threads', version: 1, operations: ['threads.list'] },
+        { capability: 'drone-control', version: 1, operations: ['drones.list'] },
       ]);
       expect((await store.read()).devices[remote.id]?.grants).toEqual(result.grants);
 

@@ -55,11 +55,13 @@ describe('drone hub domain helpers', () => {
       sessionName: 'drone-hub-chat-default',
       createdAt: '2026-02-10T00:00:00.000Z',
       model: 'gpt-5.2',
+      agentLocked: true,
       agentSuggestionEnabled: true,
       agent: { kind: 'custom', id: 'reviewer', label: 'Reviewer', command: 'review --strict' },
     });
     expect(custom.agent).toEqual({ kind: 'custom', id: 'reviewer', label: 'Reviewer', command: 'review --strict' });
     expect(custom.model).toBe('gpt-5.2');
+    expect(custom.agentLocked).toBe(true);
     expect(custom.agentSuggestionEnabled).toBe(true);
 
     const builtin = normalizeChatInfoPayload({

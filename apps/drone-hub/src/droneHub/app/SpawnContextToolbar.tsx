@@ -62,9 +62,14 @@ export function SpawnContextToolbar({
     })),
   );
   const modelCatalog = useSpawnModelCatalog({
-    agentId: spawnAgentConfig.kind === 'builtin' ? spawnAgentConfig.id : '',
+    agentId:
+      spawnAgentConfig.kind === 'native'
+        ? 'native'
+        : spawnAgentConfig.kind === 'builtin'
+          ? spawnAgentConfig.id
+          : '',
     runtime,
-    enabled: showAgentControls && spawnAgentConfig.kind === 'builtin',
+    enabled: showAgentControls && spawnAgentConfig.kind !== 'custom',
   });
   const spawnModelMenuEntries = React.useMemo(
     () => buildDetectedModelMenuEntries(modelCatalog.models, spawnModel),
@@ -129,7 +134,7 @@ export function SpawnContextToolbar({
             </div>
           </div>
         ) : null}
-        {showAgentControls && spawnAgentConfig.kind === 'builtin' ? (
+        {showAgentControls && spawnAgentConfig.kind !== 'custom' ? (
           <div className="min-w-0 rounded-xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3">
             <div className={sectionLabelClassName} style={sectionLabelStyle}>
               Model
@@ -258,7 +263,7 @@ export function SpawnContextToolbar({
           </button>
         </div>
       ) : null}
-      {showAgentControls && spawnAgentConfig.kind === 'builtin' ? (
+      {showAgentControls && spawnAgentConfig.kind !== 'custom' ? (
         <div className={toolbarGroupClassName}>
           <span className={sectionLabelClassName} style={sectionLabelStyle}>
             Model

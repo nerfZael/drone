@@ -20,10 +20,12 @@ To pair:
 4. Approve the pending phone on the existing Hub and select only the needed operations.
 5. Configure any different permissions separately on every other destination Hub.
 
-## Assistant on the phone
+## Built-in agent on the phone
 
-The **Assistant → On this phone** view runs a small assistant loop directly in the React Native
-process. It does not ask another Hub to host the thread.
+Choose this phone in the **Drones** tab to create host-runtime phone drones. Phone drones use the
+Built-in agent, which runs directly in the React Native process; containers and third-party agent
+CLIs are not available on Android. A phone drone can be created with an initial chat or empty, and
+there is no limit on the number of chats.
 
 1. In the mobile **Settings** tab, choose either an OpenAI API key or a Codex subscription login
    and select a model. Codex can authenticate directly on the phone with OpenAI's device-code flow;
@@ -31,13 +33,13 @@ process. It does not ask another Hub to host the thread.
    Android secure storage and are sent only to the selected OpenAI model service.
 2. On a destination Hub, open **Settings → Device mesh → Workspaces**, choose one or more local
    folders, and grant this phone Read, Write, or Run commands access to each folder.
-3. Create a phone thread and open **Access**. Expand a device and select any subset of the named
+3. Create a phone drone chat and open **Access**. Expand a device and select any subset of the named
    workspaces and permissions it granted to the phone.
-4. Apply the thread access changes. New threads start with no workspace access, and each thread can
+4. Apply the chat access changes. New chats start with no device workspace access, and each chat can
    select multiple workspaces across multiple devices without copying IDs.
 
 The destination's device-to-workspace grant is the maximum access. The phone narrows that grant for
-each thread before exposing model tools. **Run commands** starts Bash in the workspace folder but is
+each chat before exposing model tools. **Run commands** starts Bash in the workspace folder but is
 host access and is not confined to that folder. Bash runs as an asynchronous destination-owned job:
 the phone receives a job handle immediately, consumes output incrementally, and sends an explicit
 cancel operation when a run is stopped. Commands default to a 30-minute timeout and are capped at
@@ -46,8 +48,8 @@ Blip transcript is stored as append-only chunks in the app's private document di
 subject to AsyncStorage's database ceiling. Provider credentials are stored separately in Secure
 Store.
 
-Phone-hosted assistants run the same portable `@blip/core` session lifecycle as Hub-hosted
-assistants, including tool turns, progress events, cancellation, and workspace target semantics.
+Phone-hosted Built-in chats run the same portable `@blip/core` session lifecycle as Hub-hosted
+Built-in chats, including tool turns, progress events, cancellation, and workspace target semantics.
 `@blip/workspace` supplies the shared browser-safe target catalog. Android injects a React Native
 session repository plus OpenAI and Codex HTTP/SSE transports; Node storage, local filesystem tools,
 Git/process diagnostics, and CLI prompt policy are not bundled.
@@ -62,9 +64,9 @@ Codex response text streams through the React Native transport into Blip session
 Chat Completions transport currently commits each model response as a unit. Stop aborts the Blip
 session, its model request, and active cancellable mesh command jobs.
 
-Cross-device assistant thread lists refresh whenever their tab opens. While connected, authorized
-thread-change notifications travel over the existing authenticated mesh WebSocket and trigger a
-debounced refresh of the list and the open transcript.
+Remote drone chats use the `drone-control` capability. While connected, authorized chat-change
+notifications travel over the existing authenticated mesh WebSocket and trigger a debounced refresh
+of the drone list and open transcript.
 
 Drone chat messages detect linked GitHub pull requests and can show their state, checks, review,
 conflicts, and full branch names. The destination Hub supplies GitHub status using its existing
@@ -75,11 +77,9 @@ phone should be allowed to change pull requests. The title opens the pull reques
 browser. Open requests refresh while the chat is visible (more often while checks are pending), and
 actions refresh the native attachment immediately.
 
-Each assistant location opens its most recently updated thread. Tap the **Assistant** app header to
-open the shared thread drawer. Phone and cross-device transcripts use the same compact message,
-tool-call, image, attachment, composer, and model-selection presentation. Changing a model on a
-remote thread additionally requires the `assistant-threads/thread.update` grant.
-Cloning a remote thread requires the `assistant-threads/thread.clone` grant.
+Phone and cross-device drone chats use the same compact message, tool-call, image, attachment,
+approval, composer, and model-selection presentation. Model updates, chat creation, and chat cloning
+are authorized through the corresponding `drone-control` operations on the destination device.
 
 ### Copying OpenAI or Codex credentials from another Hub
 
@@ -92,10 +92,10 @@ The phone can explicitly copy an OpenAI API key or a file-based Codex CLI login 
 1. On the source Hub, open **Settings → Devices** and edit the phone.
 2. Mark the phone as an administrator and grant `provider-credentials/openai.export`,
    `provider-credentials/codex.export`, or both.
-3. On the phone, open **Settings → Assistant on this phone**, select the source, and copy the
+3. On the phone, open **Settings → Built-in**, select the source, and copy the
    desired credential.
 4. Select **OpenAI API** or **Codex subscription** as the phone assistant provider and save the
-   assistant settings.
+   Built-in agent settings.
 
 The source grant and the confirmation on the phone are both required. The key is encrypted for a
 fresh, phone-owned transfer key before entering the mesh, so a forwarding bridge receives only

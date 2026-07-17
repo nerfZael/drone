@@ -14,7 +14,6 @@ import {
 } from './assistant-artifacts';
 import {
   ASSISTANT_THREAD_MESSAGE_LIMIT,
-  ASSISTANT_REGISTRY_MAX_THREADS,
   ASSISTANT_SYSTEM_PROMPT_MAX_CHARS,
   CHAT_MESSAGE_DEFAULT_LIMIT,
   CHAT_MESSAGE_MAX_LIMIT,
@@ -115,6 +114,8 @@ type AssistantThreadStatus =
   | 'error';
 type AssistantThread = {
   id: string;
+  ownerDroneId?: string;
+  ownerChatName?: string;
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -1244,6 +1245,12 @@ function normalizeThread(
   const thinkingLevel = allowedThinkingLevelForModel(provider, model, raw.thinkingLevel);
   return {
     id,
+    ...(cleanOptionalString(raw.ownerDroneId)
+      ? { ownerDroneId: cleanOptionalString(raw.ownerDroneId) }
+      : {}),
+    ...(cleanOptionalString(raw.ownerChatName)
+      ? { ownerChatName: cleanOptionalString(raw.ownerChatName) }
+      : {}),
     title: String(raw.title ?? '').trim() || DEFAULT_THREAD_TITLE,
     createdAt,
     updatedAt,
@@ -1290,9 +1297,7 @@ function serializeState(input: {
     activeThreadId: input.activeThreadId,
     defaultModel: input.defaultModel,
     defaultEnabledTools: normalizeAssistantEnabledTools(input.defaultEnabledTools),
-    threads: input.threads
-      .slice(0, ASSISTANT_REGISTRY_MAX_THREADS)
-      .map((thread) => sanitizeThread(thread, true)),
+    threads: input.threads.map((thread) => sanitizeThread(thread, true)),
     ...(chatIdleSubscriptions.length > 0 ? { chatIdleSubscriptions } : {}),
     webSearchToolMigrationApplied: true,
     fetchContentToolMigrationApplied: true,
@@ -1382,6 +1387,8 @@ export class HubAssistantService {
     if (type === 'session_started' || type === 'turn_started') {
       this.runningThreadIds.add(thread.id);
       this.modelStreamingText.set(thread.id, '');
+      thread.status = 'running';
+      thread.error = null;
       thread.updatedAt = nowIso();
       emit('runtime_started');
       return;
@@ -1415,11 +1422,25 @@ export class HubAssistantService {
     if (type === 'session_finished') {
       this.runningThreadIds.delete(thread.id);
       this.modelStreamingText.delete(thread.id);
+      const failed = String(event?.status ?? '').trim() === 'error';
+      thread.status = failed ? 'error' : 'idle';
+      thread.error = failed
+        ? cleanOptionalString(event?.error) || thread.error || 'Built-in agent prompt failed'
+        : null;
       thread.updatedAt = nowIso();
+      await this.persist();
       emit('runtime_finished');
       return;
     }
-    if (type === 'session_error') emit('runtime_error');
+    if (type === 'session_error') {
+      this.runningThreadIds.delete(thread.id);
+      this.modelStreamingText.delete(thread.id);
+      thread.status = 'error';
+      thread.error = cleanOptionalString(event?.error) || 'Built-in agent prompt failed';
+      thread.updatedAt = nowIso();
+      await this.persist();
+      emit('runtime_error');
+    }
   }
 
   subscribeChanges(listener: (event: AssistantChangeEvent) => void): () => void {
@@ -1507,11 +1528,14 @@ export class HubAssistantService {
     const threadId = cleanOptionalString(input.threadId) || this.activeThreadId;
     const thread = this.threads.find((item) => item.id === threadId);
     if (!thread) throw new Error(`unknown assistant thread: ${threadId}`);
+    const requestedDroneIds = Array.isArray(input.droneIds) ? input.droneIds : [];
     thread.accessScope = makeAssistantAccessScope({
       readMode: (input as any).readMode ?? input.mode,
       writeMode: (input as any).writeMode ?? input.mode,
       executeMode: (input as any).executeMode ?? (input as any).writeMode ?? input.mode,
-      droneIds: input.droneIds,
+      droneIds: thread.ownerDroneId
+        ? [...requestedDroneIds, thread.ownerDroneId]
+        : requestedDroneIds,
       updatedAt: nowIso(),
     });
     thread.updatedAt = nowIso();
@@ -1819,6 +1843,7 @@ export class HubAssistantService {
   }
 
   async createThread(input?: {
+    id?: unknown;
     title?: unknown;
     model?: unknown;
     provider?: unknown;
@@ -1831,6 +1856,9 @@ export class HubAssistantService {
       ? normalizeProvider(explicitProvider)
       : this.defaultModelSelection.provider;
     const thread = this.makeThread({
+      id: cleanOptionalString(input?.id) || undefined,
+      ownerDroneId: cleanOptionalString(input?.activeDroneId) || undefined,
+      ownerChatName: cleanOptionalString(input?.activeChatName) || undefined,
       provider,
       model:
         String(input?.model ?? '').trim() ||
@@ -1841,10 +1869,234 @@ export class HubAssistantService {
       title: String(input?.title ?? '').trim() || DEFAULT_THREAD_TITLE,
       accessScope: this.defaultAccessScopeForNewThread(input),
     });
-    this.threads = [thread, ...this.threads].slice(0, ASSISTANT_REGISTRY_MAX_THREADS);
+    this.threads = [thread, ...this.threads];
     this.activeThreadId = thread.id;
     await this.persist();
     return await this.threadSnapshot(thread.id);
+  }
+
+  async ensureNativeThread(input: {
+    id: unknown;
+    droneId: unknown;
+    chatName: unknown;
+    title?: unknown;
+    provider?: unknown;
+    model?: unknown;
+    thinkingLevel?: unknown;
+  }): Promise<AssistantSnapshot> {
+    await this.ensureLoaded();
+    // Standalone Assistant threads are intentionally disposable after unification. The legacy
+    // service still creates one placeholder while loading an empty store for compatibility with
+    // its internal model/settings APIs; remove that placeholder as soon as a native drone chat is
+    // established so only drone-owned conversations remain persisted.
+    if (this.threads.some((thread) => !thread.ownerDroneId)) {
+      this.threads = this.threads.filter((thread) => Boolean(thread.ownerDroneId));
+      this.activeThreadId = this.threads[0]?.id ?? '';
+    }
+    const id = cleanOptionalString(input.id);
+    const ownerDroneId = cleanOptionalString(input.droneId);
+    const ownerChatName = cleanOptionalString(input.chatName) || 'default';
+    if (!id) throw new Error('native chat id is required');
+    if (!ownerDroneId) throw new Error('native chat owner drone is required');
+    const existing = this.threads.find((thread) => thread.id === id);
+    if (existing) {
+      if (existing.ownerDroneId && existing.ownerDroneId !== ownerDroneId)
+        throw new Error('native chat is already owned by another drone');
+      let metadataChanged = false;
+      if (existing.ownerDroneId !== ownerDroneId) {
+        existing.ownerDroneId = ownerDroneId;
+        metadataChanged = true;
+      }
+      if (existing.ownerChatName !== ownerChatName) {
+        existing.ownerChatName = ownerChatName;
+        metadataChanged = true;
+      }
+      const requestedTitle = cleanOptionalString(input.title);
+      if (requestedTitle && existing.title !== requestedTitle) {
+        existing.title = requestedTitle;
+        metadataChanged = true;
+      }
+      if (!existing.accessScope.droneIds.includes(ownerDroneId)) {
+        existing.accessScope = makeAssistantAccessScope({
+          ...existing.accessScope,
+          droneIds: [...existing.accessScope.droneIds, ownerDroneId],
+          updatedAt: nowIso(),
+        });
+        metadataChanged = true;
+      }
+      this.activeThreadId = id;
+      if (metadataChanged) existing.updatedAt = nowIso();
+      await this.persist();
+      return await this.threadSnapshot(id);
+    }
+    const requestedModel = cleanOptionalString(input.model);
+    const requestedProvider = cleanOptionalString(input.provider);
+    const catalogModel = requestedModel
+      ? ASSISTANT_MODEL_OPTIONS.find((option) => option.id === requestedModel)
+      : null;
+    const provider = requestedProvider
+      ? normalizeProvider(requestedProvider)
+      : catalogModel?.provider ?? this.defaultModelSelection.provider;
+    const model = requestedModel || this.defaultModelSelection.model;
+    const thread = this.makeThread({
+      id,
+      ownerDroneId,
+      ownerChatName,
+      title: cleanOptionalString(input.title) || ownerChatName,
+      provider,
+      model,
+      thinkingLevel: allowedThinkingLevelForModel(
+        provider,
+        model,
+        cleanOptionalString(input.thinkingLevel) || this.defaultModelSelection.thinkingLevel,
+      ),
+      accessScope: makeAssistantAccessScope({
+        readMode: 'selected',
+        writeMode: 'selected',
+        executeMode: 'selected',
+        droneIds: [ownerDroneId],
+      }),
+    });
+    this.threads = [thread, ...this.threads];
+    this.activeThreadId = id;
+    await this.persist();
+    return await this.threadSnapshot(id);
+  }
+
+  async nativeThreadHasHistory(threadIdRaw: unknown): Promise<boolean> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.threads.find((item) => item.id === threadId);
+    if (!thread) return false;
+    return (
+      thread.messages.length > 0 ||
+      thread.queuedPrompts.length > 0 ||
+      this.runningThreadIds.has(threadId) ||
+      Array.from(this.approvals.values()).some(
+        (approval) => approval.threadId === threadId && approval.status === 'pending',
+      )
+    );
+  }
+
+  async nativeThreadIsBusy(threadIdRaw: unknown): Promise<boolean> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.threads.find((item) => item.id === threadId);
+    if (!thread) return false;
+    return (
+      thread.queuedPrompts.some(
+        (prompt) => prompt.status === 'queued' || prompt.status === 'running',
+      ) ||
+      this.runningThreadIds.has(threadId) ||
+      Array.from(this.approvals.values()).some(
+        (approval) => approval.threadId === threadId && approval.status === 'pending',
+      )
+    );
+  }
+
+  async nativeThreadError(threadIdRaw: unknown): Promise<string> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.threads.find((item) => item.id === threadId);
+    return cleanOptionalString(thread?.error);
+  }
+
+  async beginNativeThreadPrompt(threadIdRaw: unknown): Promise<void> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.getThread(threadId);
+    if (!thread.error && thread.status !== 'error') return;
+    thread.status = 'idle';
+    thread.error = null;
+    thread.updatedAt = nowIso();
+    await this.persist();
+  }
+
+  async failNativeThreadPrompt(threadIdRaw: unknown, error: unknown): Promise<void> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.getThread(threadId);
+    this.runningThreadIds.delete(threadId);
+    this.modelStreamingText.delete(threadId);
+    thread.status = 'error';
+    thread.error = cleanOptionalString((error as any)?.message ?? error) || 'Built-in agent prompt failed';
+    thread.updatedAt = nowIso();
+    await this.persist();
+    this.emitChange('runtime_error', thread.id);
+  }
+
+  async nativeThreadLatestAssistantText(threadIdRaw: unknown): Promise<string> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.threads.find((item) => item.id === threadId);
+    if (!thread) return '';
+    const message = [...thread.messages]
+      .reverse()
+      .find((item: any) => item?.role === 'assistant');
+    if (!message) return '';
+    if (typeof (message as any).content === 'string') return (message as any).content;
+    if (!Array.isArray((message as any).content)) return '';
+    return (message as any).content
+      .map((part: any) =>
+        part?.type === 'text' || part?.type === 'thinking'
+          ? String(part?.text ?? part?.thinking ?? '')
+          : '',
+      )
+      .filter(Boolean)
+      .join('\n');
+  }
+
+  async nativeThreadOwner(
+    threadIdRaw: unknown,
+  ): Promise<{ droneId: string; chatName: string } | null> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.threads.find((item) => item.id === threadId);
+    const droneId = cleanOptionalString(thread?.ownerDroneId);
+    if (!thread || !droneId) return null;
+    return {
+      droneId,
+      chatName: cleanOptionalString(thread.ownerChatName) || 'default',
+    };
+  }
+
+  async cloneNativeThread(input: {
+    sourceId: unknown;
+    id: unknown;
+    droneId: unknown;
+    chatName: unknown;
+  }): Promise<AssistantSnapshot> {
+    await this.ensureLoaded();
+    const source = this.getThread(cleanOptionalString(input.sourceId));
+    const id = cleanOptionalString(input.id);
+    const ownerDroneId = cleanOptionalString(input.droneId);
+    const ownerChatName = cleanOptionalString(input.chatName) || 'default';
+    if (!id || !ownerDroneId) throw new Error('native chat clone identity is required');
+    if (this.threads.some((thread) => thread.id === id)) return await this.threadSnapshot(id);
+    const thread = this.makeThread({
+      id,
+      ownerDroneId,
+      ownerChatName,
+      title: ownerChatName,
+      provider: source.provider,
+      model: source.model,
+      thinkingLevel: source.thinkingLevel,
+      accessScope: makeAssistantAccessScope({
+        ...structuredClone(source.accessScope),
+        droneIds: Array.from(new Set([...source.accessScope.droneIds, ownerDroneId])),
+        updatedAt: nowIso(),
+      }),
+      systemPrompt: source.systemPrompt,
+    });
+    thread.systemPromptUpdatedAt = source.systemPromptUpdatedAt;
+    thread.enabledTools = [...source.enabledTools];
+    thread.autoApprove = source.autoApprove;
+    thread.promptDeliveryMode = source.promptDeliveryMode;
+    thread.messages = structuredClone(source.messages);
+    this.threads = [thread, ...this.threads];
+    this.activeThreadId = id;
+    await this.persist();
+    return await this.threadSnapshot(id);
   }
 
   async createNewThreadFromThread(
@@ -1865,7 +2117,7 @@ export class HubAssistantService {
       thread.model,
       previousThread.thinkingLevel,
     );
-    this.threads = [thread, ...this.threads].slice(0, ASSISTANT_REGISTRY_MAX_THREADS);
+    this.threads = [thread, ...this.threads];
     this.activeThreadId = thread.id;
     await this.persist();
     return {
@@ -1894,7 +2146,7 @@ export class HubAssistantService {
     thread.autoApprove = source.autoApprove;
     thread.promptDeliveryMode = source.promptDeliveryMode;
     thread.messages = structuredClone(source.messages);
-    this.threads = [thread, ...this.threads].slice(0, ASSISTANT_REGISTRY_MAX_THREADS);
+    this.threads = [thread, ...this.threads];
     this.activeThreadId = thread.id;
     await this.persist();
     return await this.threadSnapshot(thread.id);
@@ -2504,6 +2756,8 @@ export class HubAssistantService {
     if (!queued) return;
     queued.status = 'failed';
     queued.error = String((error as any)?.message ?? error ?? 'Assistant prompt failed');
+    thread.status = 'error';
+    thread.error = queued.error;
     thread.updatedAt = nowIso();
     await this.persist();
   }
@@ -2623,6 +2877,9 @@ export class HubAssistantService {
   }
 
   private makeThread(input?: {
+    id?: string;
+    ownerDroneId?: string;
+    ownerChatName?: string;
     provider?: LlmProviderId;
     model?: string;
     thinkingLevel?: AssistantThinkingLevel;
@@ -2633,7 +2890,13 @@ export class HubAssistantService {
     const provider = normalizeProvider(input?.provider);
     const at = nowIso();
     return {
-      id: makeAssistantId('thread'),
+      id: cleanOptionalString(input?.id) || makeAssistantId('thread'),
+      ...(cleanOptionalString(input?.ownerDroneId)
+        ? { ownerDroneId: cleanOptionalString(input?.ownerDroneId) }
+        : {}),
+      ...(cleanOptionalString(input?.ownerChatName)
+        ? { ownerChatName: cleanOptionalString(input?.ownerChatName) }
+        : {}),
       title: input?.title?.trim() || DEFAULT_THREAD_TITLE,
       createdAt: at,
       updatedAt: at,
@@ -2770,12 +3033,6 @@ export class HubAssistantService {
           drones.find((item) => item.id === scopedDroneId) ??
           drones.find((item) => item.name === rawDroneId) ??
           null;
-        if (drone && String(drone.runtime ?? '').trim() !== 'container') {
-          return {
-            block: true,
-            reason: `bash is only supported for container drones: ${drone.name}`,
-          };
-        }
         const cwd = cleanOptionalString(ctx?.args?.cwd);
         approvalArgs = {
           requested: ctx?.args ?? {},

@@ -22,26 +22,19 @@ import {
 import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-dnd';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import {
-  IconChatThread,
   IconPencil,
   IconPlus,
   IconSettings,
   IconShieldCheck,
-  IconSidebarCollapse,
-  IconSidebarExpand,
   IconSpinner,
-  IconTrash,
   IconWrench,
 } from '../app/icons';
-import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { IconChevron, IconDrone, IconFile, IconFolder, iconForFilePath } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import { useBlipThreadSession } from './useBlipThreadSession';
 import { AssistantThreadFilesView, selectDefaultArtifactPath } from './AssistantThreadFilesView';
-import { AssistantThreadSidebar } from './AssistantThreadSidebar';
 import { AssistantWorkspaceAccessView } from './AssistantWorkspaceAccessView';
-import { assistantThreadsByCreatedAtNewestFirst } from './assistant-thread-order';
 import {
   AssistantSystemPromptModal,
   AssistantToolsPanel,
@@ -117,7 +110,6 @@ import type {
   AssistantToolSummary,
   PendingAssistantScopeSave,
 } from './assistant-types';
-const ASSISTANT_THREAD_SIDEBAR_OPEN_STORAGE_KEY = 'droneHub.assistant.threadSidebarOpen';
 const ASSISTANT_FILES_OPEN_STORAGE_KEY = 'droneHub.assistant.filesOpen';
 /** Distance from bottom (px) below which we treat the assistant transcript as "pinned" for auto-scroll. */
 const ASSISTANT_SCROLL_BOTTOM_THRESHOLD_PX = 48;
@@ -139,11 +131,6 @@ const ASSISTANT_PROVIDERS: Array<{ id: AssistantProviderId; label: string; title
   { id: 'openai', label: 'OpenAI', title: 'Use OpenAI models.' },
   { id: 'gemini', label: 'Gemini', title: 'Use Gemini models.' },
 ];
-
-function readInitialThreadSidebarOpen(): boolean {
-  if (typeof window === 'undefined') return true;
-  return window.localStorage.getItem(ASSISTANT_THREAD_SIDEBAR_OPEN_STORAGE_KEY) !== '0';
-}
 
 function readInitialFilesOpen(): boolean {
   if (typeof window === 'undefined') return false;
@@ -348,7 +335,20 @@ async function readNdjson(response: Response, onEvent: (event: any) => void): Pr
   if (rest) onEvent(JSON.parse(rest));
 }
 
-export function AssistantDock() {
+export type NativeChatBinding = {
+  droneId: string;
+  chatName: string;
+};
+
+export function AssistantDock({
+  nativeChat,
+  onHistoryChange,
+}: {
+  nativeChat: NativeChatBinding;
+  onHistoryChange?: (hasHistory: boolean) => void;
+}) {
+  const nativeDroneId = nativeChat.droneId;
+  const nativeChatName = nativeChat.chatName;
   const [snapshot, setSnapshot] = React.useState<AssistantSnapshot | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
@@ -357,7 +357,6 @@ export function AssistantDock() {
   const [referencedDrones, setReferencedDrones] = React.useState<AssistantDroneReference[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
   const [attachmentDragActive, setAttachmentDragActive] = React.useState(false);
-  const [threadSidebarOpen, setThreadSidebarOpen] = React.useState(readInitialThreadSidebarOpen);
   const [filesOpen, setFilesOpen] = React.useState(readInitialFilesOpen);
   const [artifactFiles, setArtifactFiles] = React.useState<AssistantArtifactSummary[]>([]);
   const [selectedArtifactPath, setSelectedArtifactPath] = React.useState<string | null>(null);
@@ -396,14 +395,6 @@ export function AssistantDock() {
   const [assistantEventsUnavailable, setAssistantEventsUnavailable] = React.useState(
     () => typeof window === 'undefined' || typeof window.EventSource === 'undefined',
   );
-  const selectedDrone = useDroneHubUiStore((state) => state.selectedDrone);
-  const selectedChat = useDroneHubUiStore((state) => state.selectedChat);
-  const appView = useDroneHubUiStore((state) => state.appView);
-  const draftChat = useDroneHubUiStore((state) => state.draftChat);
-  const playbookRunsOpen = useDroneHubUiStore((state) => state.playbookRunsOpen);
-  const selectedGroupMultiChat = useDroneHubUiStore((state) => state.selectedGroupMultiChat);
-  const threadSidebarDockSide = useDroneHubUiStore((state) => state.assistantThreadSidebarDockSide);
-  const setThreadSidebarDockSide = useDroneHubUiStore((state) => state.setAssistantThreadSidebarDockSide);
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const scrollContentRef = React.useRef<HTMLDivElement | null>(null);
@@ -466,18 +457,27 @@ export function AssistantDock() {
     attempt();
   }, [updateAssistantPinned]);
 
-  const visibleThreads = React.useMemo(() => {
-    return assistantThreadsByCreatedAtNewestFirst(snapshot?.threads ?? []);
-  }, [snapshot?.threads]);
-
   const activeThread = React.useMemo(() => {
     if (!snapshot) return null;
-    return visibleThreads.find((thread) => thread.id === snapshot.activeThreadId) ?? visibleThreads[0] ?? null;
-  }, [snapshot, visibleThreads]);
+    return (
+      snapshot.threads.find((thread) => thread.id === snapshot.activeThreadId) ??
+      snapshot.threads[0] ??
+      null
+    );
+  }, [snapshot]);
   const activeThreadId = activeThread?.id ?? '';
   activeThreadIdRef.current = activeThreadId;
   const autoApprove = Boolean(activeThread?.autoApprove);
   const blipSession = useBlipThreadSession(activeThreadId, Boolean(activeThread));
+  const hasHistory =
+    blipSession.messages.length > 0 ||
+    Boolean(blipSession.streamingMessage) ||
+    Boolean(snapshot?.streamingMessage) ||
+    Boolean(snapshot?.streamingMessages?.length) ||
+    Boolean(activeThread?.queuedPrompts?.length);
+  React.useEffect(() => {
+    if (hasHistory) onHistoryChange?.(true);
+  }, [hasHistory, onHistoryChange]);
   React.useEffect(() => {
     if (activeThreadId) void blipSession.refreshHistory({ quiet: true });
   }, [activeThread?.updatedAt, activeThreadId, blipSession.refreshHistory]);
@@ -631,27 +631,20 @@ export function AssistantDock() {
     }
     const requestSeq = snapshotRequestSeqRef.current;
     try {
-      const threadId = activeThreadIdRef.current;
-      let next: AssistantSnapshot;
-      if (threadId) {
-        next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(threadId)}`);
-        if (snapshotRequestSeqRef.current !== requestSeq) return;
-        applySnapshot(next, threadId);
-      } else {
-        const listed = await requestJson<AssistantSnapshot>('/api/assistant/threads');
-        const listedThreadId = String(listed.activeThreadId ?? '').trim();
-        next = listedThreadId
-          ? await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(listedThreadId)}`)
-          : listed;
-        if (snapshotRequestSeqRef.current !== requestSeq) return;
-        applySnapshot(next, listedThreadId);
-      }
+      const next = await requestJson<AssistantSnapshot & { nativeChatId?: string }>(
+        `/api/drones/${encodeURIComponent(nativeDroneId)}/chats/${encodeURIComponent(nativeChatName)}/native`,
+        { method: 'POST' },
+      );
+      if (snapshotRequestSeqRef.current !== requestSeq) return;
+      const nativeChatId = String(next.nativeChatId ?? next.activeThreadId ?? '').trim();
+      activeThreadIdRef.current = nativeChatId;
+      applySnapshot(next, nativeChatId);
     } catch (err: any) {
       if (!options.silent) setError(err?.message ?? String(err));
     } finally {
       if (!options.silent) setLoading(false);
     }
-  }, [applySnapshot]);
+  }, [applySnapshot, nativeChatName, nativeDroneId]);
 
   React.useEffect(() => {
     attachmentsRef.current = attachments;
@@ -749,7 +742,7 @@ export function AssistantDock() {
           },
         };
       });
-      setSystemPromptNotice('Saved. New assistant threads will use this prompt.');
+      setSystemPromptNotice('Saved. New Built-in chats will use this prompt.');
     } catch (err: any) {
       setSystemPromptError(err?.message ?? String(err));
     } finally {
@@ -771,7 +764,7 @@ export function AssistantDock() {
       });
       setThreadSystemPromptSettings(data);
       setThreadSystemPromptDraft(data.threadSystemPrompt.prompt);
-      setSystemPromptNotice('Saved. Only this assistant thread will use this prompt.');
+      setSystemPromptNotice('Saved. Only this Built-in chat will use this prompt.');
       void refresh();
     } catch (err: any) {
       setSystemPromptError(err?.message ?? String(err));
@@ -783,7 +776,7 @@ export function AssistantDock() {
   const promoteThreadSystemPrompt = React.useCallback(async () => {
     const threadId = activeThreadIdRef.current;
     if (!threadId) return;
-    const confirmed = window.confirm('Promote this thread system prompt to the matching global prompt for new assistant threads? Existing threads keep their own prompts.');
+    const confirmed = window.confirm('Promote this chat system prompt to the matching global prompt for new Built-in chats? Existing chats keep their own prompts.');
     if (!confirmed) return;
     setPromoteSystemPromptSaving(true);
     setSystemPromptError(null);
@@ -797,7 +790,7 @@ export function AssistantDock() {
       setSystemPromptSettings(data);
       setSystemPromptDraft(data.assistantSystemPrompt.prompt);
       await loadSystemPromptSettings();
-      setSystemPromptNotice('Promoted. New assistant threads will use this prompt.');
+      setSystemPromptNotice('Promoted. New Built-in chats will use this prompt.');
       void refresh();
     } catch (err: any) {
       setSystemPromptError(err?.message ?? String(err));
@@ -807,8 +800,10 @@ export function AssistantDock() {
   }, [loadSystemPromptSettings, refresh, threadSystemPromptDraft]);
 
   React.useEffect(() => {
+    activeThreadIdRef.current = '';
+    setSnapshot(null);
     void refresh();
-  }, [refresh]);
+  }, [nativeChatName, nativeDroneId, refresh]);
 
   React.useEffect(() => {
     if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
@@ -886,11 +881,6 @@ export function AssistantDock() {
       cancelled = true;
     };
   }, [toolDroneKey]);
-
-  React.useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(ASSISTANT_THREAD_SIDEBAR_OPEN_STORAGE_KEY, threadSidebarOpen ? '1' : '0');
-  }, [threadSidebarOpen]);
 
   React.useEffect(() => {
     if (!systemPromptOpen) return;
@@ -1011,7 +1001,7 @@ export function AssistantDock() {
   const waitForScopeSave = React.useCallback(async (): Promise<boolean> => {
     if (scopeSyncPromiseRef.current && !(await scopeSyncPromiseRef.current.promise)) return false;
     if (currentScopeKeyRef.current && lastSyncedScopeKeyRef.current !== currentScopeKeyRef.current) {
-      setError('Assistant access changes are not saved yet.');
+      setError('Built-in agent access changes are not saved yet.');
       return false;
     }
     return true;
@@ -1117,89 +1107,6 @@ export function AssistantDock() {
     refocusInputWhenIdleRef.current = false;
     inputRef.current?.focus();
   }, [running]);
-
-  const selectedDroneChatOpen = Boolean(
-    selectedDrone &&
-      appView === 'workspace' &&
-      !draftChat &&
-      !playbookRunsOpen &&
-      !selectedGroupMultiChat,
-  );
-
-  const createThread = React.useCallback(async () => {
-    updateThreadRequestRef.current += 1;
-    const requestSeq = beginSnapshotMutation();
-    try {
-      const activeDroneId = selectedDroneChatOpen ? String(selectedDrone ?? '').trim() : '';
-      const next = await requestJson<AssistantSnapshot>('/api/assistant/threads', {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          activeDroneId: activeDroneId || null,
-          activeChatName: activeDroneId ? String(selectedChat ?? '').trim() || 'default' : null,
-        }),
-      });
-      if (!snapshotMutationCurrent(requestSeq)) return;
-      activeThreadIdRef.current = String(next.activeThreadId ?? '').trim();
-      applySnapshot(next, activeThreadIdRef.current);
-      setDraft('');
-    } catch (err: any) {
-      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
-    }
-  }, [applySnapshot, beginSnapshotMutation, selectedChat, selectedDrone, selectedDroneChatOpen, snapshotMutationCurrent]);
-
-  const selectThread = React.useCallback(async (thread: AssistantThread) => {
-    updateThreadRequestRef.current += 1;
-    const requestSeq = beginSnapshotMutation();
-    const previousThreadId = activeThreadIdRef.current;
-    activeThreadIdRef.current = thread.id;
-    try {
-      const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}/activate`, { method: 'POST' });
-      if (!snapshotMutationCurrent(requestSeq)) return;
-      applySnapshot(next, thread.id);
-      setDraft('');
-    } catch (err: any) {
-      if (!snapshotMutationCurrent(requestSeq)) return;
-      activeThreadIdRef.current = previousThreadId;
-      setError(err?.message ?? String(err));
-    }
-  }, [applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
-
-  const deleteThread = React.useCallback(async (thread: AssistantThread) => {
-    updateThreadRequestRef.current += 1;
-    const requestSeq = beginSnapshotMutation();
-    try {
-      const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}`, { method: 'DELETE' });
-      if (!snapshotMutationCurrent(requestSeq)) return;
-      activeThreadIdRef.current = String(next.activeThreadId ?? '').trim();
-      applySnapshot(next, activeThreadIdRef.current);
-    } catch (err: any) {
-      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
-    }
-  }, [applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
-
-  const renameThread = React.useCallback(async (thread: AssistantThread, title: string) => {
-    updateThreadRequestRef.current += 1;
-    const requestSeq = beginSnapshotMutation();
-    const preferredThreadId = activeThreadIdRef.current;
-    try {
-      let next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(thread.id)}`, {
-        method: 'PATCH',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ title }),
-      });
-      if (!snapshotMutationCurrent(requestSeq)) return;
-      if (preferredThreadId && preferredThreadId !== thread.id) {
-        next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(preferredThreadId)}/activate`, { method: 'POST' });
-        if (!snapshotMutationCurrent(requestSeq)) return;
-      }
-      activeThreadIdRef.current = preferredThreadId || String(next.activeThreadId ?? '').trim();
-      applySnapshot(next, activeThreadIdRef.current);
-    } catch (err: any) {
-      if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
-      throw err;
-    }
-  }, [applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
   const updateThread = React.useCallback(async (patch: Partial<Pick<AssistantThread, 'title' | 'model' | 'provider' | 'thinkingLevel' | 'autoApprove' | 'promptDeliveryMode' | 'enabledTools'>>) => {
     if (!activeThread) return;
@@ -1427,7 +1334,7 @@ export function AssistantDock() {
         blipSession.handleStreamEvent(event);
         if (event?.type === 'error') {
           sentOk = false;
-          setError(String(event.error ?? 'Assistant failed.'));
+          setError(String(event.error ?? 'Built-in agent failed.'));
         }
       });
       if (!sentOk && snapshotMutationCurrent(requestSeq)) {
@@ -1808,23 +1715,8 @@ export function AssistantDock() {
     return () => window.clearInterval(timer);
   }, [filesOpen, loadSelectedArtifactFile, selectedArtifactPath]);
 
-  const threadSidebar = threadSidebarOpen ? (
-    <AssistantThreadSidebar
-      threads={visibleThreads}
-      activeThreadId={activeThread?.id ?? null}
-      dockSide={threadSidebarDockSide}
-      onCreateThread={() => void createThread()}
-      onSelectThread={(thread) => void selectThread(thread)}
-      onDockSideChange={setThreadSidebarDockSide}
-      onRenameThread={renameThread}
-      onDeleteThread={(thread) => void deleteThread(thread)}
-      onCollapse={() => setThreadSidebarOpen(false)}
-    />
-  ) : null;
-
   return (
     <div data-assistant-dock-root="true" className="flex h-full min-h-0 bg-[var(--panel-alt)]">
-      {threadSidebarDockSide === 'left' ? threadSidebar : null}
       <div
         ref={assistantThreadRef}
         tabIndex={-1}
@@ -1852,42 +1744,13 @@ export function AssistantDock() {
         }}
       >
         <div className="relative flex h-11 flex-shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[rgba(255,255,255,.025)] px-2">
-          <button
-            type="button"
-            onClick={() => setThreadSidebarOpen((open) => !open)}
-            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg-secondary)] ${
-              threadSidebarOpen
-                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
-            }`}
-            title={threadSidebarOpen ? 'Hide thread sidebar' : 'Show thread sidebar'}
-            aria-label={threadSidebarOpen ? 'Hide thread sidebar' : 'Show thread sidebar'}
-            aria-pressed={threadSidebarOpen}
-          >
-            {threadSidebarOpen ? (
-              <IconSidebarCollapse className={`h-3.5 w-3.5 ${threadSidebarDockSide === 'right' ? 'rotate-180' : ''}`} />
-            ) : (
-              <IconSidebarExpand className={`h-3.5 w-3.5 ${threadSidebarDockSide === 'right' ? 'rotate-180' : ''}`} />
-            )}
-          </button>
           <div className="min-w-0 flex-1">
-            <div className="truncate text-[12px] font-semibold text-[var(--fg)]">{activeThread?.title ?? 'Assistant'}</div>
+            <div className="truncate text-[12px] font-semibold text-[var(--fg)]">{activeThread?.title ?? nativeChat.chatName}</div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               {activeThread ? <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${assistantThreadStatusTone(activeThread.status)}`} /> : null}
               <span className="truncate">{assistantThreadStatusLabel(activeThread?.status, loading ? 'loading' : 'idle')}</span>
             </div>
           </div>
-          {!threadSidebarOpen ? (
-            <button
-              type="button"
-              onClick={() => void createThread()}
-              className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg)]"
-              title="New assistant thread"
-              aria-label="New assistant thread"
-            >
-              <IconPlus className="h-3.5 w-3.5" />
-            </button>
-          ) : null}
           <button
             type="button"
             onClick={() => {
@@ -1934,8 +1797,8 @@ export function AssistantDock() {
             type="button"
             onClick={openSystemPromptEditor}
             className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg)]"
-            title="Edit assistant system prompts"
-            aria-label="Edit assistant system prompts"
+            title="Edit system prompt"
+            aria-label="Edit system prompt"
           >
             <IconPencil className="h-3.5 w-3.5" />
           </button>
@@ -1972,8 +1835,8 @@ export function AssistantDock() {
                 ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
             }`}
-            title="Assistant settings"
-            aria-label="Assistant settings"
+            title="Built-in agent settings"
+            aria-label="Built-in agent settings"
           >
             <IconSettings className="h-3.5 w-3.5" />
           </button>
@@ -2211,7 +2074,7 @@ export function AssistantDock() {
             variant="toolbar"
             role="listbox"
             itemRole="option"
-            title="Assistant provider"
+            title="Built-in agent provider"
             triggerLabel={activeProviderMeta.label}
             triggerClassName="h-7 w-[88px] justify-between border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
             triggerLabelClassName="font-semibold"
@@ -2260,7 +2123,7 @@ export function AssistantDock() {
             disabled={!activeThread || defaultModelBusy}
             aria-pressed={activeModelIsDefault}
             aria-label={activeModelIsDefault ? 'Current default model and reasoning' : 'Set current model and reasoning as default'}
-            title={activeModelIsDefault ? 'Default model and reasoning for new threads' : 'Make this model and reasoning the default for new threads'}
+            title={activeModelIsDefault ? 'Default model and reasoning for new chats' : 'Make this model and reasoning the default for new chats'}
             onClick={() => void setActiveModelAsDefault()}
             className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
               activeModelIsDefault
@@ -2273,7 +2136,7 @@ export function AssistantDock() {
           <div
             className="grid h-7 flex-shrink-0 grid-cols-2 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"
             role="group"
-            aria-label="Assistant message delivery"
+            aria-label="Built-in agent message delivery"
           >
             {(['queue', 'asap'] as const).map((mode) => (
               <button
@@ -2515,7 +2378,6 @@ export function AssistantDock() {
         </div>
       )}
       </div>
-      {threadSidebarDockSide === 'right' ? threadSidebar : null}
       {systemPromptOpen ? (
         <AssistantSystemPromptModal
           mode={systemPromptMode}

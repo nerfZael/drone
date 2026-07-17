@@ -124,6 +124,7 @@ type ChatPromptRuntimeDependencyName =
   | 'parseStructuredAgentJobTranscript'
   | 'patchChatMetadataInStore'
   | 'playbookMetaFromEntry'
+  | 'promptNativeChat'
   | 'projectCanonicalChatToRegistry'
   | 'promptWithImageAttachments'
   | 'readBuiltinTranscriptSessionId'
@@ -161,6 +162,9 @@ type ChatPromptRuntimeDependencyName =
   | 'unsupportedHostCustomAgentError'
   | 'updateTranscriptTurnById'
   | 'upgradeDroneDaemonInContainer'
+  | 'nativeChatIsBusy'
+  | 'nativeChatError'
+  | 'nativeChatLatestAssistantText'
   | 'waitForDroneDaemonReady'
   | 'withDroneOpLock'
   | 'withLockedDroneContainer'
@@ -268,6 +272,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     parseStructuredAgentJobTranscript,
     patchChatMetadataInStore,
     playbookMetaFromEntry,
+    promptNativeChat,
+    nativeChatIsBusy,
+    nativeChatError,
+    nativeChatLatestAssistantText,
     projectCanonicalChatToRegistry,
     promptWithImageAttachments,
     readBuiltinTranscriptSessionId,
@@ -461,6 +469,25 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
               storageRoot: attachmentsStorageRoot,
             });
       const effectivePrompt = promptWithImageAttachments(opts.prompt, attachmentsForPrompt);
+      if (agent.kind === 'native') {
+        await promptNativeChat({
+          droneId,
+          chatName: normalizedChat,
+          chatId: String((chat as any)?.id ?? '').trim(),
+          provider: String((chat as any)?.nativeProvider ?? '').trim(),
+          model: String((chat as any)?.model ?? '').trim(),
+          thinkingLevel: String((chat as any)?.reasoning ?? '').trim(),
+          prompt: String(opts.prompt ?? '').trim(),
+          attachments,
+        });
+        return {
+          ok: true as const,
+          agent,
+          mode: 'native' as const,
+          chat: normalizedChat,
+          turnOk: true as const,
+        };
+      }
       const codexImageArgs = codexImageAttachmentFlags(attachmentsForPrompt);
       const promptWithHistory =
         agent.kind === 'builtin'
@@ -2599,22 +2626,57 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     if (enqueued.kind === 'error') throw new Error(enqueued.error);
     job.lastPromptId = enqueued.id;
     job.updatedAt = nowIso();
-    await waitForPromptAutomationPromptCompletion({
-      droneId: job.droneId,
-      chatName: job.chatName,
-      promptId: enqueued.id,
-      timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
-      signal: signal ?? new AbortController().signal,
-      requireTranscript: false,
-    });
-    await preservePromptAutomationPendingHistory({
-      droneId: job.droneId,
-      chatName: job.chatName,
-      promptId: enqueued.id,
-      prompt: finalPrompt,
-      automation,
-    });
+    const nativeChatId = await nativeAutomationChatId(job.droneId, job.chatName);
+    if (nativeChatId) {
+      await waitForNativeAutomationCompletion(
+        nativeChatId,
+        PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
+        signal ?? new AbortController().signal,
+      );
+    } else {
+      await waitForPromptAutomationPromptCompletion({
+        droneId: job.droneId,
+        chatName: job.chatName,
+        promptId: enqueued.id,
+        timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
+        signal: signal ?? new AbortController().signal,
+        requireTranscript: false,
+      });
+      await preservePromptAutomationPendingHistory({
+        droneId: job.droneId,
+        chatName: job.chatName,
+        promptId: enqueued.id,
+        prompt: finalPrompt,
+        automation,
+      });
+    }
     job.updatedAt = nowIso();
+  }
+
+  async function nativeAutomationChatId(
+    droneId: string,
+    chatName: string,
+  ): Promise<string> {
+    const { d, chat } = await getChatEntry({ droneId, chatName });
+    return inferChatAgent(chat, d).kind === 'native' ? String(chat?.id ?? '').trim() : '';
+  }
+
+  async function waitForNativeAutomationCompletion(
+    nativeChatId: string,
+    timeoutMs: number,
+    signal: AbortSignal,
+  ): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      if (signal.aborted) throw new Error('automation stopped');
+      if (!(await nativeChatIsBusy(nativeChatId))) {
+        const error = await nativeChatError(nativeChatId);
+        if (error) throw new Error(error);
+        return;
+      }
+      await sleepMs(250);
+    } while (Date.now() < deadline);
+    throw new Error('Timed out waiting for the Built-in agent to finish');
   }
 
   async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<void> {
@@ -2655,21 +2717,29 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           job.lastPromptId = enqueued.id;
           job.updatedAt = nowIso();
           notifyPromptAutomationChatChanged(job.droneId, job.chatName);
-
-          await waitForPromptAutomationPromptCompletion({
-            droneId: job.droneId,
-            chatName: job.chatName,
-            promptId: enqueued.id,
-            timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
-            signal: signal ?? new AbortController().signal,
-          });
-          await preservePromptAutomationPendingHistory({
-            droneId: job.droneId,
-            chatName: job.chatName,
-            promptId: enqueued.id,
-            prompt: job.prompt,
-            automation,
-          });
+          const nativeChatId = await nativeAutomationChatId(job.droneId, job.chatName);
+          if (nativeChatId) {
+            await waitForNativeAutomationCompletion(
+              nativeChatId,
+              PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
+              signal ?? new AbortController().signal,
+            );
+          } else {
+            await waitForPromptAutomationPromptCompletion({
+              droneId: job.droneId,
+              chatName: job.chatName,
+              promptId: enqueued.id,
+              timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
+              signal: signal ?? new AbortController().signal,
+            });
+            await preservePromptAutomationPendingHistory({
+              droneId: job.droneId,
+              chatName: job.chatName,
+              promptId: enqueued.id,
+              prompt: job.prompt,
+              automation,
+            });
+          }
           job.runsCompleted += 1;
           job.updatedAt = nowIso();
           notifyPromptAutomationChatChanged(job.droneId, job.chatName);
@@ -2677,11 +2747,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           if (job.stopPhrase) {
             let output = '';
             try {
-              output = await readPromptAutomationTurnOutput({
-                droneId: job.droneId,
-                chatName: job.chatName,
-                promptId: enqueued.id,
-              });
+              output = nativeChatId
+                ? await nativeChatLatestAssistantText(nativeChatId)
+                : await readPromptAutomationTurnOutput({
+                    droneId: job.droneId,
+                    chatName: job.chatName,
+                    promptId: enqueued.id,
+                  });
             } catch {
               output = '';
             }
@@ -2928,7 +3000,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       const { d, chat } = await getChatEntry({ droneId, chatName });
       if (isDraftChatEntry(chat)) return;
       const agent = inferChatAgent(chat, d);
-      if (!agent || agent.kind !== 'builtin') return;
+      if (!agent || (agent.kind !== 'builtin' && agent.kind !== 'native')) return;
 
       const entry: any = chat;
       // Prompt rows are canonical in SQLite; the registry-backed chat projection
@@ -3017,9 +3089,20 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             patch: { state: 'failed', error: String(r?.error ?? 'failed') },
           });
         } else {
+          if (agent.kind === 'native') {
+            const nativeChatId = String((chat as any)?.id ?? '').trim();
+            if (!nativeChatId) throw new Error('native chat has no stable identity');
+            await waitForNativeAutomationCompletion(
+              nativeChatId,
+              PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
+              new AbortController().signal,
+            );
+          }
           await updatePendingPrompt({ droneId, chatName, id, patch: { state: 'sent' } });
-          // Best-effort: reconcile soon after enqueue to keep UI fresh.
-          enqueueReconcile(droneId, chatName);
+          if (agent.kind === 'builtin') {
+            // Best-effort: reconcile soon after enqueue to keep UI fresh.
+            enqueueReconcile(droneId, chatName);
+          }
         }
       } catch (e: any) {
         const errorText = e?.message ?? String(e);
@@ -3627,6 +3710,24 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           status: 409,
           error:
             'Docker snapshot is in progress for this chat; wait for it to finish before sending another message',
+        };
+      }
+      if (chatEntry && inferChatAgent(chatEntry, liveDroneEntry).kind === 'native') {
+        await promptNativeChat({
+          droneId,
+          chatName,
+          chatId: String(chatEntry?.id ?? '').trim(),
+          provider: String(chatEntry?.nativeProvider ?? '').trim(),
+          model: String(chatEntry?.model ?? '').trim(),
+          thinkingLevel: String(chatEntry?.reasoning ?? '').trim(),
+          prompt,
+          attachments,
+        });
+        return {
+          kind: 'enqueued',
+          id: fallbackId,
+          pendingState: 'sending',
+          blockedByAutomation: false,
         };
       }
       const r = await enqueuePrompt({

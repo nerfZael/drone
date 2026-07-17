@@ -138,11 +138,13 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
     const seedAgent = deps.parseSeedAgent(seedRaw?.agent);
     const seedAgentPermissionMode = seedRaw?.agentPermissionMode === 'read-only' ? 'read-only' : null;
     const hasSeedModel = Object.prototype.hasOwnProperty.call(seedRaw, 'model');
+    const hasSeedProvider = Object.prototype.hasOwnProperty.call(seedRaw, 'provider');
     const hasSeedReasoning = Object.prototype.hasOwnProperty.call(seedRaw, 'reasoning');
-    if (!seedAgent && !hasSeedModel && !hasSeedReasoning && !seedAgentPermissionMode) return;
+    if (!seedAgent && !hasSeedProvider && !hasSeedModel && !hasSeedReasoning && !seedAgentPermissionMode) return;
 
     const chatName = deps.normalizeChatName(seedRaw?.chatName ?? 'default');
     const seedModel = deps.normalizeChatModel(seedRaw?.model);
+    const seedProvider = String(seedRaw?.provider ?? '').trim().toLowerCase();
     const seedReasoning = normalizeChatReasoning(seedRaw?.reasoning);
     droneEntry.chats = droneEntry.chats && typeof droneEntry.chats === 'object' ? droneEntry.chats : {};
     const entry =
@@ -151,6 +153,11 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
         : { createdAt: deps.nowIso() };
     if (!(typeof entry.createdAt === 'string' && entry.createdAt.trim())) entry.createdAt = deps.nowIso();
     if (seedAgent) entry.agent = seedAgent;
+    if (hasSeedProvider && seedAgent?.kind === 'native' && seedProvider) {
+      entry.nativeProvider = seedProvider;
+    } else if (hasSeedProvider) {
+      delete entry.nativeProvider;
+    }
     if (seedAgentPermissionMode) entry.agentPermissionMode = seedAgentPermissionMode;
     else delete entry.agentPermissionMode;
     if (hasSeedModel) {
@@ -456,6 +463,7 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
       : [];
     const seedChatName = deps.normalizeChatName(seed?.chatName ?? 'default');
     const seedAgent = deps.parseSeedAgent(seed?.agent);
+    const seedProvider = String(seed?.provider ?? '').trim().toLowerCase();
     const seedModel = deps.normalizeChatModel(seed?.model);
     const hasSeedReasoning = Object.prototype.hasOwnProperty.call(seed ?? {}, 'reasoning');
     const seedReasoning = normalizeChatReasoning(seed?.reasoning);
@@ -558,6 +566,8 @@ export function createDroneProvisioningController(deps: DroneProvisioningControl
           const entry = d.chats[chatName] ?? { createdAt: deps.nowIso() };
           if (chatName === seedChatName && (seedAgent || Object.prototype.hasOwnProperty.call(seed ?? {}, 'model'))) {
             if (seedAgent) entry.agent = seedAgent;
+            if (seedAgent?.kind === 'native' && seedProvider) entry.nativeProvider = seedProvider;
+            else delete entry.nativeProvider;
             if (seedModel) entry.model = seedModel;
             else delete entry.model;
           }

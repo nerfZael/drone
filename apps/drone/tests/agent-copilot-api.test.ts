@@ -103,13 +103,15 @@ describeSocketSuite('agent copilot api', () => {
             enqueuedPrompts.push({ id, prompt: String(body?.prompt ?? '') });
             const now = new Date().toISOString();
             const override = mockPromptOutputOverride?.({ body, id }) ?? null;
+            const stdout = String(override?.stdout ?? `mock-response:${id}`);
             mockPromptJobs.set(id, {
               id,
               state: String(override?.state ?? 'done') || 'done',
               startedAt: now,
               finishedAt: now,
-              stdout: String(override?.stdout ?? `mock-response:${id}`),
+              stdout,
               stderr: String(override?.stderr ?? ''),
+              transcript: { kind: 'cursor', message: stdout, terminalStatus: 'completed' },
             });
             return Response.json({ ok: true, accepted: true, id });
           });
@@ -160,25 +162,27 @@ describeSocketSuite('agent copilot api', () => {
     const droneId = 'drone-agent-copilot';
     const sourcePromptId = 'source-prompt';
     const now = new Date().toISOString();
+    const sourceResponse = [
+      'Need a second opinion.',
+      '',
+      '```json',
+      '{',
+      '  "type": "agent-copilot",',
+      '  "name": "docs-review",',
+      '  "message": "Review the new API copy for gaps."',
+      '}',
+      '```',
+      '',
+      'Continue after it responds.',
+    ].join('\n');
     mockPromptJobs.set(sourcePromptId, {
       id: sourcePromptId,
       state: 'done',
       startedAt: now,
       finishedAt: now,
-      stdout: [
-        'Need a second opinion.',
-        '',
-        '```json',
-        '{',
-        '  "type": "agent-copilot",',
-        '  "name": "docs-review",',
-        '  "message": "Review the new API copy for gaps."',
-        '}',
-        '```',
-        '',
-        'Continue after it responds.',
-      ].join('\n'),
+      stdout: sourceResponse,
       stderr: '',
+      transcript: { kind: 'cursor', message: sourceResponse, terminalStatus: 'completed' },
     });
     mockPromptOutputOverride = ({ body }) => {
       const prompt = String(body?.prompt ?? '').trim();
@@ -253,23 +257,25 @@ describeSocketSuite('agent copilot api', () => {
     const sourceMessageId = `${droneId}:${sourcePromptId}`;
     const copilotPromptId = agentCopilotPromptId(sourceMessageId, 'copilot');
     const now = new Date().toISOString();
+    const sourceResponse = [
+      'Need a second opinion.',
+      '',
+      '```json',
+      '{',
+      '  "type": "agent-copilot",',
+      '  "name": "docs-review",',
+      '  "message": "Review the new API copy for gaps."',
+      '}',
+      '```',
+    ].join('\n');
     mockPromptJobs.set(sourcePromptId, {
       id: sourcePromptId,
       state: 'done',
       startedAt: now,
       finishedAt: now,
-      stdout: [
-        'Need a second opinion.',
-        '',
-        '```json',
-        '{',
-        '  "type": "agent-copilot",',
-        '  "name": "docs-review",',
-        '  "message": "Review the new API copy for gaps."',
-        '}',
-        '```',
-      ].join('\n'),
+      stdout: sourceResponse,
       stderr: '',
+      transcript: { kind: 'cursor', message: sourceResponse, terminalStatus: 'completed' },
     });
     mockPromptJobs.set(copilotPromptId, {
       id: copilotPromptId,
@@ -278,6 +284,11 @@ describeSocketSuite('agent copilot api', () => {
       finishedAt: now,
       stdout: 'Copilot says the API copy is missing edge-case guidance.',
       stderr: '',
+      transcript: {
+        kind: 'cursor',
+        message: 'Copilot says the API copy is missing edge-case guidance.',
+        terminalStatus: 'completed',
+      },
     });
     mockPromptOutputOverride = ({ body }) => {
       const prompt = String(body?.prompt ?? '').trim();
@@ -361,6 +372,11 @@ describeSocketSuite('agent copilot api', () => {
       finishedAt: now,
       stdout: '{"type":"agent-copilot","name":"bad/name","message":"Review this."}',
       stderr: '',
+      transcript: {
+        kind: 'cursor',
+        message: '{"type":"agent-copilot","name":"bad/name","message":"Review this."}',
+        terminalStatus: 'completed',
+      },
     });
     mockPromptOutputOverride = ({ body }) => {
       const prompt = String(body?.prompt ?? '').trim();

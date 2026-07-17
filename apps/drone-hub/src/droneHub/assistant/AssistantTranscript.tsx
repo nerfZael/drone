@@ -151,7 +151,7 @@ export function AssistantThinkingRow() {
         className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
         style={{ fontFamily: 'var(--display)' }}
       >
-        Assistant
+        Agent
       </div>
       <ThinkingPulseDots />
     </div>

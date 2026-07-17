@@ -57,13 +57,17 @@ describeSocketSuite('routed Hub APIs', () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  test('routes assistant collection and parameter endpoints', async () => {
-    const created = await apiFetch(
+  test('retires standalone creation while retaining native chat session endpoints', async () => {
+    const createAttempt = await apiFetch(
       '/api/assistant/threads',
       jsonRequest('POST', { title: 'Router test' }),
     );
-    expect(created.response.status).toBe(201);
-    const threadId = created.data.activeThreadId;
+    expect(createAttempt.response.status).toBe(410);
+    expect(createAttempt.data.error).toContain('drone chat');
+
+    const listed = await apiFetch('/api/assistant/threads');
+    expect(listed.response.status).toBe(200);
+    const threadId = listed.data.activeThreadId;
 
     const updated = await apiFetch(
       `/api/assistant/threads/${encodeURIComponent(threadId)}`,

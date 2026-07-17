@@ -13,6 +13,7 @@ interface ModelDiscoveryCacheEntry {
 
 export interface RepositoryRouteDependencies {
   normalizeBuiltinAgentId: ServiceFunction;
+  nativeModelCatalog: ServiceFunction;
   modelCatalogCacheKey: ServiceFunction;
   latestChatModelDiscoveryByAgent: Map<string, ModelDiscoveryCacheEntry>;
   loadRegistry: ServiceFunction;
@@ -39,6 +40,7 @@ export function registerRepositoryRoutes(
 ): void {
   const {
     normalizeBuiltinAgentId,
+    nativeModelCatalog,
     modelCatalogCacheKey,
     latestChatModelDiscoveryByAgent,
     loadRegistry,
@@ -60,10 +62,16 @@ export function registerRepositoryRoutes(
   } = deps;
 
   router.get('/api/model-catalog', async ({ url, fail, json }) => {
-    const agentId = normalizeBuiltinAgentId(url.searchParams.get('agent'));
+    const requestedAgent = String(url.searchParams.get('agent') ?? '').trim().toLowerCase();
     const runtime: DroneRuntime =
       String(url.searchParams.get('runtime') ?? '').trim() === 'host' ? 'host' : 'container';
     const forceRefresh = parseBoolParam(url.searchParams.get('refresh'), false);
+    if (requestedAgent === 'native') {
+      const catalog = await nativeModelCatalog();
+      json(200, { ok: true, agent: 'native', runtime, ...catalog, source: 'native' });
+      return;
+    }
+    const agentId = normalizeBuiltinAgentId(requestedAgent);
     if (!agentId) return fail(400, 'A builtin agent is required.');
 
     const cacheKey = modelCatalogCacheKey(runtime, agentId);

@@ -160,7 +160,7 @@ export function useJobsWorkflow({
           .join('\n');
 
         const seedAgent = resolveAgentKeyToConfig(agentKey);
-        const seedModel = seedAgent.kind === 'builtin' ? spawnModelForSeed : null;
+        const seedModel = seedAgent.kind !== 'custom' ? spawnModelForSeed : null;
         const repoPath = String(repoPathOverride ?? '').trim();
 
         const resp = await queueDrones([
@@ -245,7 +245,7 @@ export function useJobsWorkflow({
       const groupName = String(group ?? '').trim();
       const prefixText = String(prefix ?? '').trim();
       const seedAgent = resolveAgentKeyToConfig(agentKey);
-      const seedModel = seedAgent.kind === 'builtin' ? spawnModelForSeed : null;
+      const seedModel = seedAgent.kind !== 'custom' ? spawnModelForSeed : null;
       const repoPath = String(repoPathOverride ?? '').trim();
 
       const specs: DroneQueueSpec[] = [];

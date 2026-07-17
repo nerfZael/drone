@@ -157,9 +157,14 @@ export function CreateDronesModal({
     })),
   );
   const modelCatalog = useSpawnModelCatalog({
-    agentId: spawnAgentConfig.kind === 'builtin' ? spawnAgentConfig.id : '',
+    agentId:
+      spawnAgentConfig.kind === 'native'
+        ? 'native'
+        : spawnAgentConfig.kind === 'builtin'
+          ? spawnAgentConfig.id
+          : '',
     runtime: createRuntime,
-    enabled: open && spawnAgentConfig.kind === 'builtin',
+    enabled: open && spawnAgentConfig.kind !== 'custom',
   });
   const spawnModelMenuEntries = React.useMemo(
     () => buildDetectedModelMenuEntries(modelCatalog.models, spawnModel),
@@ -173,7 +178,7 @@ export function CreateDronesModal({
   const spawnModelMenuDisabled =
     creating ||
     (createMode === 'clone' && cloneIncludeChats) ||
-    spawnAgentConfig.kind !== 'builtin' ||
+    spawnAgentConfig.kind === 'custom' ||
     spawnModelMenuEntries.length <= 1;
   const spawnAgentAccessCopiedFromClone = createMode === 'clone' && cloneIncludeChats;
   const spawnAgentAccessDisabled = creating || spawnAgentAccessCopiedFromClone;
@@ -611,19 +616,19 @@ export function CreateDronesModal({
                   value={spawnModel}
                   onChange={(e) => onSpawnModelChange(e.target.value)}
                   className={`h-9 flex-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[13px] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
-                    creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind !== 'builtin'
+                    creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind === 'custom'
                       ? 'opacity-50 cursor-not-allowed'
                       : ''
                   }`}
                   placeholder="Default model"
-                  disabled={creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind !== 'builtin'}
+                  disabled={creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind === 'custom'}
                 />
                 <button
                   type="button"
                   onClick={onClearSpawnModel}
-                  disabled={creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind !== 'builtin' || !spawnModel.trim()}
+                  disabled={creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind === 'custom' || !spawnModel.trim()}
                   className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                    creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind !== 'builtin' || !spawnModel.trim()
+                    creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind === 'custom' || !spawnModel.trim()
                       ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
@@ -661,7 +666,7 @@ export function CreateDronesModal({
               <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
                 {createMode === 'clone' && cloneIncludeChats
                   ? 'When cloning chats, model settings are copied from the source chats.'
-                  : spawnAgentConfig.kind === 'builtin'
+                  : spawnAgentConfig.kind !== 'custom'
                     ? 'Leave empty to use each agent’s default model.'
                     : 'Custom agents manage model selection in their own CLI.'}
               </span>

@@ -231,6 +231,104 @@ class MobileWorkspaceTarget implements WorkspaceTarget {
   }
 }
 
+function artifactPathParts(value: unknown): string[] {
+  const path = String(value ?? '.').trim().replace(/\\/g, '/');
+  if (!path || path === '.') return [];
+  if (path.startsWith('/') || path.split('/').some((part) => !part || part === '.' || part === '..')) {
+    throw new Error('Artifact paths must be workspace-relative and cannot contain . or ..');
+  }
+  return path.split('/');
+}
+
+class MobileArtifactsTarget implements WorkspaceTarget {
+  readonly descriptor;
+
+  constructor(threadId: string) {
+    this.descriptor = {
+      id: 'Assistant Artifacts',
+      kind: 'local' as const,
+      label: 'Assistant Artifacts',
+      rootLabel: 'Assistant Artifacts',
+      capabilities: ['files.list', 'files.read', 'files.search', 'files.write'] as WorkspaceCapability[],
+    };
+    this.threadId = threadId;
+  }
+
+  private readonly threadId: string;
+
+  private directory(root: any, Directory: any, parts: string[]): any {
+    return parts.length === 0 ? root : new Directory(root, ...parts);
+  }
+
+  private file(root: any, File: any, parts: string[]): any {
+    if (parts.length === 0) throw new Error('A file path is required');
+    return new File(root, ...parts);
+  }
+
+  private async search(directory: any, Directory: any, File: any, base: string, query: string, mode: string, output: string[], limit: number): Promise<void> {
+    if (output.length >= limit || !directory.exists) return;
+    for (const entry of directory.list()) {
+      if (output.length >= limit) return;
+      const relative = base ? `${base}/${entry.name}` : entry.name;
+      if (entry instanceof Directory) {
+        if (mode === 'name' && entry.name.toLowerCase().includes(query)) output.push(`${relative}/`);
+        await this.search(entry, Directory, File, relative, query, mode, output, limit);
+      } else if (entry instanceof File) {
+        if (mode === 'name' && entry.name.toLowerCase().includes(query)) output.push(relative);
+        if (mode === 'content' && (await entry.text()).toLowerCase().includes(query)) output.push(relative);
+      }
+    }
+  }
+
+  async execute(call: WorkspaceTargetCall): Promise<any> {
+    // Expo's filesystem module loads React Native bindings, so defer it until an artifact tool is
+    // actually used. This also keeps the portable workspace runtime testable outside Android.
+    const { Directory, File, Paths } = await import('expo-file-system');
+    const root = new Directory(Paths.document, 'drone-hub-native-artifacts-v1', encodeURIComponent(this.threadId));
+    root.create({ idempotent: true, intermediates: true });
+    const parts = artifactPathParts(call.args.path);
+    if (call.tool === 'list_files') {
+      const directory = this.directory(root, Directory, parts);
+      if (!directory.exists) throw new Error(`Artifact directory not found: ${parts.join('/') || '.'}`);
+      const limit = Math.max(1, Math.min(1000, Number(call.args.limit) || 200));
+      const entries = directory.list().slice(0, limit).map((entry: any) => ({
+        name: entry.name,
+        type: entry instanceof Directory ? 'directory' : 'file',
+        ...(entry instanceof File ? { size: entry.size } : {}),
+      }));
+      return { content: [{ type: 'text', text: JSON.stringify(entries, null, 2) }], details: { entries, target: this.descriptor } };
+    }
+    if (call.tool === 'read_file') {
+      const file = this.file(root, File, parts);
+      if (!file.exists) throw new Error(`Artifact file not found: ${parts.join('/')}`);
+      const lines = (await file.text()).split('\n');
+      const offset = Math.max(0, Number(call.args.offset) || 0);
+      const limit = Math.max(1, Math.min(5000, Number(call.args.limit) || 1000));
+      const text = lines.slice(offset, offset + limit).join('\n');
+      return { content: [{ type: 'text', text }], details: { path: parts.join('/'), offset, lines: Math.min(limit, Math.max(0, lines.length - offset)), target: this.descriptor } };
+    }
+    if (call.tool === 'search_files') {
+      const directory = this.directory(root, Directory, parts);
+      const query = String(call.args.query ?? '').toLowerCase();
+      if (!query) throw new Error('A search query is required');
+      const mode = call.args.mode === 'content' ? 'content' : 'name';
+      const matches: string[] = [];
+      await this.search(directory, Directory, File, parts.join('/'), query, mode, matches, Math.max(1, Math.min(500, Number(call.args.limit) || 100)));
+      return { content: [{ type: 'text', text: matches.join('\n') }], details: { matches, target: this.descriptor } };
+    }
+    if (call.tool === 'write_file') {
+      const file = this.file(root, File, parts);
+      if (call.args.mode === 'create' && file.exists) throw new Error(`Artifact file already exists: ${parts.join('/')}`);
+      const parentParts = parts.slice(0, -1);
+      if (parentParts.length > 0) this.directory(root, Directory, parentParts).create({ idempotent: true, intermediates: true });
+      file.create({ overwrite: true, intermediates: true });
+      file.write(String(call.args.content ?? ''));
+      return { content: [{ type: 'text', text: `Wrote ${parts.join('/')}.` }], details: { path: parts.join('/'), size: file.size, target: this.descriptor } };
+    }
+    throw new Error(`Unsupported artifact tool: ${call.tool}`);
+  }
+}
+
 function textFromResult(result: any): string {
   return (Array.isArray(result?.content) ? result.content : [])
     .filter((part: any) => part?.type === 'text')
@@ -244,9 +342,9 @@ export class MobileWorkspaceToolRuntime {
   private readonly catalog: WorkspaceTargetCatalog;
 
   constructor(thread: LocalAssistantThread, request: MeshRequest) {
-    const targets = workspaceChoices(thread.workspaceTargets).map(
+    const targets: WorkspaceTarget[] = [...workspaceChoices(thread.workspaceTargets).map(
       (choice) => new MobileWorkspaceTarget(choice.target, choice.handle, request),
-    );
+    ), ...(thread.artifactWorkspace ? [new MobileArtifactsTarget(thread.id)] : [])];
     this.catalog = new WorkspaceTargetCatalog(targets);
     const descriptors = this.catalog.list();
     const workspaceTools = Object.entries(definitions).flatMap(([name, definition]) => {

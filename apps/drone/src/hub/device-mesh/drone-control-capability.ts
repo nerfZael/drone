@@ -1,6 +1,7 @@
 import { DRONE_CONTROL_CAPABILITY } from '@drone/device-protocol';
 import type { CapabilityHandler } from './device-mesh-types';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
+import { submitNativeChatPrompt } from './native-chat-prompt';
 
 function object(value: unknown): Record<string, unknown> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
@@ -99,7 +100,11 @@ function requiredPositiveInteger(value: unknown, label: string): number {
 
 function seedAgent(value: unknown): Record<string, string> | undefined {
   const agent = object(value);
-  const kind = agent.kind === 'builtin' || agent.kind === 'custom' ? agent.kind : '';
+  const kind =
+    agent.kind === 'native' || agent.kind === 'builtin' || agent.kind === 'custom'
+      ? agent.kind
+      : '';
+  if (kind === 'native') return { kind };
   const id = optionalText(agent.id);
   if (!kind || !id) return undefined;
   if (kind === 'builtin') return { kind, id };
@@ -156,6 +161,16 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
       if (operation === 'drones.list') {
         const createModelAgent = optionalText(payload.createModelAgent);
         if (createModelAgent) {
+          if (createModelAgent === 'native') {
+            const createModelCatalog = await localHubRequest(
+              access,
+              '/api/model-catalog?agent=native',
+            );
+            return {
+              schemaVersion: 6,
+              createModelCatalog,
+            };
+          }
           const runtime = payload.createModelRuntime === 'host' ? 'host' : 'container';
           const refresh = payload.refreshCreateModels === true ? '&refresh=1' : '';
           const createModelCatalog = await localHubRequest(
@@ -310,6 +325,9 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
             ? { remoteBranch: optionalText(payload.remoteBranch) }
             : {}),
           ...(agent ? { seedAgent: agent, seedChat: 'default' } : {}),
+          ...(agent?.kind === 'native' && optionalText(payload.seedProvider)
+            ? { seedProvider: optionalText(payload.seedProvider) }
+            : {}),
           ...(optionalText(payload.seedModel)
             ? { seedModel: optionalText(payload.seedModel) }
             : {}),
@@ -406,9 +424,57 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
             updatedByDeviceId: context?.sourceDevice?.id ?? null,
           }),
         });
+        if (result?.agent?.kind === 'native') {
+          const ensured = await localHubRequest(access, `${chatPath}/native`, {
+            method: 'POST',
+            body: '{}',
+          });
+          const nativeChatId = requiredText(ensured?.nativeChatId, 'nativeChatId');
+          const history = await localHubRequest(
+            access,
+            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/history?limit=100`,
+          );
+          const thread = Array.isArray(ensured?.threads)
+            ? ensured.threads.find((item: any) => String(item?.id ?? '') === nativeChatId)
+            : null;
+          const pendingApprovals = (Array.isArray(ensured?.pendingApprovals)
+            ? ensured.pendingApprovals
+            : []
+          ).filter(
+            (approval: any) =>
+              String(approval?.threadId ?? '') === nativeChatId &&
+              approval?.status === 'pending',
+          );
+          return {
+            droneId,
+            chatName,
+            historyKind: 'messages',
+            nativeChatId,
+            history,
+            streamingMessages: Array.isArray(ensured?.streamingMessages)
+              ? ensured.streamingMessages
+              : ensured?.streamingMessage
+                ? [ensured.streamingMessage]
+                : [],
+            pendingApprovals,
+            thread,
+            agent: result.agent,
+            model: thread?.model ?? result.model ?? null,
+            reasoning: thread?.thinkingLevel ?? null,
+            pending: Array.isArray(thread?.queuedPrompts)
+              ? thread.queuedPrompts.map((prompt: any) => ({
+                  ...prompt,
+                  state: prompt?.status ?? 'queued',
+                }))
+              : [],
+            readState: marked?.readState ?? result?.readState ?? null,
+            agentPermissionMode: 'full-access',
+          };
+        }
         return {
           droneId,
           chatName,
+          historyKind: 'turns',
           turns: result.turns ?? [],
           agent: result.agent ?? null,
           model: result.model ?? null,
@@ -420,6 +486,38 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
         };
       }
       if (operation === 'chat.models') {
+        const nativeChatId = optionalText(payload.nativeChatId);
+        if (nativeChatId) {
+          const ensured = await localHubRequest(
+            access,
+            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}`,
+          );
+          const thread = Array.isArray(ensured?.threads)
+            ? ensured.threads.find((item: any) => String(item?.id ?? '') === nativeChatId)
+            : null;
+          return {
+            droneId,
+            chatName,
+            agent: { kind: 'native' },
+            provider: thread?.provider ?? null,
+            model: thread?.model ?? null,
+            reasoning: thread?.thinkingLevel ?? null,
+            models: Array.isArray(ensured?.models)
+              ? ensured.models.map((item: any) => ({
+                  id: String(item?.id ?? ''),
+                  label: String(item?.name ?? item?.id ?? ''),
+                  provider: String(item?.provider ?? ''),
+                  thinkingLevel: String(item?.thinkingLevel ?? ''),
+                  reasoningLevels: item?.reasoning
+                    ? ['off', 'low', 'medium', 'high']
+                    : ['off'],
+                }))
+              : [],
+            source: 'native',
+            discoveredAt: null,
+            error: null,
+          };
+        }
         const refresh = payload.refresh === true ? '?refresh=1' : '';
         const result = await localHubRequest(access, `${chatPath}/models${refresh}`);
         return {
@@ -435,19 +533,89 @@ export function createDroneControlCapability(access: LocalHubAccess): Capability
       }
       if (operation === 'chat.update') {
         const model = payload.model == null ? null : String(payload.model).trim();
+        const nativeChatId = optionalText(payload.nativeChatId);
+        if (nativeChatId) {
+          return await localHubRequest(
+            access,
+            `/api/assistant/threads/${encodeURIComponent(nativeChatId)}`,
+            {
+              method: 'PATCH',
+              body: JSON.stringify({
+                ...(model ? { model } : {}),
+                ...(optionalText(payload.provider) ? { provider: optionalText(payload.provider) } : {}),
+                ...(optionalText(payload.thinkingLevel)
+                  ? { thinkingLevel: optionalText(payload.thinkingLevel) }
+                  : {}),
+                ...(typeof payload.autoApprove === 'boolean'
+                  ? { autoApprove: payload.autoApprove }
+                  : {}),
+              }),
+            },
+          );
+        }
         return await localHubRequest(access, `${chatPath}/config`, {
           method: 'POST',
           body: JSON.stringify({ model: model || null }),
         });
       }
+      if (operation === 'chat.approval.resolve') {
+        const nativeChatId = requiredText(payload.nativeChatId, 'nativeChatId');
+        const approvalId = requiredText(payload.approvalId, 'approvalId');
+        const decision = payload.approved === true ? 'approve' : 'deny';
+        return await localHubRequest(
+          access,
+          `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/approvals/${encodeURIComponent(approvalId)}/${decision}`,
+          { method: 'POST', body: '{}' },
+        );
+      }
+      if (operation === 'chat.message.delete') {
+        const nativeChatId = requiredText(payload.nativeChatId, 'nativeChatId');
+        const messageId = requiredText(payload.messageId, 'messageId');
+        return await localHubRequest(
+          access,
+          `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/messages/${encodeURIComponent(messageId)}?following=${payload.deleteFollowing === true}`,
+          { method: 'DELETE' },
+        );
+      }
       if (operation === 'chat.prompt') {
         const prompt = requiredText(payload.prompt, 'prompt');
+        const chat = await localHubRequest(access, chatPath);
+        if (chat?.agent?.kind === 'native') {
+          const ensured = await localHubRequest(access, `${chatPath}/native`, {
+            method: 'POST',
+            body: '{}',
+          });
+          const nativeChatId = requiredText(ensured?.nativeChatId, 'nativeChatId');
+          const acknowledgement = await submitNativeChatPrompt(access, nativeChatId, prompt);
+          return {
+            accepted: true,
+            nativeChatId,
+            queuedPrompt:
+              acknowledgement?.type === 'queued' ? acknowledgement.prompt ?? null : null,
+          };
+        }
         return await localHubRequest(access, `${chatPath}/prompt`, {
           method: 'POST',
           body: JSON.stringify({ prompt }),
         });
       }
       if (operation === 'chat.stop') {
+        const chat = await localHubRequest(access, chatPath);
+        if (chat?.agent?.kind === 'native') {
+          const ensured = await localHubRequest(access, `${chatPath}/native`, {
+            method: 'POST',
+            body: '{}',
+          });
+          const nativeChatId = requiredText(ensured?.nativeChatId, 'nativeChatId');
+          const promptId = optionalText(payload.promptId);
+          return await localHubRequest(
+            access,
+            promptId
+              ? `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/queued/${encodeURIComponent(promptId)}`
+              : `/api/assistant/threads/${encodeURIComponent(nativeChatId)}/stop`,
+            { method: promptId ? 'DELETE' : 'POST', body: promptId ? undefined : '{}' },
+          );
+        }
         // Per-prompt cancellation is intentionally covered by the existing stop grant so an
         // already-paired mobile device does not need its access permissions expanded on upgrade.
         const promptId = optionalText(payload.promptId);

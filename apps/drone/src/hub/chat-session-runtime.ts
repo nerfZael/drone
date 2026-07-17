@@ -172,6 +172,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       ? inferChatAgent(opts.sourceChatEntry, opts.droneEntry)
       : defaultChatAgentConfigForDrone(opts.droneEntry);
     const entry: any = {
+      id: crypto.randomUUID(),
       createdAt: opts.createdAt,
       agent,
       ...(opts.sourceChatEntry &&
@@ -183,6 +184,9 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         : {}),
       ...(opts.sourceChatEntry && normalizeChatReasoning(opts.sourceChatEntry?.reasoning)
         ? { reasoning: normalizeChatReasoning(opts.sourceChatEntry?.reasoning) }
+        : {}),
+      ...(opts.sourceChatEntry && typeof opts.sourceChatEntry?.nativeProvider === 'string'
+        ? { nativeProvider: String(opts.sourceChatEntry.nativeProvider).trim() }
         : {}),
     };
     if (opts.autoContinueEnabledByDefault && agent.kind === 'builtin') {
@@ -428,6 +432,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
 
   function inferChatAgent(entry: any, droneEntry?: any): ChatAgentConfig {
     const agent = entry?.agent as ChatAgentConfig | undefined;
+    if (agent && agent.kind === 'native') return { kind: 'native' };
     if (agent && agent.kind === 'builtin') {
       const builtinId = normalizeBuiltinAgentId(agent.id);
       if (builtinId) return { kind: 'builtin', id: builtinId };
@@ -443,7 +448,12 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
 
   function assertReadOnlySupportedForAgent(agent: ChatAgentConfig): void {
     if (agent.kind === 'builtin' && (agent.id === 'codex' || agent.id === 'blip')) return;
-    const label = agent.kind === 'builtin' ? agent.id : agent.label || agent.id || 'custom agent';
+    const label =
+      agent.kind === 'native'
+        ? 'native agent'
+        : agent.kind === 'builtin'
+          ? agent.id
+          : agent.label || agent.id || 'custom agent';
     const error: Error & { statusCode?: number } = new Error(
       `read-only mode is currently supported for Codex and Blip chats only (selected: ${label})`,
     );
@@ -1353,11 +1363,12 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
           const reasoning = normalizeChatReasoning(opts.reasoning);
           if (reasoning) {
             if (
-              effectiveAgent.kind !== 'builtin' ||
-              (effectiveAgent.id !== 'codex' && effectiveAgent.id !== 'blip')
+              effectiveAgent.kind !== 'native' &&
+              (effectiveAgent.kind !== 'builtin' ||
+                (effectiveAgent.id !== 'codex' && effectiveAgent.id !== 'blip'))
             ) {
               const error: Error & { statusCode?: number } = new Error(
-                'reasoning is only supported for Codex and Blip chats',
+                'reasoning is only supported for Built-in, Codex, and Blip chats',
               );
               error.statusCode = 400;
               throw error;
@@ -1431,6 +1442,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const { d, chat } = await getChatEntry(opts);
     const agent = inferChatAgent(chat, d);
     if (agent.kind === 'builtin') return resolveBuiltinTmuxCommand(agent.id);
+    if (agent.kind === 'native') throw new Error('native chats do not use tmux sessions');
     return agent.command || resolveHubAgentCommand();
   }
 

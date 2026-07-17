@@ -142,7 +142,7 @@ export function useMobileChatVoiceRecorder({
     try {
       if (!(await readGroqApiKey())) {
         throw new Error(
-          'GROQ API key is not configured on this phone. Copy it in Assistant settings first.',
+          'GROQ API key is not configured on this phone. Copy it in Built-in agent settings first.',
         );
       }
       const permission = await requestRecordingPermissionsAsync();

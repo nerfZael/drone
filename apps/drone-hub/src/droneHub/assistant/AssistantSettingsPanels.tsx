@@ -328,10 +328,10 @@ export function AssistantSystemPromptModal({
               className="text-[13px] font-semibold text-[var(--fg)]"
               style={{ fontFamily: 'var(--display)' }}
             >
-              Assistant system prompts
+              Built-in agent system prompts
             </div>
             <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
-              Thread changes affect only the current thread. Global changes apply to new threads.
+              Chat changes affect only the current chat. Global changes apply to new chats.
             </div>
           </div>
           <button
@@ -359,7 +359,7 @@ export function AssistantSystemPromptModal({
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
-                {item === 'thread' ? 'This thread' : 'Global'}
+                {item === 'thread' ? 'This chat' : 'Global'}
               </button>
             ))}
           </div>
@@ -389,7 +389,7 @@ export function AssistantSystemPromptModal({
               rows={20}
               className="min-h-[360px] resize-y rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] px-3 py-2 font-mono text-[12px] leading-relaxed text-[var(--fg)] placeholder:text-[var(--muted-dim)] transition-colors focus:border-[var(--accent-muted)] focus:outline-none disabled:opacity-50"
               placeholder={
-                loading ? 'Loading system prompt...' : 'Enter the assistant system prompt'
+                loading ? 'Loading system prompt...' : 'Enter the Built-in agent system prompt'
               }
             />
           </label>
@@ -451,7 +451,7 @@ export function AssistantSystemPromptModal({
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
-                {threadSaving ? 'Saving...' : 'Save for this thread'}
+                {threadSaving ? 'Saving...' : 'Save for this chat'}
               </button>
             </>
           ) : (
@@ -476,7 +476,7 @@ export function AssistantSystemPromptModal({
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
-                {saving ? 'Saving...' : 'Save for new threads'}
+                {saving ? 'Saving...' : 'Save for new chats'}
               </button>
             </>
           )}

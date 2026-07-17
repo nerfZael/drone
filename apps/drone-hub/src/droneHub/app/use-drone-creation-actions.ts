@@ -738,8 +738,8 @@ export function useDroneCreationActions({
         setDraftCreateError('Read-only mode is currently supported for Codex and Blip chats only.');
         return false;
       }
-      if (automationPrompt && automationId && seedAgent?.kind !== 'builtin') {
-        setDraftCreateError('Automations require a builtin transcript agent.');
+      if (automationPrompt && automationId && seedAgent?.kind === 'custom') {
+        setDraftCreateError('Automations require Built-in or a transcript agent.');
         return false;
       }
       beginDraftCreate();

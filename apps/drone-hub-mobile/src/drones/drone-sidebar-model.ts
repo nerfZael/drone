@@ -128,6 +128,7 @@ export function normalizeMobileDroneCreateRepo(raw: unknown): MobileDroneCreateR
 }
 
 export type MobileDroneCreateModel = {
+  provider: string;
   id: string;
   label: string;
   reasoningLevels: string[];
@@ -142,12 +143,15 @@ export function normalizeMobileDroneCreateModelCatalog(raw: unknown): MobileDron
   return models.flatMap((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
     const value = item as Record<string, unknown>;
+    const provider = text(value.provider);
     const id = text(value.id);
-    if (!id || seen.has(id)) return [];
-    seen.add(id);
+    const key = `${provider}\u0000${id}`;
+    if (!id || seen.has(key)) return [];
+    seen.add(key);
     const reasoningLevels = stringList(value.reasoningLevels);
     const defaultReasoningLevel = text(value.defaultReasoningLevel);
     return [{
+      provider,
       id,
       label: text(value.label) || id,
       reasoningLevels,

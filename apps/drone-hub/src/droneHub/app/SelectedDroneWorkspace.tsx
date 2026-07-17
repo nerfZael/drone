@@ -75,6 +75,7 @@ import {
 import { parseGithubPullRequestHref } from '../chat/github-pull-request-links';
 import { useHeaderRepoPullRequestSummary } from './HeaderPullRequestShortcuts';
 import { useFleetAssignmentDropState } from './use-fleet-assignment-drop-state';
+import { AssistantDock } from '../assistant/AssistantDock';
 import {
   buildTranscriptExportFilename,
   formatTranscriptJson,
@@ -166,6 +167,7 @@ type SelectedDroneWorkspaceProps = {
   currentAgentKey: string;
   pickAgentValue: (next: string) => void;
   toolbarAgentMenuEntries: UiMenuSelectEntry[];
+  agentLocked: boolean;
   agentDisabled: boolean;
   agentLabel: string;
   chatRuntimeMetadataAvailable: boolean;
@@ -268,7 +270,6 @@ type SelectedDroneWorkspaceProps = {
     activeDroneId: string | null;
     previewVisible: boolean;
   }) => void;
-  onEmbeddedAssistantVisibleChange?: (visible: boolean) => void;
 };
 
 type ChatScrollSnapshot = {
@@ -296,6 +297,7 @@ export function SelectedDroneWorkspace({
   currentAgentKey,
   pickAgentValue,
   toolbarAgentMenuEntries,
+  agentLocked,
   agentDisabled,
   agentLabel,
   chatRuntimeMetadataAvailable,
@@ -387,7 +389,6 @@ export function SelectedDroneWorkspace({
   rightPanelOpenRequestSeq,
   renderRightPanelTabContent,
   onPersistentPreviewHostChange,
-  onEmbeddedAssistantVisibleChange,
 }: SelectedDroneWorkspaceProps) {
   const {
     sidebarCollapsed,
@@ -572,6 +573,12 @@ export function SelectedDroneWorkspace({
   const showCompactRuntimeMetadata = hasChats && chatRuntimeMetadataAvailable;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
+  const nativeChatActive = currentAgentKey === 'native' && !currentChatIsDraft;
+  const [nativeHistoryObserved, setNativeHistoryObserved] = React.useState(false);
+  React.useEffect(() => {
+    setNativeHistoryObserved(false);
+  }, [currentAgentKey, currentDrone.id, activeChatName]);
+  const effectiveAgentLocked = agentLocked || nativeHistoryObserved;
   const showFleetBadge =
     fleetBadgeAssigning ||
     fleetBadgeDropActive ||
@@ -594,12 +601,6 @@ export function SelectedDroneWorkspace({
     if (!message) return;
     openDroneErrorModal(currentDrone, message, null);
   }, [chatInfoError, currentDrone, openDroneErrorModal]);
-  const handleVisibleWorkspaceToolTabsChange = React.useCallback(
-    (tabs: RightPanelTab[]) => {
-      onEmbeddedAssistantVisibleChange?.(tabs.includes('assistant'));
-    },
-    [onEmbeddedAssistantVisibleChange],
-  );
   const reportChatMutationError = React.useCallback(
     (action: string, error: unknown) => {
       const status = Number((error as any)?.status ?? 0);
@@ -1317,8 +1318,12 @@ export function SelectedDroneWorkspace({
                       }
                       setAgentMenuOpen(open);
                     }}
-                    disabled={agentDisabled}
-                    title="Choose agent implementation for this chat."
+                    disabled={agentDisabled || effectiveAgentLocked}
+                    title={
+                      effectiveAgentLocked
+                        ? 'This chat has history. Create a new chat to use a different agent.'
+                        : 'Choose agent implementation for this chat.'
+                    }
                     triggerLabel={agentLabel}
                     chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
                     panelClassName="w-[260px]"
@@ -1547,7 +1552,7 @@ export function SelectedDroneWorkspace({
               {hasChats && chatUiMode === 'transcript' ? (
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Assistant suggestion
+                    Agent suggestion
                   </span>
                   <button
                     type="button"
@@ -1567,7 +1572,7 @@ export function SelectedDroneWorkspace({
                           : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
-                    title="Suggest a likely next user reply for new assistant messages in this transcript chat."
+                    title="Suggest a likely next user reply for new agent messages in this transcript chat."
                   >
                     <span
                       className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
@@ -2039,7 +2044,6 @@ export function SelectedDroneWorkspace({
         previewTab="preview"
         onActiveToolTabChange={setRightPanelTab}
         onPreviewHostChange={onPersistentPreviewHostChange}
-        onVisibleToolTabsChange={handleVisibleWorkspaceToolTabsChange}
         onBeforeWorkspaceMouseDown={captureWorkspaceChatScroll}
         onAfterToolPanelRemove={restoreWorkspaceChatScroll}
         chatContent={
@@ -2085,7 +2089,13 @@ export function SelectedDroneWorkspace({
             aria-hidden={fleetDropHintVisible}
           >
           <div className="flex-1 min-h-0 relative">
-            {chatUiMode === 'transcript' ? (
+            {nativeChatActive ? (
+              <AssistantDock
+                key={`${currentDrone.id}:${activeChatName}`}
+                nativeChat={{ droneId: currentDrone.id, chatName: activeChatName }}
+                onHistoryChange={setNativeHistoryObserved}
+              />
+            ) : chatUiMode === 'transcript' ? (
               <ChatTranscriptFrame
                 ref={transcriptScrollRef}
                 loading={loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0}
@@ -2297,9 +2307,9 @@ export function SelectedDroneWorkspace({
             )}
           </div>
 
-          {chatUiMode === 'cli' ? <CliPendingPromptStrip items={visibleCliPendingPrompts} /> : null}
+          {!nativeChatActive && chatUiMode === 'cli' ? <CliPendingPromptStrip items={visibleCliPendingPrompts} /> : null}
 
-          {chatUiMode === 'transcript' && agentSuggestionEnabled && latestAgentSuggestionTarget && showLatestAgentSuggestion ? (
+          {!nativeChatActive && chatUiMode === 'transcript' && agentSuggestionEnabled && latestAgentSuggestionTarget && showLatestAgentSuggestion ? (
             <div className="mx-4 mb-3 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-3 py-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
@@ -2307,7 +2317,7 @@ export function SelectedDroneWorkspace({
                     className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]"
                     style={{ fontFamily: 'var(--display)' }}
                   >
-                    Assistant suggestion
+                    Agent suggestion
                     {latestAgentSuggestionKindLabel ? (
                       <span className="ml-2 normal-case tracking-normal text-[var(--muted)]">{latestAgentSuggestionKindLabel}</span>
                     ) : null}
@@ -2383,7 +2393,7 @@ export function SelectedDroneWorkspace({
             </div>
           ) : null}
 
-          <ChatInput
+          {!nativeChatActive ? <ChatInput
             resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
             droneName={currentDrone.name}
             focusTargetId="primary-chat"
@@ -2419,7 +2429,7 @@ export function SelectedDroneWorkspace({
                   }
                 : undefined
             }
-          />
+          /> : null}
           {fileOpenToast ? (
             <div className="absolute right-4 bottom-4 z-20">
               <button

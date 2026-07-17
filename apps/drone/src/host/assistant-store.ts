@@ -175,6 +175,26 @@ export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
         .run(new Date().toISOString());
     },
   },
+  {
+    version: 7,
+    name: 'reset standalone assistant data for native drone chats',
+    migrate(connection) {
+      connection.exec(`
+        DROP TABLE IF EXISTS assistant_messages;
+        DROP TABLE IF EXISTS assistant_queued_prompts;
+        DROP TABLE IF EXISTS assistant_chat_idle_subscriptions;
+        DROP TABLE IF EXISTS assistant_threads;
+        DROP TABLE IF EXISTS assistant_preferences;
+        DROP TABLE IF EXISTS assistant_store_metadata;
+      `);
+      createAssistantSchema(connection);
+      connection
+        .prepare(
+          "INSERT INTO assistant_store_metadata (key, value, updated_at) VALUES ('assistant_data_reset_pending', '1', ?)",
+        )
+        .run(new Date().toISOString());
+    },
+  },
 ];
 
 type PreferenceRow = {

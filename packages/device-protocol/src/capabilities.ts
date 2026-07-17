@@ -24,30 +24,14 @@ export const DRONE_CONTROL_CAPABILITY: CapabilityDescriptor = {
     'chat.update',
     'chat.prompt',
     'chat.stop',
+    'chat.approval.resolve',
+    'chat.message.delete',
     'repo.pull-requests.read',
     'repo.pull-requests.merge',
     'repo.pull-requests.close',
     'drone.create.container',
     'drone.create.host',
     'drone.delete',
-  ],
-};
-
-export const ASSISTANT_THREADS_CAPABILITY: CapabilityDescriptor = {
-  id: 'assistant-threads',
-  version: 1,
-  operations: [
-    'threads.list',
-    'models.list',
-    'thread.get',
-    'thread.create',
-    'thread.clone',
-    'thread.delete',
-    'thread.message.delete',
-    'thread.update',
-    'approval.resolve',
-    'thread.prompt',
-    'thread.stop',
   ],
 };
 

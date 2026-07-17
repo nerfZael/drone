@@ -24,6 +24,7 @@ function createDroneLifecycleServiceHandler(
     commitDroneMetadataPatch,
     deleteArchivedChatById,
     deleteCanonicalDroneLifecycle,
+    deleteNativeChatSessionsForDrone,
     dequeueProvisioning,
     droneEnvironmentPayload,
     droneRuntime,
@@ -587,6 +588,13 @@ function createDroneLifecycleServiceHandler(
             removedDescendants: r.removedDescendants,
           });
           return;
+        }
+        if (forget) {
+          for (const removedDroneId of [droneId, ...r.removedDescendants]) {
+            const removedSnapshot = regAnySnapshot?.drones?.[removedDroneId] ??
+              regAnySnapshot?.pending?.[removedDroneId];
+            if (removedSnapshot) await deleteNativeChatSessionsForDrone(removedSnapshot);
+          }
         }
 
         json(res, 200, {

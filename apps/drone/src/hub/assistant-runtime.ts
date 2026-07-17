@@ -290,7 +290,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           name: 'get_system_prompt',
           label: 'Get system prompt',
           description:
-            'Read the current thread system prompt, global prompt, and runtime appendix.',
+            'Read the current chat system prompt, global prompt, and runtime appendix.',
           parameters: { type: 'object', properties: {}, additionalProperties: false },
           execute: async () => {
             const result = await assistantService.threadSystemPromptSettings(threadId);
@@ -303,7 +303,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         {
           name: 'update_system_prompt',
           label: 'Update system prompt',
-          description: 'Replace or patch only this assistant thread system prompt.',
+          description: 'Replace or patch only this chat system prompt.',
           parameters: {
             type: 'object',
             properties: {
@@ -324,7 +324,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             const result = await assistantService.updateThreadSystemPrompt(threadId, args ?? {});
             return {
               content: [
-                { type: 'text' as const, text: 'Updated this assistant thread system prompt.' },
+                { type: 'text' as const, text: 'Updated this chat system prompt.' },
               ],
               details: result,
             };
@@ -334,7 +334,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           name: 'set_thinking_level',
           label: 'Set thinking level',
           description:
-            'Change the thinking level for this assistant thread while keeping its current model.',
+            'Change the thinking level for this chat while keeping its current model.',
           parameters: {
             type: 'object',
             properties: {
@@ -360,28 +360,6 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             };
             return {
               content: [{ type: 'text' as const, text: `Thinking level is now ${next}.` }],
-              details: result,
-            };
-          },
-        },
-        {
-          name: 'create_new_thread',
-          label: 'Create new thread',
-          description:
-            'Create a fresh assistant thread only when the user explicitly asks for one.',
-          parameters: {
-            type: 'object',
-            properties: { title: { type: 'string' } },
-            additionalProperties: false,
-          },
-          execute: async (_callId: string, args: any) => {
-            const result = await assistantService.createNewThreadFromThread(threadId, {
-              title: args?.title,
-            });
-            return {
-              content: [
-                { type: 'text' as const, text: `Created assistant thread ${result.thread.title}.` },
-              ],
               details: result,
             };
           },
@@ -560,19 +538,29 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   deviceMesh.onAssistantPolicyChange((threadIds: string[]) => {
     for (const threadId of threadIds) {
       blipAssistantHost.invalidateThread(threadId);
-      void deviceMesh.broadcastAssistantThreadChange({
-        reason: 'workspace_policy_changed',
-        threadId,
-      });
+      void assistantService.nativeThreadOwner(threadId).then((owner) => {
+        if (!owner) return;
+        return deviceMesh.broadcastDroneChatChange({
+          reason: 'workspace_policy_changed',
+          droneId: owner.droneId,
+          chatName: owner.chatName,
+        });
+      }).catch(() => {});
     }
   });
   const unsubscribeDeviceMeshAssistantChanges = assistantService.subscribeChanges((event) => {
-    void deviceMesh.broadcastAssistantThreadChange({
-      sequence: event.sequence,
-      reason: event.reason,
-      ...(event.threadId ? { threadId: event.threadId } : {}),
-      at: event.at,
-    });
+    if (event.threadId) {
+      void assistantService.nativeThreadOwner(event.threadId).then((owner) => {
+        if (!owner) return;
+        return deviceMesh.broadcastDroneChatChange({
+          sequence: event.sequence,
+          reason: event.reason,
+          droneId: owner.droneId,
+          chatName: owner.chatName,
+          at: event.at,
+        });
+      }).catch(() => {});
+    }
   });
   assistantService.setTextPromptDelegate(async (threadId, prompt) => {
     await blipAssistantHost.promptThread(threadId, prompt);

@@ -1,4 +1,5 @@
 export type ChatAgentConfig =
+  | { kind: 'native' }
   | { kind: 'builtin'; id: 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip' }
   | { kind: 'custom'; id: string; label: string; command: string };
 
@@ -8,6 +9,7 @@ export type ChatInfo = {
   name: string;
   chat: string;
   agent: ChatAgentConfig;
+  agentLocked: boolean;
   model: string | null;
   agentPermissionMode: AgentPermissionMode;
   agentMessageAutoContinueEnabled: boolean;
@@ -78,7 +80,7 @@ export function isUngroupedGroupName(name: string): boolean {
   return name.trim().toLowerCase() === 'ungrouped';
 }
 
-export function normalizeChatInfoPayload(data: any): ChatInfo {
+function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> {
   const name = String(data?.name ?? '');
   const chat = String(data?.chat ?? 'default').trim() || 'default';
   const modelRaw = String(data?.model ?? '').trim();
@@ -89,6 +91,20 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
   const dockerSnapshotAfterAgentMessageEnabled = data?.dockerSnapshotAfterAgentMessageEnabled === true;
 
   const raw = data?.agent;
+  if (raw?.kind === 'native') {
+    return {
+      name,
+      chat,
+      model,
+      agentPermissionMode: 'full-access',
+      agentMessageAutoContinueEnabled: false,
+      agentSuggestionEnabled: false,
+      dockerSnapshotAfterAgentMessageEnabled: false,
+      sessionName,
+      createdAt,
+      agent: { kind: 'native' },
+    };
+  }
   const normalizeBuiltin = (v: any): 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip' | null => {
     const id = String(v ?? '')
       .trim()
@@ -189,5 +205,12 @@ export function normalizeChatInfoPayload(data: any): ChatInfo {
     sessionName,
     createdAt,
     agent: { kind: 'builtin', id: 'cursor' },
+  };
+}
+
+export function normalizeChatInfoPayload(data: any): ChatInfo {
+  return {
+    ...normalizeChatInfoPayloadBase(data),
+    agentLocked: data?.agentLocked === true,
   };
 }

@@ -82,9 +82,12 @@ describe('drone metadata application commands', () => {
     await saveRegistry(staleSnapshot);
     await repository.backfillLegacyInsertOnly(await loadRegistry());
     assert.equal(repository.get('drone-1').lifecycle.group, 'Review');
-    assert.deepEqual((await loadRegistry()).drones['drone-1'].chats, {
+    const projectedChats = (await loadRegistry()).drones['drone-1'].chats;
+    assert.match(projectedChats.default.id, /^[0-9a-f-]{36}$/i);
+    assert.deepEqual(projectedChats, {
       default: {
         createdAt: '2026-07-01T00:00:00.000Z',
+        id: projectedChats.default.id,
         turns: [],
         pendingPrompts: [],
       },
