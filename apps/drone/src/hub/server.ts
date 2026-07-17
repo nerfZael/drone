@@ -341,7 +341,9 @@ import {
 } from './github-pull-requests';
 import {
   archiveRetentionMs,
+  cancelCodexLogin,
   clearStoredProviderApiKey,
+  codexLoginStatus,
   collectProviderApiKeyDiagnostics,
   FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
   FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
@@ -373,6 +375,7 @@ import {
   resolveGroqApiKeySettings,
   resolveLlmSettingsResponse,
   resolveUiPreferencesSettingsResponse,
+  startCodexLogin,
   upsertStoredDeleteActionSettings,
   upsertStoredFilesystemSettings,
   upsertStoredAgentMessageAutoContinueSettings,
@@ -5526,6 +5529,9 @@ export async function startDroneHubApiServer(opts: {
     normalizeApiKey,
     upsertStoredProviderApiKey,
     clearStoredProviderApiKey,
+    startCodexLogin,
+    codexLoginStatus,
+    cancelCodexLogin,
     resolveLlmSettingsResponse,
     parseLlmProvider,
     upsertStoredLlmProvider,
@@ -6245,6 +6251,7 @@ export async function startDroneHubApiServer(opts: {
           }
         : null,
     close: async () => {
+      cancelCodexLogin();
       unsubscribeDeviceMeshAssistantChanges();
       await deviceMesh.close();
       await hubOutboxDispatchLoop?.stop();

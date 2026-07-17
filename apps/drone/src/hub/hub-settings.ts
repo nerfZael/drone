@@ -11,6 +11,7 @@ import {
   type HubSettingRecord,
 } from '../host/hub-settings-repository';
 import { loadRegistry, updateRegistry, type DroneRegistry } from '../host/registry';
+import { createCodexLoginManager } from './codex-login-manager';
 
 const dynamicImport = new Function('specifier', 'return import(specifier)') as (specifier: string) => Promise<any>;
 
@@ -619,6 +620,18 @@ export async function installCodexCliAuthJsonFromTransfer(authJson: string): Pro
   await fs.chmod(authPath, 0o600).catch(() => {});
 }
 
+const codexLoginManager = createCodexLoginManager({
+  login: async (options) => {
+    const { loginOpenAICodex } = await dynamicImport('@mariozechner/pi-ai/oauth');
+    return await loginOpenAICodex(options);
+  },
+  installAuthJson: installCodexCliAuthJsonFromTransfer,
+});
+
+export const startCodexLogin = () => codexLoginManager.start();
+export const codexLoginStatus = () => codexLoginManager.status();
+export const cancelCodexLogin = () => codexLoginManager.cancel();
+
 async function refreshCodexCliAuthFile(authPath: string, parsed: any, refreshToken: string): Promise<{ apiKey: string; updatedAt: string | null }> {
   const { refreshOpenAICodexToken } = await dynamicImport('@mariozechner/pi-ai/oauth');
   const refreshed = await refreshOpenAICodexToken(refreshToken);
@@ -631,6 +644,7 @@ async function refreshCodexCliAuthFile(authPath: string, parsed: any, refreshTok
       access_token: refreshed.access,
       refresh_token: refreshed.refresh,
       account_id: typeof refreshed.accountId === 'string' ? refreshed.accountId : (parsed?.tokens?.account_id ?? undefined),
+      ...(typeof refreshed.idToken === 'string' ? { id_token: refreshed.idToken } : {}),
     },
     last_refresh: updatedAt,
   };

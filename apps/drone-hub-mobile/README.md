@@ -25,9 +25,10 @@ To pair:
 The **Assistant → On this phone** view runs a small assistant loop directly in the React Native
 process. It does not ask another Hub to host the thread.
 
-1. In the mobile **Settings** tab, choose either an OpenAI API key or a copied Codex subscription
-   login and select a model. Credentials are kept in Android secure storage and are sent only to
-   the selected OpenAI model service.
+1. In the mobile **Settings** tab, choose either an OpenAI API key or a Codex subscription login
+   and select a model. Codex can authenticate directly on the phone with OpenAI's device-code flow;
+   a credential copied from a trusted Hub remains available as a fallback. Credentials are kept in
+   Android secure storage and are sent only to the selected OpenAI model service.
 2. On a destination Hub, open **Settings → Device mesh → Workspaces**, choose one or more local
    folders, and grant this phone Read, Write, or Run commands access to each folder.
 3. Create a phone thread and open **Access**. Expand a device and select any subset of the named
@@ -81,6 +82,10 @@ remote thread additionally requires the `assistant-threads/thread.update` grant.
 Cloning a remote thread requires the `assistant-threads/thread.clone` grant.
 
 ### Copying OpenAI or Codex credentials from another Hub
+
+Direct phone sign-in is the preferred Codex setup. Select **Codex subscription**, tap **Sign in
+with Codex on this phone**, open the OpenAI page, and enter the displayed one-time code. Drone Hub
+finishes the login automatically; no localhost redirect URL or desktop credential copy is needed.
 
 The phone can explicitly copy an OpenAI API key or a file-based Codex CLI login from a trusted Hub:
 

@@ -29,6 +29,9 @@ export interface SettingsRouteDependencies {
   normalizeApiKey: ServiceFunction;
   upsertStoredProviderApiKey: ServiceFunction;
   clearStoredProviderApiKey: ServiceFunction;
+  startCodexLogin: ServiceFunction;
+  codexLoginStatus: ServiceFunction;
+  cancelCodexLogin: ServiceFunction;
   resolveLlmSettingsResponse: ServiceFunction;
   parseLlmProvider: ServiceFunction;
   upsertStoredLlmProvider: ServiceFunction;
@@ -95,6 +98,9 @@ export function registerSettingsRoutes(
     normalizeApiKey,
     upsertStoredProviderApiKey,
     clearStoredProviderApiKey,
+    startCodexLogin,
+    codexLoginStatus,
+    cancelCodexLogin,
     resolveLlmSettingsResponse,
     parseLlmProvider,
     upsertStoredLlmProvider,
@@ -188,7 +194,7 @@ export function registerSettingsRoutes(
       if (provider === 'codex') {
         return fail(
           400,
-          'Codex uses local Codex CLI authentication. Run `codex` on the Hub host to sign in.',
+          'Codex uses subscription authentication. Connect from Drone Hub, run `codex login` on the Hub host, or use `codex login --device-auth` for a remote or headless Hub.',
         );
       }
       const body = await readJson<any>();
@@ -203,7 +209,10 @@ export function registerSettingsRoutes(
 
     apiRouter.delete(providerPath, async ({ fail, json: respond }) => {
       if (provider === 'codex') {
-        return fail(400, 'Codex credentials are managed by the Codex CLI.');
+        return fail(
+          400,
+          'Codex uses the shared local login. Run `codex logout` on the Hub host to remove it.',
+        );
       }
       await clearStoredProviderApiKey(provider);
       respond(200, {
@@ -212,6 +221,26 @@ export function registerSettingsRoutes(
       });
     });
   }
+
+  apiRouter.get('/api/settings/codex/connect', async ({ json: respond }) => {
+    respond(200, codexLoginStatus());
+  });
+
+  apiRouter.post('/api/settings/codex/connect', async ({ json: respond }) => {
+    try {
+      respond(200, await startCodexLogin());
+    } catch (error: any) {
+      respond(400, {
+        ok: false,
+        error: error?.message ?? String(error),
+        login: codexLoginStatus(),
+      });
+    }
+  });
+
+  apiRouter.delete('/api/settings/codex/connect', async ({ json: respond }) => {
+    respond(200, cancelCodexLogin());
+  });
 
   apiRouter.get('/api/settings/llm', async ({ method, json: respond }) => {
     const data = await resolveLlmSettingsResponse();

@@ -11,7 +11,7 @@ const CODEX_TOKEN_URL = 'https://auth.openai.com/oauth/token';
 const CODEX_CLIENT_ID = 'app_EMoamEEZ73f0CkXaXp7hrann';
 const REFRESH_WINDOW_MS = 5 * 60_000;
 
-async function saveCodexAuth(auth: LocalCodexAuth): Promise<void> {
+export async function saveLocalAssistantCodexAuth(auth: LocalCodexAuth): Promise<void> {
   await SecureStore.setItemAsync(CODEX_AUTH_NAME, JSON.stringify(auth), {
     keychainAccessible: SecureStore.WHEN_UNLOCKED_THIS_DEVICE_ONLY,
   });
@@ -50,21 +50,28 @@ async function refreshCodexAuth(current: LocalCodexAuth): Promise<LocalCodexAuth
     accountId,
     expiresAt: Number.isFinite(expiresIn) && expiresIn > 0 ? Date.now() + expiresIn * 1_000 : null,
   };
-  await saveCodexAuth(next);
+  await saveLocalAssistantCodexAuth(next);
   return next;
 }
 
 export async function hasLocalAssistantCodexAuth(): Promise<boolean> {
-  return Boolean(await SecureStore.getItemAsync(CODEX_AUTH_NAME));
+  const raw = await SecureStore.getItemAsync(CODEX_AUTH_NAME);
+  if (!raw) return false;
+  try {
+    parseStoredCodexAuth(raw);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 export async function saveImportedCodexAuthJson(authJson: string): Promise<void> {
-  await saveCodexAuth(parseCodexAuthJson(authJson));
+  await saveLocalAssistantCodexAuth(parseCodexAuthJson(authJson));
 }
 
 export async function readLocalAssistantCodexAuth(): Promise<LocalCodexAuth> {
   const current = await loadCodexAuth();
-  if (!current) throw new Error('Copy a Codex login in Settings before sending a prompt');
+  if (!current) throw new Error('Sign in to Codex in Settings before sending a prompt');
   if (current.expiresAt === null || current.expiresAt > Date.now() + REFRESH_WINDOW_MS)
     return current;
   return await refreshCodexAuth(current);
