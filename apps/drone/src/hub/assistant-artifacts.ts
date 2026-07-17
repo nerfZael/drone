@@ -32,13 +32,34 @@ export type AssistantArtifactPatch = {
 };
 
 export type AssistantArtifactActionInput = {
-  action: 'list' | 'read' | 'write' | 'append' | 'patch' | 'delete' | 'create_directory';
+  action:
+    | 'list'
+    | 'read'
+    | 'write'
+    | 'append'
+    | 'patch'
+    | 'delete'
+    | 'move'
+    | 'create_directory'
+    | 'delete_directory';
   path?: unknown;
+  from?: unknown;
+  to?: unknown;
   content?: unknown;
   baseRevision?: unknown;
   patches?: unknown;
   recursive?: unknown;
+  overwrite?: unknown;
   mode?: unknown;
+};
+
+export type AssistantArtifactSearchInput = {
+  query?: unknown;
+  mode?: unknown;
+  path?: unknown;
+  includeGlob?: unknown;
+  excludeGlob?: unknown;
+  limit?: unknown;
 };
 
 const ARTIFACT_MAX_FILE_BYTES = 500_000;
@@ -432,6 +453,127 @@ export async function listAssistantArtifactFiles(
   return files;
 }
 
+function artifactGlobRegex(patternRaw: unknown): RegExp | null {
+  const pattern = String(patternRaw ?? '').trim().replace(/\\/g, '/');
+  if (!pattern) return null;
+  let source = '';
+  for (let index = 0; index < pattern.length; index += 1) {
+    const char = pattern[index];
+    if (char === '*' && pattern[index + 1] === '*') {
+      index += 1;
+      if (pattern[index + 1] === '/') {
+        index += 1;
+        source += '(?:.*/)?';
+      } else {
+        source += '.*';
+      }
+    } else if (char === '*') {
+      source += '[^/]*';
+    } else if (char === '?') {
+      source += '[^/]';
+    } else {
+      source += char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp(`^${source}$`);
+}
+
+function artifactSmartCaseIncludes(value: string, query: string): boolean {
+  return /[A-Z]/.test(query)
+    ? value.includes(query)
+    : value.toLocaleLowerCase().includes(query.toLocaleLowerCase());
+}
+
+function artifactSmartCasePatternMatches(value: string, query: string): boolean {
+  try {
+    return new RegExp(query, /[A-Z]/.test(query) ? '' : 'i').test(value);
+  } catch {
+    return artifactSmartCaseIncludes(value, query);
+  }
+}
+
+export async function statAssistantArtifactPath(
+  threadId: string,
+  artifactPathRaw: unknown,
+): Promise<{ path: string; type: 'file' | 'directory'; size: number } | null> {
+  const { artifactPath, filePath } = resolveArtifactPath(threadId, artifactPathRaw);
+  try {
+    const stat = await fs.stat(filePath);
+    if (!stat.isFile() && !stat.isDirectory())
+      throw errorWithStatus(`artifact path is not a file or directory: ${artifactPath}`, 400);
+    return {
+      path: artifactPath,
+      type: stat.isDirectory() ? 'directory' : 'file',
+      size: stat.size,
+    };
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+export async function searchAssistantArtifactFiles(
+  threadId: string,
+  input: AssistantArtifactSearchInput,
+): Promise<{
+  matches: Array<string | { path: string; line: number; preview: string }>;
+  truncated: boolean;
+  engine: 'artifacts';
+  smartCase: true;
+}> {
+  const query = String(input.query ?? '');
+  const mode = String(input.mode ?? '').trim() === 'name' ? 'name' : 'content';
+  const rawRoot = String(input.path ?? '').trim();
+  const searchRoot = rawRoot && rawRoot !== '.' ? normalizeAssistantArtifactPath(rawRoot) : '';
+  if (searchRoot && !(await statAssistantArtifactPath(threadId, searchRoot))) {
+    throw errorWithStatus(`artifact path not found: ${searchRoot}`, 404);
+  }
+  const requestedLimit = Number(input.limit);
+  const limit = Number.isFinite(requestedLimit)
+    ? Math.max(1, Math.min(500, Math.floor(requestedLimit)))
+    : 100;
+  const include = artifactGlobRegex(input.includeGlob);
+  const exclude = artifactGlobRegex(input.excludeGlob);
+  const candidates = (await listAssistantArtifactFiles(threadId)).filter((file) => {
+    if (searchRoot && file.path !== searchRoot && !file.path.startsWith(`${searchRoot}/`))
+      return false;
+    if (include && !include.test(file.path)) return false;
+    if (exclude?.test(file.path)) return false;
+    return true;
+  });
+
+  if (mode === 'name') {
+    const allMatches = candidates
+      .map((file) => file.path)
+      .filter((filePath) => artifactSmartCaseIncludes(filePath, query));
+    return {
+      matches: allMatches.slice(0, limit),
+      truncated: allMatches.length > limit,
+      engine: 'artifacts',
+      smartCase: true,
+    };
+  }
+
+  const matches: Array<{ path: string; line: number; preview: string }> = [];
+  let truncated = false;
+  for (const summary of candidates) {
+    if (summary.binary) continue;
+    const file = await readAssistantArtifactFile(threadId, summary.path);
+    if (file.binary) continue;
+    const lines = file.content.split(/\r?\n/);
+    for (const [index, line] of lines.entries()) {
+      if (!artifactSmartCasePatternMatches(line, query)) continue;
+      if (matches.length >= limit) {
+        truncated = true;
+        break;
+      }
+      matches.push({ path: summary.path, line: index + 1, preview: line.trim() });
+    }
+    if (truncated) break;
+  }
+  return { matches, truncated, engine: 'artifacts', smartCase: true };
+}
+
 export async function listAssistantArtifactEntries(
   threadId: string,
   directoryPathRaw?: unknown,
@@ -670,6 +812,54 @@ async function createAssistantArtifactDirectory(
   await fs.mkdir(root, { recursive: true });
   await fs.mkdir(directoryPath, { recursive });
   return { path: artifactPath, recursive };
+}
+
+async function deleteAssistantArtifactDirectory(
+  threadId: string,
+  directoryPathRaw: unknown,
+  recursiveRaw: unknown,
+): Promise<{ path: string; recursive: boolean }> {
+  const { artifactPath, directoryPath } = resolveArtifactDirectoryPath(
+    threadId,
+    directoryPathRaw,
+  );
+  const stat = await fs.stat(directoryPath);
+  if (!stat.isDirectory()) throw errorWithStatus(`artifact path is not a directory: ${artifactPath}`, 400);
+  const recursive = recursiveRaw === true;
+  if (recursive) await fs.rm(directoryPath, { recursive: true, force: false });
+  else await fs.rmdir(directoryPath);
+  return { path: artifactPath, recursive };
+}
+
+async function moveAssistantArtifactPath(
+  threadId: string,
+  fromRaw: unknown,
+  toRaw: unknown,
+  overwriteRaw: unknown,
+): Promise<{ from: string; to: string; overwritten: boolean }> {
+  const source = resolveArtifactPath(threadId, fromRaw);
+  const destination = resolveArtifactPath(threadId, toRaw);
+  if (source.filePath === destination.filePath)
+    throw errorWithStatus('artifact source and destination are the same', 400);
+  const sourceStat = await fs.stat(source.filePath);
+  if (
+    sourceStat.isDirectory() &&
+    destination.filePath.startsWith(`${source.filePath}${path.sep}`)
+  ) {
+    throw errorWithStatus('artifact directory cannot be moved inside itself', 400);
+  }
+  const overwrite = overwriteRaw === true;
+  let overwritten = false;
+  try {
+    await fs.stat(destination.filePath);
+    if (!overwrite) throw errorWithStatus(`artifact destination exists: ${destination.artifactPath}`, 409);
+    await fs.rm(destination.filePath, { recursive: true, force: false });
+    overwritten = true;
+  } catch (error: any) {
+    if (error?.code !== 'ENOENT') throw error;
+  }
+  await fs.rename(source.filePath, destination.filePath);
+  return { from: source.artifactPath, to: destination.artifactPath, overwritten };
 }
 
 function base64DecodedByteLength(b64Raw: string): number {
@@ -923,10 +1113,22 @@ export async function runAssistantArtifactAction(
       ...(await deleteAssistantArtifactFile(threadId, input.path, input.baseRevision)),
     };
   }
+  if (action === 'move') {
+    return {
+      ok: true,
+      ...(await moveAssistantArtifactPath(threadId, input.from, input.to, input.overwrite)),
+    };
+  }
   if (action === 'create_directory') {
     return {
       ok: true,
       ...(await createAssistantArtifactDirectory(threadId, input.path, input.recursive)),
+    };
+  }
+  if (action === 'delete_directory') {
+    return {
+      ok: true,
+      ...(await deleteAssistantArtifactDirectory(threadId, input.path, input.recursive)),
     };
   }
   throw errorWithStatus(`unknown artifact action: ${action || '(empty)'}`, 400);

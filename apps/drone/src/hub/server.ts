@@ -4573,16 +4573,12 @@ export async function startDroneHubApiServer(opts: {
       const activeDroneIds = new Set(drones.map(([droneId]) => String(droneId)));
       for (const pendingChat of await resumePendingPromptChats()) {
         if (!activeDroneIds.has(pendingChat.droneId)) continue;
-        const droneEntry = regAny.drones[pendingChat.droneId];
-        const chatEntry = droneEntry?.chats?.[pendingChat.chatName];
-        if (chatEntry && inferChatAgent(chatEntry, droneEntry).kind === 'native') continue;
         enqueuePendingPromptPump(pendingChat.droneId, pendingChat.chatName);
       }
       for (const [droneName, d] of drones as any[]) {
         const chats = d?.chats && typeof d.chats === 'object' ? Object.entries(d.chats) : [];
         for (const [chatName, entry] of chats as any[]) {
           if (isDraftChatEntry(entry)) continue;
-          if (inferChatAgent(entry, d).kind === 'native') continue;
           const pending = await readPendingPrompts({
             droneId: String(droneName),
             chatName: String(chatName),
@@ -4645,6 +4641,8 @@ export async function startDroneHubApiServer(opts: {
     deviceMesh,
     normalizeDroneIdentity,
     nowIso,
+    onNativePromptQueueChanged: ({ droneId, chatName }) =>
+      notifyDroneChatWrite?.(droneId, chatName),
     summarizeDroneActivity,
   });
   const nativeChatLifecycle = new NativeChatLifecycle(assistantService, blipAssistantHost);
@@ -4702,6 +4700,9 @@ export async function startDroneHubApiServer(opts: {
         (attachment) => !String(attachment?.mime ?? '').startsWith('image/'),
       ),
     );
+    if (uploaded.length > 0 && (await assistantService.ensureArtifactsWorkspaceEnabled(chatId))) {
+      blipAssistantHost.invalidateThread(chatId);
+    }
     const references = uploaded.map((file: any) => `- ${file.path}`).join('\n');
     const promptWithFiles = references
       ? `${prompt}${prompt ? '\n\n' : ''}Attached files:\n${references}`

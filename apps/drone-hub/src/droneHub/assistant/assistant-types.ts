@@ -6,6 +6,7 @@ import type {
   NativeAgentModelOption,
   NativeAgentProviderId,
   NativeAgentToolSummary,
+  NativeAgentWorkspaceSummary,
   NativeChatAccessScope,
   NativeChatApproval,
   NativeChatSnapshot,
@@ -26,6 +27,7 @@ export type AssistantQueuedPrompt = NativeQueuedPrompt;
 export type AssistantApproval = NativeChatApproval;
 export type AssistantModelOption = NativeAgentModelOption;
 export type AssistantToolSummary = NativeAgentToolSummary;
+export type AssistantWorkspaceSummary = NativeAgentWorkspaceSummary;
 
 export type AssistantScopeUpdateResult = { ok: true; accessScope?: AssistantAccessScope };
 export type AssistantScopeMode = 'all' | 'selected';

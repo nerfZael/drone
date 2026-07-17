@@ -3,6 +3,7 @@ import path from 'node:path';
 import type {
   NativeAgentDefaultModel,
   NativeAgentDefaultSettings,
+  NativeAgentWorkspaceSummary,
   NativeChatAccessScope,
   NativeChatApproval,
   NativeChatSnapshot,
@@ -53,10 +54,14 @@ import {
   ASSISTANT_CHAT_IDLE_PROMPT_LINE,
   ASSISTANT_MULTI_TARGET_PROMPT_LINE,
   ASSISTANT_SINGLE_TARGET_PROMPT_LINE,
+  ASSISTANT_NO_TARGET_PROMPT_LINE,
   ASSISTANT_SYSTEM_PROMPT_DEFAULT,
   ASSISTANT_TOOL_SUMMARIES,
   ASSISTANT_ALL_TOOL_NAMES,
   ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES,
+  ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES,
+  ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES,
+  ASSISTANT_WORKSPACE_TOOL_CAPABILITIES,
   ASSISTANT_MODEL_OPTIONS,
 } from './assistant/assistant-config';
 import {
@@ -140,6 +145,7 @@ type StoredAssistantState = {
   threads?: AssistantThread[];
   webSearchToolMigrationApplied?: boolean;
   fetchContentToolMigrationApplied?: boolean;
+  droneHubMcpDefaultOptInMigrationApplied?: boolean;
   systemPrompt?: string;
   systemPromptUpdatedAt?: string;
   updatedAt?: string;
@@ -511,6 +517,13 @@ function cleanOptionalString(raw: unknown): string {
   return String(raw ?? '').trim();
 }
 
+function normalizeAssistantWorkspaceIds(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  return Array.from(
+    new Set(raw.map((item) => cleanOptionalString(item)).filter(Boolean)),
+  ).slice(0, 100);
+}
+
 function normalizeAssistantRenameRequests(
   raw: unknown,
 ): Array<{ droneId: string; newName: string }> {
@@ -729,8 +742,9 @@ function sameToolSet(rawNames: Set<string>, names: string[]): boolean {
 function normalizeStoredAssistantEnabledTools(
   raw: unknown,
   _migrations: { webSearchDefaultTool: boolean; fetchContentDefaultTool: boolean },
+  fallback?: string[],
 ): string[] {
-  return normalizeAssistantEnabledTools(raw);
+  return normalizeAssistantEnabledTools(raw, fallback);
 }
 
 function normalizeAssistantSystemPromptPatches(
@@ -1023,6 +1037,9 @@ function sanitizeThread(thread: AssistantThread): AssistantThread {
       migrateAssistantSystemPrompt(thread.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(thread.systemPromptUpdatedAt) || null,
     enabledTools: normalizeAssistantEnabledTools(thread.enabledTools),
+    ...(Array.isArray(thread.enabledWorkspaceIds)
+      ? { enabledWorkspaceIds: normalizeAssistantWorkspaceIds(thread.enabledWorkspaceIds) ?? [] }
+      : {}),
     status:
       thread.status === 'running' || thread.status === 'waiting_for_approval'
         ? 'idle'
@@ -1033,7 +1050,11 @@ function sanitizeThread(thread: AssistantThread): AssistantThread {
 function normalizeThread(
   raw: any,
   fallback: { provider: LlmProviderId; model: string; systemPrompt?: string },
-  options?: { migrateWebSearchDefaultTool?: boolean; migrateFetchContentDefaultTool?: boolean },
+  options?: {
+    migrateWebSearchDefaultTool?: boolean;
+    migrateFetchContentDefaultTool?: boolean;
+    preserveLegacyImplicitMcpTools?: boolean;
+  },
 ): AssistantThread | null {
   if (!raw || typeof raw !== 'object') return null;
   const id = String(raw.id ?? '').trim();
@@ -1062,10 +1083,19 @@ function normalizeThread(
       fallback.systemPrompt ||
       ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(raw.systemPromptUpdatedAt) || null,
-    enabledTools: normalizeStoredAssistantEnabledTools(raw.enabledTools, {
-      webSearchDefaultTool: options?.migrateWebSearchDefaultTool === true,
-      fetchContentDefaultTool: options?.migrateFetchContentDefaultTool === true,
-    }),
+    enabledTools: normalizeStoredAssistantEnabledTools(
+      raw.enabledTools,
+      {
+        webSearchDefaultTool: options?.migrateWebSearchDefaultTool === true,
+        fetchContentDefaultTool: options?.migrateFetchContentDefaultTool === true,
+      },
+      options?.preserveLegacyImplicitMcpTools === true
+        ? [...ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES]
+        : undefined,
+    ),
+    ...(Array.isArray(raw.enabledWorkspaceIds)
+      ? { enabledWorkspaceIds: normalizeAssistantWorkspaceIds(raw.enabledWorkspaceIds) ?? [] }
+      : {}),
     accessScope: makeAssistantAccessScope(raw.accessScope),
     autoApprove: normalizeAssistantAutoApprove(raw.autoApprove),
     promptDeliveryMode: normalizeAssistantPromptDeliveryMode(raw.promptDeliveryMode),
@@ -1089,6 +1119,7 @@ function serializeState(input: {
     threads: input.threads.map((thread) => sanitizeThread(thread)),
     webSearchToolMigrationApplied: true,
     fetchContentToolMigrationApplied: true,
+    droneHubMcpDefaultOptInMigrationApplied: true,
     ...(systemPrompt !== ASSISTANT_SYSTEM_PROMPT_DEFAULT
       ? {
           systemPrompt,
@@ -1523,7 +1554,11 @@ export class HubAssistantService {
     if (!targetThread) throw new Error(`unknown assistant thread: ${threadId}`);
     const streamingMessages = this.threadStreamingMessages(id);
     const streamingMessage = this.primaryThreadStreamingMessage(id);
-    const availableTools = await this.availableToolsForThread(id);
+    const availableWorkspaces = await this.availableWorkspacesForThread(id);
+    const enabledWorkspaces = availableWorkspaces.filter((workspace) =>
+      this.workspaceEnabled(targetThread, workspace.id),
+    );
+    const availableTools = this.availableToolsForWorkspaces(enabledWorkspaces);
     const queuedPrompts = this.queuedPromptsForThread(targetThread, false);
     const snapshotThread = { ...sanitizeThread(targetThread), queuedPrompts };
     return {
@@ -1537,6 +1572,7 @@ export class HubAssistantService {
       defaultModel: { ...this.defaultModelSelection },
       defaultEnabledTools: [...this.defaultEnabledTools],
       availableTools,
+      availableWorkspaces,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       ...(streamingMessage
         ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages }
@@ -1622,6 +1658,7 @@ export class HubAssistantService {
         executeMode: 'selected',
         droneIds: [ownerDroneId],
       }),
+      enabledWorkspaceIds: [`drone:${ownerDroneId}`],
     });
     this.threads = [thread, ...this.threads];
     await this.persist();
@@ -1717,6 +1754,21 @@ export class HubAssistantService {
     const ownerChatName = cleanOptionalString(input.chatName) || 'default';
     if (!id || !ownerDroneId) throw new Error('native chat clone identity is required');
     if (this.threads.some((thread) => thread.id === id)) return await this.threadSnapshot(id);
+    const clonedEnabledWorkspaceIds = Array.isArray(source.enabledWorkspaceIds)
+      ? Array.from(
+          new Set([
+            ...source.enabledWorkspaceIds.filter(
+              (workspaceId) => !workspaceId.startsWith('artifacts:'),
+            ),
+            `drone:${ownerDroneId}`,
+            ...(source.enabledWorkspaceIds.some((workspaceId) =>
+              workspaceId.startsWith('artifacts:'),
+            )
+              ? [`artifacts:${id}`]
+              : []),
+          ]),
+        )
+      : undefined;
     const thread = this.makeThread({
       id,
       ownerDroneId,
@@ -1731,6 +1783,7 @@ export class HubAssistantService {
         updatedAt: nowIso(),
       }),
       systemPrompt: source.systemPrompt,
+      ...(clonedEnabledWorkspaceIds ? { enabledWorkspaceIds: clonedEnabledWorkspaceIds } : {}),
     });
     thread.systemPromptUpdatedAt = source.systemPromptUpdatedAt;
     thread.enabledTools = [...source.enabledTools];
@@ -1811,6 +1864,7 @@ export class HubAssistantService {
       autoApprove?: unknown;
       promptDeliveryMode?: unknown;
       enabledTools?: unknown;
+      enabledWorkspaceIds?: unknown;
     },
   ): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
@@ -1835,6 +1889,11 @@ export class HubAssistantService {
       thread.promptDeliveryMode = normalizeAssistantPromptDeliveryMode(patch.promptDeliveryMode);
     if (patch.enabledTools != null)
       thread.enabledTools = normalizeAssistantEnabledTools(patch.enabledTools, thread.enabledTools);
+    if (patch.enabledWorkspaceIds != null) {
+      if (!Array.isArray(patch.enabledWorkspaceIds))
+        throw new Error('enabledWorkspaceIds must be an array');
+      thread.enabledWorkspaceIds = normalizeAssistantWorkspaceIds(patch.enabledWorkspaceIds) ?? [];
+    }
     thread.updatedAt = nowIso();
     await this.persist();
     return await this.threadSnapshot(thread.id);
@@ -1971,26 +2030,100 @@ export class HubAssistantService {
     });
   }
 
-  private async availableToolsForThread(threadId: string): Promise<AssistantToolSummary[]> {
-    // Every Assistant thread has its artifacts workspace. Target discovery and
-    // selection and transfer are useful only when at least one drone workspace is accessible.
-    let hasMultipleTargets = false;
+  private async availableWorkspacesForThread(
+    threadId: string,
+  ): Promise<NativeAgentWorkspaceSummary[]> {
+    const thread = this.getThread(threadId);
+    let drones: Awaited<ReturnType<HubAssistantService['workspaceDrones']>> = [];
     try {
-      hasMultipleTargets = (await this.workspaceDrones(threadId)).length > 0;
+      drones = await this.workspaceDrones(threadId);
     } catch (error: any) {
       hubLog('warn', 'assistant target catalog unavailable while building tool summary', {
         threadId,
         error: error?.message ?? String(error),
       });
     }
-    return hasMultipleTargets
-      ? ASSISTANT_TOOL_SUMMARIES
-      : ASSISTANT_TOOL_SUMMARIES.filter(
-          (tool) =>
-            tool.name !== 'list_targets' &&
-            tool.name !== 'set_target' &&
-            tool.name !== 'transfer_files',
-        );
+    return [
+      ...drones.map((drone) => ({
+        id: `drone:${drone.id}`,
+        label: drone.name || drone.id,
+        kind: 'drone' as const,
+        description: 'Drone workspace',
+        capabilities: [
+          ...(drone.canRead ? (['read'] as const) : []),
+          ...(drone.canWrite ? (['write'] as const) : []),
+          ...(drone.canExecute ? (['execute'] as const) : []),
+        ],
+      })),
+      {
+        id: `artifacts:${thread.id}`,
+        label: 'Artifacts',
+        kind: 'artifacts' as const,
+        description: 'Private files for this chat',
+        capabilities: ['read', 'write'] as Array<'read' | 'write'>,
+      },
+    ];
+  }
+
+  private workspaceEnabled(thread: AssistantThread, workspaceId: string): boolean {
+    // Chats created before workspace toggles existed retain their previous access.
+    return !Array.isArray(thread.enabledWorkspaceIds) || thread.enabledWorkspaceIds.includes(workspaceId);
+  }
+
+  workspaceIsEnabled(threadId: string, workspaceId: string): boolean {
+    return this.workspaceEnabled(this.getThread(threadId), workspaceId);
+  }
+
+  async ensureArtifactsWorkspaceEnabled(threadId: string): Promise<boolean> {
+    await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    if (!Array.isArray(thread.enabledWorkspaceIds)) return false;
+    const workspaceId = `artifacts:${thread.id}`;
+    if (thread.enabledWorkspaceIds.includes(workspaceId)) return false;
+    thread.enabledWorkspaceIds = [...thread.enabledWorkspaceIds, workspaceId];
+    thread.updatedAt = nowIso();
+    await this.persist();
+    return true;
+  }
+
+  private availableToolsForWorkspaces(
+    workspaces: NativeAgentWorkspaceSummary[],
+  ): AssistantToolSummary[] {
+    const supportedCapabilities = new Set<string>();
+    for (const workspace of workspaces) {
+      const capabilities = new Set(workspace.capabilities);
+      if (capabilities.has('read')) {
+        supportedCapabilities.add('files.list');
+        supportedCapabilities.add('files.read');
+        supportedCapabilities.add('files.search');
+        if (workspace.kind === 'drone') supportedCapabilities.add('git.status');
+      }
+      if (capabilities.has('write')) {
+        supportedCapabilities.add('files.write');
+        supportedCapabilities.add('files.delete');
+        supportedCapabilities.add('files.move');
+        supportedCapabilities.add('directories.create');
+        supportedCapabilities.add('directories.delete');
+        supportedCapabilities.add('patch.apply');
+      }
+      if (capabilities.has('execute')) supportedCapabilities.add('shell.execute');
+    }
+
+    const workspaceCount = workspaces.length;
+    const multiTargetTools = new Set(['list_targets', 'set_target', 'transfer_files']);
+    const canTransfer =
+      workspaceCount > 1 &&
+      workspaces.some((workspace) => workspace.capabilities.includes('read')) &&
+      workspaces.some((workspace) => workspace.capabilities.includes('write'));
+    return ASSISTANT_TOOL_SUMMARIES.filter((tool) => {
+      if (tool.name === 'transfer_files') return canTransfer;
+      if (multiTargetTools.has(tool.name)) return workspaceCount > 1;
+      const capability =
+        ASSISTANT_WORKSPACE_TOOL_CAPABILITIES[
+          tool.name as keyof typeof ASSISTANT_WORKSPACE_TOOL_CAPABILITIES
+        ];
+      return !capability || supportedCapabilities.has(capability);
+    });
   }
 
   private promptQueue(): PromptQueueRepository | null {
@@ -2299,27 +2432,19 @@ export class HubAssistantService {
     throw new Error(`unsupported drone workspace tool: ${call.tool}`);
   }
 
-  async currentContext(threadId: string): Promise<any> {
-    const thread = this.getThread(threadId);
-    const ownerDroneId = cleanOptionalString(thread.ownerDroneId) || null;
-    const ownerDrone = ownerDroneId
-      ? (await this.tools.listDrones()).find((drone) => drone.id === ownerDroneId)
-      : null;
-    return {
-      app: {
-        activeDroneId: ownerDroneId,
-        activeDroneName: ownerDrone?.name ?? ownerDroneId,
-        activeChatName: cleanOptionalString(thread.ownerChatName) || 'default',
-        appView: 'workspace',
-        updatedAt: thread.updatedAt,
-      },
-      accessScope: this.activeAccessScope(threadId),
-    };
-  }
-
-  resolvedSystemPrompt(threadId: string, options?: { multipleWorkspaceTargets?: boolean }): string {
+  resolvedSystemPrompt(
+    threadId: string,
+    options?: { multipleWorkspaceTargets?: boolean; workspaceTargetCount?: number },
+  ): string {
     const prompt = this.systemPrompt(threadId);
-    if (options?.multipleWorkspaceTargets !== false) return prompt;
+    if (options?.workspaceTargetCount === 0) {
+      return prompt.includes(ASSISTANT_MULTI_TARGET_PROMPT_LINE)
+        ? prompt.replace(ASSISTANT_MULTI_TARGET_PROMPT_LINE, ASSISTANT_NO_TARGET_PROMPT_LINE)
+        : `${prompt}\n\n${ASSISTANT_NO_TARGET_PROMPT_LINE}`;
+    }
+    if (options?.workspaceTargetCount != null && options.workspaceTargetCount > 1) return prompt;
+    if (options?.workspaceTargetCount == null && options?.multipleWorkspaceTargets !== false)
+      return prompt;
     return prompt.includes(ASSISTANT_MULTI_TARGET_PROMPT_LINE)
       ? prompt.replace(ASSISTANT_MULTI_TARGET_PROMPT_LINE, ASSISTANT_SINGLE_TARGET_PROMPT_LINE)
       : `${prompt}\n\n${ASSISTANT_SINGLE_TARGET_PROMPT_LINE}`;
@@ -2532,10 +2657,15 @@ export class HubAssistantService {
         stored?.defaultModel?.thinkingLevel,
       ),
     };
-    this.defaultEnabledTools = normalizeAssistantEnabledTools(
+    const storedDefaultEnabledTools = normalizeAssistantEnabledTools(
       stored?.defaultEnabledTools,
       ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES,
     );
+    const droneHubMcpToolNames = new Set(ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES);
+    this.defaultEnabledTools =
+      stored?.droneHubMcpDefaultOptInMigrationApplied === true
+        ? storedDefaultEnabledTools
+        : storedDefaultEnabledTools.filter((name) => !droneHubMcpToolNames.has(name));
     const storedThreads = Array.isArray(stored?.threads) ? stored.threads : [];
     const storedFallbackProvider = normalizeProvider(
       storedThreads.find((thread: any) => thread && typeof thread === 'object')?.provider,
@@ -2547,11 +2677,14 @@ export class HubAssistantService {
     };
     const migrateWebSearchDefaultTool = stored?.webSearchToolMigrationApplied !== true;
     const migrateFetchContentDefaultTool = stored?.fetchContentToolMigrationApplied !== true;
+    const preserveLegacyImplicitMcpTools =
+      stored?.droneHubMcpDefaultOptInMigrationApplied !== true;
     const threads = storedThreads
       .map((thread) =>
         normalizeThread(thread, storedFallback, {
           migrateWebSearchDefaultTool,
           migrateFetchContentDefaultTool,
+          preserveLegacyImplicitMcpTools,
         }),
       )
       .filter(Boolean) as AssistantThread[];
@@ -2572,6 +2705,7 @@ export class HubAssistantService {
     thinkingLevel?: AssistantThinkingLevel;
     title?: string;
     accessScope?: AssistantAccessScope;
+    enabledWorkspaceIds?: string[];
     systemPrompt?: string;
   }): AssistantThread {
     const provider = normalizeProvider(input?.provider);
@@ -2598,6 +2732,9 @@ export class HubAssistantService {
       systemPromptUpdatedAt: null,
       enabledTools: normalizeAssistantEnabledTools(this.defaultEnabledTools),
       accessScope: input?.accessScope ?? this.defaultAccessScopeForNewThread(),
+      ...(Array.isArray(input?.enabledWorkspaceIds)
+        ? { enabledWorkspaceIds: normalizeAssistantWorkspaceIds(input.enabledWorkspaceIds) ?? [] }
+        : {}),
       autoApprove: false,
       promptDeliveryMode: 'queue',
       status: 'idle',
@@ -2895,6 +3032,33 @@ export class HubAssistantService {
     const snapshotThreadId = targetThread.id;
     const streamingMessages = this.threadStreamingMessages(snapshotThreadId);
     const streamingMessage = this.primaryThreadStreamingMessage(snapshotThreadId);
+    const fallbackDroneIds = Array.from(
+      new Set([
+        ...targetThread.accessScope.droneIds,
+        ...(targetThread.enabledWorkspaceIds ?? []).flatMap((workspaceId) =>
+          workspaceId.startsWith('drone:') ? [workspaceId.slice('drone:'.length)] : [],
+        ),
+      ]),
+    );
+    const availableWorkspaces: NativeAgentWorkspaceSummary[] = [
+      ...fallbackDroneIds.map((droneId) => ({
+        id: `drone:${droneId}`,
+        label: droneId,
+        kind: 'drone' as const,
+        description: 'Drone workspace',
+        capabilities: ['read', 'write', 'execute'] as Array<'read' | 'write' | 'execute'>,
+      })),
+      {
+        id: `artifacts:${snapshotThreadId}`,
+        label: 'Artifacts',
+        kind: 'artifacts' as const,
+        description: 'Private files for this chat',
+        capabilities: ['read', 'write'] as Array<'read' | 'write'>,
+      },
+    ];
+    const enabledWorkspaces = availableWorkspaces.filter((workspace) =>
+      this.workspaceEnabled(targetThread, workspace.id),
+    );
     return {
       ok: true,
       chatId: snapshotThreadId,
@@ -2914,7 +3078,8 @@ export class HubAssistantService {
       models: [],
       defaultModel: { ...this.defaultModelSelection },
       defaultEnabledTools: [...this.defaultEnabledTools],
-      availableTools: ASSISTANT_TOOL_SUMMARIES,
+      availableTools: this.availableToolsForWorkspaces(enabledWorkspaces),
+      availableWorkspaces,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
       ...(streamingMessage
         ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages }

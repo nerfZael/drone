@@ -107,6 +107,27 @@ function isStoppableTranscriptPendingPrompt(item: PendingPrompt | null | undefin
   return item.state === 'queued' || item.state === 'sending' || item.state === 'sent';
 }
 
+export function visiblePendingPromptsForAgent(opts: {
+  agentKind: ChatAgentConfig['kind'] | null | undefined;
+  chatUiMode: 'transcript' | 'cli';
+  pendingPrompts: PendingPrompt[];
+  transcripts: TranscriptItem[] | null;
+}): PendingPrompt[] {
+  // Until the selected chat's config is resolved, do not project canonical
+  // prompt rows into generic transcript state. The rows may belong to a native
+  // chat, whose completion lives in the separate Assistant history store.
+  if (!opts.agentKind || opts.agentKind === 'native') return [];
+  if (opts.chatUiMode !== 'transcript') return opts.pendingPrompts;
+  const ids = new Set(
+    (Array.isArray(opts.transcripts) ? opts.transcripts : [])
+      .map((turn) => String((turn as any)?.id ?? '').trim())
+      .filter(Boolean),
+  );
+  return opts.pendingPrompts.filter(
+    (prompt) => prompt.state === 'failed' || !ids.has(prompt.id),
+  );
+}
+
 export function useChatRuntimeOrchestration({
   chatInfo,
   currentDrone,
@@ -546,11 +567,17 @@ export function useChatRuntimeOrchestration({
   }, [optimisticPendingPrompts, pendingRespForChat, selectedChatCacheKey]);
 
   const visiblePendingPrompts = React.useMemo(() => {
-    if (chatUiMode !== 'transcript') return pendingPrompts;
-    const ts = Array.isArray(transcripts) ? transcripts : [];
-    const ids = new Set(ts.map((t) => String((t as any)?.id ?? '')).filter(Boolean));
-    return pendingPrompts.filter((p) => p.state === 'failed' || !ids.has(p.id));
-  }, [chatUiMode, pendingPrompts, transcripts]);
+    // Built-in/native chats render and reconcile their canonical prompt queue in
+    // AssistantDock. Their completed prompts do not have generic transcript turn
+    // ids, so treating those rows as generic pending work leaves the drone typing
+    // forever whenever the chat is selected.
+    return visiblePendingPromptsForAgent({
+      agentKind: chatInfo?.agent?.kind,
+      chatUiMode,
+      pendingPrompts,
+      transcripts,
+    });
+  }, [chatInfo?.agent?.kind, chatUiMode, pendingPrompts, transcripts]);
 
   const startupPendingPrompt = React.useMemo((): PendingPrompt | null => {
     if (chatUiMode !== 'transcript') return null;

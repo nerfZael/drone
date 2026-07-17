@@ -3,6 +3,7 @@ import type { AgentPermissionMode, ChatAgentConfig, ChatInfo } from '../../domai
 import { normalizeChatInfoPayload } from '../../domain';
 import type { DroneSummary } from '../types';
 import type { ChatModelOption } from './app-types';
+import { chatInfoForSelection, chatSelectionKey } from './chat-selection-model';
 import { isDroneStartingOrSeeding } from './helpers';
 import { fetchJson, isNotFoundError } from './hooks';
 
@@ -21,9 +22,59 @@ export function useChatConfigState({
   droneById,
   requestJson,
 }: UseChatConfigStateArgs) {
-  const [chatInfo, setChatInfo] = React.useState<ChatInfo | null>(null);
-  const [chatInfoError, setChatInfoError] = React.useState<string | null>(null);
-  const [loadingChatInfo, setLoadingChatInfo] = React.useState(false);
+  const [chatInfoState, setChatInfoState] = React.useState<{
+    key: string;
+    value: ChatInfo | null;
+  }>({ key: '', value: null });
+  const selectedChatInfoKey = chatSelectionKey(selectedDrone, selectedChat);
+  const chatInfo = chatInfoForSelection(
+    chatInfoState.value,
+    chatInfoState.key,
+    selectedDrone,
+    selectedChat,
+  );
+  const setChatInfo = React.useCallback<React.Dispatch<React.SetStateAction<ChatInfo | null>>>(
+    (next) => {
+      setChatInfoState((previous) => ({
+        key: selectedChatInfoKey,
+        value:
+          typeof next === 'function'
+            ? next(previous.key === selectedChatInfoKey ? previous.value : null)
+            : next,
+      }));
+    },
+    [selectedChatInfoKey],
+  );
+  const [chatInfoStatus, setChatInfoStatus] = React.useState<{
+    key: string;
+    loading: boolean;
+    error: string | null;
+  }>({ key: '', loading: false, error: null });
+  const chatInfoStatusCurrent = chatInfoStatus.key === selectedChatInfoKey;
+  const chatInfoError = chatInfoStatusCurrent ? chatInfoStatus.error : null;
+  const loadingChatInfo = chatInfoStatusCurrent
+    ? chatInfoStatus.loading
+    : Boolean(selectedChatInfoKey);
+  const setChatInfoError = React.useCallback<React.Dispatch<React.SetStateAction<string | null>>>(
+    (next) => {
+      setChatInfoStatus((previous) => {
+        const previousError = previous.key === selectedChatInfoKey ? previous.error : null;
+        const error = typeof next === 'function' ? next(previousError) : next;
+        return { key: selectedChatInfoKey, loading: previous.key === selectedChatInfoKey && previous.loading, error };
+      });
+    },
+    [selectedChatInfoKey],
+  );
+  const setLoadingChatInfo = React.useCallback(
+    (loading: boolean) => {
+      setChatInfoStatus((previous) => ({
+        key: selectedChatInfoKey,
+        loading,
+        error: previous.key === selectedChatInfoKey ? previous.error : null,
+      }));
+    },
+    [selectedChatInfoKey],
+  );
   const [chatModels, setChatModels] = React.useState<ChatModelOption[]>([]);
   const [chatModelsSource, setChatModelsSource] = React.useState<
     'live' | 'cache' | 'none'

@@ -12,7 +12,11 @@ import {
   type AssistantToolCall,
   type AssistantToolRenderItem,
 } from '@drone/assistant-chat';
-import type { AssistantDroneNameMap, AssistantMessage } from './assistant-types';
+import type {
+  AssistantDroneNameMap,
+  AssistantMessage,
+  AssistantQueuedPrompt,
+} from './assistant-types';
 
 const TOOL_ROW_TARGET_PREVIEW_MAX = 3;
 
@@ -34,6 +38,41 @@ export type AssistantMessageDroneSummary = {
   chatName: string;
   message: string;
 };
+
+export function assistantHasEnabledMcpGroup(
+  tools: Array<{ name: string; group?: { kind?: string; id?: string } | null }>,
+  enabledToolNames: string[],
+  groupId: string,
+): boolean {
+  const enabled = new Set(enabledToolNames);
+  return tools.some(
+    (tool) =>
+      tool.group?.kind === 'mcp' &&
+      tool.group.id === groupId &&
+      enabled.has(tool.name),
+  );
+}
+
+export function assistantPromptHasVisibleUserMessage(
+  messages: Array<{ role: string; content?: unknown; timestamp?: unknown }>,
+  prompt: AssistantQueuedPrompt,
+): boolean {
+  const promptText = String(prompt.prompt ?? '').trim();
+  if (!promptText) return false;
+  const createdAtMs = Date.parse(String(prompt.createdAt ?? ''));
+  return messages.some((message) => {
+    if (message.role !== 'user') return false;
+    const text = messageText(message as AssistantMessage).trim();
+    if (text !== promptText && !text.startsWith(`${promptText}\n\nAttached files:`)) return false;
+    if (!Number.isFinite(createdAtMs)) return true;
+    const timestamp = (message as any).timestamp;
+    const messageAtMs =
+      typeof timestamp === 'number' && Number.isFinite(timestamp)
+        ? timestamp
+        : Date.parse(String(timestamp ?? ''));
+    return !Number.isFinite(messageAtMs) || messageAtMs >= createdAtMs - 5_000;
+  });
+}
 export function isChatIdleToolName(name: string | undefined): boolean {
   return (
     name === 'subscribe_to_any_chat_idle' ||

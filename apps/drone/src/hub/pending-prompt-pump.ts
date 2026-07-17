@@ -3,6 +3,22 @@ export interface PendingPromptPumpTarget {
   chatName: string;
 }
 
+export function nativeAssistantOwnsPromptDelivery(agentKind: string): boolean {
+  return agentKind === 'native';
+}
+
+export function pendingPromptKeepsChatBusy(opts: {
+  state: string;
+  hasTurn: boolean;
+  native: boolean;
+}): boolean {
+  const state = String(opts.state ?? '').trim();
+  if (state === 'failed' || state === 'cancelled') return false;
+  if (state === 'queued' || state === 'sending') return true;
+  if (opts.native && state === 'sent') return false;
+  return !opts.hasTurn;
+}
+
 export interface PendingPromptPumpDependencies {
   normalizeDroneId(raw: string): string;
   normalizeChatName(raw: string): string;

@@ -93,7 +93,6 @@ const TOOL_LABELS: Record<string, string> = {
   create_chat: 'Create chat',
   create_drone: 'Create drone',
   assistant_files: 'Assistant files',
-  get_current_context: 'Read current context',
   get_system_prompt: 'Read system prompt',
   update_system_prompt: 'Update system prompt',
   get_working_tree_status: 'Get working tree status',

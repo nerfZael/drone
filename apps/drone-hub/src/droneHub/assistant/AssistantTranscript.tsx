@@ -39,22 +39,26 @@ export function AssistantQueuedPromptRow({
   onCancel: () => void;
 }) {
   const failed = prompt.status === 'failed';
+  const running = prompt.status === 'running';
+  const statusLabel = failed ? 'Failed' : running ? 'Working' : 'Queued';
   return (
     <div className="mx-3 flex justify-end">
       <div className={`max-w-[88%] rounded-lg border px-3 py-2 ${failed ? 'border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.07)]' : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.035)]'}`}>
         <div className="mb-1 flex items-center gap-2 text-[9px] font-semibold uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
-          <span className={failed ? 'text-[var(--red)]' : 'text-[var(--muted)]'}>{failed ? 'Failed' : 'Queued'}</span>
+          <span className={failed ? 'text-[var(--red)]' : 'text-[var(--muted)]'}>{statusLabel}</span>
           {prompt.imageCount > 0 ? <span className="text-[var(--muted-dim)]">{prompt.imageCount} image{prompt.imageCount === 1 ? '' : 's'}</span> : null}
-          <button
-            type="button"
-            onClick={onCancel}
-            disabled={cancelling}
-            className="ml-auto rounded px-1 py-0.5 text-[9px] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
-            aria-label={failed ? 'Dismiss failed prompt' : 'Cancel queued prompt'}
-            title={failed ? 'Dismiss failed prompt' : 'Cancel queued prompt'}
-          >
-            {cancelling ? '…' : '×'}
-          </button>
+          {!running ? (
+            <button
+              type="button"
+              onClick={onCancel}
+              disabled={cancelling}
+              className="ml-auto rounded px-1 py-0.5 text-[9px] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
+              aria-label={failed ? 'Dismiss failed prompt' : 'Cancel queued prompt'}
+              title={failed ? 'Dismiss failed prompt' : 'Cancel queued prompt'}
+            >
+              {cancelling ? '…' : '×'}
+            </button>
+          ) : null}
         </div>
         {prompt.prompt ? <div className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-[var(--fg-secondary)]">{prompt.prompt}</div> : null}
         {failed && prompt.error ? <div className="mt-1.5 text-[10px] text-[var(--red)]">{prompt.error}</div> : null}

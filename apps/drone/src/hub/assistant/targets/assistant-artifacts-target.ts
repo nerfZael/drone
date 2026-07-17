@@ -3,7 +3,11 @@ import type { WorkspaceTarget, WorkspaceTargetCall, WorkspaceTargetDescriptor } 
 import {
   createAssistantArtifactTransferAdapter,
   listAssistantArtifactEntries,
+  normalizeAssistantArtifactPath,
+  readAssistantArtifactFile,
   runAssistantArtifactAction,
+  searchAssistantArtifactFiles,
+  statAssistantArtifactPath,
 } from '../../assistant-artifacts';
 
 function textResult(text: string, details: unknown) {
@@ -14,13 +18,33 @@ export class AssistantArtifactsTarget implements WorkspaceTarget {
   readonly descriptor: WorkspaceTargetDescriptor;
   readonly transfer;
 
-  constructor(private readonly threadId: string) {
+  constructor(
+    private readonly threadId: string,
+    private readonly patchEngine: {
+      parse: (patch: string) => Array<
+        | { type: 'add'; path: string; lines: string[] }
+        | { type: 'delete'; path: string }
+        | { type: 'update'; path: string; moveTo?: string; hunks: any[][] }
+      >;
+      applyHunks: (content: string, hunks: any[][], filePath: string) => string;
+    },
+  ) {
     this.descriptor = {
       id: `artifacts:${threadId}`,
       kind: 'artifacts',
-      label: 'Assistant artifacts',
+      label: 'Artifacts',
       rootLabel: `artifacts:${threadId}`,
-      capabilities: ['files.list', 'files.read', 'files.write', 'files.delete', 'directories.create'],
+      capabilities: [
+        'files.list',
+        'files.read',
+        'files.search',
+        'files.write',
+        'files.delete',
+        'files.move',
+        'directories.create',
+        'directories.delete',
+        'patch.apply',
+      ],
     };
     this.transfer = createAssistantArtifactTransferAdapter(threadId);
   }
@@ -52,6 +76,17 @@ export class AssistantArtifactsTarget implements WorkspaceTarget {
         revision: file.revision,
       });
     }
+    if (call.tool === 'search_files') {
+      const result = await searchAssistantArtifactFiles(this.threadId, call.args);
+      const text = result.matches
+        .map((match) =>
+          typeof match === 'string'
+            ? match
+            : `${match.path}:${match.line}:${match.preview}`,
+        )
+        .join('\n');
+      return textResult(text || '(no matches)', result);
+    }
     if (call.tool === 'write_file') {
       const result = await runAssistantArtifactAction(this.threadId, {
         action: 'write',
@@ -75,6 +110,15 @@ export class AssistantArtifactsTarget implements WorkspaceTarget {
       });
       return textResult(`deleted ${String(call.args.path ?? '')}`, result);
     }
+    if (call.tool === 'move_path') {
+      const result = await runAssistantArtifactAction(this.threadId, {
+        action: 'move',
+        from: call.args.from,
+        to: call.args.to,
+        overwrite: call.args.overwrite,
+      });
+      return textResult(`moved ${result.from} -> ${result.to}`, result);
+    }
     if (call.tool === 'create_directory') {
       const result = await runAssistantArtifactAction(this.threadId, {
         action: 'create_directory',
@@ -86,6 +130,114 @@ export class AssistantArtifactsTarget implements WorkspaceTarget {
         recursive: result.recursive,
       });
     }
-    throw new Error(`assistant artifacts target does not support ${call.tool}`);
+    if (call.tool === 'delete_directory') {
+      const result = await runAssistantArtifactAction(this.threadId, {
+        action: 'delete_directory',
+        path: call.args.path,
+        recursive: call.args.recursive,
+      });
+      return textResult(`deleted directory ${result.path}`, result);
+    }
+    if (call.tool === 'apply_patch') {
+      const operations = this.patchEngine.parse(String(call.args.patch ?? ''));
+      const planned: Array<{
+        operation: (typeof operations)[number];
+        path: string;
+        moveTo?: string;
+        content?: string;
+        revision?: string;
+      }> = [];
+      for (const operation of operations) {
+        const operationPath = normalizeAssistantArtifactPath(operation.path);
+        if (operation.type === 'add') {
+          if (await statAssistantArtifactPath(this.threadId, operationPath)) {
+            throw new Error(`file already exists: ${operationPath}`);
+          }
+          planned.push({ operation, path: operationPath, content: operation.lines.join('\n') });
+          continue;
+        }
+        if (operation.type === 'delete') {
+          const current = await readAssistantArtifactFile(this.threadId, operationPath);
+          planned.push({ operation, path: operationPath, revision: current.revision });
+          continue;
+        }
+        const current = await readAssistantArtifactFile(this.threadId, operationPath);
+        if (current.binary) throw new Error(`cannot patch binary artifact: ${operationPath}`);
+        const content =
+          operation.hunks.length > 0
+            ? this.patchEngine.applyHunks(current.content, operation.hunks, operationPath)
+            : current.content;
+        const moveTo = operation.moveTo
+          ? normalizeAssistantArtifactPath(operation.moveTo)
+          : undefined;
+        if (moveTo) {
+          if (await statAssistantArtifactPath(this.threadId, moveTo)) {
+            throw new Error(`move destination exists: ${moveTo}`);
+          }
+        }
+        planned.push({
+          operation,
+          path: operationPath,
+          ...(moveTo ? { moveTo } : {}),
+          content,
+          revision: current.revision,
+        });
+      }
+
+      const changedPaths: string[] = [];
+      for (const item of planned) {
+        const operation = item.operation;
+        if (operation.type === 'add') {
+          await runAssistantArtifactAction(this.threadId, {
+            action: 'write',
+            path: item.path,
+            content: item.content,
+            mode: 'create',
+          });
+          changedPaths.push(item.path);
+        } else if (operation.type === 'delete') {
+          await runAssistantArtifactAction(this.threadId, {
+            action: 'delete',
+            path: item.path,
+            baseRevision: item.revision,
+          });
+          changedPaths.push(item.path);
+        } else {
+          if (item.moveTo) {
+            const separator = item.moveTo.lastIndexOf('/');
+            if (separator > 0) {
+              await runAssistantArtifactAction(this.threadId, {
+                action: 'create_directory',
+                path: item.moveTo.slice(0, separator),
+                recursive: true,
+              });
+            }
+          }
+          await runAssistantArtifactAction(this.threadId, {
+            action: 'write',
+            path: item.path,
+            content: item.content,
+            baseRevision: item.revision,
+            mode: 'overwrite',
+          });
+          changedPaths.push(item.path);
+          if (item.moveTo) {
+            await runAssistantArtifactAction(this.threadId, {
+              action: 'move',
+              from: item.path,
+              to: item.moveTo,
+              overwrite: false,
+            });
+            changedPaths.push(item.moveTo);
+          }
+        }
+      }
+      const uniqueChangedPaths = Array.from(new Set(changedPaths));
+      return textResult(`applied patch\n${uniqueChangedPaths.join('\n')}`, {
+        changedPaths: uniqueChangedPaths,
+        operations: operations.map((operation) => operation.type),
+      });
+    }
+    throw new Error(`artifacts target does not support ${call.tool}`);
   }
 }

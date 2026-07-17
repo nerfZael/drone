@@ -16,7 +16,11 @@ import { ChatReconciliationQueue } from './chat-reconciliation-queue';
 import { createChatReconciliationExecutor } from './chat-reconciliation-executor';
 import { DaemonPromptEventMonitor } from './daemon-prompt-event-monitor';
 import type { PendingPromptState } from './drone-pending-state';
-import { PendingPromptPump } from './pending-prompt-pump';
+import {
+  nativeAssistantOwnsPromptDelivery,
+  pendingPromptKeepsChatBusy,
+  PendingPromptPump,
+} from './pending-prompt-pump';
 import type { PendingPrompt } from './drone-pending-prompts';
 import {
   PromptAutomationManager,
@@ -3058,6 +3062,44 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       });
       if (defer) return;
 
+      if (nativeAssistantOwnsPromptDelivery(agent.kind)) {
+        try {
+          // Native chats and daemon-backed chats share the canonical prompt table,
+          // but the native assistant drain must own the queued -> sending claim.
+          // Claiming here first leaves the assistant drain with no claimable row.
+          await sendPromptToChat({
+            id,
+            droneId,
+            chatName,
+            prompt,
+            attachmentRefs: normalizeChatImageAttachmentRefs(p?.attachments),
+            cwd,
+            waitForDaemonMs: undefined,
+            skipManagedRepoSync:
+              String((p as any)?.automation?.kind ?? '').trim() === 'prompt-loop',
+          });
+        } catch (e: any) {
+          const errorText = e?.message ?? String(e);
+          hubLog('warn', 'queued native prompt enqueue failed', {
+            droneId,
+            chatName,
+            promptId: id,
+            error: String(errorText ?? 'unknown error'),
+          });
+          if (looksLikeTransientPromptEnqueueError(errorText)) {
+            schedulePendingPromptPumpRetry(droneId, chatName);
+          } else {
+            await updatePendingPrompt({
+              droneId,
+              chatName,
+              id,
+              patch: { state: 'failed', error: errorText },
+            });
+          }
+        }
+        return;
+      }
+
       // Transition queued -> sending before we attempt any daemon work.
       // This claim is atomic to prevent a race where a user cancels a queued row.
       const claimed = await claimQueuedPendingPromptForSending({ droneId, chatName, id });
@@ -3215,11 +3257,18 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     if (pending.length === 0) return false;
     const turns = Array.isArray(entry?.turns) ? entry.turns : [];
     const doneIds = new Set(turns.map((t: any) => String(t?.id ?? '').trim()).filter(Boolean));
+    const native = inferChatAgent(entry, null).kind === 'native';
     for (const p of pending) {
       const st = String(p?.state ?? '').trim();
-      if (st === 'failed') continue;
       const id = String(p?.id ?? '').trim();
-      if (!id || !doneIds.has(id)) return true;
+      if (
+        pendingPromptKeepsChatBusy({
+          state: st,
+          hasTurn: Boolean(id && doneIds.has(id)),
+          native,
+        })
+      )
+        return true;
     }
     return false;
   }

@@ -30,13 +30,15 @@ export const ASSISTANT_CHAT_IDLE_PROMPT_LINE_LEGACY =
 export const ASSISTANT_CHAT_IDLE_PROMPT_LINE =
   'When you send drone chat messages and need results later, call subscribe_to_any_chat_idle to resume as soon as one target chat is idle, or subscribe_to_all_chats_idle to resume only after every target chat is idle. These tools return immediately so you can continue other work. If there is nothing else to do, end your turn; the system will resume this thread when the subscription fires.';
 export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
-  'Use list_targets to discover drone workspaces and the private assistant artifacts target. Use set_target to choose the default workspace before a sequence of file operations, or pass target explicitly on an individual workspace tool. When two or more workspaces are available, use transfer_files to copy a file or folder directly between them.';
+  'Use list_targets to discover the workspaces enabled for this chat, including its optional private Artifacts workspace. Use set_target to choose the default workspace before a sequence of file operations, or pass target explicitly on an individual workspace tool. When two or more workspaces are available, use transfer_files to copy a file or folder directly between them.';
 export const ASSISTANT_SINGLE_TARGET_PROMPT_LINE =
   "Filesystem tools are bound to this thread's only workspace. Call them without a target argument; list_targets and set_target are intentionally unavailable.";
+export const ASSISTANT_NO_TARGET_PROMPT_LINE =
+  'No workspace is enabled for this chat. Workspace file, patch, Git, shell, target-selection, and transfer tools are intentionally unavailable until the user enables a workspace.';
 export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'You are the Built-in agent, a concise operator embedded in the app.',
   'You help the user understand available drones and coordinate work across drone chats.',
-  'Use get_current_context when the user asks about the current, active, selected, or open drone/chat, or before acting on phrases like "this drone".',
+  'Drone Hub MCP tools are opt-in. Use Drone Hub tool instructions only for tools enabled in this chat; never assume a missing tool is available.',
   'Use web_search for current information, documentation, news, prices, schedules, or facts that may have changed. Use fetch_content when the user gives a direct URL to read, inspect, summarize, or analyze. Cite source URLs in the final answer.',
   'Use list_drones before referring to specific drones unless the user already provided an exact drone id.',
   'Use list_chats to discover chats and read_chat in pages when you need drone conversation context.',
@@ -79,12 +81,6 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     label: 'List groups',
     category: 'drones',
     description: 'List Drone Hub groups.',
-  },
-  {
-    name: 'get_current_context',
-    label: 'Get current context',
-    category: 'context',
-    description: 'Read the current Drone Hub UI context.',
   },
   {
     name: 'web_search',
@@ -163,7 +159,7 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     name: 'list_targets',
     label: 'List workspace targets',
     category: 'files',
-    description: 'List drone workspaces and private assistant artifacts available to this thread.',
+    description: 'List the workspaces enabled for this chat.',
   },
   {
     name: 'set_target',
@@ -382,12 +378,33 @@ export const ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] =
       : tool,
   );
 export const ASSISTANT_ALL_TOOL_NAMES = ASSISTANT_TOOL_SUMMARIES.map((tool) => tool.name);
-export const ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_ALL_TOOL_NAMES.filter(
+export const ASSISTANT_WORKSPACE_TOOL_CAPABILITIES = {
+  list_files: 'files.list',
+  get_working_tree_status: 'git.status',
+  read_file: 'files.read',
+  search_files: 'files.search',
+  write_file: 'files.write',
+  delete_file: 'files.delete',
+  create_directory: 'directories.create',
+  delete_directory: 'directories.delete',
+  move_path: 'files.move',
+  bash: 'shell.execute',
+  apply_patch: 'patch.apply',
+} as const;
+export const ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_ALL_TOOL_NAMES.filter(
   (name) =>
     name !== 'get_system_prompt' &&
     name !== 'update_system_prompt' &&
     name !== 'set_thinking_level',
 );
+export const ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES = ASSISTANT_TOOL_SUMMARIES.filter(
+  (tool) => tool.group?.kind === 'mcp' && tool.group.id === 'drone-hub',
+).map((tool) => tool.name);
+const ASSISTANT_DRONE_HUB_MCP_TOOL_NAME_SET = new Set(ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES);
+export const ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES =
+  ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES.filter(
+    (name) => !ASSISTANT_DRONE_HUB_MCP_TOOL_NAME_SET.has(name),
+  );
 export const ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES = [
   'transfer_files',
   'rename_drones',

@@ -1,12 +1,14 @@
 import React from 'react';
 
 import { IconWrench } from '../app/icons';
+import { IconFolder } from '../icons';
 
 import type {
   AssistantScopeMode,
   AssistantSystemPromptSettings,
   AssistantThreadSystemPromptSettings,
   AssistantToolSummary,
+  AssistantWorkspaceSummary,
 } from './assistant-types';
 
 export function ScopeModeControl({
@@ -156,6 +158,79 @@ export function AssistantToolsPanel({
           );
         })}
       </div>
+    </div>
+  );
+}
+
+export function AssistantWorkspacesPanel({
+  workspaces,
+  enabledWorkspaceIds,
+  disabled,
+  onToggleWorkspace,
+  onEnableAll,
+  onDisableAll,
+  onOpenRemoteAccess,
+  onClose,
+}: {
+  workspaces: AssistantWorkspaceSummary[];
+  enabledWorkspaceIds: string[];
+  disabled: boolean;
+  onToggleWorkspace: (workspaceId: string, enabled: boolean) => void;
+  onEnableAll: () => void;
+  onDisableAll: () => void;
+  onOpenRemoteAccess: () => void;
+  onClose: () => void;
+}) {
+  const panelRef = React.useRef<HTMLDivElement>(null);
+  React.useEffect(() => {
+    const dismiss = (event: PointerEvent) => {
+      if ((event.target as Element | null)?.closest?.('[data-assistant-workspaces-trigger]')) return;
+      if (!panelRef.current?.contains(event.target as Node)) onClose();
+    };
+    window.addEventListener('pointerdown', dismiss);
+    return () => window.removeEventListener('pointerdown', dismiss);
+  }, [onClose]);
+  const enabled = new Set(enabledWorkspaceIds);
+
+  return (
+    <div ref={panelRef} className="absolute right-2 top-10 z-30 w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_rgba(0,0,0,.48)]">
+      <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <IconFolder className="h-3.5 w-3.5 text-[var(--muted)]" />
+          <div className="text-[12px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>Workspaces</div>
+        </div>
+        <div className="text-[10px] tabular-nums text-[var(--muted-dim)]">{enabledWorkspaceIds.length} / {workspaces.length}</div>
+      </div>
+      <div className="flex items-center border-b border-[var(--border-subtle)] px-3 py-1.5">
+        <div className="inline-flex overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]" role="group" aria-label="Set all workspaces">
+          <button type="button" onClick={onEnableAll} disabled={disabled || enabledWorkspaceIds.length === workspaces.length} className="h-5 px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35">All</button>
+          <button type="button" onClick={onDisableAll} disabled={disabled || enabledWorkspaceIds.length === 0} className="h-5 border-l border-[var(--border-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-35">None</button>
+        </div>
+      </div>
+      <div className="max-h-[min(520px,calc(100vh-190px))] overflow-y-auto p-2">
+        <div className="space-y-1">
+          {workspaces.map((workspace) => {
+            const checked = enabled.has(workspace.id);
+            return (
+              <label key={workspace.id} className={`flex cursor-pointer items-start gap-2 rounded border border-[var(--border-subtle)] px-2 py-1.5 transition-colors ${checked ? 'bg-[rgba(255,255,255,.055)]' : 'bg-[rgba(255,255,255,.02)] hover:bg-[var(--hover)]'}`}>
+                <input type="checkbox" checked={checked} disabled={disabled} onChange={(event) => onToggleWorkspace(workspace.id, event.target.checked)} className="mt-0.5 h-3.5 w-3.5 flex-shrink-0 accent-[var(--accent)]" />
+                <span className="min-w-0 flex-1">
+                  <span className="flex items-center gap-2">
+                    <span className="block truncate text-[11px] font-medium text-[var(--fg-secondary)]">{workspace.label}</span>
+                    <span className="text-[8px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]">{workspace.kind === 'artifacts' ? 'Private' : workspace.capabilities.join(' · ')}</span>
+                  </span>
+                  <span className="mt-0.5 block text-[10px] leading-snug text-[var(--muted-dim)]">{workspace.description}</span>
+                </span>
+              </label>
+            );
+          })}
+          {workspaces.length === 0 ? <div className="px-2 py-5 text-center text-[10px] text-[var(--muted-dim)]">No local workspaces are available.</div> : null}
+        </div>
+      </div>
+      <button type="button" onClick={onOpenRemoteAccess} className="flex w-full items-center justify-between border-t border-[var(--border-subtle)] px-3 py-2 text-left text-[10px] font-semibold text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]">
+        <span>Connected-device workspaces</span>
+        <span aria-hidden="true">→</span>
+      </button>
     </div>
   );
 }

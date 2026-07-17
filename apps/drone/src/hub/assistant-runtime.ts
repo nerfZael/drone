@@ -5,6 +5,7 @@ import { normalizeDroneRuntime } from '../host/runtime';
 import { HubAssistantService, type AssistantDroneSummary } from './assistant';
 import { BlipAssistantHost } from './assistant/blip-assistant-host';
 import { loadBlipMcp, loadBlipTools } from './assistant/blip-runtime-loader';
+import { ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES } from './assistant/assistant-config';
 import { createInProcessDroneHubMcpClient } from './assistant/in-process-drone-hub-mcp';
 import { AssistantArtifactsTarget } from './assistant/targets/assistant-artifacts-target';
 import { DroneWorkspaceTarget } from './assistant/targets/workspace-targets';
@@ -21,6 +22,7 @@ export interface AssistantRuntimeDependencies {
   deviceMesh: any;
   normalizeDroneIdentity: (value: unknown) => string;
   nowIso: () => string;
+  onNativePromptQueueChanged?: (owner: { droneId: string; chatName: string }) => void;
   summarizeDroneActivity: (entry: any) => {
     lastActivityAt: string | null;
     lastMessageAt: string | null;
@@ -35,6 +37,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     deviceMesh,
     normalizeDroneIdentity,
     nowIso,
+    onNativePromptQueueChanged,
     summarizeDroneActivity,
   } = deps;
   const {
@@ -247,10 +250,19 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
               applyHunks: blipTools.applyPatchHunks,
             }),
         });
-      });
-      const artifactTarget = new AssistantArtifactsTarget(threadId);
+      }).filter((target) => assistantService.workspaceIsEnabled(threadId, target.descriptor.id));
+      const artifactTarget = assistantService.workspaceIsEnabled(threadId, `artifacts:${threadId}`)
+        ? new AssistantArtifactsTarget(threadId, {
+            parse: blipTools.parsePatch,
+            applyHunks: blipTools.applyPatchHunks,
+          })
+        : null;
       const remoteWorkspaceTargets = await deviceMesh.remoteWorkspaceTargets(threadId);
-      const targets = [...droneTargets, artifactTarget, ...remoteWorkspaceTargets];
+      const targets = [
+        ...droneTargets,
+        ...(artifactTarget ? [artifactTarget] : []),
+        ...remoteWorkspaceTargets,
+      ];
       const preferredDroneId = Array.isArray(thread.accessScope?.droneIds)
         ? thread.accessScope.droneIds[0]
         : '';
@@ -259,13 +271,20 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           ?.descriptor.id ?? targets[0]?.descriptor.id;
       const targetCatalog = new blipTools.WorkspaceTargetCatalog(targets, activeTargetId);
       const enabledTools = new Set(Array.isArray(thread.enabledTools) ? thread.enabledTools : []);
+      const supportedWorkspaceCapabilities = new Set(
+        targets.flatMap((target) => target.descriptor.capabilities),
+      );
       const workspaceTools = blipTools
         .createWorkspaceTargetTools({
           profile: 'no-shell-workspace-write',
           includeShell: true,
           catalog: targetCatalog,
         })
-        .filter((tool) => enabledTools.has(tool.name));
+        .filter((tool) => {
+          if (!enabledTools.has(tool.name)) return false;
+          const capability = blipTools.capabilityForWorkspaceTool(tool.name);
+          return !capability || supportedWorkspaceCapabilities.has(capability);
+        });
       const targetTools = blipTools
         .createWorkspaceTargetSelectionTools(targetCatalog)
         .filter((tool) => enabledTools.has(tool.name));
@@ -273,19 +292,6 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         .createWorkspaceTransferTools(targetCatalog)
         .filter((tool) => enabledTools.has(tool.name));
       const tools = [
-        {
-          name: 'get_current_context',
-          label: 'Get current context',
-          description: 'Read the current Drone Hub UI context and this thread access scope.',
-          parameters: { type: 'object', properties: {}, additionalProperties: false },
-          execute: async () => {
-            const context = await assistantService.currentContext(threadId);
-            return {
-              content: [{ type: 'text' as const, text: JSON.stringify(context, null, 2) }],
-              details: context,
-            };
-          },
-        },
         {
           name: 'get_system_prompt',
           label: 'Get system prompt',
@@ -417,7 +423,11 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       });
       const enabledMcpProvider = {
         id: mcpProvider.id,
-        promptSections: mcpProvider.promptSections?.bind(mcpProvider),
+        promptSections: ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES.some((name) =>
+          enabledTools.has(name),
+        )
+          ? mcpProvider.promptSections?.bind(mcpProvider)
+          : () => [],
         async load(context: any) {
           return (await mcpProvider.load(context)).filter((tool) => {
             const unqualified = tool.name.replace(/^drone_hub__/, '');
@@ -445,6 +455,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         promptDeliveryMode: thread.promptDeliveryMode,
         systemPrompt: assistantService.resolvedSystemPrompt(threadId, {
           multipleWorkspaceTargets: targetCatalog.size() > 1,
+          workspaceTargetCount: targetCatalog.size(),
         }),
         tools,
         toolProviders: [enabledMcpProvider],
@@ -569,6 +580,11 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     | string
     | { text: string; images: Array<{ type: 'image'; data: string; mimeType: string }> };
   const assistantPromptDrains = new Map<string, Promise<void>>();
+  const notifyNativePromptQueueChanged = async (threadId: string): Promise<void> => {
+    if (!onNativePromptQueueChanged) return;
+    const owner = await assistantService.nativeThreadOwner(threadId);
+    if (owner) onNativePromptQueueChanged(owner);
+  };
   const queuedPromptInput = (queued: any): AssistantPromptInput => {
     const images = Array.isArray(queued?.promptImages) ? queued.promptImages : [];
     return images.length > 0
@@ -586,12 +602,15 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         while (true) {
           const queued = await assistantService.claimNextQueuedPrompt(threadId);
           if (!queued) break;
+          await notifyNativePromptQueueChanged(threadId);
           try {
             await blipAssistantHost.waitForThreadIdle(threadId);
             await blipAssistantHost.promptThread(threadId, queuedPromptInput(queued));
             await assistantService.completeQueuedPrompt(threadId, queued.id);
           } catch (error) {
             await assistantService.failQueuedPrompt(threadId, queued.id, error);
+          } finally {
+            await notifyNativePromptQueueChanged(threadId);
           }
         }
       })
@@ -634,15 +653,23 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       prompt: input.prompt,
       promptImages: input.promptImages,
     });
+    await notifyNativePromptQueueChanged(input.threadId);
     if (steerImmediately) {
       const claimed = await assistantService.claimQueuedPrompt(input.threadId, queued.id, {
         allowConcurrent: true,
       });
       if (!claimed) throw new Error('built-in prompt could not be claimed');
+      await notifyNativePromptQueueChanged(input.threadId);
       void blipAssistantHost
         .promptThread(input.threadId, promptInput)
-        .then(() => assistantService.completeQueuedPrompt(input.threadId, queued.id))
-        .catch((error) => assistantService.failQueuedPrompt(input.threadId, queued.id, error));
+        .then(async () => {
+          await assistantService.completeQueuedPrompt(input.threadId, queued.id);
+          await notifyNativePromptQueueChanged(input.threadId);
+        })
+        .catch(async (error) => {
+          await assistantService.failQueuedPrompt(input.threadId, queued.id, error);
+          await notifyNativePromptQueueChanged(input.threadId);
+        });
       return queued;
     }
     const drain = startAssistantPromptDrain(input.threadId);

@@ -13,6 +13,14 @@ export type NativeChatAccessScope = {
   updatedAt: string;
 };
 
+export type NativeAgentWorkspaceSummary = {
+  id: string;
+  label: string;
+  kind: 'drone' | 'artifacts';
+  description: string;
+  capabilities: Array<'read' | 'write' | 'execute'>;
+};
+
 export type NativeQueuedPrompt = {
   id: string;
   prompt: string;
@@ -36,6 +44,8 @@ export type NativeChatThread = {
   systemPrompt: string;
   systemPromptUpdatedAt: string | null;
   enabledTools: string[];
+  /** Missing only on chats created before workspace access became configurable. */
+  enabledWorkspaceIds?: string[];
   accessScope: NativeChatAccessScope;
   autoApprove: boolean;
   promptDeliveryMode: NativePromptDeliveryMode;
@@ -86,6 +96,7 @@ export type NativeChatSnapshot = {
   defaultModel: NativeAgentDefaultModel;
   defaultEnabledTools: string[];
   availableTools: NativeAgentToolSummary[];
+  availableWorkspaces: NativeAgentWorkspaceSummary[];
   accessScope: NativeChatAccessScope;
   streamingMessage?: AssistantMessage;
   streamingMessages?: AssistantMessage[];

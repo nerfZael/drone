@@ -431,6 +431,9 @@ export function registerAssistantRoutes(
         const artifactUploads = attachments.filter((item: any) => item?.disposition !== 'prompt');
         const uploaded = await saveAssistantArtifactUploads(params.threadId, artifactUploads);
         if (uploaded.length > 0) {
+          if (await assistantService.ensureArtifactsWorkspaceEnabled(params.threadId)) {
+            blipAssistantHost.invalidateThread(params.threadId);
+          }
           const references = uploaded.map((file) => `- ${file.path}`).join('\n');
           prompt = `${prompt}${prompt ? '\n\n' : ''}Attached files:\n${references}`;
         }

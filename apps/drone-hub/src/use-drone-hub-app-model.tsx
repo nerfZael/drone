@@ -658,7 +658,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     droneById,
     requestJson,
   });
-
   const chatEndRef = React.useRef<HTMLDivElement | null>(null);
   const chatUiModeRef = React.useRef<'transcript' | 'cli'>('transcript');
   const {
@@ -2228,7 +2227,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const chatRuntimeMetadataAvailable = Boolean(
     effectiveChatInfo &&
       currentDrone &&
-      effectiveChatInfo.name === currentDrone.name &&
       effectiveChatInfo.chat === (selectedChat || 'default'),
   );
   const builtinAgentOptions: Array<{ key: string; label: string; agent: ChatAgentConfig }> = BUILTIN_AGENT_OPTIONS;

@@ -12,6 +12,7 @@ const {
   saveAssistantState,
 } = require('../../dist/host/assistant-store.js');
 const { requireHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
+const { getPromptQueueRepository } = require('../../dist/host/prompt-queue-repository.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 const { HubAssistantService } = require('../../dist/hub/assistant.js');
 
@@ -233,6 +234,40 @@ describe('assistant SQLite store', () => {
       (await service.threadSnapshot(created.chatId)).threads[0].queuedPrompts.length,
       32,
     );
+  });
+
+  test('adopts a queued startup prompt without replacing its canonical chat row', async () => {
+    useTempDataDir('native-startup-queue');
+    const service = assistantService();
+    const created = await service.ensureNativeThread({
+      id: 'native-startup-chat',
+      droneId: 'drone-1',
+      chatName: 'default',
+      title: 'default',
+    });
+    const queue = getPromptQueueRepository();
+    await queue.enqueue({
+      droneId: 'drone-1',
+      chatName: 'default',
+      prompt: {
+        id: 'startup-prompt',
+        at: '2026-07-17T20:55:44.565Z',
+        prompt: 'What tools do you have?',
+        state: 'queued',
+      },
+    });
+
+    const adopted = await service.enqueueThreadPrompt(created.chatId, {
+      id: 'startup-prompt',
+      prompt: 'What tools do you have?',
+    });
+    assert.equal(adopted.id, 'startup-prompt');
+    assert.equal(adopted.status, 'queued');
+    assert.equal((await service.threadSnapshot(created.chatId)).threads[0].queuedPrompts[0].prompt, 'What tools do you have?');
+
+    const claimed = await service.claimNextQueuedPrompt(created.chatId);
+    assert.equal(claimed.id, 'startup-prompt');
+    assert.equal(claimed.status, 'running');
   });
 
   test('switches canonical databases when DRONE_DATA_DIR changes', async () => {

@@ -38,6 +38,7 @@ import {
 import { DroneWorkspaceHeaderFrame } from './DroneWorkspaceHeaderFrame';
 import { type RightPanelTab } from './app-config';
 import type { AgentSuggestionState, ChatModelOption, StartupSeedState, TldrState } from './app-types';
+import { chatConfigResolutionState } from './chat-selection-model';
 import type { RepoOpErrorMeta } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
 import { requestChangesPullRequest } from '../changes/navigation';
@@ -574,6 +575,18 @@ export function SelectedDroneWorkspace({
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
   const nativeChatActive = currentAgentKey === 'native' && !currentChatIsDraft;
+  const chatConfigResolution = chatConfigResolutionState({
+    currentChatIsDraft,
+    hasChats,
+    metadataAvailable: chatRuntimeMetadataAvailable,
+    loading: loadingChatInfo,
+  });
+  const chatConfigPending = chatConfigResolution === 'loading';
+  const chatConfigFailed = chatConfigResolution === 'unavailable';
+  const genericChatActive =
+    !nativeChatActive &&
+    !chatConfigFailed &&
+    (currentChatIsDraft || !hasChats || chatRuntimeMetadataAvailable);
   const [nativeHistoryObserved, setNativeHistoryObserved] = React.useState(false);
   React.useEffect(() => {
     setNativeHistoryObserved(false);
@@ -2089,7 +2102,15 @@ export function SelectedDroneWorkspace({
             aria-hidden={fleetDropHintVisible}
           >
           <div className="flex-1 min-h-0 relative">
-            {nativeChatActive ? (
+            {chatConfigPending ? (
+              <TranscriptSkeleton message="Loading chat..." />
+            ) : chatConfigFailed ? (
+              <EmptyState
+                icon={<IconChat className="h-8 w-8 text-[var(--muted)]" />}
+                title="Chat unavailable"
+                description={chatInfoError || 'Unable to load this chat.'}
+              />
+            ) : nativeChatActive ? (
               <AssistantDock
                 key={`${currentDrone.id}:${activeChatName}`}
                 nativeChat={{ droneId: currentDrone.id, chatName: activeChatName }}
@@ -2307,9 +2328,9 @@ export function SelectedDroneWorkspace({
             )}
           </div>
 
-          {!nativeChatActive && chatUiMode === 'cli' ? <CliPendingPromptStrip items={visibleCliPendingPrompts} /> : null}
+          {genericChatActive && chatUiMode === 'cli' ? <CliPendingPromptStrip items={visibleCliPendingPrompts} /> : null}
 
-          {!nativeChatActive && chatUiMode === 'transcript' && agentSuggestionEnabled && latestAgentSuggestionTarget && showLatestAgentSuggestion ? (
+          {genericChatActive && chatUiMode === 'transcript' && agentSuggestionEnabled && latestAgentSuggestionTarget && showLatestAgentSuggestion ? (
             <div className="mx-4 mb-3 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-3 py-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
@@ -2393,7 +2414,7 @@ export function SelectedDroneWorkspace({
             </div>
           ) : null}
 
-          {!nativeChatActive ? <ChatInput
+          {genericChatActive ? <ChatInput
             resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
             droneName={currentDrone.name}
             focusTargetId="primary-chat"

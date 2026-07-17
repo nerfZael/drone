@@ -36,6 +36,7 @@ import { AssistantWorkspaceAccessView } from './AssistantWorkspaceAccessView';
 import {
   AssistantSystemPromptModal,
   AssistantToolsPanel,
+  AssistantWorkspacesPanel,
   ScopeModeControl,
 } from './AssistantSettingsPanels';
 import {
@@ -56,6 +57,8 @@ import {
   formatUpdatedAt,
 } from './assistant-formatters';
 import {
+  assistantHasEnabledMcpGroup,
+  assistantPromptHasVisibleUserMessage,
   compactPreview,
   isChatIdleToolName,
   lastAssistantContentBlock,
@@ -105,6 +108,7 @@ import type {
   AssistantThreadStatus,
   AssistantThreadSystemPromptSettings,
   AssistantToolSummary,
+  AssistantWorkspaceSummary,
   PendingAssistantScopeSave,
 } from './assistant-types';
 const ASSISTANT_FILES_OPEN_STORAGE_KEY = 'droneHub.assistant.filesOpen';
@@ -113,6 +117,7 @@ const ASSISTANT_SCROLL_BOTTOM_THRESHOLD_PX = 48;
 
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
 const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
+const EMPTY_ASSISTANT_WORKSPACES: AssistantWorkspaceSummary[] = [];
 
 function readInitialFilesOpen(): boolean {
   if (typeof window === 'undefined') return false;
@@ -315,9 +320,11 @@ export function AssistantDock({
   const [assistantStopBusy, setAssistantStopBusy] = React.useState(false);
   const [defaultModelBusy, setDefaultModelBusy] = React.useState(false);
   const [toolsPanelOpen, setToolsPanelOpen] = React.useState(false);
+  const [workspacesPanelOpen, setWorkspacesPanelOpen] = React.useState(false);
   const [settingsOpen, setSettingsOpen] = React.useState(false);
   const [workspaceAccessOpen, setWorkspaceAccessOpen] = React.useState(false);
   const [enabledToolDraftNames, setEnabledToolDraftNames] = React.useState<string[]>([]);
+  const [enabledWorkspaceDraftIds, setEnabledWorkspaceDraftIds] = React.useState<string[]>([]);
   const [defaultEnabledToolDraftNames, setDefaultEnabledToolDraftNames] = React.useState<string[]>([]);
   const [defaultToolsBusy, setDefaultToolsBusy] = React.useState(false);
   const [systemPromptOpen, setSystemPromptOpen] = React.useState(false);
@@ -352,6 +359,7 @@ export function AssistantDock({
   const updateThreadRequestRef = React.useRef(0);
   const snapshotRequestSeqRef = React.useRef(0);
   const enabledToolDraftNamesRef = React.useRef<string[]>([]);
+  const enabledWorkspaceDraftIdsRef = React.useRef<string[]>([]);
   const defaultEnabledToolDraftNamesRef = React.useRef<string[]>([]);
   const nativeChangeRefreshRef = React.useRef<() => void>(() => {});
   const { isOver: scopeDropIsOver, setNodeRef: setScopeDropNodeRef } = useDroppable({
@@ -432,8 +440,13 @@ export function AssistantDock({
     [activeThread?.id, snapshot?.pendingApprovals],
   );
   const visibleQueuedPrompts = React.useMemo(
-    () => (activeThread?.queuedPrompts ?? []).filter((prompt) => prompt.status !== 'running'),
-    [activeThread?.queuedPrompts],
+    () =>
+      (activeThread?.queuedPrompts ?? []).filter(
+        (prompt) =>
+          prompt.status !== 'running' ||
+          !assistantPromptHasVisibleUserMessage(blipSession.messages, prompt),
+      ),
+    [activeThread?.queuedPrompts, blipSession.messages],
   );
   const running =
     blipSession.running ||
@@ -968,8 +981,8 @@ export function AssistantDock({
     inputRef.current?.focus();
   }, [running]);
 
-  const updateThread = React.useCallback(async (patch: Partial<Pick<AssistantThread, 'title' | 'model' | 'provider' | 'thinkingLevel' | 'autoApprove' | 'promptDeliveryMode' | 'enabledTools'>>) => {
-    if (!activeThread) return;
+  const updateThread = React.useCallback(async (patch: Partial<Pick<AssistantThread, 'title' | 'model' | 'provider' | 'thinkingLevel' | 'autoApprove' | 'promptDeliveryMode' | 'enabledTools' | 'enabledWorkspaceIds'>>) => {
+    if (!activeThread) return false;
     const requestId = updateThreadRequestRef.current + 1;
     updateThreadRequestRef.current = requestId;
     const requestSeq = beginSnapshotMutation();
@@ -980,8 +993,10 @@ export function AssistantDock({
         body: JSON.stringify(patch),
       });
       if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq)) applySnapshot(next);
+      return true;
     } catch (err: any) {
       if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
+      return false;
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
@@ -1306,6 +1321,27 @@ export function AssistantDock({
   }, [activeThread, beginSnapshotMutation, snapshot?.defaultModel, snapshotMutationCurrent]);
 
   const availableTools = snapshot?.availableTools ?? EMPTY_ASSISTANT_TOOL_SUMMARIES;
+  const availableWorkspaces = snapshot?.availableWorkspaces ?? EMPTY_ASSISTANT_WORKSPACES;
+  const availableWorkspaceIdsKey = React.useMemo(
+    () => availableWorkspaces.map((workspace) => workspace.id).join('\u0000'),
+    [availableWorkspaces],
+  );
+  const snapshotEnabledWorkspaceIds = React.useMemo(() => {
+    const availableIds = availableWorkspaces.map((workspace) => workspace.id);
+    if (!activeThread) return [];
+    const configured = Array.isArray(activeThread.enabledWorkspaceIds)
+      ? activeThread.enabledWorkspaceIds
+      : availableIds;
+    return configured.filter((workspaceId) => availableIds.includes(workspaceId));
+  }, [activeThread, availableWorkspaces]);
+
+  React.useEffect(() => {
+    const currentKey = enabledWorkspaceDraftIdsRef.current.join('\u0000');
+    const nextKey = snapshotEnabledWorkspaceIds.join('\u0000');
+    if (currentKey === nextKey) return;
+    enabledWorkspaceDraftIdsRef.current = snapshotEnabledWorkspaceIds;
+    setEnabledWorkspaceDraftIds(snapshotEnabledWorkspaceIds);
+  }, [activeThreadId, availableWorkspaceIdsKey, snapshotEnabledWorkspaceIds]);
   const snapshotEnabledToolNames = React.useMemo(() => {
     const toolNames = availableTools.map((tool) => tool.name);
     if (!activeThread) return [];
@@ -1338,6 +1374,10 @@ export function AssistantDock({
     const available = new Set(availableTools.map((tool) => tool.name));
     return enabledToolDraftNames.filter((name) => available.has(name));
   }, [availableTools, enabledToolDraftNames]);
+  const showExistingDroneAccess = React.useMemo(
+    () => assistantHasEnabledMcpGroup(availableTools, enabledToolNames, 'drone-hub'),
+    [availableTools, enabledToolNames],
+  );
 
   const updateEnabledTools = React.useCallback(
     (nextTools: string[]) => {
@@ -1372,6 +1412,43 @@ export function AssistantDock({
       updateEnabledTools(ordered);
     },
     [availableTools, updateEnabledTools],
+  );
+
+  const updateEnabledWorkspaces = React.useCallback(
+    (nextWorkspaceIds: string[]) => {
+      enabledWorkspaceDraftIdsRef.current = nextWorkspaceIds;
+      setEnabledWorkspaceDraftIds(nextWorkspaceIds);
+      const available = new Set(availableWorkspaces.map((workspace) => workspace.id));
+      const unavailableConfigured = (activeThread?.enabledWorkspaceIds ?? []).filter(
+        (workspaceId) => !available.has(workspaceId),
+      );
+      const attemptedKey = nextWorkspaceIds.join('\u0000');
+      void updateThread({
+        enabledWorkspaceIds: [...nextWorkspaceIds, ...unavailableConfigured],
+      }).then((saved) => {
+        if (saved || enabledWorkspaceDraftIdsRef.current.join('\u0000') !== attemptedKey) return;
+        enabledWorkspaceDraftIdsRef.current = snapshotEnabledWorkspaceIds;
+        setEnabledWorkspaceDraftIds(snapshotEnabledWorkspaceIds);
+      });
+    },
+    [
+      activeThread?.enabledWorkspaceIds,
+      availableWorkspaces,
+      snapshotEnabledWorkspaceIds,
+      updateThread,
+    ],
+  );
+
+  const toggleAssistantWorkspace = React.useCallback(
+    (workspaceId: string, enabled: boolean) => {
+      const current = new Set(enabledWorkspaceDraftIdsRef.current);
+      if (enabled) current.add(workspaceId);
+      else current.delete(workspaceId);
+      updateEnabledWorkspaces(
+        availableWorkspaces.map((workspace) => workspace.id).filter((id) => current.has(id)),
+      );
+    },
+    [availableWorkspaces, updateEnabledWorkspaces],
   );
 
   const updateDefaultEnabledTools = React.useCallback(
@@ -1543,6 +1620,7 @@ export function AssistantDock({
             type="button"
             onClick={() => {
               setWorkspaceAccessOpen(false);
+              setWorkspacesPanelOpen(false);
               setFilesOpen((value) => !value);
             }}
             aria-pressed={filesOpen}
@@ -1563,26 +1641,6 @@ export function AssistantDock({
           </button>
           <button
             type="button"
-            onClick={() => {
-              setFilesOpen(false);
-              setToolsPanelOpen(false);
-              setSettingsOpen(false);
-              setWorkspaceAccessOpen((value) => !value);
-            }}
-            disabled={!activeThread}
-            aria-pressed={workspaceAccessOpen}
-            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
-              workspaceAccessOpen
-                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
-            }`}
-            title="Configure workspace access"
-            aria-label="Configure workspace access"
-          >
-            <IconFolder className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
             onClick={openSystemPromptEditor}
             className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg)]"
             title="Edit system prompt"
@@ -1592,10 +1650,33 @@ export function AssistantDock({
           </button>
           <button
             type="button"
+            data-assistant-workspaces-trigger
+            onClick={() => {
+              setFilesOpen(false);
+              setToolsPanelOpen(false);
+              setSettingsOpen(false);
+              setWorkspaceAccessOpen(false);
+              setWorkspacesPanelOpen((value) => !value);
+            }}
+            disabled={!activeThread}
+            aria-pressed={workspacesPanelOpen || workspaceAccessOpen}
+            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
+              workspacesPanelOpen || workspaceAccessOpen
+                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
+            }`}
+            title="Configure chat workspaces"
+            aria-label="Configure chat workspaces"
+          >
+            <IconFolder className="h-3.5 w-3.5" />
+          </button>
+          <button
+            type="button"
             data-assistant-tools-trigger
             onClick={() => {
               setSettingsOpen(false);
               setWorkspaceAccessOpen(false);
+              setWorkspacesPanelOpen(false);
               setToolsPanelOpen((value) => !value);
             }}
             disabled={!activeThread}
@@ -1615,6 +1696,7 @@ export function AssistantDock({
             onClick={() => {
               setToolsPanelOpen(false);
               setWorkspaceAccessOpen(false);
+              setWorkspacesPanelOpen(false);
               setSettingsOpen((value) => !value);
             }}
             aria-pressed={settingsOpen}
@@ -1655,6 +1737,21 @@ export function AssistantDock({
               onClose={() => setToolsPanelOpen(false)}
             />
           ) : null}
+          {workspacesPanelOpen ? (
+            <AssistantWorkspacesPanel
+              workspaces={availableWorkspaces}
+              enabledWorkspaceIds={enabledWorkspaceDraftIds}
+              disabled={!activeThread}
+              onToggleWorkspace={toggleAssistantWorkspace}
+              onEnableAll={() => updateEnabledWorkspaces(availableWorkspaces.map((workspace) => workspace.id))}
+              onDisableAll={() => updateEnabledWorkspaces([])}
+              onOpenRemoteAccess={() => {
+                setWorkspacesPanelOpen(false);
+                setWorkspaceAccessOpen(true);
+              }}
+              onClose={() => setWorkspacesPanelOpen(false)}
+            />
+          ) : null}
         </div>
 
       {settingsOpen ? (
@@ -1693,7 +1790,7 @@ export function AssistantDock({
         </div>
       ) : null}
 
-      <div
+      {showExistingDroneAccess ? <div
         ref={setScopeDropNodeRef}
         className={`flex-shrink-0 border-b border-[var(--border)] px-2 py-1.5 transition-colors ${
           scopeDropActive ? 'bg-[var(--accent-subtle)]' : 'bg-[rgba(0,0,0,.08)]'
@@ -1738,7 +1835,7 @@ export function AssistantDock({
             )}
           </div>
         </div>
-      </div>
+      </div> : null}
 
       {filesOpen ? (
         <AssistantThreadFilesView

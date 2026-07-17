@@ -1,8 +1,13 @@
 import { describe, expect, test } from 'bun:test';
 
-import { loadAssistantState } from '../src/host/assistant-store';
+import { loadAssistantState, saveAssistantState } from '../src/host/assistant-store';
 import { HubAssistantService } from '../src/hub/assistant';
-import { ASSISTANT_TOOL_SUMMARIES } from '../src/hub/assistant/assistant-config';
+import {
+  ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES,
+  ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES,
+  ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES,
+  ASSISTANT_TOOL_SUMMARIES,
+} from '../src/hub/assistant/assistant-config';
 import { ensureTestNativeChat } from './native-chat-test-helpers';
 import { withTempDroneDataDir } from './test-helpers';
 
@@ -30,29 +35,105 @@ describe('assistant system prompt settings', () => {
   test('advertises the complete grouped tool catalog without legacy aliases', () => {
     const names = ASSISTANT_TOOL_SUMMARIES.map((tool) => tool.name);
     for (const name of ['list_targets', 'set_target', 'get_working_tree_status', 'delete_file', 'create_directory', 'delete_directory', 'move_path']) expect(names).toContain(name);
-    for (const name of ['assistant_files', 'find_files', 'list_changed_files', 'message_drone', 'read_chat_messages']) expect(names).not.toContain(name);
+    for (const name of ['assistant_files', 'find_files', 'list_changed_files', 'message_drone', 'read_chat_messages', 'get_current_context']) expect(names).not.toContain(name);
     expect(ASSISTANT_TOOL_SUMMARIES.find((tool) => tool.name === 'send_message')?.group).toEqual({ kind: 'mcp', id: 'drone-hub', label: 'Drone Hub' });
     expect(ASSISTANT_TOOL_SUMMARIES.find((tool) => tool.name === 'read_file')?.group).toBeUndefined();
   });
 
-  test('exposes target selection only when a thread has multiple workspaces', async () => {
-    await withTempDroneDataDir('assistant-target-tool-cardinality-', async () => {
-      const artifactsOnly = makeAssistantService();
-      const single = await ensureTestNativeChat(artifactsOnly, { chatName: 'artifacts only' });
-      expect(single.availableTools.map((tool) => tool.name)).not.toContain('set_target');
-      expect(single.availableTools.map((tool) => tool.name)).not.toContain('transfer_files');
-      expect(artifactsOnly.resolvedSystemPrompt(single.chatId, { multipleWorkspaceTargets: false })).toContain('only workspace');
+  test('keeps Drone Hub MCP tools available but disabled by default for new chats', async () => {
+    await withTempDroneDataDir('assistant-mcp-tools-opt-in-', async () => {
+      const service = makeAssistantService();
+      const snapshot = await ensureTestNativeChat(service, { chatName: 'mcp opt in' });
+      const available = snapshot.availableTools.map((tool) => tool.name);
+      expect(available).toEqual(expect.arrayContaining(ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES));
+      expect(snapshot.defaultEnabledTools).toEqual(ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES);
+      expect(snapshot.threads[0]?.enabledTools).not.toEqual(
+        expect.arrayContaining(ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES),
+      );
+    });
+  });
 
+  test('migrates old defaults without changing existing chat tool selections', async () => {
+    await withTempDroneDataDir('assistant-mcp-default-migration-', async () => {
+      const initial = makeAssistantService();
+      const existing = await ensureTestNativeChat(initial, { chatName: 'existing mcp chat' });
+      const implicit = await ensureTestNativeChat(initial, { chatName: 'implicit mcp chat' });
+      const stored = await loadAssistantState();
+      const existingStored = stored?.threads?.find((thread) => thread.id === existing.chatId);
+      const implicitStored = stored?.threads?.find((thread) => thread.id === implicit.chatId);
+      if (!stored || !existingStored || !implicitStored)
+        throw new Error('missing stored assistant thread');
+      stored.defaultEnabledTools = [...ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES];
+      existingStored.enabledTools = [...ASSISTANT_PRE_MCP_OPT_IN_DEFAULT_ENABLED_TOOL_NAMES];
+      delete implicitStored.enabledTools;
+      delete stored.droneHubMcpDefaultOptInMigrationApplied;
+      await saveAssistantState(stored);
+
+      const reloaded = makeAssistantService();
+      const existingSnapshot = await reloaded.threadSnapshot(existing.chatId);
+      expect(existingSnapshot.defaultEnabledTools).toEqual(ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES);
+      expect(existingSnapshot.threads[0]?.enabledTools).toEqual(
+        expect.arrayContaining(ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES),
+      );
+      expect(
+        (await reloaded.threadSnapshot(implicit.chatId)).threads[0]?.enabledTools,
+      ).toEqual(expect.arrayContaining(ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES));
+
+      const created = await ensureTestNativeChat(reloaded, { chatName: 'new mcp chat' });
+      expect(created.threads.find((thread) => thread.id === created.chatId)?.enabledTools).not.toEqual(
+        expect.arrayContaining(ASSISTANT_DRONE_HUB_MCP_TOOL_NAMES),
+      );
+    });
+  });
+
+  test('does not instruct built-in chats to use the removed current-context tool', async () => {
+    await withTempDroneDataDir('assistant-without-current-context-', async () => {
+      const service = makeAssistantService();
+      const snapshot = await ensureTestNativeChat(service, { chatName: 'no current context' });
+      expect(snapshot.availableTools.map((tool) => tool.name)).not.toContain('get_current_context');
+      expect(snapshot.threads[0]?.enabledTools).not.toContain('get_current_context');
+      expect(service.resolvedSystemPrompt(snapshot.chatId)).not.toContain('get_current_context');
+    });
+  });
+
+  test('keeps Artifacts off by default and exposes target selection after it is enabled', async () => {
+    await withTempDroneDataDir('assistant-target-tool-cardinality-', async () => {
       const withDrone = new HubAssistantService({
         listDrones: async () => [{ id: 'drone-a', name: 'Drone A', group: null, status: 'ready' } as any],
       });
-      const multiple = await ensureTestNativeChat(withDrone, {
+      const single = await ensureTestNativeChat(withDrone, {
         droneId: 'drone-a',
         chatName: 'multiple targets',
+      });
+      const thread = single.threads.find((item) => item.id === single.chatId);
+      expect(single.availableWorkspaces.map((workspace) => workspace.label)).toEqual([
+        'Drone A',
+        'Artifacts',
+      ]);
+      expect(thread?.enabledWorkspaceIds).toEqual(['drone:drone-a']);
+      expect(single.availableTools.map((tool) => tool.name)).not.toContain('set_target');
+      expect(single.availableTools.map((tool) => tool.name)).not.toContain('transfer_files');
+      expect(withDrone.workspaceIsEnabled(single.chatId, `artifacts:${single.chatId}`)).toBe(false);
+
+      const multiple = await withDrone.updateThread(single.chatId, {
+        enabledWorkspaceIds: ['drone:drone-a', `artifacts:${single.chatId}`],
       });
       expect(multiple.availableTools.map((tool) => tool.name)).toEqual(
         expect.arrayContaining(['list_targets', 'set_target', 'transfer_files']),
       );
+      expect(withDrone.workspaceIsEnabled(single.chatId, `artifacts:${single.chatId}`)).toBe(true);
+
+      const disabled = await withDrone.updateThread(single.chatId, { enabledWorkspaceIds: [] });
+      expect(disabled.availableTools.map((tool) => tool.name)).not.toContain('read_file');
+      expect(disabled.threads[0]?.enabledWorkspaceIds).toEqual([]);
+      expect(
+        withDrone.resolvedSystemPrompt(single.chatId, { workspaceTargetCount: 0 }),
+      ).toContain('No workspace is enabled for this chat.');
+
+      const reloaded = new HubAssistantService({
+        listDrones: async () => [{ id: 'drone-a', name: 'Drone A', group: null, status: 'ready' } as any],
+      });
+      expect((await reloaded.threadSnapshot(single.chatId)).threads[0]?.enabledWorkspaceIds).toEqual([]);
     });
   });
 
@@ -62,6 +143,66 @@ describe('assistant system prompt settings', () => {
       const snapshot = await ensureTestNativeChat(service, { chatName: 'fallback tools' });
       expect(snapshot.availableTools.map((tool) => tool.name)).not.toContain('set_target');
       expect(snapshot.availableTools.map((tool) => tool.name)).not.toContain('transfer_files');
+    });
+  });
+
+  test('preserves implicit workspace access for chats created before workspace toggles', async () => {
+    await withTempDroneDataDir('assistant-legacy-workspaces-', async () => {
+      const initial = makeAssistantService();
+      const created = await ensureTestNativeChat(initial, { chatName: 'legacy workspaces' });
+      const stored = await loadAssistantState();
+      if (!stored?.threads?.[0]) throw new Error('missing stored assistant thread');
+      delete stored.threads[0].enabledWorkspaceIds;
+      await saveAssistantState(stored);
+
+      const reloaded = makeAssistantService();
+      const snapshot = await reloaded.threadSnapshot(created.chatId);
+      expect(snapshot.threads[0]?.enabledWorkspaceIds).toBeUndefined();
+      expect(reloaded.workspaceIsEnabled(created.chatId, `artifacts:${created.chatId}`)).toBe(true);
+      expect(snapshot.availableTools.map((tool) => tool.name)).toEqual(
+        expect.arrayContaining([
+          'list_files',
+          'read_file',
+          'search_files',
+          'write_file',
+          'delete_file',
+          'create_directory',
+          'delete_directory',
+          'move_path',
+          'apply_patch',
+        ]),
+      );
+      expect(snapshot.availableTools.map((tool) => tool.name)).not.toContain('bash');
+      expect(snapshot.availableTools.map((tool) => tool.name)).not.toContain(
+        'get_working_tree_status',
+      );
+      const cloned = await reloaded.cloneNativeThread({
+        sourceId: created.chatId,
+        id: 'legacy-workspace-clone',
+        droneId: 'native-test-drone',
+        chatName: 'legacy workspace clone',
+      });
+      expect(cloned.threads[0]?.enabledWorkspaceIds).toBeUndefined();
+      expect(
+        reloaded.workspaceIsEnabled(
+          'legacy-workspace-clone',
+          'artifacts:legacy-workspace-clone',
+        ),
+      ).toBe(true);
+    });
+  });
+
+  test('enables Artifacts when a chat explicitly attaches a file', async () => {
+    await withTempDroneDataDir('assistant-attached-artifact-workspace-', async () => {
+      const service = makeAssistantService();
+      const created = await ensureTestNativeChat(service, { chatName: 'attached artifact' });
+      const artifactWorkspaceId = `artifacts:${created.chatId}`;
+      expect(service.workspaceIsEnabled(created.chatId, artifactWorkspaceId)).toBe(false);
+      expect(await service.ensureArtifactsWorkspaceEnabled(created.chatId)).toBe(true);
+      expect(await service.ensureArtifactsWorkspaceEnabled(created.chatId)).toBe(false);
+      const snapshot = await service.threadSnapshot(created.chatId);
+      expect(snapshot.threads[0]?.enabledWorkspaceIds).toContain(artifactWorkspaceId);
+      expect(snapshot.availableTools.map((tool) => tool.name)).toContain('read_file');
     });
   });
 

@@ -1,0 +1,30 @@
+import type { ChatInfo } from '../../domain';
+
+export function chatSelectionKey(
+  droneIdRaw: string | null | undefined,
+  chatNameRaw: string | null | undefined,
+): string {
+  const droneId = String(droneIdRaw ?? '').trim();
+  if (!droneId) return '';
+  return `${droneId}\u0000${String(chatNameRaw ?? '').trim() || 'default'}`;
+}
+
+export function chatInfoForSelection(
+  chatInfo: ChatInfo | null,
+  chatInfoKey: string,
+  droneIdRaw: string | null | undefined,
+  chatNameRaw: string | null | undefined,
+): ChatInfo | null {
+  if (!chatInfo) return null;
+  return chatInfoKey === chatSelectionKey(droneIdRaw, chatNameRaw) ? chatInfo : null;
+}
+
+export function chatConfigResolutionState(input: {
+  currentChatIsDraft: boolean;
+  hasChats: boolean;
+  metadataAvailable: boolean;
+  loading: boolean;
+}): 'ready' | 'loading' | 'unavailable' {
+  if (input.currentChatIsDraft || !input.hasChats || input.metadataAvailable) return 'ready';
+  return input.loading ? 'loading' : 'unavailable';
+}
