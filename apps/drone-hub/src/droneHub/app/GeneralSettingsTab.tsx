@@ -6,6 +6,7 @@ import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
 import type { UseGithubSettingsResult } from './use-github-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
 import type { LlmProviderId } from './settings-types';
+import { CodexConnectControl } from './CodexConnectControl';
 
 function llmProviderLabel(provider: LlmProviderId | null | undefined): string {
   if (provider === 'codex') return 'Codex';
@@ -330,24 +331,30 @@ export function GeneralSettingsTab({
             <div className="text-[11px] text-[var(--muted-dim)]">No Codex CLI login found for the Hub process.</div>
           )}
           <div className="text-[12px] leading-relaxed text-[var(--fg-secondary)]">
-            The Assistant panel reuses the local Codex CLI ChatGPT login from the Hub host. Sign in with `codex` in the same environment that starts Drone Hub,
-            then reload settings.
+            Drone Hub uses the local file-based Codex login. Connecting here opens OpenAI and
+            finishes automatically through a temporary localhost callback.
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void loadLlmSettings()}
-              disabled={llmSettingsLoading}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                llmSettingsLoading
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-              }`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              Refresh
-            </button>
-          </div>
+          <CodexConnectControl
+            connected={Boolean(llmSettings?.codex.hasKey)}
+            onConnected={loadLlmSettings}
+          />
+          {llmSettings?.codex.hasKey ? (
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => void loadLlmSettings()}
+                disabled={llmSettingsLoading}
+                className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                  llmSettingsLoading
+                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                }`}
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                Refresh
+              </button>
+            </div>
+          ) : null}
         </div>
 
         <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">

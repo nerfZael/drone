@@ -1,6 +1,7 @@
 import React from 'react';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import { requestJson } from '../http';
+import { CodexConnectControl } from '../app/CodexConnectControl';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import {
@@ -2176,6 +2177,7 @@ export function AssistantDock() {
                     onCancel={() => void cancelQueuedPrompt(prompt.id)}
                   />
                 ))}
+                {activeProvider === 'codex' ? <CodexConnectControl compact /> : null}
                 {error || blipSession.runError || blipSession.historyError ? <div className="mx-3 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-3 py-2 text-[11px] text-[var(--red)]">{error ?? blipSession.runError ?? blipSession.historyError}</div> : null}
               </div>
             </div>

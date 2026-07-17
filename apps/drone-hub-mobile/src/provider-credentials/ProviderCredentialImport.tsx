@@ -22,8 +22,10 @@ function credentialLabel(credential: ProviderCredentialId): string {
 
 export function ProviderCredentialImport({
   onImported,
+  onImportStarted,
 }: {
   onImported(credential: ProviderCredentialId): void;
+  onImportStarted?(credential: ProviderCredentialId): void;
 }) {
   const mesh = useMesh();
   const sources = mesh.devices.filter(
@@ -77,6 +79,7 @@ export function ProviderCredentialImport({
     setBusy(true);
     setError(null);
     setSaved(null);
+    onImportStarted?.(credential);
     try {
       const imported = await fetchProviderCredential({
         sourceDeviceId: copySource.id,

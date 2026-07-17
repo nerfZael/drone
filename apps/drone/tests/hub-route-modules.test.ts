@@ -5,6 +5,7 @@ import { createEditorRouteHandler } from '../src/hub/routes/editor-routes';
 import { registerFleetRoutes } from '../src/hub/routes/fleet-routes';
 import { registerMessageRoutes } from '../src/hub/routes/message-routes';
 import { registerOperationalRoutes } from '../src/hub/routes/operational-routes';
+import { registerSettingsRoutes } from '../src/hub/routes/settings-routes';
 import { registerSystemRoutes } from '../src/hub/routes/system-routes';
 import { createTerminalRouteHandler } from '../src/hub/routes/terminal-routes';
 
@@ -189,5 +190,39 @@ describe('extracted Hub route modules', () => {
 
     expect(await request('GET', '/api/fleet/actors/owner-id')).toBe(true);
     expect(responses).toEqual([{ status: 200, body: { ok: true, id: 'owner-id' } }]);
+  });
+
+  test('exposes the automatic Codex connection lifecycle', async () => {
+    const { router, request, responses } = routeHarness();
+    const calls: string[] = [];
+    const waiting = {
+      ok: true,
+      status: 'waiting',
+      authorizationUrl: 'https://auth.openai.com/authorize',
+      startedAt: '2026-07-17T10:00:00.000Z',
+      completedAt: null,
+      error: null,
+    };
+    registerSettingsRoutes(router, {
+      codexLoginStatus: () => ({ ...waiting, status: 'idle', authorizationUrl: null }),
+      startCodexLogin: async () => {
+        calls.push('start');
+        return waiting;
+      },
+      cancelCodexLogin: () => {
+        calls.push('cancel');
+        return { ...waiting, status: 'idle', authorizationUrl: null };
+      },
+    } as any);
+
+    expect(await request('GET', '/api/settings/codex/connect')).toBe(true);
+    expect(await request('POST', '/api/settings/codex/connect')).toBe(true);
+    expect(await request('DELETE', '/api/settings/codex/connect')).toBe(true);
+    expect(calls).toEqual(['start', 'cancel']);
+    expect(responses).toEqual([
+      { status: 200, body: { ...waiting, status: 'idle', authorizationUrl: null } },
+      { status: 200, body: waiting },
+      { status: 200, body: { ...waiting, status: 'idle', authorizationUrl: null } },
+    ]);
   });
 });

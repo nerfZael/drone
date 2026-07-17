@@ -29,7 +29,7 @@ const REDIRECT_URI = "http://localhost:1455/auth/callback";
 const SCOPE = "openid profile email offline_access";
 const JWT_CLAIM_PATH = "https://api.openai.com/auth";
 
-type TokenSuccess = { type: "success"; access: string; refresh: string; expires: number };
+type TokenSuccess = { type: "success"; access: string; refresh: string; expires: number; idToken?: string };
 type TokenFailure = { type: "failed"; message: string; status?: number };
 type TokenResult = TokenSuccess | TokenFailure;
 
@@ -119,6 +119,7 @@ async function exchangeAuthorizationCode(
 		access_token?: string;
 		refresh_token?: string;
 		expires_in?: number;
+		id_token?: string;
 	};
 
 	if (!json.access_token || !json.refresh_token || typeof json.expires_in !== "number") {
@@ -133,6 +134,7 @@ async function exchangeAuthorizationCode(
 		access: json.access_token,
 		refresh: json.refresh_token,
 		expires: Date.now() + json.expires_in * 1000,
+		...(json.id_token ? { idToken: json.id_token } : {}),
 	};
 }
 
@@ -161,6 +163,7 @@ async function refreshAccessToken(refreshToken: string): Promise<TokenResult> {
 			access_token?: string;
 			refresh_token?: string;
 			expires_in?: number;
+			id_token?: string;
 		};
 
 		if (!json.access_token || !json.refresh_token || typeof json.expires_in !== "number") {
@@ -175,6 +178,7 @@ async function refreshAccessToken(refreshToken: string): Promise<TokenResult> {
 			access: json.access_token,
 			refresh: json.refresh_token,
 			expires: Date.now() + json.expires_in * 1000,
+			...(json.id_token ? { idToken: json.id_token } : {}),
 		};
 	} catch (error) {
 		return {
@@ -406,6 +410,7 @@ export async function loginOpenAICodex(options: {
 			refresh: tokenResult.refresh,
 			expires: tokenResult.expires,
 			accountId,
+			...(tokenResult.idToken ? { idToken: tokenResult.idToken } : {}),
 		};
 	} finally {
 		server.close();
@@ -431,6 +436,7 @@ export async function refreshOpenAICodexToken(refreshToken: string): Promise<OAu
 		refresh: result.refresh,
 		expires: result.expires,
 		accountId,
+		...(result.idToken ? { idToken: result.idToken } : {}),
 	};
 }
 
