@@ -274,6 +274,7 @@ import { DroneRegistryBroadcaster } from './drone-registry-broadcaster';
 import { createTerminalWebSocketServer } from './terminal-websocket-server';
 import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgrade';
 import { registerAssistantRoutes } from './routes/assistant-routes';
+import { NativeChatLifecycle } from './assistant/native-chat-lifecycle';
 import { registerNativeChatRoutes } from './routes/native-chat-routes';
 import { registerCatalogRoutes } from './routes/catalog-routes';
 import { createChatAutomationRouteHandler } from './routes/chat-automation-routes';
@@ -1308,6 +1309,7 @@ let nativeChatPromptHandler: (input: {
   droneId: string;
   chatName: string;
   chatId: string;
+  promptId?: string;
   provider?: string;
   model?: string;
   thinkingLevel?: string;
@@ -4569,14 +4571,17 @@ export async function startDroneHubApiServer(opts: {
         regAny?.drones && typeof regAny.drones === 'object' ? Object.entries(regAny.drones) : [];
       const activeDroneIds = new Set(drones.map(([droneId]) => String(droneId)));
       for (const pendingChat of await resumePendingPromptChats()) {
-        if (activeDroneIds.has(pendingChat.droneId)) {
-          enqueuePendingPromptPump(pendingChat.droneId, pendingChat.chatName);
-        }
+        if (!activeDroneIds.has(pendingChat.droneId)) continue;
+        const droneEntry = regAny.drones[pendingChat.droneId];
+        const chatEntry = droneEntry?.chats?.[pendingChat.chatName];
+        if (chatEntry && inferChatAgent(chatEntry, droneEntry).kind === 'native') continue;
+        enqueuePendingPromptPump(pendingChat.droneId, pendingChat.chatName);
       }
       for (const [droneName, d] of drones as any[]) {
         const chats = d?.chats && typeof d.chats === 'object' ? Object.entries(d.chats) : [];
         for (const [chatName, entry] of chats as any[]) {
           if (isDraftChatEntry(entry)) continue;
+          if (inferChatAgent(entry, d).kind === 'native') continue;
           const pending = await readPendingPrompts({
             droneId: String(droneName),
             chatName: String(chatName),
@@ -4629,7 +4634,7 @@ export async function startDroneHubApiServer(opts: {
     blipAssistantHost,
     buildAssistantDroneSummariesFromRegistry,
     emitWhiteboardChange,
-    startAssistantPromptDrain,
+    submitAssistantPrompt,
     subscribeWhiteboardChanges,
     unsubscribeDeviceMeshAssistantChanges,
     writeAssistantSseEvent,
@@ -4641,6 +4646,7 @@ export async function startDroneHubApiServer(opts: {
     nowIso,
     summarizeDroneActivity,
   });
+  const nativeChatLifecycle = new NativeChatLifecycle(assistantService, blipAssistantHost);
   nativeChatIsBusyHandler = async (nativeChatId: string) =>
     assistantPromptDrains.has(nativeChatId) ||
     blipAssistantHost.isThreadRunning(nativeChatId) ||
@@ -4648,24 +4654,23 @@ export async function startDroneHubApiServer(opts: {
   nativeChatErrorHandler = (nativeChatId: string) =>
     assistantService.nativeThreadError(nativeChatId);
   nativeChatLatestAssistantTextHandler = (nativeChatId: string) =>
-    assistantService.nativeThreadLatestAssistantText(nativeChatId);
+    blipAssistantHost.latestAssistantText(nativeChatId);
   deleteNativeChatSessionsHandler = async (droneEntry: any) => {
     const chatEntries = [
       ...Object.values<any>(droneEntry?.chats ?? {}),
       ...Object.values<any>(droneEntry?.archivedChats ?? {}),
     ];
-    for (const chatEntry of chatEntries) {
-      if (inferChatAgent(chatEntry, droneEntry).kind !== 'native') continue;
-      const nativeChatId = String(chatEntry?.id ?? '').trim();
-      if (!nativeChatId) continue;
-      await blipAssistantHost.deleteThread(nativeChatId);
-      await assistantService.deleteThread(nativeChatId);
-    }
+    const nativeChatIds = chatEntries
+      .filter((chatEntry) => inferChatAgent(chatEntry, droneEntry).kind === 'native')
+      .map((chatEntry) => String(chatEntry?.id ?? '').trim())
+      .filter(Boolean);
+    await nativeChatLifecycle.deleteMany(nativeChatIds);
   };
   nativeChatPromptHandler = async ({
     droneId,
     chatName,
     chatId,
+    promptId,
     provider,
     model,
     thinkingLevel,
@@ -4673,16 +4678,14 @@ export async function startDroneHubApiServer(opts: {
     attachments,
   }) => {
     if (!chatId) throw new Error('native chat has no stable identity');
-    await assistantService.ensureNativeThread({
+    await nativeChatLifecycle.ensure({
       id: chatId,
       droneId,
       chatName,
-      title: chatName,
       provider,
       model,
       thinkingLevel,
     });
-    await assistantService.beginNativeThreadPrompt(chatId);
     const nativeAttachments = Array.isArray(attachments) ? attachments : [];
     const promptImages = validateAssistantPromptImages(
       nativeAttachments
@@ -4702,26 +4705,11 @@ export async function startDroneHubApiServer(opts: {
     const promptWithFiles = references
       ? `${prompt}${prompt ? '\n\n' : ''}Attached files:\n${references}`
       : prompt;
-    const input =
-      promptImages.length > 0
-        ? { text: promptWithFiles, images: promptImages }
-        : promptWithFiles;
-    const drain = startAssistantPromptDrain(chatId, { input });
-    if (!drain.started) {
-      await assistantService.enqueueThreadPrompt(chatId, {
-        prompt: promptWithFiles,
-        promptImages,
-      });
-      return;
-    }
-    void drain.initialPromise.catch((error: any) => {
-      void assistantService.failNativeThreadPrompt(chatId, error).catch(() => {});
-      hubLog('warn', 'native chat prompt failed after acceptance', {
-        droneId,
-        chatName,
-        chatId,
-        error: String(error?.message ?? error),
-      });
+    await submitAssistantPrompt({
+      threadId: chatId,
+      promptId,
+      prompt: promptWithFiles,
+      promptImages,
     });
   };
 
@@ -5717,15 +5705,12 @@ export async function startDroneHubApiServer(opts: {
     writeAssistantSseEvent,
     resolveDroneOrPendingForReadRef,
     requireWhiteboardStore,
-    assistantPromptDrains,
-    startAssistantPromptDrain,
+    submitAssistantPrompt,
     validateAssistantPromptImages,
     saveAssistantArtifactUploads,
-    hubLog,
   });
   registerNativeChatRoutes(apiRouter, {
-    assistantService,
-    blipAssistantHost,
+    nativeChatLifecycle,
     getChatEntry,
     inferChatAgent,
     resolveDroneOrPendingForReadRef,
@@ -5741,7 +5726,7 @@ export async function startDroneHubApiServer(opts: {
   registerRepositoryRoutes(apiRouter, {
     normalizeBuiltinAgentId,
     nativeModelCatalog: async () => {
-      const snapshot = await assistantService.snapshot('compact');
+      const snapshot = await assistantService.defaultSettings();
       return {
         models: snapshot.models.map((model: any) => {
           const reasoningLevels = model?.reasoning
@@ -6040,7 +6025,7 @@ export async function startDroneHubApiServer(opts: {
     cancelQueuedPendingPrompt,
     chatSnapshotResponseBody,
     claimChatAutoRenameFromFirstPrompt,
-    cloneNativeChatSession: async (input: {
+    cloneNativeChatSession: (input: {
       sourceId: string;
       sourceChatName: string;
       sourceProvider?: string;
@@ -6049,34 +6034,14 @@ export async function startDroneHubApiServer(opts: {
       targetId: string;
       droneId: string;
       chatName: string;
-    }) => {
-      await assistantService.ensureNativeThread({
-        id: input.sourceId,
-        droneId: input.droneId,
-        chatName: input.sourceChatName,
-        title: input.sourceChatName,
-        provider: input.sourceProvider,
-        model: input.sourceModel,
-        thinkingLevel: input.sourceThinkingLevel,
-      });
-      await assistantService.cloneNativeThread({
-        sourceId: input.sourceId,
-        id: input.targetId,
-        droneId: input.droneId,
-        chatName: input.chatName,
-      });
-      await blipAssistantHost.cloneThread(input.sourceId, input.targetId);
-    },
+    }) => nativeChatLifecycle.clone({ ...input, id: input.targetId }),
     collectDockerSnapshotImageRefsFromChatEntry,
     createChatInStore,
     createOrEnqueuePromptUnified,
     createRequestTimer,
     defaultDaemonReadyTimeoutMs,
     deleteActiveChatFromStore,
-    deleteNativeChatSession: async (nativeChatId: string) => {
-      await blipAssistantHost.deleteThread(nativeChatId);
-      await assistantService.deleteThread(nativeChatId);
-    },
+    deleteNativeChatSession: (nativeChatId: string) => nativeChatLifecycle.delete(nativeChatId),
     discoverAndRememberModelsForBuiltinAgent,
     dockerSnapshotAfterAgentMessageEnabledForChat,
     droneRuntime,
@@ -6135,18 +6100,11 @@ export async function startDroneHubApiServer(opts: {
     readChatReadStateFromStore,
     readChatSnapshot,
     removeDockerSnapshotImagesBestEffort,
-    renameNativeChatSession: async (input: {
+    renameNativeChatSession: (input: {
       id: string;
       droneId: string;
       chatName: string;
-    }) => {
-      await assistantService.ensureNativeThread({
-        id: input.id,
-        droneId: input.droneId,
-        chatName: input.chatName,
-        title: input.chatName,
-      });
-    },
+    }) => nativeChatLifecycle.rename(input),
     renameChatInStore,
     resolveChatTmuxCommand,
     resolveDroneDaemonClientForEntry,

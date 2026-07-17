@@ -145,6 +145,35 @@ test('claims preserve FIFO within a chat while allowing another chat to proceed'
   );
 });
 
+test('steering can claim a follow-up while the current built-in prompt is sending', async () => {
+  const queue = repository('steering');
+  const at = '2026-07-10T09:00:00.000Z';
+  await queue.enqueue({ droneId: 'alpha', chatName: 'default', prompt: prompt('current', at) });
+  await queue.enqueue({ droneId: 'alpha', chatName: 'default', prompt: prompt('steer', at) });
+  assert.ok(
+    await queue.claim({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'current',
+      leaseOwner: 'native-current',
+      now: at,
+    }),
+  );
+  assert.ok(
+    await queue.claimForSteering({
+      droneId: 'alpha',
+      chatName: 'default',
+      promptId: 'steer',
+      leaseOwner: 'native-steer',
+      now: at,
+    }),
+  );
+  assert.deepEqual(
+    queue.listPending({ droneId: 'alpha', chatName: 'default' }).map((item) => item.state),
+    ['sending', 'sending'],
+  );
+});
+
 test('a conditional update permits only one competing claimant', async () => {
   const queue = repository('claim-race');
   const at = '2026-07-10T09:00:00.000Z';

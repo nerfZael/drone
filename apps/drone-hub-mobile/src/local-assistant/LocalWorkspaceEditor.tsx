@@ -238,10 +238,10 @@ export function LocalWorkspaceEditor({
     <View style={styles.page}>
       <View style={styles.heading}>
         <View style={styles.headingCopy}>
-          <Label>Thread access</Label>
+          <Label>Chat access</Label>
           <Text style={styles.title}>Devices and workspaces</Text>
           <Text style={styles.body}>
-            This thread starts with no access. Choose a subset of the workspaces each destination
+            This chat starts with no access. Choose a subset of the workspaces each destination
             has already granted to this phone.
           </Text>
         </View>
@@ -412,7 +412,7 @@ export function LocalWorkspaceEditor({
 
       <ConfirmDialog
         visible={confirmApply}
-        title="Apply thread access changes?"
+        title="Apply chat access changes?"
         message={`Update ${changes} workspace ${changes === 1 ? 'selection' : 'selections'} for “${thread.title}”?`}
         confirmLabel="Apply changes"
         busy={busy}
@@ -422,7 +422,7 @@ export function LocalWorkspaceEditor({
       <ConfirmDialog
         visible={confirmDiscard}
         title="Discard access changes?"
-        message="Restore this thread’s last saved workspace access?"
+        message="Restore this chat’s last saved workspace access?"
         confirmLabel="Discard changes"
         destructive
         onCancel={() => setConfirmDiscard(false)}

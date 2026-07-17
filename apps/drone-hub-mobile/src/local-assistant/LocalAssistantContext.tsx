@@ -17,8 +17,8 @@ import type {
   LocalWorkspaceTarget,
 } from './local-assistant-types';
 import { readLocalAssistantCodexAuth } from './local-assistant-codex-auth';
-import { nextAssistantThreadTitle } from './next-assistant-thread-title';
-import { clonedAssistantThreadTitle } from './cloned-assistant-thread-title';
+import { nextChatTitle } from './next-chat-title';
+import { clonedChatTitle } from './cloned-chat-title';
 import { createWorkspaceToolRuntime } from './workspace-tools';
 import { runMobileBlip } from './run-mobile-blip';
 import {
@@ -31,13 +31,11 @@ import { messagesAfterDeletion } from './assistant-message-deletion';
 
 export type LocalAssistantContextValue = {
   threads: LocalAssistantThread[];
-  activeThreadId: string;
   loading: boolean;
   runningThreadId: string | null;
   error: string | null;
   pendingApprovals: LocalAssistantApproval[];
   refreshThreads(): Promise<LocalAssistantThread[]>;
-  selectThread(threadId: string): void;
   createThread(title?: string): Promise<LocalAssistantThread>;
   cloneThread(threadId: string): Promise<LocalAssistantThread>;
   deleteThread(threadId: string): Promise<void>;
@@ -73,7 +71,6 @@ function userMessage(prompt: string): LocalAssistantMessage {
 export function LocalAssistantProvider({ children }: { children: React.ReactNode }) {
   const mesh = useMesh();
   const [threads, setThreads] = React.useState<LocalAssistantThread[]>([]);
-  const [activeThreadId, setActiveThreadId] = React.useState('');
   const [loading, setLoading] = React.useState(true);
   const [runningThreadId, setRunningThreadId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
@@ -143,7 +140,6 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         if (!active) return;
         threadsRef.current = stored;
         setThreads(stored);
-        setActiveThreadId(stored[0]?.id ?? '');
       })
       .catch((nextError) => active && setError(nextError?.message ?? String(nextError)))
       .finally(() => active && setLoading(false));
@@ -164,9 +160,6 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
     const stored = await loadLocalAssistantThreads();
     threadsRef.current = stored;
     setThreads(stored);
-    setActiveThreadId((current) =>
-      stored.some((thread) => thread.id === current) ? current : (stored[0]?.id ?? ''),
-    );
     return stored;
   }, []);
 
@@ -176,7 +169,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       const now = new Date().toISOString();
       const thread: LocalAssistantThread = {
         id: `mobile_thread_${Crypto.randomUUID()}`,
-        title: title.trim().slice(0, 160) || nextAssistantThreadTitle(threadsRef.current),
+        title: title.trim().slice(0, 160) || nextChatTitle(threadsRef.current),
         createdAt: now,
         updatedAt: now,
         model: settings.model,
@@ -189,7 +182,6 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         queuedPrompts: [],
       };
       await replaceThreads([thread, ...threadsRef.current]);
-      setActiveThreadId(thread.id);
       return thread;
     },
     [replaceThreads],
@@ -201,7 +193,6 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
       const next = threadsRef.current.filter((thread) => thread.id !== threadId);
       await replaceThreads(next);
       await deleteLocalBlipSessionSnapshot(threadId);
-      setActiveThreadId((current) => (current === threadId ? (next[0]?.id ?? '') : current));
     },
     [replaceThreads],
   );
@@ -232,14 +223,14 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
   const cloneThread = React.useCallback(
     async (threadId: string) => {
       if (abortRef.current?.threadId === threadId)
-        throw new Error('Stop this thread before cloning it');
+        throw new Error('Stop this chat before cloning it');
       const source = threadsRef.current.find((thread) => thread.id === threadId);
       if (!source) throw new Error('Built-in chat was not found');
       const now = new Date().toISOString();
       const thread: LocalAssistantThread = {
         ...source,
         id: `mobile_thread_${Crypto.randomUUID()}`,
-        title: clonedAssistantThreadTitle(source.title, threadsRef.current),
+        title: clonedChatTitle(source.title, threadsRef.current),
         createdAt: now,
         updatedAt: now,
         status: 'idle',
@@ -255,7 +246,6 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         await deleteLocalBlipSessionSnapshot(thread.id).catch(() => undefined);
         throw error;
       }
-      setActiveThreadId(thread.id);
       return thread;
     },
     [replaceThreads],
@@ -524,13 +514,11 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
 
   const value: LocalAssistantContextValue = {
     threads,
-    activeThreadId,
     loading,
     runningThreadId,
     error,
     pendingApprovals,
     refreshThreads,
-    selectThread: setActiveThreadId,
     createThread,
     cloneThread,
     deleteThread,

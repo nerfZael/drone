@@ -16,10 +16,10 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ConfirmDialog, ErrorBanner } from '../components/Ui';
 import { QueuedPromptRows } from '../components/QueuedPromptRows';
 import {
-  AssistantThreadDrawer,
+  AppDrawer,
   type AppDrawerNavigationItem,
   type DrawerDevicePickerItem,
-} from '../local-assistant/AssistantThreadDrawer';
+} from '../local-assistant/AppDrawer';
 import { AssistantComposer } from '../local-assistant/AssistantComposer';
 import {
   AssistantModelPicker,
@@ -53,6 +53,7 @@ import {
 import { mobileDronePendingPrompts } from '../drones/mobile-pending-prompts';
 import { useDroneLinkedPullRequests } from '../drones/use-drone-linked-pull-requests';
 import { useLocalDroneControl } from '../drones/local-drone-control';
+import type { DroneControlOperation } from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { LocalWorkspaceEditor } from '../local-assistant/LocalWorkspaceEditor';
 import {
@@ -123,7 +124,7 @@ export function DronesScreen({
   const targetSupportsDrones = phoneTarget || targets.some((target) => target.id === targetId);
   const meshRouteAvailable = phoneTarget || mesh.connectedDeviceIds.length > 0;
   const requestDroneControl = React.useCallback(
-    (destinationId: string, operation: string, payload?: any) =>
+    (destinationId: string, operation: DroneControlOperation, payload?: any) =>
       destinationId === mesh.identity?.id
         ? localDroneControl.request(operation, payload)
         : mesh.request(destinationId, 'drone-control', operation, payload),
@@ -1049,15 +1050,11 @@ export function DronesScreen({
 
   return (
     <View style={styles.screen}>
-      <AssistantThreadDrawer
+      <AppDrawer
         open={drawerOpen}
-        title={targets.find((target) => target.id === targetId)?.name ?? 'On device'}
-        threads={[]}
-        activeThreadId=""
         offset={drawerOffset}
         openingGestureActive={openingGestureActive}
         navigationItems={navigationItems}
-        showThreads={false}
         showDrones
         drones={drones}
         droneSidebarOrder={droneSidebarOrder}
@@ -1071,8 +1068,6 @@ export function DronesScreen({
         devicePickerItems={devicePickerItems}
         activeDeviceId={targetId}
         onClose={() => onDrawerOpenChange(false)}
-        onSelect={() => {}}
-        onCreate={() => {}}
         onCreateDrone={
           targetSupportsDrones && meshRouteAvailable
             ? () => {

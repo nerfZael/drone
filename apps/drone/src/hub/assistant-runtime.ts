@@ -279,7 +279,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           description: 'Read the current Drone Hub UI context and this thread access scope.',
           parameters: { type: 'object', properties: {}, additionalProperties: false },
           execute: async () => {
-            const context = assistantService.currentContext(threadId);
+            const context = await assistantService.currentContext(threadId);
             return {
               content: [{ type: 'text' as const, text: JSON.stringify(context, null, 2) }],
               details: context,
@@ -577,31 +577,12 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   };
   const startAssistantPromptDrain = (
     threadId: string,
-    initial?: { input: AssistantPromptInput; onEvent?: (event: any) => Promise<void> | void },
-  ): { started: boolean; promise: Promise<void>; initialPromise: Promise<void> } => {
+  ): { started: boolean; promise: Promise<void> } => {
     const existing = assistantPromptDrains.get(threadId);
-    if (existing) return { started: false, promise: existing, initialPromise: existing };
-    let resolveInitial!: () => void;
-    let rejectInitial!: (error: unknown) => void;
-    const initialPromise = new Promise<void>((resolve, reject) => {
-      resolveInitial = resolve;
-      rejectInitial = reject;
-    });
-    if (!initial) void initialPromise.catch(() => {});
+    if (existing) return { started: false, promise: existing };
     const promise = Promise.resolve()
       .then(async () => {
-        try {
-          if (initial) {
-            await blipAssistantHost.waitForThreadIdle(threadId);
-            await blipAssistantHost.promptThread(threadId, initial.input, initial.onEvent);
-          } else {
-            await blipAssistantHost.waitForThreadIdle(threadId);
-          }
-          resolveInitial();
-        } catch (error) {
-          rejectInitial(error);
-          throw error;
-        }
+        await blipAssistantHost.waitForThreadIdle(threadId);
         while (true) {
           const queued = await assistantService.claimNextQueuedPrompt(threadId);
           if (!queued) break;
@@ -632,17 +613,55 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           .catch(() => {});
       });
     assistantPromptDrains.set(threadId, promise);
-    return { started: true, promise, initialPromise };
+    return { started: true, promise };
+  };
+
+  const submitAssistantPrompt = async (input: {
+    threadId: string;
+    promptId?: string;
+    prompt: string;
+    promptImages?: Array<{ type: 'image'; data: string; mimeType: string }>;
+  }) => {
+    await assistantService.beginNativeThreadPrompt(input.threadId);
+    const promptInput: AssistantPromptInput = input.promptImages?.length
+      ? { text: input.prompt, images: input.promptImages }
+      : input.prompt;
+    const steerImmediately =
+      (await assistantService.promptDeliveryMode(input.threadId)) === 'asap' &&
+      blipAssistantHost.isThreadRunning(input.threadId);
+    const queued = await assistantService.enqueueThreadPrompt(input.threadId, {
+      id: input.promptId,
+      prompt: input.prompt,
+      promptImages: input.promptImages,
+    });
+    if (steerImmediately) {
+      const claimed = await assistantService.claimQueuedPrompt(input.threadId, queued.id, {
+        allowConcurrent: true,
+      });
+      if (!claimed) throw new Error('built-in prompt could not be claimed');
+      void blipAssistantHost
+        .promptThread(input.threadId, promptInput)
+        .then(() => assistantService.completeQueuedPrompt(input.threadId, queued.id))
+        .catch((error) => assistantService.failQueuedPrompt(input.threadId, queued.id, error));
+      return queued;
+    }
+    const drain = startAssistantPromptDrain(input.threadId);
+    void drain.promise.catch((error: any) => {
+      hubLog('warn', 'assistant queued prompt drain failed', {
+        threadId: input.threadId,
+        error: error?.message ?? String(error),
+      });
+    });
+    return queued;
   };
   void assistantService
-    .snapshot('compact')
-    .then((snapshot) => {
-      for (const thread of snapshot.threads) {
-        if (!thread.queuedPrompts?.some((prompt: any) => prompt.status === 'queued')) continue;
-        const drain = startAssistantPromptDrain(thread.id);
+    .threadIdsWithQueuedPrompts()
+    .then((threadIds) => {
+      for (const threadId of threadIds) {
+        const drain = startAssistantPromptDrain(threadId);
         void drain.promise.catch((error: any) => {
           hubLog('warn', 'assistant queued prompt recovery drain failed', {
-            threadId: thread.id,
+            threadId,
             error: error?.message ?? String(error),
           });
         });
@@ -666,6 +685,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     buildAssistantDroneSummariesFromRegistry,
     emitWhiteboardChange,
     startAssistantPromptDrain,
+    submitAssistantPrompt,
     subscribeWhiteboardChanges,
     unsubscribeDeviceMeshAssistantChanges,
     writeAssistantSseEvent,

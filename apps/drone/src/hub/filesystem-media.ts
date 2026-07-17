@@ -144,6 +144,10 @@ export function isLikelyTextMimeType(rawMimeType: string): boolean {
   return false;
 }
 
+export function isImageMimeType(rawMimeType: string): boolean {
+  return String(rawMimeType ?? '').trim().toLowerCase().startsWith('image/');
+}
+
 export function bufferLooksBinary(buf: Buffer): boolean {
   if (!buf || buf.length === 0) return false;
   if (buf.includes(0)) return true;

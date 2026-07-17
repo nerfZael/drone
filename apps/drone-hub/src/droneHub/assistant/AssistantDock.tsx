@@ -1,7 +1,6 @@
 import React from 'react';
 import { useDndMonitor, useDroppable } from '@dnd-kit/core';
 import { requestJson } from '../http';
-import { CodexConnectControl } from '../app/CodexConnectControl';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import {
@@ -29,7 +28,6 @@ import {
   IconSpinner,
   IconWrench,
 } from '../app/icons';
-import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { IconChevron, IconDrone, IconFile, IconFolder, iconForFilePath } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import { useBlipThreadSession } from './useBlipThreadSession';
@@ -41,7 +39,6 @@ import {
   ScopeModeControl,
 } from './AssistantSettingsPanels';
 import {
-  AssistantChatIdleFooterBanner,
   AssistantQueuedPromptRow,
   AssistantMessageRow,
   AssistantThinkingRow,
@@ -51,6 +48,7 @@ import {
   ToolActivityRow,
 } from './AssistantTranscript';
 import { ApprovalCard } from './AssistantWorkflowCards';
+import { NativeAgentModelControls } from './NativeAgentModelControls';
 import {
   assistantThreadStatusLabel,
   assistantThreadStatusTone,
@@ -86,18 +84,17 @@ import type {
   AssistantArtifactSummary,
   AssistantAttachmentPayload,
   AssistantAttachmentSource,
-  AssistantChatIdleSubscription,
   AssistantDraftAttachment,
   AssistantDraftFileAttachment,
   AssistantDraftImageAttachment,
   AssistantDraftTextAttachment,
+  AssistantDefaultSettings,
   AssistantDroneNameMap,
   AssistantDroneReference,
   AssistantMessage,
   AssistantModelOption,
   AssistantPromptDeliveryMode,
   AssistantProviderId,
-  AssistantRunModel,
   AssistantScopeDraft,
   AssistantScopeDrone,
   AssistantScopeMode,
@@ -113,24 +110,9 @@ import type {
 const ASSISTANT_FILES_OPEN_STORAGE_KEY = 'droneHub.assistant.filesOpen';
 /** Distance from bottom (px) below which we treat the assistant transcript as "pinned" for auto-scroll. */
 const ASSISTANT_SCROLL_BOTTOM_THRESHOLD_PX = 48;
-const ASSISTANT_IDLE_REFRESH_INTERVAL_MS = 2_500;
-const ASSISTANT_ACTIVE_REFRESH_INTERVAL_MS = 1_000;
-const ASSISTANT_EVENT_REFRESH_DEBOUNCE_MS = 150;
 
-function snapshotWithPreferredActiveThread(snapshot: AssistantSnapshot, preferredThreadId: string | null | undefined): AssistantSnapshot {
-  const threadId = String(preferredThreadId ?? '').trim();
-  if (!threadId || snapshot.activeThreadId === threadId) return snapshot;
-  if (!snapshot.threads.some((thread) => thread.id === threadId)) return snapshot;
-  return { ...snapshot, activeThreadId: threadId };
-}
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
 const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
-
-const ASSISTANT_PROVIDERS: Array<{ id: AssistantProviderId; label: string; title: string }> = [
-  { id: 'codex', label: 'Codex', title: 'Use Codex models.' },
-  { id: 'openai', label: 'OpenAI', title: 'Use OpenAI models.' },
-  { id: 'gemini', label: 'Gemini', title: 'Use Gemini models.' },
-];
 
 function readInitialFilesOpen(): boolean {
   if (typeof window === 'undefined') return false;
@@ -265,47 +247,6 @@ async function encodeAssistantAttachment(attachment: AssistantDraftAttachment): 
   };
 }
 
-function modelSelectionKey(selection: Pick<AssistantRunModel, 'provider' | 'model' | 'thinkingLevel'>): string {
-  return `${selection.provider}:${selection.model}`;
-}
-
-function modelSelectionLabel(
-  selection: Pick<AssistantRunModel, 'provider' | 'model' | 'thinkingLevel'>,
-  options: AssistantModelOption[],
-): string {
-  const match = options.find((option) => option.provider === selection.provider && option.id === selection.model);
-  if (match) return match.name;
-  return selection.model;
-}
-
-function compactModelSelectionLabel(label: string): string {
-  return label.replace(/^GPT-/, '').replace(/\bMedium\b/, 'Med');
-}
-
-function uniqueAssistantModels(options: AssistantModelOption[]): AssistantModelOption[] {
-  const seen = new Set<string>();
-  return options.filter((option) => {
-    const key = `${option.provider}:${option.id}`;
-    if (seen.has(key)) return false;
-    seen.add(key);
-    return true;
-  });
-}
-
-function assistantReasoningLabel(level: string): string {
-  if (level === 'off') return 'None';
-  if (level === 'xhigh') return 'X-high';
-  return level.charAt(0).toUpperCase() + level.slice(1);
-}
-
-function DefaultModelStar({ selected }: { selected: boolean }) {
-  return (
-    <svg viewBox="0 0 24 24" aria-hidden="true" className="h-3.5 w-3.5" fill={selected ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.8">
-      <path strokeLinecap="round" strokeLinejoin="round" d="m12 3.2 2.65 5.37 5.93.86-4.29 4.18 1.01 5.91L12 16.73l-5.3 2.79 1.01-5.91-4.29-4.18 5.93-.86L12 3.2Z" />
-    </svg>
-  );
-}
-
 async function readNdjson(response: Response, onEvent: (event: any) => void): Promise<void> {
   if (!response.ok || !response.body) {
     let data: any = null;
@@ -391,10 +332,6 @@ export function AssistantDock({
   const [promoteSystemPromptSaving, setPromoteSystemPromptSaving] = React.useState(false);
   const [systemPromptError, setSystemPromptError] = React.useState<string | null>(null);
   const [systemPromptNotice, setSystemPromptNotice] = React.useState<string | null>(null);
-  const [assistantEventsConnected, setAssistantEventsConnected] = React.useState(false);
-  const [assistantEventsUnavailable, setAssistantEventsUnavailable] = React.useState(
-    () => typeof window === 'undefined' || typeof window.EventSource === 'undefined',
-  );
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const scrollContentRef = React.useRef<HTMLDivElement | null>(null);
@@ -416,7 +353,7 @@ export function AssistantDock({
   const snapshotRequestSeqRef = React.useRef(0);
   const enabledToolDraftNamesRef = React.useRef<string[]>([]);
   const defaultEnabledToolDraftNamesRef = React.useRef<string[]>([]);
-  const assistantEventRefreshTimerRef = React.useRef<number | null>(null);
+  const nativeChangeRefreshRef = React.useRef<() => void>(() => {});
   const { isOver: scopeDropIsOver, setNodeRef: setScopeDropNodeRef } = useDroppable({
     id: 'assistant-drone-scope-drop',
     data: { type: 'assistant-drone-scope-drop' },
@@ -457,18 +394,13 @@ export function AssistantDock({
     attempt();
   }, [updateAssistantPinned]);
 
-  const activeThread = React.useMemo(() => {
-    if (!snapshot) return null;
-    return (
-      snapshot.threads.find((thread) => thread.id === snapshot.activeThreadId) ??
-      snapshot.threads[0] ??
-      null
-    );
-  }, [snapshot]);
+  const activeThread = snapshot?.threads[0] ?? null;
   const activeThreadId = activeThread?.id ?? '';
   activeThreadIdRef.current = activeThreadId;
   const autoApprove = Boolean(activeThread?.autoApprove);
-  const blipSession = useBlipThreadSession(activeThreadId, Boolean(activeThread));
+  const blipSession = useBlipThreadSession(activeThreadId, Boolean(activeThread), () => {
+    nativeChangeRefreshRef.current();
+  });
   const hasHistory =
     blipSession.messages.length > 0 ||
     Boolean(blipSession.streamingMessage) ||
@@ -503,13 +435,10 @@ export function AssistantDock({
     () => (activeThread?.queuedPrompts ?? []).filter((prompt) => prompt.status !== 'running'),
     [activeThread?.queuedPrompts],
   );
-  const activeRunningModel = activeThread ? snapshot?.runningModels?.[activeThread.id] ?? null : null;
-  const running = blipSession.running || activeThread?.status === 'running' || activeThread?.status === 'waiting_for_approval' || Boolean(activeRunningModel);
-  const activeChatIdleSubscriptionsForThread = React.useMemo(
-    () =>
-      (snapshot?.chatIdleSubscriptions ?? []).filter((sub) => sub.threadId === activeThreadId && sub.status === 'active'),
-    [snapshot?.chatIdleSubscriptions, activeThreadId],
-  );
+  const running =
+    blipSession.running ||
+    activeThread?.status === 'running' ||
+    activeThread?.status === 'waiting_for_approval';
   const droneMentionLinks = React.useMemo<MarkdownTextMentionLink[]>(() => {
     const nameCounts = new Map<string, number>();
     for (const name of Object.values(droneNameById)) {
@@ -535,10 +464,7 @@ export function AssistantDock({
     },
     [droneNameById],
   );
-  const assistantChatIdleHold =
-    Boolean(activeThread) &&
-    (activeThread?.status === 'waiting_for_chats_idle' || activeChatIdleSubscriptionsForThread.length > 0);
-  const droneReferenceControlsLocked = !activeThread || assistantChatIdleHold;
+  const droneReferenceControlsLocked = !activeThread;
   const { isOver: droneReferenceDropIsOver, setNodeRef: setDroneReferenceDropNodeRef } = useDroppable({
     id: 'assistant-message-drone-reference-drop',
     data: { type: 'assistant-message-drone-reference-drop' },
@@ -613,9 +539,7 @@ export function AssistantDock({
     !showThinking;
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
-  const applySnapshot = React.useCallback((next: AssistantSnapshot, preferredThreadId?: string | null) => {
-    setSnapshot(snapshotWithPreferredActiveThread(next, preferredThreadId ?? activeThreadIdRef.current));
-  }, []);
+  const applySnapshot = React.useCallback((next: AssistantSnapshot) => setSnapshot(next), []);
 
   const beginSnapshotMutation = React.useCallback(() => {
     snapshotRequestSeqRef.current += 1;
@@ -636,15 +560,18 @@ export function AssistantDock({
         { method: 'POST' },
       );
       if (snapshotRequestSeqRef.current !== requestSeq) return;
-      const nativeChatId = String(next.nativeChatId ?? next.activeThreadId ?? '').trim();
+      const nativeChatId = String(next.nativeChatId ?? next.chatId ?? '').trim();
       activeThreadIdRef.current = nativeChatId;
-      applySnapshot(next, nativeChatId);
+      applySnapshot(next);
     } catch (err: any) {
       if (!options.silent) setError(err?.message ?? String(err));
     } finally {
       if (!options.silent) setLoading(false);
     }
   }, [applySnapshot, nativeChatName, nativeDroneId]);
+  nativeChangeRefreshRef.current = () => {
+    void refresh({ silent: true });
+  };
 
   React.useEffect(() => {
     attachmentsRef.current = attachments;
@@ -669,17 +596,6 @@ export function AssistantDock({
       revokeAssistantAttachmentPreviewUrls(attachmentsRef.current);
     };
   }, []);
-
-  const scheduleAssistantEventRefresh = React.useCallback(() => {
-    if (typeof window === 'undefined') return;
-    if (assistantEventRefreshTimerRef.current != null) {
-      window.clearTimeout(assistantEventRefreshTimerRef.current);
-    }
-    assistantEventRefreshTimerRef.current = window.setTimeout(() => {
-      assistantEventRefreshTimerRef.current = null;
-      void refresh({ silent: true });
-    }, ASSISTANT_EVENT_REFRESH_DEBOUNCE_MS);
-  }, [refresh]);
 
   const loadSystemPromptSettings = React.useCallback(async () => {
     const threadId = activeThreadIdRef.current;
@@ -806,62 +722,6 @@ export function AssistantDock({
   }, [nativeChatName, nativeDroneId, refresh]);
 
   React.useEffect(() => {
-    if (typeof window === 'undefined' || typeof window.EventSource === 'undefined') {
-      setAssistantEventsUnavailable(true);
-      return;
-    }
-    let closed = false;
-    const source = new window.EventSource('/api/assistant/events');
-    const markConnected = () => {
-      if (closed) return;
-      setAssistantEventsConnected(true);
-      setAssistantEventsUnavailable(false);
-      scheduleAssistantEventRefresh();
-    };
-    const markChanged = () => {
-      if (closed) return;
-      scheduleAssistantEventRefresh();
-    };
-    source.onopen = markConnected;
-    source.onmessage = markChanged;
-    source.addEventListener('connected', markConnected);
-    source.addEventListener('assistant_change', markChanged);
-    source.onerror = () => {
-      if (closed) return;
-      setAssistantEventsConnected(false);
-      setAssistantEventsUnavailable(true);
-    };
-    return () => {
-      closed = true;
-      source.close();
-    };
-  }, [scheduleAssistantEventRefresh]);
-
-  React.useEffect(() => {
-    return () => {
-      if (assistantEventRefreshTimerRef.current != null) {
-        window.clearTimeout(assistantEventRefreshTimerRef.current);
-        assistantEventRefreshTimerRef.current = null;
-      }
-    };
-  }, []);
-
-  const hasAssistantBackgroundActivity =
-    Object.keys(snapshot?.runningModels ?? {}).length > 0 ||
-    (snapshot?.threads ?? []).some((thread) => thread.status === 'running' || thread.status === 'waiting_for_approval' || thread.status === 'waiting_for_chats_idle') ||
-    (snapshot?.chatIdleSubscriptions ?? []).some((subscription) => subscription.status === 'active');
-  const shouldPollAssistantSnapshot = assistantEventsUnavailable || !assistantEventsConnected;
-
-  React.useEffect(() => {
-    if (!shouldPollAssistantSnapshot) return;
-    const intervalMs = hasAssistantBackgroundActivity ? ASSISTANT_ACTIVE_REFRESH_INTERVAL_MS : ASSISTANT_IDLE_REFRESH_INTERVAL_MS;
-    const timer = window.setInterval(() => {
-      void refresh({ silent: true });
-    }, intervalMs);
-    return () => window.clearInterval(timer);
-  }, [hasAssistantBackgroundActivity, refresh, shouldPollAssistantSnapshot]);
-
-  React.useEffect(() => {
     let cancelled = false;
     void requestJson<{ ok: true; drones?: Array<{ id?: string; name?: string }> }>('/api/drones')
       .then((data) => {
@@ -943,7 +803,7 @@ export function AssistantDock({
     activeAccessScope?.updatedAt,
     activeAccessScopeDroneIdsKey,
     resolveScopeDroneNames,
-    snapshot?.activeThreadId,
+    snapshot?.chatId,
   ]);
 
   const saveScopeDraft = React.useCallback(async (draft: AssistantScopeDraft): Promise<boolean> => {
@@ -1119,13 +979,13 @@ export function AssistantDock({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(patch),
       });
-      if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq)) applySnapshot(next, activeThread.id);
+      if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq)) applySnapshot(next);
     } catch (err: any) {
       if (updateThreadRequestRef.current === requestId && snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
-  const attachmentControlsLocked = !activeThread || assistantChatIdleHold;
+  const attachmentControlsLocked = !activeThread;
   const imageAttachmentCount = React.useMemo(
     () => attachments.filter((attachment) => attachment.kind === 'image').length,
     [attachments],
@@ -1377,10 +1237,7 @@ export function AssistantDock({
     try {
       const next = await requestJson<AssistantSnapshot>(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/stop`, { method: 'POST' });
       if (!snapshotMutationCurrent(requestSeq)) return;
-      applySnapshot(
-        next,
-        activeThread.id,
-      );
+      applySnapshot(next);
     } catch (err: any) {
       if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     } finally {
@@ -1397,7 +1254,7 @@ export function AssistantDock({
         `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/queued/${encodeURIComponent(promptId)}`,
         { method: 'DELETE' },
       );
-      if (snapshotMutationCurrent(requestSeq)) applySnapshot(next, activeThread.id);
+      if (snapshotMutationCurrent(requestSeq)) applySnapshot(next);
     } catch (err: any) {
       if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     } finally {
@@ -1415,10 +1272,7 @@ export function AssistantDock({
         { method: 'POST' },
       );
       if (!snapshotMutationCurrent(requestSeq)) return;
-      applySnapshot(
-        next,
-        activeThread.id,
-      );
+      applySnapshot(next);
     } catch (err: any) {
       if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     } finally {
@@ -1436,81 +1290,21 @@ export function AssistantDock({
     const requestSeq = beginSnapshotMutation();
     setDefaultModelBusy(true);
     try {
-      const next = await requestJson<AssistantSnapshot>('/api/assistant/default-model', {
+      const next = await requestJson<AssistantDefaultSettings>('/api/assistant/default-model', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ provider: activeThread.provider, model: activeThread.model, thinkingLevel: activeThread.thinkingLevel }),
       });
-      if (snapshotMutationCurrent(requestSeq)) applySnapshot(next, activeThread.id);
+      if (snapshotMutationCurrent(requestSeq)) {
+        setSnapshot((current) => (current ? { ...current, ...next } : current));
+      }
     } catch (err: any) {
       if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
     } finally {
       setDefaultModelBusy(false);
     }
-  }, [activeThread, applySnapshot, beginSnapshotMutation, snapshot?.defaultModel, snapshotMutationCurrent]);
+  }, [activeThread, beginSnapshotMutation, snapshot?.defaultModel, snapshotMutationCurrent]);
 
-  const modelOptions = snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS;
-  const activeProvider = activeThread?.provider ?? modelOptions[0]?.provider ?? 'openai';
-  const providerOptions = React.useMemo(
-    () => ASSISTANT_PROVIDERS.map((provider) => ({
-      ...provider,
-      models: uniqueAssistantModels(modelOptions.filter((model) => model.provider === provider.id)),
-    })),
-    [modelOptions],
-  );
-  const activeProviderOptions = React.useMemo(
-    () => providerOptions.find((provider) => provider.id === activeProvider)?.models ?? [],
-    [activeProvider, providerOptions],
-  );
-  const displayedModelOptions = React.useMemo(() => {
-    if (!activeThread) return activeProviderOptions;
-    const selectedKey = `${activeThread.provider}:${activeThread.model}`;
-    const hasSelected = activeProviderOptions.some((model) => `${model.provider}:${model.id}` === selectedKey);
-    if (hasSelected) return activeProviderOptions;
-    return [
-      {
-        provider: activeThread.provider,
-        id: activeThread.model,
-        name: activeThread.model,
-        reasoning: activeThread.thinkingLevel !== 'off',
-        thinkingLevel: activeThread.thinkingLevel,
-      },
-      ...activeProviderOptions,
-    ];
-  }, [activeProviderOptions, activeThread]);
-  const selectedModelKey = activeThread ? modelSelectionKey({ provider: activeThread.provider, model: activeThread.model, thinkingLevel: activeThread.thinkingLevel }) : '';
-  const modelMenuEntries = React.useMemo<UiMenuSelectEntry[]>(
-    () =>
-      displayedModelOptions.map((model) => ({
-        value: `${model.provider}:${model.id}`,
-        label: model.name,
-        title: model.id,
-        searchText: `${model.name} ${model.id}`,
-      })),
-    [displayedModelOptions],
-  );
-  const reasoningMenuEntries = React.useMemo<UiMenuSelectEntry[]>(() => {
-    if (!activeThread) return [];
-    const levels = new Set(
-      modelOptions
-        .filter((option) => option.provider === activeThread.provider && option.id === activeThread.model)
-        .map((option) => option.thinkingLevel),
-    );
-    if (levels.size === 0) levels.add(activeThread.thinkingLevel);
-    return [...levels].map((level) => ({ value: level, label: assistantReasoningLabel(level) }));
-  }, [activeThread, modelOptions]);
-  const selectedModelLabel = React.useMemo(() => {
-    if (!activeThread) return '';
-    return modelSelectionLabel({ provider: activeThread.provider, model: activeThread.model, thinkingLevel: activeThread.thinkingLevel }, modelOptions);
-  }, [activeThread, modelOptions]);
-  const activeModelIsDefault = Boolean(
-    activeThread &&
-      snapshot?.defaultModel.provider === activeThread.provider &&
-      snapshot.defaultModel.model === activeThread.model &&
-      snapshot.defaultModel.thinkingLevel === activeThread.thinkingLevel,
-  );
-  const activeProviderMeta = providerOptions.find((provider) => provider.id === activeProvider) ?? ASSISTANT_PROVIDERS[0];
-  const activeRunningModelLabel = activeRunningModel ? modelSelectionLabel(activeRunningModel, modelOptions) : '';
   const availableTools = snapshot?.availableTools ?? EMPTY_ASSISTANT_TOOL_SUMMARIES;
   const snapshotEnabledToolNames = React.useMemo(() => {
     const toolNames = availableTools.map((tool) => tool.name);
@@ -1590,19 +1384,21 @@ export function AssistantDock({
       const requestSeq = beginSnapshotMutation();
       setDefaultToolsBusy(true);
       try {
-        const next = await requestJson<AssistantSnapshot>('/api/assistant/default-tools', {
+        const next = await requestJson<AssistantDefaultSettings>('/api/assistant/default-tools', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ enabledTools: persistedTools }),
         });
-        if (snapshotMutationCurrent(requestSeq)) applySnapshot(next, activeThreadIdRef.current);
+        if (snapshotMutationCurrent(requestSeq)) {
+          setSnapshot((current) => (current ? { ...current, ...next } : current));
+        }
       } catch (err: any) {
         if (snapshotMutationCurrent(requestSeq)) setError(err?.message ?? String(err));
       } finally {
         setDefaultToolsBusy(false);
       }
     },
-    [applySnapshot, availableTools, beginSnapshotMutation, snapshot?.defaultEnabledTools, snapshotMutationCurrent],
+    [availableTools, beginSnapshotMutation, snapshot?.defaultEnabledTools, snapshotMutationCurrent],
   );
 
   const toggleDefaultTool = React.useCallback(
@@ -1690,11 +1486,7 @@ export function AssistantDock({
   React.useEffect(() => {
     if (!filesOpen || !activeThreadId) return;
     void loadArtifactFiles();
-    const timer = window.setInterval(() => {
-      void loadArtifactFiles({ silent: true });
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [activeThreadId, filesOpen, loadArtifactFiles]);
+  }, [activeThread?.updatedAt, activeThreadId, filesOpen, loadArtifactFiles]);
 
   React.useEffect(() => {
     if (!filesOpen) return;
@@ -1709,11 +1501,7 @@ export function AssistantDock({
   React.useEffect(() => {
     if (!filesOpen || !selectedArtifactPath) return;
     void loadSelectedArtifactFile();
-    const timer = window.setInterval(() => {
-      void loadSelectedArtifactFile({ silent: true });
-    }, 1000);
-    return () => window.clearInterval(timer);
-  }, [filesOpen, loadSelectedArtifactFile, selectedArtifactPath]);
+  }, [activeThread?.updatedAt, filesOpen, loadSelectedArtifactFile, selectedArtifactPath]);
 
   return (
     <div data-assistant-dock-root="true" className="flex h-full min-h-0 bg-[var(--panel-alt)]">
@@ -1877,7 +1665,7 @@ export function AssistantDock({
                 <IconSettings className="h-4 w-4 text-[var(--muted)]" />
                 Settings
               </div>
-              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Defaults apply to newly created threads. Existing threads keep their current configuration.</div>
+              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Defaults apply to newly created chats. Existing chats keep their current configuration.</div>
             </div>
             <AssistantToolsPanel
               variant="settings"
@@ -1993,12 +1781,12 @@ export function AssistantDock({
                   </div>
                 ) : null}
                 {loading && !snapshot ? (
-                  <div className="px-3 text-[12px] text-[var(--muted)]">Loading assistant...</div>
+                  <div className="px-3 text-[12px] text-[var(--muted)]">Loading built-in agent...</div>
                 ) : blipSession.historyLoading && visibleItems.length === 0 ? (
                   <div className="px-3 text-[12px] text-[var(--muted)]">Loading conversation...</div>
                 ) : showEmptyAssistantThread ? (
                   <div className="w-full rounded border border-dashed border-[var(--border)] px-3 py-5 text-center">
-                    <div className="text-[12px] text-[var(--fg-secondary)]">Start a thread to inspect drones or coordinate work.</div>
+                    <div className="text-[12px] text-[var(--fg-secondary)]">Start the chat to inspect drones or coordinate work.</div>
                     <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Drone messaging will ask for approval first.</div>
                   </div>
                 ) : (
@@ -2040,124 +1828,20 @@ export function AssistantDock({
                     onCancel={() => void cancelQueuedPrompt(prompt.id)}
                   />
                 ))}
-                {activeProvider === 'codex' ? <CodexConnectControl compact /> : null}
                 {error || blipSession.runError || blipSession.historyError ? <div className="mx-3 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-3 py-2 text-[11px] text-[var(--red)]">{error ?? blipSession.runError ?? blipSession.historyError}</div> : null}
               </div>
             </div>
           </div>
 
-          {assistantChatIdleHold ? (
-            <AssistantChatIdleFooterBanner subscriptions={activeChatIdleSubscriptionsForThread} droneNameById={droneNameById} />
-          ) : null}
-
       <div className="flex-shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)] p-2">
-        <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
-          <UiMenuSelect
-            value={activeProvider}
-            disabled={!activeThread || defaultModelBusy}
-            onValueChange={(value) => {
-              const provider = providerOptions.find((option) => option.id === value);
-              if (!provider) return;
-              const nextModel = provider.models[0];
-              void updateThread({
-                provider: provider.id,
-                ...(nextModel ? { model: nextModel.id } : {}),
-              });
-            }}
-            entries={providerOptions.map((provider) => ({
-              value: provider.id,
-              label: provider.label,
-              title: provider.title,
-              searchText: provider.label,
-              disabled: provider.models.length === 0,
-            }))}
-            variant="toolbar"
-            role="listbox"
-            itemRole="option"
-            title="Built-in agent provider"
-            triggerLabel={activeProviderMeta.label}
-            triggerClassName="h-7 w-[88px] justify-between border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
-            triggerLabelClassName="font-semibold"
-            panelClassName="bottom-full mb-1.5 w-[140px]"
-            header="Provider"
-          />
-          <UiMenuSelect
-            value={selectedModelKey}
-            disabled={!activeThread || defaultModelBusy}
-            onValueChange={(value) => {
-              const [provider, model] = value.split(':');
-              void updateThread({ provider: provider as AssistantThread['provider'], model });
-            }}
-            entries={modelMenuEntries}
-            variant="toolbar"
-            role="listbox"
-            itemRole="option"
-            title="Next assistant model"
-            triggerLabel={compactModelSelectionLabel(selectedModelLabel)}
-            triggerClassName="h-7 w-[112px] justify-between border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
-            triggerLabelClassName="font-semibold"
-            panelClassName="bottom-full mb-1.5 w-[190px]"
-            menuClassName="max-h-56 overflow-y-auto"
-            header="Model"
-            searchable
-            searchPlaceholder="Search models"
-          />
-          <UiMenuSelect
-            value={activeThread?.thinkingLevel ?? ''}
-            disabled={!activeThread || defaultModelBusy || reasoningMenuEntries.length === 0}
-            onValueChange={(thinkingLevel) => void updateThread({ thinkingLevel })}
-            entries={reasoningMenuEntries}
-            variant="toolbar"
-            role="listbox"
-            itemRole="option"
-            title={`Reasoning: ${assistantReasoningLabel(activeThread?.thinkingLevel ?? 'off')}`}
-            triggerLabel={assistantReasoningLabel(activeThread?.thinkingLevel ?? 'off')}
-            triggerClassName="h-7 w-[82px] justify-between border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
-            triggerLabelClassName="font-semibold"
-            panelClassName="bottom-full mb-1.5 w-[140px]"
-            menuClassName="max-h-56 overflow-y-auto"
-            header="Reasoning"
-          />
-          <button
-            type="button"
-            disabled={!activeThread || defaultModelBusy}
-            aria-pressed={activeModelIsDefault}
-            aria-label={activeModelIsDefault ? 'Current default model and reasoning' : 'Set current model and reasoning as default'}
-            title={activeModelIsDefault ? 'Default model and reasoning for new chats' : 'Make this model and reasoning the default for new chats'}
-            onClick={() => void setActiveModelAsDefault()}
-            className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded transition-colors disabled:cursor-not-allowed disabled:opacity-45 ${
-              activeModelIsDefault
-                ? 'bg-[rgba(250,204,21,.10)] text-[var(--yellow)]'
-                : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--yellow)]'
-            }`}
-          >
-            <DefaultModelStar selected={activeModelIsDefault} />
-          </button>
-          <div
-            className="grid h-7 flex-shrink-0 grid-cols-2 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"
-            role="group"
-            aria-label="Built-in agent message delivery"
-          >
-            {(['queue', 'asap'] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                disabled={!activeThread}
-                onClick={() => void updateThread({ promptDeliveryMode: mode })}
-                aria-pressed={promptDeliveryMode === mode}
-                title={mode === 'queue' ? 'Queue after the assistant finishes' : 'Inject after the current turn before the next assistant response'}
-                className={`min-w-[42px] px-2 text-[10px] font-semibold uppercase tracking-wide disabled:opacity-40 ${
-                  promptDeliveryMode === mode
-                    ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'text-[var(--muted)] hover:bg-[rgba(255,255,255,.025)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                {mode === 'queue' ? 'Queue' : 'ASAP'}
-              </button>
-            ))}
-          </div>
-        </div>
+        <NativeAgentModelControls
+          thread={activeThread}
+          models={snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS}
+          defaultModel={snapshot?.defaultModel}
+          busy={defaultModelBusy}
+          onUpdate={(patch) => void updateThread(patch)}
+          onSetDefault={() => void setActiveModelAsDefault()}
+        />
         {attachmentError ? (
           <div className="mb-2 rounded border border-[rgba(255,90,90,.28)] bg-[rgba(255,90,90,.07)] px-2.5 py-1.5 text-[11px] text-[var(--red)]">
             {attachmentError}
@@ -2309,7 +1993,7 @@ export function AssistantDock({
             onKeyDown={(event) => {
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                if (!assistantChatIdleHold) void sendPrompt();
+                void sendPrompt();
               }
             }}
             onPaste={(event) => {
@@ -2318,13 +2002,11 @@ export function AssistantDock({
             }}
             disabled={!activeThread}
             placeholder={
-              assistantChatIdleHold
-                ? 'Stop subscription below to send a message'
-                : running
-                  ? promptDeliveryMode === 'asap'
-                    ? 'Send at next turn'
-                    : 'Queue a message'
-                  : 'Ask the assistant'
+              running
+                ? promptDeliveryMode === 'asap'
+                  ? 'Send at next turn'
+                  : 'Queue a message'
+                : 'Ask the assistant'
             }
             className="h-24 w-full resize-none border-0 bg-transparent px-3 pb-10 pt-2 text-[12px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none disabled:opacity-50"
           />
@@ -2338,22 +2020,13 @@ export function AssistantDock({
           >
             <IconPlus className="h-3.5 w-3.5" />
           </button>
-          {activeRunningModel ? (
-            <span
-              className="absolute bottom-2 left-10 max-w-[calc(100%-190px)] truncate rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]"
-              title={`Running model: ${activeRunningModelLabel}`}
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              Running {activeRunningModelLabel}
-            </span>
-          ) : null}
           <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
-            {running || assistantChatIdleHold ? (
+            {running ? (
               <button
                 type="button"
                 onClick={() => void stop()}
                 disabled={assistantStopBusy}
-                title={assistantChatIdleHold && !running ? 'Cancel chat idle subscription' : 'Stop the assistant run'}
+                title="Stop the assistant run"
                 aria-busy={assistantStopBusy}
                 className="h-7 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--red)] disabled:opacity-40"
                 style={{ fontFamily: 'var(--display)' }}
@@ -2361,17 +2034,15 @@ export function AssistantDock({
                 {assistantStopBusy ? 'Stopping…' : 'Stop'}
               </button>
             ) : null}
-            {!assistantChatIdleHold ? (
-              <button
-                type="button"
-                onClick={() => void sendPrompt()}
-                disabled={(!draft.trim() && attachments.length === 0 && referencedDrones.length === 0) || !activeThread || scopeSyncBusy}
-                className="h-7 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)] disabled:opacity-40"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                Send
-              </button>
-            ) : null}
+            <button
+              type="button"
+              onClick={() => void sendPrompt()}
+              disabled={(!draft.trim() && attachments.length === 0 && referencedDrones.length === 0) || !activeThread || scopeSyncBusy}
+              className="h-7 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)] disabled:opacity-40"
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              Send
+            </button>
           </div>
         </div>
       </div>

@@ -217,7 +217,7 @@ function AssistantPromptDiffView({ oldText, newText }: { oldText: string; newTex
         >
           Promotion diff
         </div>
-        <div className="text-[10px] text-[var(--muted-dim)]">Global to thread draft</div>
+        <div className="text-[10px] text-[var(--muted-dim)]">Global to chat draft</div>
       </div>
       <div className="max-h-[260px] overflow-auto font-mono text-[11px] leading-relaxed">
         {!changed ? (

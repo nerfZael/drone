@@ -25,6 +25,7 @@
         "@blip/mcp": "workspace:*",
         "@blip/protocol": "workspace:*",
         "@blip/tools": "workspace:*",
+        "@drone/assistant-chat": "workspace:*",
         "@drone/device-protocol": "workspace:*",
         "@mariozechner/pi-agent-core": "workspace:*",
         "@mariozechner/pi-ai": "workspace:*",

@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { HubAssistantService } from '../src/hub/assistant';
 import { updateRegistry } from '../src/host/registry';
+import { ensureTestNativeChat } from './native-chat-test-helpers';
 import { withTempDroneDataDir } from './test-helpers';
 
 async function markDroneReady(id: string): Promise<void> {
@@ -54,8 +55,8 @@ describe('assistant drone workspace target execution', () => {
           };
         },
       });
-      const created = await service.createThread({ title: 'files' });
-      const threadId = created.activeThreadId;
+      const created = await ensureTestNativeChat(service, { chatName: 'files' });
+      const threadId = created.chatId;
       await service.updateAccessScope({
         threadId,
         readMode: 'selected',
@@ -89,8 +90,8 @@ describe('assistant drone workspace target execution', () => {
           return { droneId, path, size: content.length };
         },
       });
-      const created = await service.createThread({ title: 'files' });
-      const threadId = created.activeThreadId;
+      const created = await ensureTestNativeChat(service, { chatName: 'files' });
+      const threadId = created.chatId;
       await service.updateAccessScope({
         threadId,
         readMode: 'all',
@@ -135,8 +136,8 @@ describe('assistant drone workspace target execution', () => {
       const service = new HubAssistantService({
         listDrones: async () => drones,
       });
-      const created = await service.createThread({ title: 'write only' });
-      const threadId = created.activeThreadId;
+      const created = await ensureTestNativeChat(service, { chatName: 'write only' });
+      const threadId = created.chatId;
       await service.updateAccessScope({
         threadId,
         readMode: 'selected',
@@ -164,8 +165,8 @@ describe('assistant drone workspace target execution', () => {
           return { droneId: input.droneId, command: input.command, code: 0 } as any;
         },
       });
-      const created = await service.createThread({ title: 'execute' });
-      const threadId = created.activeThreadId;
+      const created = await ensureTestNativeChat(service, { chatName: 'execute' });
+      const threadId = created.chatId;
       await service.updateAccessScope({
         threadId,
         readMode: 'all',
@@ -192,8 +193,8 @@ describe('assistant drone workspace target execution', () => {
   test('preflights remote workspace bash against the resolved target', async () => {
     await withTempDroneDataDir('assistant-remote-workspace-bash-', async () => {
       const service = new HubAssistantService({ listDrones: async () => [] });
-      const created = await service.createThread({ title: 'remote execute' });
-      const threadId = created.activeThreadId;
+      const created = await ensureTestNativeChat(service, { chatName: 'remote execute' });
+      const threadId = created.chatId;
       await service.updateThread(threadId, { autoApprove: true });
 
       await expect(
@@ -212,8 +213,8 @@ describe('assistant drone workspace target execution', () => {
   test('denies an approval immediately when its signal is already aborted', async () => {
     await withTempDroneDataDir('assistant-aborted-bash-approval-', async () => {
       const service = new HubAssistantService({ listDrones: async () => [] });
-      const created = await service.createThread({ title: 'aborted execute' });
-      const threadId = created.activeThreadId;
+      const created = await ensureTestNativeChat(service, { chatName: 'aborted execute' });
+      const threadId = created.chatId;
       const controller = new AbortController();
       controller.abort();
 

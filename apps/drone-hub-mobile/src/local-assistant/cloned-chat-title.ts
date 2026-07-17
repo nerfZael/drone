@@ -1,9 +1,9 @@
-export function clonedAssistantThreadTitle(
+export function clonedChatTitle(
   sourceTitle: string,
-  threads: Array<{ title?: string }>,
+  chats: Array<{ title?: string }>,
 ): string {
-  const base = String(sourceTitle || 'Thread').trim().slice(0, 153) || 'Thread';
-  const titles = new Set(threads.map((thread) => String(thread.title ?? '').trim()));
+  const base = String(sourceTitle || 'Chat').trim().slice(0, 153) || 'Chat';
+  const titles = new Set(chats.map((chat) => String(chat.title ?? '').trim()));
   const first = `${base} (copy)`;
   if (!titles.has(first)) return first;
   for (let copy = 2; copy < 10_000; copy += 1) {

@@ -40,7 +40,11 @@ function mergeEntries(
   return [...bySequence.values()].sort((a, b) => a.sequence - b.sequence);
 }
 
-export function useBlipThreadSession(threadId: string, enabled: boolean) {
+export function useBlipThreadSession(
+  threadId: string,
+  enabled: boolean,
+  onNativeChange?: () => void,
+) {
   const [entries, setEntries] = React.useState<BlipHistoryEntry[]>([]);
   const [beforeCursor, setBeforeCursor] = React.useState<number | null>(null);
   const [hasOlder, setHasOlder] = React.useState(false);
@@ -54,7 +58,9 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
   const threadIdRef = React.useRef(threadId);
   const seenEventKeysRef = React.useRef<string[]>([]);
   const latestHistoryRequestRef = React.useRef(0);
+  const onNativeChangeRef = React.useRef(onNativeChange);
   threadIdRef.current = threadId;
+  onNativeChangeRef.current = onNativeChange;
 
   const refreshHistory = React.useCallback(
     async (options?: { quiet?: boolean }) => {
@@ -236,6 +242,7 @@ export function useBlipThreadSession(threadId: string, enabled: boolean) {
     };
     source.addEventListener('connected', onEvent as EventListener);
     source.addEventListener('blip_event', onEvent as EventListener);
+    source.addEventListener('native_change', () => onNativeChangeRef.current?.());
     return () => source.close();
   }, [enabled, handleStreamEvent, threadId]);
 

@@ -57,34 +57,18 @@ describeSocketSuite('routed Hub APIs', () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  test('retires standalone creation while retaining native chat session endpoints', async () => {
+  test('does not expose standalone assistant thread routes', async () => {
     const createAttempt = await apiFetch(
       '/api/assistant/threads',
       jsonRequest('POST', { title: 'Router test' }),
     );
-    expect(createAttempt.response.status).toBe(410);
-    expect(createAttempt.data.error).toContain('drone chat');
+    expect(createAttempt.response.status).toBe(404);
 
     const listed = await apiFetch('/api/assistant/threads');
-    expect(listed.response.status).toBe(200);
-    const threadId = listed.data.activeThreadId;
+    expect(listed.response.status).toBe(404);
 
-    const updated = await apiFetch(
-      `/api/assistant/threads/${encodeURIComponent(threadId)}`,
-      jsonRequest('PATCH', { title: 'Updated through router' }),
-    );
-    expect(updated.response.status).toBe(200);
-    expect(updated.data.threads.find((thread: any) => thread.id === threadId)?.title).toBe(
-      'Updated through router',
-    );
-
-    const systemPrompt = await apiFetch(
-      `/api/assistant/threads/${encodeURIComponent(threadId)}/system-prompt`,
-    );
+    const systemPrompt = await apiFetch('/api/assistant/system-prompt');
     expect(systemPrompt.response.status).toBe(200);
-
-    const missing = await apiFetch('/api/assistant/threads/does-not-exist');
-    expect(missing.response.status).toBe(404);
   });
 
   test('routes whiteboard CRUD and reports malformed JSON consistently', async () => {

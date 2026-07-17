@@ -355,6 +355,38 @@ export class PromptQueueRepository {
     });
   }
 
+  listPending(opts: { droneId: string; chatName: string }): PromptQueueRecord[] {
+    return this.database.read((connection) =>
+      (
+        connection
+          .prepare(
+            `SELECT * FROM prompts
+             WHERE drone_id = ? AND chat_name = ?
+               AND state IN ('queued', 'sending', 'failed')
+             ORDER BY sequence`,
+          )
+          .all(opts.droneId, opts.chatName) as PromptRow[]
+      )
+        .map((row) => recordFromRow(row))
+        .filter((row): row is PromptQueueRecord => Boolean(row)),
+    );
+  }
+
+  nextQueued(opts: { droneId: string; chatName: string }): PromptQueueRecord | null {
+    return this.database.read((connection) =>
+      recordFromRow(
+        connection
+          .prepare(
+            `SELECT * FROM prompts
+             WHERE drone_id = ? AND chat_name = ? AND state = 'queued'
+             ORDER BY sequence
+             LIMIT 1`,
+          )
+          .get(opts.droneId, opts.chatName) as PromptRow | undefined,
+      ),
+    );
+  }
+
   async renameChat(opts: { droneId: string; chatName: string; newChatName: string }): Promise<number> {
     return await this.database.writeTransaction('rename chat prompt queue', (connection) => {
       connection.prepare('DELETE FROM prompts WHERE drone_id = ? AND chat_name = ?')
@@ -439,6 +471,45 @@ export class PromptQueueRepository {
         | undefined;
       return recordFromRow(claimed);
     });
+  }
+
+  async claimForSteering(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    leaseOwner: string;
+    leaseMs?: number;
+    now?: string;
+  }): Promise<PromptQueueRecord | null> {
+    const now = normalizeIso(opts.now, new Date().toISOString());
+    const leaseOwner = String(opts.leaseOwner ?? '').trim();
+    if (!leaseOwner) throw new Error('Prompt lease owner cannot be empty');
+    const leaseExpiresAt = addMs(now, Math.max(1_000, opts.leaseMs ?? 180_000));
+    return await this.database.writeTransaction('claim steering prompt', (connection) =>
+      recordFromRow(
+        connection
+          .prepare(
+            `UPDATE prompts
+             SET state = 'sending',
+                 attempt_count = attempt_count + 1,
+                 updated_at = ?,
+                 lease_owner = ?,
+                 lease_expires_at = ?,
+                 last_error = NULL
+             WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?
+               AND state = 'queued'
+             RETURNING *`,
+          )
+          .get(
+            now,
+            leaseOwner,
+            leaseExpiresAt,
+            opts.droneId,
+            opts.chatName,
+            opts.promptId,
+          ) as PromptRow | undefined,
+      ),
+    );
   }
 
   async update(opts: {

@@ -1557,20 +1557,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const closeDroneDropActionModal = React.useCallback(() => {
     setDroneDropActionModal(null);
   }, []);
-  React.useEffect(() => {
-    void fetch('/api/assistant/context', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        activeDroneId: currentDrone?.id ?? null,
-        activeDroneName: currentDrone?.name ?? null,
-        activeChatName: currentDrone ? (String(selectedChat ?? '').trim() || 'default') : null,
-        appView,
-      }),
-    }).catch(() => {
-      // Context reporting is best effort; assistant chat still works without it.
-    });
-  }, [appView, currentDrone?.id, currentDrone?.name, selectedChat]);
   const expandGroupsForDroneIds = React.useCallback(
     (droneIds: string[]) => {
       const groups = new Set<string>();

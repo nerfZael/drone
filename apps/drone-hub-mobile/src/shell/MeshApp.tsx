@@ -23,12 +23,12 @@ import Trash2 from 'lucide-react-native/icons/trash-2';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
 import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext';
 import {
-  AssistantDrawerProvider,
-  AssistantThreadDrawer,
-  assistantDrawerWidth,
+  AppDrawerProvider,
+  AppDrawer,
+  appDrawerWidth,
   type AppDrawerNavigationItem,
   type DrawerDevicePickerItem,
-} from '../local-assistant/AssistantThreadDrawer';
+} from '../local-assistant/AppDrawer';
 import { DevicesScreen } from '../screens/DevicesScreen';
 import { DronesScreen, type DronesAppHeaderState } from '../screens/DronesScreen';
 import { PairScreen } from '../screens/PairScreen';
@@ -161,7 +161,7 @@ function Shell() {
   }, [devicePickerItems, selectedDeviceId]);
   React.useEffect(() => setHeaderMenuOpen(false), [activeDeviceId, pairingVisible, tab]);
   const { width: windowWidth } = useWindowDimensions();
-  const drawerWidth = assistantDrawerWidth(windowWidth);
+  const drawerWidth = appDrawerWidth(windowWidth);
   const drawerOffset = React.useRef(new Animated.Value(-drawerWidth)).current;
   const drawerOpenRef = React.useRef(appDrawerOpen);
   const drawerWidthRef = React.useRef(drawerWidth);
@@ -353,21 +353,15 @@ function Shell() {
       {...drawerPanResponder.panHandlers}
     >
       {mesh.profile && (tab !== 'drones' || pairingVisible) ? (
-        <AssistantThreadDrawer
+        <AppDrawer
           open={appDrawerOpen}
-          title=""
-          threads={[]}
-          activeThreadId=""
           offset={drawerOffset}
           openingGestureActive={openingGestureActive}
           navigationItems={navigationItems}
-          showThreads={false}
           devicePickerItems={devicePickerItems}
           activeDeviceId={activeDeviceId}
           onSelectDevice={setSelectedDeviceId}
           onClose={() => setAppDrawerOpen(false)}
-          onSelect={() => {}}
-          onCreate={() => {}}
         />
       ) : null}
       <View style={styles.header}>
@@ -464,9 +458,9 @@ export function MeshApp() {
   return (
     <MeshProvider>
       <LocalAssistantProvider>
-        <AssistantDrawerProvider>
+        <AppDrawerProvider>
           <Shell />
-        </AssistantDrawerProvider>
+        </AppDrawerProvider>
       </LocalAssistantProvider>
     </MeshProvider>
   );

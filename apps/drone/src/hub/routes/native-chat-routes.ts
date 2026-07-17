@@ -1,8 +1,7 @@
 import type { HubRouter } from '../hub-router';
 
 export type NativeChatRouteDependencies = {
-  assistantService: any;
-  blipAssistantHost: any;
+  nativeChatLifecycle: any;
   getChatEntry: (input: { droneId: string; chatName: string }) => Promise<{ chat: any }>;
   inferChatAgent: (chat: any, drone?: any) => { kind: string };
   resolveDroneOrPendingForReadRef: (
@@ -37,11 +36,10 @@ export function registerNativeChatRoutes(
         const droneRef = decodeURIComponent(params.droneRef);
         const chatName = decodeURIComponent(params.chatName) || 'default';
         const { resolved, chat, chatId } = await resolveNativeChat(droneRef, chatName);
-        const snapshot = await deps.assistantService.ensureNativeThread({
+        const snapshot = await deps.nativeChatLifecycle.ensure({
           id: chatId,
           droneId: resolved.id,
           chatName,
-          title: chatName,
           provider: chat?.nativeProvider,
           model: chat?.model,
           thinkingLevel: chat?.reasoning,
@@ -62,8 +60,7 @@ export function registerNativeChatRoutes(
         const droneRef = decodeURIComponent(params.droneRef);
         const chatName = decodeURIComponent(params.chatName) || 'default';
         const { chatId } = await resolveNativeChat(droneRef, chatName);
-        await deps.blipAssistantHost.deleteThread(chatId);
-        await deps.assistantService.deleteThread(chatId);
+        await deps.nativeChatLifecycle.delete(chatId);
         respond(200, { ok: true, deleted: true, nativeChatId: chatId });
       } catch (error: any) {
         const message = String(error?.message ?? error);

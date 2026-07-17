@@ -12,27 +12,35 @@ export const DEVICE_CORE_CAPABILITY: CapabilityDescriptor = {
   ],
 };
 
+export const DRONE_CONTROL_OPERATIONS = [
+  'drones.list',
+  'chats.list',
+  'chat.create',
+  'chat.read',
+  'chat.models',
+  'chat.update',
+  'chat.prompt',
+  'chat.stop',
+  'chat.approval.resolve',
+  'chat.message.delete',
+  'repo.pull-requests.read',
+  'repo.pull-requests.merge',
+  'repo.pull-requests.close',
+  'drone.create.container',
+  'drone.create.host',
+  'drone.delete',
+] as const;
+
+export type DroneControlOperation = (typeof DRONE_CONTROL_OPERATIONS)[number];
+export type DroneControlRequest = <Result = unknown>(
+  operation: DroneControlOperation,
+  payload?: Record<string, unknown>,
+) => Promise<Result>;
+
 export const DRONE_CONTROL_CAPABILITY: CapabilityDescriptor = {
   id: 'drone-control',
   version: 1,
-  operations: [
-    'drones.list',
-    'chats.list',
-    'chat.create',
-    'chat.read',
-    'chat.models',
-    'chat.update',
-    'chat.prompt',
-    'chat.stop',
-    'chat.approval.resolve',
-    'chat.message.delete',
-    'repo.pull-requests.read',
-    'repo.pull-requests.merge',
-    'repo.pull-requests.close',
-    'drone.create.container',
-    'drone.create.host',
-    'drone.delete',
-  ],
+  operations: DRONE_CONTROL_OPERATIONS,
 };
 
 export const WORKSPACE_CAPABILITY: CapabilityDescriptor = {

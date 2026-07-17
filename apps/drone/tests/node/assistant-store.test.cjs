@@ -18,105 +18,58 @@ const { HubAssistantService } = require('../../dist/hub/assistant.js');
 const originalDataDir = process.env.DRONE_DATA_DIR;
 const tempRoots = [];
 
-function useTempDataDir(label) {
-  const root = fs.mkdtempSync(path.join(os.tmpdir(), `assistant-store-${label}-`));
-  tempRoots.push(root);
-  const dataDir = path.join(root, 'data');
-  fs.mkdirSync(dataDir, { recursive: true });
-  process.env.DRONE_DATA_DIR = dataDir;
-  resetDroneRootDirForTests();
-  return dataDir;
-}
-
 function useDataDir(dataDir) {
   process.env.DRONE_DATA_DIR = dataDir;
   resetDroneRootDirForTests();
 }
 
+function useTempDataDir(label) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), `assistant-store-${label}-`));
+  tempRoots.push(root);
+  const dataDir = path.join(root, 'data');
+  fs.mkdirSync(dataDir, { recursive: true });
+  useDataDir(dataDir);
+  return dataDir;
+}
+
 function state(title = 'first') {
   return {
-    activeThreadId: 'thread-1',
     defaultModel: { provider: 'openai', model: 'gpt-5.6-sol', thinkingLevel: 'medium' },
     defaultEnabledTools: ['list_drones', 'read_chat'],
-    webSearchToolMigrationApplied: true,
-    fetchContentToolMigrationApplied: true,
     systemPrompt: 'default prompt',
     systemPromptUpdatedAt: '2026-01-01T00:00:00.000Z',
     updatedAt: '2026-01-02T00:00:00.000Z',
     threads: [
       {
-        id: 'thread-1',
+        id: 'native-chat-1',
+        ownerDroneId: 'drone-1',
+        ownerChatName: 'default',
         title,
         createdAt: '2026-01-01T00:00:00.000Z',
         updatedAt: '2026-01-02T00:00:00.000Z',
         provider: 'openai',
         model: 'gpt-5.5',
         thinkingLevel: 'off',
-        systemPrompt: 'thread prompt',
+        systemPrompt: 'chat prompt',
         enabledTools: ['list_drones'],
-        accessScope: { readMode: 'all', writeMode: 'selected', droneIds: [] },
+        accessScope: {
+          readMode: 'all',
+          writeMode: 'selected',
+          executeMode: 'selected',
+          droneIds: ['drone-1'],
+        },
         autoApprove: false,
         promptDeliveryMode: 'queue',
-        messages: [
-          { id: 'message-1', role: 'user', content: 'hello', futureMessageField: 'kept' },
-          { id: 'message-2', role: 'assistant', content: 'hi' },
-        ],
-        queuedPrompts: [
-          {
-            id: 'queued-1',
-            prompt: 'next',
-            createdAt: '2026-01-02T00:00:00.000Z',
-            provider: 'openai',
-            model: 'gpt-5.5',
-            thinkingLevel: 'off',
-            deliveryMode: 'queue',
-            status: 'queued',
-            error: null,
-            attachments: [{ path: '/tmp/reference.txt', name: 'reference.txt' }],
-            futureQueueField: { kept: true },
-          },
-        ],
         status: 'idle',
         error: null,
         futureThreadField: ['kept'],
-      },
-    ],
-    chatIdleSubscriptions: [
-      {
-        id: 'subscription-1',
-        threadId: 'thread-1',
-        toolCallId: 'tool-1',
-        mode: 'all',
-        targets: [{ droneId: 'drone-1', chatName: 'default' }],
-        createdAt: '2026-01-02T00:00:00.000Z',
-        expiresAt: '2026-01-03T00:00:00.000Z',
-        idleForMs: 1000,
-        status: 'active',
-        idleSince: null,
-        firedAt: null,
-        cancelledAt: null,
-        expiredAt: null,
-        lastResult: null,
-        futureSubscriptionField: 'kept',
       },
     ],
   };
 }
 
 function assistantService() {
-  return new HubAssistantService({
-    listDrones: async () => [],
-    createDrone: async () => ({ id: 'drone-1', name: 'Drone 1', runtime: 'container' }),
-    createChat: async () => ({
-      droneId: 'drone-1',
-      droneName: 'Drone 1',
-      chatName: 'default',
-      chats: ['default'],
-    }),
-    setDroneGroup: async () => ({ group: null, moved: [], rejected: [], total: 0 }),
-    renameDrones: async () => ({ renamed: [], rejected: [], total: 0 }),
-    messageDrone: async () => ({ promptId: 'prompt-1' }),
-  });
+  return new HubAssistantService({ listDrones: async () => [] });
 }
 
 afterEach(async () => {
@@ -129,13 +82,11 @@ afterEach(async () => {
 });
 
 describe('assistant SQLite store', () => {
-  test('upgrades historical migrations and clears only assistant-owned data', async () => {
-    const dataDir = useTempDataDir('voice-mode-upgrade');
+  test('drops obsolete runtime-owned tables without touching unrelated data', async () => {
+    const dataDir = useTempDataDir('obsolete-tables');
     const databasePath = path.join(dataDir, 'hub.sqlite');
     const legacyDatabase = new Database(databasePath);
-    const initialMigration = ASSISTANT_STORE_MIGRATIONS.find((migration) => migration.version === 1);
-    assert.ok(initialMigration);
-    initialMigration.migrate(legacyDatabase);
+    ASSISTANT_STORE_MIGRATIONS[0].migrate(legacyDatabase);
     legacyDatabase.exec(`
       CREATE TABLE hub_schema_migrations (
         scope TEXT NOT NULL,
@@ -145,162 +96,118 @@ describe('assistant SQLite store', () => {
         PRIMARY KEY (scope, version),
         UNIQUE (scope, name)
       );
+      CREATE TABLE assistant_messages (id TEXT PRIMARY KEY);
+      CREATE TABLE assistant_queued_prompts (id TEXT PRIMARY KEY);
+      CREATE TABLE assistant_chat_idle_subscriptions (id TEXT PRIMARY KEY);
       CREATE TABLE assistant_reset_sentinel (value TEXT NOT NULL);
       INSERT INTO assistant_reset_sentinel VALUES ('keep me');
     `);
-    const insertMigration = legacyDatabase.prepare(
+    const recordMigration = legacyDatabase.prepare(
       'INSERT INTO hub_schema_migrations (scope, version, name, applied_at) VALUES (?, ?, ?, ?)',
     );
-    for (const migration of ASSISTANT_STORE_MIGRATIONS.filter((candidate) => candidate.version <= 4)) {
-      insertMigration.run('assistant', migration.version, migration.name, '2026-01-01T00:00:00.000Z');
+    for (const migration of ASSISTANT_STORE_MIGRATIONS.filter((item) => item.version < 8)) {
+      recordMigration.run('assistant', migration.version, migration.name, '2026-01-01T00:00:00.000Z');
     }
-    legacyDatabase.prepare(`
-      INSERT INTO assistant_preferences (
-        singleton, active_thread_id, default_provider, default_model,
-        default_thinking_level, default_enabled_tools_json
-      ) VALUES (1, 'legacy-thread', 'openai', 'gpt-5.5', 'off', '[]')
-    `).run();
     legacyDatabase.close();
-
-    const blipDatabase = new Database(path.join(dataDir, 'assistant-blip.sqlite'));
-    blipDatabase.exec(`
-      CREATE TABLE assistant_blip_sessions (id TEXT PRIMARY KEY);
-      CREATE TABLE assistant_blip_entries (id TEXT PRIMARY KEY);
-      CREATE TABLE assistant_blip_thread_bindings (thread_id TEXT PRIMARY KEY);
-      CREATE TABLE assistant_mcp_idle_subscriptions (id TEXT PRIMARY KEY);
-      INSERT INTO assistant_blip_sessions VALUES ('legacy-session');
-      INSERT INTO assistant_blip_entries VALUES ('legacy-entry');
-      INSERT INTO assistant_blip_thread_bindings VALUES ('legacy-thread');
-      INSERT INTO assistant_mcp_idle_subscriptions VALUES ('keep-subscription');
-    `);
-    blipDatabase.close();
-    fs.mkdirSync(path.join(dataDir, 'assistant-artifacts', 'legacy-thread'), { recursive: true });
-    fs.writeFileSync(path.join(dataDir, 'assistant-artifacts', 'legacy-thread', 'note.txt'), 'discard me');
-    fs.writeFileSync(path.join(dataDir, 'assistant.json'), JSON.stringify(state('discard me')));
 
     assert.equal(await loadAssistantState(), null);
     const database = requireHubDatabase();
-    const sentinel = database.read((connection) =>
-      connection.prepare('SELECT value FROM assistant_reset_sentinel').get(),
-    );
-    assert.equal(sentinel.value, 'keep me');
-    assert.deepEqual(
-      database.read((connection) =>
-        connection
-          .prepare("SELECT version, name FROM hub_schema_migrations WHERE scope = 'assistant' ORDER BY version")
-          .all(),
-      ),
-      ASSISTANT_STORE_MIGRATIONS.map(({ version, name }) => ({ version, name })),
-    );
-    const resetBlipDatabase = new Database(path.join(dataDir, 'assistant-blip.sqlite'));
-    assert.equal(resetBlipDatabase.prepare('SELECT COUNT(*) AS count FROM assistant_blip_sessions').get().count, 0);
-    assert.equal(resetBlipDatabase.prepare('SELECT COUNT(*) AS count FROM assistant_blip_entries').get().count, 0);
-    assert.equal(resetBlipDatabase.prepare('SELECT COUNT(*) AS count FROM assistant_blip_thread_bindings').get().count, 0);
-    assert.equal(resetBlipDatabase.prepare('SELECT COUNT(*) AS count FROM assistant_mcp_idle_subscriptions').get().count, 1);
-    resetBlipDatabase.close();
-    assert.equal(fs.existsSync(path.join(dataDir, 'assistant-artifacts')), false);
-    assert.equal(fs.existsSync(path.join(dataDir, 'assistant.json')), false);
-  });
-
-  test('persists service settings canonically without recreating assistant.json', async () => {
-    const dataDir = useTempDataDir('service');
-    const service = assistantService();
-
-    await service.updateSystemPrompt({ prompt: 'Canonical assistant prompt.' });
-    assert.equal((await loadAssistantState()).systemPrompt, 'Canonical assistant prompt.');
-    assert.equal(fs.existsSync(path.join(dataDir, 'assistant.json')), false);
-
-    const reopened = assistantService();
     assert.equal(
-      (await reopened.systemPromptSettings()).assistantSystemPrompt.prompt,
-      'Canonical assistant prompt.',
+      database.read((connection) =>
+        connection.prepare('SELECT value FROM assistant_reset_sentinel').get().value,
+      ),
+      'keep me',
+    );
+    for (const table of [
+      'assistant_messages',
+      'assistant_queued_prompts',
+      'assistant_chat_idle_subscriptions',
+    ]) {
+      assert.equal(
+        database.read((connection) =>
+          connection
+            .prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?")
+            .get(table).count,
+        ),
+        0,
+      );
+    }
+  });
+
+  test('persists built-in settings without recreating assistant.json', async () => {
+    const dataDir = useTempDataDir('settings');
+    const service = assistantService();
+    await service.updateSystemPrompt({ prompt: 'Canonical built-in prompt.' });
+
+    assert.equal((await loadAssistantState()).systemPrompt, 'Canonical built-in prompt.');
+    assert.equal(fs.existsSync(path.join(dataDir, 'assistant.json')), false);
+    assert.equal(
+      (await assistantService().systemPromptSettings()).assistantSystemPrompt.prompt,
+      'Canonical built-in prompt.',
     );
   });
 
-  test('discards legacy assistant state without retaining a recovery copy', async () => {
-    const dataDir = useTempDataDir('migration');
-    const legacy = state('from legacy file');
-    fs.writeFileSync(path.join(dataDir, 'assistant.json'), JSON.stringify(legacy));
+  test('discards legacy standalone JSON instead of importing it', async () => {
+    const dataDir = useTempDataDir('legacy-json');
+    fs.writeFileSync(path.join(dataDir, 'assistant.json'), JSON.stringify(state('legacy')));
 
     assert.equal(await loadAssistantState(), null);
     assert.equal(fs.existsSync(path.join(dataDir, 'assistant.json')), false);
-    assert.equal(
-      fs.readdirSync(dataDir).some((name) => name.startsWith('assistant.json.migrated-')),
-      false,
-    );
   });
 
-  test('does not re-import assistant.json after the canonical database is reopened', async () => {
-    const dataDir = useTempDataDir('reopen');
-    await saveAssistantState(state('canonical'));
-    await resetHubDatabaseForTests();
-    resetAssistantStoreForTests();
-    fs.writeFileSync(path.join(dataDir, 'assistant.json'), JSON.stringify(state('stale file')));
-
-    assert.equal((await loadAssistantState()).threads[0].title, 'canonical');
-    assert.equal(fs.existsSync(path.join(dataDir, 'assistant.json')), false);
-    assert.equal(fs.readdirSync(dataDir).some((name) => name.startsWith('assistant.json.migrated-')), false);
-  });
-
-  test('updates only changed rows and preserves unknown row fields', async () => {
+  test('updates native chat rows incrementally and preserves unknown metadata', async () => {
     useTempDataDir('incremental');
     const initial = state();
     await saveAssistantState(initial);
     const database = requireHubDatabase();
-    await database.writeTransaction('install assistant audit triggers', (connection) => {
+    await database.writeTransaction('install assistant audit trigger', (connection) => {
       connection.exec(`
-        CREATE TABLE assistant_test_audit (table_name TEXT NOT NULL, operation TEXT NOT NULL);
+        CREATE TABLE assistant_test_audit (operation TEXT NOT NULL);
         CREATE TRIGGER assistant_test_thread_update AFTER UPDATE ON assistant_threads
-        BEGIN INSERT INTO assistant_test_audit VALUES ('threads', 'update'); END;
-        CREATE TRIGGER assistant_test_message_update AFTER UPDATE ON assistant_messages
-        BEGIN INSERT INTO assistant_test_audit VALUES ('messages', 'update'); END;
-        CREATE TRIGGER assistant_test_queue_update AFTER UPDATE ON assistant_queued_prompts
-        BEGIN INSERT INTO assistant_test_audit VALUES ('queue', 'update'); END;
-        CREATE TRIGGER assistant_test_subscription_update AFTER UPDATE ON assistant_chat_idle_subscriptions
-        BEGIN INSERT INTO assistant_test_audit VALUES ('subscriptions', 'update'); END;
+        BEGIN INSERT INTO assistant_test_audit VALUES ('update'); END;
       `);
     });
 
-    const changed = structuredClone(initial);
-    changed.threads[0].messages[1].content = 'changed reply';
-    await saveAssistantState(changed);
-
+    await saveAssistantState(structuredClone(initial));
     assert.deepEqual(
       database.read((connection) => connection.prepare('SELECT * FROM assistant_test_audit').all()),
-      [{ table_name: 'messages', operation: 'update' }],
+      [],
+    );
+
+    const changed = structuredClone(initial);
+    changed.threads[0].title = 'changed';
+    await saveAssistantState(changed);
+    assert.deepEqual(
+      database.read((connection) => connection.prepare('SELECT * FROM assistant_test_audit').all()),
+      [{ operation: 'update' }],
     );
     const loaded = await loadAssistantState();
-    assert.equal(loaded.threads[0].messages[1].content, 'changed reply');
+    assert.equal(loaded.threads[0].title, 'changed');
     assert.deepEqual(loaded.threads[0].futureThreadField, ['kept']);
-    assert.deepEqual(loaded.threads[0].queuedPrompts[0].futureQueueField, { kept: true });
-    assert.equal(loaded.chatIdleSubscriptions[0].futureSubscriptionField, 'kept');
   });
 
-  test('rolls back all assistant rows when referential integrity fails', async () => {
-    useTempDataDir('rollback');
-    await saveAssistantState(state('before'));
-    const invalid = state('should roll back');
-    invalid.activeThreadId = 'thread-2';
-    invalid.threads.push({
-      ...invalid.threads[0],
-      id: 'thread-2',
-      title: 'new thread',
-      messages: [],
-      queuedPrompts: [],
+  test('uses the canonical prompt queue for built-in chats without a queue limit', async () => {
+    useTempDataDir('native-queue');
+    const service = assistantService();
+    const created = await service.ensureNativeThread({
+      id: 'native-queue-chat',
+      droneId: 'drone-1',
+      chatName: 'default',
+      title: 'default',
     });
-    invalid.chatIdleSubscriptions = [
-      { ...invalid.chatIdleSubscriptions[0], id: 'bad-subscription', threadId: 'missing' },
-    ];
+    const first = await service.enqueueThreadPrompt(created.chatId, {
+      prompt: 'first',
+      promptImages: [{ type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' }],
+    });
+    assert.equal(first.promptImages[0].data, '');
+    const claimed = await service.claimNextQueuedPrompt(created.chatId);
+    assert.equal(claimed.promptImages[0].data, 'aW1hZ2U=');
+    await service.completeQueuedPrompt(created.chatId, claimed.id);
 
-    await assert.rejects(saveAssistantState(invalid), /FOREIGN KEY constraint failed/);
-    const loaded = await loadAssistantState();
-    assert.equal(loaded.activeThreadId, 'thread-1');
-    assert.deepEqual(
-      loaded.threads.map((thread) => thread.id),
-      ['thread-1'],
-    );
-    assert.equal(loaded.threads[0].title, 'before');
-    assert.equal(loaded.chatIdleSubscriptions[0].id, 'subscription-1');
+    for (let index = 0; index < 40; index += 1) {
+      await service.enqueueThreadPrompt(created.chatId, { prompt: `queued ${index}` });
+    }
+    assert.equal((await service.threadSnapshot(created.chatId)).threads[0].queuedPrompts.length, 40);
   });
 
   test('switches canonical databases when DRONE_DATA_DIR changes', async () => {

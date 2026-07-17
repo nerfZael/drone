@@ -1,665 +1,113 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { describe, expect, test } from 'bun:test';
+
 import { HubAssistantService } from '../src/hub/assistant';
-import { updateRegistry } from '../src/host/registry';
+import { ensureTestNativeChat } from './native-chat-test-helpers';
 import { withTempDroneDataDir } from './test-helpers';
 
-function deferred<T = void>(): {
-  promise: Promise<T>;
-  resolve: (value: T | PromiseLike<T>) => void;
-  reject: (reason?: unknown) => void;
-} {
-  let resolve!: (value: T | PromiseLike<T>) => void;
-  let reject!: (reason?: unknown) => void;
-  const promise = new Promise<T>((res, rej) => {
-    resolve = res;
-    reject = rej;
-  });
-  return { promise, resolve, reject };
+function service() {
+  return new HubAssistantService({ listDrones: async () => [] });
 }
 
-function fakePromptText(input: any): string {
-  if (typeof input === 'string') return input;
-  if (typeof input?.content === 'string') return input.content;
-  if (!Array.isArray(input?.content)) return '';
-  return input.content
-    .map((item: any) => (item?.type === 'text' ? String(item.text ?? '') : ''))
-    .join('\n');
-}
-
-function installFakeRuntime(
-  service: HubAssistantService,
-  handlers: {
-    onPrompt?: (
-      prompt: string,
-      run: { provider: string; model: string; thinkingLevel: string },
-    ) => Promise<void> | void;
-  },
-): void {
-  const Type = {
-    Object: (value: unknown) => value,
-    String: (value?: unknown) => value,
-    Optional: (value: unknown) => value,
-    Number: (value?: unknown) => value,
-    Boolean: (value?: unknown) => value,
-    Array: (value: unknown) => value,
-  };
-
-  class FakeAgent {
-    state: { messages: any[]; streamingMessage: any };
-    private readonly run: { provider: string; model: string; thinkingLevel: string };
-    private readonly tools: any[];
-    private subscribers: Array<(event: any) => Promise<void> | void> = [];
-
-    constructor(opts: any) {
-      this.run = {
-        provider: String(opts?.initialState?.model?.provider ?? ''),
-        model: String(opts?.initialState?.model?.id ?? ''),
-        thinkingLevel: String(opts?.initialState?.thinkingLevel ?? ''),
-      };
-      this.state = {
-        messages: [...(opts?.initialState?.messages ?? [])],
-        streamingMessage: null,
-      };
-      this.tools = Array.isArray(opts?.initialState?.tools) ? opts.initialState.tools : [];
-    }
-
-    subscribe(callback: (event: any) => Promise<void> | void): void {
-      this.subscribers.push(callback);
-    }
-
-    abort(): void {
-      this.state.streamingMessage = null;
-    }
-
-    async prompt(input: any): Promise<void> {
-      const prompt = fakePromptText(input);
-      this.state.messages.push(
-        typeof input === 'string' ? { role: 'user', content: input } : input,
-      );
-      this.state.streamingMessage = {
-        role: 'assistant',
-        content: [{ type: 'text', text: `running ${prompt}` }],
-      };
-      await this.emit({ type: 'message_update', message: this.state.streamingMessage });
-      await handlers.onPrompt?.(prompt, this.run);
-      this.state.streamingMessage = null;
-      this.state.messages.push({
-        role: 'assistant',
-        content: [{ type: 'text', text: `done ${prompt}` }],
-      });
-      await this.emit({
-        type: 'turn_end',
-        message: this.state.messages[this.state.messages.length - 1],
-      });
-      await this.emit({ type: 'agent_end' });
-    }
-
-    private async emit(event: any): Promise<void> {
-      for (const subscriber of this.subscribers) await subscriber(event);
-    }
-  }
-
-  (service as any).runtime = async () => ({
-    Agent: FakeAgent,
-    Type,
-    getModel: (provider: string, model: string) => ({ provider, id: model, reasoning: false }),
-    getModels: () => [],
-    getSupportedThinkingLevels: () => ['off'],
-  });
-}
-
-function makeService(): HubAssistantService {
-  return new HubAssistantService({
-    listDrones: async () => [],
-  });
-}
-
-async function markDroneReady(input: {
-  id: string;
-  name: string;
-  runtime?: string;
-  group?: string | null;
-  repoPath?: string;
-}): Promise<void> {
-  const now = new Date().toISOString();
-  await updateRegistry((reg: any) => {
-    reg.pending = reg.pending ?? {};
-    delete reg.pending[input.id];
-    reg.drones = reg.drones ?? {};
-    reg.drones[input.id] = {
-      id: input.id,
-      name: input.name,
-      group: input.group ?? undefined,
-      runtime: input.runtime ?? 'container',
-      repoPath: input.repoPath ?? '',
-      createdAt: now,
-      chats: { default: { createdAt: now, turns: [] } },
-    };
-  });
-}
-
-describe('assistant thread isolation', () => {
-  test('native drone chats replace disposable standalone threads and keep owner access', async () => {
-    await withTempDroneDataDir('assistant-native-owner-', async () => {
-      const service = makeService();
-      await service.createThread({ title: 'disposable' });
-      const snapshot = await service.ensureNativeThread({
-        id: 'chat-stable-id',
-        droneId: 'drone-1',
-        chatName: 'default',
-      });
-      expect(snapshot.threads.map((thread: any) => thread.id)).toEqual(['chat-stable-id']);
-      const thread = snapshot.threads[0] as any;
-      expect(thread.ownerDroneId).toBe('drone-1');
-      expect(thread.ownerChatName).toBe('default');
-      expect(thread.accessScope.droneIds).toContain('drone-1');
-    });
-  });
-
-  test('does not cap the number of native drone chats', async () => {
-    await withTempDroneDataDir('assistant-native-unlimited-', async () => {
-      const service = makeService();
-      for (let index = 0; index < 40; index += 1) {
-        await service.ensureNativeThread({
-          id: `chat-${index}`,
-          droneId: `drone-${index}`,
-          chatName: 'default',
-        });
-      }
-
-      const snapshot = await service.snapshot('compact');
-      expect(snapshot.threads).toHaveLength(40);
-      expect(snapshot.threads.map((thread) => thread.id)).toContain('chat-0');
-      expect(snapshot.threads.map((thread) => thread.id)).toContain('chat-39');
-    });
-  });
-
-  test('clones thread conversation and settings without pending work', async () => {
-    await withTempDroneDataDir('assistant-thread-clone-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
-
-      const created = await service.createThread({ title: 'Source' });
-      const sourceId = created.activeThreadId;
-      await service.updateThread(sourceId, {
-        autoApprove: true,
-        promptDeliveryMode: 'asap',
-      });
-      const source = (service as any).threads.find((thread: any) => thread.id === sourceId);
-      source.messages = [
-        { role: 'user', content: 'hello' },
-        { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
-      ];
-      source.queuedPrompts = [
-        {
-          id: 'queued',
-          prompt: 'later',
-          promptImages: [],
-          imageCount: 0,
-          createdAt: new Date().toISOString(),
-          status: 'queued',
-          error: null,
-        },
-      ];
-
-      const cloned = await service.cloneThread(sourceId);
-      const copy = cloned.threads.find((thread) => thread.id === cloned.activeThreadId) as any;
-      expect(copy.id).not.toBe(sourceId);
-      expect(copy.title).toBe('Source (copy)');
-      expect(copy.messages).toEqual(source.messages);
-      expect(copy.queuedPrompts).toEqual([]);
-      expect(copy.autoApprove).toBe(true);
-      expect(copy.promptDeliveryMode).toBe('asap');
-      expect(copy.status).toBe('idle');
-    });
-  });
-
-  test('defaults new assistant threads to OpenAI when Codex is not connected', async () => {
-    await withTempDroneDataDir('assistant-default-openai-', async (droneDataDir) => {
-      const previousCodexAuthFile = process.env.DRONE_HUB_CODEX_AUTH_FILE;
-      process.env.DRONE_HUB_CODEX_AUTH_FILE = path.join(droneDataDir, 'missing-codex-auth.json');
-      try {
-        const service = makeService();
-        installFakeRuntime(service, {});
-
-        const snapshot = await service.createThread({ title: 'default provider' });
-        const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
-
-        expect(thread.provider).toBe('openai');
-        expect(thread.model).toBe('gpt-5.6-sol');
-        expect(thread.thinkingLevel).toBe('off');
-      } finally {
-        if (previousCodexAuthFile == null) delete process.env.DRONE_HUB_CODEX_AUTH_FILE;
-        else process.env.DRONE_HUB_CODEX_AUTH_FILE = previousCodexAuthFile;
-      }
-    });
-  });
-
-  test('stores assistant controls on the backend thread', async () => {
-    await withTempDroneDataDir('assistant-thread-controls-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
-
-      const created = await service.createThread({ title: 'controls' });
-      const threadId = created.activeThreadId;
-      let thread = created.threads.find((item) => item.id === threadId) as any;
-      expect(thread.autoApprove).toBe(false);
-      expect(thread.promptDeliveryMode).toBe('queue');
-
-      const updated = await service.updateThread(threadId, {
-        autoApprove: true,
-        promptDeliveryMode: 'asap',
-      });
-      thread = updated.threads.find((item) => item.id === threadId) as any;
-      expect(thread.autoApprove).toBe(true);
-      expect(thread.promptDeliveryMode).toBe('asap');
-    });
-  });
-
-  test('auto approve does not bypass assistant write scope', async () => {
-    await withTempDroneDataDir('assistant-auto-approve-scope-', async () => {
-      await markDroneReady({ id: 'drone-a', name: 'Allowed' });
-      await markDroneReady({ id: 'drone-b', name: 'Denied' });
-      const service = new HubAssistantService({
-        listDrones: async () => [
-          {
-            id: 'drone-a',
-            name: 'Allowed',
-            group: null,
-            runtime: 'container',
-            repoPath: '',
-            status: 'ready',
-            chats: ['default'],
-          },
-          {
-            id: 'drone-b',
-            name: 'Denied',
-            group: null,
-            runtime: 'container',
-            repoPath: '',
-            status: 'ready',
-            chats: ['default'],
-          },
-        ],
-      });
-      const created = await service.createThread({ title: 'scope' });
-      const threadId = created.activeThreadId;
-      await service.updateAccessScope({
-        threadId,
-        readMode: 'selected',
-        writeMode: 'selected',
-        droneIds: ['drone-a'],
-      });
-      await service.updateThread(threadId, { autoApprove: true });
-
-      const denied = await service.preflightBlipTool(threadId, 'message_drone', 'call-denied', {
-        droneId: 'drone-b',
-        chatName: 'default',
-        message: 'no',
-      });
-      const allowed = await service.preflightBlipTool(threadId, 'message_drone', 'call-allowed', {
+describe('native chat isolation', () => {
+  test('returns only the requested chat and keeps chat settings independent', async () => {
+    await withTempDroneDataDir('native-chat-isolation-', async () => {
+      const assistant = service();
+      const first = await ensureTestNativeChat(assistant, {
+        id: 'native-first',
         droneId: 'drone-a',
-        chatName: 'default',
-        message: 'yes',
+        chatName: 'first',
+      });
+      await ensureTestNativeChat(assistant, {
+        id: 'native-second',
+        droneId: 'drone-a',
+        chatName: 'second',
+      });
+      await assistant.updateThread(first.chatId, {
+        thinkingLevel: 'high',
+        enabledTools: ['list_drones'],
       });
 
-      expect(denied?.block).toBe(true);
-      expect(denied?.reason).toContain('scope does not include');
-      expect(allowed).toBeUndefined();
+      const firstSnapshot = await assistant.threadSnapshot('native-first');
+      const secondSnapshot = await assistant.threadSnapshot('native-second');
+      expect(firstSnapshot.chatId).toBe('native-first');
+      expect(firstSnapshot.threads.map((chat) => chat.id)).toEqual(['native-first']);
+      expect(firstSnapshot.threads[0]?.thinkingLevel).toBe('high');
+      expect(secondSnapshot.threads.map((chat) => chat.id)).toEqual(['native-second']);
+      expect(secondSnapshot.threads[0]?.thinkingLevel).not.toBe('high');
     });
   });
 
-  test('compact assistant snapshots omit archived thread message bodies', async () => {
-    await withTempDroneDataDir('assistant-compact-snapshot-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
+  test('updates owner metadata without changing stable chat identity', async () => {
+    await withTempDroneDataDir('native-chat-owner-', async () => {
+      const assistant = service();
+      await ensureTestNativeChat(assistant, {
+        id: 'native-chat',
+        droneId: 'drone-a',
+        chatName: 'before',
+      });
+      const renamed = await assistant.ensureNativeThread({
+        id: 'native-chat',
+        droneId: 'drone-a',
+        chatName: 'after',
+        title: 'after',
+      });
 
-      const first = await service.createThread({ title: 'first' });
-      const firstThreadId = first.activeThreadId;
-      const second = await service.createThread({ title: 'second' });
-      const secondThreadId = second.activeThreadId;
-      const largeText = 'x'.repeat(250_000);
-      const threads = (service as any).threads as any[];
-      threads.find((thread) => thread.id === firstThreadId).messages = [
-        { role: 'assistant', content: [{ type: 'text', text: largeText }] },
-      ];
-      threads.find((thread) => thread.id === secondThreadId).messages = [
-        { role: 'assistant', content: [{ type: 'text', text: largeText }] },
-      ];
-      (service as any).chatIdleSubscriptions = [
-        {
-          id: 'sub-fired',
-          threadId: firstThreadId,
-          toolCallId: null,
-          mode: 'all',
-          targets: [{ droneId: 'drone-1', chatName: 'default' }],
-          createdAt: new Date().toISOString(),
-          expiresAt: new Date(Date.now() + 60_000).toISOString(),
-          idleForMs: 0,
-          status: 'fired',
-          idleSince: null,
-          firedAt: new Date().toISOString(),
-          cancelledAt: null,
-          expiredAt: null,
-          lastResult: { ok: true, targets: [{ latest: { text: largeText } }] },
-        },
-      ];
+      expect(renamed.chatId).toBe('native-chat');
+      expect(renamed.threads[0]).toMatchObject({
+        id: 'native-chat',
+        ownerDroneId: 'drone-a',
+        ownerChatName: 'after',
+        title: 'after',
+      });
+    });
+  });
 
-      const compact = await service.snapshot('compact');
-      expect(JSON.stringify(compact)).not.toContain(largeText);
-      expect(compact.threads.every((thread: any) => thread.messages.length === 0)).toBe(true);
-      expect(compact.threads.find((thread: any) => thread.id === firstThreadId)?.messageCount).toBe(
-        1,
+  test('clones configuration into a new stable chat without sharing later changes', async () => {
+    await withTempDroneDataDir('native-chat-clone-', async () => {
+      const assistant = service();
+      await ensureTestNativeChat(assistant, {
+        id: 'native-source',
+        droneId: 'drone-a',
+        chatName: 'source',
+      });
+      await assistant.updateThread('native-source', {
+        autoApprove: true,
+        promptDeliveryMode: 'asap',
+        enabledTools: ['list_drones'],
+      });
+      const cloned = await assistant.cloneNativeThread({
+        sourceId: 'native-source',
+        id: 'native-copy',
+        droneId: 'drone-a',
+        chatName: 'copy',
+      });
+      expect(cloned.threads[0]).toMatchObject({
+        id: 'native-copy',
+        autoApprove: true,
+        promptDeliveryMode: 'asap',
+        enabledTools: ['list_drones'],
+      });
+
+      await assistant.updateThread('native-copy', { autoApprove: false });
+      expect((await assistant.threadSnapshot('native-source')).threads[0]?.autoApprove).toBe(true);
+    });
+  });
+
+  test('deletes only the selected native chat and does not create a placeholder', async () => {
+    await withTempDroneDataDir('native-chat-delete-', async () => {
+      const assistant = service();
+      await ensureTestNativeChat(assistant, { id: 'native-first', droneId: 'drone-a' });
+      await ensureTestNativeChat(assistant, { id: 'native-second', droneId: 'drone-a' });
+
+      expect(await assistant.deleteThread('native-first')).toEqual({
+        ok: true,
+        deleted: true,
+        threadId: 'native-first',
+      });
+      await expect(assistant.threadSnapshot('native-first')).rejects.toThrow(
+        'unknown assistant thread',
       );
-      expect(
-        compact.threads.find((thread: any) => thread.id === secondThreadId)?.messageCount,
-      ).toBe(1);
-      expect(compact.chatIdleSubscriptions).toEqual([]);
-
-      const detail = await service.threadSnapshot(firstThreadId);
-      const firstDetail = detail.threads.find((thread: any) => thread.id === firstThreadId) as any;
-      const secondSummary = detail.threads.find(
-        (thread: any) => thread.id === secondThreadId,
-      ) as any;
-      expect(detail.activeThreadId).toBe(firstThreadId);
-      expect((await service.snapshot('compact')).activeThreadId).toBe(secondThreadId);
-      expect(JSON.stringify(firstDetail)).toContain(largeText);
-      expect(firstDetail.messageCount).toBe(1);
-      expect(JSON.stringify(secondSummary)).not.toContain(largeText);
-      expect(secondSummary.messageCount).toBe(1);
-      expect(secondSummary.messages).toEqual([]);
-      expect(detail.chatIdleSubscriptions).toEqual([]);
-
-      const activated = await service.activateThread(firstThreadId);
-      expect(activated.activeThreadId).toBe(firstThreadId);
-      expect((await service.snapshot('compact')).activeThreadId).toBe(firstThreadId);
-    });
-  });
-
-  test('approval pending snapshots omit inactive thread message bodies', async () => {
-    await withTempDroneDataDir('assistant-approval-compact-snapshot-', async () => {
-      await markDroneReady({ id: 'drone-1', name: 'Approval drone' });
-      const service = makeService();
-      installFakeRuntime(service, {});
-
-      const archived = await service.createThread({ title: 'archived' });
-      const archivedThreadId = archived.activeThreadId;
-      const active = await service.createThread({ title: 'approval' });
-      const activeThreadId = active.activeThreadId;
-      await service.updateAccessScope({
-        threadId: activeThreadId,
-        readMode: 'all',
-        writeMode: 'all',
-        droneIds: [],
-      });
-      const largeText = 'approval-large-payload'.repeat(20_000);
-      const activeText = 'active approval context';
-      const threads = (service as any).threads as any[];
-      threads.find((thread) => thread.id === archivedThreadId).messages = [
-        { role: 'assistant', content: [{ type: 'text', text: largeText }] },
-      ];
-      threads.find((thread) => thread.id === activeThreadId).messages = [
-        { role: 'assistant', content: [{ type: 'text', text: activeText }] },
-      ];
-
-      const events: any[] = [];
-      const preflight = (service as any).beforeToolCall(
-        activeThreadId,
-        {
-          toolCall: { id: 'message-call', name: 'message_drone' },
-          args: { droneId: 'drone-1', chatName: 'default', prompt: 'hello' },
-        },
-        async (event: any) => {
-          if (event.type !== 'approval_pending') return;
-          events.push(event);
-          await service.approve(event.approval.id, true);
-        },
-      );
-
-      await expect(preflight).resolves.toBeUndefined();
-      expect(events).toHaveLength(1);
-      const eventSnapshot = events[0].snapshot;
-      const archivedSummary = eventSnapshot.threads.find(
-        (thread: any) => thread.id === archivedThreadId,
-      ) as any;
-      const activeDetail = eventSnapshot.threads.find(
-        (thread: any) => thread.id === activeThreadId,
-      ) as any;
-      expect(JSON.stringify(eventSnapshot)).not.toContain(largeText);
-      expect(JSON.stringify(activeDetail)).toContain(activeText);
-      expect(archivedSummary.messages).toEqual([]);
-      expect(archivedSummary.messageCount).toBe(1);
-    });
-  });
-
-  test('keeps selected access even when no drones are selected', async () => {
-    await withTempDroneDataDir('assistant-empty-selected-scope-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
-
-      const created = await service.createThread({ title: 'empty selected' });
-      const threadId = created.activeThreadId;
-      await service.updateAccessScope({
-        threadId,
-        readMode: 'selected',
-        writeMode: 'selected',
-        droneIds: [],
-      });
-
-      const snapshot = await service.snapshot();
-      const thread = snapshot.threads.find((item) => item.id === threadId) as any;
-      expect(thread.accessScope.readMode).toBe('selected');
-      expect(thread.accessScope.writeMode).toBe('selected');
-      expect(thread.accessScope.executeMode).toBe('selected');
-      expect(thread.accessScope.droneIds).toEqual([]);
-    });
-  });
-
-  test('defaults new assistant threads to limited write access', async () => {
-    await withTempDroneDataDir('assistant-thread-access-defaults-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
-
-      const noActive = await service.createThread({ title: 'no active chat' });
-      let thread = noActive.threads.find((item) => item.id === noActive.activeThreadId) as any;
-      expect(thread.accessScope).toMatchObject({
-        readMode: 'all',
-        writeMode: 'selected',
-        executeMode: 'selected',
-        droneIds: [],
-      });
-
-      service.updateAppContext({
-        activeDroneId: 'drone-a',
-        activeDroneName: 'Drone A',
-        activeChatName: 'default',
-        appView: 'workspace',
-      });
-      const withActive = await service.createThread({ title: 'active chat' });
-      thread = withActive.threads.find((item) => item.id === withActive.activeThreadId) as any;
-      expect(thread.accessScope).toMatchObject({
-        readMode: 'all',
-        writeMode: 'selected',
-        executeMode: 'selected',
-        droneIds: ['drone-a'],
-      });
-
-    });
-  });
-
-  test('projects model runtime deltas and running state into thread snapshots', async () => {
-    await withTempDroneDataDir('assistant-model-runtime-streaming-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
-      const initial = await service.snapshot('compact');
-      const threadId = initial.activeThreadId;
-
-      await service.notifyRuntimeEvent(threadId, { type: 'turn_started' });
-      await service.notifyRuntimeEvent(threadId, { type: 'assistant_delta', text: 'Hel' });
-      await service.notifyRuntimeEvent(threadId, { type: 'assistant_delta', text: 'lo' });
-
-      const streaming = await service.threadSnapshot(threadId);
-      expect(streaming.threads.find((thread) => thread.id === threadId)?.status).toBe('running');
-      expect((streaming as any).streamingMessage?.content?.[0]?.text).toBe('Hello');
-
-      await service.notifyRuntimeEvent(threadId, {
-        type: 'transcript_changed',
-        role: 'assistant',
-      });
-      const persisted = await service.threadSnapshot(threadId);
-      expect((persisted as any).streamingMessage).toBeUndefined();
-      expect(persisted.threads.find((thread) => thread.id === threadId)?.status).toBe('running');
-
-      await service.notifyRuntimeEvent(threadId, { type: 'session_finished' });
-      const finished = await service.threadSnapshot(threadId);
-      expect(finished.threads.find((thread) => thread.id === threadId)?.status).toBe('idle');
-    });
-  });
-
-  test('keeps native prompt failures visible without leaving the chat busy', async () => {
-    await withTempDroneDataDir('assistant-native-runtime-error-', async () => {
-      const service = makeService();
-      const created = await service.ensureNativeThread({
-        id: 'native-error-chat',
-        droneId: 'drone-1',
-        chatName: 'default',
-      });
-      const threadId = created.activeThreadId;
-
-      await service.notifyRuntimeEvent(threadId, { type: 'session_started' });
-      await service.notifyRuntimeEvent(threadId, {
-        type: 'session_error',
-        error: 'provider unavailable',
-      });
-      await service.notifyRuntimeEvent(threadId, {
-        type: 'session_finished',
-        status: 'error',
-      });
-
-      expect(await service.nativeThreadIsBusy(threadId)).toBe(false);
-      expect(await service.nativeThreadError(threadId)).toBe('provider unavailable');
-      let snapshot = await service.threadSnapshot(threadId);
-      expect(snapshot.threads.find((thread) => thread.id === threadId)?.status).toBe('error');
-
-      await service.beginNativeThreadPrompt(threadId);
-      expect(await service.nativeThreadError(threadId)).toBe('');
-      snapshot = await service.threadSnapshot(threadId);
-      expect(snapshot.threads.find((thread) => thread.id === threadId)?.status).toBe('idle');
-
-      const queued = await service.enqueueThreadPrompt(threadId, { prompt: 'retry' });
-      await service.claimNextQueuedPrompt(threadId);
-      await service.failQueuedPrompt(threadId, queued.id, new Error('retry failed'));
-      expect(await service.nativeThreadIsBusy(threadId)).toBe(false);
-      expect(await service.nativeThreadHasHistory(threadId)).toBe(true);
-      expect(await service.nativeThreadError(threadId)).toBe('retry failed');
-    });
-  });
-
-  test('defaults new assistant threads to Codex GPT-5.6 Sol with no reasoning when Codex is connected', async () => {
-    await withTempDroneDataDir('assistant-default-codex-', async (droneDataDir) => {
-      const previousCodexAuthFile = process.env.DRONE_HUB_CODEX_AUTH_FILE;
-      const authPath = path.join(droneDataDir, 'codex-auth.json');
-      fs.writeFileSync(
-        authPath,
-        JSON.stringify({
-          tokens: { access_token: 'test-access-token', refresh_token: 'test-refresh-token' },
-          last_refresh: '2026-05-08T00:00:00.000Z',
-        }),
-      );
-      process.env.DRONE_HUB_CODEX_AUTH_FILE = authPath;
-      try {
-        const service = makeService();
-        installFakeRuntime(service, {});
-
-        const snapshot = await service.createThread({ title: 'default provider' });
-        const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
-
-        expect(thread.provider).toBe('codex');
-        expect(thread.model).toBe('gpt-5.6-sol');
-        expect(thread.thinkingLevel).toBe('off');
-      } finally {
-        if (previousCodexAuthFile == null) delete process.env.DRONE_HUB_CODEX_AUTH_FILE;
-        else process.env.DRONE_HUB_CODEX_AUTH_FILE = previousCodexAuthFile;
-      }
-    });
-  });
-
-  test('redacts current app drone context outside the thread read scope', async () => {
-    await withTempDroneDataDir('assistant-thread-scope-context-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
-
-      const snapshot = await service.createThread({ title: 'scoped thread' });
-      const threadId = snapshot.activeThreadId;
-      service.updateAppContext({
-        activeDroneId: 'drone-b',
-        activeDroneName: 'Drone B',
-        activeChatName: 'default',
-        appView: 'workspace',
-      });
-      await service.updateAccessScope({
-        threadId,
-        readMode: 'selected',
-        writeMode: 'selected',
-        droneIds: ['drone-a'],
-      });
-
-      const context = (service as any).scopedAppContext(threadId);
-      expect(context.activeDroneId).toBeNull();
-      expect(context.activeDroneName).toBeNull();
-      expect(context.activeChatName).toBeNull();
-      expect(context.appView).toBe('workspace');
-    });
-  });
-
-  test('offers the same GPT-5.6 assistant model choices for Codex as OpenAI', async () => {
-    await withTempDroneDataDir('assistant-codex-model-options-', async () => {
-      const service = makeService();
-      installFakeRuntime(service, {});
-
-      const snapshot = await service.createThread({ provider: 'codex', title: 'codex models' });
-      const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
-      const codexOptions = snapshot.models.filter((option) => option.provider === 'codex');
-
-      expect(thread.model).toBe('gpt-5.6-sol');
-      expect(thread.thinkingLevel).toBe('off');
-      expect(
-        codexOptions
-          .filter((option) => option.id.startsWith('gpt-5.6-'))
-          .map((option) => `${option.id}:${option.thinkingLevel}`),
-      ).toEqual([
-        'gpt-5.6-sol:off',
-        'gpt-5.6-sol:low',
-        'gpt-5.6-sol:medium',
-        'gpt-5.6-sol:high',
-        'gpt-5.6-terra:off',
-        'gpt-5.6-terra:low',
-        'gpt-5.6-terra:medium',
-        'gpt-5.6-terra:high',
-        'gpt-5.6-luna:off',
-        'gpt-5.6-luna:low',
-        'gpt-5.6-luna:medium',
-        'gpt-5.6-luna:high',
-      ]);
-    });
-  });
-
-  test('keeps advertising configured models when one runtime lookup fails', async () => {
-    await withTempDroneDataDir('assistant-partial-model-catalog-', async () => {
-      const service = makeService();
-      (service as any).runtime = async () => ({
-        getModel: (_provider: string, model: string) => {
-          if (model === 'gpt-5.6-luna') throw new Error('model is not installed');
-          return { reasoning: model !== 'gpt-5.5' };
-        },
-      });
-
-      const snapshot = await service.snapshot('compact');
-      expect(snapshot.models.some((option) => option.id === 'gpt-5.6-terra')).toBe(true);
-      expect(snapshot.models.some((option) => option.id === 'gpt-5.6-luna')).toBe(true);
-      expect(snapshot.models.some((option) => option.id === 'gpt-5.5')).toBe(true);
+      expect((await assistant.threadSnapshot('native-second')).chatId).toBe('native-second');
     });
   });
 });

@@ -1,6 +1,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
 import React from 'react';
+import type { DroneControlOperation } from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { loadLocalAssistantSettings } from '../local-assistant/local-assistant-settings';
 import {
@@ -80,7 +81,7 @@ export function useLocalDroneControl() {
     return () => { active = false; };
   }, []);
 
-  const request = React.useCallback(async (operation: string, payload: any = {}): Promise<any> => {
+  const request = React.useCallback(async (operation: DroneControlOperation, payload: any = {}): Promise<any> => {
     const getDrone = () => {
       const drone = dronesRef.current.find((candidate) => candidate.id === String(payload.droneId ?? ''));
       if (!drone) throw new Error('Phone drone was not found');
