@@ -331,8 +331,8 @@ export function GeneralSettingsTab({
             <div className="text-[11px] text-[var(--muted-dim)]">No Codex CLI login found for the Hub process.</div>
           )}
           <div className="text-[12px] leading-relaxed text-[var(--fg-secondary)]">
-            Drone Hub uses the local file-based Codex login. Connecting here opens OpenAI and
-            finishes automatically through a temporary localhost callback.
+            The Built-in agent uses the local file-based Codex login. Connecting here opens
+            OpenAI and finishes automatically through a temporary localhost callback.
           </div>
           <CodexConnectControl
             connected={Boolean(llmSettings?.codex.hasKey)}
@@ -768,10 +768,10 @@ export function GeneralSettingsTab({
 
           <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
             <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-              Assistant suggestion
+              Agent suggestion
             </div>
             <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
-              Suggest a likely next user reply for each new assistant message. The policy stays editable so you can tune it as the assistant learns your workflow.
+              Suggest a likely next user reply for each new agent message. The policy stays editable so you can tune it over time.
             </div>
             {agentSuggestionSettingsError && (
               <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
@@ -841,7 +841,7 @@ export function GeneralSettingsTab({
                     maxLength={agentSuggestionPolicyMaxChars}
                     rows={12}
                     className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono resize-y"
-                    placeholder="# Assistant Suggestion Policy"
+                    placeholder="# Agent Suggestion Policy"
                     disabled={agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
                   />
                 </label>

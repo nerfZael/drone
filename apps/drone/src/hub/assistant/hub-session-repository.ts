@@ -208,6 +208,26 @@ export class HubSessionRepository implements SessionRepository {
     };
   }
 
+  async readThreadMessage(threadId: string, entryId: string): Promise<Record<string, unknown>> {
+    const sessionId = await this.sessionIdForThread(threadId);
+    if (!sessionId) throw new Error(`unknown Hub assistant session for thread: ${threadId}`);
+    const row = this.db.prepare(`
+      SELECT sequence, entry_json
+      FROM assistant_blip_entries
+      WHERE session_id = ?
+        AND json_extract(entry_json, '$.type') = 'message'
+        AND json_extract(entry_json, '$.id') = ?
+    `).get(sessionId, entryId) as { sequence?: number; entry_json?: string } | undefined;
+    if (!row?.entry_json) throw new Error(`unknown assistant message: ${entryId}`);
+    const entry = JSON.parse(row.entry_json) as Extract<TranscriptEntry, { type: 'message' }>;
+    return {
+      sequence: Number(row.sequence),
+      id: entry.id,
+      timestamp: entry.timestamp,
+      message: entry.message,
+    };
+  }
+
   async deleteThreadMessage(
     threadId: string,
     entryId: string,

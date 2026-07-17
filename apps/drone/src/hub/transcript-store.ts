@@ -346,6 +346,32 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 5,
+    name: 'stable chat identities',
+    migrate(connection) {
+      const rows = connection
+        .prepare('SELECT drone_id, chat_name, metadata_json FROM canonical_chats')
+        .all() as Array<{ drone_id: string; chat_name: string; metadata_json: string }>;
+      const update = connection.prepare(
+        'UPDATE canonical_chats SET metadata_json = ?, updated_at = ? WHERE drone_id = ? AND chat_name = ?',
+      );
+      for (const row of rows) {
+        const current = parseJson(row.metadata_json);
+        const metadata = current && typeof current === 'object' && !Array.isArray(current)
+          ? { ...current }
+          : {};
+        if (typeof metadata.id === 'string' && metadata.id.trim()) continue;
+        metadata.id = crypto.randomUUID();
+        update.run(
+          stableJson(metadata),
+          new Date().toISOString(),
+          row.drone_id,
+          row.chat_name,
+        );
+      }
+    },
+  },
 ];
 
 type ChatRow = {
@@ -465,6 +491,13 @@ function metadata(chatEntry: any): any {
   delete value.turns;
   delete value.pendingPrompts;
   return value;
+}
+
+function metadataWithStableId(chatEntry: any, current?: any): any {
+  const value = metadata(chatEntry);
+  const suppliedId = typeof value.id === 'string' ? value.id.trim() : '';
+  const currentId = typeof current?.id === 'string' ? current.id.trim() : '';
+  return { ...value, id: suppliedId || currentId || crypto.randomUUID() };
 }
 
 function archivedChatValue(raw: unknown): {
@@ -1157,9 +1190,16 @@ export class ChatTranscriptRepository {
         throw new Error(`cannot write chat for permanently deleted drone: ${opts.droneId}`);
       }
       const now = new Date().toISOString();
-      const value = opts.chatEntry && typeof opts.chatEntry === 'object' ? opts.chatEntry : {};
-      const sourceHash = chatEntrySourceHash(value);
+      const rawValue = opts.chatEntry && typeof opts.chatEntry === 'object' ? opts.chatEntry : {};
       const current = this.chatRow(connection, opts.droneId, opts.chatName);
+      const value = {
+        ...rawValue,
+        ...metadataWithStableId(
+          rawValue,
+          current ? parseJson(current.metadata_json) : undefined,
+        ),
+      };
+      const sourceHash = chatEntrySourceHash(value);
       connection.prepare(`
         INSERT INTO canonical_chats (
           drone_id, chat_name, created_at, updated_at, metadata_json, source_hash,
@@ -1581,7 +1621,12 @@ export class ChatTranscriptRepository {
     if (this.droneChatTombstoned(connection, droneId)) {
       throw new Error(`cannot write chat for permanently deleted drone: ${droneId}`);
     }
-    const value = raw && typeof raw === 'object' ? raw : {};
+    const rawValue = raw && typeof raw === 'object' ? raw : {};
+    const current = this.chatRow(connection, droneId, chatName);
+    const value = {
+      ...rawValue,
+      ...metadataWithStableId(rawValue, current ? parseJson(current.metadata_json) : undefined),
+    };
     const now = new Date().toISOString();
     connection.prepare(`
       INSERT INTO canonical_chats (
@@ -1678,7 +1723,8 @@ export class ChatTranscriptRepository {
     const tombstone = connection.prepare(`SELECT 1 FROM canonical_chat_tombstones
       WHERE drone_id = ? AND chat_name = ?`).get(droneId, chatName);
     if (tombstone) return;
-    const value = raw && typeof raw === 'object' ? raw : {};
+    const rawValue = raw && typeof raw === 'object' ? raw : {};
+    const value = { ...rawValue, ...metadataWithStableId(rawValue) };
     const now = new Date().toISOString();
     const info = connection.prepare(`
       INSERT OR IGNORE INTO canonical_chats (
@@ -1989,7 +2035,9 @@ function memoryReadChat(droneId: string, chatName: string): ChatStoreReadResult 
 async function memoryBackfillChat(droneId: string, chatName: string, raw: unknown): Promise<ChatStoreImportResult> {
   const k = key(droneId, chatName);
   if (memoryDroneChatTombstones.has(droneId)) return { available: true, sourceHash: '' };
-  const value = raw && typeof raw === 'object' ? raw : {};
+  const rawValue = raw && typeof raw === 'object' ? raw : {};
+  const current = memoryChats.get(k)?.metadata;
+  const value = { ...rawValue, ...metadataWithStableId(rawValue, current) };
   if (memoryChatTombstones.has(k)) return { available: true, sourceHash: '' };
   const inserted = !memoryChats.has(k);
   if (inserted) {
@@ -2261,8 +2309,12 @@ export async function upsertChatInStore(opts: { droneId: string; chatName: strin
   if (memoryDroneChatTombstones.has(opts.droneId)) {
     throw new Error(`cannot write chat for permanently deleted drone: ${opts.droneId}`);
   }
-  const value = opts.chatEntry && typeof opts.chatEntry === 'object' ? opts.chatEntry : {};
   const k = key(opts.droneId, opts.chatName);
+  const rawValue = opts.chatEntry && typeof opts.chatEntry === 'object' ? opts.chatEntry : {};
+  const value = {
+    ...rawValue,
+    ...metadataWithStableId(rawValue, memoryChats.get(k)?.metadata),
+  };
   memoryChatTombstones.delete(k);
   memoryChats.set(k, { metadata: metadata(value), sourceHash: chatEntrySourceHash(value), version: 0 });
   const turns = memoryTurnMap(opts.droneId, opts.chatName);

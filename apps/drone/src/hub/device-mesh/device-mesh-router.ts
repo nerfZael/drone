@@ -4,6 +4,8 @@ import type { Duplex } from 'node:stream';
 import {
   capabilityRequestSigningText,
   isGranted,
+  MESH_MAX_MESSAGE_BYTES,
+  MESH_SAFE_MESSAGE_BYTES,
   parseSignedCapabilityRequest,
   socketAuthSigningText,
   socketServerAuthSigningText,
@@ -27,8 +29,12 @@ import { DeviceRouteManager } from './device-route-manager';
 
 type AuthenticatedSocket = { ws: WebSocket; peerDeviceId: string; outbound: boolean };
 
-function send(ws: WebSocket, payload: unknown): void {
-  if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
+function send(ws: WebSocket, payload: unknown): boolean {
+  if (ws.readyState !== WebSocket.OPEN) return false;
+  const serialized = JSON.stringify(payload);
+  if (Buffer.byteLength(serialized) > MESH_SAFE_MESSAGE_BYTES) return false;
+  ws.send(serialized);
+  return true;
 }
 
 function socketUrl(endpoint: string, deviceId: string): string {
@@ -40,8 +46,21 @@ function socketUrl(endpoint: string, deviceId: string): string {
   return url.toString();
 }
 
+function isBulkTransferRequest(request: SignedCapabilityRequest): boolean {
+  if (
+    request.capability === WORKSPACE_CAPABILITY.id &&
+    (request.operation === 'files.transfer.read' || request.operation === 'files.transfer.write')
+  )
+    return true;
+  return (
+    request.capability === 'drone-control' &&
+    request.operation === 'chat.prompt' &&
+    String((request.payload as any)?.attachmentTransfer?.action ?? '') === 'write'
+  );
+}
+
 export class DeviceMeshRouter {
-  private readonly server = new WebSocketServer({ noServer: true, maxPayload: 256 * 1024 });
+  private readonly server = new WebSocketServer({ noServer: true, maxPayload: MESH_MAX_MESSAGE_BYTES });
   private readonly connections = new Map<string, AuthenticatedSocket>();
   private readonly routes = new Map<
     string,
@@ -60,6 +79,7 @@ export class DeviceMeshRouter {
     { expires: number; fingerprint: string; response: CapabilityResponse }
   >();
   private readonly requestTimes = new Map<string, number[]>();
+  private readonly bulkRequestTimes = new Map<string, number[]>();
   private readonly connecting = new Set<string>();
   private reconnectTimer: ReturnType<typeof setInterval> | null = null;
   private readonly membership: DeviceMembershipSynchronizer;
@@ -383,7 +403,20 @@ export class DeviceMeshRouter {
       ) {
         this.routes.delete(routeKey);
         clearTimeout(route.timer);
-        send(route.sourceWs, message);
+        if (!send(route.sourceWs, message)) {
+          send(
+            route.sourceWs,
+            this.errorResponse(
+              {
+                requestId: route.requestId,
+                sourceDeviceId: route.sourceDeviceId,
+                targetDeviceId: route.targetDeviceId,
+              },
+              'RESPONSE_TOO_LARGE',
+              'mesh response is too large; request a smaller page or chunk',
+            ),
+          );
+        }
       }
       return;
     }
@@ -398,10 +431,14 @@ export class DeviceMeshRouter {
       );
       return;
     }
-    const recent = (this.requestTimes.get(connection.peerDeviceId) ?? []).filter(
+    const bulkTransfer = isBulkTransferRequest(request);
+    const rateLimit = bulkTransfer ? 600 : 120;
+    const rateMap = bulkTransfer ? this.bulkRequestTimes : this.requestTimes;
+    const rateKey = connection.peerDeviceId;
+    const recent = (rateMap.get(rateKey) ?? []).filter(
       (time) => time > Date.now() - 60_000,
     );
-    if (recent.length >= 120) {
+    if (recent.length >= rateLimit) {
       send(
         connection.ws,
         this.errorResponse(request, 'RATE_LIMITED', 'too many mesh requests from this peer'),
@@ -409,7 +446,7 @@ export class DeviceMeshRouter {
       return;
     }
     recent.push(Date.now());
-    this.requestTimes.set(connection.peerDeviceId, recent);
+    rateMap.set(rateKey, recent);
     const state = await this.store.read();
     if (request.targetDeviceId !== state.selfDeviceId) {
       if (request.sourceDeviceId !== connection.peerDeviceId) {
@@ -462,7 +499,18 @@ export class DeviceMeshRouter {
         requestId: request.requestId,
         timer,
       });
-      send(target.ws, request);
+      if (!send(target.ws, request)) {
+        clearTimeout(timer);
+        this.routes.delete(routeKey);
+        send(
+          connection.ws,
+          this.errorResponse(
+            request,
+            'REQUEST_TOO_LARGE',
+            'mesh request is too large to forward',
+          ),
+        );
+      }
       return;
     }
     const responseKey = `${request.sourceDeviceId}:${request.requestId}`;
@@ -546,7 +594,7 @@ export class DeviceMeshRouter {
         },
       );
       await this.recordAudit(request, 'allowed');
-      return {
+      const response: CapabilityResponse = {
         type: 'capability.response',
         version: 1,
         requestId: request.requestId,
@@ -555,6 +603,14 @@ export class DeviceMeshRouter {
         ok: true,
         result,
       };
+      if (Buffer.byteLength(JSON.stringify(response)) > MESH_SAFE_MESSAGE_BYTES) {
+        return this.errorResponse(
+          request,
+          'RESPONSE_TOO_LARGE',
+          'mesh response is too large; request a smaller page or chunk',
+        );
+      }
+      return response;
     } catch (error: any) {
       await this.recordAudit(request, 'failed', String(error?.code ?? 'OPERATION_FAILED'));
       return this.errorResponse(

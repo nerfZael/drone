@@ -31,12 +31,14 @@ export function createChatManagementRouteHandler(
     cancelQueuedPendingPrompt,
     chatSnapshotResponseBody,
     claimChatAutoRenameFromFirstPrompt,
+    cloneNativeChatSession,
     collectDockerSnapshotImageRefsFromChatEntry,
     createChatInStore,
     createOrEnqueuePromptUnified,
     createRequestTimer,
     defaultDaemonReadyTimeoutMs,
     deleteActiveChatFromStore,
+    deleteNativeChatSession,
     discoverAndRememberModelsForBuiltinAgent,
     dockerSnapshotAfterAgentMessageEnabledForChat,
     droneRuntime,
@@ -65,6 +67,7 @@ export function createChatManagementRouteHandler(
     markChatUnreadInStore,
     markTranscriptTurnAgentSuggestionUsedDirect,
     migrateInMemoryChatStateForRename,
+    nativeChatHasHistory,
     normalizeAgentPermissionMode,
     normalizeBuiltinAgentId,
     normalizeChatImageAttachments,
@@ -87,6 +90,7 @@ export function createChatManagementRouteHandler(
     readChatReadStateFromStore,
     readChatSnapshot,
     removeDockerSnapshotImagesBestEffort,
+    renameNativeChatSession,
     renameChatInStore,
     resolveChatTmuxCommand,
     resolveDroneDaemonClientForEntry,
@@ -106,6 +110,52 @@ export function createChatManagementRouteHandler(
     waitForDroneDaemonReady,
     withLockedDroneContainer,
   } = deps;
+
+  const sameChatAgent = (current: ChatAgentConfig, next: ChatAgentConfig): boolean => {
+    if (current.kind !== next.kind) return false;
+    if (current.kind === 'native' && next.kind === 'native') return true;
+    if (current.kind === 'builtin' && next.kind === 'builtin') return current.id === next.id;
+    return (
+      current.kind === 'custom' &&
+      next.kind === 'custom' &&
+      current.id === next.id &&
+      current.label === next.label &&
+      current.command === next.command
+    );
+  };
+
+  const chatHasAgentLockingHistory = async (
+    chat: any,
+    currentAgent: ChatAgentConfig,
+  ): Promise<boolean> => {
+    const transcriptHasHistory =
+      (Array.isArray(chat?.turns) && chat.turns.length > 0) ||
+      (Array.isArray(chat?.pendingPrompts) && chat.pendingPrompts.length > 0);
+    if (transcriptHasHistory) return true;
+    const nativeChatId = currentAgent.kind === 'native' ? String(chat?.id ?? '').trim() : '';
+    return nativeChatId ? await nativeChatHasHistory(nativeChatId) : false;
+  };
+
+  const prepareAgentChange = async (
+    droneId: string,
+    chatName: string,
+    drone: any,
+    nextAgent: ChatAgentConfig,
+  ): Promise<string | null> => {
+    const { chat } = await getChatEntry({ droneId, chatName });
+    const currentAgent = inferChatAgent(chat, drone);
+    if (sameChatAgent(currentAgent, nextAgent)) return null;
+    const nativeChatId = currentAgent.kind === 'native' ? String(chat?.id ?? '').trim() : '';
+    if (await chatHasAgentLockingHistory(chat, currentAgent)) {
+      const error: Error & { statusCode?: number } = new Error(
+        'The agent cannot be changed after this chat has history. Create a new chat to use a different agent.',
+      );
+      error.statusCode = 409;
+      throw error;
+    }
+    return nativeChatId || null;
+  };
+
   return async ({ req, res, url: u, method, parts }) => {
     const handled = await (async (): Promise<false | void> => {
       // POST /api/drones/:id/chats
@@ -179,6 +229,28 @@ export function createChatManagementRouteHandler(
             },
           });
           await projectCanonicalChatsToRegistry(droneId);
+          if (copyFrom) {
+            const [{ chat: sourceChat }, { chat: targetChat }] = await Promise.all([
+              getChatEntry({ droneId, chatName: copyFrom }),
+              getChatEntry({ droneId, chatName }),
+            ]);
+            if (inferChatAgent(sourceChat, droneEntry).kind === 'native') {
+              const sourceId = String(sourceChat?.id ?? '').trim();
+              const targetId = String(targetChat?.id ?? '').trim();
+              if (sourceId && targetId) {
+                await cloneNativeChatSession({
+                  sourceId,
+                  sourceChatName: copyFrom,
+                  sourceProvider: String(sourceChat?.nativeProvider ?? '').trim(),
+                  sourceModel: String(sourceChat?.model ?? '').trim(),
+                  sourceThinkingLevel: String(sourceChat?.reasoning ?? '').trim(),
+                  targetId,
+                  droneId,
+                  chatName,
+                });
+              }
+            }
+          }
 
           json(res, 201, {
             ok: true,
@@ -248,6 +320,21 @@ export function createChatManagementRouteHandler(
               fromChatName: chatName,
               toChatName: newChatName,
             });
+            await projectCanonicalChatsToRegistry(droneId);
+            const { chat: renamedChat } = await getChatEntry({
+              droneId,
+              chatName: newChatName,
+            });
+            if (inferChatAgent(renamedChat, resolved.drone).kind === 'native') {
+              const nativeChatId = String(renamedChat?.id ?? '').trim();
+              if (nativeChatId) {
+                await renameNativeChatSession({
+                  id: nativeChatId,
+                  droneId,
+                  chatName: newChatName,
+                });
+              }
+            }
           }
           await projectCanonicalChatsToRegistry(droneId);
 
@@ -462,6 +549,10 @@ export function createChatManagementRouteHandler(
           const snapshotImageRefs = collectDockerSnapshotImageRefsFromChatEntry(
             deleted.deletedChat,
           );
+          if (inferChatAgent(deleted.deletedChat, resolved.drone).kind === 'native') {
+            const nativeChatId = String(deleted.deletedChat?.id ?? '').trim();
+            if (nativeChatId) await deleteNativeChatSession(nativeChatId);
+          }
           await projectCanonicalChatsToRegistry(droneId);
           await removeDockerSnapshotImagesBestEffort(snapshotImageRefs, {
             droneId,
@@ -637,6 +728,7 @@ export function createChatManagementRouteHandler(
           const chatEntry = (await importResolvedChatToStore(droneId, chatName, c)) ?? c;
           timer.mark('import');
           const agent = inferChatAgent(chatEntry as any, resolved.drone);
+          const agentLocked = await chatHasAgentLockingHistory(chatEntry, agent);
           const readState = readChatReadStateFromStore({ droneId, chatName });
           timer.mark('format');
           timer.setHeader(res);
@@ -654,6 +746,7 @@ export function createChatManagementRouteHandler(
             name: droneName,
             chat: chatName,
             agent,
+            agentLocked,
             model: (chatEntry as any).model ?? null,
             reasoning: normalizeChatReasoning((chatEntry as any).reasoning),
             agentPermissionMode: normalizeAgentPermissionMode(
@@ -883,9 +976,9 @@ export function createChatManagementRouteHandler(
         }
         try {
           await ensureChatEntry({ droneId, chatName });
-          const builtinId = normalizeBuiltinAgentId(kind === 'builtin' ? agentRaw?.id : kind);
-          if (builtinId) {
-            const agent: ChatAgentConfig = { kind: 'builtin', id: builtinId };
+          if (kind === 'native') {
+            const agent: ChatAgentConfig = { kind: 'native' };
+            await prepareAgentChange(droneId, chatName, resolved.drone, agent);
             await setChatAgentConfig({
               droneId,
               chatName,
@@ -908,21 +1001,18 @@ export function createChatManagementRouteHandler(
               chat: chatName,
               agent,
               ...(hasModelField ? { model } : {}),
-              ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
-              ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
-              ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
-              ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
             });
             return;
           }
-          if (kind === 'custom') {
-            const id = String(agentRaw?.id ?? '').trim();
-            const label = String(agentRaw?.label ?? '').trim();
-            const command = String(agentRaw?.command ?? '').trim();
-            if (!id) throw new Error('missing agent.id');
-            if (!label) throw new Error('missing agent.label');
-            if (!command) throw new Error('missing agent.command');
-            const agent: ChatAgentConfig = { kind: 'custom', id, label, command };
+          const builtinId = normalizeBuiltinAgentId(kind === 'builtin' ? agentRaw?.id : kind);
+          if (builtinId) {
+            const agent: ChatAgentConfig = { kind: 'builtin', id: builtinId };
+            const nativeChatIdToDelete = await prepareAgentChange(
+              droneId,
+              chatName,
+              resolved.drone,
+              agent,
+            );
             await setChatAgentConfig({
               droneId,
               chatName,
@@ -938,6 +1028,51 @@ export function createChatManagementRouteHandler(
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
             });
+            if (nativeChatIdToDelete) await deleteNativeChatSession(nativeChatIdToDelete);
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              chat: chatName,
+              agent,
+              ...(hasModelField ? { model } : {}),
+              ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
+              ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
+              ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
+              ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
+            });
+            return;
+          }
+          if (kind === 'custom') {
+            const id = String(agentRaw?.id ?? '').trim();
+            const label = String(agentRaw?.label ?? '').trim();
+            const command = String(agentRaw?.command ?? '').trim();
+            if (!id) throw new Error('missing agent.id');
+            if (!label) throw new Error('missing agent.label');
+            if (!command) throw new Error('missing agent.command');
+            const agent: ChatAgentConfig = { kind: 'custom', id, label, command };
+            const nativeChatIdToDelete = await prepareAgentChange(
+              droneId,
+              chatName,
+              resolved.drone,
+              agent,
+            );
+            await setChatAgentConfig({
+              droneId,
+              chatName,
+              agent,
+              setModel: hasModelField,
+              model,
+              setAgentPermissionMode: hasAgentPermissionModeField,
+              agentPermissionMode,
+              setAgentMessageAutoContinueEnabled: hasAutoContinueField,
+              agentMessageAutoContinueEnabled,
+              setAgentSuggestionEnabled: hasAgentSuggestionField,
+              agentSuggestionEnabled,
+              setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
+              dockerSnapshotAfterAgentMessageEnabled,
+            });
+            if (nativeChatIdToDelete) await deleteNativeChatSession(nativeChatIdToDelete);
             json(res, 200, {
               ok: true,
               id: droneId,
@@ -1070,7 +1205,7 @@ export function createChatManagementRouteHandler(
           }
           json(res, 400, {
             ok: false,
-            error: `invalid request (expected agent cursor|codex|claude|opencode|pi|blip|custom, model, agentPermissionMode, agentMessageAutoContinueEnabled, agentSuggestionEnabled, dockerSnapshotAfterAgentMessageEnabled)`,
+            error: `invalid request (expected agent native|cursor|codex|claude|opencode|pi|blip|custom, model, agentPermissionMode, agentMessageAutoContinueEnabled, agentSuggestionEnabled, dockerSnapshotAfterAgentMessageEnabled)`,
           });
           return;
         } catch (e: any) {

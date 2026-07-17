@@ -99,7 +99,7 @@ type UseChatRuntimeOrchestrationArgs = {
 
 function chatUiModeForAgent(agent: ChatAgentConfig | null | undefined): 'transcript' | 'cli' {
   if (!agent) return 'transcript';
-  return agent.kind === 'builtin' ? 'transcript' : 'cli';
+  return agent.kind === 'custom' ? 'cli' : 'transcript';
 }
 
 function isStoppableTranscriptPendingPrompt(item: PendingPrompt | null | undefined): boolean {

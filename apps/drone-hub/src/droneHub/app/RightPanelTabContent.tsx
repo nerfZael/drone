@@ -24,7 +24,6 @@ import { AsyncPaneBoundary, type PaneModuleLoader } from './AsyncPaneBoundary';
 import { DroneEditorDock } from './DroneEditorDock';
 import { isDroneStartingOrSeeding } from './helpers';
 
-const loadAssistantDock = async () => (await import('../assistant/AssistantDock')).AssistantDock;
 const loadDroneCanvasDock = async () => (await import('../canvas/DroneCanvasDock')).DroneCanvasDock;
 const loadDroneChangesDock = async () => (await import('../changes/DroneChangesDock')).DroneChangesDock;
 const loadDroneEnvDock = async () => (await import('../env/DroneEnvDock')).DroneEnvDock;
@@ -340,14 +339,6 @@ export function RightPanelTabContent({
   onRevealChangesFileInFiles,
   onOpenChangesFileInEditor,
 }: RightPanelTabContentProps) {
-  if (tab === 'assistant') {
-    return (
-      <PaneModule tab={tab} load={loadAssistantDock}>
-        {(AssistantDock) => <AssistantDock />}
-      </PaneModule>
-    );
-  }
-
   const disabled = isDroneStartingOrSeeding(drone.hubPhase);
   const repoFeaturesEnabled = Boolean(drone.repoAttached ?? Boolean(String(drone.repoPath ?? '').trim()));
   const repoUnavailableReason = repoUnavailableReasonForRuntime(drone.runtime);

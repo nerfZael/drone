@@ -8,11 +8,12 @@ import { loadOrCreateDeviceIdentity } from './device-identity';
 import { DeviceMeshHttp, type DeviceMeshHttpExtension } from './device-mesh-http';
 import { DeviceMeshIngressHttp } from './device-mesh-ingress-http';
 import { DeviceMeshIngress } from './device-mesh-ingress';
+import { MeshChatAttachmentHttp } from './mesh-chat-attachment-http';
+import { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { DeviceMeshRouter } from './device-mesh-router';
 import { DeviceMeshStore } from './device-mesh-store';
 import { DeviceRouteManager } from './device-route-manager';
 import { createDroneControlCapability } from './drone-control-capability';
-import { createAssistantThreadsCapability } from './features/cross-device-assistant/assistant-threads-capability';
 import { CrossDeviceAssistantPolicyHttp } from './features/cross-device-assistant/policy-http';
 import { CrossDeviceAssistantPolicyStore } from './features/cross-device-assistant/policy-store';
 import { RemoteWorkspaceTarget } from './features/cross-device-assistant/remote-workspace-target';
@@ -31,6 +32,8 @@ export async function createDeviceMeshService(options: {
   await store.read();
   await store.prunePairingState();
   const capabilities = new CapabilityRegistry();
+  const chatAttachments = new MeshChatAttachmentStore(path.join(options.rootDir, 'attachments'));
+  await chatAttachments.initialize();
   let router: DeviceMeshRouter;
   capabilities.register(
     createDeviceCoreCapability(
@@ -40,19 +43,22 @@ export async function createDeviceMeshService(options: {
     ),
   );
   capabilities.register(
-    createDroneControlCapability({ baseUrl: options.localHubBaseUrl, apiToken: options.apiToken }),
+    createDroneControlCapability(
+      { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
+      chatAttachments,
+    ),
   );
   const assistantPolicies = new CrossDeviceAssistantPolicyStore(
     path.join(options.rootDir, 'cross-device-assistant.json'),
   );
   const localHubAccess = { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken };
-  capabilities.register(createAssistantThreadsCapability(localHubAccess, assistantPolicies));
   capabilities.register(createWorkspaceCapability(assistantPolicies));
   capabilities.register(createProviderCredentialsCapability(identity));
   const routeManager = new DeviceRouteManager(identity, store);
   const audit = new DeviceMeshAuditStore(path.join(options.rootDir, 'audit.json'));
   router = new DeviceMeshRouter(identity, store, capabilities, routeManager, audit);
   const extensions: DeviceMeshHttpExtension[] = [
+    new MeshChatAttachmentHttp(chatAttachments),
     new CrossDeviceAssistantPolicyHttp(assistantPolicies, (targetDeviceId) =>
       router.request(targetDeviceId, 'workspace', 'workspaces.list', {}),
     ),
@@ -100,6 +106,7 @@ export async function createDeviceMeshService(options: {
       if (pairingPruneTimer) clearInterval(pairingPruneTimer);
       pairingPruneTimer = null;
       await ingress.close();
+      await chatAttachments.close();
       await capabilities.close();
       router.close();
     },
@@ -114,13 +121,6 @@ export async function createDeviceMeshService(options: {
     store,
     onAssistantPolicyChange: (listener: (threadIds: string[]) => void) =>
       assistantPolicies.onChange(listener),
-    broadcastAssistantThreadChange: (payload: Record<string, any>) =>
-      router.broadcastCapabilityEvent(
-        'assistant-threads',
-        'threads.changed',
-        payload,
-        'threads.list',
-      ),
     broadcastDroneListChange: (payload: Record<string, any>) =>
       router.broadcastCapabilityEvent('drone-control', 'drones.changed', payload, 'drones.list'),
     broadcastDroneChatChange: (payload: Record<string, any>) =>

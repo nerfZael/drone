@@ -723,8 +723,18 @@ export function createPlaybookRuntime(dependencies: PlaybookRuntimeDependencies)
         .filter((item: any) => item.state === 'failed')
         .map((item: any) => item.id),
     );
+    const completedNativePromptIds = new Set(
+      String(chatEntry?.agent?.kind ?? '') === 'native'
+        ? pendingPromptsFromChatEntry(chatEntry, { keepRecentlyCompleted: true })
+            .filter((item: any) => item.state === 'sent')
+            .map((item: any) => item.id)
+        : [],
+    );
     return gate.initialPromptIds.every(
-      (promptId) => turnIds.has(promptId) || failedIds.has(promptId),
+      (promptId) =>
+        turnIds.has(promptId) ||
+        failedIds.has(promptId) ||
+        completedNativePromptIds.has(promptId),
     );
   }
 

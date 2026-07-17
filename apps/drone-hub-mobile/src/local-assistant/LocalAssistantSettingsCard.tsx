@@ -161,7 +161,7 @@ export function LocalAssistantSettingsCard() {
 
   return (
     <View style={styles.section}>
-      <Label>Assistant on this phone</Label>
+      <Label>Built-in agent on this phone</Label>
       <Text style={[textStyles.heading, styles.title]}>Direct model connection</Text>
       <Text style={textStyles.body}>
         Credentials stay in Android secure storage and are sent only to the selected model service.
@@ -195,7 +195,7 @@ export function LocalAssistantSettingsCard() {
       <View style={styles.fields}>
         <Pressable
           accessibilityRole="button"
-          accessibilityLabel="Choose default assistant model and reasoning"
+          accessibilityLabel="Choose default built-in model and reasoning"
           onPress={() => setModelOpen(true)}
           style={({ pressed }) => [styles.modelField, pressed && styles.pressed]}
         >
@@ -227,7 +227,7 @@ export function LocalAssistantSettingsCard() {
           onPress={() => void save()}
           style={styles.actionButton}
         >
-          Save assistant settings
+          Save built-in settings
         </Button>
         {provider === 'openai' && hasApiKey ? (
           <Button

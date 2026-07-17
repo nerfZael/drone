@@ -719,9 +719,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     const value = String(spawnModel ?? '').trim();
     return value || null;
   }, [spawnModel]);
-  const spawnModelForSeed = spawnAgentConfig.kind === 'builtin' ? spawnModelValue : null;
+  const spawnModelForSeed = spawnAgentConfig.kind !== 'custom' ? spawnModelValue : null;
   const spawnReasoningForSeed =
-    spawnAgentConfig.kind === 'builtin' && (spawnAgentConfig.id === 'codex' || spawnAgentConfig.id === 'blip')
+    spawnAgentConfig.kind === 'native' ||
+    (spawnAgentConfig.kind === 'builtin' &&
+      (spawnAgentConfig.id === 'codex' || spawnAgentConfig.id === 'blip'))
       ? String(spawnReasoning ?? '').trim() || null
       : null;
   const [spawnAgentPermissionMode, setSpawnAgentPermissionMode] = React.useState<AgentPermissionMode>('full-access');
@@ -1555,20 +1557,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const closeDroneDropActionModal = React.useCallback(() => {
     setDroneDropActionModal(null);
   }, []);
-  React.useEffect(() => {
-    void fetch('/api/assistant/context', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        activeDroneId: currentDrone?.id ?? null,
-        activeDroneName: currentDrone?.name ?? null,
-        activeChatName: currentDrone ? (String(selectedChat ?? '').trim() || 'default') : null,
-        appView,
-      }),
-    }).catch(() => {
-      // Context reporting is best effort; assistant chat still works without it.
-    });
-  }, [appView, currentDrone?.id, currentDrone?.name, selectedChat]);
   const expandGroupsForDroneIds = React.useCallback(
     (droneIds: string[]) => {
       const groups = new Set<string>();
@@ -2227,6 +2215,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           name: currentDrone.name,
           chat: startupSeedForCurrentDrone.chatName || selectedChat || 'default',
           agent: startupSeedForCurrentDrone.agent,
+          agentLocked: false,
           model: startupSeedForCurrentDrone.model ?? null,
           agentPermissionMode: startupSeedForCurrentDrone.agentPermissionMode ?? 'full-access',
           agentMessageAutoContinueEnabled: false,
@@ -2246,14 +2235,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const currentAgent = effectiveChatInfo?.agent ?? ({ kind: 'builtin', id: 'cursor' } as ChatAgentConfig);
   const currentModel = String(chatInfo?.model ?? effectiveChatInfo?.model ?? '').trim() || null;
   const currentAgentKey =
-    currentAgent.kind === 'builtin'
+    currentAgent.kind === 'native'
+      ? 'native'
+      : currentAgent.kind === 'builtin'
       ? `builtin:${currentAgent.id}`
       : `custom:${currentAgent.id}`;
   const currentSelectionCreateSeed = React.useMemo(
     () => resolveNewDroneContextFromCurrentSelection(currentDrone),
     [currentDrone],
   );
-  const currentSelectionSpawnModel = currentAgent.kind === 'builtin' ? String(currentModel ?? '') : '';
+  const currentSelectionSpawnModel = currentAgent.kind !== 'custom' ? String(currentModel ?? '') : '';
   const resolveCurrentSelectionDraftContext = React.useCallback(() => {
     if (!selectedDrone || !currentDrone) return null;
     const nextRepoPath = normalizeCreateRepoPath(currentSelectionCreateSeed.repoPath);
@@ -2380,12 +2371,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         );
         const chatInfo = normalizeChatInfoPayload(data);
         seedAgent = chatInfo.agent;
-        seedModel = chatInfo.agent.kind === 'builtin' ? chatInfo.model : null;
+        seedModel = chatInfo.agent.kind !== 'custom' ? chatInfo.model : null;
       } catch {
         const selectedChatName = String(effectiveChatInfo?.chat ?? '').trim() || 'default';
         if (selectedDrone === sourceDroneId && effectiveChatInfo && selectedChatName === sourceChatName) {
           seedAgent = effectiveChatInfo.agent;
-          seedModel = effectiveChatInfo.agent.kind === 'builtin' ? effectiveChatInfo.model : null;
+          seedModel = effectiveChatInfo.agent.kind !== 'custom' ? effectiveChatInfo.model : null;
         }
       }
 
@@ -2474,11 +2465,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     const nextAgentKey =
       effectiveChatInfo.agent.kind === 'builtin'
         ? `builtin:${effectiveChatInfo.agent.id}`
-        : `custom:${effectiveChatInfo.agent.id}`;
+        : effectiveChatInfo.agent.kind === 'custom'
+          ? `custom:${effectiveChatInfo.agent.id}`
+          : 'native';
     const nextModel =
-      effectiveChatInfo.agent.kind === 'builtin'
-        ? String(effectiveChatInfo.model ?? '')
-        : '';
+      effectiveChatInfo.agent.kind !== 'custom' ? String(effectiveChatInfo.model ?? '') : '';
     updateSpawnContextForRepo(currentDroneRepoAttached ? currentDroneRepoPath : '', {
       spawnAgentKey: nextAgentKey,
       spawnModel: nextModel,
@@ -2564,13 +2555,18 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     Boolean(currentDroneBusy) && Boolean(currentDrone?.statusOk) && currentDrone?.hubPhase !== 'error';
   const currentCustomAgentMissing = currentAgent.kind === 'custom' && !customAgents.some((a) => a.id === currentAgent.id);
   const currentDroneAllowsCustomAgents = String(currentDrone?.runtime ?? '').trim().toLowerCase() !== 'host';
-  const agentDisabled =
+  const agentControlBusy =
     loadingChatInfo ||
     Boolean(openingTerminal) ||
     Boolean(openingEditor) ||
     isDroneStartingOrSeeding(currentDrone?.hubPhase);
+  const agentLocked =
+    effectiveChatInfo?.agentLocked === true ||
+    Boolean(transcripts?.length) ||
+    visiblePendingPromptsWithStartup.length > 0;
+  const agentDisabled = agentControlBusy || agentLocked;
   const modelControlEnabled = currentAgent.kind === 'builtin';
-  const modelDisabled = agentDisabled || !modelControlEnabled;
+  const modelDisabled = agentControlBusy || !modelControlEnabled;
   const {
     availableChatModels,
     modelMenuEntries,
@@ -2591,6 +2587,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     currentAgent,
     currentCustomAgentMissing,
     currentAgentKey,
+    agentLocked,
     modelDisabled,
     manualChatModelInput,
     setChatModel,
@@ -2946,7 +2943,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       const seedAgentKey = String(overrides.agentKey ?? spawnAgentKey ?? '').trim() || 'builtin:cursor';
       const seedAgent = resolveAgentKeyToConfig(seedAgentKey);
       const seedModel =
-        seedAgent.kind === 'builtin'
+        seedAgent.kind !== 'custom'
           ? String(overrides.model ?? spawnModel ?? '').trim() || null
           : null;
       const seedAgentPermissionMode: AgentPermissionMode = seedAgent ? spawnAgentPermissionMode : 'full-access';
@@ -4048,6 +4045,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     currentAgentKey,
     pickAgentValue,
     toolbarAgentMenuEntries,
+    agentLocked,
     agentDisabled,
     agentLabel,
     chatRuntimeMetadataAvailable,

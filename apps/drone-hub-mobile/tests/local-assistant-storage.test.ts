@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { boundLocalAssistantMessages } from '../src/local-assistant/local-assistant-storage';
+import {
+  boundLocalAssistantMessages,
+  parseLocalAssistantThreads,
+} from '../src/local-assistant/local-assistant-storage';
 
 function transferDetails(fileCount: number, pathLength: number) {
   return {
@@ -23,12 +26,47 @@ function transferDetails(fileCount: number, pathLength: number) {
       size: 100,
       transferredBytes: index < fileCount / 2 ? 100 : 0,
       retries: 0,
-      status: index < fileCount / 2 ? 'completed' : index === Math.floor(fileCount / 2) ? 'failed' : 'pending',
+      status:
+        index < fileCount / 2
+          ? 'completed'
+          : index === Math.floor(fileCount / 2)
+            ? 'failed'
+            : 'pending',
     })),
   };
 }
 
 describe('local assistant storage', () => {
+  test('keeps legacy threads compatible with the native chat store', () => {
+    const threads = parseLocalAssistantThreads(
+      JSON.stringify([
+        {
+          id: 'legacy-thread',
+          title: 'Existing conversation',
+          createdAt: '2026-01-01T00:00:00.000Z',
+          updatedAt: '2026-01-02T00:00:00.000Z',
+          model: 'gpt-5',
+          thinkingLevel: 'medium',
+          messages: [
+            {
+              id: 'message-1',
+              role: 'user',
+              content: 'Do not lose this',
+              createdAt: '2026-01-01T00:00:00.000Z',
+            },
+          ],
+        },
+      ]),
+    );
+
+    expect(threads).toHaveLength(1);
+    expect(threads?.[0]).toMatchObject({
+      id: 'legacy-thread',
+      title: 'Existing conversation',
+      messages: [{ id: 'message-1', content: 'Do not lose this' }],
+    });
+  });
+
   test('preserves transfer progress beyond the generic tool detail limit', () => {
     const details = transferDetails(100, 20);
     const messages = boundLocalAssistantMessages([

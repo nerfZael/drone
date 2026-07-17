@@ -24,7 +24,6 @@ import {
 } from './assistant-message-model';
 import type {
   AssistantApproval,
-  AssistantChatIdleSubscription,
   AssistantDroneNameMap,
   AssistantMessage,
   AssistantQueuedPrompt,
@@ -151,7 +150,7 @@ export function AssistantThinkingRow() {
         className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
         style={{ fontFamily: 'var(--display)' }}
       >
-        Assistant
+        Agent
       </div>
       <ThinkingPulseDots />
     </div>
@@ -201,105 +200,6 @@ function ReasoningBlock({ text, headerPulse }: { text: string; headerPulse: bool
           …
         </div>
       ) : null}
-    </div>
-  );
-}
-
-function summarizeChatIdleBannerTargets(
-  subscriptions: AssistantChatIdleSubscription[],
-  droneNameById: AssistantDroneNameMap,
-): string {
-  const parts: string[] = [];
-  const seen = new Set<string>();
-  for (const sub of subscriptions) {
-    for (const target of sub.targets) {
-      const droneId = String(target.droneId ?? '').trim();
-      const chatName = String(target.chatName ?? '').trim() || 'default';
-      const droneLabel = (droneId && droneNameById[droneId]) || droneId || 'drone';
-      const label = chatName !== 'default' ? `${droneLabel} / ${chatName}` : droneLabel;
-      if (!label.trim() || seen.has(label)) continue;
-      seen.add(label);
-      parts.push(label);
-    }
-  }
-  if (parts.length === 0) return '';
-  const visible = parts.slice(0, 4);
-  const extra = parts.length - visible.length;
-  return extra > 0 ? `${visible.join(' · ')} +${extra}` : visible.join(' · ');
-}
-
-function chatIdleBannerTitle(subscriptions: AssistantChatIdleSubscription[]): string {
-  const modes = new Set(subscriptions.map((sub) => sub.mode ?? 'all'));
-  if (modes.size === 1 && modes.has('any')) return 'Subscribed — waiting for any chat to go idle';
-  if (modes.size === 1 && modes.has('all')) return 'Subscribed — waiting for all chats to go idle';
-  return 'Subscribed — waiting for chat idle events';
-}
-
-function formatChatIdleExpiryHint(expiresAtIso: string): string {
-  const ms = Date.parse(expiresAtIso);
-  if (!Number.isFinite(ms)) return '';
-  const delta = ms - Date.now();
-  if (delta <= 0) return 'Subscription expires soon';
-  if (delta < 60_000) return 'Expires in under a minute';
-  if (delta < 60 * 60_000) return `Expires in ${Math.ceil(delta / 60_000)}m`;
-  return `Expires ${new Date(ms).toLocaleString()}`;
-}
-
-function earliestChatIdleExpiryIso(subscriptions: AssistantChatIdleSubscription[]): string | null {
-  let best: number | null = null;
-  for (const sub of subscriptions) {
-    const ms = Date.parse(sub.expiresAt);
-    if (!Number.isFinite(ms)) continue;
-    if (best === null || ms < best) best = ms;
-  }
-  return best === null ? null : new Date(best).toISOString();
-}
-
-export function AssistantChatIdleFooterBanner({
-  subscriptions,
-  droneNameById,
-}: {
-  subscriptions: AssistantChatIdleSubscription[];
-  droneNameById: AssistantDroneNameMap;
-}) {
-  const targetLine = React.useMemo(
-    () => summarizeChatIdleBannerTargets(subscriptions, droneNameById),
-    [subscriptions, droneNameById],
-  );
-  const title = React.useMemo(() => chatIdleBannerTitle(subscriptions), [subscriptions]);
-  const expiryHint = React.useMemo(() => {
-    const iso = earliestChatIdleExpiryIso(subscriptions);
-    return iso ? formatChatIdleExpiryHint(iso) : '';
-  }, [subscriptions]);
-
-  return (
-    <div
-      className="flex-shrink-0 border-t border-[rgba(255,200,80,.28)] bg-[rgba(255,200,80,.08)] px-3 py-2"
-      role="status"
-      aria-live="polite"
-    >
-      <div className="flex items-start gap-2">
-        <span
-          className="mt-1 h-2 w-2 flex-shrink-0 animate-pulse rounded-full bg-[var(--yellow)]"
-          aria-hidden="true"
-        />
-        <div className="min-w-0 flex-1">
-          <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">{title}</div>
-          {targetLine ? (
-            <div className="mt-0.5 truncate text-[10px] text-[var(--muted)]" title={targetLine}>
-              Watching {targetLine}
-            </div>
-          ) : (
-            <div className="mt-0.5 text-[10px] text-[var(--muted)]">
-              The assistant resumes this thread automatically when monitored chats become idle. Use
-              Stop below to cancel.
-            </div>
-          )}
-          {expiryHint ? (
-            <div className="mt-1 text-[10px] text-[var(--muted-dim)]">{expiryHint}</div>
-          ) : null}
-        </div>
-      </div>
     </div>
   );
 }

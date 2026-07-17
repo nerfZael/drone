@@ -12,6 +12,7 @@ import {
   type MobileDeviceIdentity,
 } from '../security/device-identity';
 import { MeshSocket } from './MeshSocket';
+import { uploadMeshChatAttachment } from './upload-mesh-chat-attachment';
 import { claimPairing, validatePairingApproval, waitForPairingApproval } from './pair-device';
 import { assertKnownRecoveryTarget } from './pairing-recovery';
 import {
@@ -37,6 +38,14 @@ type MeshContextValue = {
     payload?: unknown,
     signal?: AbortSignal,
   ): Promise<any>;
+  uploadChatAttachment(input: {
+    targetDeviceId: string;
+    droneId: string;
+    chatName: string;
+    name: string;
+    mime: string;
+    bytes: Uint8Array;
+  }): Promise<{ attachmentId: string; name: string; mime: string; size: number }>;
   refreshDevices(): Promise<void>;
   subscribe(
     capability: string,
@@ -210,6 +219,35 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
       return await socket.request(targetDeviceId, capability, operation, payload, signal);
     },
     [],
+  );
+
+  const uploadChatAttachment = React.useCallback(
+    async (input: {
+      targetDeviceId: string;
+      droneId: string;
+      chatName: string;
+      name: string;
+      mime: string;
+      bytes: Uint8Array;
+    }) => {
+      const direct = sockets.current.find(
+        (socket) => socket.connected && socket.connection.deviceId === input.targetDeviceId,
+      );
+      const knownEndpoint = profile?.devices.find(
+        (device) => device.id === input.targetDeviceId,
+      )?.endpoints[0];
+      return await uploadMeshChatAttachment({
+        endpoint: direct?.connection.endpoint ?? knownEndpoint ?? null,
+        droneId: input.droneId,
+        chatName: input.chatName,
+        name: input.name,
+        mime: input.mime,
+        bytes: input.bytes,
+        request: (payload) =>
+          request(input.targetDeviceId, 'drone-control', 'chat.prompt', payload),
+      });
+    },
+    [profile?.devices, request],
   );
 
   const refreshDevices = React.useCallback(async () => {
@@ -387,6 +425,7 @@ export function MeshProvider({ children }: { children: React.ReactNode }) {
     error,
     pair,
     request,
+    uploadChatAttachment,
     refreshDevices,
     subscribe,
     renameSelf,

@@ -1,11 +1,16 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 import type { WorkspaceTransferAdapter } from '@blip/tools';
 
 import { droneRootPath } from '../host/paths';
 import { isAssistantTransferTemporaryName } from './assistant/is-assistant-transfer-temporary-name';
+import { readTransferBytes, writeTransferBytes } from './assistant/transfer-file-io';
+import {
+  guessImageMimeType,
+  isImageMimeType,
+  isLikelyTextMimeType,
+} from './filesystem-media';
 
 export type AssistantArtifactFileSummary = {
   path: string;
@@ -41,38 +46,6 @@ const ARTIFACT_MAX_UPLOAD_BYTES_EACH = 6 * 1024 * 1024;
 const ARTIFACT_MAX_UPLOAD_BYTES_TOTAL = 20 * 1024 * 1024;
 const ARTIFACT_MAX_UPLOAD_FILES = 8;
 const ARTIFACT_MAX_PATH_CHARS = 180;
-
-async function readTransferBytes(
-  handle: FileHandle,
-  buffer: Buffer,
-  position: number,
-): Promise<boolean> {
-  let read = 0;
-  while (read < buffer.length) {
-    const result = await handle.read(buffer, read, buffer.length - read, position + read);
-    if (result.bytesRead <= 0) return false;
-    read += result.bytesRead;
-  }
-  return true;
-}
-
-async function writeTransferBytes(
-  handle: FileHandle,
-  buffer: Buffer,
-  position: number,
-): Promise<void> {
-  let written = 0;
-  while (written < buffer.length) {
-    const result = await handle.write(
-      buffer,
-      written,
-      buffer.length - written,
-      position + written,
-    );
-    if (result.bytesWritten <= 0) throw new Error('destination stopped writing transfer data');
-    written += result.bytesWritten;
-  }
-}
 
 export type AssistantArtifactUploadInput = {
   name?: unknown;
@@ -182,25 +155,9 @@ function revisionForContent(content: string | Buffer): string {
 
 function mimeTypeForPath(artifactPath: string): string {
   const ext = path.extname(artifactPath).toLowerCase();
+  const imageMimeType = guessImageMimeType(artifactPath);
+  if (imageMimeType !== 'application/octet-stream') return imageMimeType;
   switch (ext) {
-    case '.png':
-      return 'image/png';
-    case '.jpg':
-    case '.jpeg':
-      return 'image/jpeg';
-    case '.gif':
-      return 'image/gif';
-    case '.webp':
-      return 'image/webp';
-    case '.bmp':
-      return 'image/bmp';
-    case '.svg':
-      return 'image/svg+xml';
-    case '.avif':
-      return 'image/avif';
-    case '.tif':
-    case '.tiff':
-      return 'image/tiff';
     case '.md':
       return 'text/markdown';
     case '.txt':
@@ -409,26 +366,6 @@ export function createAssistantArtifactTransferAdapter(threadId: string): Worksp
   };
 }
 
-function isTextMimeType(mimeType: string): boolean {
-  const mime = String(mimeType ?? '')
-    .trim()
-    .toLowerCase();
-  return (
-    mime.startsWith('text/') ||
-    mime === 'application/json' ||
-    mime === 'application/xml' ||
-    mime === 'application/javascript' ||
-    mime === 'application/x-javascript'
-  );
-}
-
-function isImageMimeType(mimeType: string): boolean {
-  return String(mimeType ?? '')
-    .trim()
-    .toLowerCase()
-    .startsWith('image/');
-}
-
 function isUploadedArtifactPath(artifactPath: string): boolean {
   return String(artifactPath ?? '')
     .replace(/\\/g, '/')
@@ -449,7 +386,7 @@ async function summaryForFile(
   const [stat, content] = await Promise.all([fs.stat(filePath), fs.readFile(filePath)]);
   const mimeType = mimeTypeForPath(artifactPath);
   const binary =
-    !isTextMimeType(mimeType) &&
+    !isLikelyTextMimeType(mimeType) &&
     (isImageMimeType(mimeType) ||
       mimeType !== 'application/octet-stream' ||
       !isLikelyTextBuffer(content));
@@ -559,7 +496,7 @@ export async function readAssistantArtifactFile(
     if (!stat.isFile()) throw errorWithStatus(`artifact is not a file: ${artifactPath}`, 404);
     const mimeType = mimeTypeForPath(artifactPath);
     const maxBytes =
-      isTextMimeType(mimeType) && !isUploadedArtifactPath(artifactPath)
+      isLikelyTextMimeType(mimeType) && !isUploadedArtifactPath(artifactPath)
         ? ARTIFACT_MAX_FILE_BYTES
         : ARTIFACT_MAX_UPLOAD_BYTES_EACH;
     if (stat.size > maxBytes) {

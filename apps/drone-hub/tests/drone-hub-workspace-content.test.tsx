@@ -17,16 +17,6 @@ function mockedView(name: string) {
   };
 }
 
-mock.module('../src/droneHub/assistant', () => ({
-  FloatingAssistantDock: ({ embeddedVisible }: { embeddedVisible: boolean }) =>
-    React.createElement('div', { 'data-assistant-embedded': String(embeddedVisible) }, 'assistant'),
-}));
-
-mock.module('../src/droneHub/assistant/FloatingAssistantDock', () => ({
-  FloatingAssistantDock: ({ embeddedVisible }: { embeddedVisible: boolean }) =>
-    React.createElement('div', { 'data-assistant-embedded': String(embeddedVisible) }, 'assistant'),
-}));
-
 mock.module('../src/droneHub/app/NoDroneSelectedState', () => ({
   NoDroneSelectedState: () => React.createElement('div', { 'data-view': 'no-drone' }, 'No drone selected'),
 }));
@@ -150,33 +140,18 @@ describe('DroneHubWorkspaceContent lazy workspace views', () => {
     expect(html).toContain('data-has-preview-host="true"');
   });
 
-  test('hides the floating assistant immediately when the assistant pane is active', async () => {
+  test('does not mount the removed standalone assistant surface', async () => {
     const html = await renderSettled(
       baseProps({
         selectedDroneWorkspaceProps: {
           currentDrone: { id: 'drone-1' },
           rightPanelOpen: true,
-          rightPanelTab: 'assistant',
+          rightPanelTab: 'terminal',
           rightPanelSplit: false,
           rightPanelBottomTab: 'terminal',
         } as DroneHubWorkspaceContentProps['selectedDroneWorkspaceProps'],
       }),
     );
-    expect(html).toContain('data-assistant-embedded="true"');
-  });
-
-  test('hides the floating assistant when the assistant pane is active in split mode', async () => {
-    const html = await renderSettled(
-      baseProps({
-        selectedDroneWorkspaceProps: {
-          currentDrone: { id: 'drone-1' },
-          rightPanelOpen: true,
-          rightPanelTab: 'files',
-          rightPanelSplit: true,
-          rightPanelBottomTab: 'assistant',
-        } as DroneHubWorkspaceContentProps['selectedDroneWorkspaceProps'],
-      }),
-    );
-    expect(html).toContain('data-assistant-embedded="true"');
+    expect(html).not.toContain('data-assistant-embedded');
   });
 });

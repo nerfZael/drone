@@ -701,7 +701,7 @@ export function CrossDeviceAssistantPolicyPanel({
           </div>
         ) : (
           <div className="p-4 text-[11px] text-[var(--muted)]">
-            Start an assistant thread to configure its workspace access.
+            Start a Built-in chat to configure its workspace access.
           </div>
         )}
       </div>

@@ -102,6 +102,29 @@ export class BlipAssistantHost {
     return this.repository.readThreadHistoryPage(threadId, input);
   }
 
+  message(threadId: string, entryId: string): Promise<Record<string, unknown>> {
+    return this.repository.readThreadMessage(threadId, entryId);
+  }
+
+  async latestAssistantText(threadId: string): Promise<string> {
+    const history = await this.historyPage(threadId, { limit: 50 });
+    const message = [...history.entries]
+      .reverse()
+      .map((entry) => entry.message)
+      .find((candidate) => candidate.role === 'assistant');
+    if (!message) return '';
+    if (typeof message.content === 'string') return message.content;
+    if (!Array.isArray(message.content)) return '';
+    return message.content
+      .map((part: any) =>
+        part?.type === 'text' || part?.type === 'thinking'
+          ? String(part?.text ?? part?.thinking ?? '')
+          : '',
+      )
+      .filter(Boolean)
+      .join('\n');
+  }
+
   isThreadRunning(threadId: string): boolean {
     return this.handles.get(threadId)?.running === true;
   }

@@ -1,5 +1,4 @@
 import fs from 'node:fs/promises';
-import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
 
 import { dvmExec, run as runHostCommand } from '../host/dvm';
@@ -26,6 +25,7 @@ import {
 } from './assistant-filesystem-utils';
 import { bashQuote, normalizeContainerPath } from './hub-format';
 import { resolveDroneFromRegistryRef } from './drone-lifecycle-service';
+import { readTransferBytes, writeTransferBytes } from './assistant/transfer-file-io';
 import { droneRepoChangesSummary } from './drone-repo';
 import { gitRepoChangesSummary, gitTopLevel } from './repoOps';
 
@@ -383,39 +383,9 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     };
   }
 
-  const ASSISTANT_TRANSFER_CHUNK_BYTES = 256 * 1024;
-
-  async function readAssistantTransferBytes(
-    handle: FileHandle,
-    buffer: Buffer,
-    position: number,
-  ): Promise<boolean> {
-    let read = 0;
-    while (read < buffer.length) {
-      const result = await handle.read(buffer, read, buffer.length - read, position + read);
-      if (result.bytesRead <= 0) return false;
-      read += result.bytesRead;
-    }
-    return true;
-  }
-
-  async function writeAssistantTransferBytes(
-    handle: FileHandle,
-    buffer: Buffer,
-    position: number,
-  ): Promise<void> {
-    let written = 0;
-    while (written < buffer.length) {
-      const result = await handle.write(
-        buffer,
-        written,
-        buffer.length - written,
-        position + written,
-      );
-      if (result.bytesWritten <= 0) throw new Error('destination stopped writing transfer data');
-      written += result.bytesWritten;
-    }
-  }
+  // This chunk can cross the JSON/base64 device-mesh fallback, whose envelope
+  // must remain below the 256 KiB WebSocket message limit.
+  const ASSISTANT_TRANSFER_CHUNK_BYTES = 128 * 1024;
 
   function assistantTransferId(raw: unknown): string {
     const value = String(raw ?? '').trim();
@@ -600,7 +570,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
         const info = await handle.stat();
         if (info.size === offset + data.length) {
           const existing = Buffer.alloc(data.length);
-          if ((await readAssistantTransferBytes(handle, existing, offset)) && existing.equals(data))
+          if ((await readTransferBytes(handle, existing, offset)) && existing.equals(data))
             return { offset: info.size };
         }
         if (info.size !== offset)
@@ -608,7 +578,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
             new Error(`transfer offset mismatch: expected ${info.size}, received ${offset}`),
             { code: 'TRANSFER_OFFSET_MISMATCH' },
           );
-        await writeAssistantTransferBytes(handle, data, offset);
+        await writeTransferBytes(handle, data, offset);
         await handle.sync();
         return { offset: offset + data.length };
       } finally {

@@ -220,7 +220,7 @@ export function AssistantThreadFilesView({
           <IconFile className="h-4 w-4 flex-shrink-0 text-[var(--muted)]" />
           <div className="min-w-0">
             <div className="min-w-0 truncate text-[12px] font-semibold text-[var(--fg-secondary)]">
-              Thread files
+              Chat files
             </div>
             <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-[var(--muted-dim)]">
               <span>
@@ -263,7 +263,7 @@ export function AssistantThreadFilesView({
         <aside className="w-[210px] flex-shrink-0 overflow-y-auto border-r border-[var(--border-subtle)] py-1">
           {files.length === 0 ? (
             <div className="px-2 py-3 text-[11px] text-[var(--muted-dim)]">
-              {loading ? 'Loading files...' : 'No thread files.'}
+              {loading ? 'Loading files...' : 'No chat files.'}
             </div>
           ) : (
             <div>{renderArtifactTree(artifactTree, 0)}</div>

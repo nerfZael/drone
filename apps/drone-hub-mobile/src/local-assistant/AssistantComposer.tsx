@@ -132,6 +132,8 @@ export function AssistantComposer({
   editable = true,
   queueWhileRunning = false,
   showAttachments = true,
+  hasAttachments = false,
+  onAddAttachment,
   sendLabel,
   sendPlacement = 'controls',
   footer,
@@ -154,6 +156,8 @@ export function AssistantComposer({
   editable?: boolean;
   queueWhileRunning?: boolean;
   showAttachments?: boolean;
+  hasAttachments?: boolean;
+  onAddAttachment?(): void;
   sendLabel?: string;
   sendPlacement?: 'controls' | 'below';
   footer?: any;
@@ -185,10 +189,13 @@ export function AssistantComposer({
   const voiceActiveRef = React.useRef(voiceActive);
   voiceActiveRef.current = voiceActive;
   const voiceCanPauseOrStop = voiceStatus === 'recording' || voiceStatus === 'paused';
+  const attachmentsEnabled = showAttachments && Boolean(onAddAttachment);
+  const attachmentActionDisabled =
+    !editable || sending || voiceActive || (running && !queueWhileRunning);
   const expanded =
-    focused || Boolean(value.trim()) || running || voiceActive || Boolean(voiceError);
+    focused || Boolean(value.trim()) || hasAttachments || running || voiceActive || Boolean(voiceError);
   const canSend =
-    (Boolean(value.trim()) || voiceCanPauseOrStop) &&
+    (Boolean(value.trim()) || hasAttachments || voiceCanPauseOrStop) &&
     !sending &&
     editable &&
     !voiceActionInFlight &&
@@ -325,8 +332,11 @@ export function AssistantComposer({
     if (nextDraft?.trim()) {
       setVoiceError('');
       onSend(nextDraft.trim());
+    } else if (hasAttachments) {
+      setVoiceError('');
+      onSend();
     }
-  }, [canSend, onSend, stopVoiceAndAppend, voiceActive]);
+  }, [canSend, hasAttachments, onSend, stopVoiceAndAppend, voiceActive]);
 
   return (
     <View style={styles.frame}>
@@ -359,20 +369,26 @@ export function AssistantComposer({
             styles.input,
             expanded && styles.inputExpanded,
             !expanded &&
-              (showAttachments
+              (attachmentsEnabled
                 ? styles.inputWithCollapsedVoice
                 : styles.inputWithCollapsedVoiceOnly),
           ]}
         />
         {!expanded ? (
           <>
-            {showAttachments ? (
+            {attachmentsEnabled ? (
               <Pressable
                 accessibilityRole="button"
-                accessibilityLabel="Add attachment — coming soon"
+                accessibilityLabel="Add image"
+                accessibilityState={{ disabled: attachmentActionDisabled }}
+                disabled={attachmentActionDisabled}
                 hitSlop={6}
-                onPress={() => {}}
-                style={({ pressed }) => [styles.collapsedAddButton, pressed && styles.pressed]}
+                onPress={onAddAttachment}
+                style={({ pressed }) => [
+                  styles.collapsedAddButton,
+                  attachmentActionDisabled && styles.disabled,
+                  pressed && styles.pressed,
+                ]}
               >
                 <Plus color={colors.text} size={17} strokeWidth={2.1} />
               </Pressable>
@@ -427,8 +443,13 @@ export function AssistantComposer({
           <View style={styles.controls}>
             {voiceStatus === 'idle' ? (
               <>
-                {showAttachments ? (
-                  <IconButton label="Add attachment — coming soon" icon={Plus} onPress={() => {}} />
+                {attachmentsEnabled ? (
+                  <IconButton
+                    label="Add image"
+                    icon={Plus}
+                    disabled={attachmentActionDisabled}
+                    onPress={onAddAttachment!}
+                  />
                 ) : null}
                 <View style={styles.controlSpacer} />
                 <Pressable

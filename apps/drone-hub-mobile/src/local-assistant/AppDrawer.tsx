@@ -25,7 +25,6 @@ import Folder from 'lucide-react-native/icons/folder';
 import Svg, { Circle, Line, Rect } from 'react-native-svg';
 import { colors } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { assistantThreadsNewestFirst } from './latest-assistant-thread';
 import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
 import {
   buildMobileDroneRepoGroups,
@@ -37,18 +36,9 @@ import {
   type MobileDroneTreeNode,
 } from '../drones/drone-sidebar-model';
 
-export function assistantDrawerWidth(windowWidth: number): number {
+export function appDrawerWidth(windowWidth: number): number {
   return Math.min(windowWidth, 460);
 }
-
-export type DrawerAssistantThread = {
-  id: string;
-  title: string;
-  status: string;
-  createdAt?: string;
-  updatedAt?: string;
-  model?: string;
-};
 
 export type AppDrawerNavigationItem = {
   id: string;
@@ -64,18 +54,11 @@ export type DrawerDevicePickerItem = {
   detail?: string;
 };
 
-export type AssistantThreadDrawerProps = {
+export type AppDrawerProps = {
   open: boolean;
-  title: string;
-  threads: DrawerAssistantThread[];
-  activeThreadId: string;
-  creating?: boolean;
-  threadsLoading?: boolean;
   offset: Animated.Value;
   openingGestureActive?: boolean;
   navigationItems: AppDrawerNavigationItem[];
-  canCreate?: boolean;
-  showThreads?: boolean;
   showDrones?: boolean;
   drones?: MobileDroneSummary[];
   droneSidebarOrder?: MobileDroneSidebarOrder;
@@ -87,29 +70,27 @@ export type AssistantThreadDrawerProps = {
   devicePickerItems?: DrawerDevicePickerItem[];
   activeDeviceId?: string;
   onClose(): void;
-  onSelect(threadId: string): void;
-  onCreate(): void;
   onCreateDrone?(): void;
   onRetryDrones?(): void;
   onSelectDroneChat?(droneId: string, chatName: string): void;
   onSelectDevice?(deviceId: string): void;
 };
 
-type RegisterDrawer = (props: AssistantThreadDrawerProps) => void;
+type RegisterDrawer = (props: AppDrawerProps) => void;
 
-const AssistantDrawerHostContext = React.createContext<RegisterDrawer | null>(null);
+const AppDrawerHostContext = React.createContext<RegisterDrawer | null>(null);
 
-export function AssistantDrawerProvider({ children }: { children: React.ReactNode }) {
-  const [drawerProps, setDrawerProps] = React.useState<AssistantThreadDrawerProps | null>(null);
+export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
+  const [drawerProps, setDrawerProps] = React.useState<AppDrawerProps | null>(null);
   const registerDrawer = React.useCallback<RegisterDrawer>((nextProps) => {
     setDrawerProps(nextProps);
   }, []);
 
   return (
-    <AssistantDrawerHostContext.Provider value={registerDrawer}>
+    <AppDrawerHostContext.Provider value={registerDrawer}>
       {children}
-      {drawerProps ? <AssistantThreadDrawerView {...drawerProps} /> : null}
-    </AssistantDrawerHostContext.Provider>
+      {drawerProps ? <AppDrawerView {...drawerProps} /> : null}
+    </AppDrawerHostContext.Provider>
   );
 }
 
@@ -335,16 +316,6 @@ function DroneStateCounts({
       ) : null}
     </View>
   );
-}
-
-function threadDisplayState(thread: DrawerAssistantThread): SwitchDisplayState {
-  const rawState = thread.status.trim().toLowerCase();
-  if (rawState.includes('error') || rawState.includes('block') || rawState.includes('approval'))
-    return 'blocked';
-  if (rawState.includes('waiting')) return 'waiting';
-  if (rawState.includes('run') || rawState.includes('work')) return 'working';
-  if (rawState.includes('done') || rawState.includes('complete')) return 'done';
-  return 'idle';
 }
 
 function switchStateLabel(state: SwitchDisplayState): string {
@@ -621,29 +592,22 @@ function DrawerDroneEntry({
   );
 }
 
-export function AssistantThreadDrawer(props: AssistantThreadDrawerProps) {
-  const registerDrawer = React.useContext(AssistantDrawerHostContext);
+export function AppDrawer(props: AppDrawerProps) {
+  const registerDrawer = React.useContext(AppDrawerHostContext);
 
   React.useLayoutEffect(() => {
     registerDrawer?.(props);
   }, [props, registerDrawer]);
 
   if (registerDrawer) return null;
-  return <AssistantThreadDrawerView {...props} />;
+  return <AppDrawerView {...props} />;
 }
 
-function AssistantThreadDrawerView({
+function AppDrawerView({
   open,
-  title: _title,
-  threads,
-  activeThreadId,
-  creating,
-  threadsLoading = false,
   offset,
   openingGestureActive,
   navigationItems,
-  canCreate = true,
-  showThreads = true,
   showDrones = false,
   drones = [],
   droneSidebarOrder = EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
@@ -655,16 +619,14 @@ function AssistantThreadDrawerView({
   devicePickerItems = [],
   activeDeviceId = '',
   onClose,
-  onSelect,
-  onCreate,
   onCreateDrone,
   onRetryDrones,
   onSelectDroneChat,
   onSelectDevice,
-}: AssistantThreadDrawerProps) {
+}: AppDrawerProps) {
   const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
-  const drawerWidth = assistantDrawerWidth(windowWidth);
+  const drawerWidth = appDrawerWidth(windowWidth);
   const closedX = -drawerWidth;
   const closeSwipeDistance = Math.min(drawerWidth * 0.14, 52);
   const [visible, setVisible] = React.useState(open);
@@ -745,7 +707,6 @@ function AssistantThreadDrawerView({
     },
     [closedX, offset, open],
   );
-  const orderedThreads = React.useMemo(() => assistantThreadsNewestFirst(threads), [threads]);
   const droneGroups = React.useMemo(
     () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
     [droneSidebarOrder, drones],
@@ -854,77 +815,7 @@ function AssistantThreadDrawerView({
                 );
               })}
             </View>
-            {showThreads ? (
-              <>
-                <View style={styles.sidebarToolbar}>
-                  {threadsLoading ? (
-                    <View style={styles.loadingSummary}>
-                      <ActivityIndicator color={colors.accent} size="small" />
-                      <Text style={styles.loadingSummaryText}>Loading threads…</Text>
-                    </View>
-                  ) : (
-                    <Text style={styles.sidebarToolbarText}>
-                      {threads.length} {threads.length === 1 ? 'thread' : 'threads'}
-                    </Text>
-                  )}
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Create new thread"
-                    disabled={threadsLoading || creating || !canCreate}
-                    onPress={onCreate}
-                    style={({ pressed }) => [
-                      styles.create,
-                      (threadsLoading || !canCreate) && styles.createDisabled,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    {creating ? (
-                      <ActivityIndicator color={colors.accent} size="small" />
-                    ) : (
-                      <Plus color={colors.accent} size={19} strokeWidth={2.2} />
-                    )}
-                  </Pressable>
-                </View>
-                <ScrollView style={styles.scroll} contentContainerStyle={styles.list}>
-                  {orderedThreads.map((thread) => {
-                    const active = thread.id === activeThreadId;
-                    const displayState = threadDisplayState(thread);
-                    return (
-                      <Pressable
-                        key={thread.id}
-                        onPress={() => onSelect(thread.id)}
-                        style={({ pressed }) => [
-                          styles.switchItemRow,
-                          active && styles.switchItemRowActive,
-                          pressed && styles.pressed,
-                        ]}
-                      >
-                        <View style={styles.switchItemCopy}>
-                          <View style={styles.switchItemTitleRow}>
-                            <Text
-                              numberOfLines={1}
-                              style={[styles.switchItemTitle, active && styles.activeText]}
-                            >
-                              {thread.title || 'Untitled thread'}
-                            </Text>
-                            <RelativeMessageTimestamp
-                              timestamp={thread.updatedAt}
-                              style={styles.switchItemTime}
-                            />
-                          </View>
-                          <SwitchItemState state={displayState} detail={thread.model} />
-                        </View>
-                      </Pressable>
-                    );
-                  })}
-                  {!threadsLoading && threads.length === 0 ? (
-                    <Text style={styles.empty}>
-                      No threads here yet. Create one to start a conversation.
-                    </Text>
-                  ) : null}
-                </ScrollView>
-              </>
-            ) : showDrones ? (
+            {showDrones ? (
               <>
                 <View style={styles.sidebarToolbar}>
                   {dronesLoading ? (
@@ -1200,7 +1091,6 @@ const styles = StyleSheet.create({
   },
   createDisabled: { opacity: 0.42 },
   scroll: { flex: 1 },
-  list: { paddingHorizontal: 8, paddingBottom: 20 },
   activeText: { color: colors.accent, fontWeight: '800' },
   empty: { color: colors.muted, fontSize: 12, lineHeight: 18, padding: 12 },
   drawerError: { gap: 10, padding: 12 },

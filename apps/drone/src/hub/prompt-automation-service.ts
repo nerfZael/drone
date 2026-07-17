@@ -104,8 +104,8 @@ export class PromptAutomationService {
       chatName: opts.chatName,
     });
     const agent = this.deps.inferChatAgent(chat, d);
-    if (agent?.kind !== 'builtin') {
-      throw new DomainConflictError('automation requires a builtin transcript agent');
+    if (agent?.kind !== 'builtin' && agent?.kind !== 'native') {
+      throw new DomainConflictError('automation requires Built-in or a transcript agent');
     }
 
     const lane = this.deps.manager.ensure(opts.droneId, opts.chatName);

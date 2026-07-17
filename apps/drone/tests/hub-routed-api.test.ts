@@ -57,30 +57,18 @@ describeSocketSuite('routed Hub APIs', () => {
     fs.rmSync(tempRoot, { recursive: true, force: true });
   });
 
-  test('routes assistant collection and parameter endpoints', async () => {
-    const created = await apiFetch(
+  test('does not expose standalone assistant thread routes', async () => {
+    const createAttempt = await apiFetch(
       '/api/assistant/threads',
       jsonRequest('POST', { title: 'Router test' }),
     );
-    expect(created.response.status).toBe(201);
-    const threadId = created.data.activeThreadId;
+    expect(createAttempt.response.status).toBe(404);
 
-    const updated = await apiFetch(
-      `/api/assistant/threads/${encodeURIComponent(threadId)}`,
-      jsonRequest('PATCH', { title: 'Updated through router' }),
-    );
-    expect(updated.response.status).toBe(200);
-    expect(updated.data.threads.find((thread: any) => thread.id === threadId)?.title).toBe(
-      'Updated through router',
-    );
+    const listed = await apiFetch('/api/assistant/threads');
+    expect(listed.response.status).toBe(404);
 
-    const systemPrompt = await apiFetch(
-      `/api/assistant/threads/${encodeURIComponent(threadId)}/system-prompt`,
-    );
+    const systemPrompt = await apiFetch('/api/assistant/system-prompt');
     expect(systemPrompt.response.status).toBe(200);
-
-    const missing = await apiFetch('/api/assistant/threads/does-not-exist');
-    expect(missing.response.status).toBe(404);
   });
 
   test('routes whiteboard CRUD and reports malformed JSON consistently', async () => {

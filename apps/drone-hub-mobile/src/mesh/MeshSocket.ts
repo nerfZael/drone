@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import {
   capabilityRequestSigningText,
+  MESH_SAFE_MESSAGE_BYTES,
   socketAuthSigningText,
   socketServerAuthSigningText,
   type CapabilityResponse,
@@ -27,8 +28,6 @@ type PendingRequest = {
   signal?: AbortSignal;
   onAbort?: () => void;
 };
-
-const MAX_REQUEST_BYTES = 240 * 1024;
 
 export class MeshSocket {
   private socket: WebSocket | null = null;
@@ -141,7 +140,7 @@ export class MeshSocket {
       typeof TextEncoder === 'undefined'
         ? serialized.length * 3
         : new TextEncoder().encode(serialized).byteLength;
-    if (requestBytes > MAX_REQUEST_BYTES) throw new Error('Mesh request is too large');
+    if (requestBytes > MESH_SAFE_MESSAGE_BYTES) throw new Error('Mesh request is too large');
     return await new Promise((resolve, reject) => {
       const onAbort = () => {
         clearTimeout(timer);

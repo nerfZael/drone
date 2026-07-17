@@ -10,6 +10,7 @@ type ArchiveRuntimeDependencyName =
   | 'collectDockerSnapshotImageRefsFromChatEntry'
   | 'collectDockerSnapshotImageRefsFromDroneEntry'
   | 'deleteArchivedChatFromStore'
+  | 'deleteNativeChatSessionsForDrone'
   | 'droneDisplayNameExists'
   | 'droneRuntime'
   | 'dvmContainerExists'
@@ -52,6 +53,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     collectDockerSnapshotImageRefsFromChatEntry,
     collectDockerSnapshotImageRefsFromDroneEntry,
     deleteArchivedChatFromStore,
+    deleteNativeChatSessionsForDrone,
     droneDisplayNameExists,
     droneRuntime,
     dvmContainerExists,
@@ -357,6 +359,11 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
         chatName: archivedChatName,
         reason: 'delete-archived-chat',
       });
+      if (stored.archivedChat?.chat) {
+        await deleteNativeChatSessionsForDrone({
+          chats: { [archivedChatName]: stored.archivedChat.chat },
+        });
+      }
     }
     return {
       hadDrone: true,
@@ -620,6 +627,7 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
           droneId,
           reason: 'delete-archived-drone',
         });
+        await deleteNativeChatSessionsForDrone(archivedEntry);
       }
     }
 

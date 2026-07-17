@@ -10,8 +10,8 @@ import {
   normalizeLocalAssistantThinkingLevel,
 } from './local-assistant-model';
 
-const THREADS_KEY = 'droneHub.localAssistant.threads.v1';
-const MAX_THREADS = 30;
+const THREADS_KEY = 'droneHub.nativeChats.threads.v1';
+const LEGACY_ASSISTANT_THREADS_KEY = 'droneHub.localAssistant.threads.v1';
 const MAX_MESSAGES_PER_THREAD = 120;
 const MAX_STORED_MESSAGE_CHARS = 24_000;
 const MAX_STORED_THREAD_CHARS = 650_000;
@@ -201,33 +201,52 @@ function cleanThread(value: any): LocalAssistantThread | null {
     status: value.status === 'error' ? 'error' : 'idle',
     error: value.status === 'error' && value.error ? String(value.error).slice(0, 2_000) : null,
     autoApprove: value.autoApprove === true,
+    artifactWorkspace: value.artifactWorkspace === true,
     workspaceTargets,
     messages,
     queuedPrompts,
   };
 }
 
-export async function loadLocalAssistantThreads(): Promise<LocalAssistantThread[]> {
-  const stored = await AsyncStorage.getItem(THREADS_KEY);
-  if (!stored) return [];
+export function parseLocalAssistantThreads(raw: string | null): LocalAssistantThread[] | null {
+  if (raw === null) return null;
   try {
-    const parsed = JSON.parse(stored);
-    if (!Array.isArray(parsed)) throw new Error('invalid local assistant threads');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
     return parsed
-      .slice(0, MAX_THREADS)
       .map(cleanThread)
       .filter((thread: LocalAssistantThread | null): thread is LocalAssistantThread =>
         Boolean(thread),
       );
   } catch {
+    return null;
+  }
+}
+
+export async function loadLocalAssistantThreads(): Promise<LocalAssistantThread[]> {
+  const stored = await AsyncStorage.getItem(THREADS_KEY);
+  const threads = parseLocalAssistantThreads(stored);
+  if (threads) return threads;
+  if (stored !== null) {
     await AsyncStorage.removeItem(THREADS_KEY);
+  }
+
+  const legacyStored = await AsyncStorage.getItem(LEGACY_ASSISTANT_THREADS_KEY);
+  const legacyThreads = parseLocalAssistantThreads(legacyStored);
+  if (!legacyThreads) {
+    if (legacyStored !== null) await AsyncStorage.removeItem(LEGACY_ASSISTANT_THREADS_KEY);
     return [];
   }
+
+  // Keep the old value until the canonical write succeeds so an interrupted upgrade cannot lose
+  // the user's chats. Transcript files and assistant preferences remain compatible with the new UI.
+  await AsyncStorage.setItem(THREADS_KEY, JSON.stringify(legacyThreads));
+  await AsyncStorage.removeItem(LEGACY_ASSISTANT_THREADS_KEY);
+  return legacyThreads;
 }
 
 export async function saveLocalAssistantThreads(threads: LocalAssistantThread[]): Promise<void> {
   const clean = threads
-    .slice(0, MAX_THREADS)
     .map(cleanThread)
     .filter((thread: LocalAssistantThread | null): thread is LocalAssistantThread =>
       Boolean(thread),

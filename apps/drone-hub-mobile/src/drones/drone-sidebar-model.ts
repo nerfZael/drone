@@ -40,6 +40,14 @@ export type MobileDroneTurn = {
   model: string;
   reasoning: string;
   attachments: Array<{ name: string; mime: string; size: number | null }>;
+  meshTruncated?: boolean;
+};
+
+export type MobileChatHistoryPage = {
+  beforeCursor: number | null;
+  hasOlder: boolean;
+  responseTruncated: boolean;
+  contentTruncated: boolean;
 };
 
 export type MobileDroneTreeNode = {
@@ -128,6 +136,7 @@ export function normalizeMobileDroneCreateRepo(raw: unknown): MobileDroneCreateR
 }
 
 export type MobileDroneCreateModel = {
+  provider: string;
   id: string;
   label: string;
   reasoningLevels: string[];
@@ -142,20 +151,25 @@ export function normalizeMobileDroneCreateModelCatalog(raw: unknown): MobileDron
   return models.flatMap((item) => {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return [];
     const value = item as Record<string, unknown>;
+    const provider = text(value.provider);
     const id = text(value.id);
-    if (!id || seen.has(id)) return [];
-    seen.add(id);
+    const key = `${provider}\u0000${id}`;
+    if (!id || seen.has(key)) return [];
+    seen.add(key);
     const reasoningLevels = stringList(value.reasoningLevels);
     const defaultReasoningLevel = text(value.defaultReasoningLevel);
-    return [{
-      id,
-      label: text(value.label) || id,
-      reasoningLevels,
-      defaultReasoningLevel:
-        defaultReasoningLevel && reasoningLevels.includes(defaultReasoningLevel)
-          ? defaultReasoningLevel
-          : reasoningLevels[0] ?? '',
-    }];
+    return [
+      {
+        provider,
+        id,
+        label: text(value.label) || id,
+        reasoningLevels,
+        defaultReasoningLevel:
+          defaultReasoningLevel && reasoningLevels.includes(defaultReasoningLevel)
+            ? defaultReasoningLevel
+            : (reasoningLevels[0] ?? ''),
+      },
+    ];
   });
 }
 
@@ -171,9 +185,7 @@ export function suggestNextMobileDroneChatName(
   chats: readonly string[] | null | undefined,
 ): string {
   const taken = new Set(
-    (Array.isArray(chats) ? chats : [])
-      .map((chat) => String(chat ?? '').trim())
-      .filter(Boolean),
+    (Array.isArray(chats) ? chats : []).map((chat) => String(chat ?? '').trim()).filter(Boolean),
   );
   let nextIndex = Math.max(1, taken.size + 1);
   for (const chat of taken) {
@@ -214,9 +226,7 @@ function nullableStringMap(value: unknown): Record<string, string | null> {
   );
 }
 
-function chatReadStateMap(
-  value: unknown,
-): NonNullable<MobileDroneSummary['chatReadStates']> {
+function chatReadStateMap(value: unknown): NonNullable<MobileDroneSummary['chatReadStates']> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   return Object.fromEntries(
     Object.entries(value as Record<string, unknown>).flatMap(([chatNameRaw, stateRaw]) => {
@@ -254,9 +264,10 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
   if (!id) return null;
   const chats = stringList(value.chats, ['default']);
   const chatReadStates = chatReadStateMap(value.chatReadStates);
-  const unreadChats = Object.keys(chatReadStates).length > 0
-    ? chats.filter((chatName) => chatReadStates[chatName]?.unread === true)
-    : stringList(value.unreadChats).filter((chatName) => chats.includes(chatName));
+  const unreadChats =
+    Object.keys(chatReadStates).length > 0
+      ? chats.filter((chatName) => chatReadStates[chatName]?.unread === true)
+      : stringList(value.unreadChats).filter((chatName) => chats.includes(chatName));
   return {
     id,
     name: text(value.name || value.id) || id,
@@ -623,31 +634,70 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
     const messages: AssistantMessage[] = [];
     if (prompt || attachments.length > 0) {
       messages.push({
+        ...(turn.meshTruncated ? { id: `${turn.id}:user` } : {}),
         role: 'user',
         ...(prompt ? { content: prompt } : {}),
         ...(turn.promptAt || turn.at ? { createdAt: turn.promptAt || turn.at } : {}),
         ...(attachments.length > 0 ? { details: { attachments } } : {}),
+        ...(turn.meshTruncated ? { meshTruncated: true } : {}),
       });
     }
     if (output || error) {
       messages.push(
         !turn.ok && error
           ? {
+              ...(turn.meshTruncated ? { id: `${turn.id}:assistant` } : {}),
               role: 'assistant',
               ...(output ? { content: output } : {}),
               ...(turn.completedAt || turn.at ? { createdAt: turn.completedAt || turn.at } : {}),
               isError: true,
               errorMessage: error,
+              ...(turn.meshTruncated ? { meshTruncated: true } : {}),
             }
           : {
+              ...(turn.meshTruncated ? { id: `${turn.id}:assistant` } : {}),
               role: 'assistant',
               content: output || error,
               ...(turn.completedAt || turn.at ? { createdAt: turn.completedAt || turn.at } : {}),
+              ...(turn.meshTruncated ? { meshTruncated: true } : {}),
             },
       );
     }
     return messages;
   });
+}
+
+export function normalizeMobileNativeChatHistory(raw: unknown): {
+  messages: AssistantMessage[];
+  page: MobileChatHistoryPage;
+} {
+  const source =
+    raw && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, any>) : {};
+  const entries = Array.isArray(raw) ? raw : Array.isArray(source.entries) ? source.entries : [];
+  const messages = entries.flatMap((entry): AssistantMessage[] => {
+    const message = entry?.message && typeof entry.message === 'object' ? entry.message : entry;
+    if (!message || typeof message !== 'object' || !String(message.role ?? '').trim()) return [];
+    return [
+      {
+        ...message,
+        id: String(entry?.id ?? message.id ?? '').trim() || undefined,
+        ...(entry?.meshTruncated === true || message.meshTruncated === true
+          ? { meshTruncated: true }
+          : {}),
+      } as AssistantMessage,
+    ];
+  });
+  const page = source.page && typeof source.page === 'object' ? source.page : {};
+  const beforeCursor = Number(page.beforeCursor);
+  return {
+    messages,
+    page: {
+      beforeCursor: Number.isSafeInteger(beforeCursor) && beforeCursor > 0 ? beforeCursor : null,
+      hasOlder: page.hasOlder === true,
+      responseTruncated: page.responseTruncated === true,
+      contentTruncated: page.contentTruncated === true,
+    },
+  };
 }
 
 function normalizeTurnAttachments(value: unknown): MobileDroneTurn['attachments'] {
@@ -689,6 +739,7 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
         model: text(turn.model),
         reasoning: text(turn.reasoning),
         attachments: normalizeTurnAttachments(turn.attachments),
+        ...(turn.meshTruncated === true ? { meshTruncated: true } : {}),
       },
     ];
   });

@@ -55,6 +55,7 @@ function createDroneProvisioningServiceHandler(
     normalizeDroneDisplayName,
     normalizeDroneRuntime,
     normalizeSubmittedAtIso,
+    notifyCanonicalDroneRegistryWrite,
     nowIso,
     parseAgentPermissionModeForUpdate,
     parseChatModelForUpdate,
@@ -203,14 +204,38 @@ function createDroneProvisioningServiceHandler(
           json(res, 400, { ok: false, error: e?.message ?? String(e) });
           return;
         }
+        const seedProviderRaw = String(
+          body?.seedProvider ?? body?.seed?.provider ?? '',
+        ).trim().toLowerCase();
+        const seedProvider =
+          seedProviderRaw === 'openai' ||
+          seedProviderRaw === 'gemini' ||
+          seedProviderRaw === 'codex'
+            ? seedProviderRaw
+            : '';
+        if (seedProviderRaw && !seedProvider) {
+          json(res, 400, { ok: false, error: 'invalid Built-in model provider' });
+          return;
+        }
+        if (seedProvider && seedAgent?.kind !== 'native') {
+          json(res, 400, {
+            ok: false,
+            error: 'seedProvider is only supported for the Built-in agent',
+          });
+          return;
+        }
         const seedReasoning = normalizeChatReasoning(body?.seedReasoning ?? body?.seed?.reasoning);
         if (
           seedReasoning &&
-          !(seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
+          !(
+            seedAgent?.kind === 'native' ||
+            (seedAgent?.kind === 'builtin' &&
+              (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
+          )
         ) {
           json(res, 400, {
             ok: false,
-            error: 'reasoning selection is currently supported for Codex and Blip seed agents',
+            error: 'reasoning selection is currently supported for Built-in, Codex, and Blip seed agents',
           });
           return;
         }
@@ -414,12 +439,14 @@ function createDroneProvisioningServiceHandler(
               : {}),
             ...(seedPrompt ||
             seedAgent ||
+            seedProvider ||
             seedModel ||
             seedReasoning ||
             seedAgentPermissionMode === 'read-only'
               ? {
                   seed: {
                     chatName: seedChatName,
+                    ...(seedProvider ? { provider: seedProvider } : {}),
                     ...(seedModel ? { model: seedModel } : {}),
                     ...(seedReasoning ? { reasoning: seedReasoning } : {}),
                     ...(seedAgentPermissionMode === 'read-only'
@@ -441,6 +468,7 @@ function createDroneProvisioningServiceHandler(
           }
           throw error;
         }
+        notifyCanonicalDroneRegistryWrite();
 
         if (!createAsDraft) enqueueProvisioning(droneId);
 
@@ -739,6 +767,27 @@ function createDroneProvisioningServiceHandler(
                 raw?.seedChat ?? raw?.seed?.chatName ?? raw?.seed?.chat ?? 'default',
               );
               const seedAgent = parseSeedAgent(raw?.seedAgent ?? raw?.agent ?? raw?.seed?.agent);
+              const seedProviderRaw = String(
+                raw?.seedProvider ?? raw?.seed?.provider ?? '',
+              ).trim().toLowerCase();
+              const seedProvider =
+                seedProviderRaw === 'openai' ||
+                seedProviderRaw === 'gemini' ||
+                seedProviderRaw === 'codex'
+                  ? seedProviderRaw
+                  : '';
+              if (seedProviderRaw && !seedProvider) {
+                rejected.push({ name, error: 'invalid Built-in model provider', status: 400 });
+                continue;
+              }
+              if (seedProvider && seedAgent?.kind !== 'native') {
+                rejected.push({
+                  name,
+                  error: 'seedProvider is only supported for the Built-in agent',
+                  status: 400,
+                });
+                continue;
+              }
               let seedAgentPermissionMode: AgentPermissionMode = 'full-access';
               try {
                 const seedPermissionRaw =
@@ -772,14 +821,15 @@ function createDroneProvisioningServiceHandler(
               if (
                 seedReasoning &&
                 !(
-                  seedAgent?.kind === 'builtin' &&
-                  (seedAgent.id === 'codex' || seedAgent.id === 'blip')
+                  seedAgent?.kind === 'native' ||
+                  (seedAgent?.kind === 'builtin' &&
+                    (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
                 )
               ) {
                 rejected.push({
                   name,
                   error:
-                    'reasoning selection is currently supported for Codex and Blip seed agents',
+                    'reasoning selection is currently supported for Built-in, Codex, and Blip seed agents',
                   status: 400,
                 });
                 continue;
@@ -947,12 +997,14 @@ function createDroneProvisioningServiceHandler(
                   : {}),
                 ...(seedPrompt ||
                 seedAgent ||
+                seedProvider ||
                 seedModel ||
                 seedReasoning ||
                 seedAgentPermissionMode === 'read-only'
                   ? {
                       seed: {
                         chatName: seedChatName,
+                        ...(seedProvider ? { provider: seedProvider } : {}),
                         ...(seedModel ? { model: seedModel } : {}),
                         ...(seedReasoning ? { reasoning: seedReasoning } : {}),
                         ...(seedAgentPermissionMode === 'read-only'
@@ -981,6 +1033,7 @@ function createDroneProvisioningServiceHandler(
           })();
           for (const groupName of groupsToEnsure) await ensureCanonicalGroup(groupName);
           await upsertCanonicalDroneLifecycleBatch(pendingEntries);
+          notifyCanonicalDroneRegistryWrite();
           accepted = result.accepted;
           rejected = result.rejected;
         } catch (e: any) {

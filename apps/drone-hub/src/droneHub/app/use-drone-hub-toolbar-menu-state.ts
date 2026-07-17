@@ -21,6 +21,7 @@ type UseDroneHubToolbarMenuStateArgs = {
   currentAgent: ChatAgentConfig;
   currentCustomAgentMissing: boolean;
   currentAgentKey: string;
+  agentLocked: boolean;
   modelDisabled: boolean;
   manualChatModelInput: string;
   setChatModel: (model: string | null) => Promise<void>;
@@ -43,6 +44,7 @@ export function useDroneHubToolbarMenuState({
   currentAgent,
   currentCustomAgentMissing,
   currentAgentKey,
+  agentLocked,
   modelDisabled,
   manualChatModelInput,
   setChatModel,
@@ -107,42 +109,56 @@ export function useDroneHubToolbarMenuState({
   );
 
   const toolbarAgentMenuEntries = React.useMemo(() => {
+    const option = (value: string, label: string) => ({
+      value,
+      label,
+      disabled: agentLocked && value !== currentAgentKey,
+      ...(agentLocked && value !== currentAgentKey
+        ? { title: 'Create a new chat to use a different agent.' }
+        : {}),
+    });
     if (!allowCustomAgents) {
-      return builtinAgentOptions.map((o) => ({ value: o.key, label: o.label }));
+      return builtinAgentOptions.map((o) => option(o.key, o.label));
     }
-    const entries: Array<
-      | { value: string; label: string; title?: string; inactiveClassName?: string }
-      | { kind: 'separator' }
-    > = [...builtinAgentOptions.map((o) => ({ value: o.key, label: o.label }))];
+    const entries: UiMenuSelectEntry[] = [
+      ...builtinAgentOptions.map((o) => option(o.key, o.label)),
+    ];
     entries.push({ kind: 'separator' });
     if (currentCustomAgentMissing && currentAgent.kind === 'custom') {
       entries.push({
         value: `custom:${currentAgent.id}`,
         label: `Custom: ${currentAgent.label}`,
-        title: 'This custom agent is configured on the drone but not saved locally.',
+        disabled: agentLocked,
+        title: agentLocked
+          ? 'Create a new chat to use a different agent.'
+          : 'This custom agent is configured on the drone but not saved locally.',
       });
     }
     for (const a of customAgents) {
-      entries.push({ value: `custom:${a.id}`, label: `Custom: ${a.label}` });
+      entries.push(option(`custom:${a.id}`, `Custom: ${a.label}`));
     }
     entries.push({ kind: 'separator' });
     entries.push({
       value: '__add_custom__',
       label: 'Add custom...',
+      disabled: agentLocked,
+      ...(agentLocked ? { title: 'Create a new chat to use a different agent.' } : {}),
       inactiveClassName: 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]',
     });
     return entries;
-  }, [allowCustomAgents, builtinAgentOptions, currentAgent, currentCustomAgentMissing, customAgents]);
+  }, [agentLocked, allowCustomAgents, builtinAgentOptions, currentAgent, currentAgentKey, currentCustomAgentMissing, customAgents]);
 
   const agentLabel = React.useMemo(() => {
     const builtin = builtinAgentOptions.find((o) => o.key === currentAgentKey);
     if (builtin) return builtin.label;
+    if (currentAgent.kind === 'native') return 'Built-in';
     if (currentAgent.kind === 'custom') return `Custom: ${currentAgent.label}`;
     return currentAgentKey;
   }, [builtinAgentOptions, currentAgent, currentAgentKey]);
 
   const pickAgentValue = React.useCallback(
     (v: string) => {
+      if (agentLocked) return;
       if (v === '__add_custom__') {
         setCustomAgentError(null);
         setNewCustomAgentLabel('');
@@ -175,6 +191,7 @@ export function useDroneHubToolbarMenuState({
     },
     [
       allowCustomAgents,
+      agentLocked,
       builtinAgentOptions,
       currentAgent,
       customAgents,

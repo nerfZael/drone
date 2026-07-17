@@ -162,11 +162,19 @@ function normalizeState(raw: unknown): PromptQueueState {
     : 'failed';
 }
 
+function hasPromptAttachments(value: unknown): boolean {
+  if (typeof value === 'string') return Boolean(value.trim());
+  if (Array.isArray(value)) return value.some(hasPromptAttachments);
+  if (!value || typeof value !== 'object') return false;
+  return Object.values(value as Record<string, unknown>).some(hasPromptAttachments);
+}
+
 function normalizeItem(raw: PromptQueueItem, now: string): PromptQueueItem {
   const id = String(raw?.id ?? '').trim();
   const prompt = String(raw?.prompt ?? '');
   if (!id) throw new Error('Prompt id cannot be empty');
-  if (!prompt.trim()) throw new Error('Prompt text cannot be empty');
+  if (!prompt.trim() && !hasPromptAttachments(raw?.attachments))
+    throw new Error('Prompt text or attachments are required');
   const at = normalizeIso(raw.at, now);
   return {
     ...raw,
@@ -245,9 +253,14 @@ export class PromptQueueRepository {
     const idempotencyKey = String(opts.idempotencyKey ?? prompt.id).trim();
     if (!idempotencyKey) throw new Error('Prompt idempotency key cannot be empty');
     return await this.database.writeTransaction('enqueue prompt', (connection) => {
-      const deletedDrone = connection.prepare(`SELECT 1 FROM canonical_drone_chat_tombstones
-        WHERE drone_id = ?`).get(opts.droneId);
-      if (deletedDrone) throw new Error(`cannot enqueue prompt for permanently deleted drone: ${opts.droneId}`);
+      const deletedDrone = connection
+        .prepare(
+          `SELECT 1 FROM canonical_drone_chat_tombstones
+        WHERE drone_id = ?`,
+        )
+        .get(opts.droneId);
+      if (deletedDrone)
+        throw new Error(`cannot enqueue prompt for permanently deleted drone: ${opts.droneId}`);
       const info = connection
         .prepare(
           `
@@ -303,8 +316,12 @@ export class PromptQueueRepository {
     }
     if (normalized.length === 0) return 0;
     return await this.database.writeTransaction('backfill legacy prompts', (connection) => {
-      const deletedDrone = connection.prepare(`SELECT 1 FROM canonical_drone_chat_tombstones
-        WHERE drone_id = ?`).get(opts.droneId);
+      const deletedDrone = connection
+        .prepare(
+          `SELECT 1 FROM canonical_drone_chat_tombstones
+        WHERE drone_id = ?`,
+        )
+        .get(opts.droneId);
       if (deletedDrone) return 0;
       const insert = connection.prepare(`
         INSERT OR IGNORE INTO prompts (
@@ -355,11 +372,49 @@ export class PromptQueueRepository {
     });
   }
 
-  async renameChat(opts: { droneId: string; chatName: string; newChatName: string }): Promise<number> {
+  listPending(opts: { droneId: string; chatName: string }): PromptQueueRecord[] {
+    return this.database.read((connection) =>
+      (
+        connection
+          .prepare(
+            `SELECT * FROM prompts
+             WHERE drone_id = ? AND chat_name = ?
+               AND state IN ('queued', 'sending', 'failed')
+             ORDER BY sequence`,
+          )
+          .all(opts.droneId, opts.chatName) as PromptRow[]
+      )
+        .map((row) => recordFromRow(row))
+        .filter((row): row is PromptQueueRecord => Boolean(row)),
+    );
+  }
+
+  nextQueued(opts: { droneId: string; chatName: string }): PromptQueueRecord | null {
+    return this.database.read((connection) =>
+      recordFromRow(
+        connection
+          .prepare(
+            `SELECT * FROM prompts
+             WHERE drone_id = ? AND chat_name = ? AND state = 'queued'
+             ORDER BY sequence
+             LIMIT 1`,
+          )
+          .get(opts.droneId, opts.chatName) as PromptRow | undefined,
+      ),
+    );
+  }
+
+  async renameChat(opts: {
+    droneId: string;
+    chatName: string;
+    newChatName: string;
+  }): Promise<number> {
     return await this.database.writeTransaction('rename chat prompt queue', (connection) => {
-      connection.prepare('DELETE FROM prompts WHERE drone_id = ? AND chat_name = ?')
+      connection
+        .prepare('DELETE FROM prompts WHERE drone_id = ? AND chat_name = ?')
         .run(opts.droneId, opts.newChatName);
-      const info = connection.prepare('UPDATE prompts SET chat_name = ? WHERE drone_id = ? AND chat_name = ?')
+      const info = connection
+        .prepare('UPDATE prompts SET chat_name = ? WHERE drone_id = ? AND chat_name = ?')
         .run(opts.newChatName, opts.droneId, opts.chatName);
       return Number(info.changes ?? 0);
     });
@@ -367,7 +422,8 @@ export class PromptQueueRepository {
 
   async deleteChat(opts: { droneId: string; chatName: string }): Promise<number> {
     return await this.database.writeTransaction('delete chat prompt queue', (connection) => {
-      const info = connection.prepare('DELETE FROM prompts WHERE drone_id = ? AND chat_name = ?')
+      const info = connection
+        .prepare('DELETE FROM prompts WHERE drone_id = ? AND chat_name = ?')
         .run(opts.droneId, opts.chatName);
       return Number(info.changes ?? 0);
     });
@@ -441,12 +497,49 @@ export class PromptQueueRepository {
     });
   }
 
+  async claimForSteering(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    leaseOwner: string;
+    leaseMs?: number;
+    now?: string;
+  }): Promise<PromptQueueRecord | null> {
+    const now = normalizeIso(opts.now, new Date().toISOString());
+    const leaseOwner = String(opts.leaseOwner ?? '').trim();
+    if (!leaseOwner) throw new Error('Prompt lease owner cannot be empty');
+    const leaseExpiresAt = addMs(now, Math.max(1_000, opts.leaseMs ?? 180_000));
+    return await this.database.writeTransaction('claim steering prompt', (connection) =>
+      recordFromRow(
+        connection
+          .prepare(
+            `UPDATE prompts
+             SET state = 'sending',
+                 attempt_count = attempt_count + 1,
+                 updated_at = ?,
+                 lease_owner = ?,
+                 lease_expires_at = ?,
+                 last_error = NULL
+             WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?
+               AND state = 'queued'
+             RETURNING *`,
+          )
+          .get(now, leaseOwner, leaseExpiresAt, opts.droneId, opts.chatName, opts.promptId) as
+          | PromptRow
+          | undefined,
+      ),
+    );
+  }
+
   async update(opts: {
     droneId: string;
     chatName: string;
     promptId: string;
     patch: Partial<
-      Pick<PromptQueueItem, 'state' | 'error' | 'observability' | 'blipClones' | 'agentPlan' | 'updatedAt'>
+      Pick<
+        PromptQueueItem,
+        'state' | 'error' | 'observability' | 'blipClones' | 'agentPlan' | 'updatedAt'
+      >
     >;
     now?: string;
   }): Promise<boolean> {
@@ -579,6 +672,31 @@ export class PromptQueueRepository {
     });
   }
 
+  async recoverSendingForChat(opts: {
+    droneId: string;
+    chatName: string;
+    now?: string;
+    error?: string;
+  }): Promise<number> {
+    const now = normalizeIso(opts.now, new Date().toISOString());
+    const error = String(opts.error ?? 'Built-in prompt was interrupted; retrying.');
+    return await this.database.writeTransaction(
+      'recover interrupted built-in prompts',
+      (connection) => {
+        const info = connection
+          .prepare(
+            `UPDATE prompts
+           SET state = 'queued', updated_at = ?, next_attempt_at = ?, last_error = ?,
+               lease_owner = NULL, lease_expires_at = NULL,
+               payload_json = json_set(payload_json, '$.state', 'queued', '$.error', ?, '$.updatedAt', ?)
+           WHERE drone_id = ? AND chat_name = ? AND state = 'sending'`,
+          )
+          .run(now, now, error, error, now, opts.droneId, opts.chatName);
+        return Number(info.changes ?? 0);
+      },
+    );
+  }
+
   async cancelQueued(opts: {
     droneId: string;
     chatName: string;
@@ -587,7 +705,8 @@ export class PromptQueueRepository {
     return await this.database.writeTransaction('cancel queued prompt', (connection) => {
       const current = rowForPrompt(connection, opts.droneId, opts.chatName, opts.promptId);
       if (!current) return { cancelled: false, state: null };
-      if (current.state !== 'queued') return { cancelled: false, state: current.state };
+      if (current.state !== 'queued' && current.state !== 'failed')
+        return { cancelled: false, state: current.state };
       const cancelledAt = new Date().toISOString();
       const info = connection
         .prepare(
@@ -595,12 +714,13 @@ export class PromptQueueRepository {
            SET state = 'cancelled', updated_at = ?, lease_owner = NULL,
                lease_expires_at = NULL,
                payload_json = json_set(payload_json, '$.state', 'cancelled', '$.updatedAt', ?)
-           WHERE drone_id = ? AND chat_name = ? AND prompt_id = ? AND state = 'queued'`,
+           WHERE drone_id = ? AND chat_name = ? AND prompt_id = ?
+             AND state IN ('queued', 'failed')`,
         )
         .run(cancelledAt, cancelledAt, opts.droneId, opts.chatName, opts.promptId);
       return {
         cancelled: Number(info.changes ?? 0) === 1,
-        state: 'queued' as const,
+        state: current.state,
       };
     });
   }

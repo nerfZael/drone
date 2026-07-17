@@ -43,6 +43,7 @@ export function normalizePlaybookArtifactPath(value: unknown): string {
 
 export function normalizePlaybookAgent(value: unknown): ChatAgentConfig {
   if (value && typeof value === 'object') {
+    if ((value as any).kind === 'native') return { kind: 'native' };
     if ((value as any).kind === 'builtin') {
       const id = String((value as any).id ?? '')
         .trim()

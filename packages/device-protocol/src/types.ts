@@ -12,7 +12,7 @@ export type DevicePublicIdentity = {
 export type CapabilityDescriptor = {
   id: string;
   version: number;
-  operations: string[];
+  operations: readonly string[];
 };
 
 export type CapabilityGrant = {

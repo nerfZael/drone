@@ -9,6 +9,7 @@ type DroneLifecycleDependencyName =
   | 'commitDroneMetadataPatch'
   | 'deleteArchivedChatById'
   | 'deleteCanonicalDroneLifecycle'
+  | 'deleteNativeChatSessionsForDrone'
   | 'dequeueProvisioning'
   | 'droneEnvironmentPayload'
   | 'droneRuntime'

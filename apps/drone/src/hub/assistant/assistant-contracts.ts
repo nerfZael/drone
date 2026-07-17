@@ -1,6 +1,10 @@
-import type { LlmProviderId } from '../hub-settings';
+import type {
+  NativeAgentModelOption,
+  NativeAgentThinkingLevel,
+  NativeAgentToolSummary,
+} from '@drone/assistant-chat';
 
-export type AssistantThinkingLevel = 'off' | 'minimal' | 'low' | 'medium' | 'high' | 'xhigh';
+export type AssistantThinkingLevel = NativeAgentThinkingLevel;
 
 export type AssistantDroneSummary = {
   id: string;
@@ -126,21 +130,8 @@ export type AssistantChatIdleWaitResult = {
   targets: AssistantChatIdleStatus[];
 };
 
-export type AssistantSnapshotMode = 'full' | 'compact';
-export type AssistantModelOption = {
-  provider: LlmProviderId;
-  id: string;
-  name: string;
-  reasoning: boolean;
-  thinkingLevel: AssistantThinkingLevel;
-};
-export type AssistantToolSummary = {
-  name: string;
-  label: string;
-  description: string;
-  category: 'context' | 'prompts' | 'files' | 'chats' | 'drones' | 'actions';
-  group?: { kind: 'mcp'; id: string; label: string };
-};
+export type AssistantModelOption = NativeAgentModelOption;
+export type AssistantToolSummary = NativeAgentToolSummary;
 
 export type AssistantSystemPromptSettings = {
   ok: true;

@@ -1,7 +1,23 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
+import type {
+  NativeAgentDefaultModel,
+  NativeAgentDefaultSettings,
+  NativeChatAccessScope,
+  NativeChatApproval,
+  NativeChatSnapshot,
+  NativeChatStatus,
+  NativeChatThread,
+  NativePromptDeliveryMode,
+  NativeQueuedPrompt,
+} from '@drone/assistant-chat';
 
 import { loadAssistantState, saveAssistantState } from '../host/assistant-store';
+import {
+  getPromptQueueRepository,
+  type PromptQueueRepository,
+  type PromptQueueRecord,
+} from '../host/prompt-queue-repository';
 import { loadRegistry } from '../host/registry';
 import { hubLog, resolveEffectiveProviderApiKeySettings, type LlmProviderId } from './hub-settings';
 import {
@@ -13,8 +29,6 @@ import {
   type AssistantArtifactActionInput,
 } from './assistant-artifacts';
 import {
-  ASSISTANT_THREAD_MESSAGE_LIMIT,
-  ASSISTANT_REGISTRY_MAX_THREADS,
   ASSISTANT_SYSTEM_PROMPT_MAX_CHARS,
   CHAT_MESSAGE_DEFAULT_LIMIT,
   CHAT_MESSAGE_MAX_LIMIT,
@@ -23,8 +37,6 @@ import {
   CHAT_IDLE_MAX_TIMEOUT_MS,
   CHAT_IDLE_DEFAULT_POLL_INTERVAL_MS,
   CHAT_IDLE_DEFAULT_IDLE_FOR_MS,
-  CHAT_IDLE_SUBSCRIPTION_EXPIRES_AFTER_MS,
-  CHAT_IDLE_MAX_SUBSCRIPTIONS,
   CHAT_IDLE_MAX_TARGETS,
   DRONE_READY_DEFAULT_TIMEOUT_MS,
   DRONE_READY_POLL_INTERVAL_MS,
@@ -77,7 +89,6 @@ import type {
   AssistantReorderDronesResult,
   AssistantSetDroneGroupResult,
   AssistantSetDroneGroupsResult,
-  AssistantSnapshotMode,
   AssistantSystemPromptSettings,
   AssistantThinkingLevel,
   AssistantThreadSystemPromptSettings,
@@ -99,7 +110,6 @@ export type {
   AssistantReorderDronesResult,
   AssistantSetDroneGroupResult,
   AssistantSetDroneGroupsResult,
-  AssistantSnapshotMode,
   AssistantSystemPromptSettings,
   AssistantThinkingLevel,
   AssistantThreadSystemPromptSettings,
@@ -107,95 +117,27 @@ export type {
   AssistantUiAction,
 } from './assistant/assistant-contracts';
 
-type AssistantThreadStatus =
-  | 'idle'
-  | 'running'
-  | 'waiting_for_approval'
-  | 'waiting_for_chats_idle'
-  | 'error';
-type AssistantThread = {
-  id: string;
-  title: string;
-  createdAt: string;
-  updatedAt: string;
-  model: string;
-  provider: LlmProviderId;
+type AssistantThreadStatus = NativeChatStatus;
+type AssistantThread = Omit<NativeChatThread, 'queuedPrompts' | 'thinkingLevel'> & {
   thinkingLevel: AssistantThinkingLevel;
-  systemPrompt: string;
-  systemPromptUpdatedAt: string | null;
-  enabledTools: string[];
-  accessScope: AssistantAccessScope;
-  autoApprove: boolean;
-  promptDeliveryMode: AssistantPromptDeliveryMode;
-  messageCount?: number;
-  messages: any[];
+};
+
+type AssistantThreadSnapshot = AssistantThread & {
   queuedPrompts: AssistantQueuedPrompt[];
-  status: AssistantThreadStatus;
-  error: string | null;
 };
 
-export type AssistantQueuedPrompt = {
-  id: string;
-  prompt: string;
-  promptImages: Array<{ type: 'image'; data: string; mimeType: string }>;
-  imageCount: number;
-  createdAt: string;
-  status: 'queued' | 'running' | 'failed';
-  error: string | null;
-};
+export type AssistantQueuedPrompt = NativeQueuedPrompt;
 
-type AssistantPromptDeliveryMode = 'queue' | 'asap';
+type AssistantPromptDeliveryMode = NativePromptDeliveryMode;
+type AssistantDefaultModel = NativeAgentDefaultModel & { thinkingLevel: AssistantThinkingLevel };
 const ASSISTANT_QUEUED_PROMPT_LIMIT = 32;
 
-type AssistantChatIdleSubscriptionStatus = 'active' | 'fired' | 'cancelled' | 'expired';
-export type AssistantChatIdleSubscription = {
-  id: string;
-  threadId: string;
-  toolCallId: string | null;
-  mode: AssistantChatIdleWaitMode;
-  targets: AssistantChatIdleTarget[];
-  createdAt: string;
-  expiresAt: string;
-  idleForMs: number;
-  status: AssistantChatIdleSubscriptionStatus;
-  idleSince: string | null;
-  firedAt: string | null;
-  cancelledAt: string | null;
-  expiredAt: string | null;
-  lastResult: AssistantChatIdleWaitResult | null;
-};
-
-type AssistantRunModel = {
-  provider: LlmProviderId;
-  model: string;
-  thinkingLevel: AssistantThinkingLevel;
-  promptId: string;
-  startedAt: string;
-};
-
-type AssistantDefaultModel = {
-  provider: LlmProviderId;
-  model: string;
-  thinkingLevel: AssistantThinkingLevel;
-};
-
-type AssistantApproval = {
-  id: string;
-  threadId: string;
-  toolCallId: string;
-  toolName: string;
-  label: string;
-  args: any;
-  createdAt: string;
-  status: 'pending' | 'approved' | 'denied';
-};
+type AssistantApproval = NativeChatApproval;
 
 type StoredAssistantState = {
-  activeThreadId?: string | null;
   defaultModel?: { provider?: string; model?: string; thinkingLevel?: string };
   defaultEnabledTools?: string[];
   threads?: AssistantThread[];
-  chatIdleSubscriptions?: AssistantChatIdleSubscription[];
   webSearchToolMigrationApplied?: boolean;
   fetchContentToolMigrationApplied?: boolean;
   systemPrompt?: string;
@@ -213,21 +155,7 @@ type AssistantPromptEvent =
   | { type: 'approval_pending'; approval: AssistantApproval; snapshot: AssistantSnapshot }
   | { type: 'error'; threadId?: string; error: string };
 
-type AssistantAppContext = {
-  activeDroneId: string | null;
-  activeDroneName: string | null;
-  activeChatName: string | null;
-  appView: string | null;
-  updatedAt: string;
-};
-
-type AssistantAccessScope = {
-  readMode: 'all' | 'selected';
-  writeMode: 'all' | 'selected';
-  executeMode: 'all' | 'selected';
-  droneIds: string[];
-  updatedAt: string;
-};
+type AssistantAccessScope = NativeChatAccessScope;
 
 type ChatTimelineMessage = {
   id: string;
@@ -256,21 +184,9 @@ type ChatMessagePage = {
   newerCursor: string | null;
 };
 
-export type AssistantSnapshot = {
-  ok: true;
-  activeThreadId: string;
-  threads: AssistantThread[];
-  chatIdleSubscriptions: AssistantChatIdleSubscription[];
-  pendingApprovals: AssistantApproval[];
-  models: AssistantModelOption[];
-  defaultModel: AssistantDefaultModel;
-  defaultEnabledTools: string[];
-  availableTools: AssistantToolSummary[];
-  accessScope: AssistantAccessScope;
-  runningModels: Record<string, AssistantRunModel>;
-  streamingMessage?: any;
-  streamingMessages?: any[];
-};
+export type AssistantSnapshot = NativeChatSnapshot;
+
+export type AssistantDefaultSettings = NativeAgentDefaultSettings;
 
 const dynamicImport = new Function('specifier', 'return import(specifier)') as (
   specifier: string,
@@ -418,19 +334,6 @@ function makeAssistantUserMessage(
     content,
     timestamp: Date.now(),
   };
-}
-
-function clonedThreadTitle(sourceTitle: string, threads: AssistantThread[]): string {
-  const base = (cleanOptionalString(sourceTitle) || DEFAULT_THREAD_TITLE).slice(0, 153);
-  const titles = new Set(threads.map((thread) => thread.title));
-  const first = `${base} (copy)`;
-  if (!titles.has(first)) return first;
-  for (let copy = 2; copy < 10_000; copy += 1) {
-    const suffix = ` (copy ${copy})`;
-    const candidate = `${base.slice(0, 160 - suffix.length)}${suffix}`;
-    if (!titles.has(candidate)) return candidate;
-  }
-  return `${base.slice(0, 145)} (${Date.now()})`;
 }
 
 function textFromMessage(message: any): string {
@@ -1090,82 +993,6 @@ function describeAssistantAccessMode(
   return `selected drones (${droneIds.join(', ')})`;
 }
 
-function normalizeChatIdleSubscriptionStatus(raw: unknown): AssistantChatIdleSubscriptionStatus {
-  const value = String(raw ?? '')
-    .trim()
-    .toLowerCase();
-  if (value === 'fired' || value === 'cancelled' || value === 'expired') return value;
-  return 'active';
-}
-
-function normalizeChatIdleSubscription(raw: any): AssistantChatIdleSubscription | null {
-  if (!raw || typeof raw !== 'object') return null;
-  const id = cleanOptionalString(raw.id);
-  const threadId = cleanOptionalString(raw.threadId);
-  if (!id || !threadId) return null;
-  const targets = Array.isArray(raw.targets)
-    ? raw.targets
-        .map((target: any) => ({
-          droneId: cleanOptionalString(target?.droneId),
-          chatName: normalizeChatNameForAssistant(target?.chatName),
-        }))
-        .filter((target: AssistantChatIdleTarget) => target.droneId)
-        .slice(0, CHAT_IDLE_MAX_TARGETS)
-    : [];
-  if (targets.length === 0) return null;
-  const createdAt = cleanOptionalString(raw.createdAt) || nowIso();
-  const createdMs = Date.parse(createdAt);
-  const expiresAt =
-    cleanOptionalString(raw.expiresAt) ||
-    new Date(
-      (Number.isFinite(createdMs) ? createdMs : Date.now()) +
-        CHAT_IDLE_SUBSCRIPTION_EXPIRES_AFTER_MS,
-    ).toISOString();
-  const idleForMs = clampChatIdleForMs(raw.idleForMs);
-  const lastResult =
-    raw.lastResult && typeof raw.lastResult === 'object'
-      ? (sanitizeMessage(raw.lastResult) as AssistantChatIdleWaitResult)
-      : null;
-  return {
-    id,
-    threadId,
-    toolCallId: cleanOptionalString(raw.toolCallId) || null,
-    mode: normalizeAssistantChatIdleWaitMode(raw.mode, 'all'),
-    targets,
-    createdAt,
-    expiresAt,
-    idleForMs,
-    status: normalizeChatIdleSubscriptionStatus(raw.status),
-    idleSince: cleanOptionalString(raw.idleSince) || null,
-    firedAt: cleanOptionalString(raw.firedAt) || null,
-    cancelledAt: cleanOptionalString(raw.cancelledAt) || null,
-    expiredAt: cleanOptionalString(raw.expiredAt) || null,
-    lastResult,
-  };
-}
-
-function sanitizeChatIdleSubscription(
-  subscription: AssistantChatIdleSubscription,
-): AssistantChatIdleSubscription {
-  return {
-    ...subscription,
-    mode: normalizeAssistantChatIdleWaitMode(subscription.mode, 'all'),
-    targets: subscription.targets.map((target) => ({
-      droneId: target.droneId,
-      chatName: normalizeChatNameForAssistant(target.chatName),
-    })),
-    lastResult: subscription.lastResult ? sanitizeMessage(subscription.lastResult) : null,
-  };
-}
-
-function activeChatIdleSubscriptionSummaries(
-  subscriptions: AssistantChatIdleSubscription[],
-): AssistantChatIdleSubscription[] {
-  return subscriptions
-    .filter((subscription) => subscription.status === 'active')
-    .map((subscription) => ({ ...sanitizeChatIdleSubscription(subscription), lastResult: null }));
-}
-
 function sanitizeQueuedPrompt(
   prompt: AssistantQueuedPrompt,
   includeImageData: boolean,
@@ -1189,30 +1016,17 @@ function sanitizeQueuedPrompt(
   };
 }
 
-function sanitizeThread(thread: AssistantThread, includeQueuedImageData = true): AssistantThread {
+function sanitizeThread(thread: AssistantThread): AssistantThread {
   return {
     ...thread,
     systemPrompt:
       migrateAssistantSystemPrompt(thread.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(thread.systemPromptUpdatedAt) || null,
     enabledTools: normalizeAssistantEnabledTools(thread.enabledTools),
-    messageCount: thread.messages.length,
-    messages: thread.messages.slice(-ASSISTANT_THREAD_MESSAGE_LIMIT).map(sanitizeMessage),
-    queuedPrompts: (thread.queuedPrompts ?? []).map((prompt) =>
-      sanitizeQueuedPrompt(prompt, includeQueuedImageData),
-    ),
     status:
       thread.status === 'running' || thread.status === 'waiting_for_approval'
         ? 'idle'
         : thread.status,
-  };
-}
-
-function sanitizeThreadSummary(thread: AssistantThread): AssistantThread {
-  const sanitized = sanitizeThread(thread, false);
-  return {
-    ...sanitized,
-    messages: [],
   };
 }
 
@@ -1228,22 +1042,15 @@ function normalizeThread(
   const model = allowedModelForProvider(provider, raw.model ?? fallback.model);
   const createdAt = String(raw.createdAt ?? '').trim() || nowIso();
   const updatedAt = String(raw.updatedAt ?? '').trim() || createdAt;
-  const messages = Array.isArray(raw.messages)
-    ? raw.messages.map(sanitizeMessage).slice(-ASSISTANT_THREAD_MESSAGE_LIMIT)
-    : [];
-  const queuedPrompts = Array.isArray(raw.queuedPrompts)
-    ? raw.queuedPrompts
-        .slice(-ASSISTANT_QUEUED_PROMPT_LIMIT)
-        .map((prompt: AssistantQueuedPrompt) =>
-          sanitizeQueuedPrompt(
-            { ...prompt, status: prompt?.status === 'failed' ? 'failed' : 'queued' },
-            true,
-          ),
-        )
-    : [];
   const thinkingLevel = allowedThinkingLevelForModel(provider, model, raw.thinkingLevel);
   return {
     id,
+    ...(cleanOptionalString(raw.ownerDroneId)
+      ? { ownerDroneId: cleanOptionalString(raw.ownerDroneId) }
+      : {}),
+    ...(cleanOptionalString(raw.ownerChatName)
+      ? { ownerChatName: cleanOptionalString(raw.ownerChatName) }
+      : {}),
     title: String(raw.title ?? '').trim() || DEFAULT_THREAD_TITLE,
     createdAt,
     updatedAt,
@@ -1255,45 +1062,31 @@ function normalizeThread(
       fallback.systemPrompt ||
       ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(raw.systemPromptUpdatedAt) || null,
-    enabledTools: normalizeStoredAssistantEnabledTools(
-      raw.enabledTools,
-      {
-        webSearchDefaultTool: options?.migrateWebSearchDefaultTool === true,
-        fetchContentDefaultTool: options?.migrateFetchContentDefaultTool === true,
-      },
-    ),
+    enabledTools: normalizeStoredAssistantEnabledTools(raw.enabledTools, {
+      webSearchDefaultTool: options?.migrateWebSearchDefaultTool === true,
+      fetchContentDefaultTool: options?.migrateFetchContentDefaultTool === true,
+    }),
     accessScope: makeAssistantAccessScope(raw.accessScope),
     autoApprove: normalizeAssistantAutoApprove(raw.autoApprove),
     promptDeliveryMode: normalizeAssistantPromptDeliveryMode(raw.promptDeliveryMode),
-    messages,
-    queuedPrompts,
     status: raw.status === 'error' ? 'error' : 'idle',
     error: typeof raw.error === 'string' && raw.error.trim() ? raw.error : null,
   };
 }
 
 function serializeState(input: {
-  activeThreadId: string;
   defaultModel: AssistantDefaultModel;
   defaultEnabledTools: string[];
   threads: AssistantThread[];
-  chatIdleSubscriptions: AssistantChatIdleSubscription[];
   systemPrompt: string;
   systemPromptUpdatedAt: string | null;
 }): StoredAssistantState {
   const systemPrompt =
     normalizeAssistantSystemPrompt(input.systemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
-  const chatIdleSubscriptions = input.chatIdleSubscriptions
-    .slice(-CHAT_IDLE_MAX_SUBSCRIPTIONS)
-    .map(sanitizeChatIdleSubscription);
   return {
-    activeThreadId: input.activeThreadId,
     defaultModel: input.defaultModel,
     defaultEnabledTools: normalizeAssistantEnabledTools(input.defaultEnabledTools),
-    threads: input.threads
-      .slice(0, ASSISTANT_REGISTRY_MAX_THREADS)
-      .map((thread) => sanitizeThread(thread, true)),
-    ...(chatIdleSubscriptions.length > 0 ? { chatIdleSubscriptions } : {}),
+    threads: input.threads.map((thread) => sanitizeThread(thread)),
     webSearchToolMigrationApplied: true,
     fetchContentToolMigrationApplied: true,
     ...(systemPrompt !== ASSISTANT_SYSTEM_PROMPT_DEFAULT
@@ -1306,15 +1099,8 @@ function serializeState(input: {
   };
 }
 
-function firstThread(threads: AssistantThread[], id: string): AssistantThread {
-  const found = threads.find((thread) => thread.id === id) ?? threads[0];
-  if (!found) throw new Error('assistant has no threads');
-  return found;
-}
-
 export class HubAssistantService {
   private threads: AssistantThread[] = [];
-  private activeThreadId = '';
   private loaded = false;
   private runtimePromise: Promise<AssistantRuntime> | null = null;
   private modelStreamingText = new Map<string, string>();
@@ -1330,13 +1116,6 @@ export class HubAssistantService {
   private defaultEnabledTools = [...ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES];
   private changeSequence = 0;
   private readonly changeListeners = new Set<(event: AssistantChangeEvent) => void>();
-  private appContext: AssistantAppContext = {
-    activeDroneId: null,
-    activeDroneName: null,
-    activeChatName: null,
-    appView: null,
-    updatedAt: nowIso(),
-  };
   private readonly approvals = new Map<
     string,
     AssistantApproval & {
@@ -1382,6 +1161,8 @@ export class HubAssistantService {
     if (type === 'session_started' || type === 'turn_started') {
       this.runningThreadIds.add(thread.id);
       this.modelStreamingText.set(thread.id, '');
+      thread.status = 'running';
+      thread.error = null;
       thread.updatedAt = nowIso();
       emit('runtime_started');
       return;
@@ -1415,11 +1196,25 @@ export class HubAssistantService {
     if (type === 'session_finished') {
       this.runningThreadIds.delete(thread.id);
       this.modelStreamingText.delete(thread.id);
+      const failed = String(event?.status ?? '').trim() === 'error';
+      thread.status = failed ? 'error' : 'idle';
+      thread.error = failed
+        ? cleanOptionalString(event?.error) || thread.error || 'Built-in agent prompt failed'
+        : null;
       thread.updatedAt = nowIso();
+      await this.persist();
       emit('runtime_finished');
       return;
     }
-    if (type === 'session_error') emit('runtime_error');
+    if (type === 'session_error') {
+      this.runningThreadIds.delete(thread.id);
+      this.modelStreamingText.delete(thread.id);
+      thread.status = 'error';
+      thread.error = cleanOptionalString(event?.error) || 'Built-in agent prompt failed';
+      thread.updatedAt = nowIso();
+      await this.persist();
+      emit('runtime_error');
+    }
   }
 
   subscribeChanges(listener: (event: AssistantChangeEvent) => void): () => void {
@@ -1446,7 +1241,13 @@ export class HubAssistantService {
 
   private threadStreamingMessages(threadId: string): any[] {
     if (!this.modelStreamingText.has(threadId)) return [];
-    return [{ role: 'assistant', content: [{ type: 'text', text: this.modelStreamingText.get(threadId) ?? '' }], timestamp: Date.now() }];
+    return [
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: this.modelStreamingText.get(threadId) ?? '' }],
+        timestamp: Date.now(),
+      },
+    ];
   }
 
   private primaryThreadStreamingMessage(threadId: string): any | null {
@@ -1480,21 +1281,6 @@ export class HubAssistantService {
     return { ok: true, uiAction };
   }
 
-  updateAppContext(input: {
-    activeDroneId?: unknown;
-    activeDroneName?: unknown;
-    activeChatName?: unknown;
-    appView?: unknown;
-  }): void {
-    this.appContext = {
-      activeDroneId: String(input.activeDroneId ?? '').trim() || null,
-      activeDroneName: String(input.activeDroneName ?? '').trim() || null,
-      activeChatName: String(input.activeChatName ?? '').trim() || null,
-      appView: String(input.appView ?? '').trim() || null,
-      updatedAt: nowIso(),
-    };
-  }
-
   async updateAccessScope(input: {
     threadId?: unknown;
     mode?: unknown;
@@ -1504,14 +1290,18 @@ export class HubAssistantService {
     droneIds?: unknown;
   }): Promise<AssistantAccessScope> {
     await this.ensureLoaded();
-    const threadId = cleanOptionalString(input.threadId) || this.activeThreadId;
+    const threadId = cleanOptionalString(input.threadId);
+    if (!threadId) throw new Error('native chat id is required');
     const thread = this.threads.find((item) => item.id === threadId);
     if (!thread) throw new Error(`unknown assistant thread: ${threadId}`);
+    const requestedDroneIds = Array.isArray(input.droneIds) ? input.droneIds : [];
     thread.accessScope = makeAssistantAccessScope({
       readMode: (input as any).readMode ?? input.mode,
       writeMode: (input as any).writeMode ?? input.mode,
       executeMode: (input as any).executeMode ?? (input as any).writeMode ?? input.mode,
-      droneIds: input.droneIds,
+      droneIds: thread.ownerDroneId
+        ? [...requestedDroneIds, thread.ownerDroneId]
+        : requestedDroneIds,
       updatedAt: nowIso(),
     });
     thread.updatedAt = nowIso();
@@ -1519,20 +1309,18 @@ export class HubAssistantService {
     return thread.accessScope;
   }
 
-  private activeAccessScope(threadId?: string): AssistantAccessScope {
+  private activeAccessScope(threadId: string): AssistantAccessScope {
     const id = cleanOptionalString(threadId);
-    if (id) {
-      const thread = this.threads.find((item) => item.id === id);
-      if (!thread) throw new Error(`unknown assistant thread: ${id}`);
-      return thread.accessScope;
-    }
-    return firstThread(this.threads, this.activeThreadId).accessScope;
+    const thread = this.threads.find((item) => item.id === id);
+    if (!thread) throw new Error(`unknown assistant thread: ${id}`);
+    return thread.accessScope;
   }
 
   private allowedDroneIdSet(
     kind: 'read' | 'write' | 'execute' = 'read',
     threadId?: string,
   ): Set<string> | null {
+    if (!threadId) throw new Error('native chat id is required');
     const accessScope = this.activeAccessScope(threadId);
     const mode =
       kind === 'write'
@@ -1728,176 +1516,229 @@ export class HubAssistantService {
     return { ok: true, droneId, operations: applied };
   }
 
-  private scopedAppContext(threadId: string): AssistantAppContext {
-    const allowed = this.allowedDroneIdSet('read', threadId);
-    if (!allowed) return { ...this.appContext };
-    const activeDroneId = cleanOptionalString(this.appContext.activeDroneId);
-    if (activeDroneId && allowed.has(activeDroneId)) return { ...this.appContext };
-    return {
-      ...this.appContext,
-      activeDroneId: null,
-      activeDroneName: null,
-      activeChatName: null,
-    };
-  }
-
-  async snapshot(mode: AssistantSnapshotMode = 'full'): Promise<AssistantSnapshot> {
-    await this.ensureLoaded();
-    const streamingMessages = this.threadStreamingMessages(this.activeThreadId);
-    const streamingMessage = this.primaryThreadStreamingMessage(this.activeThreadId);
-    const compact = mode === 'compact';
-    const availableTools = await this.availableToolsForThread(this.activeThreadId);
-    return {
-      ok: true,
-      activeThreadId: this.activeThreadId,
-      threads: this.threads.map((thread) => {
-        const sanitized = compact
-          ? sanitizeThreadSummary(thread)
-          : { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) };
-        return this.runningThreadIds.has(thread.id)
-          ? { ...sanitized, status: 'running' }
-          : sanitized;
-      }),
-      chatIdleSubscriptions: [],
-      pendingApprovals: this.pendingApprovals(),
-      models: await this.modelOptions(),
-      defaultModel: { ...this.defaultModelSelection },
-      defaultEnabledTools: [...this.defaultEnabledTools],
-      availableTools,
-      accessScope: sanitizeMessage(this.activeAccessScope()),
-      runningModels: {},
-      ...(streamingMessage
-        ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages }
-        : {}),
-    };
-  }
-
-  async threadSnapshot(
-    threadId: string,
-    options?: { activate?: boolean },
-  ): Promise<AssistantSnapshot> {
+  async threadSnapshot(threadId: string): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const id = cleanOptionalString(threadId);
     const targetThread = this.threads.find((thread) => thread.id === id);
     if (!targetThread) throw new Error(`unknown assistant thread: ${threadId}`);
-    if (options?.activate) this.activeThreadId = id;
     const streamingMessages = this.threadStreamingMessages(id);
     const streamingMessage = this.primaryThreadStreamingMessage(id);
     const availableTools = await this.availableToolsForThread(id);
+    const queuedPrompts = this.queuedPromptsForThread(targetThread, false);
+    const snapshotThread = { ...sanitizeThread(targetThread), queuedPrompts };
     return {
       ok: true,
-      activeThreadId: id,
-      threads: this.threads.map((thread) => {
-        const sanitized =
-          thread.id === id
-            ? { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) }
-            : sanitizeThreadSummary(thread);
-        return this.runningThreadIds.has(thread.id)
-          ? { ...sanitized, status: 'running' }
-          : sanitized;
-      }),
-      chatIdleSubscriptions: [],
-      pendingApprovals: this.pendingApprovals(),
+      chatId: id,
+      threads: [
+        this.runningThreadIds.has(id) ? { ...snapshotThread, status: 'running' } : snapshotThread,
+      ],
+      pendingApprovals: this.pendingApprovals(id),
       models: await this.modelOptions(),
       defaultModel: { ...this.defaultModelSelection },
       defaultEnabledTools: [...this.defaultEnabledTools],
       availableTools,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
-      runningModels: {},
       ...(streamingMessage
         ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages }
         : {}),
     };
   }
 
-  async activateThread(threadId: string): Promise<AssistantSnapshot> {
-    await this.ensureLoaded();
-    const thread = this.getThread(threadId);
-    this.activeThreadId = thread.id;
-    await this.persist();
-    return await this.threadSnapshot(thread.id);
-  }
-
-  async createThread(input?: {
+  async ensureNativeThread(input: {
+    id: unknown;
+    droneId: unknown;
+    chatName: unknown;
     title?: unknown;
-    model?: unknown;
     provider?: unknown;
-    activeDroneId?: unknown;
-    activeChatName?: unknown;
+    model?: unknown;
+    thinkingLevel?: unknown;
   }): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
-    const explicitProvider = String(input?.provider ?? '').trim();
-    const provider = explicitProvider
-      ? normalizeProvider(explicitProvider)
-      : this.defaultModelSelection.provider;
+    const id = cleanOptionalString(input.id);
+    const ownerDroneId = cleanOptionalString(input.droneId);
+    const ownerChatName = cleanOptionalString(input.chatName) || 'default';
+    if (!id) throw new Error('native chat id is required');
+    if (!ownerDroneId) throw new Error('native chat owner drone is required');
+    const existing = this.threads.find((thread) => thread.id === id);
+    if (existing) {
+      if (existing.ownerDroneId && existing.ownerDroneId !== ownerDroneId)
+        throw new Error('native chat is already owned by another drone');
+      let metadataChanged = false;
+      if (existing.ownerDroneId !== ownerDroneId) {
+        existing.ownerDroneId = ownerDroneId;
+        metadataChanged = true;
+      }
+      if (existing.ownerChatName !== ownerChatName) {
+        const previousChatName = cleanOptionalString(existing.ownerChatName) || 'default';
+        await this.promptQueue()?.renameChat({
+          droneId: ownerDroneId,
+          chatName: previousChatName,
+          newChatName: ownerChatName,
+        });
+        existing.ownerChatName = ownerChatName;
+        metadataChanged = true;
+      }
+      const requestedTitle = cleanOptionalString(input.title);
+      if (requestedTitle && existing.title !== requestedTitle) {
+        existing.title = requestedTitle;
+        metadataChanged = true;
+      }
+      if (!existing.accessScope.droneIds.includes(ownerDroneId)) {
+        existing.accessScope = makeAssistantAccessScope({
+          ...existing.accessScope,
+          droneIds: [...existing.accessScope.droneIds, ownerDroneId],
+          updatedAt: nowIso(),
+        });
+        metadataChanged = true;
+      }
+      if (metadataChanged) existing.updatedAt = nowIso();
+      await this.persist();
+      return await this.threadSnapshot(id);
+    }
+    const requestedModel = cleanOptionalString(input.model);
+    const requestedProvider = cleanOptionalString(input.provider);
+    const catalogModel = requestedModel
+      ? ASSISTANT_MODEL_OPTIONS.find((option) => option.id === requestedModel)
+      : null;
+    const provider = requestedProvider
+      ? normalizeProvider(requestedProvider)
+      : (catalogModel?.provider ?? this.defaultModelSelection.provider);
+    const model = requestedModel || this.defaultModelSelection.model;
     const thread = this.makeThread({
+      id,
+      ownerDroneId,
+      ownerChatName,
+      title: cleanOptionalString(input.title) || ownerChatName,
       provider,
-      model:
-        String(input?.model ?? '').trim() ||
-        (explicitProvider ? defaultModelForProvider(provider) : this.defaultModelSelection.model),
-      ...(!explicitProvider && !String(input?.model ?? '').trim()
-        ? { thinkingLevel: this.defaultModelSelection.thinkingLevel }
-        : {}),
-      title: String(input?.title ?? '').trim() || DEFAULT_THREAD_TITLE,
-      accessScope: this.defaultAccessScopeForNewThread(input),
+      model,
+      thinkingLevel: allowedThinkingLevelForModel(
+        provider,
+        model,
+        cleanOptionalString(input.thinkingLevel) || this.defaultModelSelection.thinkingLevel,
+      ),
+      accessScope: makeAssistantAccessScope({
+        readMode: 'selected',
+        writeMode: 'selected',
+        executeMode: 'selected',
+        droneIds: [ownerDroneId],
+      }),
     });
-    this.threads = [thread, ...this.threads].slice(0, ASSISTANT_REGISTRY_MAX_THREADS);
-    this.activeThreadId = thread.id;
+    this.threads = [thread, ...this.threads];
     await this.persist();
-    return await this.threadSnapshot(thread.id);
+    return await this.threadSnapshot(id);
   }
 
-  async createNewThreadFromThread(
-    threadId: string,
-    input?: { title?: unknown },
-  ): Promise<{ ok: true; previousThreadId: string; threadId: string; thread: AssistantThread }> {
+  async nativeThreadHasHistory(threadIdRaw: unknown): Promise<boolean> {
     await this.ensureLoaded();
-    const previousThread = this.getThread(threadId);
-    const title = cleanOptionalString(input?.title) || DEFAULT_THREAD_TITLE;
-    const thread = this.makeThread({
-      provider: previousThread.provider,
-      model: previousThread.model,
-      title,
-      accessScope: this.defaultAccessScopeForNewThread(),
-    });
-    thread.thinkingLevel = allowedThinkingLevelForModel(
-      thread.provider,
-      thread.model,
-      previousThread.thinkingLevel,
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.threads.find((item) => item.id === threadId);
+    if (!thread) return false;
+    return (
+      this.queuedPromptsForThread(thread, false).length > 0 ||
+      this.runningThreadIds.has(threadId) ||
+      Array.from(this.approvals.values()).some(
+        (approval) => approval.threadId === threadId && approval.status === 'pending',
+      )
     );
-    this.threads = [thread, ...this.threads].slice(0, ASSISTANT_REGISTRY_MAX_THREADS);
-    this.activeThreadId = thread.id;
+  }
+
+  async nativeThreadIsBusy(threadIdRaw: unknown): Promise<boolean> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.threads.find((item) => item.id === threadId);
+    if (!thread) return false;
+    return (
+      this.queuedPromptsForThread(thread, false).some(
+        (prompt) => prompt.status === 'queued' || prompt.status === 'running',
+      ) ||
+      this.runningThreadIds.has(threadId) ||
+      Array.from(this.approvals.values()).some(
+        (approval) => approval.threadId === threadId && approval.status === 'pending',
+      )
+    );
+  }
+
+  async nativeThreadError(threadIdRaw: unknown): Promise<string> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.threads.find((item) => item.id === threadId);
+    return cleanOptionalString(thread?.error);
+  }
+
+  async beginNativeThreadPrompt(threadIdRaw: unknown): Promise<void> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.getThread(threadId);
+    if (!thread.error && thread.status !== 'error') return;
+    thread.status = 'idle';
+    thread.error = null;
+    thread.updatedAt = nowIso();
     await this.persist();
+  }
+
+  async failNativeThreadPrompt(threadIdRaw: unknown, error: unknown): Promise<void> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.getThread(threadId);
+    this.runningThreadIds.delete(threadId);
+    this.modelStreamingText.delete(threadId);
+    thread.status = 'error';
+    thread.error =
+      cleanOptionalString((error as any)?.message ?? error) || 'Built-in agent prompt failed';
+    thread.updatedAt = nowIso();
+    await this.persist();
+    this.emitChange('runtime_error', thread.id);
+  }
+
+  async nativeThreadOwner(
+    threadIdRaw: unknown,
+  ): Promise<{ droneId: string; chatName: string } | null> {
+    await this.ensureLoaded();
+    const threadId = cleanOptionalString(threadIdRaw);
+    const thread = this.threads.find((item) => item.id === threadId);
+    const droneId = cleanOptionalString(thread?.ownerDroneId);
+    if (!thread || !droneId) return null;
     return {
-      ok: true,
-      previousThreadId: previousThread.id,
-      threadId: thread.id,
-      thread: sanitizeThread(thread, false),
+      droneId,
+      chatName: cleanOptionalString(thread.ownerChatName) || 'default',
     };
   }
 
-  async cloneThread(threadId: string, input?: { title?: unknown }): Promise<AssistantSnapshot> {
+  async cloneNativeThread(input: {
+    sourceId: unknown;
+    id: unknown;
+    droneId: unknown;
+    chatName: unknown;
+  }): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
-    const source = this.getThread(threadId);
+    const source = this.getThread(cleanOptionalString(input.sourceId));
+    const id = cleanOptionalString(input.id);
+    const ownerDroneId = cleanOptionalString(input.droneId);
+    const ownerChatName = cleanOptionalString(input.chatName) || 'default';
+    if (!id || !ownerDroneId) throw new Error('native chat clone identity is required');
+    if (this.threads.some((thread) => thread.id === id)) return await this.threadSnapshot(id);
     const thread = this.makeThread({
+      id,
+      ownerDroneId,
+      ownerChatName,
+      title: ownerChatName,
       provider: source.provider,
       model: source.model,
       thinkingLevel: source.thinkingLevel,
-      title:
-        cleanOptionalString(input?.title)?.slice(0, 160) ||
-        clonedThreadTitle(source.title, this.threads),
-      accessScope: structuredClone(source.accessScope),
+      accessScope: makeAssistantAccessScope({
+        ...structuredClone(source.accessScope),
+        droneIds: Array.from(new Set([...source.accessScope.droneIds, ownerDroneId])),
+        updatedAt: nowIso(),
+      }),
       systemPrompt: source.systemPrompt,
     });
     thread.systemPromptUpdatedAt = source.systemPromptUpdatedAt;
     thread.enabledTools = [...source.enabledTools];
     thread.autoApprove = source.autoApprove;
     thread.promptDeliveryMode = source.promptDeliveryMode;
-    thread.messages = structuredClone(source.messages);
-    this.threads = [thread, ...this.threads].slice(0, ASSISTANT_REGISTRY_MAX_THREADS);
-    this.activeThreadId = thread.id;
+    this.threads = [thread, ...this.threads];
     await this.persist();
-    return await this.threadSnapshot(thread.id);
+    return await this.threadSnapshot(id);
   }
 
   async systemPromptSettings(): Promise<AssistantSystemPromptSettings> {
@@ -1905,9 +1746,7 @@ export class HubAssistantService {
     return this.systemPromptSettingsSync();
   }
 
-  async updateSystemPrompt(input: {
-    prompt?: unknown;
-  }): Promise<AssistantSystemPromptSettings> {
+  async updateSystemPrompt(input: { prompt?: unknown }): Promise<AssistantSystemPromptSettings> {
     await this.ensureLoaded();
     const prompt = normalizeAssistantSystemPrompt(input.prompt);
     if (!prompt) throw new Error('missing system prompt');
@@ -1976,7 +1815,6 @@ export class HubAssistantService {
   ): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
-    this.activeThreadId = thread.id;
     const title = typeof patch.title === 'string' ? patch.title.trim() : '';
     if (title) thread.title = title.slice(0, 80);
     if (patch.provider != null) thread.provider = normalizeProvider(patch.provider);
@@ -2006,7 +1844,7 @@ export class HubAssistantService {
     provider?: unknown;
     model?: unknown;
     thinkingLevel?: unknown;
-  }): Promise<AssistantSnapshot> {
+  }): Promise<AssistantDefaultSettings> {
     await this.ensureLoaded();
     const provider = normalizeProvider(input?.provider);
     const model = String(input?.model ?? '').trim();
@@ -2024,10 +1862,12 @@ export class HubAssistantService {
       this.defaultModelSelection = { provider, model, thinkingLevel };
       await this.persist();
     }
-    return await this.threadSnapshot(this.activeThreadId);
+    return await this.defaultSettings();
   }
 
-  async updateDefaultEnabledTools(input?: { enabledTools?: unknown }): Promise<AssistantSnapshot> {
+  async updateDefaultEnabledTools(input?: {
+    enabledTools?: unknown;
+  }): Promise<AssistantDefaultSettings> {
     await this.ensureLoaded();
     if (!Array.isArray(input?.enabledTools)) throw new Error('enabledTools must be an array');
     const enabledTools = normalizeAssistantEnabledTools(
@@ -2038,26 +1878,49 @@ export class HubAssistantService {
       this.defaultEnabledTools = enabledTools;
       await this.persist();
     }
-    return await this.threadSnapshot(this.activeThreadId);
+    return await this.defaultSettings();
   }
 
-  async deleteThread(threadId: string): Promise<AssistantSnapshot> {
+  async defaultSettings(): Promise<AssistantDefaultSettings> {
     await this.ensureLoaded();
+    return {
+      ok: true,
+      models: await this.modelOptions(),
+      defaultModel: { ...this.defaultModelSelection },
+      defaultEnabledTools: [...this.defaultEnabledTools],
+    };
+  }
+
+  async threadIdsWithQueuedPrompts(): Promise<string[]> {
+    await this.ensureLoaded();
+    const queue = this.promptQueue();
+    if (!queue) return [];
+    // Native executions live in this Hub process. Any row it left as `sending` cannot still be
+    // running after startup, even when its old lease has not expired yet.
+    for (const thread of this.threads) {
+      await queue.recoverSendingForChat(this.promptQueueIdentity(thread));
+    }
+    return this.threads
+      .filter((thread) => queue.nextQueued(this.promptQueueIdentity(thread)))
+      .map((thread) => thread.id);
+  }
+
+  async deleteThread(threadId: string): Promise<{ ok: true; deleted: boolean; threadId: string }> {
+    await this.ensureLoaded();
+    const existing = this.threads.find((thread) => thread.id === threadId);
     this.modelStreamingText.delete(threadId);
     this.runningThreadIds.delete(threadId);
     const runtimeTimer = this.runtimeChangeTimers.get(threadId);
     if (runtimeTimer) clearTimeout(runtimeTimer);
     this.runtimeChangeTimers.delete(threadId);
     await deleteAssistantArtifactsForThread(threadId);
+    if (existing) {
+      await this.promptQueue()?.deleteChat(this.promptQueueIdentity(existing));
+    }
+    const deleted = Boolean(existing);
     this.threads = this.threads.filter((thread) => thread.id !== threadId);
-    if (this.threads.length === 0) {
-      this.threads = [this.makeThread(this.defaultModelSelection)];
-    }
-    if (!this.threads.some((thread) => thread.id === this.activeThreadId)) {
-      this.activeThreadId = this.threads[0].id;
-    }
     await this.persist();
-    return await this.threadSnapshot(this.activeThreadId);
+    return { ok: true, deleted, threadId };
   }
 
   async stopThread(threadId: string): Promise<AssistantSnapshot> {
@@ -2128,6 +1991,61 @@ export class HubAssistantService {
             tool.name !== 'set_target' &&
             tool.name !== 'transfer_files',
         );
+  }
+
+  private promptQueue(): PromptQueueRepository | null {
+    return getPromptQueueRepository();
+  }
+
+  private requirePromptQueue(): PromptQueueRepository {
+    const queue = this.promptQueue();
+    if (!queue) throw new Error('native prompt queue is unavailable');
+    return queue;
+  }
+
+  private promptQueueIdentity(thread: AssistantThread): { droneId: string; chatName: string } {
+    const droneId = cleanOptionalString(thread.ownerDroneId);
+    if (!droneId) throw new Error(`native chat has no owner: ${thread.id}`);
+    return {
+      droneId,
+      chatName: cleanOptionalString(thread.ownerChatName) || 'default',
+    };
+  }
+
+  private queuedPromptFromRecord(
+    record: PromptQueueRecord,
+    includeImageData: boolean,
+  ): AssistantQueuedPrompt {
+    const attachments =
+      record.attachments && typeof record.attachments === 'object'
+        ? (record.attachments as any)
+        : {};
+    const promptImages = Array.isArray(attachments.promptImages) ? attachments.promptImages : [];
+    return sanitizeQueuedPrompt(
+      {
+        id: record.id,
+        prompt: record.prompt,
+        promptImages,
+        imageCount: promptImages.length,
+        createdAt: record.at,
+        status:
+          record.state === 'failed' ? 'failed' : record.state === 'sending' ? 'running' : 'queued',
+        error: cleanOptionalString(record.error ?? record.lastError) || null,
+      },
+      includeImageData,
+    );
+  }
+
+  private queuedPromptsForThread(
+    thread: AssistantThread,
+    includeImageData: boolean,
+  ): AssistantQueuedPrompt[] {
+    const identity = this.promptQueueIdentity(thread);
+    const queue = this.promptQueue();
+    if (!queue) return [];
+    return queue
+      .listPending(identity)
+      .map((record) => this.queuedPromptFromRecord(record, includeImageData));
   }
 
   async executeDroneWorkspaceTool(
@@ -2381,10 +2299,20 @@ export class HubAssistantService {
     throw new Error(`unsupported drone workspace tool: ${call.tool}`);
   }
 
-  currentContext(threadId: string): any {
-    this.getThread(threadId);
+  async currentContext(threadId: string): Promise<any> {
+    const thread = this.getThread(threadId);
+    const ownerDroneId = cleanOptionalString(thread.ownerDroneId) || null;
+    const ownerDrone = ownerDroneId
+      ? (await this.tools.listDrones()).find((drone) => drone.id === ownerDroneId)
+      : null;
     return {
-      app: this.scopedAppContext(threadId),
+      app: {
+        activeDroneId: ownerDroneId,
+        activeDroneName: ownerDrone?.name ?? ownerDroneId,
+        activeChatName: cleanOptionalString(thread.ownerChatName) || 'default',
+        appView: 'workspace',
+        updatedAt: thread.updatedAt,
+      },
       accessScope: this.activeAccessScope(threadId),
     };
   }
@@ -2439,11 +2367,15 @@ export class HubAssistantService {
 
   async enqueueThreadPrompt(
     threadId: string,
-    input: { prompt?: unknown; promptImages?: unknown },
+    input: {
+      id?: unknown;
+      prompt?: unknown;
+      promptImages?: unknown;
+    },
   ): Promise<AssistantQueuedPrompt> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
-    if (thread.queuedPrompts.length >= ASSISTANT_QUEUED_PROMPT_LIMIT) {
+    if (this.queuedPromptsForThread(thread, false).length >= ASSISTANT_QUEUED_PROMPT_LIMIT) {
       throw new Error(`assistant prompt queue is full (max ${ASSISTANT_QUEUED_PROMPT_LIMIT})`);
     }
     const prompt = String(input.prompt ?? '').trim();
@@ -2457,42 +2389,64 @@ export class HubAssistantService {
           .filter((image) => image.data)
       : [];
     if (!prompt && promptImages.length === 0) throw new Error('missing prompt');
-    const queued = sanitizeQueuedPrompt(
-      {
-        id: makeAssistantId('queued'),
+    const identity = this.promptQueueIdentity(thread);
+    const id = cleanOptionalString(input.id) || makeAssistantId('prompt');
+    const queued = await this.requirePromptQueue().enqueue({
+      ...identity,
+      prompt: {
+        id,
+        at: nowIso(),
         prompt,
-        promptImages,
-        imageCount: promptImages.length,
-        createdAt: nowIso(),
-        status: 'queued',
-        error: null,
+        attachments: { promptImages },
+        state: 'queued',
       },
-      true,
-    );
-    thread.queuedPrompts.push(queued);
+    });
     thread.updatedAt = nowIso();
     await this.persist();
-    return sanitizeQueuedPrompt(queued, false);
+    return this.queuedPromptFromRecord(queued.prompt, false);
   }
 
   async claimNextQueuedPrompt(threadId: string): Promise<AssistantQueuedPrompt | null> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
-    const queued = thread.queuedPrompts.find((prompt) => prompt.status === 'queued');
+    const identity = this.promptQueueIdentity(thread);
+    const queued = this.requirePromptQueue().nextQueued(identity);
     if (!queued) return null;
-    queued.status = 'running';
-    queued.error = null;
+    return await this.claimQueuedPrompt(threadId, queued.id);
+  }
+
+  async claimQueuedPrompt(
+    threadId: string,
+    promptId: string,
+    options?: { allowConcurrent?: boolean },
+  ): Promise<AssistantQueuedPrompt | null> {
+    await this.ensureLoaded();
+    const thread = this.getThread(threadId);
+    const identity = this.promptQueueIdentity(thread);
+    const queue = this.requirePromptQueue();
+    const claim = options?.allowConcurrent
+      ? queue.claimForSteering.bind(queue)
+      : queue.claim.bind(queue);
+    const claimed = await claim({
+      ...identity,
+      promptId,
+      leaseOwner: `native:${process.pid}`,
+      leaseMs: 30 * 60_000,
+    });
+    if (!claimed) return null;
     thread.updatedAt = nowIso();
     await this.persist();
-    return sanitizeQueuedPrompt(queued, true);
+    return this.queuedPromptFromRecord(claimed, true);
   }
 
   async completeQueuedPrompt(threadId: string, promptId: string): Promise<void> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
-    const next = thread.queuedPrompts.filter((prompt) => prompt.id !== promptId);
-    if (next.length === thread.queuedPrompts.length) return;
-    thread.queuedPrompts = next;
+    await this.requirePromptQueue().update({
+      ...this.promptQueueIdentity(thread),
+      promptId,
+      patch: { state: 'sent', error: undefined },
+    });
     thread.updatedAt = nowIso();
     await this.persist();
   }
@@ -2500,10 +2454,14 @@ export class HubAssistantService {
   async failQueuedPrompt(threadId: string, promptId: string, error: unknown): Promise<void> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
-    const queued = thread.queuedPrompts.find((prompt) => prompt.id === promptId);
-    if (!queued) return;
-    queued.status = 'failed';
-    queued.error = String((error as any)?.message ?? error ?? 'Assistant prompt failed');
+    const message = String((error as any)?.message ?? error ?? 'Assistant prompt failed');
+    await this.requirePromptQueue().update({
+      ...this.promptQueueIdentity(thread),
+      promptId,
+      patch: { state: 'failed', error: message },
+    });
+    thread.status = 'error';
+    thread.error = message;
     thread.updatedAt = nowIso();
     await this.persist();
   }
@@ -2511,10 +2469,13 @@ export class HubAssistantService {
   async cancelQueuedPrompt(threadId: string, promptId: string): Promise<AssistantSnapshot> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
-    const queued = thread.queuedPrompts.find((prompt) => prompt.id === promptId);
+    const identity = this.promptQueueIdentity(thread);
+    const queue = this.requirePromptQueue();
+    const queued = queue.get({ ...identity, promptId });
     if (!queued) throw new Error(`unknown queued assistant prompt: ${promptId}`);
-    if (queued.status === 'running') throw new Error('assistant prompt is already running');
-    thread.queuedPrompts = thread.queuedPrompts.filter((prompt) => prompt.id !== promptId);
+    if (queued.state === 'sending') throw new Error('assistant prompt is already running');
+    const cancelled = await queue.cancelQueued({ ...identity, promptId });
+    if (!cancelled.cancelled) throw new Error(`assistant prompt cannot be cancelled: ${promptId}`);
     thread.updatedAt = nowIso();
     await this.persist();
     return await this.threadSnapshot(threadId);
@@ -2522,7 +2483,13 @@ export class HubAssistantService {
 
   async hasQueuedPrompts(threadId: string): Promise<boolean> {
     await this.ensureLoaded();
-    return this.getThread(threadId).queuedPrompts.some((prompt) => prompt.status === 'queued');
+    const thread = this.getThread(threadId);
+    return Boolean(this.requirePromptQueue().nextQueued(this.promptQueueIdentity(thread)));
+  }
+
+  async promptDeliveryMode(threadId: string): Promise<AssistantPromptDeliveryMode> {
+    await this.ensureLoaded();
+    return this.getThread(threadId).promptDeliveryMode;
   }
 
   async promptThread(
@@ -2535,7 +2502,6 @@ export class HubAssistantService {
     const prompt = String(input.prompt ?? '').trim();
     if (!prompt) throw new Error('missing prompt');
     if (!this.textPromptDelegate) throw new Error('Blip assistant host is not ready');
-    this.activeThreadId = thread.id;
     thread.error = null;
     thread.updatedAt = nowIso();
     await this.persist();
@@ -2589,40 +2555,18 @@ export class HubAssistantService {
         }),
       )
       .filter(Boolean) as AssistantThread[];
-    if (threads.length > 0) {
-      this.threads = threads;
-    } else {
-      this.threads = [
-        this.makeThread({
-          ...this.defaultModelSelection,
-          systemPrompt: this.defaultSystemPrompt,
-        }),
-      ];
-    }
-    const activeThreadId = String(stored?.activeThreadId ?? '').trim();
-    this.activeThreadId = this.threads.some((thread) => thread.id === activeThreadId)
-      ? activeThreadId
-      : this.threads[0].id;
+    this.threads = threads.filter((thread) => Boolean(thread.ownerDroneId));
     this.loaded = true;
   }
 
-  private defaultAccessScopeForNewThread(input?: {
-    activeDroneId?: unknown;
-    activeChatName?: unknown;
-  }): AssistantAccessScope {
-    const hasInputDrone = Object.prototype.hasOwnProperty.call(input ?? {}, 'activeDroneId');
-    const hasInputChat = Object.prototype.hasOwnProperty.call(input ?? {}, 'activeChatName');
-    const activeDroneId = hasInputDrone
-      ? cleanOptionalString(input?.activeDroneId)
-      : cleanOptionalString(this.appContext.activeDroneId);
-    const activeChatName = hasInputChat
-      ? cleanOptionalString(input?.activeChatName)
-      : cleanOptionalString(this.appContext.activeChatName);
-    if (!activeDroneId || !activeChatName) return makeDefaultAssistantAccessScope();
-    return makeDefaultAssistantAccessScope([activeDroneId]);
+  private defaultAccessScopeForNewThread(): AssistantAccessScope {
+    return makeDefaultAssistantAccessScope();
   }
 
   private makeThread(input?: {
+    id?: string;
+    ownerDroneId?: string;
+    ownerChatName?: string;
     provider?: LlmProviderId;
     model?: string;
     thinkingLevel?: AssistantThinkingLevel;
@@ -2633,7 +2577,13 @@ export class HubAssistantService {
     const provider = normalizeProvider(input?.provider);
     const at = nowIso();
     return {
-      id: makeAssistantId('thread'),
+      id: cleanOptionalString(input?.id) || makeAssistantId('thread'),
+      ...(cleanOptionalString(input?.ownerDroneId)
+        ? { ownerDroneId: cleanOptionalString(input?.ownerDroneId) }
+        : {}),
+      ...(cleanOptionalString(input?.ownerChatName)
+        ? { ownerChatName: cleanOptionalString(input?.ownerChatName) }
+        : {}),
       title: input?.title?.trim() || DEFAULT_THREAD_TITLE,
       createdAt: at,
       updatedAt: at,
@@ -2644,23 +2594,21 @@ export class HubAssistantService {
         allowedModelForProvider(provider, input?.model),
         input?.thinkingLevel,
       ),
-      systemPrompt:
-        normalizeAssistantSystemPrompt(input?.systemPrompt) ||
-        this.defaultSystemPrompt,
+      systemPrompt: normalizeAssistantSystemPrompt(input?.systemPrompt) || this.defaultSystemPrompt,
       systemPromptUpdatedAt: null,
       enabledTools: normalizeAssistantEnabledTools(this.defaultEnabledTools),
       accessScope: input?.accessScope ?? this.defaultAccessScopeForNewThread(),
       autoApprove: false,
       promptDeliveryMode: 'queue',
-      messages: [],
-      queuedPrompts: [],
       status: 'idle',
       error: null,
     };
   }
 
   private defaultSystemPromptForThread(_thread: AssistantThread): string {
-    return normalizeAssistantSystemPrompt(this.defaultSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
+    return (
+      normalizeAssistantSystemPrompt(this.defaultSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT
+    );
   }
 
   private getThread(threadId: string): AssistantThread {
@@ -2671,18 +2619,15 @@ export class HubAssistantService {
   }
 
   private async persist(): Promise<void> {
-    const activeThread = firstThread(this.threads, this.activeThreadId);
     const state = serializeState({
-      activeThreadId: activeThread.id,
       defaultModel: this.defaultModelSelection,
       defaultEnabledTools: this.defaultEnabledTools,
       threads: this.threads,
-      chatIdleSubscriptions: [],
       systemPrompt: this.defaultSystemPrompt,
       systemPromptUpdatedAt: this.defaultSystemPromptUpdatedAt,
     });
     await saveAssistantState(state);
-    this.emitChange('persisted', activeThread.id);
+    this.emitChange('persisted');
   }
 
   private async runtime(): Promise<AssistantRuntime> {
@@ -2770,12 +2715,6 @@ export class HubAssistantService {
           drones.find((item) => item.id === scopedDroneId) ??
           drones.find((item) => item.name === rawDroneId) ??
           null;
-        if (drone && String(drone.runtime ?? '').trim() !== 'container') {
-          return {
-            block: true,
-            reason: `bash is only supported for container drones: ${drone.name}`,
-          };
-        }
         const cwd = cleanOptionalString(ctx?.args?.cwd);
         approvalArgs = {
           requested: ctx?.args ?? {},
@@ -2949,51 +2888,53 @@ export class HubAssistantService {
     return approval.status === 'approved';
   }
 
-  private snapshotSyncFallback(threadId?: string): AssistantSnapshot {
-    const id = cleanOptionalString(threadId) || this.activeThreadId;
-    const targetThread =
-      this.threads.find((thread) => thread.id === id) ??
-      firstThread(this.threads, this.activeThreadId);
+  private snapshotSyncFallback(threadId: string): AssistantSnapshot {
+    const id = cleanOptionalString(threadId);
+    const targetThread = this.threads.find((thread) => thread.id === id);
+    if (!targetThread) throw new Error(`unknown assistant thread: ${threadId}`);
     const snapshotThreadId = targetThread.id;
     const streamingMessages = this.threadStreamingMessages(snapshotThreadId);
     const streamingMessage = this.primaryThreadStreamingMessage(snapshotThreadId);
     return {
       ok: true,
-      activeThreadId: snapshotThreadId,
-      threads: this.threads.map((thread) => {
-        const sanitized =
-          thread.id === snapshotThreadId
-            ? { ...sanitizeThread(thread, false), messages: thread.messages.map(sanitizeMessage) }
-            : sanitizeThreadSummary(thread);
-        return this.runningThreadIds.has(thread.id)
-          ? { ...sanitized, status: 'running' }
-          : sanitized;
-      }),
-      chatIdleSubscriptions: [],
-      pendingApprovals: this.pendingApprovals(),
+      chatId: snapshotThreadId,
+      threads: [
+        this.runningThreadIds.has(id)
+          ? {
+              ...sanitizeThread(targetThread),
+              queuedPrompts: this.queuedPromptsForThread(targetThread, false),
+              status: 'running',
+            }
+          : {
+              ...sanitizeThread(targetThread),
+              queuedPrompts: this.queuedPromptsForThread(targetThread, false),
+            },
+      ],
+      pendingApprovals: this.pendingApprovals(id),
       models: [],
       defaultModel: { ...this.defaultModelSelection },
       defaultEnabledTools: [...this.defaultEnabledTools],
       availableTools: ASSISTANT_TOOL_SUMMARIES,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
-      runningModels: {},
       ...(streamingMessage
         ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages }
         : {}),
     };
   }
 
-  private pendingApprovals(): AssistantApproval[] {
-    return [...this.approvals.values()].map((approval) => ({
-      id: approval.id,
-      threadId: approval.threadId,
-      toolCallId: approval.toolCallId,
-      toolName: approval.toolName,
-      label: approval.label,
-      args: sanitizeMessage(approval.args),
-      createdAt: approval.createdAt,
-      status: approval.status,
-    }));
+  private pendingApprovals(threadId: string): AssistantApproval[] {
+    return [...this.approvals.values()]
+      .filter((approval) => approval.threadId === threadId)
+      .map((approval) => ({
+        id: approval.id,
+        threadId: approval.threadId,
+        toolCallId: approval.toolCallId,
+        toolName: approval.toolName,
+        label: approval.label,
+        args: sanitizeMessage(approval.args),
+        createdAt: approval.createdAt,
+        status: approval.status,
+      }));
   }
 
   private systemPromptSettingsSync(): AssistantSystemPromptSettings {
@@ -3041,8 +2982,8 @@ export class HubAssistantService {
     };
   }
 
-  private systemPrompt(threadId?: string): string {
-    const thread = threadId ? this.threads.find((item) => item.id === threadId) : null;
+  private systemPrompt(threadId: string): string {
+    const thread = this.threads.find((item) => item.id === threadId) ?? null;
     const accessScope = this.activeAccessScope(threadId);
     const readScope = describeAssistantAccessMode(accessScope.readMode, accessScope.droneIds);
     const writeScope = describeAssistantAccessMode(accessScope.writeMode, accessScope.droneIds);

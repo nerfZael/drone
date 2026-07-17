@@ -7,21 +7,26 @@ import { loadAssistantState } from '../src/host/assistant-store';
 import { BlipAssistantHost } from '../src/hub/assistant/blip-assistant-host';
 import { HubSessionRepository } from '../src/hub/assistant/hub-session-repository';
 import { HubAssistantService } from '../src/hub/assistant';
+import { ensureTestNativeChat } from './native-chat-test-helpers';
 import { withTempDroneDataDir } from './test-helpers';
 
 describe('Blip assistant host', () => {
-  test('migrates legacy Hub thread metadata into the canonical assistant store', async () => {
+  test('discards legacy standalone metadata and stores native chat metadata', async () => {
     await withTempDroneDataDir('blip-assistant-state-', async (dataDir) => {
       const legacyPath = path.join(dataDir, 'assistant.json');
       fs.writeFileSync(legacyPath, JSON.stringify({ threads: [{ id: 'legacy-thread' }] }));
       const service = new HubAssistantService({
         listDrones: async () => [],
       });
-      const snapshot = await service.createThread({ title: 'SQLite thread' });
-      expect(snapshot.threads.some((thread) => thread.id === 'legacy-thread')).toBe(true);
+      const snapshot = await ensureTestNativeChat(service, {
+        id: 'native-chat',
+        droneId: 'drone-a',
+        chatName: 'SQLite chat',
+      });
+      expect(snapshot.threads.map((thread) => thread.id)).toEqual(['native-chat']);
 
       const stored = await loadAssistantState();
-      expect(stored?.threads.some((thread: any) => thread.title === 'SQLite thread')).toBe(true);
+      expect(stored?.threads.some((thread: any) => thread.title === 'SQLite chat')).toBe(true);
     });
   });
 
@@ -62,6 +67,9 @@ describe('Blip assistant host', () => {
       const latestPage = await host.historyPage('thread-one', { limit: 2 });
       expect(latestPage.entries).toHaveLength(2);
       expect(latestPage.page.hasOlder).toBe(true);
+      await expect(host.message('thread-one', latestPage.entries[0]!.id)).resolves.toEqual(
+        latestPage.entries[0],
+      );
       const olderPage = await host.historyPage('thread-one', { limit: 2, before: latestPage.page.beforeCursor! });
       expect(olderPage.entries).toHaveLength(2);
       expect(olderPage.page.hasOlder).toBe(false);

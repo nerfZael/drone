@@ -205,13 +205,6 @@ type DroneRegistryV1 = {
       enabledByDefault?: boolean;
       updatedAt?: string;
     };
-    assistant?: {
-      activeThreadId?: string | null;
-      threads?: unknown[];
-      systemPrompt?: string;
-      systemPromptUpdatedAt?: string;
-      updatedAt?: string;
-    };
     agents?: {
       content?: string;
       updatedAt?: string;

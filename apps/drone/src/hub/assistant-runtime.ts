@@ -279,7 +279,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           description: 'Read the current Drone Hub UI context and this thread access scope.',
           parameters: { type: 'object', properties: {}, additionalProperties: false },
           execute: async () => {
-            const context = assistantService.currentContext(threadId);
+            const context = await assistantService.currentContext(threadId);
             return {
               content: [{ type: 'text' as const, text: JSON.stringify(context, null, 2) }],
               details: context,
@@ -290,7 +290,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           name: 'get_system_prompt',
           label: 'Get system prompt',
           description:
-            'Read the current thread system prompt, global prompt, and runtime appendix.',
+            'Read the current chat system prompt, global prompt, and runtime appendix.',
           parameters: { type: 'object', properties: {}, additionalProperties: false },
           execute: async () => {
             const result = await assistantService.threadSystemPromptSettings(threadId);
@@ -303,7 +303,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         {
           name: 'update_system_prompt',
           label: 'Update system prompt',
-          description: 'Replace or patch only this assistant thread system prompt.',
+          description: 'Replace or patch only this chat system prompt.',
           parameters: {
             type: 'object',
             properties: {
@@ -324,7 +324,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             const result = await assistantService.updateThreadSystemPrompt(threadId, args ?? {});
             return {
               content: [
-                { type: 'text' as const, text: 'Updated this assistant thread system prompt.' },
+                { type: 'text' as const, text: 'Updated this chat system prompt.' },
               ],
               details: result,
             };
@@ -334,7 +334,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           name: 'set_thinking_level',
           label: 'Set thinking level',
           description:
-            'Change the thinking level for this assistant thread while keeping its current model.',
+            'Change the thinking level for this chat while keeping its current model.',
           parameters: {
             type: 'object',
             properties: {
@@ -360,28 +360,6 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             };
             return {
               content: [{ type: 'text' as const, text: `Thinking level is now ${next}.` }],
-              details: result,
-            };
-          },
-        },
-        {
-          name: 'create_new_thread',
-          label: 'Create new thread',
-          description:
-            'Create a fresh assistant thread only when the user explicitly asks for one.',
-          parameters: {
-            type: 'object',
-            properties: { title: { type: 'string' } },
-            additionalProperties: false,
-          },
-          execute: async (_callId: string, args: any) => {
-            const result = await assistantService.createNewThreadFromThread(threadId, {
-              title: args?.title,
-            });
-            return {
-              content: [
-                { type: 'text' as const, text: `Created assistant thread ${result.thread.title}.` },
-              ],
               details: result,
             };
           },
@@ -560,19 +538,29 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   deviceMesh.onAssistantPolicyChange((threadIds: string[]) => {
     for (const threadId of threadIds) {
       blipAssistantHost.invalidateThread(threadId);
-      void deviceMesh.broadcastAssistantThreadChange({
-        reason: 'workspace_policy_changed',
-        threadId,
-      });
+      void assistantService.nativeThreadOwner(threadId).then((owner) => {
+        if (!owner) return;
+        return deviceMesh.broadcastDroneChatChange({
+          reason: 'workspace_policy_changed',
+          droneId: owner.droneId,
+          chatName: owner.chatName,
+        });
+      }).catch(() => {});
     }
   });
   const unsubscribeDeviceMeshAssistantChanges = assistantService.subscribeChanges((event) => {
-    void deviceMesh.broadcastAssistantThreadChange({
-      sequence: event.sequence,
-      reason: event.reason,
-      ...(event.threadId ? { threadId: event.threadId } : {}),
-      at: event.at,
-    });
+    if (event.threadId) {
+      void assistantService.nativeThreadOwner(event.threadId).then((owner) => {
+        if (!owner) return;
+        return deviceMesh.broadcastDroneChatChange({
+          sequence: event.sequence,
+          reason: event.reason,
+          droneId: owner.droneId,
+          chatName: owner.chatName,
+          at: event.at,
+        });
+      }).catch(() => {});
+    }
   });
   assistantService.setTextPromptDelegate(async (threadId, prompt) => {
     await blipAssistantHost.promptThread(threadId, prompt);
@@ -589,31 +577,12 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   };
   const startAssistantPromptDrain = (
     threadId: string,
-    initial?: { input: AssistantPromptInput; onEvent?: (event: any) => Promise<void> | void },
-  ): { started: boolean; promise: Promise<void>; initialPromise: Promise<void> } => {
+  ): { started: boolean; promise: Promise<void> } => {
     const existing = assistantPromptDrains.get(threadId);
-    if (existing) return { started: false, promise: existing, initialPromise: existing };
-    let resolveInitial!: () => void;
-    let rejectInitial!: (error: unknown) => void;
-    const initialPromise = new Promise<void>((resolve, reject) => {
-      resolveInitial = resolve;
-      rejectInitial = reject;
-    });
-    if (!initial) void initialPromise.catch(() => {});
+    if (existing) return { started: false, promise: existing };
     const promise = Promise.resolve()
       .then(async () => {
-        try {
-          if (initial) {
-            await blipAssistantHost.waitForThreadIdle(threadId);
-            await blipAssistantHost.promptThread(threadId, initial.input, initial.onEvent);
-          } else {
-            await blipAssistantHost.waitForThreadIdle(threadId);
-          }
-          resolveInitial();
-        } catch (error) {
-          rejectInitial(error);
-          throw error;
-        }
+        await blipAssistantHost.waitForThreadIdle(threadId);
         while (true) {
           const queued = await assistantService.claimNextQueuedPrompt(threadId);
           if (!queued) break;
@@ -644,17 +613,55 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           .catch(() => {});
       });
     assistantPromptDrains.set(threadId, promise);
-    return { started: true, promise, initialPromise };
+    return { started: true, promise };
+  };
+
+  const submitAssistantPrompt = async (input: {
+    threadId: string;
+    promptId?: string;
+    prompt: string;
+    promptImages?: Array<{ type: 'image'; data: string; mimeType: string }>;
+  }) => {
+    await assistantService.beginNativeThreadPrompt(input.threadId);
+    const promptInput: AssistantPromptInput = input.promptImages?.length
+      ? { text: input.prompt, images: input.promptImages }
+      : input.prompt;
+    const steerImmediately =
+      (await assistantService.promptDeliveryMode(input.threadId)) === 'asap' &&
+      blipAssistantHost.isThreadRunning(input.threadId);
+    const queued = await assistantService.enqueueThreadPrompt(input.threadId, {
+      id: input.promptId,
+      prompt: input.prompt,
+      promptImages: input.promptImages,
+    });
+    if (steerImmediately) {
+      const claimed = await assistantService.claimQueuedPrompt(input.threadId, queued.id, {
+        allowConcurrent: true,
+      });
+      if (!claimed) throw new Error('built-in prompt could not be claimed');
+      void blipAssistantHost
+        .promptThread(input.threadId, promptInput)
+        .then(() => assistantService.completeQueuedPrompt(input.threadId, queued.id))
+        .catch((error) => assistantService.failQueuedPrompt(input.threadId, queued.id, error));
+      return queued;
+    }
+    const drain = startAssistantPromptDrain(input.threadId);
+    void drain.promise.catch((error: any) => {
+      hubLog('warn', 'assistant queued prompt drain failed', {
+        threadId: input.threadId,
+        error: error?.message ?? String(error),
+      });
+    });
+    return queued;
   };
   void assistantService
-    .snapshot('compact')
-    .then((snapshot) => {
-      for (const thread of snapshot.threads) {
-        if (!thread.queuedPrompts?.some((prompt: any) => prompt.status === 'queued')) continue;
-        const drain = startAssistantPromptDrain(thread.id);
+    .threadIdsWithQueuedPrompts()
+    .then((threadIds) => {
+      for (const threadId of threadIds) {
+        const drain = startAssistantPromptDrain(threadId);
         void drain.promise.catch((error: any) => {
           hubLog('warn', 'assistant queued prompt recovery drain failed', {
-            threadId: thread.id,
+            threadId,
             error: error?.message ?? String(error),
           });
         });
@@ -678,6 +685,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     buildAssistantDroneSummariesFromRegistry,
     emitWhiteboardChange,
     startAssistantPromptDrain,
+    submitAssistantPrompt,
     subscribeWhiteboardChanges,
     unsubscribeDeviceMeshAssistantChanges,
     writeAssistantSseEvent,

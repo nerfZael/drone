@@ -542,6 +542,90 @@ describeSocketSuite('chat management api', () => {
     expect(regAny?.drones?.[droneId]?.chats?.default?.agentPermissionMode).toBeUndefined();
   });
 
+  test('locks every agent change after chat history exists', async () => {
+    const droneId = 'drone-chat-agent-lock';
+    await seedDrone(droneId);
+    await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    const now = new Date().toISOString();
+    await upsertTranscriptTurnInStore({
+      droneId,
+      chatName: 'default',
+      turn: {
+        id: 'history-turn',
+        at: now,
+        promptAt: now,
+        completedAt: now,
+        prompt: 'Keep this history',
+        ok: true,
+        output: 'Kept',
+      },
+    });
+
+    const info = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats/default`);
+    expect(info.r.status).toBe(200);
+    expect(info.data?.agentLocked).toBe(true);
+
+    const rejected = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agent: { kind: 'native' } }),
+      },
+    );
+    expect(rejected.r.status).toBe(409);
+    expect(String(rejected.data?.error ?? '')).toContain('Create a new chat');
+
+    const externalSwitch = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agent: { kind: 'builtin', id: 'claude' } }),
+      },
+    );
+    expect(externalSwitch.r.status).toBe(409);
+    expect(String(externalSwitch.data?.error ?? '')).toContain('Create a new chat');
+
+    const unchangedAgent = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agent: { kind: 'builtin', id: 'cursor' } }),
+      },
+    );
+    expect(unchangedAgent.r.status).toBe(200);
+  });
+
+  test('clones an empty Built-in chat before its native session has been opened', async () => {
+    const droneId = 'drone-chat-empty-native-clone';
+    await seedDrone(droneId);
+    const configured = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/config`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ agent: { kind: 'native' } }),
+      },
+    );
+    expect(configured.r.status).toBe(200);
+
+    const cloned = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/chats`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ name: 'review', copyFrom: 'default' }),
+    });
+    expect(cloned.r.status).toBe(201);
+
+    const opened = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/review/native`,
+      { method: 'POST' },
+    );
+    expect(opened.r.status).toBe(200);
+    expect(String(opened.data?.nativeChatId ?? '')).toMatch(/^[0-9a-f-]{36}$/i);
+  });
+
   test('clears read-only agent permission mode when switching to an unsupported agent', async () => {
     const droneId = 'drone-chat-agent-permission-clear';
     await seedDrone(droneId);

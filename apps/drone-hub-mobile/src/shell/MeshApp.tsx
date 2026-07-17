@@ -17,21 +17,19 @@ import Check from 'lucide-react-native/icons/check';
 import Menu from 'lucide-react-native/icons/menu';
 import MoreVertical from 'lucide-react-native/icons/ellipsis-vertical';
 import MessageCircle from 'lucide-react-native/icons/message-circle';
-import Copy from 'lucide-react-native/icons/copy';
 import Plus from 'lucide-react-native/icons/plus';
 import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
 import Trash2 from 'lucide-react-native/icons/trash-2';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
 import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext';
 import {
-  AssistantDrawerProvider,
-  AssistantThreadDrawer,
-  assistantDrawerWidth,
+  AppDrawerProvider,
+  AppDrawer,
+  appDrawerWidth,
   type AppDrawerNavigationItem,
   type DrawerDevicePickerItem,
-} from '../local-assistant/AssistantThreadDrawer';
+} from '../local-assistant/AppDrawer';
 import { DevicesScreen } from '../screens/DevicesScreen';
-import { AssistantHomeScreen, type AssistantAppHeaderState } from '../screens/AssistantHomeScreen';
 import { DronesScreen, type DronesAppHeaderState } from '../screens/DronesScreen';
 import { PairScreen } from '../screens/PairScreen';
 import { SettingsScreen, type SettingsTab } from '../screens/SettingsScreen';
@@ -39,7 +37,7 @@ import { colors } from '../theme';
 
 const DRAWER_EDGE_SWIPE_WIDTH = 12;
 
-type Tab = 'assistant' | 'drones' | 'devices' | 'settings';
+type Tab = 'drones' | 'devices' | 'settings';
 
 type HeaderMenuAction = {
   id: string;
@@ -119,23 +117,16 @@ function HeaderOverflowMenu({
 
 function Shell() {
   const mesh = useMesh();
-  const [tab, setTab] = React.useState<Tab>('assistant');
+  const [tab, setTab] = React.useState<Tab>('drones');
   const [pairing, setPairing] = React.useState(false);
-  const [pairReturnTab, setPairReturnTab] = React.useState<Tab>('assistant');
+  const [pairReturnTab, setPairReturnTab] = React.useState<Tab>('drones');
   const [appDrawerOpen, setAppDrawerOpen] = React.useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = React.useState('');
   const [settingsTab, setSettingsTab] = React.useState<SettingsTab>('assistant');
   const [headerMenuOpen, setHeaderMenuOpen] = React.useState(false);
   const [dronesHeader, setDronesHeader] = React.useState<DronesAppHeaderState | null>(null);
-  const [assistantHeader, setAssistantHeader] = React.useState<AssistantAppHeaderState | null>(
-    null,
-  );
   const handleDronesHeaderChange = React.useCallback(
     (header: DronesAppHeaderState | null) => setDronesHeader(header),
-    [],
-  );
-  const handleAssistantHeaderChange = React.useCallback(
-    (header: AssistantAppHeaderState | null) => setAssistantHeader(header),
     [],
   );
   const devicePickerItems = React.useMemo<DrawerDevicePickerItem[]>(() => {
@@ -170,7 +161,7 @@ function Shell() {
   }, [devicePickerItems, selectedDeviceId]);
   React.useEffect(() => setHeaderMenuOpen(false), [activeDeviceId, pairingVisible, tab]);
   const { width: windowWidth } = useWindowDimensions();
-  const drawerWidth = assistantDrawerWidth(windowWidth);
+  const drawerWidth = appDrawerWidth(windowWidth);
   const drawerOffset = React.useRef(new Animated.Value(-drawerWidth)).current;
   const drawerOpenRef = React.useRef(appDrawerOpen);
   const drawerWidthRef = React.useRef(drawerWidth);
@@ -238,12 +229,6 @@ function Shell() {
   };
   const navigationItems: AppDrawerNavigationItem[] = [
     {
-      id: 'assistant',
-      label: 'Assistant',
-      active: !pairingVisible && tab === 'assistant',
-      onPress: () => navigateToTab('assistant'),
-    },
-    {
       id: 'drones',
       label: 'Drones',
       active: !pairingVisible && tab === 'drones',
@@ -268,75 +253,15 @@ function Shell() {
       : 'Pair device'
     : (
         {
-          assistant: 'Assistant',
           drones: 'Drones',
           devices: 'Devices',
           settings: 'Settings',
         } as const
       )[tab];
-  const hasContextHeader = Boolean(
-    !pairingVisible &&
-    ((tab === 'drones' && dronesHeader) || (tab === 'assistant' && assistantHeader)),
-  );
+  const hasContextHeader = Boolean(!pairingVisible && tab === 'drones' && dronesHeader);
   const headerMenuActions: HeaderMenuAction[] = !pairingVisible
-    ? tab === 'assistant' && assistantHeader
+    ? tab === 'drones' && dronesHeader
       ? [
-          ...(assistantHeader.onNewThread
-            ? [
-                {
-                  id: 'new-thread',
-                  label: 'New thread',
-                  icon: Plus,
-                  onPress: assistantHeader.onNewThread,
-                },
-              ]
-            : []),
-          ...(assistantHeader.onCloneThread
-            ? [
-                {
-                  id: 'clone-thread',
-                  label: 'Clone thread',
-                  icon: Copy,
-                  disabled: assistantHeader.cloneDisabled,
-                  onPress: assistantHeader.onCloneThread,
-                },
-              ]
-            : []),
-          ...(assistantHeader.onToggleAccess
-            ? [
-                {
-                  id: 'access',
-                  label: assistantHeader.accessOpen ? 'Return to chat' : 'Edit thread access',
-                  disabled: assistantHeader.accessDisabled,
-                  onPress: assistantHeader.onToggleAccess,
-                },
-              ]
-            : []),
-          ...(assistantHeader.onToggleAutoApprove
-            ? [
-                {
-                  id: 'auto-approve',
-                  label: assistantHeader.autoApprove
-                    ? 'Disable auto-approve requests'
-                    : 'Auto-approve requests',
-                  icon: Check,
-                  onPress: assistantHeader.onToggleAutoApprove,
-                },
-              ]
-            : []),
-          ...(assistantHeader.onDelete
-            ? [
-                {
-                  id: 'delete-thread',
-                  label: 'Delete thread',
-                  destructive: true,
-                  onPress: assistantHeader.onDelete,
-                },
-              ]
-            : []),
-        ]
-      : tab === 'drones' && dronesHeader
-        ? [
             ...(dronesHeader.onNewDrone
               ? [
                   {
@@ -367,8 +292,24 @@ function Shell() {
                   },
                 ]
               : []),
+            ...(dronesHeader.onToggleAccess
+              ? [{
+                  id: 'access',
+                  label: dronesHeader.accessOpen ? 'Return to chat' : 'Edit workspace access',
+                  disabled: dronesHeader.accessDisabled,
+                  onPress: dronesHeader.onToggleAccess,
+                }]
+              : []),
+            ...(dronesHeader.onToggleAutoApprove
+              ? [{
+                  id: 'auto-approve',
+                  label: dronesHeader.autoApprove ? 'Disable auto-approve requests' : 'Auto-approve requests',
+                  icon: Check,
+                  onPress: dronesHeader.onToggleAutoApprove,
+                }]
+              : []),
           ]
-        : []
+      : []
     : [];
   const content = pairingVisible ? (
     <ScrollView keyboardShouldPersistTaps="handled">
@@ -401,19 +342,6 @@ function Shell() {
       devicePickerItems={devicePickerItems}
       onDeviceChange={setSelectedDeviceId}
     />
-  ) : tab === 'assistant' ? (
-    <AssistantHomeScreen
-      drawerOpen={appDrawerOpen}
-      drawerOffset={drawerOffset}
-      navigationItems={navigationItems}
-      openingGestureActive={openingGestureActive}
-      onDrawerOpenChange={setAppDrawerOpen}
-      location={activeDeviceId === mesh.identity?.id ? 'phone' : 'devices'}
-      activeDeviceId={activeDeviceId}
-      devicePickerItems={devicePickerItems}
-      onDeviceChange={setSelectedDeviceId}
-      onHeaderChange={handleAssistantHeaderChange}
-    />
   ) : (
     <DevicesScreen />
   );
@@ -424,22 +352,16 @@ function Shell() {
       edges={['top', 'right', 'bottom', 'left']}
       {...drawerPanResponder.panHandlers}
     >
-      {mesh.profile && ((tab !== 'assistant' && tab !== 'drones') || pairingVisible) ? (
-        <AssistantThreadDrawer
+      {mesh.profile && (tab !== 'drones' || pairingVisible) ? (
+        <AppDrawer
           open={appDrawerOpen}
-          title=""
-          threads={[]}
-          activeThreadId=""
           offset={drawerOffset}
           openingGestureActive={openingGestureActive}
           navigationItems={navigationItems}
-          showThreads={false}
           devicePickerItems={devicePickerItems}
           activeDeviceId={activeDeviceId}
           onSelectDevice={setSelectedDeviceId}
           onClose={() => setAppDrawerOpen(false)}
-          onSelect={() => {}}
-          onCreate={() => {}}
         />
       ) : null}
       <View style={styles.header}>
@@ -464,11 +386,11 @@ function Shell() {
               <View style={styles.contextTitle}>
                 <View style={styles.contextTitleRow}>
                   <Text numberOfLines={1} style={styles.contextTitleText}>
-                    {tab === 'drones' ? dronesHeader?.title : assistantHeader?.title}
+                    {dronesHeader?.title}
                   </Text>
                 </View>
                 <Text numberOfLines={1} style={styles.contextSubtitle}>
-                  {tab === 'drones' ? dronesHeader?.subtitle : assistantHeader?.subtitle}
+                  {dronesHeader?.subtitle}
                 </Text>
               </View>
             ) : (
@@ -536,9 +458,9 @@ export function MeshApp() {
   return (
     <MeshProvider>
       <LocalAssistantProvider>
-        <AssistantDrawerProvider>
+        <AppDrawerProvider>
           <Shell />
-        </AssistantDrawerProvider>
+        </AppDrawerProvider>
       </LocalAssistantProvider>
     </MeshProvider>
   );

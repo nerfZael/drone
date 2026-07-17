@@ -19,7 +19,6 @@ export function formatArtifactSize(bytesRaw: number): string {
 export function assistantThreadStatusTone(status: AssistantThreadStatus): string {
   if (status === 'running') return 'bg-[var(--green)]';
   if (status === 'waiting_for_approval') return 'bg-[var(--accent)]';
-  if (status === 'waiting_for_chats_idle') return 'bg-[var(--yellow)]';
   if (status === 'error') return 'bg-[var(--red)]';
   return 'bg-[var(--muted-dim)]';
 }
@@ -29,7 +28,6 @@ export function assistantThreadStatusLabel(
   fallback: string,
 ): string {
   if (!status) return fallback;
-  if (status === 'waiting_for_chats_idle') return 'subscribed to chats idle';
   return status.replace(/_/g, ' ');
 }
 import type { AssistantThreadStatus } from './assistant-types';

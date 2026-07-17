@@ -10,6 +10,7 @@ export type AssistantMessageContentPart = {
 };
 
 export type AssistantMessage = {
+  id?: string;
   role: 'user' | 'assistant' | 'toolResult';
   content?: string | AssistantMessageContentPart[];
   toolName?: string;
@@ -19,6 +20,7 @@ export type AssistantMessage = {
   details?: unknown;
   createdAt?: string;
   timestamp?: string | number;
+  meshTruncated?: boolean;
 };
 
 export type AssistantDroneNameMap = Record<string, string>;

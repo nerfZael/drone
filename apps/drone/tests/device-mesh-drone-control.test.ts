@@ -349,6 +349,36 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('rejects native thread ids that do not belong to the selected chat', async () => {
+    const originalFetch = globalThis.fetch;
+    const requestedPaths: string[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      requestedPaths.push(url.pathname);
+      if (url.pathname.endsWith('/native')) {
+        return Response.json({ ok: true, nativeChatId: 'native-for-selected-chat' });
+      }
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('chat.update', {
+          droneId: 'drone-1',
+          chatName: 'default',
+          nativeChatId: 'another-native-thread',
+          model: 'gpt-5',
+        }),
+      ).rejects.toMatchObject({ code: 'INVALID_REQUEST' });
+      expect(requestedPaths).toEqual(['/api/drones/drone-1/chats/default/native']);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('returns durable pending prompts and forwards per-prompt cancellation', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; method: string }> = [];

@@ -16,11 +16,9 @@ import {
 import { droneRootPath } from './paths';
 
 export type StoredAssistantState = {
-  activeThreadId?: string | null;
   defaultModel?: { provider?: string; model?: string; thinkingLevel?: string };
   defaultEnabledTools?: string[];
   threads?: any[];
-  chatIdleSubscriptions?: any[];
   webSearchToolMigrationApplied?: boolean;
   fetchContentToolMigrationApplied?: boolean;
   systemPrompt?: string;
@@ -35,7 +33,6 @@ function createAssistantSchema(connection: HubDatabaseConnection): void {
   connection.exec(`
         CREATE TABLE assistant_preferences (
           singleton INTEGER NOT NULL PRIMARY KEY CHECK (singleton = 1),
-          active_thread_id TEXT,
           default_provider TEXT,
           default_model TEXT,
           default_thinking_level TEXT,
@@ -67,51 +64,6 @@ function createAssistantSchema(connection: HubDatabaseConnection): void {
           extra_json TEXT NOT NULL
         );
         CREATE INDEX assistant_threads_ordinal_idx ON assistant_threads (ordinal);
-
-        CREATE TABLE assistant_messages (
-          thread_id TEXT NOT NULL REFERENCES assistant_threads(id) ON DELETE CASCADE,
-          ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
-          message_json TEXT NOT NULL,
-          PRIMARY KEY (thread_id, ordinal)
-        );
-
-        CREATE TABLE assistant_queued_prompts (
-          id TEXT NOT NULL PRIMARY KEY,
-          thread_id TEXT NOT NULL REFERENCES assistant_threads(id) ON DELETE CASCADE,
-          ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
-          prompt TEXT,
-          attachments_json TEXT,
-          prompt_images_json TEXT,
-          created_at TEXT,
-          provider TEXT,
-          model TEXT,
-          thinking_level TEXT,
-          delivery_mode TEXT,
-          extra_json TEXT NOT NULL
-        );
-        CREATE INDEX assistant_queued_prompts_thread_ordinal_idx
-          ON assistant_queued_prompts (thread_id, ordinal);
-
-        CREATE TABLE assistant_chat_idle_subscriptions (
-          id TEXT NOT NULL PRIMARY KEY,
-          ordinal INTEGER NOT NULL CHECK (ordinal >= 0),
-          thread_id TEXT NOT NULL REFERENCES assistant_threads(id) ON DELETE CASCADE,
-          tool_call_id TEXT,
-          mode TEXT,
-          targets_json TEXT NOT NULL,
-          created_at TEXT,
-          expires_at TEXT,
-          idle_for_ms INTEGER,
-          status TEXT,
-          idle_since TEXT,
-          fired_at TEXT,
-          cancelled_at TEXT,
-          expired_at TEXT,
-          last_result_json TEXT,
-          extra_json TEXT NOT NULL
-        );
-        CREATE INDEX assistant_chat_idle_subscriptions_ordinal_idx
-          ON assistant_chat_idle_subscriptions (ordinal);
 
         CREATE TABLE assistant_store_metadata (
           key TEXT NOT NULL PRIMARY KEY,
@@ -175,10 +127,40 @@ export const ASSISTANT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
         .run(new Date().toISOString());
     },
   },
+  {
+    version: 7,
+    name: 'reset standalone assistant data for native drone chats',
+    migrate(connection) {
+      connection.exec(`
+        DROP TABLE IF EXISTS assistant_messages;
+        DROP TABLE IF EXISTS assistant_queued_prompts;
+        DROP TABLE IF EXISTS assistant_chat_idle_subscriptions;
+        DROP TABLE IF EXISTS assistant_threads;
+        DROP TABLE IF EXISTS assistant_preferences;
+        DROP TABLE IF EXISTS assistant_store_metadata;
+      `);
+      createAssistantSchema(connection);
+      connection
+        .prepare(
+          "INSERT INTO assistant_store_metadata (key, value, updated_at) VALUES ('assistant_data_reset_pending', '1', ?)",
+        )
+        .run(new Date().toISOString());
+    },
+  },
+  {
+    version: 8,
+    name: 'remove runtime-owned assistant data',
+    migrate(connection) {
+      connection.exec(`
+        DROP TABLE IF EXISTS assistant_messages;
+        DROP TABLE IF EXISTS assistant_queued_prompts;
+        DROP TABLE IF EXISTS assistant_chat_idle_subscriptions;
+      `);
+    },
+  },
 ];
 
 type PreferenceRow = {
-  active_thread_id: string | null;
   default_provider: string | null;
   default_model: string | null;
   default_thinking_level: string | null;
@@ -210,40 +192,6 @@ type ThreadRow = {
   extra_json: string;
 };
 
-type MessageRow = { thread_id: string; ordinal: number; message_json: string };
-type QueuedPromptRow = {
-  id: string;
-  thread_id: string;
-  ordinal: number;
-  prompt: string | null;
-  attachments_json: string | null;
-  prompt_images_json: string | null;
-  created_at: string | null;
-  provider: string | null;
-  model: string | null;
-  thinking_level: string | null;
-  delivery_mode: string | null;
-  extra_json: string;
-};
-type SubscriptionRow = {
-  id: string;
-  ordinal: number;
-  thread_id: string;
-  tool_call_id: string | null;
-  mode: string | null;
-  targets_json: string;
-  created_at: string | null;
-  expires_at: string | null;
-  idle_for_ms: number | null;
-  status: string | null;
-  idle_since: string | null;
-  fired_at: string | null;
-  cancelled_at: string | null;
-  expired_at: string | null;
-  last_result_json: string | null;
-  extra_json: string;
-};
-
 const initializationByDatabasePath = new Map<string, Promise<void>>();
 let bunCompatibilityWriteQueue: Promise<void> = Promise.resolve();
 
@@ -253,10 +201,6 @@ function optionalText(value: unknown): string | null {
 
 function optionalBoolean(value: unknown): number | null {
   return typeof value === 'boolean' ? (value ? 1 : 0) : null;
-}
-
-function optionalNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
 }
 
 function json(value: unknown): string {
@@ -309,13 +253,12 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
     .prepare(
       `
     INSERT INTO assistant_preferences (
-      singleton, active_thread_id, default_provider, default_model, default_thinking_level, default_enabled_tools_json,
+      singleton, default_provider, default_model, default_thinking_level, default_enabled_tools_json,
       web_search_tool_migration_applied,
       fetch_content_tool_migration_applied, system_prompt, system_prompt_updated_at,
       state_updated_at
-    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(singleton) DO UPDATE SET
-      active_thread_id = excluded.active_thread_id,
       default_provider = excluded.default_provider,
       default_model = excluded.default_model,
       default_thinking_level = excluded.default_thinking_level,
@@ -325,8 +268,7 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
       system_prompt = excluded.system_prompt,
       system_prompt_updated_at = excluded.system_prompt_updated_at,
       state_updated_at = excluded.state_updated_at
-    WHERE active_thread_id IS NOT excluded.active_thread_id
-       OR default_provider IS NOT excluded.default_provider
+    WHERE default_provider IS NOT excluded.default_provider
        OR default_model IS NOT excluded.default_model
        OR default_thinking_level IS NOT excluded.default_thinking_level
        OR default_enabled_tools_json IS NOT excluded.default_enabled_tools_json
@@ -338,7 +280,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
   `,
     )
     .run(
-      optionalText(state.activeThreadId),
       optionalText(state.defaultModel?.provider),
       optionalText(state.defaultModel?.model),
       optionalText(state.defaultModel?.thinkingLevel),
@@ -381,30 +322,6 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
        OR prompt_delivery_mode IS NOT excluded.prompt_delivery_mode OR status IS NOT excluded.status
        OR error IS NOT excluded.error OR extra_json IS NOT excluded.extra_json
   `);
-  const upsertMessage = connection.prepare(`
-    INSERT INTO assistant_messages (thread_id, ordinal, message_json) VALUES (?, ?, ?)
-    ON CONFLICT(thread_id, ordinal) DO UPDATE SET message_json = excluded.message_json
-    WHERE message_json IS NOT excluded.message_json
-  `);
-  const upsertQueuedPrompt = connection.prepare(`
-    INSERT INTO assistant_queued_prompts (
-      id, thread_id, ordinal, prompt, attachments_json, prompt_images_json, created_at,
-      provider, model, thinking_level, delivery_mode, extra_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      thread_id = excluded.thread_id, ordinal = excluded.ordinal, prompt = excluded.prompt,
-      attachments_json = excluded.attachments_json, prompt_images_json = excluded.prompt_images_json,
-      created_at = excluded.created_at, provider = excluded.provider, model = excluded.model,
-      thinking_level = excluded.thinking_level, delivery_mode = excluded.delivery_mode,
-      extra_json = excluded.extra_json
-    WHERE thread_id IS NOT excluded.thread_id OR ordinal IS NOT excluded.ordinal
-       OR prompt IS NOT excluded.prompt OR attachments_json IS NOT excluded.attachments_json
-       OR prompt_images_json IS NOT excluded.prompt_images_json OR created_at IS NOT excluded.created_at
-       OR provider IS NOT excluded.provider OR model IS NOT excluded.model
-       OR thinking_level IS NOT excluded.thinking_level OR delivery_mode IS NOT excluded.delivery_mode
-       OR extra_json IS NOT excluded.extra_json
-  `);
-
   for (const [ordinal, thread] of threads.entries()) {
     if (!thread || typeof thread !== 'object') continue;
     const id = String(thread.id ?? '').trim();
@@ -440,141 +357,13 @@ function writeStateRows(connection: HubDatabaseConnection, state: StoredAssistan
         'accessScope',
         'autoApprove',
         'promptDeliveryMode',
-        'messageCount',
-        'messages',
-        'queuedPrompts',
         'status',
         'error',
       ]),
     );
-
-    const messages = Array.isArray(thread.messages) ? thread.messages : [];
-    for (const [messageOrdinal, message] of messages.entries()) {
-      upsertMessage.run(id, messageOrdinal, json(message));
-    }
-    connection
-      .prepare('DELETE FROM assistant_messages WHERE thread_id = ? AND ordinal >= ?')
-      .run(id, messages.length);
-
-    const queuedPrompts = Array.isArray(thread.queuedPrompts) ? thread.queuedPrompts : [];
-    const existingQueuedIds = (
-      connection
-        .prepare('SELECT id FROM assistant_queued_prompts WHERE thread_id = ?')
-        .all(id) as Array<{ id: string }>
-    ).map((row) => row.id);
-    for (const [promptOrdinal, prompt] of queuedPrompts.entries()) {
-      if (!prompt || typeof prompt !== 'object') continue;
-      const promptId = String(prompt.id ?? '').trim();
-      if (!promptId) continue;
-      upsertQueuedPrompt.run(
-        promptId,
-        id,
-        promptOrdinal,
-        optionalText(prompt.prompt),
-        prompt.attachments === undefined ? null : json(prompt.attachments),
-        prompt.promptImages === undefined ? null : json(prompt.promptImages),
-        optionalText(prompt.createdAt),
-        optionalText(prompt.provider),
-        optionalText(prompt.model),
-        optionalText(prompt.thinkingLevel),
-        optionalText(prompt.deliveryMode),
-        extraJson(prompt, [
-          'id',
-          'prompt',
-          'attachments',
-          'promptImages',
-          'createdAt',
-          'provider',
-          'model',
-          'thinkingLevel',
-          'deliveryMode',
-        ]),
-      );
-    }
-    deleteMissingRows(
-      connection,
-      'assistant_queued_prompts',
-      existingQueuedIds,
-      ids(queuedPrompts),
-    );
   }
   deleteMissingRows(connection, 'assistant_threads', existingThreadIds, ids(threads));
 
-  const subscriptions = Array.isArray(state.chatIdleSubscriptions)
-    ? state.chatIdleSubscriptions
-    : [];
-  const existingSubscriptionIds = (
-    connection.prepare('SELECT id FROM assistant_chat_idle_subscriptions').all() as Array<{
-      id: string;
-    }>
-  ).map((row) => row.id);
-  const upsertSubscription = connection.prepare(`
-    INSERT INTO assistant_chat_idle_subscriptions (
-      id, ordinal, thread_id, tool_call_id, mode, targets_json,
-      created_at, expires_at, idle_for_ms, status, idle_since, fired_at,
-      cancelled_at, expired_at, last_result_json, extra_json
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(id) DO UPDATE SET
-      ordinal = excluded.ordinal, thread_id = excluded.thread_id,
-      tool_call_id = excluded.tool_call_id, mode = excluded.mode, targets_json = excluded.targets_json,
-      created_at = excluded.created_at, expires_at = excluded.expires_at,
-      idle_for_ms = excluded.idle_for_ms, status = excluded.status,
-      idle_since = excluded.idle_since, fired_at = excluded.fired_at,
-      cancelled_at = excluded.cancelled_at, expired_at = excluded.expired_at,
-      last_result_json = excluded.last_result_json, extra_json = excluded.extra_json
-    WHERE ordinal IS NOT excluded.ordinal OR thread_id IS NOT excluded.thread_id
-       OR tool_call_id IS NOT excluded.tool_call_id OR mode IS NOT excluded.mode OR targets_json IS NOT excluded.targets_json
-       OR created_at IS NOT excluded.created_at OR expires_at IS NOT excluded.expires_at
-       OR idle_for_ms IS NOT excluded.idle_for_ms OR status IS NOT excluded.status
-       OR idle_since IS NOT excluded.idle_since OR fired_at IS NOT excluded.fired_at
-       OR cancelled_at IS NOT excluded.cancelled_at OR expired_at IS NOT excluded.expired_at
-       OR last_result_json IS NOT excluded.last_result_json OR extra_json IS NOT excluded.extra_json
-  `);
-  for (const [ordinal, subscription] of subscriptions.entries()) {
-    if (!subscription || typeof subscription !== 'object') continue;
-    const id = String(subscription.id ?? '').trim();
-    const threadId = String(subscription.threadId ?? '').trim();
-    if (!id || !threadId) continue;
-    upsertSubscription.run(
-      id,
-      ordinal,
-      threadId,
-      optionalText(subscription.toolCallId),
-      optionalText(subscription.mode),
-      json(subscription.targets),
-      optionalText(subscription.createdAt),
-      optionalText(subscription.expiresAt),
-      optionalNumber(subscription.idleForMs),
-      optionalText(subscription.status),
-      optionalText(subscription.idleSince),
-      optionalText(subscription.firedAt),
-      optionalText(subscription.cancelledAt),
-      optionalText(subscription.expiredAt),
-      subscription.lastResult == null ? null : json(subscription.lastResult),
-      extraJson(subscription, [
-        'id',
-        'threadId',
-        'toolCallId',
-        'mode',
-        'targets',
-        'createdAt',
-        'expiresAt',
-        'idleForMs',
-        'status',
-        'idleSince',
-        'firedAt',
-        'cancelledAt',
-        'expiredAt',
-        'lastResult',
-      ]),
-    );
-  }
-  deleteMissingRows(
-    connection,
-    'assistant_chat_idle_subscriptions',
-    existingSubscriptionIds,
-    ids(subscriptions),
-  );
 }
 
 function readStateRows(connection: HubDatabaseConnection): StoredAssistantState | null {
@@ -586,37 +375,6 @@ function readStateRows(connection: HubDatabaseConnection): StoredAssistantState 
   const threadRows = connection
     .prepare('SELECT * FROM assistant_threads ORDER BY ordinal')
     .all() as ThreadRow[];
-  const messages = connection
-    .prepare('SELECT * FROM assistant_messages ORDER BY thread_id, ordinal')
-    .all() as MessageRow[];
-  const queuedPrompts = connection
-    .prepare('SELECT * FROM assistant_queued_prompts ORDER BY thread_id, ordinal')
-    .all() as QueuedPromptRow[];
-  const messagesByThread = new Map<string, any[]>();
-  for (const row of messages) {
-    const list = messagesByThread.get(row.thread_id) ?? [];
-    list.push(JSON.parse(row.message_json));
-    messagesByThread.set(row.thread_id, list);
-  }
-  const promptsByThread = new Map<string, any[]>();
-  for (const row of queuedPrompts) {
-    const list = promptsByThread.get(row.thread_id) ?? [];
-    list.push(
-      removeUndefined({
-        ...JSON.parse(row.extra_json),
-        id: row.id,
-        prompt: row.prompt ?? undefined,
-        attachments: parseJson(row.attachments_json),
-        promptImages: parseJson(row.prompt_images_json),
-        createdAt: row.created_at ?? undefined,
-        provider: row.provider ?? undefined,
-        model: row.model ?? undefined,
-        thinkingLevel: row.thinking_level ?? undefined,
-        deliveryMode: row.delivery_mode ?? undefined,
-      }),
-    );
-    promptsByThread.set(row.thread_id, list);
-  }
   const threads = threadRows.map((row) =>
     removeUndefined({
       ...JSON.parse(row.extra_json),
@@ -633,38 +391,12 @@ function readStateRows(connection: HubDatabaseConnection): StoredAssistantState 
       accessScope: parseJson(row.access_scope_json),
       autoApprove: row.auto_approve == null ? undefined : row.auto_approve === 1,
       promptDeliveryMode: row.prompt_delivery_mode ?? undefined,
-      messages: messagesByThread.get(row.id) ?? [],
-      queuedPrompts: promptsByThread.get(row.id) ?? [],
       status: row.status ?? undefined,
       error: row.error,
     }),
   );
 
-  const subscriptionRows = connection
-    .prepare('SELECT * FROM assistant_chat_idle_subscriptions ORDER BY ordinal')
-    .all() as SubscriptionRow[];
-  const subscriptions = subscriptionRows.map((row) =>
-    removeUndefined({
-      ...JSON.parse(row.extra_json),
-      id: row.id,
-      threadId: row.thread_id,
-      toolCallId: row.tool_call_id,
-      mode: row.mode ?? undefined,
-      targets: JSON.parse(row.targets_json),
-      createdAt: row.created_at ?? undefined,
-      expiresAt: row.expires_at ?? undefined,
-      idleForMs: row.idle_for_ms ?? undefined,
-      status: row.status ?? undefined,
-      idleSince: row.idle_since,
-      firedAt: row.fired_at,
-      cancelledAt: row.cancelled_at,
-      expiredAt: row.expired_at,
-      lastResult: row.last_result_json == null ? null : JSON.parse(row.last_result_json),
-    }),
-  );
-
   return removeUndefined({
-    activeThreadId: preferences.active_thread_id,
     ...(preferences.default_provider || preferences.default_model
       ? {
           defaultModel: {
@@ -676,7 +408,6 @@ function readStateRows(connection: HubDatabaseConnection): StoredAssistantState 
       : {}),
     defaultEnabledTools: parseJson(preferences.default_enabled_tools_json),
     threads,
-    ...(subscriptions.length > 0 ? { chatIdleSubscriptions: subscriptions } : {}),
     webSearchToolMigrationApplied:
       preferences.web_search_tool_migration_applied == null
         ? undefined

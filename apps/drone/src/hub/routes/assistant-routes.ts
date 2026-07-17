@@ -10,11 +10,14 @@ export type AssistantRouteDependencies = {
   writeAssistantSseEvent: (res: ServerResponse, event: string, data: any) => void;
   resolveDroneOrPendingForReadRef: (ref: string) => Promise<{ id: string } | null>;
   requireWhiteboardStore: () => any;
-  assistantPromptDrains: Map<string, unknown>;
-  startAssistantPromptDrain: (threadId: string, initial?: any) => any;
+  submitAssistantPrompt: (input: {
+    threadId: string;
+    promptId?: string;
+    prompt: string;
+    promptImages?: any[];
+  }) => Promise<any>;
   validateAssistantPromptImages: (attachments: any[]) => any[];
   saveAssistantArtifactUploads: (threadId: string, attachments: any[]) => Promise<any[]>;
-  hubLog: (level: any, message: string, details?: any) => void;
 };
 
 export function registerAssistantRoutes(
@@ -28,11 +31,9 @@ export function registerAssistantRoutes(
     writeAssistantSseEvent,
     resolveDroneOrPendingForReadRef,
     requireWhiteboardStore,
-    assistantPromptDrains,
-    startAssistantPromptDrain,
+    submitAssistantPrompt,
     validateAssistantPromptImages,
     saveAssistantArtifactUploads,
-    hubLog,
   } = deps;
   const errorMessage = (error: any): string => error?.message ?? String(error);
   const respondStatusError = (
@@ -67,10 +68,6 @@ export function registerAssistantRoutes(
     }
   });
 
-  apiRouter.get('/api/assistant/threads', async ({ json: respond }) => {
-    respond(200, await assistantService.snapshot('compact'));
-  });
-
   apiRouter.get('/api/assistant/events', ({ req, res }) => {
     res.statusCode = 200;
     res.setHeader('content-type', 'text/event-stream; charset=utf-8');
@@ -97,31 +94,6 @@ export function registerAssistantRoutes(
     res.on('close', cleanup);
   });
 
-  apiRouter.post('/api/assistant/threads', async ({ readJson, json: respond }) => {
-    const body = await readJson<any>();
-    const cloneThreadId = String(body?.cloneThreadId ?? '').trim();
-    if (!cloneThreadId) {
-      respond(201, await assistantService.createThread(body ?? {}));
-      return;
-    }
-    let clonedThreadId = '';
-    try {
-      if (blipAssistantHost.isThreadRunning(cloneThreadId)) {
-        throw new Error('Stop this assistant thread before cloning it');
-      }
-      const snapshot = await assistantService.cloneThread(cloneThreadId, body ?? {});
-      clonedThreadId = snapshot.activeThreadId;
-      await blipAssistantHost.cloneThread(cloneThreadId, clonedThreadId);
-      respond(201, snapshot);
-    } catch (error: any) {
-      if (clonedThreadId) {
-        await blipAssistantHost.deleteThread(clonedThreadId).catch(() => undefined);
-        await assistantService.deleteThread(clonedThreadId).catch(() => undefined);
-      }
-      respondAssistantError(respond, error);
-    }
-  });
-
   apiRouter.post('/api/assistant/default-model', async ({ readJson, json: respond }) => {
     try {
       respond(200, await assistantService.updateDefaultModel((await readJson()) ?? {}));
@@ -136,12 +108,6 @@ export function registerAssistantRoutes(
     } catch (error: any) {
       respondStatusError(respond, error);
     }
-  });
-
-  apiRouter.post('/api/assistant/context', async ({ readJson, json: respond }) => {
-    const body = await readJson<any>();
-    assistantService.updateAppContext(body ?? {});
-    respond(200, { ok: true });
   });
 
   apiRouter.post('/api/assistant/ui-action', async ({ readJson, json: respond }) => {
@@ -239,12 +205,23 @@ export function registerAssistantRoutes(
     res.setHeader('connection', 'keep-alive');
     req.socket.setTimeout(0);
     (res as any).flushHeaders?.();
-    const unsubscribe = blipAssistantHost.subscribeEvents(params.threadId, (event: any) => {
+    const unsubscribeBlip = blipAssistantHost.subscribeEvents(params.threadId, (event: any) => {
       writeAssistantSseEvent(res, 'blip_event', {
         type: 'blip_event',
         version: 1,
         threadId: params.threadId,
         event,
+      });
+    });
+    const unsubscribeChanges = assistantService.subscribeChanges((event: any) => {
+      if (event.threadId !== params.threadId) return;
+      writeAssistantSseEvent(res, 'native_change', {
+        type: 'native_change',
+        version: 1,
+        threadId: params.threadId,
+        reason: event.reason,
+        sequence: event.sequence,
+        at: event.at,
       });
     });
     writeAssistantSseEvent(res, 'connected', {
@@ -258,9 +235,13 @@ export function registerAssistantRoutes(
       if (!res.destroyed && !res.writableEnded) res.write(': keepalive\n\n');
     }, 25_000);
     (keepAlive as any).unref?.();
+    let cleanedUp = false;
     const cleanup = () => {
+      if (cleanedUp) return;
+      cleanedUp = true;
       clearInterval(keepAlive);
-      unsubscribe();
+      unsubscribeBlip();
+      unsubscribeChanges();
     };
     req.once('close', cleanup);
     res.once('close', cleanup);
@@ -309,6 +290,18 @@ export function registerAssistantRoutes(
     },
   );
 
+  apiRouter.get(
+    '/api/assistant/threads/:threadId/messages/:messageId',
+    async ({ params, json: respond }) => {
+      try {
+        await assistantService.threadSnapshot(params.threadId);
+        respond(200, await blipAssistantHost.message(params.threadId, params.messageId));
+      } catch (error: any) {
+        respondAssistantError(respond, error, /unknown assistant message/i);
+      }
+    },
+  );
+
   apiRouter.get('/api/assistant/threads/:threadId', async ({ params, json: respond }) => {
     try {
       respond(200, await assistantService.threadSnapshot(params.threadId));
@@ -330,24 +323,6 @@ export function registerAssistantRoutes(
       }
     },
   );
-
-  apiRouter.delete('/api/assistant/threads/:threadId', async ({ params, json: respond }) => {
-    try {
-      await assistantService.threadSnapshot(params.threadId);
-      await blipAssistantHost.deleteThread(params.threadId);
-      respond(200, await assistantService.deleteThread(params.threadId));
-    } catch (error: any) {
-      respondAssistantError(respond, error);
-    }
-  });
-
-  apiRouter.post('/api/assistant/threads/:threadId/activate', async ({ params, json: respond }) => {
-    try {
-      respond(200, await assistantService.activateThread(params.threadId));
-    } catch (error: any) {
-      respondAssistantError(respond, error);
-    }
-  });
 
   apiRouter.post('/api/assistant/threads/:threadId/stop', async ({ params, json: respond }) => {
     try {
@@ -457,73 +432,17 @@ export function registerAssistantRoutes(
         const uploaded = await saveAssistantArtifactUploads(params.threadId, artifactUploads);
         if (uploaded.length > 0) {
           const references = uploaded.map((file) => `- ${file.path}`).join('\n');
-          prompt = `${prompt}${prompt ? '\n\n' : ''}Attached assistant files:\n${references}`;
+          prompt = `${prompt}${prompt ? '\n\n' : ''}Attached files:\n${references}`;
         }
         if (!prompt && promptImages.length === 0) throw new Error('missing prompt');
 
-        const threadSnapshot = await assistantService.threadSnapshot(params.threadId);
-        const threadMetadata = threadSnapshot.threads.find(
-          (thread: any) => thread.id === params.threadId,
-        );
-        const requestedTitle = String(body?.prompt ?? '')
-          .replace(/\s+/g, ' ')
-          .trim();
-        if (threadMetadata?.title === 'New thread' && requestedTitle) {
-          await assistantService.updateThread(params.threadId, {
-            title: requestedTitle.slice(0, 80),
-          });
-        }
-        const promptInput =
-          promptImages.length > 0 ? { text: prompt, images: promptImages } : prompt;
-        const shouldQueue =
-          threadMetadata?.promptDeliveryMode !== 'asap' &&
-          (assistantPromptDrains.has(params.threadId) ||
-            blipAssistantHost.isThreadRunning(params.threadId));
-        if (shouldQueue) {
-          const queued = await assistantService.enqueueThreadPrompt(params.threadId, {
-            prompt,
-            promptImages,
-          });
-          const drain = startAssistantPromptDrain(params.threadId);
-          void drain.promise.catch((error: any) => {
-            hubLog('warn', 'assistant queued prompt drain failed', {
-              threadId: params.threadId,
-              error: errorMessage(error),
-            });
-          });
-          writeEvent({ type: 'queued', threadId: params.threadId, prompt: queued });
-        } else if (
-          threadMetadata?.promptDeliveryMode === 'asap' &&
-          blipAssistantHost.isThreadRunning(params.threadId)
-        ) {
-          writeEvent({ type: 'accepted', threadId: params.threadId });
-          await blipAssistantHost.promptThread(params.threadId, promptInput, async (event: any) => {
-            writeEvent({ type: 'blip_event', version: 1, threadId: params.threadId, event });
-          });
-        } else {
-          const drain = startAssistantPromptDrain(params.threadId, {
-            input: promptInput,
-            onEvent: async (event: any) => {
-              writeEvent({ type: 'blip_event', version: 1, threadId: params.threadId, event });
-            },
-          });
-          if (!drain.started) {
-            const queued = await assistantService.enqueueThreadPrompt(params.threadId, {
-              prompt,
-              promptImages,
-            });
-            writeEvent({ type: 'queued', threadId: params.threadId, prompt: queued });
-          } else {
-            writeEvent({ type: 'accepted', threadId: params.threadId });
-            void drain.promise.catch((error: any) => {
-              hubLog('warn', 'assistant prompt drain failed', {
-                threadId: params.threadId,
-                error: errorMessage(error),
-              });
-            });
-            await drain.initialPromise;
-          }
-        }
+        const queued = await submitAssistantPrompt({
+          threadId: params.threadId,
+          promptId: String(body?.promptId ?? '').trim() || undefined,
+          prompt,
+          promptImages,
+        });
+        writeEvent({ type: 'queued', threadId: params.threadId, prompt: queued });
         writeEvent({ type: 'done' });
       } catch (error: any) {
         writeEvent({ type: 'error', error: errorMessage(error) });

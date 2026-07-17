@@ -164,7 +164,7 @@ export function DraftChatWorkspace({
     [],
   );
   const draftAutomationActions = React.useMemo<ChatInputAutomationAction[]>(() => {
-    const supportsDraftAutomation = spawnAgentConfig.kind === 'builtin';
+    const supportsDraftAutomation = spawnAgentConfig.kind !== 'custom';
     const actions: ChatInputAutomationAction[] = [];
     for (const [idx, automation] of (Array.isArray(automations) ? automations : []).entries()) {
       const automationId = String(automation?.id ?? '').trim();

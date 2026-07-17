@@ -419,6 +419,8 @@ export function MobileAssistantTranscript({
   assistantLabel = 'Assistant',
   messageActionsDisabled = false,
   onDeleteMessageRequest,
+  onLoadFullMessage,
+  fullMessageLoadingId = '',
   linkedPullRequests,
 }: {
   messages: AssistantMessage[];
@@ -434,6 +436,8 @@ export function MobileAssistantTranscript({
     sourceMessageIndex: number;
     deleteFollowing: boolean;
   }) => void;
+  onLoadFullMessage?: (message: AssistantMessage) => void;
+  fullMessageLoadingId?: string;
   linkedPullRequests?: MobileLinkedPullRequestContext;
 }) {
   const items = React.useMemo(
@@ -559,6 +563,32 @@ export function MobileAssistantTranscript({
                   </View>
                 ))}
               </View>
+            ) : null}
+            {item.message.meshTruncated ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Load the full message"
+                accessibilityState={{
+                  disabled:
+                    !item.message.id ||
+                    !onLoadFullMessage ||
+                    fullMessageLoadingId === item.message.id,
+                }}
+                disabled={
+                  !item.message.id || !onLoadFullMessage || fullMessageLoadingId === item.message.id
+                }
+                onPress={() => onLoadFullMessage?.(item.message)}
+                style={({ pressed }) => [
+                  styles.fullMessageButton,
+                  pressed && styles.fullMessageButtonPressed,
+                ]}
+              >
+                {fullMessageLoadingId === item.message.id ? (
+                  <ActivityIndicator color={colors.accent} size="small" />
+                ) : (
+                  <Text style={styles.fullMessageText}>Load full message</Text>
+                )}
+              </Pressable>
             ) : null}
           </>
         );
@@ -723,6 +753,20 @@ const styles = StyleSheet.create({
   images: { gap: 8, marginTop: 9 },
   image: { width: '100%', height: 220, borderRadius: 12, backgroundColor: colors.panel },
   attachments: { gap: 6, marginTop: 9 },
+  fullMessageButton: {
+    minHeight: 32,
+    alignSelf: 'flex-start',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 9,
+    paddingHorizontal: 11,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
+    backgroundColor: colors.accentWash,
+  },
+  fullMessageButtonPressed: { opacity: 0.72 },
+  fullMessageText: { color: colors.accent, fontSize: 11, fontWeight: '800' },
   attachment: {
     flexDirection: 'row',
     alignItems: 'center',

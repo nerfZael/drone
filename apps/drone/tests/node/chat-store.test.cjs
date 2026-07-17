@@ -87,12 +87,24 @@ describe('canonical chat and transcript repository', () => {
       chats: { default: legacyChat('stale legacy') },
     });
 
-    assert.equal(readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat.title, 'canonical');
+    const canonical = readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat;
+    assert.equal(canonical.title, 'canonical');
+    assert.match(canonical.id, /^[0-9a-f-]{36}$/i);
+    const stableChatId = canonical.id;
+    await upsertChatInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      chatEntry: legacyChat('canonical again'),
+    });
+    assert.equal(
+      readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat.id,
+      stableChatId,
+    );
     assert.equal(
       requireHubDatabase().read((connection) =>
         connection.prepare("SELECT COUNT(*) AS count FROM hub_schema_migrations WHERE scope = 'chats'").get().count,
       ),
-      4,
+      5,
     );
   });
 

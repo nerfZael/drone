@@ -2,7 +2,6 @@ import type { LlmProviderId } from '../hub-settings';
 import type { AssistantThinkingLevel, AssistantToolSummary } from './assistant-contracts';
 
 export const ASSISTANT_THREAD_MESSAGE_LIMIT = 80;
-export const ASSISTANT_REGISTRY_MAX_THREADS = 24;
 export const ASSISTANT_SYSTEM_PROMPT_MAX_CHARS = 20_000;
 export const CHAT_MESSAGE_DEFAULT_LIMIT = 10;
 export const CHAT_MESSAGE_MAX_LIMIT = 50;
@@ -35,7 +34,7 @@ export const ASSISTANT_MULTI_TARGET_PROMPT_LINE =
 export const ASSISTANT_SINGLE_TARGET_PROMPT_LINE =
   "Filesystem tools are bound to this thread's only workspace. Call them without a target argument; list_targets and set_target are intentionally unavailable.";
 export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
-  'You are Drone Hub Assistant, a concise operator assistant embedded in the Drone Hub app.',
+  'You are the Built-in agent, a concise operator embedded in the app.',
   'You help the user understand available drones and coordinate work across drone chats.',
   'Use get_current_context when the user asks about the current, active, selected, or open drone/chat, or before acting on phrases like "this drone".',
   'Use web_search for current information, documentation, news, prices, schedules, or facts that may have changed. Use fetch_content when the user gives a direct URL to read, inspect, summarize, or analyze. Cite source URLs in the final answer.',
@@ -46,9 +45,8 @@ export const ASSISTANT_SYSTEM_PROMPT_DEFAULT = [
   'File results keep path as the runtime path and include relativePath when the path can be expressed relative to the drone workspace or repo root.',
   'Use get_working_tree_status as a read-only review helper before reviewing or editing; it only works for repo-attached drone targets.',
   'Use read_file line ranges and search_files context when you only need a focused section of a file.',
-  'Use bash only when a command is the right tool for inspection, tests, builds, or small scripted checks in an accessible container drone. Bash is approval-gated, non-interactive, and not for background processes.',
-  'Use set_thinking_level when the user asks to change how much the assistant thinks. It changes this assistant thread to another supported thinking level for the same selected model and does not require approval.',
-  'Use create_new_thread only when the user explicitly asks to start, open, create, clear, reset, or switch to a new assistant thread or session.',
+  'Use bash only when a command is the right tool for inspection, tests, builds, or small scripted checks in a workspace that grants execute access. Bash is approval-gated, non-interactive, and not for background processes.',
+  'Use set_thinking_level when the user asks to change how much the agent thinks. It changes this chat to another supported thinking level for the same selected model and does not require approval.',
   'Use create_group for empty groups, set_drone_group for moving drones to one group, reorder_drones for sidebar order, open_drone_chat for UI navigation, highlight_drones to visually point out drones for about 10 seconds, and open_whiteboard/close_whiteboard for whiteboard panel navigation.',
   'Use whiteboard tools for simple diagrams, rectangles, arrows, and labels. Prefer structured shapes over raw scene JSON. Use capture_whiteboard when you need to inspect or share the full visible board as an image.',
   'File paths are interpreted by drone id plus path. Relative paths resolve inside the target drone workspace, usually the repo root for repo-backed drones.',
@@ -68,7 +66,7 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     name: 'list_drones',
     label: 'List drones',
     category: 'drones',
-    description: 'List drones visible to this assistant thread.',
+    description: 'List drones visible to this chat.',
   },
   {
     name: 'list_repos',
@@ -146,26 +144,20 @@ const ASSISTANT_TOOL_SUMMARY_DEFINITIONS: AssistantToolSummary[] = [
     name: 'get_system_prompt',
     label: 'Get system prompt',
     category: 'prompts',
-    description: 'Read the global and current thread system prompts.',
+    description: 'Read the global and current chat system prompts.',
   },
   {
     name: 'update_system_prompt',
     label: 'Update system prompt',
     category: 'prompts',
-    description: 'Update only this thread system prompt.',
+    description: 'Update only this chat system prompt.',
   },
   {
     name: 'set_thinking_level',
     label: 'Set thinking level',
     category: 'actions',
     description:
-      'Change this assistant thread to a supported thinking level for its current model.',
-  },
-  {
-    name: 'create_new_thread',
-    label: 'Create new thread',
-    category: 'actions',
-    description: 'Open a fresh assistant thread.',
+      'Change this chat to a supported thinking level for its current model.',
   },
   {
     name: 'list_targets',
@@ -394,8 +386,7 @@ export const ASSISTANT_DEFAULT_ENABLED_TOOL_NAMES = ASSISTANT_ALL_TOOL_NAMES.fil
   (name) =>
     name !== 'get_system_prompt' &&
     name !== 'update_system_prompt' &&
-    name !== 'set_thinking_level' &&
-    name !== 'create_new_thread',
+    name !== 'set_thinking_level',
 );
 export const ASSISTANT_DEFAULT_TOOL_MIGRATION_NAMES = [
   'transfer_files',

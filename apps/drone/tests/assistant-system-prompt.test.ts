@@ -3,6 +3,7 @@ import { describe, expect, test } from 'bun:test';
 import { loadAssistantState } from '../src/host/assistant-store';
 import { HubAssistantService } from '../src/hub/assistant';
 import { ASSISTANT_TOOL_SUMMARIES } from '../src/hub/assistant/assistant-config';
+import { ensureTestNativeChat } from './native-chat-test-helpers';
 import { withTempDroneDataDir } from './test-helpers';
 
 function makeAssistantService(): HubAssistantService {
@@ -13,15 +14,15 @@ describe('assistant system prompt settings', () => {
   test('explains that existing-drone scope does not block global drone creation', async () => {
     await withTempDroneDataDir('assistant-global-create-scope-', async () => {
       const service = makeAssistantService();
-      const snapshot = await service.createThread({ title: 'create scope' });
+      const snapshot = await ensureTestNativeChat(service, { chatName: 'create scope' });
       await service.updateAccessScope({
-        threadId: snapshot.activeThreadId,
+        threadId: snapshot.chatId,
         readMode: 'all',
         writeMode: 'selected',
         droneIds: [],
       });
-      const prompt = service.resolvedSystemPrompt(snapshot.activeThreadId);
-      expect(prompt).toContain('Current existing-drone access scope: read=all drones; write=no selected drones; execute=no selected drones.');
+      const prompt = service.resolvedSystemPrompt(snapshot.chatId);
+      expect(prompt).toContain('Current existing-drone access scope: read=all drones; write=selected drones (native-test-drone); execute=selected drones (native-test-drone).');
       expect(prompt).toContain('This scope does not restrict enabled global creation tools such as create_drone, clone_drone, or create_group.');
     });
   });
@@ -37,15 +38,18 @@ describe('assistant system prompt settings', () => {
   test('exposes target selection only when a thread has multiple workspaces', async () => {
     await withTempDroneDataDir('assistant-target-tool-cardinality-', async () => {
       const artifactsOnly = makeAssistantService();
-      const single = await artifactsOnly.createThread({ title: 'artifacts only' });
+      const single = await ensureTestNativeChat(artifactsOnly, { chatName: 'artifacts only' });
       expect(single.availableTools.map((tool) => tool.name)).not.toContain('set_target');
       expect(single.availableTools.map((tool) => tool.name)).not.toContain('transfer_files');
-      expect(artifactsOnly.resolvedSystemPrompt(single.activeThreadId, { multipleWorkspaceTargets: false })).toContain('only workspace');
+      expect(artifactsOnly.resolvedSystemPrompt(single.chatId, { multipleWorkspaceTargets: false })).toContain('only workspace');
 
       const withDrone = new HubAssistantService({
         listDrones: async () => [{ id: 'drone-a', name: 'Drone A', group: null, status: 'ready' } as any],
       });
-      const multiple = await withDrone.createThread({ title: 'multiple targets' });
+      const multiple = await ensureTestNativeChat(withDrone, {
+        droneId: 'drone-a',
+        chatName: 'multiple targets',
+      });
       expect(multiple.availableTools.map((tool) => tool.name)).toEqual(
         expect.arrayContaining(['list_targets', 'set_target', 'transfer_files']),
       );
@@ -55,7 +59,7 @@ describe('assistant system prompt settings', () => {
   test('keeps snapshots available when target discovery fails', async () => {
     await withTempDroneDataDir('assistant-target-discovery-failure-', async () => {
       const service = new HubAssistantService({ listDrones: async () => { throw new Error('registry unavailable'); } });
-      const snapshot = await service.createThread({ title: 'fallback tools' });
+      const snapshot = await ensureTestNativeChat(service, { chatName: 'fallback tools' });
       expect(snapshot.availableTools.map((tool) => tool.name)).not.toContain('set_target');
       expect(snapshot.availableTools.map((tool) => tool.name)).not.toContain('transfer_files');
     });
@@ -67,8 +71,8 @@ describe('assistant system prompt settings', () => {
       const settings = await service.updateSystemPrompt({ prompt: 'Assistant prompt.' });
       expect(settings.assistantSystemPrompt.prompt).toBe('Assistant prompt.');
 
-      const snapshot = await service.createThread({ title: 'thread' });
-      const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
+      const snapshot = await ensureTestNativeChat(service, { chatName: 'thread' });
+      const thread = snapshot.threads.find((item) => item.id === snapshot.chatId) as any;
       expect(thread.systemPrompt).toBe('Assistant prompt.');
 
       const stored = await loadAssistantState();
@@ -82,27 +86,27 @@ describe('assistant system prompt settings', () => {
   test('updates thread prompts independently and promotes them to the matching global default', async () => {
     await withTempDroneDataDir('assistant-thread-system-prompt-', async () => {
       const service = makeAssistantService();
-      const initial = await service.snapshot();
-      const firstThreadId = initial.activeThreadId;
-      const second = await service.createThread({ title: 'second' });
+      const initial = await ensureTestNativeChat(service, { chatName: 'first' });
+      const firstThreadId = initial.chatId;
+      const second = await ensureTestNativeChat(service, { chatName: 'second' });
 
       await service.updateThreadSystemPrompt(firstThreadId, { prompt: 'Thread-only prompt.' });
-      let snapshot = await service.snapshot();
+      let snapshot = await service.threadSnapshot(firstThreadId);
       expect((snapshot.threads.find((thread) => thread.id === firstThreadId) as any).systemPrompt).toBe('Thread-only prompt.');
-      expect((snapshot.threads.find((thread) => thread.id === second.activeThreadId) as any).systemPrompt).not.toBe('Thread-only prompt.');
+      expect((await service.threadSnapshot(second.chatId)).threads[0]?.systemPrompt).not.toBe('Thread-only prompt.');
 
       await service.promoteThreadSystemPrompt(firstThreadId, { prompt: 'Promoted prompt.' });
       expect((await service.systemPromptSettings()).assistantSystemPrompt.prompt).toBe('Promoted prompt.');
-      snapshot = await service.createThread({ title: 'third' });
-      expect((snapshot.threads.find((thread) => thread.id === snapshot.activeThreadId) as any).systemPrompt).toBe('Promoted prompt.');
+      snapshot = await ensureTestNativeChat(service, { chatName: 'third' });
+      expect(snapshot.threads[0]?.systemPrompt).toBe('Promoted prompt.');
     });
   });
 
   test('keeps tool enablement and thinking level as thread metadata for the Blip host', async () => {
     await withTempDroneDataDir('assistant-thread-agent-settings-', async () => {
       const service = makeAssistantService();
-      const created = await service.createThread({ title: 'settings', provider: 'openai', model: 'gpt-5.5' });
-      const threadId = created.activeThreadId;
+      const created = await ensureTestNativeChat(service, { chatName: 'settings', provider: 'openai', model: 'gpt-5.5' });
+      const threadId = created.chatId;
       const updated = await service.updateThread(threadId, {
         enabledTools: ['get_system_prompt', 'set_thinking_level'],
         thinkingLevel: 'high',
@@ -117,9 +121,9 @@ describe('assistant system prompt settings', () => {
   test('migrates legacy artifact, changed-file, and MCP toggle aliases', async () => {
     await withTempDroneDataDir('assistant-legacy-tool-settings-', async () => {
       const service = makeAssistantService();
-      const created = await service.createThread({ title: 'legacy tools' });
-      const updated = await service.updateThread(created.activeThreadId, { enabledTools: ['assistant_files', 'list_changed_files', 'message_drone', 'read_chat_messages'] });
-      const thread = updated.threads.find((item) => item.id === created.activeThreadId) as any;
+      const created = await ensureTestNativeChat(service, { chatName: 'legacy tools' });
+      const updated = await service.updateThread(created.chatId, { enabledTools: ['assistant_files', 'list_changed_files', 'message_drone', 'read_chat_messages'] });
+      const thread = updated.threads[0] as any;
       expect(thread.enabledTools).toEqual(['list_targets', 'set_target', 'get_working_tree_status', 'send_message', 'list_chats', 'read_chat']);
     });
   });
@@ -130,8 +134,8 @@ describe('assistant system prompt settings', () => {
       await service.updateDefaultModel({ provider: 'codex', model: 'gpt-5.5', thinkingLevel: 'high' });
 
       const reloaded = makeAssistantService();
-      const snapshot = await reloaded.createThread({ title: 'default model thread' });
-      const thread = snapshot.threads.find((item) => item.id === snapshot.activeThreadId) as any;
+      const snapshot = await ensureTestNativeChat(reloaded, { chatName: 'default model thread' });
+      const thread = snapshot.threads[0] as any;
       expect(snapshot.defaultModel).toEqual({ provider: 'codex', model: 'gpt-5.5', thinkingLevel: 'high' });
       expect(thread.provider).toBe('codex');
       expect(thread.model).toBe('gpt-5.5');
@@ -142,54 +146,20 @@ describe('assistant system prompt settings', () => {
   test('persists default tools without changing existing threads', async () => {
     await withTempDroneDataDir('assistant-default-tools-', async () => {
       const service = makeAssistantService();
-      const existing = await service.createThread({ title: 'existing' });
-      const existingThread = existing.threads.find((item) => item.id === existing.activeThreadId) as any;
+      const existing = await ensureTestNativeChat(service, { chatName: 'existing' });
+      const existingThread = existing.threads[0] as any;
       const defaults = ['list_drones', 'read_chat'];
 
       await service.updateDefaultEnabledTools({ enabledTools: defaults });
-      const unchanged = await service.threadSnapshot(existing.activeThreadId);
-      expect((unchanged.threads.find((item) => item.id === existing.activeThreadId) as any).enabledTools).toEqual(existingThread.enabledTools);
+      const unchanged = await service.threadSnapshot(existing.chatId);
+      expect(unchanged.threads[0]?.enabledTools).toEqual(existingThread.enabledTools);
 
       const reloaded = makeAssistantService();
-      const created = await reloaded.createThread({ title: 'new defaults' });
-      const thread = created.threads.find((item) => item.id === created.activeThreadId) as any;
+      const created = await ensureTestNativeChat(reloaded, { chatName: 'new defaults' });
+      const thread = created.threads[0] as any;
       expect(created.defaultEnabledTools).toEqual(defaults);
       expect(thread.enabledTools).toEqual(defaults);
     });
   });
 
-  test('persists and manages queued assistant prompts', async () => {
-    await withTempDroneDataDir('assistant-queued-prompts-', async () => {
-      const service = makeAssistantService();
-      const created = await service.createThread({ title: 'queue' });
-      const queued = await service.enqueueThreadPrompt(created.activeThreadId, {
-        prompt: 'Follow up after the current turn',
-        promptImages: [{ type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' }],
-      });
-      expect(queued).toMatchObject({ status: 'queued', prompt: 'Follow up after the current turn', imageCount: 1 });
-      expect(queued.promptImages[0]?.data).toBe('');
-
-      const reloaded = makeAssistantService();
-      const claimed = await reloaded.claimNextQueuedPrompt(created.activeThreadId);
-      expect(claimed?.promptImages[0]?.data).toBe('aW1hZ2U=');
-      await reloaded.completeQueuedPrompt(created.activeThreadId, claimed!.id);
-      expect((await reloaded.threadSnapshot(created.activeThreadId)).threads.find((thread) => thread.id === created.activeThreadId)?.queuedPrompts).toEqual([]);
-
-      const failed = await reloaded.enqueueThreadPrompt(created.activeThreadId, { prompt: 'This one fails' });
-      await reloaded.claimNextQueuedPrompt(created.activeThreadId);
-      await reloaded.failQueuedPrompt(created.activeThreadId, failed.id, new Error('provider unavailable'));
-      const failedSnapshot = await reloaded.threadSnapshot(created.activeThreadId);
-      expect(failedSnapshot.threads.find((thread) => thread.id === created.activeThreadId)?.queuedPrompts[0]).toMatchObject({
-        id: failed.id,
-        status: 'failed',
-        error: 'provider unavailable',
-      });
-      await reloaded.cancelQueuedPrompt(created.activeThreadId, failed.id);
-      expect(await reloaded.hasQueuedPrompts(created.activeThreadId)).toBe(false);
-      for (let index = 0; index < 32; index += 1) {
-        await reloaded.enqueueThreadPrompt(created.activeThreadId, { prompt: `Queued ${index + 1}` });
-      }
-      await expect(reloaded.enqueueThreadPrompt(created.activeThreadId, { prompt: 'Too many' })).rejects.toThrow('queue is full');
-    });
-  });
 });

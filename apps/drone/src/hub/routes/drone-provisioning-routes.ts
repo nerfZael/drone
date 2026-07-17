@@ -35,6 +35,7 @@ type DroneProvisioningDependencyName =
   | 'normalizeDroneDisplayName'
   | 'normalizeDroneRuntime'
   | 'normalizeSubmittedAtIso'
+  | 'notifyCanonicalDroneRegistryWrite'
   | 'nowIso'
   | 'parseAgentPermissionModeForUpdate'
   | 'parseChatModelForUpdate'
