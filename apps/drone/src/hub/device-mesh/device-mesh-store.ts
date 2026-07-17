@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import type { MeshDevice } from '@drone/device-protocol';
+import type { CapabilityGrant, MeshDevice } from '@drone/device-protocol';
 import type { LocalDeviceIdentity } from './device-identity';
 import type { DeviceMeshState } from './device-mesh-types';
 
@@ -12,6 +12,30 @@ function now(): string {
 const TERMINAL_PAIRING_RETENTION_MS = 10 * 60_000;
 const PENDING_PAIRING_RETENTION_MS = 60 * 60_000;
 const EXPIRED_INVITATION_RETENTION_MS = 10 * 60_000;
+
+export function migrateLegacyNativeChatGrants(
+  grants: readonly CapabilityGrant[],
+): CapabilityGrant[] {
+  const legacy = grants.find(
+    (grant) => grant.capability === 'assistant-threads' && grant.version === 1,
+  );
+  const operations = [
+    ...(legacy?.operations.includes('approval.resolve') ? ['chat.approval.resolve'] : []),
+    ...(legacy?.operations.includes('thread.message.delete') ? ['chat.message.delete'] : []),
+  ];
+  if (operations.length === 0) return grants.slice();
+
+  const next = grants.map((grant) => ({ ...grant, operations: [...grant.operations] }));
+  const droneControl = next.find(
+    (grant) => grant.capability === 'drone-control' && grant.version === 1,
+  );
+  if (!droneControl) {
+    next.push({ capability: 'drone-control', version: 1, operations });
+    return next;
+  }
+  droneControl.operations = [...new Set([...droneControl.operations, ...operations])];
+  return next;
+}
 
 export class DeviceMeshStore {
   private state: DeviceMeshState | null = null;
@@ -30,11 +54,19 @@ export class DeviceMeshStore {
       this.state.invitations ??= {};
       this.state.pending ??= {};
       for (const pending of Object.values(this.state.pending)) pending.resolvedAt ??= null;
+      let grantsMigrated = false;
+      for (const device of Object.values(this.state.devices)) {
+        const grants = migrateLegacyNativeChatGrants(device.grants);
+        if (JSON.stringify(grants) === JSON.stringify(device.grants)) continue;
+        device.grants = grants;
+        grantsMigrated = true;
+      }
       if (this.state.selfDeviceId !== this.identity.id || !this.state.devices[this.identity.id]) {
         throw new Error(
           'device mesh identity does not match its state; restore the original identity or remove the device-mesh data directory',
         );
       }
+      if (grantsMigrated) await this.persist();
     } catch (error: any) {
       if (error?.code !== 'ENOENT') throw error;
       const at = now();

@@ -420,12 +420,10 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
         });
       } catch (nextError: any) {
         const stopped = controller.signal.aborted;
-        if (running) {
-          await persistRunning({
-            status: stopped ? 'idle' : 'error',
-            error: stopped ? null : (nextError?.message ?? String(nextError)),
-          });
-        }
+        await persistRunning({
+          status: stopped ? 'idle' : 'error',
+          error: stopped ? null : (nextError?.message ?? String(nextError)),
+        });
         if (!stopped) throw nextError;
       } finally {
         if (abortRef.current?.controller === controller) abortRef.current = null;

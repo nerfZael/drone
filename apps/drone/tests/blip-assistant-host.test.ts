@@ -67,6 +67,9 @@ describe('Blip assistant host', () => {
       const latestPage = await host.historyPage('thread-one', { limit: 2 });
       expect(latestPage.entries).toHaveLength(2);
       expect(latestPage.page.hasOlder).toBe(true);
+      await expect(host.message('thread-one', latestPage.entries[0]!.id)).resolves.toEqual(
+        latestPage.entries[0],
+      );
       const olderPage = await host.historyPage('thread-one', { limit: 2, before: latestPage.page.beforeCursor! });
       expect(olderPage.entries).toHaveLength(2);
       expect(olderPage.page.hasOlder).toBe(false);

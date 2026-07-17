@@ -102,6 +102,10 @@ export class BlipAssistantHost {
     return this.repository.readThreadHistoryPage(threadId, input);
   }
 
+  message(threadId: string, entryId: string): Promise<Record<string, unknown>> {
+    return this.repository.readThreadMessage(threadId, entryId);
+  }
+
   async latestAssistantText(threadId: string): Promise<string> {
     const history = await this.historyPage(threadId, { limit: 50 });
     const message = [...history.entries]

@@ -8,6 +8,8 @@ import { loadOrCreateDeviceIdentity } from './device-identity';
 import { DeviceMeshHttp, type DeviceMeshHttpExtension } from './device-mesh-http';
 import { DeviceMeshIngressHttp } from './device-mesh-ingress-http';
 import { DeviceMeshIngress } from './device-mesh-ingress';
+import { MeshChatAttachmentHttp } from './mesh-chat-attachment-http';
+import { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
 import { DeviceMeshRouter } from './device-mesh-router';
 import { DeviceMeshStore } from './device-mesh-store';
 import { DeviceRouteManager } from './device-route-manager';
@@ -30,6 +32,8 @@ export async function createDeviceMeshService(options: {
   await store.read();
   await store.prunePairingState();
   const capabilities = new CapabilityRegistry();
+  const chatAttachments = new MeshChatAttachmentStore(path.join(options.rootDir, 'attachments'));
+  await chatAttachments.initialize();
   let router: DeviceMeshRouter;
   capabilities.register(
     createDeviceCoreCapability(
@@ -39,7 +43,10 @@ export async function createDeviceMeshService(options: {
     ),
   );
   capabilities.register(
-    createDroneControlCapability({ baseUrl: options.localHubBaseUrl, apiToken: options.apiToken }),
+    createDroneControlCapability(
+      { baseUrl: options.localHubBaseUrl, apiToken: options.apiToken },
+      chatAttachments,
+    ),
   );
   const assistantPolicies = new CrossDeviceAssistantPolicyStore(
     path.join(options.rootDir, 'cross-device-assistant.json'),
@@ -51,6 +58,7 @@ export async function createDeviceMeshService(options: {
   const audit = new DeviceMeshAuditStore(path.join(options.rootDir, 'audit.json'));
   router = new DeviceMeshRouter(identity, store, capabilities, routeManager, audit);
   const extensions: DeviceMeshHttpExtension[] = [
+    new MeshChatAttachmentHttp(chatAttachments),
     new CrossDeviceAssistantPolicyHttp(assistantPolicies, (targetDeviceId) =>
       router.request(targetDeviceId, 'workspace', 'workspaces.list', {}),
     ),
@@ -98,6 +106,7 @@ export async function createDeviceMeshService(options: {
       if (pairingPruneTimer) clearInterval(pairingPruneTimer);
       pairingPruneTimer = null;
       await ingress.close();
+      await chatAttachments.close();
       await capabilities.close();
       router.close();
     },

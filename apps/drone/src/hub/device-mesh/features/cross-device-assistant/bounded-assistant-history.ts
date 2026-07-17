@@ -1,34 +1,57 @@
 const MAX_HISTORY_BYTES = 180 * 1024;
 const MAX_ENTRY_BYTES = 24 * 1024;
 
-function sanitize(value: unknown, depth = 0): unknown {
-  if (typeof value === 'string') return value.slice(0, 4_000);
+function truncateUtf8(value: unknown, maxBytes: number): string {
+  const source = String(value ?? '');
+  const bytes = Buffer.from(source);
+  if (bytes.length <= maxBytes) return source;
+  return `${bytes
+    .subarray(0, Math.max(0, maxBytes - 3))
+    .toString('utf8')
+    .replace(/\uFFFD+$/u, '')}…`;
+}
+
+type SanitizeState = { truncated: boolean };
+
+function sanitize(value: unknown, depth = 0, state: SanitizeState = { truncated: false }): unknown {
+  if (typeof value === 'string') {
+    if (value.length > 4_000) state.truncated = true;
+    return value.slice(0, 4_000);
+  }
   if (typeof value === 'number' || typeof value === 'boolean' || value === null) return value;
-  if (depth >= 7) return '[nested value omitted]';
-  if (Array.isArray(value)) return value.slice(0, 40).map((item) => sanitize(item, depth + 1));
+  if (depth >= 7) {
+    state.truncated = true;
+    return '[nested value omitted]';
+  }
+  if (Array.isArray(value)) {
+    if (value.length > 40) state.truncated = true;
+    return value.slice(0, 40).map((item) => sanitize(item, depth + 1, state));
+  }
   if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    if (entries.length > 50) state.truncated = true;
     return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .slice(0, 50)
-        .map(([key, item]) => [key, sanitize(item, depth + 1)]),
+      entries.slice(0, 50).map(([key, item]) => [key, sanitize(item, depth + 1, state)]),
     );
   }
   return String(value ?? '');
 }
 
 function contentText(value: unknown): string {
-  if (typeof value === 'string') return value;
-  if (!Array.isArray(value)) return JSON.stringify(sanitize(value)).slice(0, 12_000);
-  return value
-    .map((item: any) =>
-      typeof item === 'string'
-        ? item
-        : typeof item?.text === 'string'
-          ? item.text
-          : JSON.stringify(sanitize(item)),
-    )
-    .join('\n')
-    .slice(0, 12_000);
+  if (typeof value === 'string') return truncateUtf8(value, 12_000);
+  if (!Array.isArray(value)) return truncateUtf8(JSON.stringify(sanitize(value)), 12_000);
+  return truncateUtf8(
+    value
+      .map((item: any) =>
+        typeof item === 'string'
+          ? item
+          : typeof item?.text === 'string'
+            ? item.text
+            : JSON.stringify(sanitize(item)),
+      )
+      .join('\n'),
+    12_000,
+  );
 }
 
 function boundedDetails(value: unknown): unknown {
@@ -93,13 +116,23 @@ function boundedDetails(value: unknown): unknown {
 }
 
 function boundedEntry(entry: any): unknown {
-  const sanitized = sanitize(entry);
-  if (Buffer.byteLength(JSON.stringify(sanitized)) <= MAX_ENTRY_BYTES) return sanitized;
+  const state = { truncated: false };
+  const sanitized = sanitize(entry, 0, state) as Record<string, any>;
+  if (Buffer.byteLength(JSON.stringify(sanitized)) <= MAX_ENTRY_BYTES) {
+    if (!state.truncated) return sanitized;
+    return {
+      ...sanitized,
+      meshTruncated: true,
+      ...(sanitized.message && typeof sanitized.message === 'object'
+        ? { message: { ...sanitized.message, meshTruncated: true } }
+        : {}),
+    };
+  }
   const message = entry?.message ?? {};
   return {
     sequence: Number(entry?.sequence ?? 0),
-    id: String(entry?.id ?? ''),
-    timestamp: String(entry?.timestamp ?? ''),
+    id: truncateUtf8(entry?.id, 300),
+    timestamp: truncateUtf8(entry?.timestamp, 100),
     message: {
       role: String(message?.role ?? 'unknown'),
       content: contentText(message?.content),
@@ -108,18 +141,18 @@ function boundedEntry(entry: any): unknown {
       toolCallId: message?.toolCallId ? String(message.toolCallId).slice(0, 300) : undefined,
       toolName: message?.toolName ? String(message.toolName).slice(0, 200) : undefined,
       isError: message?.isError === true,
-      errorMessage: message?.errorMessage
-        ? String(message.errorMessage).slice(0, 4_000)
-        : undefined,
-      truncated: true,
+      errorMessage: message?.errorMessage ? truncateUtf8(message.errorMessage, 4_000) : undefined,
+      meshTruncated: true,
     },
+    meshTruncated: true,
   };
 }
 
 export function boundedAssistantHistory(history: any, maxBytes = MAX_HISTORY_BYTES): unknown {
-  const entries = (Array.isArray(history?.entries) ? history.entries : [])
-    .slice(-60)
-    .map(boundedEntry);
+  const sourceEntries = Array.isArray(history?.entries) ? history.entries : [];
+  const responseTrimmed = sourceEntries.length > 60;
+  const entries = sourceEntries.slice(-60).map(boundedEntry) as any[];
+  const contentTruncated = entries.some((entry) => entry?.meshTruncated === true);
   const result = {
     version: 1,
     threadId: String(history?.threadId ?? ''),
@@ -130,11 +163,40 @@ export function boundedAssistantHistory(history: any, maxBytes = MAX_HISTORY_BYT
       beforeCursor: Number.isFinite(history?.page?.beforeCursor)
         ? Number(history.page.beforeCursor)
         : null,
-      hasOlder: history?.page?.hasOlder === true,
+      hasOlder: history?.page?.hasOlder === true || responseTrimmed,
+      responseTruncated: responseTrimmed,
+      contentTruncated,
     },
   };
-  const byteLimit = Math.max(32 * 1024, Math.min(MAX_HISTORY_BYTES, maxBytes));
-  while (result.entries.length > 1 && Buffer.byteLength(JSON.stringify(result)) > byteLimit)
+  const requestedLimit = Number.isFinite(maxBytes) ? Number(maxBytes) : MAX_HISTORY_BYTES;
+  const byteLimit = Math.max(4 * 1024, Math.min(MAX_HISTORY_BYTES, requestedLimit));
+  while (result.entries.length > 1 && Buffer.byteLength(JSON.stringify(result)) > byteLimit) {
     result.entries.shift();
+    result.page.hasOlder = true;
+    result.page.responseTruncated = true;
+  }
+  if (result.entries.length === 1 && Buffer.byteLength(JSON.stringify(result)) > byteLimit) {
+    const entry = result.entries[0] as any;
+    result.entries[0] = {
+      sequence: Number(entry?.sequence ?? 0),
+      id: truncateUtf8(entry?.id, 160),
+      timestamp: truncateUtf8(entry?.timestamp, 80),
+      message: {
+        role: String(entry?.message?.role ?? 'unknown'),
+        content: truncateUtf8(
+          contentText(entry?.message?.content),
+          Math.max(256, byteLimit - 2_000),
+        ),
+        meshTruncated: true,
+      },
+      meshTruncated: true,
+    };
+    result.page.contentTruncated = true;
+  }
+  if (result.page.hasOlder && result.entries.length > 0) {
+    const firstSequence = Number(result.entries[0]?.sequence);
+    if (Number.isFinite(firstSequence) && firstSequence > 0)
+      result.page.beforeCursor = firstSequence;
+  }
   return result;
 }

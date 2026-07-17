@@ -1,5 +1,9 @@
 import crypto from 'node:crypto';
-import { capabilityRequestSigningText, type SignedCapabilityRequest } from '@drone/device-protocol';
+import {
+  capabilityRequestSigningText,
+  MESH_SAFE_MESSAGE_BYTES,
+  type SignedCapabilityRequest,
+} from '@drone/device-protocol';
 import { WebSocket } from 'ws';
 import { signDeviceText, type LocalDeviceIdentity } from './device-identity';
 
@@ -12,8 +16,6 @@ type PendingRequest = {
   signal?: AbortSignal;
   onAbort?: () => void;
 };
-
-const MAX_REQUEST_BYTES = 240 * 1024;
 
 function send(ws: WebSocket, payload: unknown): void {
   if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(payload));
@@ -60,7 +62,7 @@ export class DeviceMeshRequestClient {
       ...unsigned,
       signature: signDeviceText(this.identity, capabilityRequestSigningText(unsigned)),
     };
-    if (Buffer.byteLength(JSON.stringify(request)) > MAX_REQUEST_BYTES)
+    if (Buffer.byteLength(JSON.stringify(request)) > MESH_SAFE_MESSAGE_BYTES)
       throw Object.assign(new Error('mesh request is too large'), { code: 'REQUEST_TOO_LARGE' });
 
     return await new Promise((resolve, reject) => {

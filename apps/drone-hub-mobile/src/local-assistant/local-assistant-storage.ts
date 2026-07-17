@@ -12,12 +12,6 @@ import {
 
 const THREADS_KEY = 'droneHub.nativeChats.threads.v1';
 const LEGACY_ASSISTANT_THREADS_KEY = 'droneHub.localAssistant.threads.v1';
-const LEGACY_ASSISTANT_PURGE_KEY = 'droneHub.nativeChats.legacyAssistantPurged.v1';
-const LEGACY_ASSISTANT_PREFERENCE_KEYS = [
-  'droneHub.localAssistant.model.v1',
-  'droneHub.localAssistant.thinkingLevel.v1',
-  'droneHub.localAssistant.provider.v1',
-];
 const MAX_MESSAGES_PER_THREAD = 120;
 const MAX_STORED_MESSAGE_CHARS = 24_000;
 const MAX_STORED_THREAD_CHARS = 650_000;
@@ -214,34 +208,41 @@ function cleanThread(value: any): LocalAssistantThread | null {
   };
 }
 
-export async function loadLocalAssistantThreads(): Promise<LocalAssistantThread[]> {
-  if ((await AsyncStorage.getItem(LEGACY_ASSISTANT_PURGE_KEY)) !== '1') {
-    await AsyncStorage.multiRemove([
-      LEGACY_ASSISTANT_THREADS_KEY,
-      ...LEGACY_ASSISTANT_PREFERENCE_KEYS,
-    ]);
-    // The legacy transcript directory is not indexed by AsyncStorage. Purge it once before any
-    // native drone chat can create a replacement session with the same repository. Expo's module
-    // needs to stay lazy because this storage module also runs in the portable Bun test runtime.
-    const { Directory, Paths } = await import('expo-file-system');
-    const legacySessions = new Directory(Paths.document, 'drone-hub-blip-sessions-v1');
-    if (legacySessions.exists) legacySessions.delete();
-    await AsyncStorage.setItem(LEGACY_ASSISTANT_PURGE_KEY, '1');
-  }
-  const stored = await AsyncStorage.getItem(THREADS_KEY);
-  if (!stored) return [];
+export function parseLocalAssistantThreads(raw: string | null): LocalAssistantThread[] | null {
+  if (raw === null) return null;
   try {
-    const parsed = JSON.parse(stored);
-    if (!Array.isArray(parsed)) throw new Error('invalid Built-in chats');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return null;
     return parsed
       .map(cleanThread)
       .filter((thread: LocalAssistantThread | null): thread is LocalAssistantThread =>
         Boolean(thread),
       );
   } catch {
+    return null;
+  }
+}
+
+export async function loadLocalAssistantThreads(): Promise<LocalAssistantThread[]> {
+  const stored = await AsyncStorage.getItem(THREADS_KEY);
+  const threads = parseLocalAssistantThreads(stored);
+  if (threads) return threads;
+  if (stored !== null) {
     await AsyncStorage.removeItem(THREADS_KEY);
+  }
+
+  const legacyStored = await AsyncStorage.getItem(LEGACY_ASSISTANT_THREADS_KEY);
+  const legacyThreads = parseLocalAssistantThreads(legacyStored);
+  if (!legacyThreads) {
+    if (legacyStored !== null) await AsyncStorage.removeItem(LEGACY_ASSISTANT_THREADS_KEY);
     return [];
   }
+
+  // Keep the old value until the canonical write succeeds so an interrupted upgrade cannot lose
+  // the user's chats. Transcript files and assistant preferences remain compatible with the new UI.
+  await AsyncStorage.setItem(THREADS_KEY, JSON.stringify(legacyThreads));
+  await AsyncStorage.removeItem(LEGACY_ASSISTANT_THREADS_KEY);
+  return legacyThreads;
 }
 
 export async function saveLocalAssistantThreads(threads: LocalAssistantThread[]): Promise<void> {

@@ -46,6 +46,11 @@ export async function readDeviceMeshBody(
 
 export type DeviceMeshHttpExtension = {
   handle(request: http.IncomingMessage, response: http.ServerResponse, url: URL): Promise<boolean>;
+  handlePublic?(
+    request: http.IncomingMessage,
+    response: http.ServerResponse,
+    url: URL,
+  ): Promise<boolean>;
 };
 
 const json = deviceMeshJson;
@@ -166,6 +171,10 @@ export class DeviceMeshHttp {
   ): Promise<boolean> {
     const method = String(request.method ?? 'GET').toUpperCase();
     const parts = url.pathname.split('/').filter(Boolean);
+    for (const extension of this.extensions) {
+      if (extension.handlePublic && (await extension.handlePublic(request, response, url)))
+        return true;
+    }
     const isClaim = method === 'POST' && url.pathname === '/api/device-mesh/invitations/claim';
     const isClaimStatus =
       method === 'GET' &&

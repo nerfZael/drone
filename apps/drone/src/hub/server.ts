@@ -275,6 +275,7 @@ import { createTerminalWebSocketServer } from './terminal-websocket-server';
 import { createTerminalWebSocketUpgradeHandler } from './terminal-websocket-upgrade';
 import { registerAssistantRoutes } from './routes/assistant-routes';
 import { NativeChatLifecycle } from './assistant/native-chat-lifecycle';
+import { buildNativeModelCatalog } from './assistant/native-model-catalog';
 import { registerNativeChatRoutes } from './routes/native-chat-routes';
 import { registerCatalogRoutes } from './routes/catalog-routes';
 import { createChatAutomationRouteHandler } from './routes/chat-automation-routes';
@@ -5728,25 +5729,7 @@ export async function startDroneHubApiServer(opts: {
     nativeModelCatalog: async () => {
       const snapshot = await assistantService.defaultSettings();
       return {
-        models: snapshot.models.map((model: any) => {
-          const reasoningLevels = model?.reasoning
-            ? ['off', 'low', 'medium', 'high']
-            : ['off'];
-          const configuredDefault =
-            snapshot.defaultModel.provider === model.provider &&
-            snapshot.defaultModel.model === model.id
-              ? snapshot.defaultModel.thinkingLevel
-              : model.thinkingLevel;
-          return {
-            provider: String(model.provider ?? ''),
-            id: String(model.id ?? ''),
-            label: String(model.name ?? model.id ?? ''),
-            reasoningLevels,
-            defaultReasoningLevel: reasoningLevels.includes(configuredDefault)
-              ? configuredDefault
-              : reasoningLevels[0],
-          };
-        }),
+        models: buildNativeModelCatalog(snapshot.models, snapshot.defaultModel),
       };
     },
     modelCatalogCacheKey,

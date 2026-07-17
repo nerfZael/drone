@@ -290,6 +290,18 @@ export function registerAssistantRoutes(
     },
   );
 
+  apiRouter.get(
+    '/api/assistant/threads/:threadId/messages/:messageId',
+    async ({ params, json: respond }) => {
+      try {
+        await assistantService.threadSnapshot(params.threadId);
+        respond(200, await blipAssistantHost.message(params.threadId, params.messageId));
+      } catch (error: any) {
+        respondAssistantError(respond, error, /unknown assistant message/i);
+      }
+    },
+  );
+
   apiRouter.get('/api/assistant/threads/:threadId', async ({ params, json: respond }) => {
     try {
       respond(200, await assistantService.threadSnapshot(params.threadId));

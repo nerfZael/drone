@@ -14,7 +14,10 @@ const {
 const { looksLikeTransientPromptEnqueueError } = require('../../dist/hub/pendingPromptEnqueue.js');
 const { createDronePendingPromptStore } = require('../../dist/hub/drone-pending-prompts.js');
 const { createPendingDroneStateHelpers } = require('../../dist/hub/drone-pending-state.js');
-const { resetTranscriptStoreForTests, upsertChatInStore } = require('../../dist/hub/transcript-store.js');
+const {
+  resetTranscriptStoreForTests,
+  upsertChatInStore,
+} = require('../../dist/hub/transcript-store.js');
 const { loadRegistryRawSnapshot, saveRegistry } = require('../../dist/host/registry.js');
 
 const originalDroneDataDir = process.env.DRONE_DATA_DIR;
@@ -227,6 +230,64 @@ test('expired leases recover to queued and can be claimed again', async () => {
   );
 });
 
+test('interrupted built-in prompts recover without waiting for their leases to expire', async () => {
+  const queue = repository('native-restart-recovery');
+  const at = '2026-07-10T09:00:00.000Z';
+  await queue.enqueue({ droneId: 'alpha', chatName: 'native', prompt: prompt('native', at) });
+  await queue.enqueue({ droneId: 'alpha', chatName: 'daemon', prompt: prompt('daemon', at) });
+  await queue.claim({
+    droneId: 'alpha',
+    chatName: 'native',
+    promptId: 'native',
+    leaseOwner: 'old-hub-process',
+    leaseMs: 30 * 60_000,
+    now: at,
+  });
+  await queue.claim({
+    droneId: 'alpha',
+    chatName: 'daemon',
+    promptId: 'daemon',
+    leaseOwner: 'live-daemon',
+    leaseMs: 30 * 60_000,
+    now: at,
+  });
+
+  assert.equal(
+    await queue.recoverSendingForChat({
+      droneId: 'alpha',
+      chatName: 'native',
+      now: '2026-07-10T09:00:01.000Z',
+    }),
+    1,
+  );
+  assert.equal(
+    queue.get({ droneId: 'alpha', chatName: 'native', promptId: 'native' }).state,
+    'queued',
+  );
+  assert.equal(
+    queue.get({ droneId: 'alpha', chatName: 'daemon', promptId: 'daemon' }).state,
+    'sending',
+  );
+});
+
+test('failed prompts can be dismissed from the pending queue', async () => {
+  const queue = repository('dismiss-failed');
+  const at = '2026-07-10T09:00:00.000Z';
+  await queue.enqueue({ droneId: 'alpha', chatName: 'default', prompt: prompt('failed', at) });
+  await queue.update({
+    droneId: 'alpha',
+    chatName: 'default',
+    promptId: 'failed',
+    patch: { state: 'failed', error: 'model failed', updatedAt: at },
+  });
+
+  assert.deepEqual(
+    await queue.cancelQueued({ droneId: 'alpha', chatName: 'default', promptId: 'failed' }),
+    { cancelled: true, state: 'failed' },
+  );
+  assert.deepEqual(queue.listPending({ droneId: 'alpha', chatName: 'default' }), []);
+});
+
 test('retry scheduling uses bounded backoff and becomes terminal at max attempts', async () => {
   const queue = repository('retry');
   const at = '2026-07-10T09:00:00.000Z';
@@ -391,18 +452,33 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
     chatName: 'default',
     chatEntry: { createdAt: now, turns: [], pendingPrompts: [] },
   });
-  await getHubDatabase().writeTransaction('test remove compatibility backfill marker', (connection) => {
-    connection.prepare("DELETE FROM hub_drone_lifecycle_backfill WHERE id = 'legacy-registry'").run();
-  });
-  const canonicalCounts = () => getHubDatabase().read((connection) => ({
-    backfillMarkers: connection.prepare('SELECT COUNT(*) AS count FROM hub_drone_lifecycle_backfill').get().count,
-    lifecycle: connection.prepare('SELECT COUNT(*) AS count FROM hub_canonical_drones').get().count,
-    pendingLifecycle: connection.prepare('SELECT COUNT(*) AS count FROM hub_canonical_pending_drones').get().count,
-    chats: connection.prepare('SELECT COUNT(*) AS count FROM canonical_chats').get().count,
-    prompts: connection.prepare('SELECT COUNT(*) AS count FROM prompts').get().count,
-  }));
+  await getHubDatabase().writeTransaction(
+    'test remove compatibility backfill marker',
+    (connection) => {
+      connection
+        .prepare("DELETE FROM hub_drone_lifecycle_backfill WHERE id = 'legacy-registry'")
+        .run();
+    },
+  );
+  const canonicalCounts = () =>
+    getHubDatabase().read((connection) => ({
+      backfillMarkers: connection
+        .prepare('SELECT COUNT(*) AS count FROM hub_drone_lifecycle_backfill')
+        .get().count,
+      lifecycle: connection.prepare('SELECT COUNT(*) AS count FROM hub_canonical_drones').get()
+        .count,
+      pendingLifecycle: connection
+        .prepare('SELECT COUNT(*) AS count FROM hub_canonical_pending_drones')
+        .get().count,
+      chats: connection.prepare('SELECT COUNT(*) AS count FROM canonical_chats').get().count,
+      prompts: connection.prepare('SELECT COUNT(*) AS count FROM prompts').get().count,
+    }));
   const beforePendingRead = canonicalCounts();
-  assert.deepEqual(await loadRegistryRawSnapshot(), rawBeforeEnqueue, 'enqueue must not mirror into registry_json');
+  assert.deepEqual(
+    await loadRegistryRawSnapshot(),
+    rawBeforeEnqueue,
+    'enqueue must not mirror into registry_json',
+  );
   assert.deepEqual(
     (await store.readPendingPrompts({ droneId: 'alpha', chatName: 'default' })).map((item) => ({
       id: item.id,
@@ -414,25 +490,39 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
       { id: 'failed-canonical', state: 'failed', error: 'delivery failed' },
     ],
   );
-  assert.deepEqual(canonicalCounts(), beforePendingRead, 'pending reads must not project or backfill compatibility state');
+  assert.deepEqual(
+    canonicalCounts(),
+    beforePendingRead,
+    'pending reads must not project or backfill compatibility state',
+  );
   assert.equal(canonicalCounts().backfillMarkers, 0);
-  await (await getDroneLifecycleRepository()).upsert('pending', 'starting-alpha', {
+  await (
+    await getDroneLifecycleRepository()
+  ).upsert('pending', 'starting-alpha', {
     id: 'starting-alpha',
     name: 'starting-alpha',
-    startupQueuedPrompts: [{
-      id: 'startup-canonical',
-      chatName: 'default',
-      at: now,
-      prompt: 'start canonically',
-      state: 'queued',
-    }],
+    startupQueuedPrompts: [
+      {
+        id: 'startup-canonical',
+        chatName: 'default',
+        at: now,
+        prompt: 'start canonically',
+        state: 'queued',
+      },
+    ],
   });
   const beforeStartupRead = canonicalCounts();
   assert.deepEqual(
-    (await store.readPendingStartupPrompts({ droneId: 'starting-alpha', chatName: 'default' })).map((item) => item.id),
+    (await store.readPendingStartupPrompts({ droneId: 'starting-alpha', chatName: 'default' })).map(
+      (item) => item.id,
+    ),
     ['startup-canonical'],
   );
-  assert.deepEqual(canonicalCounts(), beforeStartupRead, 'startup pending reads must remain read-only');
+  assert.deepEqual(
+    canonicalCounts(),
+    beforeStartupRead,
+    'startup pending reads must remain read-only',
+  );
   assert.equal(
     await store.claimQueuedPendingPromptForSending({
       droneId: 'alpha',
@@ -464,7 +554,9 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
     'sent',
   );
   assert.deepEqual(
-    (await store.readPendingPrompts({ droneId: 'alpha', chatName: 'default' }))[0].agentPlan.items.map((item) => item.status),
+    (
+      await store.readPendingPrompts({ droneId: 'alpha', chatName: 'default' })
+    )[0].agentPlan.items.map((item) => item.status),
     ['completed', 'in_progress'],
   );
   assert.deepEqual(await loadRegistryRawSnapshot(), rawBeforeEnqueue);

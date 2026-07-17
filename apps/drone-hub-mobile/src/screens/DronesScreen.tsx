@@ -28,6 +28,7 @@ import {
 import { MobileAssistantTranscript } from '../local-assistant/LocalAssistantTranscript';
 import { useLatestMessageScroll } from '../local-assistant/use-latest-message-scroll';
 import { useMesh } from '../mesh/MeshContext';
+import { readMeshJsonContent } from '../mesh/read-mesh-json-content';
 import { colors } from '../theme';
 import {
   NewDroneScreen,
@@ -42,17 +43,21 @@ import {
   mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneCreateRepo,
   normalizeMobileDroneCreateModelCatalog,
+  normalizeMobileNativeChatHistory,
   normalizeMobileDroneListPayload,
   normalizeMobileDroneTurns,
   suggestNextMobileDroneChatName,
   type MobileDroneCreateRepo,
   type MobileDroneCreateModel,
+  type MobileChatHistoryPage,
   type MobileDroneSidebarOrder,
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
 import { mobileDronePendingPrompts } from '../drones/mobile-pending-prompts';
 import { useDroneLinkedPullRequests } from '../drones/use-drone-linked-pull-requests';
 import { useLocalDroneControl } from '../drones/local-drone-control';
+import { ChatImageStrip } from '../drones/ChatImageStrip';
+import { pickChatImages, type MobileChatImage } from '../drones/pick-chat-images';
 import type { DroneControlOperation } from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { LocalWorkspaceEditor } from '../local-assistant/LocalWorkspaceEditor';
@@ -62,6 +67,12 @@ import {
 } from '../local-assistant/AssistantApprovalCard';
 
 const APP_HEADER_HEIGHT = 58;
+const EMPTY_CHAT_HISTORY_PAGE: MobileChatHistoryPage = {
+  beforeCursor: null,
+  hasOlder: false,
+  responseTruncated: false,
+  contentTruncated: false,
+};
 
 export type DronesAppHeaderState = {
   title: string;
@@ -148,6 +159,10 @@ export function DronesScreen({
   const [modelBusy, setModelBusy] = React.useState(false);
   const [turns, setTurns] = React.useState<any[]>([]);
   const [nativeMessages, setNativeMessages] = React.useState<AssistantMessage[] | null>(null);
+  const [chatHistoryPage, setChatHistoryPage] =
+    React.useState<MobileChatHistoryPage>(EMPTY_CHAT_HISTORY_PAGE);
+  const [olderHistoryBusy, setOlderHistoryBusy] = React.useState(false);
+  const [fullMessageBusyId, setFullMessageBusyId] = React.useState('');
   const [nativeChatId, setNativeChatId] = React.useState('');
   const [nativeThread, setNativeThread] = React.useState<any | null>(null);
   const [accessOpen, setAccessOpen] = React.useState(false);
@@ -158,6 +173,7 @@ export function DronesScreen({
   const [pendingPrompts, setPendingPrompts] = React.useState<any[]>([]);
   const [cancellingPromptId, setCancellingPromptId] = React.useState('');
   const [prompt, setPrompt] = React.useState('');
+  const [promptImages, setPromptImages] = React.useState<MobileChatImage[]>([]);
   const [createRepos, setCreateRepos] = React.useState<MobileDroneCreateRepo[]>([]);
   const [busy, setBusy] = React.useState('');
   const [dronesLoaded, setDronesLoaded] = React.useState(false);
@@ -190,6 +206,12 @@ export function DronesScreen({
   targetIdRef.current = targetId;
   selectedRef.current = selected;
   chatNameRef.current = chatName;
+
+  React.useEffect(() => {
+    setChatHistoryPage(EMPTY_CHAT_HISTORY_PAGE);
+    setOlderHistoryBusy(false);
+    setPromptImages([]);
+  }, [chatName, selected?.id, targetId]);
 
   const run = async (key: string, task: () => Promise<void>) => {
     const requestVersion = ++runVersion.current;
@@ -334,6 +356,7 @@ export function DronesScreen({
     setPendingPrompts([]);
     setCancellingPromptId('');
     setPrompt('');
+    setPromptImages([]);
     setCreateRepos([]);
     setBusy('');
     setDronesLoaded(false);
@@ -364,9 +387,7 @@ export function DronesScreen({
       const requestVersion = ++openDroneVersion.current;
       const knownChats = drone.chats;
       const knownChat =
-        requestedChat && knownChats.includes(requestedChat)
-          ? requestedChat
-          : (knownChats[0] ?? '');
+        requestedChat && knownChats.includes(requestedChat) ? requestedChat : (knownChats[0] ?? '');
       setSelected(drone);
       setChats(knownChats);
       setChatName(knownChat);
@@ -395,9 +416,7 @@ export function DronesScreen({
         : [];
       const nextChats = listedChats.length > 0 ? [...new Set(listedChats)] : drone.chats;
       const nextChat =
-        requestedChat && nextChats.includes(requestedChat)
-          ? requestedChat
-          : (nextChats[0] ?? '');
+        requestedChat && nextChats.includes(requestedChat) ? requestedChat : (nextChats[0] ?? '');
       setChats(nextChats);
       setChatName(nextChat);
       if (nextChat) await readChat(drone.id, nextChat);
@@ -417,8 +436,8 @@ export function DronesScreen({
       result?.agent?.kind === 'native'
         ? null
         : result?.agent?.kind === 'builtin'
-        ? mobileDroneAgentId(result.agent.id)
-        : mobileDroneAgentId(result?.agent?.id),
+          ? mobileDroneAgentId(result.agent.id)
+          : mobileDroneAgentId(result?.agent?.id),
     );
     setChatAgentPermissionMode(
       result?.agentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
@@ -432,24 +451,27 @@ export function DronesScreen({
           'drone',
       ).trim() || 'drone',
     );
-    const historyEntries = Array.isArray(result?.history?.entries)
-      ? result.history.entries
-      : Array.isArray(result?.history)
-        ? result.history
-        : [];
+    const nativeHistory = normalizeMobileNativeChatHistory(result?.history);
     const streamingEntries = Array.isArray(result?.streamingMessages)
       ? result.streamingMessages
       : [];
-    const richMessages = result?.historyKind === 'messages'
-      ? [...historyEntries, ...streamingEntries] as AssistantMessage[]
-      : null;
+    const richMessages =
+      result?.historyKind === 'messages'
+        ? ([...nativeHistory.messages, ...streamingEntries] as AssistantMessage[])
+        : null;
     setNativeMessages(richMessages);
     setNativeChatId(String(result?.nativeChatId ?? '').trim());
     setNativeThread(result?.thread ?? null);
-    setPendingApprovals(
-      Array.isArray(result?.pendingApprovals) ? result.pendingApprovals : [],
-    );
+    setPendingApprovals(Array.isArray(result?.pendingApprovals) ? result.pendingApprovals : []);
     setTurns(Array.isArray(result?.turns) ? result.turns : []);
+    const page = result?.historyKind === 'messages' ? nativeHistory.page : result?.page;
+    const beforeCursor = Number(page?.beforeCursor);
+    setChatHistoryPage({
+      beforeCursor: Number.isSafeInteger(beforeCursor) && beforeCursor > 0 ? beforeCursor : null,
+      hasOlder: page?.hasOlder === true,
+      responseTruncated: page?.responseTruncated === true,
+      contentTruncated: page?.contentTruncated === true,
+    });
     setPendingPrompts(Array.isArray(result?.pending) ? result.pending : []);
     if (result?.readState?.unread === false) {
       const clearUnreadChat = (drone: MobileDroneSummary): MobileDroneSummary =>
@@ -477,15 +499,131 @@ export function DronesScreen({
     }
   };
 
+  const loadOlderChatHistory = async () => {
+    if (!selected || !chatHistoryPage.hasOlder || !chatHistoryPage.beforeCursor || olderHistoryBusy)
+      return;
+    const destinationId = targetId;
+    const droneId = selected.id;
+    const activeChat = chatName;
+    setOlderHistoryBusy(true);
+    setError(null);
+    try {
+      const result = await requestDroneControl(destinationId, 'chat.read', {
+        droneId,
+        chatName: activeChat,
+        before: chatHistoryPage.beforeCursor,
+      });
+      if (
+        targetIdRef.current !== destinationId ||
+        selectedRef.current?.id !== droneId ||
+        chatNameRef.current !== activeChat
+      )
+        return;
+      if (result?.historyKind === 'messages') {
+        const older = normalizeMobileNativeChatHistory(result?.history);
+        setNativeMessages((current) => {
+          const latest = current ?? [];
+          const existingIds = new Set(latest.map((message: any) => String(message?.id ?? '')));
+          return [
+            ...older.messages.filter((message: any) => !existingIds.has(String(message?.id ?? ''))),
+            ...latest,
+          ];
+        });
+        setChatHistoryPage((current) => ({
+          ...older.page,
+          contentTruncated: current.contentTruncated || older.page.contentTruncated,
+        }));
+      } else {
+        const olderTurns = Array.isArray(result?.turns) ? result.turns : [];
+        setTurns((current) => {
+          const existingIds = new Set(
+            current.map((turn: any) => String(turn?.id ?? turn?.turn ?? '')),
+          );
+          return [
+            ...olderTurns.filter(
+              (turn: any) => !existingIds.has(String(turn?.id ?? turn?.turn ?? '')),
+            ),
+            ...current,
+          ];
+        });
+        const beforeCursor = Number(result?.page?.beforeCursor);
+        setChatHistoryPage((current) => ({
+          beforeCursor:
+            Number.isSafeInteger(beforeCursor) && beforeCursor > 0 ? beforeCursor : null,
+          hasOlder: result?.page?.hasOlder === true,
+          responseTruncated: result?.page?.responseTruncated === true,
+          contentTruncated: current.contentTruncated || result?.page?.contentTruncated === true,
+        }));
+      }
+    } catch (nextError: any) {
+      if (targetIdRef.current === destinationId) setError(nextError?.message ?? String(nextError));
+    } finally {
+      setOlderHistoryBusy(false);
+    }
+  };
+
+  const loadFullChatMessage = async (message: AssistantMessage) => {
+    if (!selected || !message.id || fullMessageBusyId) return;
+    const destinationId = targetId;
+    const droneId = selected.id;
+    const activeChat = chatName;
+    const messageId = message.id;
+    const native = nativeMessages !== null;
+    const turnId = native ? '' : messageId.replace(/:(?:user|assistant)$/, '');
+    setFullMessageBusyId(messageId);
+    setError(null);
+    try {
+      const content = await readMeshJsonContent(async (contentOffset) => {
+        const result = await requestDroneControl(destinationId, 'chat.read', {
+          droneId,
+          chatName: activeChat,
+          ...(native ? { messageId } : { turnId }),
+          contentOffset,
+        });
+        return result?.contentChunk ?? {};
+      });
+      if (
+        targetIdRef.current !== destinationId ||
+        selectedRef.current?.id !== droneId ||
+        chatNameRef.current !== activeChat
+      )
+        return;
+      if (native) {
+        const fullMessage = content?.message;
+        if (!fullMessage || typeof fullMessage !== 'object')
+          throw new Error('The remote message was invalid');
+        setNativeMessages((current) =>
+          (current ?? []).map((item) =>
+            item.id === messageId ? { ...fullMessage, id: messageId, meshTruncated: false } : item,
+          ),
+        );
+      } else {
+        setTurns((current) =>
+          current.map((turn) =>
+            String(turn?.id ?? turn?.turn ?? '') === turnId
+              ? { ...content, meshTruncated: false }
+              : turn,
+          ),
+        );
+      }
+    } catch (nextError: any) {
+      if (targetIdRef.current === destinationId) setError(nextError?.message ?? String(nextError));
+    } finally {
+      setFullMessageBusyId('');
+    }
+  };
+
   const loadDronesRef = React.useRef(loadDrones);
   loadDronesRef.current = loadDrones;
   readChatRef.current = readChat;
 
   React.useEffect(() => {
     if (!phoneTarget || !selectedRef.current) return;
-    void readChatRef.current(selectedRef.current.id, chatNameRef.current).catch((nextError: any) => {
-      setError(nextError?.message ?? String(nextError));
-    });
+    void readChatRef
+      .current(selectedRef.current.id, chatNameRef.current)
+      .catch((nextError: any) => {
+        setError(nextError?.message ?? String(nextError));
+      });
   }, [localDroneControl.revision, phoneTarget]);
 
   React.useEffect(() => {
@@ -557,35 +695,75 @@ export function DronesScreen({
       await readChat(selected.id, nextChat);
     });
 
+  const addPromptImages = async () => {
+    try {
+      setError(null);
+      const images = await pickChatImages(promptImages);
+      if (images.length > 0) setPromptImages((current) => [...current, ...images]);
+    } catch (nextError: any) {
+      setError(nextError?.message ?? String(nextError));
+    }
+  };
+
   const sendPrompt = (promptOverride?: string) => {
     const nextPrompt = String(promptOverride ?? prompt);
-    if (!selected || !nextPrompt.trim()) return;
+    const images = promptImages;
+    if (!selected || (!nextPrompt.trim() && images.length === 0)) return;
     return run('prompt', async () => {
       const destinationId = targetId;
       const droneId = selected.id;
       const activeChat = chatName;
-      const result = await requestDroneControl(destinationId, 'chat.prompt', {
-        droneId,
-        chatName: activeChat,
-        prompt: nextPrompt,
-      });
-      if (targetIdRef.current !== destinationId) return;
-      setPrompt('');
-      const promptId = String(result?.promptId ?? '').trim();
-      const queuedPromptId = String(result?.queuedPrompt?.id ?? '').trim();
-      const acceptedPromptId = promptId || queuedPromptId;
-      if (acceptedPromptId) {
-        setPendingPrompts((current) => [
-          ...current.filter((item) => String(item?.id ?? '') !== acceptedPromptId),
-          {
-            id: acceptedPromptId,
-            at: new Date().toISOString(),
-            prompt: nextPrompt.trim(),
-            state:
-              queuedPromptId || result?.pendingState === 'queued' ? 'queued' : 'sending',
-          },
-        ]);
+      const attachmentIds: string[] = [];
+      try {
+        for (const image of images) {
+          const attachment = await mesh.uploadChatAttachment({
+            targetDeviceId: destinationId,
+            droneId,
+            chatName: activeChat,
+            name: image.name,
+            mime: image.mime,
+            bytes: image.bytes,
+          });
+          attachmentIds.push(attachment.attachmentId);
+        }
+        const result = await requestDroneControl(destinationId, 'chat.prompt', {
+          droneId,
+          chatName: activeChat,
+          prompt: nextPrompt,
+          ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+        });
+        if (targetIdRef.current !== destinationId) return;
+        setPrompt('');
+        setPromptImages([]);
+        const promptId = String(result?.promptId ?? '').trim();
+        const queuedPromptId = String(result?.queuedPrompt?.id ?? '').trim();
+        const acceptedPromptId = promptId || queuedPromptId;
+        if (acceptedPromptId) {
+          const promptSummary =
+            nextPrompt.trim() || `Attached ${images.length} image${images.length === 1 ? '' : 's'}`;
+          setPendingPrompts((current) => [
+            ...current.filter((item) => String(item?.id ?? '') !== acceptedPromptId),
+            {
+              id: acceptedPromptId,
+              at: new Date().toISOString(),
+              prompt: promptSummary,
+              state: queuedPromptId || result?.pendingState === 'queued' ? 'queued' : 'sending',
+            },
+          ]);
+        }
+      } catch (nextError) {
+        await Promise.all(
+          attachmentIds.map((uploadId) =>
+            requestDroneControl(destinationId, 'chat.prompt', {
+              droneId,
+              chatName: activeChat,
+              attachmentTransfer: { action: 'abort', uploadId },
+            }).catch(() => undefined),
+          ),
+        );
+        throw nextError;
       }
+      if (targetIdRef.current !== destinationId) return;
       await readChat(droneId, activeChat);
       await loadDrones(true);
     });
@@ -595,11 +773,7 @@ export function DronesScreen({
     let created = false;
     await run(`create-${payload.runtime}`, async () => {
       const destinationId = targetId;
-      await requestDroneControl(
-        destinationId,
-        `drone.create.${payload.runtime}`,
-        payload,
-      );
+      await requestDroneControl(destinationId, `drone.create.${payload.runtime}`, payload);
       if (targetIdRef.current !== destinationId) return;
       created = true;
       await loadDrones();
@@ -716,10 +890,10 @@ export function DronesScreen({
     setCancellingPromptId(promptId);
     setError(null);
     void requestDroneControl(destinationId, 'chat.stop', {
-        droneId,
-        chatName: activeChat,
-        promptId,
-      })
+      droneId,
+      chatName: activeChat,
+      promptId,
+    })
       .then(async () => {
         if (targetIdRef.current !== destinationId) return;
         setPendingPrompts((current) =>
@@ -815,6 +989,7 @@ export function DronesScreen({
       setAccessDirty(false);
       setPendingPrompts([]);
       setPrompt('');
+      setPromptImages([]);
       setComposerFocusKey(`${drone.id}:${createdChat}:${Date.now()}`);
       await readChat(drone.id, createdChat);
       await loadDrones(true);
@@ -870,10 +1045,14 @@ export function DronesScreen({
               ? {
                   accessOpen,
                   accessDisabled: running,
-                  ...(phoneTarget ? { onToggleAccess: () => {
-                    if (accessOpen && accessDirty) setConfirmAccessDiscard(true);
-                    else setAccessOpen((value) => !value);
-                  } } : {}),
+                  ...(phoneTarget
+                    ? {
+                        onToggleAccess: () => {
+                          if (accessOpen && accessDirty) setConfirmAccessDiscard(true);
+                          else setAccessOpen((value) => !value);
+                        },
+                      }
+                    : {}),
                   autoApprove: nativeThread?.autoApprove === true,
                   onToggleAutoApprove: () => {
                     const destinationId = targetId;
@@ -958,7 +1137,9 @@ export function DronesScreen({
             name: String(model?.label ?? model?.name ?? model?.id ?? '').trim(),
           };
           const levels = Array.isArray(model?.reasoningLevels)
-            ? model.reasoningLevels.map((level: unknown) => String(level ?? '').trim()).filter(Boolean)
+            ? model.reasoningLevels
+                .map((level: unknown) => String(level ?? '').trim())
+                .filter(Boolean)
             : [];
           return levels.length > 0
             ? levels.map((thinkingLevel: string) => ({ ...base, thinkingLevel }))
@@ -1124,156 +1305,202 @@ export function DronesScreen({
                 {error ? <ErrorBanner message={error} /> : null}
               </View>
             ) : (
-            <>
-            {accessOpen && phoneTarget && nativeChatId ? (
-              <ScrollView style={styles.transcriptScroll} contentContainerStyle={styles.transcriptContent}>
-                {localAssistant.threads.find((thread) => thread.id === nativeChatId) ? (
-                  <LocalWorkspaceEditor
-                    thread={localAssistant.threads.find((thread) => thread.id === nativeChatId)!}
-                    onRequestClose={() => {
-                      if (accessDirty) setConfirmAccessDiscard(true);
-                      else setAccessOpen(false);
-                    }}
-                    onApplied={() => {
-                      setAccessDirty(false);
-                      setAccessOpen(false);
-                    }}
-                    onDirtyChange={setAccessDirty}
-                  />
-                ) : null}
-              </ScrollView>
-            ) : <>
-            {visibleChats.length > 1 ? (
-              <View style={styles.chatTabsFrame}>
-                <ScrollView
-                  ref={chatTabsRef}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.chats}
-                >
-                  {visibleChats.map((chat) => {
-                    const active = chat === chatName;
-                    const chatBusy = selected.busyChats.includes(chat);
-                    const chatUnread = !active && (selected.unreadChats ?? []).includes(chat);
-                    return (
-                      <Pressable
-                        key={chat}
-                        accessibilityLabel={`${chat}${chatUnread ? ', unread' : ''}`}
-                        accessibilityRole="tab"
-                        accessibilityState={{ selected: active }}
-                        onPress={() => !active && void selectChat(chat)}
-                        style={({ pressed }) => [
-                          styles.chatTab,
-                          active && styles.chatTabActive,
-                          pressed && styles.chatTabPressed,
-                        ]}
-                      >
-                        <MessageCircle
-                          color={active ? colors.accent : colors.muted}
-                          size={13}
-                          strokeWidth={active ? 2.2 : 1.8}
-                        />
-                        <Text
-                          numberOfLines={1}
-                          style={[styles.chatText, active && styles.chatTextActive]}
+              <>
+                {accessOpen && phoneTarget && nativeChatId ? (
+                  <ScrollView
+                    style={styles.transcriptScroll}
+                    contentContainerStyle={styles.transcriptContent}
+                  >
+                    {localAssistant.threads.find((thread) => thread.id === nativeChatId) ? (
+                      <LocalWorkspaceEditor
+                        thread={
+                          localAssistant.threads.find((thread) => thread.id === nativeChatId)!
+                        }
+                        onRequestClose={() => {
+                          if (accessDirty) setConfirmAccessDiscard(true);
+                          else setAccessOpen(false);
+                        }}
+                        onApplied={() => {
+                          setAccessDirty(false);
+                          setAccessOpen(false);
+                        }}
+                        onDirtyChange={setAccessDirty}
+                      />
+                    ) : null}
+                  </ScrollView>
+                ) : (
+                  <>
+                    {visibleChats.length > 1 ? (
+                      <View style={styles.chatTabsFrame}>
+                        <ScrollView
+                          ref={chatTabsRef}
+                          horizontal
+                          showsHorizontalScrollIndicator={false}
+                          contentContainerStyle={styles.chats}
                         >
-                          {chat}
-                        </Text>
-                        {chatBusy ? (
-                          <ActivityIndicator color={colors.warning} size="small" />
-                        ) : chatUnread ? (
-                          <View accessible={false} style={styles.chatUnreadDot} />
-                        ) : null}
-                      </Pressable>
-                    );
-                  })}
-                </ScrollView>
-              </View>
-            ) : null}
-            {error ? (
-              <View style={styles.chatError}>
-                <ErrorBanner message={error} />
-              </View>
-            ) : null}
-            <ScrollView
-              ref={latestMessageScroll.ref}
-              style={styles.transcriptScroll}
-              contentContainerStyle={[
-                styles.transcriptContent,
-                !latestMessageScroll.contentVisible && styles.transcriptContentHidden,
-              ]}
-              keyboardDismissMode="interactive"
-              keyboardShouldPersistTaps="handled"
-              onLayout={latestMessageScroll.onLayout}
-              onContentSizeChange={latestMessageScroll.onContentSizeChange}
-              onScroll={latestMessageScroll.onScroll}
-              scrollEventThrottle={16}
-            >
-              <MobileAssistantTranscript
-                messages={transcriptMessages}
-                loading={chatLoading}
-                running={running}
-                currentReasoning={running ? (normalizedTurns.at(-1)?.reasoning ?? '') : ''}
-                emptyTitle="This drone chat is ready."
-                emptyBody="Send a prompt to start the conversation."
-                assistantLabel="Agent"
-                linkedPullRequests={linkedPullRequests}
-                onDeleteMessageRequest={nativeMessages !== null ? ({ message, deleteFollowing }) => {
-                  const messageId = String((message as any)?.id ?? '').trim();
-                  if (!selected || !messageId) return;
-                  const destinationId = targetId;
-                  void requestDroneControl(destinationId, 'chat.message.delete', {
-                    droneId: selected.id,
-                    chatName,
-                    nativeChatId,
-                    messageId,
-                    deleteFollowing,
-                  })
-                    .then(() => readChat(selected.id, chatName))
-                    .catch((nextError: any) => setError(nextError?.message ?? String(nextError)));
-                } : undefined}
-              />
-              <QueuedPromptRows
-                prompts={visiblePendingPrompts}
-                cancellingId={cancellingPromptId}
-                onCancel={cancelPendingPrompt}
-              />
-              {pendingApprovals.map((approval) => (
-                <AssistantApprovalCard
-                  key={approval.id}
-                  approval={approval}
-                  busy={approvalBusyId === approval.id}
-                  onResolve={(approved) => resolveNativeApproval(approval, approved)}
-                />
-              ))}
-            </ScrollView>
-            <AssistantComposer
-              focusKey={composerFocusKey}
-              voiceResetKey={`${targetId}:${selected.id}:${chatName}`}
-              value={prompt}
-              onChangeText={setPrompt}
-              onSend={(promptOverride) => void sendPrompt(promptOverride)}
-              onStop={() => void stopChat()}
-              onOpenModel={() => void openModelPicker()}
-              modelLabel={displayedModel}
-              placeholder={`Message ${selected.name}…`}
-              sending={busy === 'prompt'}
-              running={running}
-              editable
-              queueWhileRunning
-            />
-            <AssistantModelPicker
-              open={modelOpen}
-              currentProvider={chatModelProvider}
-              currentModel={chatModel || latestModel || ''}
-              currentThinkingLevel={chatReasoning}
-              options={chatModels}
-              busy={modelBusy}
-              onClose={() => setModelOpen(false)}
-              onSelect={(choice, selection) => void updateChatModel(choice, selection)}
-            />
-            </>}
-            </>
+                          {visibleChats.map((chat) => {
+                            const active = chat === chatName;
+                            const chatBusy = selected.busyChats.includes(chat);
+                            const chatUnread =
+                              !active && (selected.unreadChats ?? []).includes(chat);
+                            return (
+                              <Pressable
+                                key={chat}
+                                accessibilityLabel={`${chat}${chatUnread ? ', unread' : ''}`}
+                                accessibilityRole="tab"
+                                accessibilityState={{ selected: active }}
+                                onPress={() => !active && void selectChat(chat)}
+                                style={({ pressed }) => [
+                                  styles.chatTab,
+                                  active && styles.chatTabActive,
+                                  pressed && styles.chatTabPressed,
+                                ]}
+                              >
+                                <MessageCircle
+                                  color={active ? colors.accent : colors.muted}
+                                  size={13}
+                                  strokeWidth={active ? 2.2 : 1.8}
+                                />
+                                <Text
+                                  numberOfLines={1}
+                                  style={[styles.chatText, active && styles.chatTextActive]}
+                                >
+                                  {chat}
+                                </Text>
+                                {chatBusy ? (
+                                  <ActivityIndicator color={colors.warning} size="small" />
+                                ) : chatUnread ? (
+                                  <View accessible={false} style={styles.chatUnreadDot} />
+                                ) : null}
+                              </Pressable>
+                            );
+                          })}
+                        </ScrollView>
+                      </View>
+                    ) : null}
+                    {error || nativeThread?.error ? (
+                      <View style={styles.chatError}>
+                        <ErrorBanner message={error || String(nativeThread?.error ?? '')} />
+                      </View>
+                    ) : null}
+                    <ScrollView
+                      ref={latestMessageScroll.ref}
+                      style={styles.transcriptScroll}
+                      contentContainerStyle={[
+                        styles.transcriptContent,
+                        !latestMessageScroll.contentVisible && styles.transcriptContentHidden,
+                      ]}
+                      keyboardDismissMode="interactive"
+                      keyboardShouldPersistTaps="handled"
+                      onLayout={latestMessageScroll.onLayout}
+                      onContentSizeChange={latestMessageScroll.onContentSizeChange}
+                      onScroll={latestMessageScroll.onScroll}
+                      scrollEventThrottle={16}
+                    >
+                      {chatHistoryPage.hasOlder ? (
+                        <Pressable
+                          accessibilityRole="button"
+                          accessibilityLabel="Load older chat messages"
+                          accessibilityState={{ disabled: olderHistoryBusy }}
+                          disabled={olderHistoryBusy}
+                          onPress={() => void loadOlderChatHistory()}
+                          style={({ pressed }) => [
+                            styles.loadOlderButton,
+                            pressed && styles.chatTabPressed,
+                          ]}
+                        >
+                          {olderHistoryBusy ? (
+                            <ActivityIndicator color={colors.accent} size="small" />
+                          ) : (
+                            <Text style={styles.loadOlderText}>Load older messages</Text>
+                          )}
+                        </Pressable>
+                      ) : null}
+                      <MobileAssistantTranscript
+                        messages={transcriptMessages}
+                        loading={chatLoading}
+                        running={running}
+                        currentReasoning={running ? (normalizedTurns.at(-1)?.reasoning ?? '') : ''}
+                        emptyTitle="This drone chat is ready."
+                        emptyBody="Send a prompt to start the conversation."
+                        assistantLabel="Agent"
+                        linkedPullRequests={linkedPullRequests}
+                        onLoadFullMessage={(message) => void loadFullChatMessage(message)}
+                        fullMessageLoadingId={fullMessageBusyId}
+                        onDeleteMessageRequest={
+                          nativeMessages !== null
+                            ? ({ message, deleteFollowing }) => {
+                                const messageId = String((message as any)?.id ?? '').trim();
+                                if (!selected || !messageId) return;
+                                const destinationId = targetId;
+                                void requestDroneControl(destinationId, 'chat.message.delete', {
+                                  droneId: selected.id,
+                                  chatName,
+                                  nativeChatId,
+                                  messageId,
+                                  deleteFollowing,
+                                })
+                                  .then(() => readChat(selected.id, chatName))
+                                  .catch((nextError: any) =>
+                                    setError(nextError?.message ?? String(nextError)),
+                                  );
+                              }
+                            : undefined
+                        }
+                      />
+                      <QueuedPromptRows
+                        prompts={visiblePendingPrompts}
+                        cancellingId={cancellingPromptId}
+                        onCancel={cancelPendingPrompt}
+                      />
+                      {pendingApprovals.map((approval) => (
+                        <AssistantApprovalCard
+                          key={approval.id}
+                          approval={approval}
+                          busy={approvalBusyId === approval.id}
+                          onResolve={(approved) => resolveNativeApproval(approval, approved)}
+                        />
+                      ))}
+                    </ScrollView>
+                    <AssistantComposer
+                      focusKey={composerFocusKey}
+                      voiceResetKey={`${targetId}:${selected.id}:${chatName}`}
+                      value={prompt}
+                      onChangeText={setPrompt}
+                      onSend={(promptOverride) => void sendPrompt(promptOverride)}
+                      onStop={() => void stopChat()}
+                      onOpenModel={() => void openModelPicker()}
+                      modelLabel={displayedModel}
+                      placeholder={`Message ${selected.name}…`}
+                      sending={busy === 'prompt'}
+                      running={running}
+                      editable
+                      queueWhileRunning
+                      hasAttachments={promptImages.length > 0}
+                      onAddAttachment={phoneTarget ? undefined : () => void addPromptImages()}
+                      footer={
+                        <ChatImageStrip
+                          images={promptImages}
+                          disabled={busy === 'prompt'}
+                          onRemove={(id) =>
+                            setPromptImages((current) => current.filter((image) => image.id !== id))
+                          }
+                        />
+                      }
+                    />
+                    <AssistantModelPicker
+                      open={modelOpen}
+                      currentProvider={chatModelProvider}
+                      currentModel={chatModel || latestModel || ''}
+                      currentThinkingLevel={chatReasoning}
+                      options={chatModels}
+                      busy={modelBusy}
+                      onClose={() => setModelOpen(false)}
+                      onSelect={(choice, selection) => void updateChatModel(choice, selection)}
+                    />
+                  </>
+                )}
+              </>
             )}
           </View>
         ) : targetSupportsDrones ? (
@@ -1415,4 +1642,17 @@ const styles = StyleSheet.create({
   transcriptScroll: { flex: 1 },
   transcriptContent: { flexGrow: 1 },
   transcriptContentHidden: { opacity: 0 },
+  loadOlderButton: {
+    minHeight: 38,
+    alignSelf: 'center',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    paddingHorizontal: 16,
+    borderRadius: 6,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panelRaised,
+  },
+  loadOlderText: { color: colors.accent, fontSize: 12, fontWeight: '800' },
 });

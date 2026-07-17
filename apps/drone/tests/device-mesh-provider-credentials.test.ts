@@ -32,6 +32,10 @@ function device(id: string, administrator: boolean): MeshDevice {
   };
 }
 
+function tamperBase64Url(value: string): string {
+  return `${value[0] === 'A' ? 'B' : 'A'}${value.slice(1)}`;
+}
+
 describe('provider credential transfer', () => {
   test('encrypts for one recipient and rejects tampering', () => {
     const transfer = createProviderCredentialRequest();
@@ -61,7 +65,7 @@ describe('provider credential transfer', () => {
     ).toContain('test-secret');
     expect(() =>
       openProviderCredential({
-        envelope: { ...envelope, ciphertext: `${envelope.ciphertext.slice(0, -2)}AA` },
+        envelope: { ...envelope, ciphertext: tamperBase64Url(envelope.ciphertext) },
         privateKey: transfer.privateKey,
         senderDeviceId: 'desktop_1',
         recipientDeviceId: 'phone_1',
@@ -70,7 +74,7 @@ describe('provider credential transfer', () => {
     ).toThrow();
     expect(() =>
       openProviderCredential({
-        envelope: { ...envelope, signature: `${envelope.signature.slice(0, -2)}AA` },
+        envelope: { ...envelope, signature: tamperBase64Url(envelope.signature) },
         privateKey: transfer.privateKey,
         senderDeviceId: 'desktop_1',
         recipientDeviceId: 'phone_1',

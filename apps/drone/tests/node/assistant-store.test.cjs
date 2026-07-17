@@ -106,15 +106,21 @@ describe('assistant SQLite store', () => {
       'INSERT INTO hub_schema_migrations (scope, version, name, applied_at) VALUES (?, ?, ?, ?)',
     );
     for (const migration of ASSISTANT_STORE_MIGRATIONS.filter((item) => item.version < 8)) {
-      recordMigration.run('assistant', migration.version, migration.name, '2026-01-01T00:00:00.000Z');
+      recordMigration.run(
+        'assistant',
+        migration.version,
+        migration.name,
+        '2026-01-01T00:00:00.000Z',
+      );
     }
     legacyDatabase.close();
 
     assert.equal(await loadAssistantState(), null);
     const database = requireHubDatabase();
     assert.equal(
-      database.read((connection) =>
-        connection.prepare('SELECT value FROM assistant_reset_sentinel').get().value,
+      database.read(
+        (connection) =>
+          connection.prepare('SELECT value FROM assistant_reset_sentinel').get().value,
       ),
       'keep me',
     );
@@ -124,10 +130,13 @@ describe('assistant SQLite store', () => {
       'assistant_chat_idle_subscriptions',
     ]) {
       assert.equal(
-        database.read((connection) =>
-          connection
-            .prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?")
-            .get(table).count,
+        database.read(
+          (connection) =>
+            connection
+              .prepare(
+                "SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = ?",
+              )
+              .get(table).count,
         ),
         0,
       );
@@ -204,10 +213,26 @@ describe('assistant SQLite store', () => {
     assert.equal(claimed.promptImages[0].data, 'aW1hZ2U=');
     await service.completeQueuedPrompt(created.chatId, claimed.id);
 
-    for (let index = 0; index < 40; index += 1) {
+    const imageOnly = await service.enqueueThreadPrompt(created.chatId, {
+      promptImages: [{ type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' }],
+    });
+    assert.equal(imageOnly.prompt, '');
+    const claimedImageOnly = await service.claimNextQueuedPrompt(created.chatId);
+    assert.equal(claimedImageOnly.prompt, '');
+    assert.equal(claimedImageOnly.promptImages[0].data, 'aW1hZ2U=');
+    await service.completeQueuedPrompt(created.chatId, claimedImageOnly.id);
+
+    for (let index = 0; index < 32; index += 1) {
       await service.enqueueThreadPrompt(created.chatId, { prompt: `queued ${index}` });
     }
-    assert.equal((await service.threadSnapshot(created.chatId)).threads[0].queuedPrompts.length, 40);
+    await assert.rejects(
+      () => service.enqueueThreadPrompt(created.chatId, { prompt: 'one too many' }),
+      /queue is full \(max 32\)/,
+    );
+    assert.equal(
+      (await service.threadSnapshot(created.chatId)).threads[0].queuedPrompts.length,
+      32,
+    );
   });
 
   test('switches canonical databases when DRONE_DATA_DIR changes', async () => {

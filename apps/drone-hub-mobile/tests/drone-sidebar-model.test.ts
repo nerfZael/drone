@@ -4,6 +4,7 @@ import {
   mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneListPayload,
   normalizeMobileDroneCreateModelCatalog,
+  normalizeMobileNativeChatHistory,
   normalizeMobileDroneTurns,
   normalizeMobileDrones,
   suggestNextMobileDroneChatName,
@@ -11,19 +12,21 @@ import {
 
 describe('mobile drone sidebar model', () => {
   test('normalizes detected create models and their supported reasoning levels', () => {
-    expect(normalizeMobileDroneCreateModelCatalog({
-      models: [
-        {
-          provider: 'codex',
-          id: 'gpt-5.2-codex',
-          label: 'GPT-5.2 Codex',
-          reasoningLevels: ['low', 'medium', 'high', 'high'],
-          defaultReasoningLevel: 'medium',
-        },
-        { provider: 'codex', id: 'gpt-5.2-codex', label: 'duplicate' },
-        { provider: 'openai', id: 'gpt-5.2-codex', label: 'OpenAI variant' },
-      ],
-    })).toEqual([
+    expect(
+      normalizeMobileDroneCreateModelCatalog({
+        models: [
+          {
+            provider: 'codex',
+            id: 'gpt-5.2-codex',
+            label: 'GPT-5.2 Codex',
+            reasoningLevels: ['low', 'medium', 'high', 'high'],
+            defaultReasoningLevel: 'medium',
+          },
+          { provider: 'codex', id: 'gpt-5.2-codex', label: 'duplicate' },
+          { provider: 'openai', id: 'gpt-5.2-codex', label: 'OpenAI variant' },
+        ],
+      }),
+    ).toEqual([
       {
         provider: 'codex',
         id: 'gpt-5.2-codex',
@@ -400,6 +403,61 @@ describe('mobile drone sidebar model', () => {
       ok: true,
       model: 'gpt-5.2-codex',
       attachments: [{ name: 'plan.md', mime: 'text/markdown', size: 42 }],
+    });
+  });
+
+  test('unwraps paged native history entries for the transcript', () => {
+    expect(
+      normalizeMobileNativeChatHistory({
+        entries: [
+          {
+            id: 'message-1',
+            meshTruncated: true,
+            message: { id: 'inner-id', role: 'assistant', content: 'A bounded response' },
+          },
+        ],
+        page: {
+          beforeCursor: 42,
+          hasOlder: true,
+          responseTruncated: true,
+          contentTruncated: true,
+        },
+      }),
+    ).toEqual({
+      messages: [
+        {
+          id: 'message-1',
+          role: 'assistant',
+          content: 'A bounded response',
+          meshTruncated: true,
+        },
+      ],
+      page: {
+        beforeCursor: 42,
+        hasOlder: true,
+        responseTruncated: true,
+        contentTruncated: true,
+      },
+    });
+  });
+
+  test('preserves raw phone-hosted native chat messages', () => {
+    expect(
+      normalizeMobileNativeChatHistory([
+        { id: 'user-1', role: 'user', content: 'Hello from the phone' },
+        { id: 'assistant-1', role: 'assistant', content: 'Hello back' },
+      ]),
+    ).toEqual({
+      messages: [
+        { id: 'user-1', role: 'user', content: 'Hello from the phone' },
+        { id: 'assistant-1', role: 'assistant', content: 'Hello back' },
+      ],
+      page: {
+        beforeCursor: null,
+        hasOlder: false,
+        responseTruncated: false,
+        contentTruncated: false,
+      },
     });
   });
 });

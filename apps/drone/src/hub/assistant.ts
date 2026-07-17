@@ -130,6 +130,7 @@ export type AssistantQueuedPrompt = NativeQueuedPrompt;
 
 type AssistantPromptDeliveryMode = NativePromptDeliveryMode;
 type AssistantDefaultModel = NativeAgentDefaultModel & { thinkingLevel: AssistantThinkingLevel };
+const ASSISTANT_QUEUED_PROMPT_LIMIT = 32;
 
 type AssistantApproval = NativeChatApproval;
 
@@ -1061,13 +1062,10 @@ function normalizeThread(
       fallback.systemPrompt ||
       ASSISTANT_SYSTEM_PROMPT_DEFAULT,
     systemPromptUpdatedAt: cleanOptionalString(raw.systemPromptUpdatedAt) || null,
-    enabledTools: normalizeStoredAssistantEnabledTools(
-      raw.enabledTools,
-      {
-        webSearchDefaultTool: options?.migrateWebSearchDefaultTool === true,
-        fetchContentDefaultTool: options?.migrateFetchContentDefaultTool === true,
-      },
-    ),
+    enabledTools: normalizeStoredAssistantEnabledTools(raw.enabledTools, {
+      webSearchDefaultTool: options?.migrateWebSearchDefaultTool === true,
+      fetchContentDefaultTool: options?.migrateFetchContentDefaultTool === true,
+    }),
     accessScope: makeAssistantAccessScope(raw.accessScope),
     autoApprove: normalizeAssistantAutoApprove(raw.autoApprove),
     promptDeliveryMode: normalizeAssistantPromptDeliveryMode(raw.promptDeliveryMode),
@@ -1243,7 +1241,13 @@ export class HubAssistantService {
 
   private threadStreamingMessages(threadId: string): any[] {
     if (!this.modelStreamingText.has(threadId)) return [];
-    return [{ role: 'assistant', content: [{ type: 'text', text: this.modelStreamingText.get(threadId) ?? '' }], timestamp: Date.now() }];
+    return [
+      {
+        role: 'assistant',
+        content: [{ type: 'text', text: this.modelStreamingText.get(threadId) ?? '' }],
+        timestamp: Date.now(),
+      },
+    ];
   }
 
   private primaryThreadStreamingMessage(threadId: string): any | null {
@@ -1526,9 +1530,7 @@ export class HubAssistantService {
       ok: true,
       chatId: id,
       threads: [
-        this.runningThreadIds.has(id)
-          ? { ...snapshotThread, status: 'running' }
-          : snapshotThread,
+        this.runningThreadIds.has(id) ? { ...snapshotThread, status: 'running' } : snapshotThread,
       ],
       pendingApprovals: this.pendingApprovals(id),
       models: await this.modelOptions(),
@@ -1600,7 +1602,7 @@ export class HubAssistantService {
       : null;
     const provider = requestedProvider
       ? normalizeProvider(requestedProvider)
-      : catalogModel?.provider ?? this.defaultModelSelection.provider;
+      : (catalogModel?.provider ?? this.defaultModelSelection.provider);
     const model = requestedModel || this.defaultModelSelection.model;
     const thread = this.makeThread({
       id,
@@ -1681,7 +1683,8 @@ export class HubAssistantService {
     this.runningThreadIds.delete(threadId);
     this.modelStreamingText.delete(threadId);
     thread.status = 'error';
-    thread.error = cleanOptionalString((error as any)?.message ?? error) || 'Built-in agent prompt failed';
+    thread.error =
+      cleanOptionalString((error as any)?.message ?? error) || 'Built-in agent prompt failed';
     thread.updatedAt = nowIso();
     await this.persist();
     this.emitChange('runtime_error', thread.id);
@@ -1743,9 +1746,7 @@ export class HubAssistantService {
     return this.systemPromptSettingsSync();
   }
 
-  async updateSystemPrompt(input: {
-    prompt?: unknown;
-  }): Promise<AssistantSystemPromptSettings> {
+  async updateSystemPrompt(input: { prompt?: unknown }): Promise<AssistantSystemPromptSettings> {
     await this.ensureLoaded();
     const prompt = normalizeAssistantSystemPrompt(input.prompt);
     if (!prompt) throw new Error('missing system prompt');
@@ -1894,6 +1895,11 @@ export class HubAssistantService {
     await this.ensureLoaded();
     const queue = this.promptQueue();
     if (!queue) return [];
+    // Native executions live in this Hub process. Any row it left as `sending` cannot still be
+    // running after startup, even when its old lease has not expired yet.
+    for (const thread of this.threads) {
+      await queue.recoverSendingForChat(this.promptQueueIdentity(thread));
+    }
     return this.threads
       .filter((thread) => queue.nextQueued(this.promptQueueIdentity(thread)))
       .map((thread) => thread.id);
@@ -2014,9 +2020,7 @@ export class HubAssistantService {
       record.attachments && typeof record.attachments === 'object'
         ? (record.attachments as any)
         : {};
-    const promptImages = Array.isArray(attachments.promptImages)
-      ? attachments.promptImages
-      : [];
+    const promptImages = Array.isArray(attachments.promptImages) ? attachments.promptImages : [];
     return sanitizeQueuedPrompt(
       {
         id: record.id,
@@ -2025,11 +2029,7 @@ export class HubAssistantService {
         imageCount: promptImages.length,
         createdAt: record.at,
         status:
-          record.state === 'failed'
-            ? 'failed'
-            : record.state === 'sending'
-              ? 'running'
-              : 'queued',
+          record.state === 'failed' ? 'failed' : record.state === 'sending' ? 'running' : 'queued',
         error: cleanOptionalString(record.error ?? record.lastError) || null,
       },
       includeImageData,
@@ -2375,6 +2375,9 @@ export class HubAssistantService {
   ): Promise<AssistantQueuedPrompt> {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
+    if (this.queuedPromptsForThread(thread, false).length >= ASSISTANT_QUEUED_PROMPT_LIMIT) {
+      throw new Error(`assistant prompt queue is full (max ${ASSISTANT_QUEUED_PROMPT_LIMIT})`);
+    }
     const prompt = String(input.prompt ?? '').trim();
     const promptImages = Array.isArray(input.promptImages)
       ? input.promptImages
@@ -2421,7 +2424,9 @@ export class HubAssistantService {
     const thread = this.getThread(threadId);
     const identity = this.promptQueueIdentity(thread);
     const queue = this.requirePromptQueue();
-    const claim = options?.allowConcurrent ? queue.claimForSteering.bind(queue) : queue.claim.bind(queue);
+    const claim = options?.allowConcurrent
+      ? queue.claimForSteering.bind(queue)
+      : queue.claim.bind(queue);
     const claimed = await claim({
       ...identity,
       promptId,
@@ -2589,9 +2594,7 @@ export class HubAssistantService {
         allowedModelForProvider(provider, input?.model),
         input?.thinkingLevel,
       ),
-      systemPrompt:
-        normalizeAssistantSystemPrompt(input?.systemPrompt) ||
-        this.defaultSystemPrompt,
+      systemPrompt: normalizeAssistantSystemPrompt(input?.systemPrompt) || this.defaultSystemPrompt,
       systemPromptUpdatedAt: null,
       enabledTools: normalizeAssistantEnabledTools(this.defaultEnabledTools),
       accessScope: input?.accessScope ?? this.defaultAccessScopeForNewThread(),
@@ -2603,7 +2606,9 @@ export class HubAssistantService {
   }
 
   private defaultSystemPromptForThread(_thread: AssistantThread): string {
-    return normalizeAssistantSystemPrompt(this.defaultSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT;
+    return (
+      normalizeAssistantSystemPrompt(this.defaultSystemPrompt) || ASSISTANT_SYSTEM_PROMPT_DEFAULT
+    );
   }
 
   private getThread(threadId: string): AssistantThread {
@@ -2921,14 +2926,14 @@ export class HubAssistantService {
     return [...this.approvals.values()]
       .filter((approval) => approval.threadId === threadId)
       .map((approval) => ({
-      id: approval.id,
-      threadId: approval.threadId,
-      toolCallId: approval.toolCallId,
-      toolName: approval.toolName,
-      label: approval.label,
-      args: sanitizeMessage(approval.args),
-      createdAt: approval.createdAt,
-      status: approval.status,
+        id: approval.id,
+        threadId: approval.threadId,
+        toolCallId: approval.toolCallId,
+        toolName: approval.toolName,
+        label: approval.label,
+        args: sanitizeMessage(approval.args),
+        createdAt: approval.createdAt,
+        status: approval.status,
       }));
   }
 

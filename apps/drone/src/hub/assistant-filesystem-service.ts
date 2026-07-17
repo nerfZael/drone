@@ -383,7 +383,9 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     };
   }
 
-  const ASSISTANT_TRANSFER_CHUNK_BYTES = 256 * 1024;
+  // This chunk can cross the JSON/base64 device-mesh fallback, whose envelope
+  // must remain below the 256 KiB WebSocket message limit.
+  const ASSISTANT_TRANSFER_CHUNK_BYTES = 128 * 1024;
 
   function assistantTransferId(raw: unknown): string {
     const value = String(raw ?? '').trim();

@@ -4,6 +4,7 @@ export async function submitNativeChatPrompt(
   access: LocalHubAccess,
   nativeChatId: string,
   prompt: string,
+  attachments: Array<{ name: string; mime: string; dataBase64: string }> = [],
 ): Promise<any> {
   const response = await fetch(
     new URL(
@@ -16,7 +17,15 @@ export async function submitNativeChatPrompt(
         authorization: `Bearer ${access.apiToken}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ prompt }),
+      body: JSON.stringify({
+        prompt,
+        attachments: attachments.map((attachment) => ({
+          disposition: 'prompt',
+          name: attachment.name,
+          mime: attachment.mime,
+          dataBase64: attachment.dataBase64,
+        })),
+      }),
     },
   );
   if (!response.ok) {

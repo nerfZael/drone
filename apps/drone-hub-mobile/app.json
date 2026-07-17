@@ -27,6 +27,10 @@
         {
           "microphonePermission": "Allow Drone Hub to record voice messages for transcription."
         }
+      ],
+      [
+        "expo-image-picker",
+        { "photosPermission": "Allow Drone Hub to attach selected images to chat prompts." }
       ]
     ]
   }

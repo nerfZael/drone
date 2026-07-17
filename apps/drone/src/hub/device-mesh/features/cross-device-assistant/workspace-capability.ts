@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import type { FileHandle } from 'node:fs/promises';
 import path from 'node:path';
-import { WORKSPACE_CAPABILITY } from '@drone/device-protocol';
+import { MESH_BINARY_CHUNK_BYTES, WORKSPACE_CAPABILITY } from '@drone/device-protocol';
 import type { CapabilityHandler } from '../../device-mesh-types';
 import { isAssistantTransferTemporaryName } from '../../../assistant/is-assistant-transfer-temporary-name';
 import { CommandJobStore } from './command-job-store';
@@ -11,7 +11,6 @@ import { CrossDeviceAssistantPolicyStore } from './policy-store';
 const MAX_FILE_BYTES = 192 * 1024;
 const MAX_SEARCH_ENTRIES = 5_000;
 const MAX_CONTENT_SEARCH_BYTES = 16 * 1024 * 1024;
-const MAX_TRANSFER_CHUNK_BYTES = 256 * 1024;
 const MAX_TRANSFER_DIRECTORY_ENTRIES = 500;
 
 async function readTransferBytes(
@@ -292,9 +291,9 @@ export function createWorkspaceCapability(
         const offset = boundedInteger(payload.offset, 0, 0, Number.MAX_SAFE_INTEGER);
         const length = boundedInteger(
           payload.length,
-          MAX_TRANSFER_CHUNK_BYTES,
+          MESH_BINARY_CHUNK_BYTES,
           1,
-          MAX_TRANSFER_CHUNK_BYTES,
+          MESH_BINARY_CHUNK_BYTES,
         );
         const handle = await fs.open(target, 'r');
         try {
@@ -352,7 +351,7 @@ export function createWorkspaceCapability(
         const id = transferId(payload.transferId);
         const offset = boundedInteger(payload.offset, 0, 0, Number.MAX_SAFE_INTEGER);
         const data = Buffer.from(String(payload.dataBase64 ?? ''), 'base64');
-        if (data.length > MAX_TRANSFER_CHUNK_BYTES)
+        if (data.length > MESH_BINARY_CHUNK_BYTES)
           throw Object.assign(new Error('transfer chunk is too large'), {
             code: 'INVALID_REQUEST',
           });

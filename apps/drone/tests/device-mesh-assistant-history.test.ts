@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import { boundedAssistantHistory } from '../src/hub/device-mesh/features/cross-device-assistant/bounded-assistant-history';
+import { compactNativeChatReadResponse } from '../src/hub/device-mesh/native-chat-response';
 
 describe('mesh assistant history', () => {
   test('keeps responses below the mesh message budget', () => {
@@ -29,6 +30,9 @@ describe('mesh assistant history', () => {
     expect(Buffer.byteLength(serialized)).toBeLessThanOrEqual(180 * 1024);
     expect(serialized).toContain('desktop');
     expect((history as any).entries.at(-1).id).toBe('message_80');
+    expect(history.page.responseTruncated).toBe(true);
+    expect(history.page.contentTruncated).toBe(true);
+    expect(history.entries.at(-1).message.meshTruncated).toBe(true);
   });
 
   test('honors a smaller caller budget when queue metadata shares the response', () => {
@@ -44,6 +48,64 @@ describe('mesh assistant history', () => {
     );
     expect(Buffer.byteLength(JSON.stringify(history))).toBeLessThanOrEqual(64 * 1024);
     expect(history.entries.at(-1).id).toBe('message_59');
+  });
+
+  test('bounds one large multi-byte message and marks it as shortened', () => {
+    const history: any = boundedAssistantHistory(
+      {
+        threadId: 'thread_1',
+        entries: [
+          {
+            sequence: 1,
+            id: 'message_1',
+            message: { role: 'assistant', content: '🌍'.repeat(30_000) },
+          },
+        ],
+      },
+      8 * 1024,
+    );
+    expect(Buffer.byteLength(JSON.stringify(history))).toBeLessThanOrEqual(8 * 1024);
+    expect(history.entries[0].message.meshTruncated).toBe(true);
+    expect(history.page.contentTruncated).toBe(true);
+  });
+
+  test('keeps unified native chat responses below the mesh frame limit', () => {
+    const response = compactNativeChatReadResponse({
+      nativeChatId: 'native_1',
+      snapshot: {
+        threads: [
+          {
+            id: 'native_1',
+            title: 'Chat',
+            systemPrompt: 'x'.repeat(100_000),
+            queuedPrompts: Array.from({ length: 100 }, (_, index) => ({
+              id: `prompt_${index}`,
+              prompt: 'q'.repeat(20_000),
+              status: 'queued',
+            })),
+          },
+        ],
+        pendingApprovals: Array.from({ length: 20 }, (_, index) => ({
+          id: `approval_${index}`,
+          threadId: 'native_1',
+          status: 'pending',
+          args: { content: 'a'.repeat(30_000) },
+        })),
+        streamingMessages: [{ role: 'assistant', content: 's'.repeat(100_000) }],
+      },
+      history: {
+        threadId: 'native_1',
+        entries: Array.from({ length: 100 }, (_, index) => ({
+          id: `message_${index}`,
+          message: { role: 'assistant', content: 'h'.repeat(30_000) },
+        })),
+      },
+    });
+
+    expect(Buffer.byteLength(JSON.stringify(response))).toBeLessThanOrEqual(205 * 1024);
+    expect(response.history.entries.at(-1).id).toBe('message_99');
+    expect(response.thread?.queuedPrompts).toHaveLength(32);
+    expect(response.pendingApprovals).toHaveLength(8);
   });
 
   test('preserves transfer result pairing and bounded progress details', () => {

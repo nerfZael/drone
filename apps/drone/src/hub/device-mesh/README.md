@@ -13,12 +13,21 @@ Responsibilities are separated as follows:
 - `device-mesh-store.ts` and `device-identity.ts`: local durable state and P-256 identity;
 - `device-mesh-audit-store.ts`: bounded target-side operation history;
 - `capability-registry.ts`: feature-neutral operation dispatch;
-- `device-core-capability.ts` and `drone-control-capability.ts`: core and drone adapters;
-- `features/cross-device-assistant`: separate assistant-thread and workspace adapters, bounded assistant history, destination-owned device/workspace grants, and origin-owned thread targets.
+- `device-core-capability.ts` and `drone-control-capability.ts`: core and unified drone-chat adapters, including Built-in agent chats;
+- `features/cross-device-assistant`: workspace adapters, bounded assistant history, and destination-owned device/workspace grants.
 
 Remote Bash uses destination-owned asynchronous command jobs. Starting a command returns a job
 handle; signed output requests consume incremental chunks; status and cancellation are separate
 operations. Jobs are scoped to the requesting device and workspace, retain bounded output in memory,
 default to 30 minutes, and cannot run longer than one hour.
+
+The authenticated WebSocket is the required control path and supports direct and one-hop relayed
+devices. Complete messages are capped at 256 KiB. Chat history is paged, oversized message bodies
+are fetched in bounded chunks, and large responses fail explicitly instead of closing the socket.
+
+Prompt images use short-lived upload sessions. A client with a direct destination endpoint uploads
+the binary body over HTTP and then sends only the attachment id in `chat.prompt`. When the
+destination is reachable only through another mesh device, the same session accepts bounded base64
+chunks through `chat.prompt`. HTTP is therefore an optimization, not a connectivity requirement.
 
 State is stored under the normal Drone Hub data directory in `device-mesh/`. The Hub API token is used only by local loopback adapters and is never placed in a mesh message.
