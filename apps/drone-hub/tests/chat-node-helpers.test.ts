@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   hasOnlyDefaultChat,
+  nextUnreadChatReadCursor,
   reconcileManualUnreadMarker,
   resolveCanvasChatDisplay,
   unreadChatNodeIdsForDrone,
@@ -103,5 +104,40 @@ describe('chat node helpers', () => {
         latestAgentRevision: 3,
       }),
     ).toBeNull();
+  });
+
+  test('continues a read acknowledgement from the newer server cursor when the registry is stale', () => {
+    expect(
+      nextUnreadChatReadCursor(
+        {
+          unread: true,
+          latestAgentTurnId: 'turn-1',
+          latestAgentRevision: 1,
+        },
+        {
+          unread: true,
+          latestAgentTurnId: 'turn-2',
+          latestAgentRevision: 2,
+        },
+        {
+          unread: true,
+          latestAgentTurnId: 'turn-1',
+          latestAgentRevision: 1,
+        },
+      ),
+    ).toEqual({
+      unread: true,
+      latestAgentTurnId: 'turn-2',
+      latestAgentRevision: 2,
+    });
+  });
+
+  test('stops a read acknowledgement when neither cursor has advanced', () => {
+    const current = {
+      unread: true,
+      latestAgentTurnId: 'turn-2',
+      latestAgentRevision: 2,
+    };
+    expect(nextUnreadChatReadCursor(current, current, current)).toBeNull();
   });
 });
