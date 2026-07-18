@@ -130,12 +130,14 @@ export function AssistantModelPicker({
         <View style={[styles.sheet, { marginBottom: Math.max(insets.bottom + 6, 12) }]}>
           <View style={styles.handle} />
           <View style={styles.sectionHead}>
-            <Text style={styles.sectionTitle}>{showReasoning ? 'Reasoning' : 'Model'}</Text>
+            <Text style={styles.sectionTitle}>
+              {showReasoning && !modelsOpen ? 'Reasoning' : 'Model'}
+            </Text>
             <Pressable onPress={onClose} style={styles.close}>
               <X color={colors.muted} size={19} strokeWidth={2} />
             </Pressable>
           </View>
-          {showReasoning ? (
+          {showReasoning && !modelsOpen ? (
             <View style={styles.reasoningList}>
               {visibleReasoning.map((level) => {
                 const active = level === selectedReasoning;
@@ -156,12 +158,9 @@ export function AssistantModelPicker({
             </View>
           ) : null}
           <Pressable onPress={() => setModelsOpen((value) => !value)} style={styles.modelToggle}>
-            <View style={styles.choiceCopy}>
-              <Text style={styles.modelToggleTitle}>Model</Text>
-              <Text numberOfLines={1} style={styles.modelToggleValue}>
-                {currentName}
-              </Text>
-            </View>
+            <Text numberOfLines={1} style={styles.modelToggleValue}>
+              {currentName}
+            </Text>
             {modelsOpen ? (
               <ChevronUp color={colors.accent} size={17} strokeWidth={2.2} />
             ) : (
@@ -210,14 +209,13 @@ export function AssistantModelPicker({
 const styles = StyleSheet.create({
   layer: {
     flex: 1,
-    alignItems: 'center',
+    alignItems: 'flex-end',
     justifyContent: 'flex-end',
     paddingHorizontal: 10,
-    backgroundColor: colors.overlaySoft,
   },
   sheet: {
-    width: '100%',
-    maxWidth: 520,
+    width: 'auto',
+    maxWidth: '92%',
     maxHeight: '72%',
     borderRadius: 24,
     borderWidth: 1,
@@ -241,9 +239,11 @@ const styles = StyleSheet.create({
     minHeight: 45,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
     paddingLeft: 16,
   },
-  sectionTitle: { flex: 1, color: colors.textStrong, fontSize: 17, fontWeight: '800' },
+  sectionTitle: { color: colors.textStrong, fontSize: 17, fontWeight: '800' },
   close: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
   scroll: { flexGrow: 0 },
   list: { paddingHorizontal: 12, paddingBottom: 8, gap: 5 },
@@ -257,28 +257,30 @@ const styles = StyleSheet.create({
   },
   modelStateText: { color: colors.muted, fontSize: 11, textAlign: 'center' },
   reasoningList: {
-    flexDirection: 'row',
-    paddingHorizontal: 10,
+    alignItems: 'flex-start',
+    paddingHorizontal: 12,
     paddingBottom: 10,
     gap: 5,
   },
   reasoningChoice: {
-    flex: 1,
-    minHeight: 38,
+    alignSelf: 'flex-start',
+    minHeight: 42,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: 3,
-    paddingHorizontal: 5,
-    borderRadius: 10,
+    gap: 5,
+    paddingHorizontal: 12,
+    borderRadius: 12,
     borderWidth: 1,
     borderColor: 'transparent',
   },
-  reasoningName: { color: colors.muted, fontSize: 10, fontWeight: '800' },
+  reasoningName: { color: colors.muted, fontSize: 13, fontWeight: '700' },
   modelToggle: {
-    minHeight: 54,
+    minHeight: 46,
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
     marginHorizontal: 10,
     marginBottom: 10,
     paddingHorizontal: 12,
@@ -287,8 +289,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.panelRaised,
   },
-  modelToggleTitle: { color: colors.text, fontSize: 12, fontWeight: '800' },
-  modelToggleValue: { color: colors.muted, fontSize: 10, marginTop: 3 },
+  modelToggleValue: { flexShrink: 1, color: colors.text, fontSize: 12, fontWeight: '800' },
   choice: {
     minHeight: 46,
     flexDirection: 'row',

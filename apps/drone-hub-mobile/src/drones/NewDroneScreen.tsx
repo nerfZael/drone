@@ -846,7 +846,6 @@ export function NewDroneScreen({
                     currentThinkingLevel={reasoning}
                     options={modelChoices}
                     busy={modelsLoading}
-                    showReasoning={Boolean(selectedModel?.reasoningLevels.length)}
                     onClose={() => setModelPickerOpen(false)}
                     onSelect={(choice, selection) => {
                       if (selection === 'model') {
@@ -854,6 +853,7 @@ export function NewDroneScreen({
                         setModelProvider(choice.provider);
                       }
                       if (choice.thinkingLevel) setReasoning(choice.thinkingLevel);
+                      if (selection === 'reasoning') setModelPickerOpen(false);
                     }}
                   />
                 </>

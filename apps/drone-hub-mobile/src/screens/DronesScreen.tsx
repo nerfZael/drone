@@ -1471,6 +1471,7 @@ export function DronesScreen({
                       onStop={() => void stopChat()}
                       onOpenModel={() => void openModelPicker()}
                       modelLabel={displayedModel}
+                      reasoningLabel={chatReasoning}
                       placeholder={`Message ${selected.name}…`}
                       sending={busy === 'prompt'}
                       running={running}
