@@ -35,6 +35,8 @@ import { DronesScreen, type DronesAppHeaderState } from '../screens/DronesScreen
 import { PairScreen } from '../screens/PairScreen';
 import { SettingsScreen, type SettingsTab } from '../screens/SettingsScreen';
 import { colors } from '../theme';
+import { resolveAvailableDeviceSelection } from './device-selection-model';
+import { loadSelectedDeviceId, saveSelectedDeviceId } from './device-selection-storage';
 
 const DRAWER_EDGE_SWIPE_WIDTH = 12;
 
@@ -123,6 +125,7 @@ function Shell() {
   const [pairReturnTab, setPairReturnTab] = React.useState<Tab>('drones');
   const [appDrawerOpen, setAppDrawerOpen] = React.useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = React.useState('');
+  const [deviceSelectionLoaded, setDeviceSelectionLoaded] = React.useState(false);
   const [settingsTab, setSettingsTab] = React.useState<SettingsTab>('assistant');
   const [headerMenuOpen, setHeaderMenuOpen] = React.useState(false);
   const [dronesHeader, setDronesHeader] = React.useState<DronesAppHeaderState | null>(null);
@@ -152,14 +155,39 @@ function Shell() {
       })),
     ];
   }, [mesh.connectedDeviceIds, mesh.devices, mesh.identity?.id, mesh.identity?.name]);
-  const activeDeviceId = devicePickerItems.some((device) => device.id === selectedDeviceId)
-    ? selectedDeviceId
-    : (devicePickerItems[0]?.id ?? '');
+  const activeDeviceId = deviceSelectionLoaded
+    ? resolveAvailableDeviceSelection(devicePickerItems, selectedDeviceId)
+    : '';
   const pairingVisible = pairing || !mesh.profile;
   React.useEffect(() => {
-    if (devicePickerItems.some((device) => device.id === selectedDeviceId)) return;
-    setSelectedDeviceId(devicePickerItems[0]?.id ?? '');
-  }, [devicePickerItems, selectedDeviceId]);
+    let active = true;
+    void loadSelectedDeviceId()
+      .then((deviceId) => {
+        if (active) setSelectedDeviceId(deviceId);
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (active) setDeviceSelectionLoaded(true);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  React.useEffect(() => {
+    if (!deviceSelectionLoaded) return;
+    const nextDeviceId = resolveAvailableDeviceSelection(devicePickerItems, selectedDeviceId);
+    if (nextDeviceId === selectedDeviceId) return;
+    setSelectedDeviceId(nextDeviceId);
+    void saveSelectedDeviceId(nextDeviceId).catch(() => undefined);
+  }, [devicePickerItems, deviceSelectionLoaded, selectedDeviceId]);
+  const selectDevice = React.useCallback(
+    (deviceId: string) => {
+      const nextDeviceId = resolveAvailableDeviceSelection(devicePickerItems, deviceId);
+      setSelectedDeviceId(nextDeviceId);
+      void saveSelectedDeviceId(nextDeviceId).catch(() => undefined);
+    },
+    [devicePickerItems],
+  );
   React.useEffect(() => setHeaderMenuOpen(false), [activeDeviceId, pairingVisible, tab]);
   const { width: windowWidth } = useWindowDimensions();
   const drawerWidth = appDrawerWidth(windowWidth);
@@ -209,7 +237,7 @@ function Shell() {
     [drawerOffset],
   );
 
-  if (mesh.loading) {
+  if (mesh.loading || !deviceSelectionLoaded) {
     return (
       <SafeAreaView style={styles.loading}>
         <ActivityIndicator color={colors.accent} />
@@ -341,7 +369,7 @@ function Shell() {
       onHeaderChange={handleDronesHeaderChange}
       selectedDeviceId={activeDeviceId}
       devicePickerItems={devicePickerItems}
-      onDeviceChange={setSelectedDeviceId}
+      onDeviceChange={selectDevice}
     />
   ) : (
     <DevicesScreen />
@@ -361,7 +389,7 @@ function Shell() {
           navigationItems={navigationItems}
           devicePickerItems={devicePickerItems}
           activeDeviceId={activeDeviceId}
-          onSelectDevice={setSelectedDeviceId}
+          onSelectDevice={selectDevice}
           onClose={() => setAppDrawerOpen(false)}
         />
       ) : null}
