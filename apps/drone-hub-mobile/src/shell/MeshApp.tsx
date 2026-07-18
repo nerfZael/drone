@@ -22,6 +22,7 @@ import SlidersHorizontal from 'lucide-react-native/icons/sliders-horizontal';
 import Trash2 from 'lucide-react-native/icons/trash-2';
 import { MeshProvider, useMesh } from '../mesh/MeshContext';
 import { LocalAssistantProvider } from '../local-assistant/LocalAssistantContext';
+import { MobileChatVoiceRecorderProvider } from '../local-assistant/MobileChatVoiceRecorderContext';
 import {
   AppDrawerProvider,
   AppDrawer,
@@ -458,9 +459,11 @@ export function MeshApp() {
   return (
     <MeshProvider>
       <LocalAssistantProvider>
-        <AppDrawerProvider>
-          <Shell />
-        </AppDrawerProvider>
+        <MobileChatVoiceRecorderProvider>
+          <AppDrawerProvider>
+            <Shell />
+          </AppDrawerProvider>
+        </MobileChatVoiceRecorderProvider>
       </LocalAssistantProvider>
     </MeshProvider>
   );

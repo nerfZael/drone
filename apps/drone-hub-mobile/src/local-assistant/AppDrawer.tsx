@@ -1,12 +1,15 @@
 import React from 'react';
+import * as Clipboard from 'expo-clipboard';
 import {
   ActivityIndicator,
   Animated,
   Modal,
+  Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
+  ToastAndroid,
   useWindowDimensions,
   View,
 } from 'react-native';
@@ -22,10 +25,17 @@ import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import FolderGit2 from 'lucide-react-native/icons/folder-git-2';
 import Folder from 'lucide-react-native/icons/folder';
+import Square from 'lucide-react-native/icons/square';
+import X from 'lucide-react-native/icons/x';
 import Svg, { Circle, Line, Rect } from 'react-native-svg';
 import { colors } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
+import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
+import {
+  formatMobileVoiceDuration,
+  mobileVoiceStatusLabel,
+} from './mobile-voice-transcription-model';
 import {
   buildMobileDroneRepoGroups,
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
@@ -603,6 +613,149 @@ export function AppDrawer(props: AppDrawerProps) {
   return <AppDrawerView {...props} />;
 }
 
+function DrawerVoiceRecordingIndicator() {
+  const {
+    error,
+    status,
+    durationMillis,
+    discardRecording,
+    stopRecordingForTranscript,
+  } = useSharedMobileChatVoiceRecorder();
+  const [copying, setCopying] = React.useState(false);
+  const [copyError, setCopyError] = React.useState('');
+  const actionTokenRef = React.useRef(0);
+  const recorderErrorRef = React.useRef(error);
+  recorderErrorRef.current = error;
+  const canStop = status === 'recording' || status === 'paused';
+  const visible = status !== 'idle' || copying || Boolean(error) || Boolean(copyError);
+  const statusText =
+    error ||
+    copyError ||
+    (copying && status === 'idle' ? 'Copying…' : mobileVoiceStatusLabel(status));
+  const durationText = formatMobileVoiceDuration(durationMillis);
+
+  React.useEffect(() => {
+    if (status !== 'starting') return;
+    actionTokenRef.current += 1;
+    setCopying(false);
+    setCopyError('');
+  }, [status]);
+
+  React.useEffect(
+    () => () => {
+      actionTokenRef.current += 1;
+    },
+    [],
+  );
+
+  const cancel = React.useCallback(() => {
+    actionTokenRef.current += 1;
+    setCopying(false);
+    setCopyError('');
+    void discardRecording();
+  }, [discardRecording]);
+
+  const stopAndCopy = React.useCallback(async () => {
+    if (!canStop || copying) return;
+    const actionToken = actionTokenRef.current + 1;
+    actionTokenRef.current = actionToken;
+    setCopying(true);
+    setCopyError('');
+    try {
+      const transcript = (await stopRecordingForTranscript()).trim();
+      if (actionTokenRef.current !== actionToken) return;
+      if (!transcript) {
+        if (!recorderErrorRef.current) setCopyError('No speech detected.');
+        return;
+      }
+      await Clipboard.setStringAsync(transcript);
+      if (actionTokenRef.current !== actionToken) return;
+      if (Number(Platform.Version) < 33) {
+        ToastAndroid.show('Transcription copied to clipboard.', ToastAndroid.SHORT);
+      }
+    } catch (nextError: any) {
+      if (actionTokenRef.current !== actionToken) return;
+      setCopyError(
+        String(
+          nextError?.message ??
+            nextError ??
+            'Transcription finished, but it could not be copied to the clipboard.',
+        ),
+      );
+    } finally {
+      if (actionTokenRef.current === actionToken) setCopying(false);
+    }
+  }, [canStop, copying, stopRecordingForTranscript]);
+
+  if (!visible) return null;
+  return (
+    <View style={styles.voiceFooter}>
+      <View style={styles.voiceFooterStatus}>
+        <View
+          style={[
+            styles.voiceFooterDot,
+            status === 'paused' && styles.voiceFooterDotPaused,
+            status === 'transcribing' && styles.voiceFooterDotTranscribing,
+            Boolean(error || copyError) && styles.voiceFooterDotError,
+          ]}
+        />
+        <View style={styles.voiceFooterCopy}>
+          <Text
+            accessibilityLiveRegion="polite"
+            numberOfLines={2}
+            style={[
+              styles.voiceFooterLabel,
+              Boolean(error || copyError) && styles.voiceFooterLabelError,
+            ]}
+          >
+            {statusText}
+          </Text>
+          {status !== 'idle' ? (
+            <Text accessibilityLabel={`${durationText} elapsed`} style={styles.voiceFooterTimer}>
+              {durationText}
+            </Text>
+          ) : null}
+        </View>
+      </View>
+      <View style={styles.voiceFooterActions}>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Cancel voice recording"
+          onPress={cancel}
+          style={({ pressed }) => [
+            styles.voiceFooterButton,
+            styles.voiceFooterCancel,
+            pressed && styles.pressed,
+          ]}
+        >
+          <X color={colors.danger} size={15} strokeWidth={2.3} />
+          <Text style={[styles.voiceFooterButtonText, styles.voiceFooterCancelText]}>Cancel</Text>
+        </Pressable>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel="Stop recording and copy transcription"
+          accessibilityState={{ disabled: !canStop || copying }}
+          disabled={!canStop || copying}
+          onPress={() => void stopAndCopy()}
+          style={({ pressed }) => [
+            styles.voiceFooterButton,
+            styles.voiceFooterStop,
+            (!canStop || copying) && styles.voiceFooterButtonDisabled,
+            pressed && styles.pressed,
+          ]}
+        >
+          {status === 'transcribing' || copying ? (
+            <ActivityIndicator color={colors.online} size="small" />
+          ) : (
+            <Square color={colors.online} size={14} strokeWidth={2.3} />
+          )}
+          <Text style={[styles.voiceFooterButtonText, styles.voiceFooterStopText]}>Stop</Text>
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
 function AppDrawerView({
   open,
   offset,
@@ -969,6 +1122,7 @@ function AppDrawerView({
                 style={styles.drawerFill}
               />
             )}
+            <DrawerVoiceRecordingIndicator />
           </View>
         </Animated.View>
       </View>
@@ -1291,5 +1445,54 @@ const styles = StyleSheet.create({
   },
   groupName: { color: colors.muted, fontSize: 11, fontWeight: '800', flex: 1 },
   drawerFill: { flex: 1 },
+  voiceFooter: {
+    flexShrink: 0,
+    gap: 10,
+    paddingHorizontal: 12,
+    paddingTop: 11,
+    paddingBottom: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.accentBorder,
+    backgroundColor: colors.panelRaised,
+  },
+  voiceFooterStatus: { flexDirection: 'row', alignItems: 'center', gap: 9 },
+  voiceFooterDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.danger },
+  voiceFooterDotPaused: { backgroundColor: colors.warning },
+  voiceFooterDotTranscribing: { backgroundColor: colors.accent },
+  voiceFooterDotError: { backgroundColor: colors.danger },
+  voiceFooterCopy: {
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  voiceFooterLabel: { flex: 1, color: colors.accent, fontSize: 11, fontWeight: '800' },
+  voiceFooterLabelError: { color: colors.danger },
+  voiceFooterTimer: {
+    color: colors.text,
+    fontFamily: 'monospace',
+    fontSize: 11,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  voiceFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  voiceFooterButton: {
+    flex: 1,
+    minHeight: 38,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    borderRadius: 6,
+    borderWidth: 1,
+  },
+  voiceFooterCancel: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
+  voiceFooterStop: { borderColor: colors.onlineBorder, backgroundColor: colors.onlineDark },
+  voiceFooterButtonDisabled: { opacity: 0.42 },
+  voiceFooterButtonText: { fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
+  voiceFooterCancelText: { color: colors.danger },
+  voiceFooterStopText: { color: colors.online },
   pressed: { opacity: 0.65 },
 });

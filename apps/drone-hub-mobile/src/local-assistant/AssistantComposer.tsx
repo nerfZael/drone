@@ -14,7 +14,7 @@ import {
   mergeMobileDraftWithVoiceTranscript,
   mobileVoiceStatusLabel,
 } from './mobile-voice-transcription-model';
-import { useMobileChatVoiceRecorder } from './use-mobile-chat-voice-recorder';
+import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
 
 type ComposerIcon = typeof ArrowUp;
 
@@ -171,20 +171,17 @@ export function AssistantComposer({
   const suppressInputFocusRef = React.useRef(false);
   const voiceActionTokenRef = React.useRef(0);
   const [focused, setFocused] = React.useState(false);
-  const [voiceError, setVoiceError] = React.useState('');
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
-  const handleVoiceError = React.useCallback(
-    (message: string) => setVoiceError(message.trim()),
-    [],
-  );
   const {
+    error: voiceError,
+    setError: setVoiceError,
     status: voiceStatus,
     durationMillis: voiceDurationMillis,
     startRecording,
     toggleRecordingPause,
     discardRecording,
     stopRecordingForTranscript,
-  } = useMobileChatVoiceRecorder({ onError: handleVoiceError });
+  } = useSharedMobileChatVoiceRecorder();
   const voiceActive = voiceStatus !== 'idle';
   const voiceActiveRef = React.useRef(voiceActive);
   voiceActiveRef.current = voiceActive;
@@ -238,27 +235,12 @@ export function AssistantComposer({
     Keyboard.dismiss();
   }, [voiceActive]);
 
-  React.useEffect(() => {
-    voiceActionTokenRef.current += 1;
-    setVoiceActionInFlight(false);
-    setVoiceError('');
-    void discardRecording();
-  }, [discardRecording, voiceResetKey]);
-
   React.useEffect(
     () => () => {
       voiceActionTokenRef.current += 1;
     },
     [],
   );
-
-  React.useEffect(() => {
-    if ((!editable || running || sending) && voiceActive) {
-      voiceActionTokenRef.current += 1;
-      setVoiceActionInFlight(false);
-      void discardRecording();
-    }
-  }, [discardRecording, editable, running, sending, voiceActive]);
 
   const discardVoice = React.useCallback(() => {
     voiceActionTokenRef.current += 1;

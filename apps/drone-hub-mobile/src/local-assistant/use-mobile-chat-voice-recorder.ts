@@ -145,7 +145,9 @@ export function useMobileChatVoiceRecorder({
           'GROQ API key is not configured on this phone. Copy it in Built-in agent settings first.',
         );
       }
+      if (generationRef.current !== generation || !mountedRef.current) return;
       const permission = await requestRecordingPermissionsAsync();
+      if (generationRef.current !== generation || !mountedRef.current) return;
       if (!permission.granted) throw new Error('Microphone permission was denied.');
       if (AppState.currentState !== 'active') {
         throw new Error('Voice recording was cancelled when the app left the foreground.');
@@ -188,6 +190,7 @@ export function useMobileChatVoiceRecorder({
       if (nextState === 'active') return;
       const interruptedStatus = statusRef.current;
       if (
+        interruptedStatus === 'starting' ||
         interruptedStatus === 'recording' ||
         interruptedStatus === 'paused' ||
         interruptedStatus === 'transcribing'
