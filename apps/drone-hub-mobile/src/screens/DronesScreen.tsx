@@ -200,6 +200,8 @@ export function DronesScreen({
   const chatTabsRef = React.useRef<ScrollView>(null);
   const createModelCatalogCache = React.useRef(new Map<string, MobileDroneCreateModel[]>());
   const createRepoBranchesCache = React.useRef(new Map<string, MobileDroneCreateRepo>());
+  const loadedDronesTargetIdRef = React.useRef('');
+  const loadDronesRef = React.useRef<(quiet?: boolean) => Promise<void>>(async () => {});
   const readChatRef = React.useRef<(droneId: string, chatName: string) => Promise<void>>(
     async () => {},
   );
@@ -245,6 +247,7 @@ export function DronesScreen({
         }
         const normalized = normalizeMobileDroneListPayload(result);
         const nextDrones = normalized.drones;
+        loadedDronesTargetIdRef.current = targetId;
         setDrones(nextDrones);
         setDroneSidebarOrder(normalized.sidebar);
         const currentSelected = selectedRef.current;
@@ -331,6 +334,7 @@ export function DronesScreen({
     },
     [requestDroneControl, targetId, targetSupportsDrones],
   );
+  loadDronesRef.current = loadDrones;
 
   React.useEffect(() => {
     setDrones([]);
@@ -376,10 +380,15 @@ export function DronesScreen({
     runVersion.current += 1;
     busyVersion.current += 1;
     modelRequestVersion.current += 1;
+    loadedDronesTargetIdRef.current = '';
   }, [targetId, targetSupportsDrones]);
   React.useEffect(() => {
-    if (meshRouteAvailable && targetSupportsDrones) void loadDrones();
-  }, [loadDrones, meshRouteAvailable, targetSupportsDrones]);
+    if (meshRouteAvailable && targetSupportsDrones) {
+      // Callback identities change while the local assistant and mesh hydrate. Refresh only when
+      // the resource key or route changes, and keep already-loaded content visible on reconnect.
+      void loadDronesRef.current(loadedDronesTargetIdRef.current === targetId);
+    }
+  }, [meshRouteAvailable, targetId, targetSupportsDrones]);
 
   const openDrone = (drone: MobileDroneSummary, requestedChat?: string) =>
     run('chats', async () => {
@@ -613,8 +622,6 @@ export function DronesScreen({
     }
   };
 
-  const loadDronesRef = React.useRef(loadDrones);
-  loadDronesRef.current = loadDrones;
   readChatRef.current = readChat;
 
   React.useEffect(() => {

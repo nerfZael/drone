@@ -8,8 +8,8 @@ export function resolveAvailableDeviceSelection(
   preferredDeviceId: string,
 ): string {
   const preferred = String(preferredDeviceId ?? '').trim();
-  if (preferred && devices.some((device) => device.id === preferred && device.connected)) {
+  if (preferred && devices.some((device) => device.id === preferred)) {
     return preferred;
   }
-  return devices[0]?.id ?? '';
+  return devices.find((device) => device.connected)?.id ?? devices[0]?.id ?? '';
 }

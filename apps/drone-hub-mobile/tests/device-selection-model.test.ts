@@ -12,8 +12,16 @@ describe('mobile selected device', () => {
     expect(resolveAvailableDeviceSelection(devices, 'desktop')).toBe('desktop');
   });
 
-  test('falls back to the first listed device when the remembered device is offline', () => {
-    expect(resolveAvailableDeviceSelection(devices, 'laptop')).toBe('phone');
+  test('keeps the remembered device selected while it is temporarily offline', () => {
+    expect(resolveAvailableDeviceSelection(devices, 'laptop')).toBe('laptop');
+  });
+
+  test('keeps device identity stable across disconnect and reconnect transitions', () => {
+    const disconnected = devices.map((device) =>
+      device.id === 'desktop' ? { ...device, connected: false } : device,
+    );
+    expect(resolveAvailableDeviceSelection(disconnected, 'desktop')).toBe('desktop');
+    expect(resolveAvailableDeviceSelection(devices, 'desktop')).toBe('desktop');
   });
 
   test('falls back when the remembered device is no longer listed', () => {

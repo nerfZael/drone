@@ -173,13 +173,6 @@ function Shell() {
       active = false;
     };
   }, []);
-  React.useEffect(() => {
-    if (!deviceSelectionLoaded) return;
-    const nextDeviceId = resolveAvailableDeviceSelection(devicePickerItems, selectedDeviceId);
-    if (nextDeviceId === selectedDeviceId) return;
-    setSelectedDeviceId(nextDeviceId);
-    void saveSelectedDeviceId(nextDeviceId).catch(() => undefined);
-  }, [devicePickerItems, deviceSelectionLoaded, selectedDeviceId]);
   const selectDevice = React.useCallback(
     (deviceId: string) => {
       const nextDeviceId = resolveAvailableDeviceSelection(devicePickerItems, deviceId);
