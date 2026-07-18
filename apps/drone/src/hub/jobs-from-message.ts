@@ -32,6 +32,18 @@ function toDashCase(raw: string): string {
   return cleaned.slice(0, 48);
 }
 
+function toDisplayName(raw: string): string {
+  const compact = String(raw ?? '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^['"]+|['"]+$/g, '')
+    .trim();
+  if (!compact) return '';
+  const bounded = compact.slice(0, 48).trim();
+  return `${bounded.charAt(0).toUpperCase()}${bounded.slice(1)}`;
+}
+
 function coerceTitle(raw: string): string {
   const s = String(raw ?? '').trim();
   if (!s) return '';
@@ -270,27 +282,43 @@ export async function jobsPlanFromAgentMessage(
 
 export async function suggestDroneNameFromMessage(
   message: string,
-  opts?: { provider?: LlmProviderId; apiKey?: string },
+  opts?: { provider?: LlmProviderId; apiKey?: string; style?: 'display' | 'identifier' },
 ): Promise<string> {
   const text = String(message ?? '').trim();
   if (!text) throw new Error('missing message');
 
   const runtime = await resolveHubLlmRuntime(opts);
   const modelId = defaultDroneNameModelId(runtime.provider);
+  const identifierStyle = opts?.style === 'identifier';
   const outputSchema = runtime.z.object({
-    name: runtime.z.string().min(1).describe('Drone name in dash-case (letters/numbers/single hyphens), max 48 chars.'),
+    name: runtime.z.string().min(1).describe(
+      identifierStyle
+        ? 'Drone identifier in dash-case (letters/numbers/single hyphens), max 48 chars.'
+        : 'Concise display name, normally using spaces and an uppercase first letter, max 48 chars.',
+    ),
   });
 
-  const system = [
-    'You generate concise drone names.',
-    'Return only the structured output required by the schema.',
-    'Rules:',
-    '- The name must be dash-case.',
-    '- Use only lowercase letters, numbers, and single hyphens.',
-    '- Keep it short and specific to the task in the message.',
-    '- Max length 48 characters.',
-    '- Do not include filler words like "please", "help", or "task".',
-  ].join('\n');
+  const system = identifierStyle
+    ? [
+        'You generate concise drone identifiers.',
+        'Return only the structured output required by the schema.',
+        'Rules:',
+        '- The identifier must be dash-case.',
+        '- Use only lowercase letters, numbers, and single hyphens.',
+        '- Keep it short and specific to the task in the message.',
+        '- Max length 48 characters.',
+        '- Do not include filler words like "please", "help", or "task".',
+      ].join('\n')
+    : [
+        'You generate concise display names for drones and chats.',
+        'Return only the structured output required by the schema.',
+        'Rules:',
+        '- Prefer a natural name with spaces and an uppercase first letter, such as "Fix login loop".',
+        '- Hyphens are allowed when they are a natural part of the name, but do not default to dash-case.',
+        '- Keep it short and specific to the task in the message.',
+        '- Max length 48 characters.',
+        '- Do not include filler words like "please", "help", or "task".',
+      ].join('\n');
 
   let object: any = null;
   try {
@@ -311,9 +339,11 @@ export async function suggestDroneNameFromMessage(
     throw new Error(`${providerDisplayName(runtime.provider)} name suggestion failed (model: ${modelId}): ${msg}`);
   }
 
-  const name = toDashCase(String(object?.name ?? ''));
+  const name = identifierStyle
+    ? toDashCase(String(object?.name ?? ''))
+    : toDisplayName(String(object?.name ?? ''));
   if (!name) throw new Error('LLM returned no valid drone name');
-  return name.slice(0, 48).replace(/-+$/g, '');
+  return identifierStyle ? name.slice(0, 48).replace(/-+$/g, '') : name;
 }
 
 

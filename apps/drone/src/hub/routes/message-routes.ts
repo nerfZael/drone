@@ -236,6 +236,7 @@ export function registerMessageRoutes(apiRouter: HubRouter, deps: MessageRouteDe
       const name = await suggestDroneNameFromMessage(message, {
         provider,
         apiKey: resolved.apiKey,
+        style: source === 'draft-create' ? 'identifier' : 'display',
       });
       if (source || requestedDroneId) {
         hubLog('info', 'name-from-message suggested', {

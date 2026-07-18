@@ -524,7 +524,7 @@ export function useDroneHubLifecycleEffects({
     void requestJson<{ ok: true; name: string }>('/api/drones/name-from-message', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ message: prompt }),
+      body: JSON.stringify({ message: prompt, source: 'draft-create' }),
     })
       .then((data) => {
         if (!mounted) return;
