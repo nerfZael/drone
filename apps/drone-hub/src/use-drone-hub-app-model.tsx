@@ -79,6 +79,7 @@ import {
 import {
   busyChatNodeIdsForDrone,
   droneChatNodeIds,
+  nextUnreadChatReadCursor,
   normalizedDroneChats,
   reconcileManualUnreadMarker,
   unreadChatNodeIdsForDrone,
@@ -600,6 +601,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const previousUnreadChatNodeIdSetRef = React.useRef<Set<string>>(new Set());
   const manuallyMarkedUnreadChatsRef = React.useRef<Map<string, ManualUnreadMarker>>(new Map());
   const readAcknowledgementsInFlightRef = React.useRef<Set<string>>(new Set());
+  const [chatOpenRequestRevision, setChatOpenRequestRevision] = React.useState(0);
   const droneIdentityByNameRef = React.useRef<Record<string, string>>({});
   const llmSettingsState = useLlmSettings(requestJson);
   const { reloadUiPreferences } = useUiPreferencesSettings({ requestJson });
@@ -1435,12 +1437,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const selectDroneCard = React.useCallback(
     (droneIdRaw: string, opts?: DroneSelectionClickOptions) => {
       selectDroneCardBase(droneIdRaw, opts);
+      if (!opts?.toggle && !opts?.range) {
+        setChatOpenRequestRevision((revision) => revision + 1);
+      }
     },
     [selectDroneCardBase],
   );
   const selectDroneChat = React.useCallback(
     (droneIdRaw: string, chatNameRaw: string) => {
       selectDroneChatBase(droneIdRaw, chatNameRaw);
+      setChatOpenRequestRevision((revision) => revision + 1);
     },
     [selectDroneChatBase],
   );
@@ -1713,9 +1719,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
             clearChatsUnread([selectedNodeId]);
             return;
           }
-          const latest = droneByIdRef.current[droneId]?.chatReadStates?.[chatName];
-          if (!latest || latest.latestAgentRevision === cursor.latestAgentRevision) return;
-          cursor = latest;
+          const nextCursor = nextUnreadChatReadCursor(
+            cursor,
+            result?.readState,
+            droneByIdRef.current[droneId]?.chatReadStates?.[chatName],
+          );
+          if (!nextCursor) return;
+          cursor = nextCursor;
         }
       } catch {
         // Keep the authoritative unread dot visible when acknowledgement fails.
@@ -1725,6 +1735,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     })();
   }, [
     clearChatsUnread,
+    chatOpenRequestRevision,
     currentDrone,
     requestJson,
     selectedChat,

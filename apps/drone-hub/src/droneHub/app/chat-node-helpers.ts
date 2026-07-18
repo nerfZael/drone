@@ -6,6 +6,38 @@ export type ManualUnreadMarker = {
   observedInSummary: boolean;
 };
 
+export type ChatReadCursor = {
+  unread: boolean;
+  latestAgentTurnId: string | null;
+  latestAgentRevision: number;
+};
+
+export function nextUnreadChatReadCursor(
+  current: ChatReadCursor,
+  response: Partial<ChatReadCursor> | null | undefined,
+  latestSummary: ChatReadCursor | null | undefined,
+): ChatReadCursor | null {
+  const candidates = [response, latestSummary];
+  for (const candidate of candidates) {
+    if (
+      candidate?.unread !== true ||
+      !Number.isSafeInteger(candidate.latestAgentRevision) ||
+      Number(candidate.latestAgentRevision) <= current.latestAgentRevision
+    ) {
+      continue;
+    }
+    return {
+      unread: true,
+      latestAgentTurnId:
+        typeof candidate.latestAgentTurnId === 'string'
+          ? candidate.latestAgentTurnId
+          : null,
+      latestAgentRevision: Number(candidate.latestAgentRevision),
+    };
+  }
+  return null;
+}
+
 export function normalizedDroneChats(
   drone: DroneSummary | null | undefined,
   opts?: { includeDefaultWhenEmpty?: boolean },
