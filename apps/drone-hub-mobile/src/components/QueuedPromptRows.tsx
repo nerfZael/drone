@@ -19,15 +19,34 @@ export function QueuedPromptRows({
 }: {
   prompts: MobileQueuedPrompt[];
   cancellingId?: string;
-  onCancel(promptId: string): void;
+  onCancel?: (promptId: string) => void;
 }) {
   if (prompts.length === 0) return null;
   return (
-    <View style={styles.list}>
+    <View>
       {prompts.map((prompt) => {
         const failed = prompt.status === 'failed';
+        const pending = prompt.status === 'pending';
         const cancelling = cancellingId === prompt.id;
         const label = failed ? 'Failed' : prompt.status === 'queued' ? 'Queued' : 'Pending';
+        if (pending) {
+          return (
+            <View key={prompt.id} style={styles.pendingMessageGroup}>
+              <View style={styles.pendingMessage}>
+                {prompt.prompt ? (
+                  <Text selectable style={styles.pendingPrompt}>
+                    {prompt.prompt}
+                  </Text>
+                ) : null}
+                {prompt.imageCount ? (
+                  <Text style={styles.pendingImageCount}>
+                    {prompt.imageCount} image{prompt.imageCount === 1 ? '' : 's'}
+                  </Text>
+                ) : null}
+              </View>
+            </View>
+          );
+        }
         return (
           <View key={prompt.id} style={[styles.row, failed && styles.rowFailed]}>
             <View style={styles.body}>
@@ -46,7 +65,7 @@ export function QueuedPromptRows({
               ) : null}
               {failed && prompt.error ? <Text style={styles.error}>{prompt.error}</Text> : null}
             </View>
-            {prompt.cancelable ? (
+            {prompt.cancelable && onCancel ? (
               <Pressable
                 accessibilityRole="button"
                 accessibilityLabel={failed ? 'Dismiss failed prompt' : 'Cancel queued prompt'}
@@ -71,7 +90,6 @@ export function QueuedPromptRows({
 }
 
 const styles = StyleSheet.create({
-  list: { gap: 8, paddingTop: 8 },
   row: {
     alignSelf: 'flex-end',
     width: '88%',
@@ -84,9 +102,32 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentWash,
     paddingHorizontal: 12,
     paddingVertical: 10,
+    marginTop: 8,
   },
   rowFailed: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
   body: { flex: 1, gap: 5 },
+  pendingMessageGroup: {
+    width: 'auto',
+    maxWidth: '86%',
+    alignSelf: 'flex-end',
+    alignItems: 'flex-end',
+    marginHorizontal: 10,
+    marginVertical: 7,
+  },
+  pendingMessage: {
+    width: 'auto',
+    maxWidth: '100%',
+    alignSelf: 'flex-end',
+    paddingHorizontal: 13,
+    paddingVertical: 10,
+    borderWidth: 1,
+    borderColor: colors.surface2,
+    borderRadius: 10,
+    borderBottomRightRadius: 3,
+    backgroundColor: colors.surface1,
+  },
+  pendingPrompt: { color: colors.textStrong, fontSize: 14, lineHeight: 21 },
+  pendingImageCount: { color: colors.muted, fontSize: 10, fontWeight: '700', marginTop: 4 },
   meta: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   badge: {
     color: colors.accent,

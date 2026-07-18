@@ -14,7 +14,6 @@ import {
 import MessageCircle from 'lucide-react-native/icons/message-circle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ConfirmDialog, ErrorBanner } from '../components/Ui';
-import { QueuedPromptRows } from '../components/QueuedPromptRows';
 import {
   AppDrawer,
   type AppDrawerNavigationItem,
@@ -1486,6 +1485,9 @@ export function DronesScreen({
                         emptyTitle="This drone chat is ready."
                         emptyBody="Send a prompt to start the conversation."
                         assistantLabel="Agent"
+                        queuedPrompts={visiblePendingPrompts}
+                        cancellingPromptId={cancellingPromptId}
+                        onCancelQueuedPrompt={cancelPendingPrompt}
                         linkedPullRequests={linkedPullRequests}
                         onLoadFullMessage={(message) => void loadFullChatMessage(message)}
                         fullMessageLoadingId={fullMessageBusyId}
@@ -1509,11 +1511,6 @@ export function DronesScreen({
                               }
                             : undefined
                         }
-                      />
-                      <QueuedPromptRows
-                        prompts={visiblePendingPrompts}
-                        cancellingId={cancellingPromptId}
-                        onCancel={cancelPendingPrompt}
                       />
                       {pendingApprovals.map((approval) => (
                         <AssistantApprovalCard
