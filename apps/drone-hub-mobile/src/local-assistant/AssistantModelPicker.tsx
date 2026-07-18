@@ -6,13 +6,13 @@ import {
   ScrollView,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Check from 'lucide-react-native/icons/check';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
 import ChevronUp from 'lucide-react-native/icons/chevron-up';
-import X from 'lucide-react-native/icons/x';
 import { colors } from '../theme';
 
 export type AssistantModelChoice = {
@@ -56,25 +56,43 @@ export function AssistantModelPicker({
   onSelect(choice: AssistantModelChoice, selection: 'model' | 'reasoning'): void;
 }) {
   const insets = useSafeAreaInsets();
+  const window = useWindowDimensions();
   const [modelsOpen, setModelsOpen] = React.useState(false);
   React.useEffect(() => {
     if (open) setModelsOpen(!showReasoning);
   }, [currentModel, open, showReasoning]);
+  const availableModels = uniqueModels(options);
+  const exactCurrentModel = availableModels.find(
+    (option) => option.provider === currentProvider && option.id === currentModel,
+  );
+  const selectedModel =
+    exactCurrentModel ||
+    availableModels.find((option) => option.id === currentModel) ||
+    (!currentModel ? availableModels[0] : undefined);
+  const selectedProvider = selectedModel?.provider || currentProvider;
+  const selectedModelId = selectedModel?.id || currentModel;
   const choices = options.some(
     (option) =>
-      option.provider === currentProvider &&
-      option.id === currentModel &&
+      option.provider === selectedProvider &&
+      option.id === selectedModelId &&
       (!option.thinkingLevel ||
         !currentThinkingLevel ||
         option.thinkingLevel === currentThinkingLevel),
   )
     ? options
-    : [{ provider: currentProvider, id: currentModel, name: currentModel }, ...options];
+    : [
+        {
+          provider: selectedProvider,
+          id: selectedModelId,
+          name: selectedModel?.name || selectedModelId,
+        },
+        ...options,
+      ];
   const selectedReasoning = currentThinkingLevel || 'low';
   const reasoningLevels = [
     ...new Set(
       choices
-        .filter((option) => option.provider === currentProvider && option.id === currentModel)
+        .filter((option) => option.provider === selectedProvider && option.id === selectedModelId)
         .map((option) => option.thinkingLevel)
         .filter((value): value is string => Boolean(value)),
     ),
@@ -82,20 +100,25 @@ export function AssistantModelPicker({
   const visibleReasoning = reasoningLevels.length > 0 ? reasoningLevels : DEFAULT_REASONING_LEVELS;
   const models = uniqueModels(choices);
   const currentName =
-    models.find((choice) => choice.provider === currentProvider && choice.id === currentModel)
-      ?.name || currentModel;
+    models.find((choice) => choice.provider === selectedProvider && choice.id === selectedModelId)
+      ?.name || selectedModelId;
+  const longestModelLabel = models.reduce(
+    (longest, model) => Math.max(longest, String(model.name || model.id).length),
+    currentName.length,
+  );
+  const sheetWidth = Math.min(window.width * 0.92, Math.max(180, longestModelLabel * 8 + 64));
 
   const selectReasoning = (thinkingLevel: string) => {
     const exact = choices.find(
       (choice) =>
-        choice.provider === currentProvider &&
-        choice.id === currentModel &&
+        choice.provider === selectedProvider &&
+        choice.id === selectedModelId &&
         choice.thinkingLevel === thinkingLevel,
     );
     onSelect(
       exact ?? {
-        provider: currentProvider,
-        id: currentModel,
+        provider: selectedProvider,
+        id: selectedModelId,
         name: currentName,
         thinkingLevel,
       },
@@ -127,15 +150,16 @@ export function AssistantModelPicker({
     >
       <View style={styles.layer}>
         <Pressable onPress={onClose} style={StyleSheet.absoluteFill} />
-        <View style={[styles.sheet, { marginBottom: Math.max(insets.bottom + 6, 12) }]}>
-          <View style={styles.handle} />
+        <View
+          style={[
+            styles.sheet,
+            { width: sheetWidth, marginBottom: Math.max(insets.bottom + 6, 12) },
+          ]}
+        >
           <View style={styles.sectionHead}>
             <Text style={styles.sectionTitle}>
               {showReasoning && !modelsOpen ? 'Reasoning' : 'Model'}
             </Text>
-            <Pressable onPress={onClose} style={styles.close}>
-              <X color={colors.muted} size={19} strokeWidth={2} />
-            </Pressable>
           </View>
           {showReasoning && !modelsOpen ? (
             <View style={styles.reasoningList}>
@@ -180,7 +204,8 @@ export function AssistantModelPicker({
                 </View>
               ) : (
                 models.map((choice) => {
-                  const active = choice.provider === currentProvider && choice.id === currentModel;
+                  const active =
+                    choice.provider === selectedProvider && choice.id === selectedModelId;
                   return (
                     <Pressable
                       key={`${choice.provider}:${choice.id}`}
@@ -189,7 +214,10 @@ export function AssistantModelPicker({
                       style={[styles.choice, active && styles.choiceActive]}
                     >
                       <View style={styles.choiceCopy}>
-                        <Text style={[styles.choiceName, active && styles.activeText]}>
+                        <Text
+                          numberOfLines={1}
+                          style={[styles.choiceName, active && styles.activeText]}
+                        >
                           {choice.name || choice.id}
                         </Text>
                       </View>
@@ -227,24 +255,13 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 12 },
     elevation: 18,
   },
-  handle: {
-    alignSelf: 'center',
-    width: 38,
-    height: 4,
-    marginTop: 8,
-    borderRadius: 3,
-    backgroundColor: colors.surface2,
-  },
   sectionHead: {
     minHeight: 45,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 12,
-    paddingLeft: 16,
+    paddingHorizontal: 16,
   },
   sectionTitle: { color: colors.textStrong, fontSize: 17, fontWeight: '800' },
-  close: { width: 42, height: 42, alignItems: 'center', justifyContent: 'center' },
   scroll: { flexGrow: 0 },
   list: { paddingHorizontal: 12, paddingBottom: 8, gap: 5 },
   modelState: {

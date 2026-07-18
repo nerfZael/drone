@@ -356,6 +356,20 @@ export function NewDroneScreen({
     void detectModels(false);
   }, [detectModels, mode]);
 
+  React.useEffect(() => {
+    if (mode !== 'with-chat' || models.length === 0) return;
+    const current = models.find(
+      (option) => option.id === model && (!modelProvider || option.provider === modelProvider),
+    );
+    if (current) {
+      if (!modelProvider) setModelProvider(current.provider || agent);
+      return;
+    }
+    const fallback = models[0];
+    setModel(fallback.id);
+    setModelProvider(fallback.provider || agent);
+  }, [agent, mode, model, modelProvider, models]);
+
   React.useEffect(
     () => () => {
       modelRequestId.current += 1;

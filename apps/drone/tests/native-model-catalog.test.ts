@@ -29,4 +29,26 @@ describe('native model catalog', () => {
       },
     ]);
   });
+
+  test('filters the catalog to the provider selected in Hub settings', () => {
+    const catalog = buildNativeModelCatalog(
+      [
+        { provider: 'openai', id: 'shared', name: 'Shared', thinkingLevel: 'low' },
+        { provider: 'codex', id: 'shared', name: 'Shared', thinkingLevel: 'medium' },
+        { provider: 'gemini', id: 'gemini-only', name: 'Gemini only', thinkingLevel: 'high' },
+      ],
+      { provider: 'codex', model: 'shared', thinkingLevel: 'medium' },
+      'codex',
+    );
+
+    expect(catalog).toEqual([
+      {
+        provider: 'codex',
+        id: 'shared',
+        label: 'Shared',
+        reasoningLevels: ['medium'],
+        defaultReasoningLevel: 'medium',
+      },
+    ]);
+  });
 });

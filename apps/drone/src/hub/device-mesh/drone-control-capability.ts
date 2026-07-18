@@ -1,5 +1,4 @@
 import { DRONE_CONTROL_CAPABILITY } from '@drone/device-protocol';
-import { buildNativeModelCatalog } from '../assistant/native-model-catalog';
 import type { CapabilityHandler } from './device-mesh-types';
 import { boundedDroneChatPage } from './drone-chat-page';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
@@ -527,17 +526,24 @@ export function createDroneControlCapability(
           const thread = Array.isArray(ensured?.threads)
             ? ensured.threads.find((item: any) => String(item?.id ?? '') === nativeChatId)
             : null;
+          const catalog = await localHubRequest(access, '/api/model-catalog?agent=native');
+          const provider =
+            optionalText(catalog?.provider) ?? optionalText(thread?.provider) ?? 'openai';
+          const models = Array.isArray(catalog?.models) ? catalog.models : [];
+          const defaultModel = object(catalog?.defaultModel);
+          const threadModelAvailable =
+            optionalText(thread?.provider) === provider &&
+            models.some((model: any) => optionalText(model?.id) === optionalText(thread?.model));
           return {
             droneId,
             chatName,
             agent: { kind: 'native' },
-            provider: thread?.provider ?? null,
-            model: thread?.model ?? null,
-            reasoning: thread?.thinkingLevel ?? null,
-            models: buildNativeModelCatalog(
-              Array.isArray(ensured?.models) ? ensured.models : [],
-              ensured?.defaultModel,
-            ),
+            provider,
+            model: threadModelAvailable ? (thread?.model ?? null) : (defaultModel.model ?? null),
+            reasoning: threadModelAvailable
+              ? (thread?.thinkingLevel ?? null)
+              : (defaultModel.thinkingLevel ?? null),
+            models,
             source: 'native',
             discoveredAt: null,
             error: null,

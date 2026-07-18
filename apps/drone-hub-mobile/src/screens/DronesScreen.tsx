@@ -1147,7 +1147,7 @@ export function DronesScreen({
         })
         .filter((model: AssistantModelChoice) => Boolean(model.id));
       setChatModels(options);
-      const configuredModel = String(result?.model ?? '').trim();
+      const configuredModel = String(result?.model ?? '').trim() || options[0]?.id || '';
       if (configuredModel) setChatModel(configuredModel);
       const configuredProvider = String(result?.provider ?? '').trim();
       if (configuredProvider) setChatModelProvider(configuredProvider);
@@ -1157,6 +1157,8 @@ export function DronesScreen({
         );
         setChatModelProvider(configuredChoice?.provider ?? fallbackProvider);
       }
+      const configuredReasoning = String(result?.reasoning ?? '').trim();
+      if (configuredReasoning) setChatReasoning(configuredReasoning);
       const discoveryError = String(result?.error ?? '').trim();
       if (discoveryError && options.length === 0) setError(discoveryError);
     } catch (nextError: any) {

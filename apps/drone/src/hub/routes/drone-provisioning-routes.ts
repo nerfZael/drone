@@ -50,6 +50,7 @@ type DroneProvisioningDependencyName =
   | 'refreshDroneRegistryBroadcasterSnapshot'
   | 'resolveDroneCliPath'
   | 'resolveDroneOrRespond'
+  | 'resolveEffectiveLlmProvider'
   | 'resolveStableDroneOrPendingIdFromRef'
   | 'scheduleDroneRegistryBroadcasterRefresh'
   | 'scheduleDroneStatusRefresh'

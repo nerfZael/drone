@@ -70,6 +70,7 @@ function createDroneProvisioningServiceHandler(
     refreshDroneRegistryBroadcasterSnapshot,
     resolveDroneCliPath,
     resolveDroneOrRespond,
+    resolveEffectiveLlmProvider,
     resolveStableDroneOrPendingIdFromRef,
     scheduleDroneRegistryBroadcasterRefresh,
     scheduleDroneStatusRefresh,
@@ -207,7 +208,7 @@ function createDroneProvisioningServiceHandler(
         const seedProviderRaw = String(
           body?.seedProvider ?? body?.seed?.provider ?? '',
         ).trim().toLowerCase();
-        const seedProvider =
+        let seedProvider =
           seedProviderRaw === 'openai' ||
           seedProviderRaw === 'gemini' ||
           seedProviderRaw === 'codex'
@@ -223,6 +224,9 @@ function createDroneProvisioningServiceHandler(
             error: 'seedProvider is only supported for the Built-in agent',
           });
           return;
+        }
+        if (!seedProvider && seedAgent?.kind === 'native') {
+          seedProvider = String((await resolveEffectiveLlmProvider()).provider ?? '').trim();
         }
         const seedReasoning = normalizeChatReasoning(body?.seedReasoning ?? body?.seed?.reasoning);
         if (
@@ -674,6 +678,9 @@ function createDroneProvisioningServiceHandler(
         try {
           const canonicalRepos = await canonicalRepositoriesMap();
           const regAny: any = await loadRegistry();
+          const assumedNativeProvider = String(
+            (await resolveEffectiveLlmProvider()).provider ?? '',
+          ).trim();
           const pendingEntries: Array<{ state: 'pending'; droneId: string; entry: any }> = [];
           const groupsToEnsure = new Set<string>();
           const result = (() => {
@@ -770,7 +777,7 @@ function createDroneProvisioningServiceHandler(
               const seedProviderRaw = String(
                 raw?.seedProvider ?? raw?.seed?.provider ?? '',
               ).trim().toLowerCase();
-              const seedProvider =
+              let seedProvider =
                 seedProviderRaw === 'openai' ||
                 seedProviderRaw === 'gemini' ||
                 seedProviderRaw === 'codex'
@@ -787,6 +794,9 @@ function createDroneProvisioningServiceHandler(
                   status: 400,
                 });
                 continue;
+              }
+              if (!seedProvider && seedAgent?.kind === 'native') {
+                seedProvider = assumedNativeProvider;
               }
               let seedAgentPermissionMode: AgentPermissionMode = 'full-access';
               try {

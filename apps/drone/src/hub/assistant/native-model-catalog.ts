@@ -22,12 +22,14 @@ export type NativeModelCatalogEntry = {
 export function buildNativeModelCatalog(
   models: readonly NativeModelOption[],
   defaultModel?: NativeDefaultModel,
+  providerFilter?: unknown,
 ): NativeModelCatalogEntry[] {
   const grouped = new Map<string, NativeModelCatalogEntry>();
+  const selectedProvider = String(providerFilter ?? '').trim();
   for (const model of models) {
     const provider = String(model?.provider ?? '').trim();
     const id = String(model?.id ?? '').trim();
-    if (!provider || !id) continue;
+    if (!provider || !id || (selectedProvider && provider !== selectedProvider)) continue;
     const key = `${provider}\u0000${id}`;
     const thinkingLevel = String(model?.thinkingLevel ?? '').trim() || 'off';
     const existing = grouped.get(key);

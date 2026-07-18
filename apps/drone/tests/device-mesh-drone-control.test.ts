@@ -379,6 +379,74 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('uses the Hub-selected provider catalog for native chat model choices', async () => {
+    const originalFetch = globalThis.fetch;
+    const requestedPaths: string[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      requestedPaths.push(`${url.pathname}${url.search}`);
+      if (url.pathname.endsWith('/native')) {
+        return Response.json({
+          ok: true,
+          nativeChatId: 'native-chat-1',
+          threads: [
+            {
+              id: 'native-chat-1',
+              provider: 'openai',
+              model: 'gpt-5.6-sol',
+              thinkingLevel: 'low',
+            },
+          ],
+        });
+      }
+      if (url.pathname === '/api/model-catalog') {
+        return Response.json({
+          ok: true,
+          provider: 'codex',
+          defaultModel: {
+            provider: 'codex',
+            model: 'gpt-5.6-sol',
+            thinkingLevel: 'medium',
+          },
+          models: [
+            {
+              provider: 'codex',
+              id: 'gpt-5.6-sol',
+              label: 'GPT-5.6 Sol',
+              reasoningLevels: ['off', 'low', 'medium', 'high'],
+              defaultReasoningLevel: 'medium',
+            },
+          ],
+        });
+      }
+      return Response.json({ ok: true });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('chat.models', {
+          droneId: 'drone-1',
+          chatName: 'default',
+          nativeChatId: 'native-chat-1',
+        }),
+      ).resolves.toMatchObject({
+        provider: 'codex',
+        model: 'gpt-5.6-sol',
+        reasoning: 'medium',
+        models: [{ provider: 'codex', id: 'gpt-5.6-sol' }],
+      });
+      expect(requestedPaths).toEqual([
+        '/api/drones/drone-1/chats/default/native',
+        '/api/model-catalog?agent=native',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('returns durable pending prompts and forwards per-prompt cancellation', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; method: string }> = [];

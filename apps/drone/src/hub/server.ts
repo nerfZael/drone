@@ -5728,9 +5728,24 @@ export async function startDroneHubApiServer(opts: {
   registerRepositoryRoutes(apiRouter, {
     normalizeBuiltinAgentId,
     nativeModelCatalog: async () => {
-      const snapshot = await assistantService.defaultSettings();
+      const [snapshot, effectiveProvider] = await Promise.all([
+        assistantService.defaultSettings(),
+        resolveEffectiveLlmProvider(),
+      ]);
+      const provider = effectiveProvider.provider;
+      const models = buildNativeModelCatalog(snapshot.models, snapshot.defaultModel, provider);
+      const configuredDefault =
+        snapshot.defaultModel.provider === provider
+          ? snapshot.defaultModel
+          : {
+              provider,
+              model: models[0]?.id ?? '',
+              thinkingLevel: models[0]?.defaultReasoningLevel ?? '',
+            };
       return {
-        models: buildNativeModelCatalog(snapshot.models, snapshot.defaultModel),
+        provider,
+        defaultModel: configuredDefault,
+        models,
       };
     },
     modelCatalogCacheKey,
@@ -6158,6 +6173,7 @@ export async function startDroneHubApiServer(opts: {
     refreshDroneRegistryBroadcasterSnapshot,
     resolveDroneCliPath,
     resolveDroneOrRespond,
+    resolveEffectiveLlmProvider,
     resolveStableDroneOrPendingIdFromRef,
     scheduleDroneRegistryBroadcasterRefresh,
     scheduleDroneStatusRefresh,
