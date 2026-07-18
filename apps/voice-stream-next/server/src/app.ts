@@ -80,6 +80,8 @@ type AppOptions = {
   logger?: boolean;
 };
 
+type VoiceStreamFinalizeReason = 'connection_closed' | 'client_end' | 'cancel' | 'terminal' | 'limit' | 'superseded';
+
 type AndroidApkInfo = {
   available: boolean;
   platform: 'android';
@@ -1521,6 +1523,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
   const speechEventClients = new Set<{ id: string; res: any; userId: string; connectedAt: string }>();
   const releaseUploadSessions = new Map<string, ReleaseUploadSession>();
   const liveRecordingSessions = new Map<string, LiveRecordingSession>();
+  const activeVoiceStreamConnections = new Map<string, {
+    connectionId: string;
+    finalizeForReconnect: () => Promise<void>;
+  }>();
   const realtimeWebRtcSessions = new Map<string, {
     userId: string;
     deviceId: string;
@@ -5824,12 +5830,24 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
     }
     const device = resolveDeviceInstallation(db, verifiedDevice.device, installationId, token);
     const groqSpeechCredential = resolveGroqCredential(db, device.userId);
+    const requestedSession = requestedSessionId ? db.voiceSessionForDevice(device.userId, device.id, requestedSessionId) : null;
+    const profileMatchedRequestedSession = requestedSession && (!assistantProfileId || requestedSession.assistantProfileId === assistantProfileId)
+      ? requestedSession
+      : null;
+    const session =
+      profileMatchedRequestedSession ??
+      (assistantProfileId ? null : db.latestVoiceSessionForDevice(device.userId, device.id)) ??
+      db.createVoiceSession(device.userId, device.id, streamMode, { assistantProfileId });
+    const recordingMode = voiceRecordingMode(streamMode);
+    const connectionId = crypto.randomUUID();
 
     let frames = 0;
     let bytes = 0;
     let storedBytes = 0;
     let finalized = false;
-    let finalizeReason: 'connection_closed' | 'client_end' | 'cancel' | 'terminal' | 'limit' = 'connection_closed';
+    let finalizationPromise: Promise<void> | null = null;
+    let finalizeReason: VoiceStreamFinalizeReason = 'connection_closed';
+    let predecessorFinalization: Promise<void> = Promise.resolve();
     let terminalFinalize: TerminalCommand | null = null;
     const chunks: Uint8Array[] = [];
     const smartTranscriptSegments: string[] = [];
@@ -6253,23 +6271,35 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
       void finalizeVoiceStream('connection_closed');
     });
 
-    async function finalizeVoiceStream(reason: 'connection_closed' | 'client_end' | 'cancel' | 'terminal' | 'limit' = 'connection_closed'): Promise<void> {
-      if (finalized) return;
+    function finalizeVoiceStream(reason: VoiceStreamFinalizeReason = 'connection_closed'): Promise<void> {
+      if (finalizationPromise) return finalizationPromise;
+      finalizationPromise = runVoiceStreamFinalization(reason);
+      return finalizationPromise;
+    }
+
+    async function runVoiceStreamFinalization(reason: VoiceStreamFinalizeReason): Promise<void> {
       finalized = true;
       finalizeReason = reason;
-      const shouldCompleteSession = reason !== 'connection_closed';
+      const shouldCompleteSession = reason !== 'connection_closed' && reason !== 'superseded';
       streamingManager?.stop();
       clearInterval(heartbeat);
       clearDurationLimit();
-      const requestedSession = requestedSessionId ? db.voiceSessionForDevice(device.userId, device.id, requestedSessionId) : null;
-      const profileMatchedRequestedSession = requestedSession && (!assistantProfileId || requestedSession.assistantProfileId === assistantProfileId)
-        ? requestedSession
-        : null;
-      const session =
-        profileMatchedRequestedSession ??
-        (assistantProfileId ? null : db.latestVoiceSessionForDevice(device.userId, device.id)) ??
-        db.createVoiceSession(device.userId, device.id, streamMode, { assistantProfileId });
-      const recordingMode = voiceRecordingMode(streamMode);
+      try {
+        await predecessorFinalization;
+      } catch (error: any) {
+        addLog(device.userId, {
+          deviceId: device.id,
+          source: device.deviceType,
+          level: 'error',
+          message: 'Voice reconnect predecessor finalization failed',
+          detailsJson: JSON.stringify({
+            mode: streamMode,
+            voiceSessionId: session.id,
+            connectionId,
+            error: error?.message ?? String(error),
+          }),
+        });
+      }
       const recordingPcm = recordingMode ? concatChunks(chunks, storedBytes) : new Uint8Array(0);
       let savedRecording: { recording: VoiceRecordingRecord; pruned: VoiceRecordingRecord[]; appendedBytes: number; savedPcmBytes: number } | null = null;
       let recordingSaveSkippedEmpty = false;
@@ -6665,17 +6695,22 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             sessionFragmentSaved: true,
           });
         }
+        if (activeVoiceStreamConnections.get(session.id)?.connectionId === connectionId) {
+          activeVoiceStreamConnections.delete(session.id);
+        }
       }
-      db.upsertClientStatus(device.userId, device.id, {
-        mode: terminalFinalize?.type === 'sleep' ? 'sleeping' : shouldCompleteSession ? 'awake' : 'recording',
-        status: terminalFinalize?.type === 'sleep' ? 'Sleeping.' : shouldCompleteSession ? 'Voice stream disconnected' : 'Voice stream disconnected; waiting for reconnect',
-        protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
-      });
-      emitAppEvent(device.userId, 'client_status_changed', {
-        deviceId: device.id,
-        mode: terminalFinalize?.type === 'sleep' ? 'sleeping' : shouldCompleteSession ? 'awake' : 'recording',
-      });
-      emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'voice_stream_disconnected' });
+      if (finalizeReason !== 'superseded') {
+        db.upsertClientStatus(device.userId, device.id, {
+          mode: terminalFinalize?.type === 'sleep' ? 'sleeping' : shouldCompleteSession ? 'awake' : 'recording',
+          status: terminalFinalize?.type === 'sleep' ? 'Sleeping.' : shouldCompleteSession ? 'Voice stream disconnected' : 'Voice stream disconnected; waiting for reconnect',
+          protocolVersion: VOICE_STREAM_PROTOCOL_VERSION,
+        });
+        emitAppEvent(device.userId, 'client_status_changed', {
+          deviceId: device.id,
+          mode: terminalFinalize?.type === 'sleep' ? 'sleeping' : shouldCompleteSession ? 'awake' : 'recording',
+        });
+        emitAppEvent(device.userId, 'device_changed', { deviceId: device.id, reason: 'voice_stream_disconnected' });
+      }
       const endedAt = Date.now();
       const activeMs = activeDurationMs(endedAt);
       const wallMs = Math.max(0, endedAt - startedAt);
@@ -6707,6 +6742,17 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             socket.close(1000, 'finalized');
           }
         }, 150);
+      }
+    }
+
+    if (recordingMode) {
+      const previousConnection = activeVoiceStreamConnections.get(session.id);
+      activeVoiceStreamConnections.set(session.id, {
+        connectionId,
+        finalizeForReconnect: () => finalizeVoiceStream('superseded'),
+      });
+      if (previousConnection && previousConnection.connectionId !== connectionId) {
+        predecessorFinalization = previousConnection.finalizeForReconnect();
       }
     }
   });

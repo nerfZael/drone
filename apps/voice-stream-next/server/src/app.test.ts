@@ -1,12 +1,19 @@
 import { afterEach, describe, expect, test } from 'bun:test';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import WebSocket from 'ws';
 
 import { binaryChunk, binarySize, buildApp, mergeTimestampedTranscriptText, mergeTranscriptText, openAiRealtimeAudioConfig, openAiSafetyIdentifier } from './app.js';
+import {
+  setAssistantExecutionTargetProvider,
+  setAssistantExternalToolApprovalEvaluator,
+  setAssistantExternalToolExecutor,
+  setAssistantSpeakPlaybackResolver,
+} from './assistant-parity.js';
 import type { VoiceRecordingRecord } from './db.js';
 import { __openAiRealtimeWebRtcTestInternals, openAiRealtimeWebRtcSessionConfig, realtimeCallIdFromLocation } from './openai-realtime-webrtc.js';
 import { realtimeStopTranscript, realtimeStreamingTranscript } from './realtime-transcript.js';
-import { pcm16ToWav } from './wav.js';
+import { pcm16ToWav, wavPcm16Data } from './wav.js';
 
 const originalEnv = {
   PORT: process.env.PORT,
@@ -76,6 +83,49 @@ async function closeBuiltApp(built: Awaited<ReturnType<typeof buildApp>>): Promi
   built.db.db.close();
 }
 
+function waitForWebSocketMessage(socket: WebSocket, type: string, timeoutMs = 8000): Promise<any> {
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => {
+      socket.off('message', onMessage);
+      reject(new Error(`timed out waiting for websocket message: ${type}`));
+    }, timeoutMs);
+    const onMessage = (data: WebSocket.RawData) => {
+      let message: any;
+      try {
+        message = JSON.parse(data.toString());
+      } catch {
+        return;
+      }
+      if (message.type !== type) return;
+      clearTimeout(timeout);
+      socket.off('message', onMessage);
+      resolve(message);
+    };
+    socket.on('message', onMessage);
+  });
+}
+
+function terminateWebSocketAndWait(socket: WebSocket, timeoutMs = 8000): Promise<void> {
+  if (socket.readyState === WebSocket.CLOSED) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timeout = setTimeout(() => reject(new Error('timed out waiting for websocket close')), timeoutMs);
+    socket.once('close', () => {
+      clearTimeout(timeout);
+      resolve();
+    });
+    socket.terminate();
+  });
+}
+
+async function waitForTestCondition(label: string, check: () => boolean, timeoutMs = 8000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (check()) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`timed out waiting for ${label}`);
+}
+
 describe('app configuration', () => {
   afterEach(() => {
     restoreEnv();
@@ -100,6 +150,92 @@ describe('app configuration', () => {
 
     expect(binarySize(fragments)).toBe(6);
     expect(Array.from(binaryChunk(fragments) ?? [])).toEqual([1, 2, 3, 4, 6, 7]);
+  });
+
+  test('assembles reconnect fragments before final clipboard transcription', async () => {
+    process.env.VOICE_STREAM_NEXT_DATA_DIR = path.join(process.cwd(), 'server', 'data', 'tests', crypto.randomUUID());
+    process.env.VOICE_STREAM_NEXT_TEST_TRANSCRIPT = 'complete reconnect transcript';
+    const built = await buildApp({ logger: false });
+    const user = built.db.upsertUser({
+      clerkUserId: 'dev_reconnect_recording_example_local',
+      displayName: 'Reconnect Recording',
+      email: 'reconnect-recording@example.local',
+      admin: false,
+    });
+    const registered = built.db.registerDevice(user.id, { deviceType: 'desktop', displayName: 'Reconnect Desktop' });
+    const session = built.db.createVoiceSession(user.id, registered.device.id, 'clipboard');
+    const query = new URLSearchParams({
+      deviceId: registered.device.id,
+      token: registered.token,
+      sessionId: session.id,
+      mode: 'clipboard',
+      ignoreCommands: '1',
+    });
+    await built.app.listen({ host: '127.0.0.1', port: 0 });
+    const address = built.app.server.address();
+    const port = typeof address === 'object' && address ? address.port : 0;
+    const wsUrl = `ws://127.0.0.1:${port}/api/voice/stream?${query.toString()}`;
+    const firstSocket = new WebSocket(wsUrl);
+    let secondSocket: WebSocket | null = null;
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        firstSocket.once('open', resolve);
+        firstSocket.once('error', reject);
+      });
+      firstSocket.send(JSON.stringify({ type: 'client_hello', protocolVersion: 1, client: 'test', mode: 'clipboard' }));
+      const firstPcm = new Int16Array(4096).fill(111);
+      firstSocket.send(firstPcm);
+      const pong = waitForWebSocketMessage(firstSocket, 'server_pong');
+      firstSocket.send(JSON.stringify({ type: 'client_ping', sentAt: new Date().toISOString() }));
+      await pong;
+
+      secondSocket = new WebSocket(wsUrl);
+      await new Promise<void>((resolve, reject) => {
+        secondSocket!.once('open', resolve);
+        secondSocket!.once('error', reject);
+      });
+      secondSocket.send(JSON.stringify({ type: 'client_hello', protocolVersion: 1, client: 'test', mode: 'clipboard' }));
+      await waitForTestCondition('superseded stream fragment', () =>
+        built.db.listLogs(user.id, 50).some((entry) => {
+          if (entry.message !== 'Voice stream disconnected') return false;
+          return JSON.parse(entry.detailsJson || '{}').finalizeReason === 'superseded';
+        }),
+      );
+      const connectedStatus = built.db.listClientStatuses(user.id)
+        .find((entry) => entry.deviceId === registered.device.id);
+      expect(connectedStatus?.mode).toBe('recording');
+      expect(connectedStatus?.status).toBe('Voice stream connected');
+
+      const secondPcm = new Int16Array(4096).fill(222);
+      secondSocket.send(secondPcm);
+      const finish = waitForWebSocketMessage(secondSocket, 'finish');
+      secondSocket.send(JSON.stringify({ type: 'end' }));
+      expect((await finish).transcriptText).toBe('complete reconnect transcript');
+
+      const recording = built.db.voiceRecordingForSession(user.id, session.id);
+      expect(recording).toBeTruthy();
+      const expectedPcm = Buffer.concat([Buffer.from(firstPcm.buffer), Buffer.from(secondPcm.buffer)]);
+      const savedPcm = wavPcm16Data(new Uint8Array(readFileSync(recording!.filePath))).pcm;
+      expect(Buffer.from(savedPcm).equals(expectedPcm)).toBe(true);
+
+      await terminateWebSocketAndWait(firstSocket);
+      const stablePcm = wavPcm16Data(new Uint8Array(readFileSync(recording!.filePath))).pcm;
+      expect(Buffer.from(stablePcm).equals(expectedPcm)).toBe(true);
+      expect(built.db.listTranscripts(user.id, 20, { voiceSessionId: session.id })).toHaveLength(1);
+    } finally {
+      firstSocket.terminate();
+      secondSocket?.terminate();
+      for (const client of built.app.websocketServer.clients) client.terminate();
+      built.app.server.closeAllConnections?.();
+      built.app.server.close();
+      built.app.server.unref();
+      setAssistantExternalToolExecutor(null);
+      setAssistantExternalToolApprovalEvaluator(null);
+      setAssistantSpeakPlaybackResolver(null);
+      setAssistantExecutionTargetProvider(null);
+      built.db.db.close();
+    }
   });
 
   test('keeps OpenAI Realtime safety identifiers below the header limit', () => {
