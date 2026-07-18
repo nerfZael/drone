@@ -14,6 +14,7 @@ import {
 } from './drone-create-runtime';
 import { makeId, newDraftChatFocusKey } from './helpers';
 import { allocateUntitledDisplayName } from './name-helpers';
+import type { DesktopNewDronePreferences } from './new-drone-preferences';
 import {
   addOptimisticStartupSeeds,
   clearOptimisticStartupSeeds,
@@ -104,6 +105,7 @@ type UseDroneCreationActionsArgs = {
     },
   ) => void;
   rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
+  rememberNewDronePreferences: (preferences: DesktopNewDronePreferences) => void;
   setStartupSeedByDrone: React.Dispatch<React.SetStateAction<StartupSeedMap>>;
   isValidDroneName: (name: string) => boolean;
   hasWhitespaceInNameRaw: (nameRaw: string) => boolean;
@@ -200,6 +202,7 @@ export function useDroneCreationActions({
   suggestAndRenameDraftDrone,
   rememberStartupSeed,
   rememberSeenModels,
+  rememberNewDronePreferences,
   setStartupSeedByDrone,
   isValidDroneName,
   hasWhitespaceInNameRaw,
@@ -798,6 +801,16 @@ export function useDroneCreationActions({
           const createdName = String((data as any)?.name ?? name ?? '').trim() || droneId;
           if (!droneId) throw new Error('create drone did not return an id');
           createdDrone = true;
+          rememberNewDronePreferences({
+            mode: effectiveCreateMode,
+            runtime,
+            createAsDraft,
+            persistVolume: persistVolume === true,
+            spawnAgentKey,
+            spawnModel: String(spawnModelForSeed ?? '').trim(),
+            spawnReasoning: String(spawnReasoningForSeed ?? '').trim(),
+            spawnAgentPermissionMode,
+          });
 
           if (optimisticSeeds.length > 0) {
             replaceOptimisticStartupSeeds(setStartupSeedByDrone, optimisticSeeds, [{ id: droneId, name: createdName }], {
@@ -974,6 +987,7 @@ export function useDroneCreationActions({
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
       rememberSeenModels,
+      rememberNewDronePreferences,
       rememberStartupSeed,
       replaceOptimisticStartupSeeds,
       requestJson,

@@ -37,6 +37,12 @@ export function mobileVoiceStatusLabel(status: MobileVoiceRecordingStatus): stri
   return '';
 }
 
+export function shouldDiscardMobileVoiceWhenInactive(
+  status: MobileVoiceRecordingStatus,
+): boolean {
+  return status === 'recording' || status === 'paused' || status === 'transcribing';
+}
+
 export function resolveMobileGroqTranscriptionResponse(input: {
   ok: boolean;
   status: number;

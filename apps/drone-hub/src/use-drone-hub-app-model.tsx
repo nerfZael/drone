@@ -73,6 +73,10 @@ import { useAgentSuggestionState } from './droneHub/app/use-agent-suggestion-sta
 import { useWorkspaceNavigationActions } from './droneHub/app/use-workspace-navigation-actions';
 import { useWorkspaceActions } from './droneHub/app/use-workspace-actions';
 import {
+  loadDesktopNewDronePreferences,
+  saveDesktopNewDronePreferences,
+} from './droneHub/app/new-drone-preferences';
+import {
   resolveNewDroneContextFromCurrentSelection,
   shouldInheritNewDroneContextFromCurrentSelection,
 } from './droneHub/app/new-drone-context';
@@ -1495,6 +1499,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       suggestAndRenameDraftDrone,
       rememberStartupSeed,
       rememberSeenModels,
+      rememberNewDronePreferences: saveDesktopNewDronePreferences,
       setStartupSeedByDrone,
       isValidDroneName: isValidDroneNameDashCase,
       hasWhitespaceInNameRaw: droneNameHasWhitespace,
@@ -2254,11 +2259,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [currentDrone],
   );
   const currentSelectionSpawnModel = currentAgent.kind !== 'custom' ? String(currentModel ?? '') : '';
-  const resolveCurrentSelectionDraftContext = React.useCallback(() => {
+  const resolveCurrentSelectionDraftContext = React.useCallback((inheritSpawnContext = false) => {
     if (!selectedDrone || !currentDrone) return null;
     const nextRepoPath = normalizeCreateRepoPath(currentSelectionCreateSeed.repoPath);
     setSpawnContextRepoPath(nextRepoPath);
-    if (effectiveChatInfo) {
+    if (inheritSpawnContext && effectiveChatInfo) {
       updateSpawnContextForRepo(nextRepoPath, {
         spawnAgentKey: currentAgentKey,
         spawnModel: currentSelectionSpawnModel,
@@ -2280,9 +2285,36 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSpawnContextRepoPath,
     updateSpawnContextForRepo,
   ]);
+  const applyRememberedNewDronePreferences = React.useCallback(
+    (repoPathRaw: string) => {
+      const preferences = loadDesktopNewDronePreferences();
+      if (!preferences) return;
+      const repoPath = normalizeCreateRepoPath(repoPathRaw);
+      setDraftCreateMode(preferences.mode);
+      setCreateRuntime(preferences.runtime);
+      setCreateAsDraft(preferences.createAsDraft);
+      setCreatePersistVolume(preferences.persistVolume);
+      setSpawnContextRepoPath(repoPath);
+      updateSpawnContextForRepo(repoPath, {
+        spawnAgentKey: preferences.spawnAgentKey,
+        spawnModel: preferences.spawnModel,
+        spawnReasoning: preferences.spawnReasoning,
+      });
+      setSpawnAgentPermissionMode(preferences.spawnAgentPermissionMode);
+    },
+    [
+      normalizeCreateRepoPath,
+      setCreateAsDraft,
+      setCreatePersistVolume,
+      setCreateRuntime,
+      setDraftCreateMode,
+      setSpawnContextRepoPath,
+      updateSpawnContextForRepo,
+    ],
+  );
   const openCreateModal = React.useCallback(() => {
     openCreateModalBase();
-    const selectionDraftContext = resolveCurrentSelectionDraftContext();
+    const selectionDraftContext = resolveCurrentSelectionDraftContext(true);
     if (!selectionDraftContext) return;
     setCreateRepoPath(selectionDraftContext.repoPath);
     setCreateGroup(selectionDraftContext.group);
@@ -2296,19 +2328,27 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     (opts?: { repoPath?: string | null; group?: string | null }) => {
       if (!shouldInheritNewDroneContextFromCurrentSelection(opts)) {
         openDraftChatComposerBase(opts);
+        const hasRepoOverride = Object.prototype.hasOwnProperty.call(opts ?? {}, 'repoPath');
+        applyRememberedNewDronePreferences(
+          hasRepoOverride ? String(opts?.repoPath ?? '') : activeRepoPath,
+        );
         return;
       }
       const selectionDraftContext = resolveCurrentSelectionDraftContext();
       if (!selectionDraftContext) {
         openDraftChatComposerBase(opts);
+        applyRememberedNewDronePreferences(activeRepoPath);
         return;
       }
       openDraftChatComposerBase({
         repoPath: selectionDraftContext.repoPath,
         group: selectionDraftContext.group,
       });
+      applyRememberedNewDronePreferences(selectionDraftContext.repoPath);
     },
     [
+      activeRepoPath,
+      applyRememberedNewDronePreferences,
       openDraftChatComposerBase,
       resolveCurrentSelectionDraftContext,
     ],
@@ -2322,9 +2362,11 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         group: selectionDraftContext.group,
         parentDroneId: String(parentDroneIdRaw ?? '').trim() || undefined,
       });
+      applyRememberedNewDronePreferences(selectionDraftContext.repoPath);
       return true;
     },
     [
+      applyRememberedNewDronePreferences,
       openDraftChatComposerBase,
       resolveCurrentSelectionDraftContext,
     ],

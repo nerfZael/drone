@@ -38,6 +38,15 @@ import {
   type MobileDroneCreatePayload,
 } from '../drones/NewDroneScreen';
 import {
+  mobileDroneCreatePreferencesFromPayload,
+  resolveMobileDroneCreateDefaults,
+  type MobileDroneCreatePreferences,
+} from '../drones/create-preferences-model';
+import {
+  loadMobileDroneCreatePreferences,
+  saveMobileDroneCreatePreferences,
+} from '../drones/create-preferences-storage';
+import {
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   mobileRepoLabel,
   mobileDroneTurnsToAssistantMessages,
@@ -197,6 +206,7 @@ export function DronesScreen({
   const runVersion = React.useRef(0);
   const busyVersion = React.useRef(0);
   const modelRequestVersion = React.useRef(0);
+  const createDefaultsRequestVersion = React.useRef(0);
   const chatTabsRef = React.useRef<ScrollView>(null);
   const createModelCatalogCache = React.useRef(new Map<string, MobileDroneCreateModel[]>());
   const createRepoBranchesCache = React.useRef(new Map<string, MobileDroneCreateRepo>());
@@ -337,6 +347,8 @@ export function DronesScreen({
   loadDronesRef.current = loadDrones;
 
   React.useEffect(() => {
+    const createDefaultsVersion = ++createDefaultsRequestVersion.current;
+    selectedRef.current = null;
     setDrones([]);
     setDroneSidebarOrder(EMPTY_MOBILE_DRONE_SIDEBAR_ORDER);
     setSelected(null);
@@ -381,6 +393,21 @@ export function DronesScreen({
     busyVersion.current += 1;
     modelRequestVersion.current += 1;
     loadedDronesTargetIdRef.current = '';
+    if (targetSupportsDrones) {
+      void loadMobileDroneCreatePreferences(targetId).then((remembered) => {
+        if (
+          targetIdRef.current !== targetId ||
+          createDefaultsRequestVersion.current !== createDefaultsVersion ||
+          selectedRef.current
+        ) {
+          return;
+        }
+        const defaults = resolveMobileDroneCreateDefaults({ remembered });
+        setNewDroneDefaults(defaults);
+        setNewDroneDraft(defaults.draft === true);
+        setNewDroneScreenVersion((value) => value + 1);
+      });
+    }
   }, [targetId, targetSupportsDrones]);
   React.useEffect(() => {
     if (meshRouteAvailable && targetSupportsDrones) {
@@ -392,6 +419,7 @@ export function DronesScreen({
 
   const openDrone = (drone: MobileDroneSummary, requestedChat?: string) =>
     run('chats', async () => {
+      createDefaultsRequestVersion.current += 1;
       const destinationId = targetId;
       const requestVersion = ++openDroneVersion.current;
       const knownChats = drone.chats;
@@ -776,13 +804,20 @@ export function DronesScreen({
     });
   };
 
-  const createDrone = async (payload: MobileDroneCreatePayload): Promise<boolean> => {
+  const createDrone = async (
+    payload: MobileDroneCreatePayload,
+    preferences?: MobileDroneCreatePreferences,
+  ): Promise<boolean> => {
     let created = false;
     await run(`create-${payload.runtime}`, async () => {
       const destinationId = targetId;
       await requestDroneControl(destinationId, `drone.create.${payload.runtime}`, payload);
-      if (targetIdRef.current !== destinationId) return;
       created = true;
+      await saveMobileDroneCreatePreferences(
+        destinationId,
+        preferences ?? mobileDroneCreatePreferencesFromPayload(payload),
+      ).catch(() => undefined);
+      if (targetIdRef.current !== destinationId) return;
       await loadDrones();
     });
     return created;
@@ -916,9 +951,26 @@ export function DronesScreen({
       .finally(() => setCancellingPromptId((current) => (current === promptId ? '' : current)));
   };
 
-  const openNewDroneScreen = (defaults: MobileDroneCreateDefaults | null = null) => {
+  const openNewDroneScreen = async (
+    overrides: MobileDroneCreateDefaults | null = null,
+  ): Promise<void> => {
+    const destinationId = targetId;
+    const requestVersion = ++createDefaultsRequestVersion.current;
+    const contextualRepoPath = overrides?.repoPath ?? selected?.repoPath ?? '';
+    const remembered = await loadMobileDroneCreatePreferences(destinationId);
+    if (
+      targetIdRef.current !== destinationId ||
+      createDefaultsRequestVersion.current !== requestVersion
+    ) {
+      return;
+    }
+    const defaults = resolveMobileDroneCreateDefaults({
+      remembered,
+      repoPath: contextualRepoPath,
+      overrides,
+    });
     setNewDroneDefaults(defaults);
-    setNewDroneDraft(false);
+    setNewDroneDraft(defaults.draft === true);
     setNewDroneScreenVersion((value) => value + 1);
     setSelected(null);
     setChats([]);
@@ -945,13 +997,14 @@ export function DronesScreen({
 
   const openNewDroneFromCurrent = () => {
     if (!selected) return;
-    openNewDroneScreen({
+    void openNewDroneScreen({
       mode: 'with-chat',
       runtime: selected.runtime === 'host' ? 'host' : 'container',
       group: selected.group ?? '',
       repoPath: selected.repoPath,
       ...(chatAgentId ? { agent: chatAgentId } : {}),
       agentPermissionMode: chatAgentPermissionMode,
+      ...(chatModelProvider ? { provider: chatModelProvider } : {}),
       ...(chatModel ? { model: chatModel } : {}),
       ...(chatReasoning ? { reasoning: chatReasoning } : {}),
     });
@@ -1262,7 +1315,7 @@ export function DronesScreen({
           targetSupportsDrones && meshRouteAvailable
             ? () => {
                 onDrawerOpenChange(false);
-                openNewDroneScreen();
+                void openNewDroneScreen();
               }
             : undefined
         }

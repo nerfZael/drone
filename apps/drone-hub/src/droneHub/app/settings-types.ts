@@ -1,3 +1,4 @@
+import type { NativeAgentDefaultSettings } from '@drone/assistant-chat';
 import type { AutomationConfig } from './automation-config';
 
 export type LlmProviderId = 'openai' | 'gemini' | 'codex';
@@ -29,6 +30,8 @@ export type LlmSettingsResponse = {
   codex: Omit<ApiKeySettingsResponse, 'ok'>;
   groq: Omit<ApiKeySettingsResponse, 'ok'>;
 };
+
+export type LlmDefaultModelSettingsResponse = NativeAgentDefaultSettings;
 
 export type HubLogsResponse = {
   ok: true;

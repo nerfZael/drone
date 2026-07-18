@@ -376,8 +376,11 @@ function SwitchItemState({
           <View style={[styles.switchStateDot, { backgroundColor: indicatorColor }]} />
         </View>
       )}
-      <Text numberOfLines={1} style={[styles.switchItemMeta, { color: stateColor }]}>
-        {stateLabel}
+      <Text
+        numberOfLines={1}
+        style={[styles.switchItemMeta, { color: stateColor }]}
+      >
+        <Text style={{ color: indicatorColor }}>{stateLabel}</Text>
         {detail ? ` · ${detail}` : ''}
       </Text>
       {chatCount != null && chatCount > 1 ? (
@@ -465,11 +468,6 @@ function DrawerDroneNode({
           pressed && styles.pressed,
         ]}
       >
-        <QuadDroneIcon
-          color={selected ? colors.accent : colors.muted}
-          size={14}
-          strokeWidth={1.7}
-        />
         <View style={styles.switchItemCopy}>
           <View style={styles.switchItemTitleRow}>
             <Text numberOfLines={1} style={[styles.switchItemTitle, selected && styles.activeText]}>

@@ -1,4 +1,5 @@
 import React from 'react';
+import { UiMenuSelect } from '../../ui/menuSelect';
 import { bytesToMaxMiB, bytesToMinMiB, bytesToNearestMiB, miBToBytes } from './filesystem-size-utils';
 import type { UseAgentMessageAutoContinueSettingsResult } from './use-agent-message-auto-continue-settings';
 import type { UseAgentSuggestionSettingsResult } from './use-agent-suggestion-settings';
@@ -12,6 +13,12 @@ function llmProviderLabel(provider: LlmProviderId | null | undefined): string {
   if (provider === 'codex') return 'Codex';
   if (provider === 'gemini') return 'Gemini';
   return 'OpenAI';
+}
+
+function llmReasoningLabel(level: string): string {
+  if (level === 'off') return 'None';
+  if (level === 'xhigh') return 'X-high';
+  return level ? level.charAt(0).toUpperCase() + level.slice(1) : 'Default';
 }
 
 type GeneralSettingsTabProps = {
@@ -42,6 +49,9 @@ export function GeneralSettingsTab({
     llmSettingsLoading,
     llmSettingsError,
     llmProviderDraft,
+    llmDefaultModelSettings,
+    llmDefaultModelDraft,
+    llmDefaultModelChoices,
     savingLlmProvider,
     showGeminiKey,
     revealingGeminiKey,
@@ -60,6 +70,8 @@ export function GeneralSettingsTab({
     revealingGroqKey,
     llmSettingsNotice,
     setLlmProviderDraft,
+    setLlmDefaultModelDraft,
+    setLlmDefaultReasoningDraft,
     updateOpenAiSettingsDraft,
     updateGeminiSettingsDraft,
     updateGroqSettingsDraft,
@@ -104,6 +116,14 @@ export function GeneralSettingsTab({
   } = agentSuggestion;
 
   const currentUploadMaxBytes = filesystemSettings?.filesystem.uploadMaxBytes ?? null;
+  const currentDefaultModel = llmDefaultModelSettings?.defaultModel;
+  const llmProviderDefaultsDirty =
+    llmProviderDraft !== (llmSettings?.provider.selected ?? 'openai') ||
+    llmDefaultModelDraft.provider !== currentDefaultModel?.provider ||
+    llmDefaultModelDraft.model !== currentDefaultModel?.model ||
+    llmDefaultModelDraft.thinkingLevel !== currentDefaultModel?.thinkingLevel;
+  const selectedDefaultModel =
+    llmDefaultModelChoices.find((choice) => choice.id === llmDefaultModelDraft.model) ?? null;
   const draftUploadMaxMiB = Number(uploadMaxMiBDraft);
   const draftUploadMaxBytes =
     Number.isFinite(draftUploadMaxMiB) && draftUploadMaxMiB > 0 ? miBToBytes(draftUploadMaxMiB) : null;
@@ -300,21 +320,73 @@ export function GeneralSettingsTab({
           >
             Codex
           </button>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_180px_auto] md:items-end">
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+              Default model
+            </span>
+            <UiMenuSelect
+              value={llmDefaultModelDraft.model}
+              onValueChange={setLlmDefaultModelDraft}
+              disabled={savingLlmProvider || llmSettingsLoading || llmDefaultModelChoices.length === 0}
+              entries={llmDefaultModelChoices.map((choice) => ({
+                value: choice.id,
+                label: choice.label,
+                title: choice.id,
+                searchText: `${choice.label} ${choice.id}`,
+              }))}
+              header={`${llmProviderLabel(llmProviderDraft)} model`}
+              searchable
+              searchPlaceholder="Search models"
+              menuClassName="max-h-56 overflow-y-auto"
+            />
+          </div>
+          <div className="flex min-w-0 flex-col gap-1.5">
+            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+              Default reasoning
+            </span>
+            <UiMenuSelect
+              value={llmDefaultModelDraft.thinkingLevel}
+              onValueChange={setLlmDefaultReasoningDraft}
+              disabled={
+                savingLlmProvider ||
+                llmSettingsLoading ||
+                !selectedDefaultModel ||
+                selectedDefaultModel.reasoningLevels.length === 0
+              }
+              entries={(selectedDefaultModel?.reasoningLevels ?? []).map((level) => ({
+                value: level,
+                label: llmReasoningLabel(level),
+              }))}
+              header="Reasoning"
+            />
+          </div>
           <button
             type="button"
             onClick={() => void saveLlmProviderSettings()}
-            disabled={savingLlmProvider || llmSettingsLoading || llmProviderDraft === (llmSettings?.provider.selected ?? 'openai')}
+            disabled={
+              savingLlmProvider ||
+              llmSettingsLoading ||
+              !llmProviderDefaultsDirty ||
+              !selectedDefaultModel
+            }
             className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-              savingLlmProvider || llmSettingsLoading || llmProviderDraft === (llmSettings?.provider.selected ?? 'openai')
+              savingLlmProvider ||
+              llmSettingsLoading ||
+              !llmProviderDefaultsDirty ||
+              !selectedDefaultModel
                 ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                 : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
             }`}
             style={{ fontFamily: 'var(--display)' }}
           >
-            {savingLlmProvider ? 'Saving…' : 'Save provider'}
+            {savingLlmProvider ? 'Saving…' : 'Save defaults'}
           </button>
         </div>
-
+        <div className="mt-2 text-[11px] leading-relaxed text-[var(--muted-dim)]">
+          New Built-in chats use this model and reasoning whenever {llmProviderLabel(llmProviderDraft)} is the active provider.
+        </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
