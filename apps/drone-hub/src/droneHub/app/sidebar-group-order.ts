@@ -3,6 +3,12 @@ import {
   rewriteSidebarGroupPathPrefix,
   sidebarGroupParentPath,
 } from './sidebar-group-paths';
+import {
+  orderSidebarEntries,
+  sidebarGroupOrderToken,
+} from '@drone/hub-model/sidebar';
+
+export { orderSidebarEntries, sidebarGroupOrderToken };
 
 export type SidebarGroupOrderKind = 'group' | 'repo';
 
@@ -13,10 +19,6 @@ export type SidebarGroupOrderRef = {
 
 export type SidebarGroupDropPlacement = 'before' | 'after';
 export type SidebarGroupCreatePlacement = 'start' | 'end';
-
-export function sidebarGroupOrderToken({ group, kind }: SidebarGroupOrderRef): string {
-  return `${kind}:${String(group ?? '').trim()}`;
-}
 
 export function normalizeSidebarGroupOrder(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
@@ -30,20 +32,7 @@ export function normalizeSidebarGroupOrder(value: unknown): string[] {
 }
 
 export function orderSidebarGroups<T extends SidebarGroupOrderRef>(groups: T[], order: string[]): T[] {
-  if (groups.length < 2) return groups.slice();
-  const orderIndex = new Map<string, number>();
-  for (const token of order) {
-    if (orderIndex.has(token)) continue;
-    orderIndex.set(token, orderIndex.size);
-  }
-  return groups
-    .map((group, index) => ({
-      group,
-      index,
-      orderIndex: orderIndex.get(sidebarGroupOrderToken(group)) ?? Number.POSITIVE_INFINITY,
-    }))
-    .sort((a, b) => a.orderIndex - b.orderIndex || a.index - b.index)
-    .map((entry) => entry.group);
+  return orderSidebarEntries(groups, order, sidebarGroupOrderToken);
 }
 
 export function mergeVisibleSidebarGroupOrder<T extends SidebarGroupOrderRef>(order: string[], groups: T[]): string[] {
@@ -127,33 +116,6 @@ export function removeSidebarGroupOrderToken(order: string[], group: SidebarGrou
   const token = sidebarGroupOrderToken(group);
   if (!token) return normalizeSidebarGroupOrder(order);
   return normalizeSidebarGroupOrder(order).filter((entry) => entry !== token);
-}
-
-export function orderSidebarEntries<T>(
-  entries: T[],
-  order: string[],
-  getKey: (entry: T) => string,
-  options?: {
-    unorderedPlacement?: 'start' | 'end';
-  },
-): T[] {
-  if (entries.length < 2) return entries.slice();
-  const unorderedPlacement = options?.unorderedPlacement === 'start' ? 'start' : 'end';
-  const orderIndex = new Map<string, number>();
-  for (const token of order) {
-    if (orderIndex.has(token)) continue;
-    orderIndex.set(token, orderIndex.size);
-  }
-  return entries
-    .map((entry, index) => ({
-      entry,
-      index,
-      orderIndex:
-        orderIndex.get(String(getKey(entry) ?? '').trim()) ??
-        (unorderedPlacement === 'start' ? Number.NEGATIVE_INFINITY : Number.POSITIVE_INFINITY),
-    }))
-    .sort((a, b) => a.orderIndex - b.orderIndex || a.index - b.index)
-    .map((item) => item.entry);
 }
 
 export function reorderSidebarEntryOrder(

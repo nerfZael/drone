@@ -65,6 +65,7 @@
         "@dnd-kit/utilities": "^3.2.2",
         "@drone/assistant-chat": "workspace:*",
         "@drone/assistant-markdown": "workspace:*",
+        "@drone/hub-model": "workspace:*",
         "@excalidraw/excalidraw": "^0.18.1",
         "@monaco-editor/react": "^4.7.0",
         "@xterm/addon-fit": "^0.11.0",
@@ -100,6 +101,7 @@
         "@blip/workspace": "workspace:*",
         "@drone/assistant-chat": "workspace:*",
         "@drone/device-protocol": "workspace:*",
+        "@drone/hub-model": "workspace:*",
         "@mariozechner/pi-agent-core": "workspace:*",
         "@mariozechner/pi-ai": "workspace:*",
         "@noble/curves": "^2.2.0",
@@ -368,6 +370,13 @@
         "eslint-config-prettier": "^9.1.0",
         "prettier": "^3.3.3",
         "rimraf": "^6.0.1",
+        "typescript": "^5.6.3",
+      },
+    },
+    "packages/hub-model": {
+      "name": "@drone/hub-model",
+      "version": "0.1.0",
+      "devDependencies": {
         "typescript": "^5.6.3",
       },
     },
@@ -677,6 +686,8 @@
     "@drone/assistant-markdown": ["@drone/assistant-markdown@workspace:packages/assistant-markdown"],
 
     "@drone/device-protocol": ["@drone/device-protocol@workspace:packages/device-protocol"],
+
+    "@drone/hub-model": ["@drone/hub-model@workspace:packages/hub-model"],
 
     "@electron/asar": ["@electron/asar@3.4.1", "", { "dependencies": { "commander": "^5.0.0", "glob": "^7.1.6", "minimatch": "^3.0.4" }, "bin": { "asar": "bin/asar.js" } }, "sha512-i4/rNPRS84t0vSRa2HorerGRXWyF4vThfHesw0dmcWHp+cspK743UanA0suA5Q5y8kzY2y6YKrvbIUn69BCAiA=="],
 

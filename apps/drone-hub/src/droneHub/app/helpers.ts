@@ -5,6 +5,12 @@ import type {
   PortReachabilityByHostPort,
   PreviewUrlByDrone,
 } from '../types';
+import {
+  compareSidebarDronesByNewestFirst,
+  parseIsoTimestampMs,
+} from '@drone/hub-model/sidebar';
+
+export { parseIsoTimestampMs };
 
 export type RepoOpErrorMeta = {
   code: string | null;
@@ -70,18 +76,8 @@ export function parseConflictFilesFromMessage(message: string): string[] {
   return Array.from(out).sort((a, b) => a.localeCompare(b));
 }
 
-export function parseIsoTimestampMs(raw: string | null | undefined): number | null {
-  const ms = Date.parse(String(raw ?? '').trim());
-  return Number.isFinite(ms) ? ms : null;
-}
-
 export function compareDronesByNewestFirst(a: DroneSummary, b: DroneSummary): number {
-  const aMs = parseIsoTimestampMs(a.createdAt);
-  const bMs = parseIsoTimestampMs(b.createdAt);
-  if (aMs == null && bMs != null) return 1;
-  if (aMs != null && bMs == null) return -1;
-  if (aMs != null && bMs != null && aMs !== bMs) return bMs - aMs;
-  return a.name.localeCompare(b.name);
+  return compareSidebarDronesByNewestFirst(a, b);
 }
 
 export function resolveChatNameForDrone(drone: DroneSummary, preferredChat: string): string {

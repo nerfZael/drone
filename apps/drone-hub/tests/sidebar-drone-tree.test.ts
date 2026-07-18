@@ -51,7 +51,7 @@ describe('buildSidebarDroneTree', () => {
     });
   });
 
-  test('adds a fallback root for parent cycles so no drones disappear from the tree', () => {
+  test('breaks parent cycles so every drone remains reachable from the root', () => {
     const result = buildSidebarDroneTree([
       drone({ id: 'alpha', name: 'alpha', fleetParentId: 'beta' }),
       drone({ id: 'beta', name: 'beta', fleetParentId: 'alpha' }),
@@ -59,11 +59,8 @@ describe('buildSidebarDroneTree', () => {
     ]);
 
     expect(result).toEqual({
-      rootDroneIds: ['gamma', 'alpha'],
-      childDroneIdsByParentId: {
-        alpha: ['beta'],
-        beta: ['alpha'],
-      },
+      rootDroneIds: ['alpha', 'beta', 'gamma'],
+      childDroneIdsByParentId: {},
     });
   });
 });

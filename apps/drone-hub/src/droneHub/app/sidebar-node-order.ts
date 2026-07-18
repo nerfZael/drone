@@ -2,19 +2,20 @@ import {
   isSameOrDescendantSidebarGroupPath,
   rewriteSidebarGroupPathPrefix,
 } from './sidebar-group-paths';
-import { normalizeSidebarGroupOrder, orderSidebarEntries, reorderSidebarEntryOrder, type SidebarGroupDropPlacement } from './sidebar-group-order';
+import { normalizeSidebarGroupOrder, reorderSidebarEntryOrder, type SidebarGroupDropPlacement } from './sidebar-group-order';
+import {
+  orderSidebarNodeIds,
+  SIDEBAR_ROOT_PARENT_ID,
+  sidebarDroneNodeId,
+  sidebarFolderNodeId,
+} from '@drone/hub-model/sidebar';
 
-export const SIDEBAR_ROOT_PARENT_ID = 'root';
-
-export function sidebarFolderNodeId(pathRaw: string): string {
-  const path = String(pathRaw ?? '').trim();
-  return `folder:${path}`;
-}
-
-export function sidebarDroneNodeId(droneIdRaw: string): string {
-  const droneId = String(droneIdRaw ?? '').trim();
-  return `drone:${droneId}`;
-}
+export {
+  orderSidebarNodeIds,
+  SIDEBAR_ROOT_PARENT_ID,
+  sidebarDroneNodeId,
+  sidebarFolderNodeId,
+};
 
 export function sidebarChatSidebarNodeId(droneIdRaw: string, chatNameRaw: string): string {
   const droneId = String(droneIdRaw ?? '').trim();
@@ -59,38 +60,6 @@ export function mergeVisibleSidebarNodeOrderByParent(
   }
 
   return normalizeNodeOrderMap(out);
-}
-
-export function orderSidebarNodeIds(childIds: string[], order: string[]): string[] {
-  const visibleChildIds = normalizeSidebarGroupOrder(childIds);
-  if (visibleChildIds.length < 2) return visibleChildIds;
-  const normalizedOrder = normalizeSidebarGroupOrder(order);
-  const orderedChildIdSet = new Set(normalizedOrder);
-
-  const orderedVisibleChildIds = orderSidebarEntries(visibleChildIds, normalizedOrder, (childId) => childId, {
-    unorderedPlacement: 'end',
-  }).filter((childId) => orderedChildIdSet.has(childId));
-
-  if (orderedVisibleChildIds.length === 0) return visibleChildIds;
-  if (orderedVisibleChildIds.length === visibleChildIds.length) return orderedVisibleChildIds;
-
-  const visibleOrderedChildIdSet = new Set(orderedVisibleChildIds);
-  const unorderedBuckets = Array.from({ length: orderedVisibleChildIds.length + 1 }, () => [] as string[]);
-  let orderedSeen = 0;
-  for (const childId of visibleChildIds) {
-    if (visibleOrderedChildIdSet.has(childId)) {
-      orderedSeen += 1;
-      continue;
-    }
-    unorderedBuckets[Math.min(orderedSeen, unorderedBuckets.length - 1)].push(childId);
-  }
-
-  const out: string[] = [];
-  for (let index = 0; index < orderedVisibleChildIds.length; index += 1) {
-    out.push(...unorderedBuckets[index], orderedVisibleChildIds[index]);
-  }
-  out.push(...unorderedBuckets[orderedVisibleChildIds.length]);
-  return out;
 }
 
 export function reorderSidebarNodeParentOrder(
