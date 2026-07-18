@@ -74,6 +74,7 @@ type ChatAutomationDependencyName =
   | 'projectCanonicalChatsToRegistry'
   | 'pushPendingPrompt'
   | 'pushPendingStartupPrompt'
+  | 'readChatFromStore'
   | 'readChatReadStateFromStore'
   | 'readChatSnapshot'
   | 'removeDockerSnapshotImagesBestEffort'

@@ -6,9 +6,11 @@ import { startDroneHubApiServer } from '../src/hub/server';
 import { resetDroneRootDirForTests } from '../src/host/paths';
 import { loadRegistry, updateRegistry } from '../src/host/registry';
 import {
+  upsertChatInStore,
   upsertPendingPromptInStore,
   upsertTranscriptTurnInStore,
 } from '../src/hub/transcript-store';
+import { upsertCanonicalDroneLifecycle } from '../src/hub/drone-lifecycle-service';
 import { getSocketListenSupport } from './socket-listen-support';
 
 const listenSupport = getSocketListenSupport();
@@ -115,6 +117,41 @@ describeSocketSuite('chat management api', () => {
     expect(Array.isArray(listed.data?.chats)).toBe(true);
     expect((listed.data?.chats ?? []).includes('default')).toBe(true);
     expect((listed.data?.chats ?? []).includes('review')).toBe(true);
+  });
+
+  test('marks a canonical chat read when the lifecycle projection has no chat aggregate', async () => {
+    const droneId = 'canonical-chat-read';
+    const now = new Date().toISOString();
+    await upsertCanonicalDroneLifecycle('real', droneId, {
+      id: droneId,
+      name: droneId,
+      runtime: 'host',
+      repoPath: '',
+      createdAt: now,
+    });
+    await upsertChatInStore({
+      droneId,
+      chatName: 'default',
+      chatEntry: {
+        id: 'canonical-chat-id',
+        createdAt: now,
+        agent: { kind: 'builtin', id: 'codex' },
+        turns: [],
+        pendingPrompts: [],
+      },
+    });
+
+    const marked = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/read`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ latestAgentTurnId: null, latestAgentRevision: 0 }),
+      },
+    );
+
+    expect(marked.r.status).toBe(200);
+    expect(marked.data).toMatchObject({ ok: true, id: droneId, chat: 'default' });
   });
 
   test('shares exact read cursors and rejects cursorless acknowledgements', async () => {

@@ -6096,6 +6096,7 @@ export async function startDroneHubApiServer(opts: {
     projectCanonicalChatsToRegistry,
     pushPendingPrompt,
     pushPendingStartupPrompt,
+    readChatFromStore,
     readChatReadStateFromStore,
     readChatSnapshot,
     removeDockerSnapshotImagesBestEffort,

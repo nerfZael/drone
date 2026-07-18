@@ -14,11 +14,30 @@ import { readJsonBody, sendJson as json } from '../hub-http';
 import type { PendingPromptState } from '../pendingPromptEnqueue';
 import type { PromptAutomationService } from '../prompt-automation-service';
 import { parseRequestSchema } from '../request-schema';
+import type { ChatAutomationRouteDependencies } from './chat-automation-routes';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './legacy-route';
 
 export type PromptAutomationRouteService = PromptAutomationService;
 
-import type { ChatAutomationRouteDependencies } from './chat-automation-routes';
+export function resolveReadStateChatEntry(input: {
+  droneId: string;
+  chatName: string;
+  droneEntry: any;
+  readChatFromStore: (opts: { droneId: string; chatName: string }) => {
+    available: boolean;
+    chat: any | null;
+  };
+}): { chatEntry: any | null; fromStore: boolean } {
+  const stored = input.readChatFromStore({
+    droneId: input.droneId,
+    chatName: input.chatName,
+  });
+  if (stored.available) return { chatEntry: stored.chat, fromStore: true };
+  return {
+    chatEntry: input.droneEntry?.chats?.[input.chatName] ?? null,
+    fromStore: false,
+  };
+}
 
 export function createChatManagementRouteHandler(
   deps: ChatAutomationRouteDependencies,
@@ -87,6 +106,7 @@ export function createChatManagementRouteHandler(
     promptAutomation,
     pushPendingPrompt,
     pushPendingStartupPrompt,
+    readChatFromStore,
     readChatReadStateFromStore,
     readChatSnapshot,
     removeDockerSnapshotImagesBestEffort,
@@ -832,13 +852,18 @@ export function createChatManagementRouteHandler(
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
         const droneId = resolved.id;
-        const chatEntry = (resolved.drone as any)?.chats?.[chatName];
+        const { chatEntry, fromStore } = resolveReadStateChatEntry({
+          droneId,
+          chatName,
+          droneEntry: resolved.drone,
+          readChatFromStore,
+        });
         if (!chatEntry) {
           json(res, 404, { ok: false, error: `unknown chat: ${chatName}` });
           return;
         }
         try {
-          await importResolvedChatToStore(droneId, chatName, chatEntry);
+          if (!fromStore) await importResolvedChatToStore(droneId, chatName, chatEntry);
           const readState = markUnread
             ? await markChatUnreadInStore({ droneId, chatName, updatedByDeviceId })
             : await markChatReadInStore({
