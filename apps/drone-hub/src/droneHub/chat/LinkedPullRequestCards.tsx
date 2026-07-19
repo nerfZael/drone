@@ -148,41 +148,51 @@ function LinkedPullRequestCard({
   const footerMessage = actionError ?? (loadError ? `Status unavailable: ${loadError}` : null);
 
   return (
-    <section className="border-l-2 border-[rgba(167,139,250,.32)] pl-3">
-      <div className="min-w-0 py-1 pr-1">
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-              Linked request
-            </span>
-            <span className="font-mono text-[10px] text-[var(--accent)]">#{link.pullNumber}</span>
-            <span
-              aria-live="polite"
-              className={`inline-flex items-center gap-1 rounded border px-1.5 py-[1px] text-[9px] capitalize ${
-                pullRequest
-                  ? pullRequestStateClassName(pullRequest.state)
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]'
-              }`}
-              title={loadError ?? statusLabel}
-            >
-              {loading ? <IconSpinner className="h-2.5 w-2.5" /> : null}
-              {statusLabel}
-            </span>
-          </div>
+    <section className="w-fit max-w-full self-start overflow-hidden rounded-md border border-[rgba(167,139,250,.18)] border-l-2 border-l-[rgba(167,139,250,.42)] bg-transparent">
+      <div className="min-w-0 py-2 pl-3 pr-2">
+        <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
+          <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            Linked request
+          </span>
+          <span className="font-mono text-[10px] text-[var(--accent)]">#{link.pullNumber}</span>
+          <span
+            aria-live="polite"
+            className={`inline-flex items-center gap-1 rounded border px-1.5 py-[1px] text-[9px] capitalize ${
+              pullRequest
+                ? pullRequestStateClassName(pullRequest.state)
+                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]'
+            }`}
+            title={loadError ?? statusLabel}
+          >
+            {loading ? <IconSpinner className="h-2.5 w-2.5" /> : null}
+            {statusLabel}
+          </span>
+          {pullRequest && !actionNotice ? <PullRequestStatusBadgeStrip pullRequest={pullRequest} compact /> : null}
+        </div>
+
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
+          <a
+            href={link.href}
+            onClick={(event) => {
+              event.preventDefault();
+              openRequest(link, onOpenLink);
+            }}
+            className="min-w-0 max-w-full truncate text-left text-[12px] font-medium text-[var(--fg-secondary)] outline-none transition-colors hover:text-[var(--fg)] hover:underline focus-visible:text-[var(--fg)] focus-visible:underline"
+            title={pullRequest?.title ?? `Open ${link.owner}/${link.repo} PR #${link.pullNumber}`}
+          >
+            {pullRequest?.title ?? `${link.owner}/${link.repo} pull request #${link.pullNumber}`}
+          </a>
           {actionNotice ? (
-            <span role="status" className="ml-auto text-[9px] text-[var(--green)]">
+            <span role="status" className="text-[9px] text-[var(--green)]">
               {actionNotice}
             </span>
           ) : isOpen && sameRepo ? (
-            <div
-              className="ml-auto flex shrink-0 items-center gap-1 border-l border-[var(--border-subtle)] pl-2"
-              aria-label="Pull request actions"
-            >
+            <div className="flex shrink-0 items-center gap-1.5" aria-label="Pull request actions">
               <button
                 type="button"
                 onClick={() => void mergePullRequest()}
                 disabled={!canManage || Boolean(blockedReason) || Boolean(busyAction) || anyActionBusy}
-                className="h-5 rounded border border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--green)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex h-6 min-w-[64px] items-center justify-center whitespace-nowrap rounded border border-[rgba(74,222,128,.38)] bg-[var(--green-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--green)] transition-[background-color,border-color,filter] hover:border-[rgba(74,222,128,.58)] hover:brightness-110 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(74,222,128,.55)] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ fontFamily: 'var(--display)' }}
                 title={blockedReason ? `Cannot merge: ${blockedReason}` : forceReason ? `Force merge: ${forceReason}` : `Merge PR #${link.pullNumber}`}
               >
@@ -192,7 +202,7 @@ function LinkedPullRequestCard({
                 type="button"
                 onClick={() => void closePullRequest()}
                 disabled={!canManage || Boolean(busyAction) || anyActionBusy}
-                className="h-5 rounded border border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--red)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex h-6 items-center justify-center whitespace-nowrap rounded border border-[rgba(255,90,90,.3)] bg-transparent px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--red)] transition-[background-color,border-color] hover:border-[rgba(255,90,90,.52)] hover:bg-[var(--red-subtle)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(255,90,90,.5)] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Close this pull request without merging"
               >
@@ -201,38 +211,30 @@ function LinkedPullRequestCard({
             </div>
           ) : null}
         </div>
-        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
-          <a
-            href={link.href}
-            onClick={(event) => {
-              event.preventDefault();
-              openRequest(link, onOpenLink);
-            }}
-            className="min-w-0 max-w-full truncate text-left text-[12px] font-medium text-[var(--fg-secondary)] hover:text-[var(--fg)] hover:underline"
-            title={pullRequest?.title ?? `Open ${link.owner}/${link.repo} PR #${link.pullNumber}`}
-          >
-            {pullRequest?.title ?? `${link.owner}/${link.repo} pull request #${link.pullNumber}`}
-          </a>
-          {pullRequest && !actionNotice ? <PullRequestStatusBadgeStrip pullRequest={pullRequest} compact /> : null}
-        </div>
-        <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-[var(--muted-dim)]">
-          <span className="font-mono">{link.owner}/{link.repo}</span>
+
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] text-[var(--muted-dim)]">
+          <span className="font-mono text-[var(--muted)]">{link.owner}/{link.repo}</span>
           {pullRequest?.headRefName || pullRequest?.baseRefName ? (
-            <span className="min-w-0 font-mono break-all" title={`${pullRequest.headRefName} → ${pullRequest.baseRefName}`}>
-              {pullRequest.headRefName || '-'} → {pullRequest.baseRefName || '-'}
-            </span>
+            <>
+              <span aria-hidden="true" className="text-[var(--border-strong)]">·</span>
+              <span className="min-w-0 font-mono break-all" title={`${pullRequest.headRefName} → ${pullRequest.baseRefName}`}>
+                {pullRequest.headRefName || '-'} → {pullRequest.baseRefName || '-'}
+              </span>
+            </>
           ) : null}
-          {pullRequest?.authorLogin ? <span>by {pullRequest.authorLogin}</span> : null}
+          {pullRequest?.authorLogin ? (
+            <>
+              <span aria-hidden="true" className="text-[var(--border-strong)]">·</span>
+              <span>by {pullRequest.authorLogin}</span>
+            </>
+          ) : null}
         </div>
+        {footerMessage ? (
+          <div role="alert" className="mt-2 border-t border-[rgba(255,90,90,.16)] pt-2 text-[9px] text-[var(--red)]">
+            {footerMessage}
+          </div>
+        ) : null}
       </div>
-      {footerMessage ? (
-        <div
-          role="alert"
-          className="mt-1 py-1 text-[9px] text-[var(--red)]"
-        >
-          {footerMessage}
-        </div>
-      ) : null}
     </section>
   );
 }
@@ -276,7 +278,7 @@ function LinkedPullRequestCardsContent({
   }, []);
 
   return (
-    <div className={`mt-3 flex flex-col gap-2 ${className ?? ''}`} aria-label="Pull requests linked in this message">
+    <div className={`mt-3 flex flex-col gap-2.5 ${className ?? ''}`} aria-label="Pull requests linked in this message">
       {links.map((link) => {
         const openRepoMatch = githubPullRequestMatchesRepo(link, context.openPullRequestsData?.github);
         const sameRepo = openRepoMatch ?? githubPullRequestMatchesRepo(link, allData?.github);

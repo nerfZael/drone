@@ -147,11 +147,17 @@ describe('linked pull request messages', () => {
     expect(html).not.toContain('Open on GitHub');
     expect(html).not.toContain('Merge requires confirmation');
     expect(html).toContain('border-l-2');
+    expect(html).toContain('rounded-md');
+    expect(html).toContain('w-fit');
+    expect(html).toContain('max-w-full');
+    expect(html).not.toContain('hover:border-l-');
+    expect(html).not.toContain('sm:grid-cols-[minmax(0,1fr)_auto]');
+    expect(html).toContain('aria-label="Pull request actions"');
     expect(html).not.toContain('shadow-[inset_3px_0_0');
     expect(html).toContain('Force merge');
     expect(html).toContain('Close');
-    expect(html.indexOf('Force merge')).toBeLessThan(html.indexOf('Add resilient workspace file and folder transfers'));
-    expect(html.indexOf('Add resilient workspace file and folder transfers')).toBeLessThan(html.indexOf('Checks pending'));
+    expect(html.indexOf('Checks pending')).toBeLessThan(html.indexOf('Add resilient workspace file and folder transfers'));
+    expect(html.indexOf('Add resilient workspace file and folder transfers')).toBeLessThan(html.indexOf('Force merge'));
     expect(html.match(/href=/g)).toHaveLength(1);
   });
 

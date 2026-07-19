@@ -20,20 +20,26 @@ export function AgentPlanList({
   const hasHiddenItems = plan.items.length > DEFAULT_VISIBLE_ITEMS;
   const showPlanItems = running || planExpanded;
   const visibleItems = stepsExpanded ? plan.items : plan.items.slice(0, DEFAULT_VISIBLE_ITEMS);
+  const progressLabel = `${completed}/${plan.items.length}`;
 
   return (
     <section
       className={`mt-2.5 border-t border-[var(--border-subtle)] pt-2.5 ${className}`}
       aria-label="Plan"
     >
-      <div className={`${showPlanItems ? 'mb-2' : ''} flex items-center justify-between gap-3`}>
+      <div className={`${showPlanItems ? 'mb-2' : ''} flex items-center gap-2`}>
         {running ? (
-          <span
-            className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-dim)]"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            Plan
-          </span>
+          <div className="flex items-baseline gap-1.5">
+            <span
+              className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-dim)]"
+              style={{ fontFamily: 'var(--display)' }}
+            >
+              Plan
+            </span>
+            <span className="font-mono text-[9px] tabular-nums text-[var(--muted-dim)]">
+              ({progressLabel})
+            </span>
+          </div>
         ) : (
           <button
             type="button"
@@ -43,12 +49,12 @@ export function AgentPlanList({
             aria-expanded={planExpanded}
           >
             <IconChevron down={planExpanded} />
-            {planExpanded ? 'Hide plan' : 'Show plan'}
+            <span>{planExpanded ? 'Hide plan' : 'Show plan'}</span>
+            <span className="font-mono font-normal tabular-nums tracking-normal text-[var(--muted-dim)]">
+              ({progressLabel})
+            </span>
           </button>
         )}
-        <span className="font-mono text-[9px] tabular-nums text-[var(--muted-dim)]">
-          {completed}/{plan.items.length}
-        </span>
       </div>
       {showPlanItems ? (
         <>

@@ -181,14 +181,14 @@ export const TranscriptTurn = React.memo(
             onSpawnTask={onSpawnDroneHubTask}
             linkedPullRequestContext={linkedPullRequestContext}
             linkedCardsClassName={
-              item.agentPlan?.items.length ? undefined : 'mb-8 md:mb-0 md:mr-40'
+              item.agentPlan?.items.length ? undefined : 'mb-8'
             }
             droneId={droneId}
             droneHomePath={droneHomePath}
             onOpenFileReference={onOpenFileReference}
             onOpenLink={onOpenLink}
             afterContent={
-              <AgentPlanList plan={item.agentPlan} className="mb-8 md:mb-0 md:mr-40" />
+              <AgentPlanList plan={item.agentPlan} className="mb-8" />
             }
             actionEnd={
               actionsEnabled && item.ok && dockerSnapshot &&

@@ -48,6 +48,8 @@ describe('AgentPlanList', () => {
     );
 
     expect(html).toContain('Show plan');
+    expect(html).toContain('(1/10)');
+    expect(html).not.toContain('justify-between');
     expect(html).toContain('plan-last');
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('1/10');
