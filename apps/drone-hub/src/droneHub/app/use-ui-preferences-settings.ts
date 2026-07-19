@@ -183,9 +183,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     setAutomations,
     setSpawnAgentKey,
     setSpawnModel,
-    setRepoBranchSource,
-    setRepoCreateRemoteBranch,
-    setPullHostBranchBeforeCreate,
   } = useDroneHubUiStore(
     useShallow((s) => ({
       sidebarGroupingMode: s.sidebarGroupingMode,
@@ -213,9 +210,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       setAutomations: s.setAutomations,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
-      setRepoBranchSource: s.setRepoBranchSource,
-      setRepoCreateRemoteBranch: s.setRepoCreateRemoteBranch,
-      setPullHostBranchBeforeCreate: s.setPullHostBranchBeforeCreate,
     })),
   );
 
@@ -238,17 +232,11 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       setAutomations(normalized.automations);
       setSpawnAgentKey(normalized.spawnAgentKey);
       setSpawnModel(normalized.spawnModel);
-      setRepoBranchSource(normalized.repoBranchSource);
-      setRepoCreateRemoteBranch(normalized.repoCreateRemoteBranch);
-      setPullHostBranchBeforeCreate(normalized.pullHostBranchBeforeCreate);
       return normalized;
     },
     [
       setAutoDelete,
       setAutomations,
-      setPullHostBranchBeforeCreate,
-      setRepoBranchSource,
-      setRepoCreateRemoteBranch,
       setSidebarDensityMode,
       setHiddenSidebarGroups,
       setSidebarChatOrderByDrone,

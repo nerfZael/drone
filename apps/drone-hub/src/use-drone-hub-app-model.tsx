@@ -74,6 +74,7 @@ import { useWorkspaceNavigationActions } from './droneHub/app/use-workspace-navi
 import { useWorkspaceActions } from './droneHub/app/use-workspace-actions';
 import {
   loadDesktopNewDronePreferences,
+  normalizeDesktopNewDronePreferences,
   saveDesktopNewDronePreferences,
 } from './droneHub/app/new-drone-preferences';
 import {
@@ -2275,9 +2276,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   ]);
   const applyRememberedNewDronePreferences = React.useCallback(
     (repoPathRaw: string) => {
-      const preferences = loadDesktopNewDronePreferences();
-      if (!preferences) return;
       const repoPath = normalizeCreateRepoPath(repoPathRaw);
+      const preferences =
+        loadDesktopNewDronePreferences(repoPath) ?? normalizeDesktopNewDronePreferences({});
+      if (!preferences) return;
       setDraftCreateMode(preferences.mode);
       setCreateRuntime(preferences.runtime);
       setCreateAsDraft(preferences.createAsDraft);
@@ -2289,6 +2291,9 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         spawnReasoning: preferences.spawnReasoning,
       });
       setSpawnAgentPermissionMode(preferences.spawnAgentPermissionMode);
+      setRepoBranchSource(preferences.repoBranchSource);
+      setRepoCreateRemoteBranch(preferences.repoCreateRemoteBranch);
+      setPullHostBranchBeforeCreate(preferences.pullHostBranchBeforeCreate);
     },
     [
       normalizeCreateRepoPath,
@@ -2297,9 +2302,16 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setCreateRuntime,
       setDraftCreateMode,
       setSpawnContextRepoPath,
+      setRepoBranchSource,
+      setRepoCreateRemoteBranch,
+      setPullHostBranchBeforeCreate,
       updateSpawnContextForRepo,
     ],
   );
+  React.useEffect(() => {
+    if (!createOpen) return;
+    applyRememberedNewDronePreferences(createRepoPath);
+  }, [applyRememberedNewDronePreferences, createOpen, createRepoPath]);
   const openCreateModal = React.useCallback(() => {
     openCreateModalBase();
     const selectionDraftContext = resolveCurrentSelectionDraftContext(true);
