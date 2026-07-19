@@ -15,24 +15,14 @@ export function useAgentChatSurfaceAdapter(): AgentChatSurfaceAdapter {
 export type ChatSurfaceProps = {
   adapter: AgentChatSurfaceAdapter;
   children: React.ReactNode;
-  overlay?: React.ReactNode;
   className?: string;
-  rootRef?: React.Ref<HTMLDivElement>;
   ariaHidden?: boolean;
 };
 
-export function ChatSurface({
-  adapter,
-  children,
-  overlay,
-  className = '',
-  rootRef,
-  ariaHidden,
-}: ChatSurfaceProps) {
+export function ChatSurface({ adapter, children, className = '', ariaHidden }: ChatSurfaceProps) {
   return (
     <ChatSurfaceAdapterContext.Provider value={adapter}>
       <div
-        ref={rootRef}
         data-chat-surface="true"
         data-agent-type={adapter.agentType}
         data-tool-activity={adapter.capabilities.toolActivity}
@@ -40,7 +30,6 @@ export function ChatSurface({
         className={`relative flex min-h-0 min-w-0 flex-1 flex-col ${className}`}
       >
         {children}
-        {overlay}
       </div>
     </ChatSurfaceAdapterContext.Provider>
   );

@@ -10,9 +10,9 @@ export function ChatMessageCopyAction({
   text: string;
   position?: 'top' | 'bottom' | 'inline';
 }) {
-  const [copied, setCopied] = React.useState(false);
+  const [copiedValue, setCopiedValue] = React.useState<string | null>(null);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
-  const value = String(text ?? '');
+  const copied = copiedValue === text;
 
   React.useEffect(
     () => () => {
@@ -21,7 +21,7 @@ export function ChatMessageCopyAction({
     [],
   );
 
-  if (!value) return null;
+  if (!text) return null;
 
   return (
     <div
@@ -44,11 +44,12 @@ export function ChatMessageCopyAction({
       <button
         type="button"
         onClick={() => {
-          void copyText(value).then(() => {
-            setCopied(true);
+          void copyText(text).then((didCopy) => {
+            if (!didCopy) return;
+            setCopiedValue(text);
             if (timerRef.current != null) clearTimeout(timerRef.current);
             timerRef.current = setTimeout(() => {
-              setCopied(false);
+              setCopiedValue(null);
               timerRef.current = null;
             }, 1200);
           });

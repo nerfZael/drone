@@ -9,14 +9,13 @@ export type ChatComposerContextItem = {
 export type ChatComposerContextConfig = {
   label: string;
   items: ChatComposerContextItem[];
-  active?: boolean;
   emptyHint?: string;
   disabled?: boolean;
   onRemove: (id: string) => void;
 };
 
 export function ChatComposerContext({ config }: { config?: ChatComposerContextConfig }) {
-  if (!config || (config.items.length === 0 && !config.active)) return null;
+  if (!config) return null;
 
   return (
     <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">

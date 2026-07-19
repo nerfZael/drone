@@ -214,7 +214,14 @@ export function CollapsibleMarkdown({
     >
       {isLong && leadSplit ? (
         <>
-          <MarkdownMessage text={leadSplit.lead} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} textMentionLinks={textMentionLinks} onOpenTextMention={onOpenTextMention} />
+          <MarkdownMessage
+            text={leadSplit.lead}
+            className={className}
+            onOpenFileReference={onOpenFileReference}
+            onOpenLink={onOpenLink}
+            textMentionLinks={textMentionLinks}
+            onOpenTextMention={onOpenTextMention}
+          />
           {!collapsed ? (
             <div className={`output-collapse ${collapsed ? 'collapsed' : ''}`} style={style}>
               <MarkdownMessage
@@ -241,7 +248,14 @@ export function CollapsibleMarkdown({
         </div>
       ) : (
         <div className={`output-collapse ${isLong && collapsed ? 'collapsed' : ''}`} style={style}>
-          <MarkdownMessage text={text} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} textMentionLinks={textMentionLinks} onOpenTextMention={onOpenTextMention} />
+          <MarkdownMessage
+            text={text}
+            className={className}
+            onOpenFileReference={onOpenFileReference}
+            onOpenLink={onOpenLink}
+            textMentionLinks={textMentionLinks}
+            onOpenTextMention={onOpenTextMention}
+          />
         </div>
       )}
       {isLong && (

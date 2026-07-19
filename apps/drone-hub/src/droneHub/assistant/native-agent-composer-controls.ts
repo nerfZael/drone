@@ -130,8 +130,8 @@ export function buildNativeAgentComposerControls({
           searchText: `${model.name} ${model.id}`,
         })),
         onValueChange: (value) => {
-          const [provider, model] = value.split(':');
-          onUpdate({ provider: provider as AssistantProviderId, model });
+          const [provider, ...modelParts] = value.split(':');
+          onUpdate({ provider: provider as AssistantProviderId, model: modelParts.join(':') });
         },
       },
       {

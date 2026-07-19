@@ -128,7 +128,14 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
               title={control.title}
               triggerLabel={control.label}
               chevron={() => (
-                <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true" className="text-[var(--muted-dim)] opacity-60">
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="currentColor"
+                  aria-hidden="true"
+                  className="text-[var(--muted-dim)] opacity-60"
+                >
                   <path d="M4.427 6.573a.25.25 0 0 1 .177-.073h6.792a.25.25 0 0 1 .177.427l-3.396 3.396a.25.25 0 0 1-.354 0L4.427 6.927a.25.25 0 0 1 0-.354Z" />
                 </svg>
               )}

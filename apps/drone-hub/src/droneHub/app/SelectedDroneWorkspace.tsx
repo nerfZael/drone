@@ -2458,44 +2458,48 @@ export function SelectedDroneWorkspace({
             </div>
           ) : null}
 
-          {genericChatActive ? <ChatSurfaceComposer
-            resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
-            droneName={currentDrone.name}
-            focusTargetId="primary-chat"
-            draftValue={chatDraftValue}
-            onDraftValueChange={(next) => {
-              setChatInputDraft(chatDraftKey, next);
-            }}
-            promptError={stopResponseError || promptError}
-            sending={sendingPrompt}
-            publishing={publishingDraft}
-            waiting={chatInputWaiting}
-            composerControls={externalComposerControls}
-            automationActions={chatAutomationActions}
-            lockComposerWhileAutomationActive={false}
-            autoFocus={shouldAutoFocusInput}
-            onStop={!currentChatIsDraft && canStopResponse ? () => requestStopResponse() : undefined}
-            stopping={stoppingResponse}
-            onPublish={currentChatIsDraft ? publishSelectedDraft : undefined}
-            onSend={async (payload: ChatSendPayload) => await sendPromptText(payload)}
-            onSendAutomation={
-              chatUiMode === 'transcript'
-                ? async (payload) => {
-                    try {
-                      const launch = createDraftChatAutomationLaunch({
-                        prompt: payload.prompt,
-                        runs: payload.runs,
-                        sleepAmount: payload.sleepAmount,
-                        sleepUnit: payload.sleepUnit,
-                      });
-                      return await startPromptAutomationLaunch(launch);
-                    } catch {
-                      return false;
+          {genericChatActive ? (
+            <ChatSurfaceComposer
+              resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
+              droneName={currentDrone.name}
+              focusTargetId="primary-chat"
+              draftValue={chatDraftValue}
+              onDraftValueChange={(next) => {
+                setChatInputDraft(chatDraftKey, next);
+              }}
+              promptError={stopResponseError || promptError}
+              sending={sendingPrompt}
+              publishing={publishingDraft}
+              waiting={chatInputWaiting}
+              composerControls={externalComposerControls}
+              automationActions={chatAutomationActions}
+              lockComposerWhileAutomationActive={false}
+              autoFocus={shouldAutoFocusInput}
+              onStop={
+                !currentChatIsDraft && canStopResponse ? () => requestStopResponse() : undefined
+              }
+              stopping={stoppingResponse}
+              onPublish={currentChatIsDraft ? publishSelectedDraft : undefined}
+              onSend={async (payload: ChatSendPayload) => await sendPromptText(payload)}
+              onSendAutomation={
+                chatUiMode === 'transcript'
+                  ? async (payload) => {
+                      try {
+                        const launch = createDraftChatAutomationLaunch({
+                          prompt: payload.prompt,
+                          runs: payload.runs,
+                          sleepAmount: payload.sleepAmount,
+                          sleepUnit: payload.sleepUnit,
+                        });
+                        return await startPromptAutomationLaunch(launch);
+                      } catch {
+                        return false;
+                      }
                     }
-                  }
-                : undefined
-            }
-          /> : null}
+                  : undefined
+              }
+            />
+          ) : null}
           {fileOpenToast ? (
             <div className="absolute right-4 bottom-4 z-20">
               <button
@@ -2511,7 +2515,7 @@ export function SelectedDroneWorkspace({
               </button>
             </div>
           ) : null}
-          </ChatSurface>
+        </ChatSurface>
         </div>
         }
       />

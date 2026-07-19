@@ -1428,7 +1428,6 @@ export function AssistantDock({
             label: drone.name || drone.id,
             meta: drone.id,
           })),
-          active: droneReferenceDropActive,
           emptyHint: 'Release to add drone names and IDs to this message.',
           disabled: droneReferenceControlsLocked,
           onRemove: removeReferencedDrone,
