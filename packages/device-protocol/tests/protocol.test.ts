@@ -64,6 +64,18 @@ describe('device protocol', () => {
     ).toBe(false);
   });
 
+  test('advertises file preview as an explicit drone permission', () => {
+    expect(DRONE_CONTROL_CAPABILITY.operations).toContain('file.preview');
+    expect(
+      isGranted(
+        [{ capability: 'drone-control', version: 1, operations: ['chat.read'] }],
+        'drone-control',
+        1,
+        'file.preview',
+      ),
+    ).toBe(false);
+  });
+
   test('public pairing endpoints require a safe HTTPS origin', () => {
     expect(() =>
       parsePairingPayload({

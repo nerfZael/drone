@@ -127,12 +127,14 @@ describeSocketSuite('host runtime routing api', () => {
     const notePath = path.join(droneRoot, 'note.txt');
     const largeNotePath = path.join(droneRoot, 'large-note.txt');
     const imagePath = path.join(droneRoot, 'thumb.png');
+    const videoPath = path.join(droneRoot, 'demo.mp4');
     fs.writeFileSync(notePath, 'hello\n', 'utf8');
     fs.writeFileSync(largeNotePath, `${'x'.repeat(700 * 1024)}\n`, 'utf8');
     fs.writeFileSync(
       imagePath,
       Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7bKJYAAAAASUVORK5CYII=', 'base64'),
     );
+    fs.writeFileSync(videoPath, Buffer.alloc(2 * 1024 * 1024 + 1));
 
     await seedHostDrone(droneId, { cwd: droneRoot, repoPath: '' });
 
@@ -176,6 +178,24 @@ describeSocketSuite('host runtime routing api', () => {
     expect(chunkResp.data?.offset).toBe(10);
     expect(chunkResp.data?.nextOffset).toBe(42);
     expect(String(chunkResp.data?.content ?? '')).toBe('x'.repeat(32));
+
+    const binaryChunkResp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/fs/chunk?path=${encodeURIComponent(imagePath)}&offset=2&limit=16`,
+    );
+    expect(binaryChunkResp.r.status).toBe(200);
+    expect(binaryChunkResp.data?.kind).toBe('binary-chunk');
+    expect(binaryChunkResp.data?.offset).toBe(2);
+    expect(Buffer.from(String(binaryChunkResp.data?.dataBase64 ?? ''), 'base64').length).toBe(16);
+    expect(binaryChunkResp.data?.content).toBeUndefined();
+
+    const mediaMetadataResp = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/fs/file?path=${encodeURIComponent(videoPath)}&metadata=1`,
+    );
+    expect(mediaMetadataResp.r.status).toBe(200);
+    expect(mediaMetadataResp.data?.kind).toBe('video');
+    expect(mediaMetadataResp.data?.mime).toBe('video/mp4');
+    expect(mediaMetadataResp.data?.size).toBe(2 * 1024 * 1024 + 1);
+    expect(mediaMetadataResp.data?.content).toBeUndefined();
 
     const writeResp = await apiFetch(`/api/drones/${encodeURIComponent(droneId)}/fs/file`, {
       method: 'POST',

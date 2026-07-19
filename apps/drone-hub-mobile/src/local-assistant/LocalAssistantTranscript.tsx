@@ -23,6 +23,11 @@ import { colors } from '../theme';
 import { QueuedPromptRows, type MobileQueuedPrompt } from '../components/QueuedPromptRows';
 import { ContextMenu } from '../components/Ui';
 import { NativeMarkdown } from './NativeMarkdown';
+import {
+  parseMobileFileReference,
+  splitMobileFileReferences,
+  type MobileFileReference,
+} from './file-reference';
 import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
 import type { LocalAssistantThread } from './local-assistant-types';
 import { LinkedPullRequestAttachments } from '../drones/LinkedPullRequestAttachment';
@@ -65,6 +70,39 @@ function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
         <Animated.View key={index} style={[styles.typingDot, { opacity }]} />
       ))}
     </View>
+  );
+}
+
+function LinkedMessageText({
+  text,
+  user,
+  onOpenFileReference,
+}: {
+  text: string;
+  user: boolean;
+  onOpenFileReference?: (reference: MobileFileReference) => void;
+}) {
+  return (
+    <Text selectable style={[styles.messageText, user && styles.userMessageText]}>
+      {splitMobileFileReferences(text).map((segment, index) =>
+        segment.type === 'text' || !onOpenFileReference ? (
+          segment.text
+        ) : (
+          <Text
+            key={`${segment.reference.path}:${index}`}
+            accessibilityRole="link"
+            accessibilityHint="Opens a read-only file preview"
+            onPress={(event) => {
+              event.stopPropagation?.();
+              onOpenFileReference(segment.reference);
+            }}
+            style={styles.fileLink}
+          >
+            {segment.text}
+          </Text>
+        ),
+      )}
+    </Text>
   );
 }
 
@@ -426,6 +464,7 @@ export function MobileAssistantTranscript({
   onLoadFullMessage,
   fullMessageLoadingId = '',
   linkedPullRequests,
+  onOpenFileReference,
 }: {
   messages: AssistantMessage[];
   running?: boolean;
@@ -446,6 +485,7 @@ export function MobileAssistantTranscript({
   onLoadFullMessage?: (message: AssistantMessage) => void;
   fullMessageLoadingId?: string;
   linkedPullRequests?: MobileLinkedPullRequestContext;
+  onOpenFileReference?: (reference: MobileFileReference) => void;
 }) {
   const items = React.useMemo(
     () =>
@@ -520,13 +560,15 @@ export function MobileAssistantTranscript({
           <>
             {text && assistant ? (
               <>
-                <NativeMarkdown text={text} />
+                <NativeMarkdown text={text} onOpenFileReference={onOpenFileReference} />
                 <LinkedPullRequestAttachments text={text} context={linkedPullRequests} />
               </>
             ) : text ? (
-              <Text selectable style={[styles.messageText, user && styles.userMessageText]}>
-                {text}
-              </Text>
+              <LinkedMessageText
+                text={text}
+                user={user}
+                onOpenFileReference={onOpenFileReference}
+              />
             ) : null}
             {item.message.errorMessage ? (
               <Text style={styles.messageError}>{item.message.errorMessage}</Text>
@@ -545,19 +587,41 @@ export function MobileAssistantTranscript({
             ) : null}
             {files.length > 0 ? (
               <View style={styles.attachments}>
-                {files.map((file, index) => (
-                  <View key={String(file?.id ?? file?.name ?? index)} style={styles.attachment}>
-                    <Text style={styles.attachmentIcon}>▧</Text>
-                    <View style={styles.attachmentCopy}>
-                      <Text numberOfLines={1} style={styles.attachmentName}>
-                        {String(file?.name ?? 'Attachment')}
-                      </Text>
-                      <Text numberOfLines={1} style={styles.attachmentMeta}>
-                        {String(file?.mime ?? file?.mimeType ?? 'file')}
-                      </Text>
-                    </View>
-                  </View>
-                ))}
+                {files.map((file, index) => {
+                  const fileReference = parseMobileFileReference(
+                    String(file?.path ?? file?.filePath ?? ''),
+                  );
+                  return (
+                    <Pressable
+                      key={String(file?.id ?? file?.name ?? index)}
+                      accessibilityRole={
+                        fileReference && onOpenFileReference ? 'button' : undefined
+                      }
+                      accessibilityHint={
+                        fileReference && onOpenFileReference
+                          ? 'Opens a read-only file preview'
+                          : undefined
+                      }
+                      disabled={!fileReference || !onOpenFileReference}
+                      onPress={() => fileReference && onOpenFileReference?.(fileReference)}
+                      style={({ pressed }) => [
+                        styles.attachment,
+                        fileReference && onOpenFileReference && styles.attachmentLinked,
+                        pressed && styles.attachmentPressed,
+                      ]}
+                    >
+                      <Text style={styles.attachmentIcon}>▧</Text>
+                      <View style={styles.attachmentCopy}>
+                        <Text numberOfLines={1} style={styles.attachmentName}>
+                          {String(file?.name ?? 'Attachment')}
+                        </Text>
+                        <Text numberOfLines={1} style={styles.attachmentMeta}>
+                          {String(file?.mime ?? file?.mimeType ?? 'file')}
+                        </Text>
+                      </View>
+                    </Pressable>
+                  );
+                })}
               </View>
             ) : null}
             {item.message.meshTruncated ? (
@@ -735,6 +799,12 @@ const styles = StyleSheet.create({
   },
   messageText: { color: colors.text, fontSize: 14, lineHeight: 21 },
   userMessageText: { color: colors.textStrong },
+  fileLink: {
+    color: colors.accentAlt,
+    fontWeight: '700',
+    textDecorationLine: 'underline',
+    textDecorationStyle: 'dotted',
+  },
   messageTime: {
     alignSelf: 'flex-start',
     color: colors.subtle,
@@ -787,6 +857,8 @@ const styles = StyleSheet.create({
     borderRadius: 10,
     padding: 9,
   },
+  attachmentLinked: { borderColor: colors.accentBorder, backgroundColor: colors.accentWash },
+  attachmentPressed: { opacity: 0.7 },
   attachmentIcon: { color: colors.accent, fontSize: 18 },
   attachmentCopy: { flex: 1, minWidth: 0 },
   attachmentName: { color: colors.text, fontSize: 11, fontWeight: '700' },

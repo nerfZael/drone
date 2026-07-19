@@ -6,6 +6,11 @@ import {
   parseNativeMarkdownInline,
   type NativeMarkdownInline,
 } from './native-markdown-model';
+import {
+  parseMobileFileReference,
+  splitMobileFileReferences,
+  type MobileFileReference,
+} from './file-reference';
 
 function safeLink(value: string): string | null {
   const link = String(value ?? '').trim();
@@ -21,7 +26,41 @@ function codeTextWidth(text: string): number {
   return Math.ceil(longestLine * CODE_CHARACTER_WIDTH);
 }
 
-function InlineMarkdown({ text }: { text: string }) {
+function FileLinkedText({
+  text,
+  onOpenFileReference,
+}: {
+  text: string;
+  onOpenFileReference?: (reference: MobileFileReference) => void;
+}) {
+  if (!onOpenFileReference) return text;
+  return splitMobileFileReferences(text).map((segment, index) =>
+    segment.type === 'text' ? (
+      segment.text
+    ) : (
+      <Text
+        key={`${segment.reference.path}:${index}`}
+        accessibilityRole="link"
+        accessibilityHint="Opens a read-only file preview"
+        onPress={(event) => {
+          event.stopPropagation?.();
+          onOpenFileReference(segment.reference);
+        }}
+        style={styles.fileLink}
+      >
+        {segment.text}
+      </Text>
+    ),
+  );
+}
+
+function InlineMarkdown({
+  text,
+  onOpenFileReference,
+}: {
+  text: string;
+  onOpenFileReference?: (reference: MobileFileReference) => void;
+}) {
   return (
     <>
       {parseNativeMarkdownInline(text).map((token: NativeMarkdownInline, index) => {
@@ -38,16 +77,33 @@ function InlineMarkdown({ text }: { text: string }) {
                     ? styles.link
                     : undefined;
         const href = token.type === 'link' ? safeLink(token.href ?? '') : null;
-        const renderedText =
-          token.type === 'code' ? `\u202f${token.text}\u202f` : token.text;
+        const fileReference =
+          onOpenFileReference && (token.type === 'code' || (token.type === 'link' && !href))
+            ? parseMobileFileReference(token.type === 'link' ? (token.href ?? '') : token.text)
+            : null;
+        const renderedText = token.type === 'code' ? `\u202f${token.text}\u202f` : token.text;
         return (
           <Text
             key={`${token.type}:${index}`}
-            style={style}
-            accessibilityRole={href ? 'link' : undefined}
-            onPress={href ? () => void Linking.openURL(href) : undefined}
+            style={[style, fileReference && styles.fileLink]}
+            accessibilityRole={href || fileReference ? 'link' : undefined}
+            accessibilityHint={fileReference ? 'Opens a read-only file preview' : undefined}
+            onPress={
+              href
+                ? () => void Linking.openURL(href)
+                : fileReference
+                  ? (event) => {
+                      event.stopPropagation?.();
+                      onOpenFileReference?.(fileReference);
+                    }
+                  : undefined
+            }
           >
-            {renderedText}
+            {token.type === 'text' ? (
+              <FileLinkedText text={renderedText} onOpenFileReference={onOpenFileReference} />
+            ) : (
+              renderedText
+            )}
           </Text>
         );
       })}
@@ -55,7 +111,13 @@ function InlineMarkdown({ text }: { text: string }) {
   );
 }
 
-export function NativeMarkdown({ text }: { text: string }) {
+export function NativeMarkdown({
+  text,
+  onOpenFileReference,
+}: {
+  text: string;
+  onOpenFileReference?: (reference: MobileFileReference) => void;
+}) {
   const blocks = React.useMemo(() => parseNativeMarkdown(text), [text]);
   return (
     <View style={styles.markdown}>
@@ -67,7 +129,7 @@ export function NativeMarkdown({ text }: { text: string }) {
               key={`heading:${index}`}
               style={[styles.heading, block.level <= 2 ? styles.headingLarge : styles.headingSmall]}
             >
-              <InlineMarkdown text={block.text} />
+              <InlineMarkdown text={block.text} onOpenFileReference={onOpenFileReference} />
             </Text>
           );
         }
@@ -103,7 +165,7 @@ export function NativeMarkdown({ text }: { text: string }) {
                 <Text style={[styles.calloutLabel, calloutStyle?.label]}>{block.callout}</Text>
               ) : null}
               <Text selectable style={styles.quoteText}>
-                <InlineMarkdown text={block.text} />
+                <InlineMarkdown text={block.text} onOpenFileReference={onOpenFileReference} />
               </Text>
             </View>
           );
@@ -123,7 +185,7 @@ export function NativeMarkdown({ text }: { text: string }) {
                         : '☐'}
                   </Text>
                   <Text selectable style={styles.body}>
-                    <InlineMarkdown text={item.text} />
+                    <InlineMarkdown text={item.text} onOpenFileReference={onOpenFileReference} />
                   </Text>
                 </View>
               ))}
@@ -154,7 +216,10 @@ export function NativeMarkdown({ text }: { text: string }) {
                         key={cellIndex}
                         style={[styles.tableCell, rowIndex === 0 && styles.tableHeadText]}
                       >
-                        <InlineMarkdown text={row[cellIndex] ?? ''} />
+                        <InlineMarkdown
+                          text={row[cellIndex] ?? ''}
+                          onOpenFileReference={onOpenFileReference}
+                        />
                       </Text>
                     ))}
                   </View>
@@ -165,7 +230,7 @@ export function NativeMarkdown({ text }: { text: string }) {
         }
         return (
           <Text selectable key={`paragraph:${index}`} style={styles.body}>
-            <InlineMarkdown text={block.text} />
+            <InlineMarkdown text={block.text} onOpenFileReference={onOpenFileReference} />
           </Text>
         );
       })}
@@ -183,6 +248,11 @@ const styles = StyleSheet.create({
   emphasis: { fontStyle: 'italic' },
   strike: { textDecorationLine: 'line-through', color: colors.muted },
   link: { color: colors.accent, textDecorationLine: 'underline' },
+  fileLink: {
+    color: colors.accentAlt,
+    textDecorationLine: 'underline',
+    textDecorationStyle: 'dotted',
+  },
   inlineCode: {
     color: colors.accentAlt,
     backgroundColor: colors.surface0,

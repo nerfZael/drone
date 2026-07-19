@@ -100,6 +100,14 @@ describe('mobile drone sidebar model', () => {
     ]);
   });
 
+  test('preserves an explicit detached repository state', () => {
+    const [drone] = normalizeMobileDrones([
+      { id: 'detached', repoPath: '/work/detached', repoAttached: false },
+    ]);
+
+    expect(drone?.repoAttached).toBe(false);
+  });
+
   test('uses the versioned repository map when individual summaries omit their paths', () => {
     const payload = normalizeMobileDroneListPayload({
       schemaVersion: 2,

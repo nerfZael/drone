@@ -56,6 +56,28 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
     withLockedDroneContainer,
     withReadonlyDroneContainer,
   } = deps;
+  const inferPreviewType = (filePath: string, rawMime: string) => {
+    const mimeRaw = String(rawMime ?? '')
+      .trim()
+      .toLowerCase();
+    const mime = mimeRaw.startsWith('image/')
+      ? mimeRaw
+      : mimeRaw.startsWith('video/')
+        ? mimeRaw
+        : isLikelyImagePath(filePath)
+          ? guessImageMimeType(filePath)
+          : isLikelyVideoPath(filePath)
+            ? guessVideoMimeType(filePath)
+            : mimeRaw || 'application/octet-stream';
+    const kind = mime.startsWith('image/')
+      ? 'image'
+      : mime.startsWith('video/')
+        ? 'video'
+        : isLikelyTextMimeType(mimeRaw)
+          ? 'text'
+          : 'binary';
+    return { kind, mime };
+  };
   return async ({ req, res, url: u, method, parts }) => {
     const handled = await (async (): Promise<false | void> => {
       // GET /api/drones/:id/ports
@@ -313,15 +335,17 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
       // GET /api/drones/:id/fs/thumb?path=/...
       // Returns image bytes for thumbnail rendering.
       // GET /api/drones/:id/fs/text-chunk?path=/...&offset=0&limit=...
-      // Reads a bounded UTF-8 chunk for large read-only text viewing.
+      // GET /api/drones/:id/fs/chunk?path=/...&offset=0&limit=...
+      // Reads a bounded UTF-8 or base64 chunk for large read-only viewing.
       if (
         method === 'GET' &&
         parts.length === 5 &&
         parts[0] === 'api' &&
         parts[1] === 'drones' &&
         parts[3] === 'fs' &&
-        parts[4] === 'text-chunk'
+        (parts[4] === 'text-chunk' || parts[4] === 'chunk')
       ) {
+        const binaryChunk = parts[4] === 'chunk';
         const droneRef = decodeURIComponent(parts[2]);
         const resolved = await resolveDroneOrRespond(res, droneRef);
         if (!resolved) return;
@@ -378,14 +402,16 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
               id: droneId,
               name: droneName,
               path: resolvedPath,
-              kind: 'text-chunk',
+              kind: binaryChunk ? 'binary-chunk' : 'text-chunk',
               mime: mime || 'text/plain',
               size,
               mtimeMs: Number.isFinite(st.mtimeMs) ? Math.max(0, Math.floor(st.mtimeMs)) : null,
               offset: start,
               nextOffset: start + readLength,
               eof: start + readLength >= size,
-              content: buf.toString('utf8'),
+              ...(binaryChunk
+                ? { dataBase64: buf.toString('base64') }
+                : { content: buf.toString('utf8') }),
             });
             return;
           } catch (e: any) {
@@ -489,14 +515,16 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             id: droneId,
             name: droneName,
             path: targetPath,
-            kind: 'text-chunk',
+            kind: binaryChunk ? 'binary-chunk' : 'text-chunk',
             mime: mimeRaw || 'text/plain',
             size: safeSize,
             mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
             offset: safeOffset,
             nextOffset: safeOffset + safeCount,
             eof: safeOffset + safeCount >= safeSize,
-            content: buf.toString('utf8'),
+            ...(binaryChunk
+              ? { dataBase64: buf.toString('base64') }
+              : { content: buf.toString('utf8') }),
           });
           return;
         } catch (e: any) {
@@ -538,9 +566,38 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
           json(res, 400, { ok: false, error: 'missing file path' });
           return;
         }
+        const metadataOnly = u.searchParams.get('metadata') === '1';
 
         if (runtime === 'host') {
           try {
+            if (metadataOnly) {
+              const resolvedPath = path.resolve(targetPath);
+              const stat = await fs.stat(resolvedPath);
+              if (!stat.isFile()) {
+                const error = new Error(`file not found: ${resolvedPath}`) as Error & {
+                  code?: string;
+                };
+                error.code = 'ENOENT';
+                throw error;
+              }
+              const { kind, mime } = inferPreviewType(
+                resolvedPath,
+                (await hostMimeType(resolvedPath)) ?? '',
+              );
+              json(res, 200, {
+                ok: true,
+                id: droneId,
+                name: droneName,
+                path: resolvedPath,
+                kind,
+                mime,
+                size: Number.isFinite(stat.size) ? Math.max(0, Math.floor(stat.size)) : 0,
+                mtimeMs: Number.isFinite(stat.mtimeMs)
+                  ? Math.max(0, Math.floor(stat.mtimeMs))
+                  : null,
+              });
+              return;
+            }
             const read = await readHostFileBytes({ targetPath, maxBytes: FS_EDITOR_MAX_BYTES });
             const mimeRaw = String(read.mime ?? '')
               .trim()
@@ -619,17 +676,21 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             'fi',
             'size=$(wc -c < "$target" | tr -d "[:space:]")',
             'if [ -z "$size" ]; then size=0; fi',
-            'if [ "$size" -gt "$max" ]; then',
-            '  printf "__ERR__\ttoo-large\t%s\n" "$size"',
-            '  exit 4',
-            'fi',
             'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
             'mime=""',
             'if command -v file >/dev/null 2>&1; then',
             '  mime=$(file -Lb --mime-type -- "$target" 2>/dev/null || true)',
             'fi',
+            ...(metadataOnly
+              ? []
+              : [
+                  'if [ "$size" -gt "$max" ]; then',
+                  '  printf "__ERR__\ttoo-large\t%s\n" "$size"',
+                  '  exit 4',
+                  'fi',
+                ]),
             'printf "__META__\t%s\t%s\t%s\n" "$mime" "$size" "$mtime"',
-            'base64 < "$target" | tr -d "\\n"',
+            ...(metadataOnly ? [] : ['base64 < "$target" | tr -d "\\n"']),
           ].join('\n');
 
         try {
@@ -763,6 +824,20 @@ function createFilesystemServiceHandler(deps: FilesystemRouteDependencies): Lega
             .toLowerCase();
           const sizeNum = Number(meta[2] ?? 0);
           const mtimeSec = Number(meta[3] ?? 0);
+          if (metadataOnly) {
+            const { kind, mime } = inferPreviewType(effectivePath, mimeRaw);
+            json(res, 200, {
+              ok: true,
+              id: droneId,
+              name: droneName,
+              path: effectivePath,
+              kind,
+              mime,
+              size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
+              mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+            });
+            return;
+          }
 
           let buf: Buffer;
           try {
