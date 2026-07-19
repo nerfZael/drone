@@ -1,12 +1,12 @@
 import React from 'react';
 import {
   ChatInput,
+  ChatLoadingState,
   type ChatSendPayload,
   type DroneHubTask,
   type DroneHubTaskSpawnMode,
   EmptyState,
   PendingTranscriptTurn,
-  TranscriptSkeleton,
   TranscriptTurn,
 } from '../chat';
 import { requestJson } from '../http';
@@ -782,7 +782,7 @@ export function GroupMultiChatColumn({
       </div>
       <div ref={columnScrollRef} className="flex-1 min-h-0 overflow-auto px-3 py-3">
         {loading && !transcripts ? (
-          <TranscriptSkeleton />
+          <ChatLoadingState />
         ) : error ? (
           <div className="rounded border border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">{error}</div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (

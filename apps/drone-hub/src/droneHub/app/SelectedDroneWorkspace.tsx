@@ -6,6 +6,7 @@ import {
   AutomationLaneStatusCard,
   ChatSurface,
   ChatSurfaceComposer,
+  ChatLoadingState,
   adaptExternalAgentChatSurface,
   adaptNativeAgentChatSurface,
   type AgentChatTranscriptItem,
@@ -17,7 +18,6 @@ import {
   CollapsibleOutput,
   EmptyState,
   PendingTranscriptTurn,
-  TranscriptSkeleton,
   TranscriptTurn,
 } from '../chat';
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
@@ -2309,7 +2309,7 @@ export function SelectedDroneWorkspace({
           >
           <div className="relative flex min-h-0 flex-1 flex-col">
             {chatConfigPending ? (
-              <TranscriptSkeleton message="Loading chat..." />
+              <ChatLoadingState />
             ) : chatConfigFailed ? (
               <EmptyState
                 icon={<IconChat className="h-8 w-8 text-[var(--muted)]" />}
@@ -2341,6 +2341,7 @@ export function SelectedDroneWorkspace({
             ) : chatUiMode === 'transcript' ? (
               <AgentChatTranscript
                 scrollRef={transcriptScrollRef}
+                initialScrollKey={`${currentDrone.id}:${activeChatName}`}
                 loading={loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0}
                 hasContent={Boolean((transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0)}
                 emptyState={
@@ -2372,7 +2373,7 @@ export function SelectedDroneWorkspace({
                   </div>
                 )}
                 {loadingSession && !sessionText ? (
-                  <TranscriptSkeleton message="Loading session output..." />
+                  <ChatLoadingState message="Loading session output…" />
                 ) : sessionText ? (
                   <div className="max-w-[1170px] mx-auto px-6 py-6">
                     <div className="rounded-lg border border-[var(--border-subtle)] bg-[rgba(0,0,0,.1)] px-4 py-3">

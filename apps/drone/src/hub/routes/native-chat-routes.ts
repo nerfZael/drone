@@ -1,7 +1,12 @@
+import type { BlipHistoryPage } from '@blip/protocol';
 import type { HubRouter } from '../hub-router';
 
 export type NativeChatRouteDependencies = {
   nativeChatLifecycle: any;
+  nativeChatHistoryPage: (
+    threadId: string,
+    input?: { before?: number; limit?: number },
+  ) => Promise<BlipHistoryPage>;
   getChatEntry: (input: { droneId: string; chatName: string }) => Promise<{ chat: any }>;
   inferChatAgent: (chat: any, drone?: any) => { kind: string };
   resolveDroneOrPendingForReadRef: (
@@ -31,7 +36,7 @@ export function registerNativeChatRoutes(
 
   apiRouter.post(
     '/api/drones/:droneRef/chats/:chatName/native',
-    async ({ params, json: respond }) => {
+    async ({ params, url, json: respond }) => {
       try {
         const droneRef = decodeURIComponent(params.droneRef);
         const chatName = decodeURIComponent(params.chatName) || 'default';
@@ -44,7 +49,17 @@ export function registerNativeChatRoutes(
           model: chat?.model,
           thinkingLevel: chat?.reasoning,
         });
-        respond(200, { ...snapshot, nativeChatId: chatId, droneId: resolved.id, chatName });
+        const includeHistory = url.searchParams.get('includeHistory') === '1';
+        const initialHistory = includeHistory
+          ? await deps.nativeChatHistoryPage(chatId, { limit: 80 }).catch(() => undefined)
+          : undefined;
+        respond(200, {
+          ...snapshot,
+          nativeChatId: chatId,
+          droneId: resolved.id,
+          chatName,
+          ...(initialHistory ? { initialHistory } : {}),
+        });
       } catch (error: any) {
         const message = String(error?.message ?? error);
         const status = Number(error?.statusCode ?? 0) || (/unknown (drone|chat)/i.test(message) ? 404 : 400);
