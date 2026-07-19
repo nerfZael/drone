@@ -1682,6 +1682,7 @@ export function DronesScreen({
             onLoadRepoPreferences={(repoPath) =>
               loadMobileDroneCreatePreferences(targetId, repoPath)
             }
+            onRememberedDraftChange={setNewDroneDraft}
             onCreate={createDrone}
           />
         ) : (
