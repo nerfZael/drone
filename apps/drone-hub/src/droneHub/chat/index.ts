@@ -15,6 +15,8 @@ export type { DroneHubTask } from './drone-hub-task-parser';
 export type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 export { PromptLoopTranscriptGroup } from './PromptLoopTranscriptGroup';
 export { AutomationLaneStatusCard } from './AutomationLaneStatusCard';
+export { ChatComposerMenu, type ChatComposerMenuAction } from './ChatComposerMenu';
+export { ChatMessageFrame } from './ChatMessageFrame';
 export { PendingTranscriptTurn } from './PendingTranscriptTurn';
 export { RelativeTimeText } from './RelativeTimeText';
 export { TranscriptSkeleton } from './TranscriptSkeleton';

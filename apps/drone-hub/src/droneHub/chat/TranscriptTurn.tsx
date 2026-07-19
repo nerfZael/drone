@@ -7,16 +7,16 @@ import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { DroneHubTaskList } from './DroneHubTaskList';
 import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
-import { RelativeTimeText } from './RelativeTimeText';
 import type { DroneHubTask } from './drone-hub-task-parser';
 import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { extractAgentCopilotFromAgentMessage } from './agent-copilot-parser';
 import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
 import { collectInlineAgentMedia, type InlineAgentMedia } from './inline-agent-media';
-import { IconAlert, IconBot, IconCheck, IconCopy, IconImage, IconJobs, IconOpen, IconSnapshot, IconSpinner, IconTldr, IconUser } from './icons';
+import { IconAlert, IconCheck, IconCopy, IconImage, IconJobs, IconOpen, IconSnapshot, IconSpinner, IconTldr } from './icons';
 import { VideoPreview } from '../media/VideoPreview';
 import { AgentPlanList } from './AgentPlanList';
 import { LinkedPullRequestCards, type LinkedPullRequestContext } from './LinkedPullRequestCards';
+import { ChatMessageFrame } from './ChatMessageFrame';
 
 type TldrState =
   | { status: 'idle' }
@@ -226,116 +226,65 @@ export const TranscriptTurn = React.memo(
     }, []);
     return (
       <div className="animate-fade-in">
-        {/* User message */}
-        <div className="flex justify-end mb-3">
-          <div className={`${showRoleIcons ? 'max-w-[85%]' : 'max-w-full'} min-w-[120px]`}>
-            <div className="flex items-center justify-end gap-2 mb-1.5">
-              <RelativeTimeText
-                at={promptIso}
-                className="text-[9px] leading-none text-[var(--muted-dim)] font-mono"
-                title={new Date(promptIso).toLocaleString()}
-              />
-              <span
-                className="text-[10px] font-semibold text-[var(--user-muted)] tracking-wide uppercase"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                You
-              </span>
-            </div>
-            <div className="bg-[var(--user-dim)] border border-[rgba(148,163,184,.14)] rounded-lg rounded-tr-sm px-4 py-3 relative group">
-              {copiedToastRole === 'user' ? (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className="absolute top-2 right-10 z-20 pointer-events-none rounded border border-[rgba(148,163,184,.28)] bg-[rgba(0,0,0,.42)] px-2 py-0.5 text-[9px] uppercase tracking-wide text-[var(--fg-secondary)]"
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  Copied
-                </div>
-              ) : null}
-              {userCopyText.length > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void copyText(userCopyText).then(() => showCopiedToast('user'));
-                  }}
-                  className="absolute top-2 right-2 z-10 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--user)] hover:border-[var(--user-muted)] hover:bg-[rgba(0,0,0,.25)]"
-                  title="Copy user message"
-                  aria-label="Copy user message"
-                >
-                  <IconCopy className="w-3.5 h-3.5 opacity-90" />
-                </button>
-              ) : null}
-              {promptText ? (
-                <CollapsibleMarkdown
-                  text={promptText}
-                  fadeTo="var(--user-dim)"
-                  className="dh-markdown--user"
-                  onOpenFileReference={onOpenFileReference}
-                  onOpenLink={onOpenLink}
-                />
-              ) : null}
-              <ImageAttachmentChips
-                attachments={attachments}
-                droneId={droneId}
-                droneHomePath={droneHomePath}
-                onOpenFileReference={onOpenFileReference}
-              />
-            </div>
-          </div>
-          {showRoleIcons && (
-            <div className="flex-shrink-0 w-7 h-7 rounded bg-[var(--user-subtle)] border border-[rgba(148,163,184,.15)] flex items-center justify-center mt-6 ml-3">
-              <IconUser className="text-[var(--user)] w-3.5 h-3.5" />
-            </div>
-          )}
-        </div>
-
-        {/* Agent response */}
-        <div className={showRoleIcons ? 'flex gap-3' : 'flex'}>
-          {showRoleIcons && (
-            <div className="flex-shrink-0 w-7 h-7 rounded bg-[var(--accent-subtle)] border border-[rgba(167,139,250,.15)] flex items-center justify-center mt-6">
-              <IconBot className="text-[var(--accent)] w-3.5 h-3.5" />
-            </div>
-          )}
-          <div className={`${showRoleIcons ? 'min-w-0 flex-1' : 'w-full'} min-w-[120px]`}>
-            <div className="flex items-center justify-between mb-1.5">
-              <div className="flex items-center gap-2 min-w-0">
-                <span
-                  className="text-[10px] font-semibold text-[var(--accent)] tracking-wide uppercase"
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  Agent
-                </span>
-              </div>
-              <div className="flex items-center gap-1.5">
-                <RelativeTimeText
-                  at={agentIso}
-                  className="text-[9px] leading-none text-[var(--muted-dim)] font-mono"
-                  title={new Date(agentIso).toLocaleString()}
-                />
-                {autoContinueBadge ? (
-                  <span
-                    className={`inline-flex items-center justify-center h-3.5 w-3.5 ${autoContinueBadge.toneClassName}`}
-                    title={autoContinueBadge.title}
-                    aria-label={autoContinueBadge.title}
-                  >
-                    {autoContinueBadge.icon === 'spinner' ? <IconSpinner className="w-3 h-3" /> : null}
-                    {autoContinueBadge.icon === 'check' ? <IconCheck className="w-3 h-3" /> : null}
-                    {autoContinueBadge.icon === 'alert' ? <IconAlert className="w-3 h-3" /> : null}
-                  </span>
-                ) : null}
-              </div>
-            </div>
+        <ChatMessageFrame role="user" at={promptIso} showRoleIcon={showRoleIcons}>
+          {copiedToastRole === 'user' ? (
             <div
-              className={`border rounded-lg rounded-tl-sm px-4 py-3 relative group ${
-                item.ok
-                  ? 'bg-[var(--accent-subtle)] border-[rgba(167,139,250,.12)]'
-                  : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)]'
-              }`}
-              onMouseEnter={() => onHoverAgentMessage(item)}
-              onMouseLeave={() => onHoverAgentMessage(null)}
-              data-message-id={messageId}
+              role="status"
+              aria-live="polite"
+              className="pointer-events-none absolute right-10 top-2 z-20 rounded border border-[rgba(148,163,184,.28)] bg-[rgba(0,0,0,.42)] px-2 py-0.5 text-[9px] uppercase tracking-wide text-[var(--fg-secondary)]"
+              style={{ fontFamily: 'var(--display)' }}
             >
+              Copied
+            </div>
+          ) : null}
+          {userCopyText.length > 0 ? (
+            <button
+              type="button"
+              onClick={() => void copyText(userCopyText).then(() => showCopiedToast('user'))}
+              className="pointer-events-none absolute right-2 top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] text-[var(--muted)] opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:border-[var(--user-muted)] hover:bg-[rgba(0,0,0,.25)] hover:text-[var(--user)] focus-visible:pointer-events-auto focus-visible:opacity-100"
+              title="Copy user message"
+              aria-label="Copy user message"
+            >
+              <IconCopy className="h-3.5 w-3.5 opacity-90" />
+            </button>
+          ) : null}
+          {promptText ? (
+            <CollapsibleMarkdown
+              text={promptText}
+              fadeTo="var(--user-dim)"
+              className="dh-markdown--user"
+              onOpenFileReference={onOpenFileReference}
+              onOpenLink={onOpenLink}
+            />
+          ) : null}
+          <ImageAttachmentChips
+            attachments={attachments}
+            droneId={droneId}
+            droneHomePath={droneHomePath}
+            onOpenFileReference={onOpenFileReference}
+          />
+        </ChatMessageFrame>
+
+        <ChatMessageFrame
+          role="assistant"
+          at={agentIso}
+          error={!item.ok}
+          showRoleIcon={showRoleIcons}
+          messageId={messageId}
+          onMouseEnter={() => onHoverAgentMessage(item)}
+          onMouseLeave={() => onHoverAgentMessage(null)}
+          headerEnd={autoContinueBadge ? (
+            <span
+              className={`inline-flex h-3.5 w-3.5 items-center justify-center ${autoContinueBadge.toneClassName}`}
+              title={autoContinueBadge.title}
+              aria-label={autoContinueBadge.title}
+            >
+              {autoContinueBadge.icon === 'spinner' ? <IconSpinner className="h-3 w-3" /> : null}
+              {autoContinueBadge.icon === 'check' ? <IconCheck className="h-3 w-3" /> : null}
+              {autoContinueBadge.icon === 'alert' ? <IconAlert className="h-3 w-3" /> : null}
+            </span>
+          ) : null}
+        >
               {copiedToastRole === 'agent' ? (
                 <div
                   role="status"
@@ -552,9 +501,7 @@ export const TranscriptTurn = React.memo(
                   </button>
                 ) : null}
               </div>
-            </div>
-          </div>
-        </div>
+        </ChatMessageFrame>
       </div>
     );
   },

@@ -4,25 +4,17 @@ import { requestJson } from '../http';
 import { MarkdownMessage } from '../chat/MarkdownMessage';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import {
-  CHAT_INPUT_MAX_BYTES_EACH,
-  CHAT_INPUT_MAX_BYTES_TOTAL,
-  CHAT_INPUT_MAX_IMAGES,
-  CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS,
-  blobToBase64,
-  fileToBase64,
-  filesFromClipboardData,
-  formatBytes,
-  imageFilesFromClipboardData,
-  isLikelyImageFile,
-  makeDraftImageAttachmentId,
-  textByteLength,
-  type DraftChatAttachment,
-} from '../chat/chat-input-attachments';
+  ChatComposerMenu,
+  ChatInput,
+  ChatTranscriptFrame,
+  EmptyState,
+  type ChatComposerMenuAction,
+  type ChatSendPayload,
+} from '../chat';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-dnd';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import {
   IconPencil,
-  IconPlus,
   IconSettings,
   IconShieldCheck,
   IconSpinner,
@@ -51,8 +43,6 @@ import {
 import { ApprovalCard } from './AssistantWorkflowCards';
 import { NativeAgentModelControls } from './NativeAgentModelControls';
 import {
-  assistantThreadStatusLabel,
-  assistantThreadStatusTone,
   formatArtifactSize,
   formatUpdatedAt,
 } from './assistant-formatters';
@@ -86,11 +76,6 @@ import type {
   AssistantArtifactFile,
   AssistantArtifactSummary,
   AssistantAttachmentPayload,
-  AssistantAttachmentSource,
-  AssistantDraftAttachment,
-  AssistantDraftFileAttachment,
-  AssistantDraftImageAttachment,
-  AssistantDraftTextAttachment,
   AssistantDefaultSettings,
   AssistantDroneNameMap,
   AssistantDroneReference,
@@ -200,58 +185,6 @@ function assistantScopeUpdatedAtMs(scope: AssistantAccessScope | null | undefine
   return Number.isFinite(ms) ? ms : 0;
 }
 
-function attachmentMimeForFile(file: File): string {
-  const mime = String((file as any).type ?? '').trim().toLowerCase();
-  if (mime && (mime !== 'application/octet-stream' || !isLikelyImageFile(file))) return mime;
-  const name = String((file as any).name ?? '').trim().toLowerCase();
-  if (/\.(jpe?g)$/.test(name)) return 'image/jpeg';
-  if (/\.gif$/.test(name)) return 'image/gif';
-  if (/\.webp$/.test(name)) return 'image/webp';
-  if (/\.svg$/.test(name)) return 'image/svg+xml';
-  if (/\.avif$/.test(name)) return 'image/avif';
-  if (/\.bmp$/.test(name)) return 'image/bmp';
-  if (/\.tiff?$/.test(name)) return 'image/tiff';
-  return isLikelyImageFile(file) ? 'image/png' : mime || 'application/octet-stream';
-}
-
-function revokeAssistantAttachmentPreviewUrls(items: AssistantDraftAttachment[]): void {
-  for (const item of items) {
-    if (item.kind === 'image' && item.previewUrl) URL.revokeObjectURL(item.previewUrl);
-  }
-}
-
-function makeAssistantPastedTextAttachmentName(existingCount: number): string {
-  return existingCount <= 0 ? 'pasted-text.txt' : `pasted-text-${existingCount + 1}.txt`;
-}
-
-async function encodeAssistantAttachment(attachment: AssistantDraftAttachment): Promise<AssistantAttachmentPayload> {
-  if (attachment.kind === 'image') {
-    return {
-      name: attachment.name,
-      mime: attachment.mime,
-      size: attachment.size,
-      dataBase64: await fileToBase64(attachment.file),
-      disposition: attachment.source === 'paste' ? 'prompt' : 'artifact',
-    };
-  }
-  if (attachment.kind === 'text') {
-    return {
-      name: attachment.name,
-      mime: attachment.mime,
-      size: attachment.size,
-      dataBase64: await blobToBase64(new Blob([attachment.text], { type: attachment.mime })),
-      disposition: 'artifact',
-    };
-  }
-  return {
-    name: attachment.name,
-    mime: attachment.mime,
-    size: attachment.size,
-    dataBase64: await fileToBase64(attachment.file),
-    disposition: 'artifact',
-  };
-}
-
 async function readNdjson(response: Response, onEvent: (event: any) => void): Promise<void> {
   if (!response.ok || !response.body) {
     let data: any = null;
@@ -299,10 +232,8 @@ export function AssistantDock({
   const [loading, setLoading] = React.useState(true);
   const [error, setError] = React.useState<string | null>(null);
   const [draft, setDraft] = React.useState('');
-  const [attachments, setAttachments] = React.useState<AssistantDraftAttachment[]>([]);
   const [referencedDrones, setReferencedDrones] = React.useState<AssistantDroneReference[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
-  const [attachmentDragActive, setAttachmentDragActive] = React.useState(false);
   const [filesOpen, setFilesOpen] = React.useState(readInitialFilesOpen);
   const [artifactFiles, setArtifactFiles] = React.useState<AssistantArtifactSummary[]>([]);
   const [selectedArtifactPath, setSelectedArtifactPath] = React.useState<string | null>(null);
@@ -342,12 +273,8 @@ export function AssistantDock({
   const activeDroneHubDrag = useDroneHubActiveDrag();
   const scrollRef = React.useRef<HTMLDivElement | null>(null);
   const scrollContentRef = React.useRef<HTMLDivElement | null>(null);
-  const assistantThreadRef = React.useRef<HTMLDivElement | null>(null);
   /** When false, new transcript content must not force scroll position (user scrolled up). */
   const assistantStickToBottomRef = React.useRef(true);
-  const inputRef = React.useRef<HTMLTextAreaElement | null>(null);
-  const attachmentInputRef = React.useRef<HTMLInputElement | null>(null);
-  const attachmentsRef = React.useRef<AssistantDraftAttachment[]>([]);
   const referencedDronesRef = React.useRef<AssistantDroneReference[]>([]);
   const refocusInputWhenIdleRef = React.useRef(false);
   const activeThreadIdRef = React.useRef('');
@@ -543,13 +470,6 @@ export function AssistantDock({
     activePendingApprovals.length === 0 &&
     !latestActivityShowsReasoning &&
     !messageText(streamingAssistantMessage ?? { role: 'assistant' }).trim();
-  const showEmptyAssistantThread =
-    !(loading && !snapshot) &&
-    !blipSession.historyLoading &&
-    visibleItems.length === 0 &&
-    visibleQueuedPrompts.length === 0 &&
-    activePendingApprovals.length === 0 &&
-    !showThinking;
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
   const applySnapshot = React.useCallback((next: AssistantSnapshot) => setSnapshot(next), []);
@@ -587,28 +507,13 @@ export function AssistantDock({
   };
 
   React.useEffect(() => {
-    attachmentsRef.current = attachments;
-  }, [attachments]);
-
-  React.useEffect(() => {
     referencedDronesRef.current = referencedDrones;
   }, [referencedDrones]);
 
   React.useEffect(() => {
     setAttachmentError(null);
-    setAttachmentDragActive(false);
     setReferencedDrones([]);
-    setAttachments((prev) => {
-      revokeAssistantAttachmentPreviewUrls(prev);
-      return [];
-    });
   }, [activeThreadId]);
-
-  React.useEffect(() => {
-    return () => {
-      revokeAssistantAttachmentPreviewUrls(attachmentsRef.current);
-    };
-  }, []);
 
   const loadSystemPromptSettings = React.useCallback(async () => {
     const threadId = activeThreadIdRef.current;
@@ -897,7 +802,9 @@ export function AssistantDock({
       for (const drone of clean) byId.set(drone.id, drone);
       return Array.from(byId.values());
     });
-    window.requestAnimationFrame(() => inputRef.current?.focus());
+    window.requestAnimationFrame(() =>
+      document.querySelector<HTMLTextAreaElement>('[data-chat-input-focus-id="assistant-chat"]')?.focus(),
+    );
   }, []);
 
   const removeReferencedDrone = React.useCallback((droneIdRaw: string) => {
@@ -978,7 +885,7 @@ export function AssistantDock({
   React.useEffect(() => {
     if (running || !refocusInputWhenIdleRef.current) return;
     refocusInputWhenIdleRef.current = false;
-    inputRef.current?.focus();
+    document.querySelector<HTMLTextAreaElement>('[data-chat-input-focus-id="assistant-chat"]')?.focus();
   }, [running]);
 
   const updateThread = React.useCallback(async (patch: Partial<Pick<AssistantThread, 'title' | 'model' | 'provider' | 'thinkingLevel' | 'autoApprove' | 'promptDeliveryMode' | 'enabledTools' | 'enabledWorkspaceIds'>>) => {
@@ -1000,210 +907,36 @@ export function AssistantDock({
     }
   }, [activeThread, applySnapshot, beginSnapshotMutation, snapshotMutationCurrent]);
 
-  const attachmentControlsLocked = !activeThread;
-  const imageAttachmentCount = React.useMemo(
-    () => attachments.filter((attachment) => attachment.kind === 'image').length,
-    [attachments],
-  );
-  const promptImageAttachmentCount = React.useMemo(
-    () => attachments.filter((attachment) => attachment.kind === 'image' && attachment.source === 'paste').length,
-    [attachments],
-  );
-
-  const openAttachmentPicker = React.useCallback(() => {
-    if (attachmentControlsLocked) return;
-    attachmentInputRef.current?.click();
-  }, [attachmentControlsLocked]);
-
-  const removeAttachment = React.useCallback((id: string) => {
-    setAttachmentError(null);
-    setAttachments((prev) => {
-      const idx = prev.findIndex((attachment) => attachment.id === id);
-      if (idx < 0) return prev;
-      const next = prev.slice();
-      const [removed] = next.splice(idx, 1);
-      if (removed) revokeAssistantAttachmentPreviewUrls([removed]);
-      return next;
-    });
-  }, []);
-
-  const addAttachmentFiles = React.useCallback((files: File[] | FileList | null | undefined, options?: { source?: AssistantAttachmentSource }) => {
-    if (attachmentControlsLocked) return;
-    if (!files) return;
-    const list = Array.isArray(files) ? files : Array.from(files);
-    if (list.length === 0) return;
-    const source = options?.source ?? 'file';
-    setAttachmentError(null);
-    setAttachments((prev) => {
-      const next = prev.slice();
-      let total = next.reduce((sum, attachment) => sum + (Number(attachment.size) || 0), 0);
-      let images = next.filter((attachment) => attachment.kind === 'image').length;
-      for (const file of list) {
-        if (!file) continue;
-        const size = Number((file as any).size ?? 0);
-        if (!Number.isFinite(size) || size <= 0) {
-          setAttachmentError('One selected file is empty or unreadable.');
-          continue;
-        }
-        if (size > CHAT_INPUT_MAX_BYTES_EACH) {
-          setAttachmentError(`File too large (${formatBytes(size)}). Max per file is ${formatBytes(CHAT_INPUT_MAX_BYTES_EACH)}.`);
-          continue;
-        }
-        if (next.length >= CHAT_INPUT_MAX_IMAGES) {
-          setAttachmentError(`Too many files. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
-          break;
-        }
-        if (total + size > CHAT_INPUT_MAX_BYTES_TOTAL) {
-          setAttachmentError(`Attachments too large in total. Max total is ${formatBytes(CHAT_INPUT_MAX_BYTES_TOTAL)}.`);
-          break;
-        }
-        const name = String((file as any).name ?? '').trim() || `attachment-${next.length + 1}`;
-        const mime = attachmentMimeForFile(file);
-        if (isLikelyImageFile(file)) {
-          if (images >= CHAT_INPUT_MAX_IMAGES) {
-            setAttachmentError(`Too many images. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
-            break;
-          }
-          next.push({
-            kind: 'image',
-            id: makeDraftImageAttachmentId(),
-            file,
-            name,
-            mime,
-            size: Math.floor(size),
-            previewUrl: URL.createObjectURL(file),
-            source,
-          });
-          images += 1;
-        } else {
-          next.push({
-            kind: 'file',
-            id: makeDraftImageAttachmentId(),
-            file,
-            name,
-            mime,
-            size: Math.floor(size),
-            source: 'file',
-          });
-        }
-        total += size;
-      }
-      return next;
-    });
-  }, [attachmentControlsLocked]);
-
-  const addPastedTextAttachment = React.useCallback((textRaw: string) => {
-    if (attachmentControlsLocked) return;
-    const text = String(textRaw ?? '');
-    if (!text) return;
-    const size = textByteLength(text);
-    setAttachmentError(null);
-    setAttachments((prev) => {
-      const total = prev.reduce((sum, attachment) => sum + (Number(attachment.size) || 0), 0);
-      if (prev.length >= CHAT_INPUT_MAX_IMAGES) {
-        setAttachmentError(`Too many files. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
-        return prev;
-      }
-      if (size > CHAT_INPUT_MAX_BYTES_EACH) {
-        setAttachmentError(`Pasted text too large (${formatBytes(size)}). Max per file is ${formatBytes(CHAT_INPUT_MAX_BYTES_EACH)}.`);
-        return prev;
-      }
-      if (total + size > CHAT_INPUT_MAX_BYTES_TOTAL) {
-        setAttachmentError(`Attachments too large in total. Max total is ${formatBytes(CHAT_INPUT_MAX_BYTES_TOTAL)}.`);
-        return prev;
-      }
-      const textCount = prev.filter((attachment) => attachment.kind === 'text').length;
-      return [
-        ...prev,
-        {
-          kind: 'text',
-          id: makeDraftImageAttachmentId(),
-          text,
-          name: makeAssistantPastedTextAttachmentName(textCount),
-          mime: 'text/plain',
-          size,
-          source: 'paste',
-        },
-      ];
-    });
-  }, [attachmentControlsLocked]);
-
-  const handleAssistantPaste = React.useCallback((event: React.ClipboardEvent): boolean => {
-    if (attachmentControlsLocked || filesOpen) return false;
-    const clipboardData = event.clipboardData;
-    const pastedImages = imageFilesFromClipboardData(clipboardData);
-    if (pastedImages.length > 0) {
-      event.preventDefault();
-      addAttachmentFiles(pastedImages, { source: 'paste' });
-      return true;
-    }
-
-    const files = filesFromClipboardData(clipboardData);
-    const nonImageFiles = files.filter((file) => !isLikelyImageFile(file));
-    if (nonImageFiles.length > 0) {
-      event.preventDefault();
-      addAttachmentFiles(nonImageFiles, { source: 'file' });
-      return true;
-    }
-
-    const pastedText = String(clipboardData?.getData('text/plain') ?? '');
-    if (pastedText.length >= CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS) {
-      event.preventDefault();
-      addPastedTextAttachment(pastedText);
-      return true;
-    }
-    return false;
-  }, [addAttachmentFiles, addPastedTextAttachment, attachmentControlsLocked, filesOpen]);
-
-  const focusAssistantThreadForPaste = React.useCallback((event: React.MouseEvent<HTMLDivElement>) => {
-    const target = event.target instanceof Element ? event.target : null;
-    if (!target || target.closest('button,a,input,textarea,select,[role="button"],[role="menuitem"],[contenteditable="true"]')) return;
-    assistantThreadRef.current?.focus();
-  }, []);
-
-  const sendPrompt = React.useCallback(async () => {
-    if (!activeThread) return;
-    const draftPrompt = draft.trim();
-    const attachmentSnapshot = attachmentsRef.current.slice();
+  const sendPrompt = React.useCallback(async (sharedPayload: ChatSendPayload): Promise<boolean> => {
+    if (!activeThread) return false;
     const referencedDroneSnapshot = referencedDronesRef.current.slice();
-    const prompt = appendAssistantDroneReferences(draftPrompt, referencedDroneSnapshot);
-    if (!prompt && attachmentSnapshot.length === 0) return;
+    const prompt = appendAssistantDroneReferences(sharedPayload.prompt, referencedDroneSnapshot);
+    const encodedAttachments: AssistantAttachmentPayload[] = sharedPayload.attachments.map((attachment) => ({
+      ...attachment,
+      disposition: attachment.disposition,
+    }));
+    if (!prompt && encodedAttachments.length === 0) return false;
     const requestSeq = beginSnapshotMutation();
     setError(null);
     setAttachmentError(null);
-    if (!(await waitForScopeSave())) return;
-    if (!snapshotMutationCurrent(requestSeq)) return;
-    setDraft('');
-    setAttachments([]);
+    if (!(await waitForScopeSave())) return false;
+    if (!snapshotMutationCurrent(requestSeq)) return false;
     setReferencedDrones([]);
     scrollAssistantToBottom({ force: true });
     refocusInputWhenIdleRef.current = true;
-    let encodedAttachments: AssistantAttachmentPayload[] = [];
-    try {
-      encodedAttachments = await Promise.all(attachmentSnapshot.map(encodeAssistantAttachment));
-    } catch (err: any) {
-      if (snapshotMutationCurrent(requestSeq)) {
-        setAttachmentError(`Failed to read attachment: ${err?.message ?? String(err)}`);
-        setDraft((cur) => (cur.trim() ? cur : draftPrompt));
-        setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
-        setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
-      }
-      return;
-    }
-    if (!snapshotMutationCurrent(requestSeq)) return;
-    const response = await fetch(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/prompt`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        prompt,
-        attachments: encodedAttachments,
-        provider: activeThread.provider,
-        model: activeThread.model,
-        thinkingLevel: activeThread.thinkingLevel,
-      }),
-    });
     let sentOk = true;
     try {
+      const response = await fetch(`/api/assistant/threads/${encodeURIComponent(activeThread.id)}/prompt`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          prompt,
+          attachments: encodedAttachments,
+          provider: activeThread.provider,
+          model: activeThread.model,
+          thinkingLevel: activeThread.thinkingLevel,
+        }),
+      });
       await readNdjson(response, (event) => {
         if (!snapshotMutationCurrent(requestSeq)) return;
         blipSession.handleStreamEvent(event);
@@ -1213,27 +946,20 @@ export function AssistantDock({
         }
       });
       if (!sentOk && snapshotMutationCurrent(requestSeq)) {
-        setDraft((cur) => (cur.trim() ? cur : draftPrompt));
-        setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
         setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
       }
     } catch (err: any) {
       sentOk = false;
       if (snapshotMutationCurrent(requestSeq)) {
         setError(err?.message ?? String(err));
-        setDraft((cur) => (cur.trim() ? cur : draftPrompt));
-        setAttachments((cur) => (cur.length === 0 ? attachmentSnapshot : cur));
         setReferencedDrones((cur) => (cur.length === 0 ? referencedDroneSnapshot : cur));
       }
     } finally {
-      if (sentOk && attachmentSnapshot.length > 0) {
-        revokeAssistantAttachmentPreviewUrls(attachmentSnapshot);
-      }
       if (snapshotMutationCurrent(requestSeq)) {
         void blipSession.refreshHistory({ quiet: true });
         void refresh({ silent: true });
       }
-      if (snapshotMutationCurrent(requestSeq) && sentOk && attachmentSnapshot.length > 0) {
+      if (snapshotMutationCurrent(requestSeq) && sentOk && encodedAttachments.length > 0) {
         requestJson<{ ok: true; threadId: string; files: AssistantArtifactSummary[] }>(
           `/api/assistant/threads/${encodeURIComponent(activeThread.id)}/artifacts`,
         )
@@ -1243,7 +969,8 @@ export function AssistantDock({
           .catch(() => {});
       }
     }
-  }, [activeThread, beginSnapshotMutation, blipSession, draft, refresh, scrollAssistantToBottom, snapshotMutationCurrent, waitForScopeSave]);
+    return sentOk;
+  }, [activeThread, beginSnapshotMutation, blipSession, refresh, scrollAssistantToBottom, snapshotMutationCurrent, waitForScopeSave]);
 
   const stop = React.useCallback(async () => {
     if (!activeThread) return;
@@ -1580,189 +1307,99 @@ export function AssistantDock({
     void loadSelectedArtifactFile();
   }, [activeThread?.updatedAt, filesOpen, loadSelectedArtifactFile, selectedArtifactPath]);
 
+  const composerMenuActions: ChatComposerMenuAction[] = [
+    {
+      id: 'files',
+      label: filesOpen ? 'Hide thread files' : 'Thread files',
+      icon: <IconFile className="h-3.5 w-3.5" />,
+      badge: artifactFiles.length > 0 ? (artifactFiles.length > 99 ? '99+' : artifactFiles.length) : undefined,
+      active: filesOpen,
+      onSelect: () => {
+        setToolsPanelOpen(false);
+        setSettingsOpen(false);
+        setWorkspaceAccessOpen(false);
+        setWorkspacesPanelOpen(false);
+        setFilesOpen((value) => !value);
+      },
+    },
+    {
+      id: 'system-prompt',
+      label: 'System prompt',
+      icon: <IconPencil className="h-3.5 w-3.5" />,
+      onSelect: openSystemPromptEditor,
+    },
+    {
+      id: 'workspaces',
+      label: 'Chat workspaces',
+      icon: <IconFolder className="h-3.5 w-3.5" />,
+      disabled: !activeThread,
+      active: workspacesPanelOpen || workspaceAccessOpen,
+      onSelect: () => {
+        setFilesOpen(false);
+        setToolsPanelOpen(false);
+        setSettingsOpen(false);
+        setWorkspaceAccessOpen(false);
+        setWorkspacesPanelOpen((value) => !value);
+      },
+    },
+    {
+      id: 'tools',
+      label: 'Thread tools',
+      icon: <IconWrench className="h-3.5 w-3.5" />,
+      disabled: !activeThread,
+      active: toolsPanelOpen,
+      onSelect: () => {
+        setSettingsOpen(false);
+        setWorkspaceAccessOpen(false);
+        setWorkspacesPanelOpen(false);
+        setToolsPanelOpen((value) => !value);
+      },
+    },
+    {
+      id: 'settings',
+      label: 'Agent defaults',
+      icon: <IconSettings className="h-3.5 w-3.5" />,
+      active: settingsOpen,
+      onSelect: () => {
+        setToolsPanelOpen(false);
+        setWorkspaceAccessOpen(false);
+        setWorkspacesPanelOpen(false);
+        setSettingsOpen((value) => !value);
+      },
+    },
+    {
+      id: 'auto-approve',
+      label: 'Auto-approve requests',
+      icon: <IconShieldCheck className="h-4 w-4" />,
+      disabled: !activeThread,
+      active: autoApprove,
+      onSelect: () => void updateThread({ autoApprove: !autoApprove }),
+    },
+  ];
+
   return (
     <div data-assistant-dock-root="true" className="flex h-full min-h-0 bg-[var(--panel-alt)]">
-      <div
-        ref={assistantThreadRef}
-        tabIndex={-1}
-        className={`relative flex min-w-0 flex-1 flex-col outline-none ${attachmentDragActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''}`}
-        onMouseDown={focusAssistantThreadForPaste}
-        onPaste={(event) => {
-          handleAssistantPaste(event);
-        }}
-        onDragEnter={(event) => {
-          if (attachmentControlsLocked || filesOpen) return;
-          if (event.dataTransfer?.types?.includes?.('Files')) setAttachmentDragActive(true);
-        }}
-        onDragOver={(event) => {
-          if (event.dataTransfer?.types?.includes?.('Files')) event.preventDefault();
-        }}
-        onDragLeave={(event) => {
-          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setAttachmentDragActive(false);
-        }}
-        onDrop={(event) => {
-          if (!event.dataTransfer?.types?.includes?.('Files')) return;
-          event.preventDefault();
-          setAttachmentDragActive(false);
-          if (attachmentControlsLocked || filesOpen) return;
-          addAttachmentFiles(event.dataTransfer?.files ?? null, { source: 'file' });
-        }}
-      >
-        <div className="relative flex h-11 flex-shrink-0 items-center gap-2 border-b border-[var(--border)] bg-[rgba(255,255,255,.025)] px-2">
-          <div className="min-w-0 flex-1">
-            <div className="truncate text-[12px] font-semibold text-[var(--fg)]">{activeThread?.title ?? nativeChat.chatName}</div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-              {activeThread ? <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${assistantThreadStatusTone(activeThread.status)}`} /> : null}
-              <span className="truncate">{assistantThreadStatusLabel(activeThread?.status, loading ? 'loading' : 'idle')}</span>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => {
-              setWorkspaceAccessOpen(false);
-              setWorkspacesPanelOpen(false);
-              setFilesOpen((value) => !value);
-            }}
-            aria-pressed={filesOpen}
-            className={`relative flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] ${
-              filesOpen
-                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
-            }`}
-            title={filesOpen ? 'Hide thread files' : 'Show thread files'}
-            aria-label={filesOpen ? 'Hide thread files' : 'Show thread files'}
-          >
-            <IconFile className="h-3.5 w-3.5" />
-            {artifactFiles.length > 0 ? (
-              <span className="absolute -right-1 -top-1 min-w-4 rounded-full border border-[var(--panel-alt)] bg-[var(--accent)] px-1 text-center text-[9px] font-semibold leading-4 text-[var(--accent-fg)]">
-                {artifactFiles.length > 9 ? '9+' : artifactFiles.length}
-              </span>
-            ) : null}
-          </button>
-          <button
-            type="button"
-            onClick={openSystemPromptEditor}
-            className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg)]"
-            title="Edit system prompt"
-            aria-label="Edit system prompt"
-          >
-            <IconPencil className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            data-assistant-workspaces-trigger
-            onClick={() => {
-              setFilesOpen(false);
-              setToolsPanelOpen(false);
-              setSettingsOpen(false);
-              setWorkspaceAccessOpen(false);
-              setWorkspacesPanelOpen((value) => !value);
-            }}
-            disabled={!activeThread}
-            aria-pressed={workspacesPanelOpen || workspaceAccessOpen}
-            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
-              workspacesPanelOpen || workspaceAccessOpen
-                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
-            }`}
-            title="Configure chat workspaces"
-            aria-label="Configure chat workspaces"
-          >
-            <IconFolder className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            data-assistant-tools-trigger
-            onClick={() => {
-              setSettingsOpen(false);
-              setWorkspaceAccessOpen(false);
-              setWorkspacesPanelOpen(false);
-              setToolsPanelOpen((value) => !value);
-            }}
-            disabled={!activeThread}
-            aria-pressed={toolsPanelOpen}
-            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
-              toolsPanelOpen
-                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
-            }`}
-            title="Configure thread tools"
-            aria-label="Configure thread tools"
-          >
-            <IconWrench className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setToolsPanelOpen(false);
-              setWorkspaceAccessOpen(false);
-              setWorkspacesPanelOpen(false);
-              setSettingsOpen((value) => !value);
-            }}
-            aria-pressed={settingsOpen}
-            className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border text-[var(--muted)] hover:text-[var(--fg)] ${
-              settingsOpen
-                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
-            }`}
-            title="Built-in agent settings"
-            aria-label="Built-in agent settings"
-          >
-            <IconSettings className="h-3.5 w-3.5" />
-          </button>
-          <button
-            type="button"
-            onClick={() => void updateThread({ autoApprove: !autoApprove })}
-            disabled={!activeThread}
-            aria-pressed={autoApprove}
-            aria-label="Toggle auto-approve requests"
-            title={autoApprove ? 'Auto-approve requests is on' : 'Auto-approve requests is off'}
-            className={`h-8 w-8 flex-shrink-0 rounded border text-[var(--muted)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-45 ${
-              autoApprove
-                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.055)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
-            }`}
-          >
-            <IconShieldCheck className="mx-auto h-4 w-4" />
-          </button>
-          {toolsPanelOpen ? (
-            <AssistantToolsPanel
-              tools={availableTools}
-              enabledTools={enabledToolNames}
-              disabled={!activeThread}
-              onToggleTool={toggleAssistantTool}
-              onToggleTools={toggleAssistantTools}
-              onEnableAll={() => updateEnabledTools(availableTools.map((tool) => tool.name))}
-              onDisableAll={() => updateEnabledTools([])}
-              onClose={() => setToolsPanelOpen(false)}
-            />
-          ) : null}
-          {workspacesPanelOpen ? (
-            <AssistantWorkspacesPanel
-              workspaces={availableWorkspaces}
-              enabledWorkspaceIds={enabledWorkspaceDraftIds}
-              disabled={!activeThread}
-              onToggleWorkspace={toggleAssistantWorkspace}
-              onEnableAll={() => updateEnabledWorkspaces(availableWorkspaces.map((workspace) => workspace.id))}
-              onDisableAll={() => updateEnabledWorkspaces([])}
-              onOpenRemoteAccess={() => {
-                setWorkspacesPanelOpen(false);
-                setWorkspaceAccessOpen(true);
-              }}
-              onClose={() => setWorkspacesPanelOpen(false)}
-            />
-          ) : null}
-        </div>
-
+      <div className="relative flex min-w-0 flex-1 flex-col outline-none">
       {settingsOpen ? (
-        <div className="absolute inset-x-0 bottom-0 top-11 z-20 overflow-y-auto bg-[var(--panel-alt)]">
+        <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
           <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
-            <div className="mb-4">
-              <div className="flex items-center gap-2 text-[15px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
-                <IconSettings className="h-4 w-4 text-[var(--muted)]" />
-                Settings
+            <div className="mb-4 flex items-start justify-between gap-3">
+              <div>
+                <div className="flex items-center gap-2 text-[15px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
+                  <IconSettings className="h-4 w-4 text-[var(--muted)]" />
+                  Settings
+                </div>
+                <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Defaults apply to newly created chats. Existing chats keep their current configuration.</div>
               </div>
-              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Defaults apply to newly created chats. Existing chats keep their current configuration.</div>
+              <button
+                type="button"
+                onClick={() => setSettingsOpen(false)}
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg)]"
+                title="Close settings"
+                aria-label="Close settings"
+              >
+                ×
+              </button>
             </div>
             <AssistantToolsPanel
               variant="settings"
@@ -1779,7 +1416,7 @@ export function AssistantDock({
       ) : null}
 
       {workspaceAccessOpen && activeThread ? (
-        <div className="absolute inset-x-0 bottom-0 top-11 z-20 overflow-y-auto bg-[var(--panel-alt)]">
+        <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
           <AssistantWorkspaceAccessView
             key={activeThread.id}
             requestJson={requestJson}
@@ -1860,53 +1497,60 @@ export function AssistantDock({
           }`}
         >
           <div className="relative min-h-0 flex-1">
-            <div ref={scrollRef} className="h-full overflow-y-auto">
-              <div
-                ref={scrollContentRef}
-                className={showEmptyAssistantThread ? 'flex min-h-full items-center justify-center px-3 py-3' : 'space-y-2 py-3'}
-              >
-                {blipSession.hasOlder ? (
-                  <div className="px-3 text-center">
-                    <button
-                      type="button"
-                      className="rounded border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--fg-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
-                      disabled={blipSession.olderLoading}
-                      onClick={() => void loadOlderMessages()}
-                    >
-                      {blipSession.olderLoading ? 'Loading older messages...' : 'Load older messages'}
-                    </button>
-                  </div>
-                ) : null}
-                {loading && !snapshot ? (
-                  <div className="px-3 text-[12px] text-[var(--muted)]">Loading built-in agent...</div>
-                ) : blipSession.historyLoading && visibleItems.length === 0 ? (
-                  <div className="px-3 text-[12px] text-[var(--muted)]">Loading conversation...</div>
-                ) : showEmptyAssistantThread ? (
-                  <div className="w-full rounded border border-dashed border-[var(--border)] px-3 py-5 text-center">
-                    <div className="text-[12px] text-[var(--fg-secondary)]">Start the chat to inspect drones or coordinate work.</div>
-                    <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Drone messaging will ask for approval first.</div>
-                  </div>
+            <ChatTranscriptFrame
+              ref={scrollRef}
+              contentRef={scrollContentRef}
+              loading={Boolean((loading && !snapshot) || (blipSession.historyLoading && visibleItems.length === 0))}
+              loadingMessage={loading && !snapshot ? 'Loading built-in agent...' : 'Loading conversation...'}
+              hasContent={Boolean(
+                blipSession.hasOlder ||
+                visibleItems.length > 0 ||
+                showThinking ||
+                activePendingApprovals.length > 0 ||
+                visibleQueuedPrompts.length > 0 ||
+                error ||
+                blipSession.runError ||
+                blipSession.historyError
+              )}
+              emptyState={(
+                <EmptyState
+                  icon={<IconDrone className="h-8 w-8 text-[var(--muted)]" />}
+                  title="No messages yet"
+                  description="Send a prompt to start the conversation. Drone messaging will ask for approval first."
+                />
+              )}
+            >
+              {blipSession.hasOlder ? (
+                <div className="text-center">
+                  <button
+                    type="button"
+                    className="rounded border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--fg-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
+                    disabled={blipSession.olderLoading}
+                    onClick={() => void loadOlderMessages()}
+                  >
+                    {blipSession.olderLoading ? 'Loading older messages...' : 'Load older messages'}
+                  </button>
+                </div>
+              ) : null}
+              {visibleItems.map((item) =>
+                item.type === 'message' ? (
+                  <AssistantMessageRow
+                    key={item.key}
+                    message={item.message}
+                    droneMentionLinks={droneMentionLinks}
+                    onOpenDroneMention={openDroneMention}
+                    showToolCalls={item.showToolCalls}
+                    isStreamingAssistant={
+                      item.message.role === 'assistant' && item.sourceMessageIndex === streamingAssistantSourceIndex
+                    }
+                    showReasoning={running && item.key === latestActivityItemKey}
+                  />
+                ) : item.type === 'tool' ? (
+                  <ToolActivityRow key={item.key} call={item.call} result={item.result} droneNameById={droneNameById} />
                 ) : (
-                  visibleItems.map((item) =>
-                    item.type === 'message' ? (
-                      <AssistantMessageRow
-                        key={item.key}
-                        message={item.message}
-                        droneMentionLinks={droneMentionLinks}
-                        onOpenDroneMention={openDroneMention}
-                        showToolCalls={item.showToolCalls}
-                        isStreamingAssistant={
-                          item.message.role === 'assistant' && item.sourceMessageIndex === streamingAssistantSourceIndex
-                        }
-                        showReasoning={running && item.key === latestActivityItemKey}
-                      />
-                    ) : item.type === 'tool' ? (
-                      <ToolActivityRow key={item.key} call={item.call} result={item.result} droneNameById={droneNameById} />
-                    ) : (
-                      <RepeatedToolActivityRow key={item.key} items={item.items} />
-                    ),
-                  )
-                )}
+                  <RepeatedToolActivityRow key={item.key} items={item.items} />
+                ),
+              )}
                 {showThinking ? <AssistantThinkingRow /> : null}
                 {activePendingApprovals.map((approval) => (
                   <ApprovalCard
@@ -1926,62 +1570,54 @@ export function AssistantDock({
                   />
                 ))}
                 {error || blipSession.runError || blipSession.historyError ? <div className="mx-3 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-3 py-2 text-[11px] text-[var(--red)]">{error ?? blipSession.runError ?? blipSession.historyError}</div> : null}
-              </div>
-            </div>
+            </ChatTranscriptFrame>
           </div>
 
-      <div className="flex-shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)] p-2">
-        <NativeAgentModelControls
-          thread={activeThread}
-          models={snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS}
-          defaultModel={snapshot?.defaultModel}
-          busy={defaultModelBusy}
-          onUpdate={(patch) => void updateThread(patch)}
-          onSetDefault={() => void setActiveModelAsDefault()}
-        />
-        {attachmentError ? (
-          <div className="mb-2 rounded border border-[rgba(255,90,90,.28)] bg-[rgba(255,90,90,.07)] px-2.5 py-1.5 text-[11px] text-[var(--red)]">
-            {attachmentError}
-          </div>
-        ) : null}
-        <div
-          className={`relative rounded border bg-[rgba(255,255,255,.03)] focus-within:border-[var(--accent-muted)] ${
-            attachmentDragActive || droneReferenceDropActive ? 'border-[var(--accent-muted)]' : 'border-[var(--border-subtle)]'
-          }`}
-          onDragEnter={(event) => {
-            event.stopPropagation();
-            if (attachmentControlsLocked) return;
-            if (event.dataTransfer?.types?.includes?.('Files')) setAttachmentDragActive(true);
-          }}
-          onDragOver={(event) => {
-            event.stopPropagation();
-            if (event.dataTransfer?.types?.includes?.('Files')) event.preventDefault();
-            if (attachmentControlsLocked) return;
-          }}
-          onDragLeave={(event) => {
-            event.stopPropagation();
-            setAttachmentDragActive(false);
-          }}
-          onDrop={(event) => {
-            event.stopPropagation();
-            event.preventDefault();
-            setAttachmentDragActive(false);
-            if (attachmentControlsLocked) return;
-            addAttachmentFiles(event.dataTransfer?.files ?? null, { source: 'file' });
-          }}
-        >
-          <input
-            ref={attachmentInputRef}
-            type="file"
-            multiple
-            className="hidden"
-            disabled={attachmentControlsLocked}
-            onChange={(event) => {
-              addAttachmentFiles(event.currentTarget.files, { source: 'file' });
-              event.currentTarget.value = '';
-            }}
+      <div className="relative flex-shrink-0">
+        {toolsPanelOpen ? (
+          <AssistantToolsPanel
+            tools={availableTools}
+            enabledTools={enabledToolNames}
+            disabled={!activeThread}
+            onToggleTool={toggleAssistantTool}
+            onToggleTools={toggleAssistantTools}
+            onEnableAll={() => updateEnabledTools(availableTools.map((tool) => tool.name))}
+            onDisableAll={() => updateEnabledTools([])}
+            onClose={() => setToolsPanelOpen(false)}
+            placement="composer"
           />
-          {referencedDrones.length > 0 || droneReferenceDropActive ? (
+        ) : null}
+        {workspacesPanelOpen ? (
+          <AssistantWorkspacesPanel
+            workspaces={availableWorkspaces}
+            enabledWorkspaceIds={enabledWorkspaceDraftIds}
+            disabled={!activeThread}
+            onToggleWorkspace={toggleAssistantWorkspace}
+            onEnableAll={() => updateEnabledWorkspaces(availableWorkspaces.map((workspace) => workspace.id))}
+            onDisableAll={() => updateEnabledWorkspaces([])}
+            onOpenRemoteAccess={() => {
+              setWorkspacesPanelOpen(false);
+              setWorkspaceAccessOpen(true);
+            }}
+            onClose={() => setWorkspacesPanelOpen(false)}
+            placement="composer"
+          />
+        ) : null}
+        <ChatInput
+          resetKey={activeThreadId || nativeChatName}
+          droneName="assistant"
+          focusTargetId="assistant-chat"
+          draftValue={draft}
+          onDraftValueChange={setDraft}
+          promptError={attachmentError}
+          sending={scopeSyncBusy}
+          waiting={running}
+          disabled={!activeThread}
+          attachmentsEnabled
+          attachmentMode="files"
+          allowSendWhileWaiting
+          modeHint={running ? (promptDeliveryMode === 'asap' ? 'Sends at the next turn' : 'Queues after the current run') : ''}
+          composerHeader={referencedDrones.length > 0 || droneReferenceDropActive ? (
             <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
               <div className="mb-1.5 flex items-center justify-between gap-2">
                 <div className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -2029,120 +1665,25 @@ export function AssistantDock({
               )}
             </div>
           ) : null}
-          {attachments.length > 0 ? (
-            <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <div className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                  {attachments.length} item{attachments.length === 1 ? '' : 's'} attached
-                  {imageAttachmentCount > 0 ? ` · ${imageAttachmentCount} image${imageAttachmentCount === 1 ? '' : 's'}` : ''}
-                  {promptImageAttachmentCount > 0 ? ` · ${promptImageAttachmentCount} chat-only` : ''}
-                </div>
-                <button
-                  type="button"
-                  onClick={openAttachmentPicker}
-                  disabled={attachmentControlsLocked}
-                  className="h-6 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-45"
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  Add
-                </button>
-              </div>
-              <div className="flex gap-2 overflow-x-auto pb-0.5 no-scrollbar">
-                {attachments.map((attachment) => (
-                  <div key={attachment.id} className="relative flex-shrink-0">
-                    {attachment.kind === 'image' ? (
-                      <img
-                        src={attachment.previewUrl}
-                        alt={attachment.name}
-                        className="h-14 w-14 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] object-cover"
-                      />
-                    ) : (
-                      <div className="w-[172px] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-2 py-1.5">
-                        <div className="flex min-w-0 items-center gap-1.5">
-                          <IconFile className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" />
-                          <span className="min-w-0 truncate text-[10px] font-medium text-[var(--fg-secondary)]">{attachment.name}</span>
-                        </div>
-                        <div className="mt-1 truncate text-[9px] text-[var(--muted-dim)]">
-                          {formatBytes(attachment.size)} · {attachment.mime || 'application/octet-stream'}
-                        </div>
-                      </div>
-                    )}
-                    <button
-                      type="button"
-                      onClick={() => removeAttachment(attachment.id)}
-                      disabled={attachmentControlsLocked}
-                      className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel-raised)] text-[10px] font-bold text-[var(--muted)] hover:border-[var(--red)] hover:text-[var(--red)] disabled:opacity-45"
-                      title={`Remove ${attachment.name}`}
-                      aria-label={`Remove ${attachment.name}`}
-                    >
-                      x
-                    </button>
-                  </div>
-                ))}
-              </div>
+          composerControls={(
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <NativeAgentModelControls
+                thread={activeThread}
+                models={snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS}
+                defaultModel={snapshot?.defaultModel}
+                busy={defaultModelBusy}
+                className=""
+                onUpdate={(patch) => void updateThread(patch)}
+                onSetDefault={() => void setActiveModelAsDefault()}
+              />
+              <ChatComposerMenu actions={composerMenuActions} />
             </div>
-          ) : null}
-          <textarea
-            ref={inputRef}
-            data-chat-input-focus-id="assistant-chat"
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                void sendPrompt();
-              }
-            }}
-            onPaste={(event) => {
-              event.stopPropagation();
-              handleAssistantPaste(event);
-            }}
-            disabled={!activeThread}
-            placeholder={
-              running
-                ? promptDeliveryMode === 'asap'
-                  ? 'Send at next turn'
-                  : 'Queue a message'
-                : 'Ask the assistant'
-            }
-            className="h-24 w-full resize-none border-0 bg-transparent px-3 pb-10 pt-2 text-[12px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none disabled:opacity-50"
-          />
-          <button
-            type="button"
-            onClick={openAttachmentPicker}
-            disabled={attachmentControlsLocked}
-            className="absolute bottom-2 left-2 flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)] disabled:opacity-40"
-            title="Attach files, paste images, or drag and drop"
-            aria-label="Attach files"
-          >
-            <IconPlus className="h-3.5 w-3.5" />
-          </button>
-          <div className="absolute bottom-2 right-2 flex items-center gap-1.5">
-            {running ? (
-              <button
-                type="button"
-                onClick={() => void stop()}
-                disabled={assistantStopBusy}
-                title="Stop the assistant run"
-                aria-busy={assistantStopBusy}
-                className="h-7 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--red)] disabled:opacity-40"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                {assistantStopBusy ? 'Stopping…' : 'Stop'}
-              </button>
-            ) : null}
-            <button
-              type="button"
-              onClick={() => void sendPrompt()}
-              disabled={(!draft.trim() && attachments.length === 0 && referencedDrones.length === 0) || !activeThread || scopeSyncBusy}
-              className="h-7 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)] disabled:opacity-40"
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              Send
-            </button>
+          )}
+          onStop={() => stop()}
+          stopping={assistantStopBusy}
+          onSend={async (payload) => await sendPrompt(payload)}
+        />
           </div>
-        </div>
-      </div>
         </div>
       )}
       </div>

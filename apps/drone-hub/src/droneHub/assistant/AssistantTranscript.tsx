@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { MarkdownMessage, type MarkdownTextMentionLink } from '../chat/MarkdownMessage';
+import { ChatMessageFrame } from '../chat/ChatMessageFrame';
 import { IconDrone } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import {
@@ -785,15 +786,11 @@ export function AssistantMessageRow({
     return null;
 
   return (
-    <div
-      className={`px-3 py-2 ${message.role === 'user' ? 'bg-[rgba(255,255,255,.025)] border-y border-[var(--border-subtle)]' : ''}`}
+    <ChatMessageFrame
+      role={message.role === 'user' ? 'user' : 'assistant'}
+      at={message.createdAt}
+      error={Boolean(message.errorMessage)}
     >
-      <div
-        className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
-        style={{ fontFamily: 'var(--display)' }}
-      >
-        {message.role === 'user' ? 'You' : 'Assistant'}
-      </div>
       {body}
       {!body && message.errorMessage ? (
         <div className="text-[12px] text-[var(--red)]">{message.errorMessage}</div>
@@ -809,6 +806,6 @@ export function AssistantMessageRow({
           ))}
         </div>
       ) : null}
-    </div>
+    </ChatMessageFrame>
   );
 }

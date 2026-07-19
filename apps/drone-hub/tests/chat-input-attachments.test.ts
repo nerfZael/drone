@@ -1,5 +1,9 @@
 import { describe, expect, test } from 'bun:test';
-import { filesFromClipboardData, imageFilesFromClipboardData } from '../src/droneHub/chat/chat-input-attachments';
+import {
+  filesFromClipboardData,
+  imageFilesFromClipboardData,
+  mimeForChatAttachmentFile,
+} from '../src/droneHub/chat/chat-input-attachments';
 
 describe('chat input attachment helpers', () => {
   test('collects all image files exposed through clipboard files', () => {
@@ -67,5 +71,17 @@ describe('chat input attachment helpers', () => {
     });
 
     expect(files).toEqual([image, text]);
+  });
+
+  test('infers an image MIME type when the browser omits it', () => {
+    const image = new File(['one'], 'photo.JPEG');
+
+    expect(mimeForChatAttachmentFile(image)).toBe('image/jpeg');
+  });
+
+  test('keeps explicit MIME types for arbitrary files', () => {
+    const archive = new File(['zip'], 'bundle.zip', { type: 'application/zip' });
+
+    expect(mimeForChatAttachmentFile(archive)).toBe('application/zip');
   });
 });

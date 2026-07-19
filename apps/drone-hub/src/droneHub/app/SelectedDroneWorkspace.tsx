@@ -1345,83 +1345,6 @@ export function SelectedDroneWorkspace({
                   />
                 </div>
               ) : null}
-              {hasChats && modelControlEnabled ? (
-                <div data-onboarding-id="chat.toolbar.model" className="flex items-center gap-1.5">
-                  <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Model
-                  </span>
-                  {availableChatModels.length > 0 ? (
-                    <UiMenuSelect
-                      variant="toolbar"
-                      value={currentModel ?? ''}
-                      onValueChange={(next) => {
-                        void setChatModel(next || null).catch((err: any) => setChatInfoError(err?.message ?? String(err)));
-                      }}
-                      entries={modelMenuEntries}
-                      disabled={modelDisabled}
-                      triggerClassName="min-w-[170px] max-w-[240px]"
-                      title="Choose model for this chat."
-                      triggerLabel={modelLabel}
-                      chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                      panelClassName="w-[260px]"
-                      menuClassName="max-h-[240px] overflow-y-auto"
-                      searchable
-                      searchPlaceholder="Search models"
-                    />
-                  ) : (
-                    <>
-                      <input
-                        value={manualChatModelInput}
-                        onChange={(e) => setManualChatModelInput(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key !== 'Enter') return;
-                          e.preventDefault();
-                          applyManualChatModel();
-                        }}
-                        disabled={modelDisabled}
-                        placeholder="Model id (optional)"
-                        className={`h-[28px] w-[170px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
-                          modelDisabled ? 'opacity-40 cursor-not-allowed' : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
-                        }`}
-                        title="Type a model id and press Enter."
-                      />
-                      <button
-                        type="button"
-                        onClick={applyManualChatModel}
-                        disabled={modelDisabled}
-                        className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                          modelDisabled
-                            ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                            : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                        }`}
-                        style={{ fontFamily: 'var(--display)' }}
-                        title="Apply typed model for this chat"
-                      >
-                        Set
-                      </button>
-                    </>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setChatModelsRefreshNonce((n) => n + 1)}
-                    disabled={modelDisabled || loadingChatModels}
-                    className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                      modelDisabled || loadingChatModels
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                        : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Refresh model list from the agent CLI in this drone"
-                  >
-                    {loadingChatModels ? 'Loading' : 'Refresh'}
-                  </button>
-                  {chatModelsError && (
-                    <span className="text-[10px] text-[var(--muted-dim)]" title={chatModelsError}>
-                      unavailable
-                    </span>
-                  )}
-                </div>
-              ) : null}
               {hasChats && chatUiMode === 'transcript' ? (
                 <div className="flex items-center gap-1.5">
                   <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
@@ -2426,6 +2349,68 @@ export function SelectedDroneWorkspace({
             sending={sendingPrompt}
             publishing={publishingDraft}
             waiting={chatInputWaiting}
+            composerControls={hasChats && modelControlEnabled ? (
+              <div data-onboarding-id="chat.composer.model" className="flex min-w-0 flex-shrink-0 items-center gap-1.5">
+                {availableChatModels.length > 0 ? (
+                  <UiMenuSelect
+                    variant="toolbar"
+                    value={currentModel ?? ''}
+                    onValueChange={(next) => {
+                      void setChatModel(next || null).catch((err: any) => setChatInfoError(err?.message ?? String(err)));
+                    }}
+                    entries={modelMenuEntries}
+                    disabled={modelDisabled}
+                    triggerClassName="h-9 min-w-[112px] max-w-[180px] justify-between px-2 text-[10px] uppercase tracking-wide"
+                    title="Choose model for this chat."
+                    triggerLabel={modelLabel}
+                    chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
+                    panelClassName="bottom-full mb-1.5 w-[260px]"
+                    menuClassName="max-h-[240px] overflow-y-auto"
+                    searchable
+                    searchPlaceholder="Search models"
+                  />
+                ) : (
+                  <>
+                    <input
+                      value={manualChatModelInput}
+                      onChange={(event) => setManualChatModelInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key !== 'Enter') return;
+                        event.preventDefault();
+                        applyManualChatModel();
+                      }}
+                      disabled={modelDisabled}
+                      placeholder="Model id"
+                      className={`h-9 w-[112px] rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
+                        modelDisabled ? 'cursor-not-allowed opacity-40' : 'hover:border-[var(--border)] hover:text-[var(--fg-secondary)]'
+                      }`}
+                      title="Type a model id and press Enter."
+                    />
+                    <button
+                      type="button"
+                      onClick={applyManualChatModel}
+                      disabled={modelDisabled}
+                      className="h-9 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-40"
+                      style={{ fontFamily: 'var(--display)' }}
+                    >
+                      Set
+                    </button>
+                  </>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setChatModelsRefreshNonce((nonce) => nonce + 1)}
+                  disabled={modelDisabled || loadingChatModels}
+                  className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-40"
+                  title={chatModelsError ? `Refresh model list: ${chatModelsError}` : 'Refresh model list from the agent CLI'}
+                  aria-label={loadingChatModels ? 'Loading models' : 'Refresh model list'}
+                >
+                  <svg className={loadingChatModels ? 'animate-spin' : ''} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
+                    <path d="M13 5V2.8l-1.2 1.1A5.5 5.5 0 1 0 13.2 9" />
+                  </svg>
+                </button>
+              </div>
+            ) : undefined}
             automationActions={chatAutomationActions}
             lockComposerWhileAutomationActive={false}
             autoFocus={shouldAutoFocusInput}

@@ -11,6 +11,7 @@ export type DraftImageAttachment = {
   mime: string;
   size: number;
   previewUrl: string;
+  disposition?: 'artifact' | 'prompt';
 };
 
 export type DraftTextAttachment = {
@@ -20,9 +21,20 @@ export type DraftTextAttachment = {
   name: string;
   mime: 'text/plain';
   size: number;
+  disposition?: 'artifact' | 'prompt';
 };
 
-export type DraftChatAttachment = DraftImageAttachment | DraftTextAttachment;
+export type DraftFileAttachment = {
+  kind: 'file';
+  id: string;
+  file: File;
+  name: string;
+  mime: string;
+  size: number;
+  disposition?: 'artifact' | 'prompt';
+};
+
+export type DraftChatAttachment = DraftImageAttachment | DraftTextAttachment | DraftFileAttachment;
 
 export function makeDraftImageAttachmentId(): string {
   // Non-crypto id; only used for React keys.
@@ -34,6 +46,21 @@ export function isLikelyImageFile(f: File): boolean {
   if (mime.startsWith('image/')) return true;
   const name = String((f as any)?.name ?? '').trim().toLowerCase();
   return /\.(png|jpe?g|gif|webp|bmp|svg|avif|tiff?)$/.test(name);
+}
+
+export function mimeForChatAttachmentFile(file: File): string {
+  const mime = String((file as any)?.type ?? '').trim().toLowerCase();
+  if (mime && mime !== 'application/octet-stream') return mime;
+  const name = String((file as any)?.name ?? '').trim().toLowerCase();
+  if (/\.(jpe?g)$/.test(name)) return 'image/jpeg';
+  if (/\.gif$/.test(name)) return 'image/gif';
+  if (/\.webp$/.test(name)) return 'image/webp';
+  if (/\.svg$/.test(name)) return 'image/svg+xml';
+  if (/\.avif$/.test(name)) return 'image/avif';
+  if (/\.bmp$/.test(name)) return 'image/bmp';
+  if (/\.tiff?$/.test(name)) return 'image/tiff';
+  if (/\.png$/.test(name)) return 'image/png';
+  return mime || 'application/octet-stream';
 }
 
 function fileIdentity(file: File): string {

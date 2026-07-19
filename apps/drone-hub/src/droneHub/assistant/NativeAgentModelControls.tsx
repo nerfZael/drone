@@ -58,6 +58,7 @@ export function NativeAgentModelControls({
   models,
   defaultModel,
   busy,
+  className = 'mb-2',
   onUpdate,
   onSetDefault,
 }: {
@@ -65,6 +66,7 @@ export function NativeAgentModelControls({
   models: AssistantModelOption[];
   defaultModel: Pick<AssistantThread, 'provider' | 'model' | 'thinkingLevel'> | undefined;
   busy: boolean;
+  className?: string;
   onUpdate(patch: AgentPatch): void;
   onSetDefault(): void;
 }) {
@@ -129,7 +131,7 @@ export function NativeAgentModelControls({
   );
 
   return (
-    <div className="mb-2 flex min-w-0 flex-wrap items-center gap-1.5">
+    <div className={`${className} flex min-w-0 flex-wrap items-center gap-1.5`}>
       <UiMenuSelect
         value={activeProvider}
         disabled={!thread || busy}

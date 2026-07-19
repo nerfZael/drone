@@ -66,6 +66,7 @@ export function AssistantToolsPanel({
   onDisableAll,
   onClose,
   variant = 'popover',
+  placement = 'top',
 }: {
   tools: AssistantToolSummary[];
   enabledTools: string[];
@@ -76,6 +77,7 @@ export function AssistantToolsPanel({
   onDisableAll: () => void;
   onClose?: () => void;
   variant?: 'popover' | 'settings';
+  placement?: 'top' | 'composer';
 }) {
   const panelRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -118,7 +120,7 @@ export function AssistantToolsPanel({
 
   return (
     <div ref={panelRef} className={variant === 'popover'
-      ? 'absolute right-2 top-10 z-30 w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_rgba(0,0,0,.48)]'
+      ? `absolute right-2 z-30 w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_rgba(0,0,0,.48)] ${placement === 'composer' ? 'bottom-full mb-2' : 'top-10'}`
       : 'overflow-hidden rounded border border-[var(--border)] bg-[rgba(0,0,0,.10)]'}>
       <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
@@ -171,6 +173,7 @@ export function AssistantWorkspacesPanel({
   onDisableAll,
   onOpenRemoteAccess,
   onClose,
+  placement = 'top',
 }: {
   workspaces: AssistantWorkspaceSummary[];
   enabledWorkspaceIds: string[];
@@ -180,6 +183,7 @@ export function AssistantWorkspacesPanel({
   onDisableAll: () => void;
   onOpenRemoteAccess: () => void;
   onClose: () => void;
+  placement?: 'top' | 'composer';
 }) {
   const panelRef = React.useRef<HTMLDivElement>(null);
   React.useEffect(() => {
@@ -193,7 +197,7 @@ export function AssistantWorkspacesPanel({
   const enabled = new Set(enabledWorkspaceIds);
 
   return (
-    <div ref={panelRef} className="absolute right-2 top-10 z-30 w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_rgba(0,0,0,.48)]">
+    <div ref={panelRef} className={`absolute right-2 z-30 w-[min(420px,calc(100vw-2rem))] overflow-hidden rounded border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_18px_55px_rgba(0,0,0,.48)] ${placement === 'composer' ? 'bottom-full mb-2' : 'top-10'}`}>
       <div className="flex items-center justify-between gap-2 border-b border-[var(--border)] px-3 py-2">
         <div className="flex min-w-0 items-center gap-2">
           <IconFolder className="h-3.5 w-3.5 text-[var(--muted)]" />
