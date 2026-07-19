@@ -8,6 +8,7 @@ import {
   localAssistantModelOptions,
   normalizeLocalAssistantThinkingLevel,
 } from '../local-assistant/local-assistant-model';
+import type { LocalAssistantPromptImage } from '../local-assistant/local-assistant-types';
 import {
   cleanLocalDroneRecords,
   createLegacyPhoneDroneRecord,
@@ -15,6 +16,20 @@ import {
 } from './local-drone-records';
 
 const LOCAL_DRONES_KEY = 'droneHub.nativeDrones.v1';
+
+function promptImages(raw: unknown): LocalAssistantPromptImage[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.slice(0, 8).flatMap((attachment): LocalAssistantPromptImage[] => {
+    const data = String(attachment?.dataBase64 ?? attachment?.data ?? '').trim();
+    const mimeType = String(attachment?.mime ?? attachment?.mimeType ?? '')
+      .trim()
+      .toLowerCase();
+    if (!data || !['image/png', 'image/jpeg', 'image/gif', 'image/webp'].includes(mimeType)) {
+      return [];
+    }
+    return [{ type: 'image', data, mimeType }];
+  });
+}
 
 function uniqueDroneName(drones: LocalDroneRecord[], requested: unknown): string {
   const base =
@@ -172,7 +187,10 @@ export function useLocalDroneControl() {
         };
         await replaceDrones([drone, ...dronesRef.current]);
         const prompt = String(payload.seedPrompt ?? '').trim();
-        if (thread && prompt) void assistant.sendPrompt(thread.id, prompt);
+        const images = promptImages(payload.seedAttachments);
+        if (thread && (prompt || images.length > 0)) {
+          void assistant.sendPrompt(thread.id, prompt, images).catch(() => undefined);
+        }
         return { ok: true, droneId: drone.id, drone };
       }
       if (operation === 'drone.delete') {
@@ -228,10 +246,16 @@ export function useLocalDroneControl() {
       }
       if (operation === 'chat.prompt') {
         const { thread } = getThread();
+        const images = promptImages(payload.attachments);
+        if (images.length > 0 && assistant.runningThreadId) {
+          throw new Error('Wait for the current response before sending images.');
+        }
         // The request is acknowledged immediately so the shared chat UI remains responsive.
         // sendPrompt persists failures onto the thread; consume the rejection to avoid an
         // unhandled promise while the revision refresh publishes that error to the screen.
-        void assistant.sendPrompt(thread.id, String(payload.prompt ?? '')).catch(() => undefined);
+        void assistant
+          .sendPrompt(thread.id, String(payload.prompt ?? ''), images)
+          .catch(() => undefined);
         return { ok: true, accepted: true };
       }
       if (operation === 'chat.stop') {
