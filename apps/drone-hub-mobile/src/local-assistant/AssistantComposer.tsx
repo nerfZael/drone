@@ -12,6 +12,7 @@ import { colors } from '../theme';
 import {
   formatMobileVoiceDuration,
   mergeMobileDraftWithVoiceTranscript,
+  mobileVoiceRecordActionDisabled,
   mobileVoiceStatusLabel,
 } from './mobile-voice-transcription-model';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
@@ -189,6 +190,12 @@ export function AssistantComposer({
   const attachmentsEnabled = showAttachments && Boolean(onAddAttachment);
   const attachmentActionDisabled =
     !editable || sending || voiceActive || (running && !queueWhileRunning);
+  const voiceRecordActionDisabled = mobileVoiceRecordActionDisabled({
+    editable,
+    sending,
+    running,
+    queueWhileRunning,
+  });
   const expanded =
     focused || Boolean(value.trim()) || hasAttachments || running || voiceActive || Boolean(voiceError);
   const canSend =
@@ -378,13 +385,13 @@ export function AssistantComposer({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Record voice message"
-              accessibilityState={{ disabled: !editable || sending }}
-              disabled={!editable || sending}
+              accessibilityState={{ disabled: voiceRecordActionDisabled }}
+              disabled={voiceRecordActionDisabled}
               hitSlop={6}
               onPress={() => void beginVoiceRecording()}
               style={({ pressed }) => [
                 styles.collapsedVoiceButton,
-                (!editable || sending) && styles.disabled,
+                voiceRecordActionDisabled && styles.disabled,
                 pressed && styles.pressed,
               ]}
             >
@@ -454,7 +461,7 @@ export function AssistantComposer({
                 <IconButton
                   label="Record voice message"
                   icon={Mic}
-                  disabled={!editable || running || sending}
+                  disabled={voiceRecordActionDisabled}
                   onPress={() => void beginVoiceRecording()}
                 />
               </>

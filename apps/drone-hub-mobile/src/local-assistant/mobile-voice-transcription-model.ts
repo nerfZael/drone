@@ -8,6 +8,15 @@ export type MobileVoiceRecordingStatus =
 export const MOBILE_GROQ_TRANSCRIPTION_MODEL = 'whisper-large-v3-turbo';
 export const MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES = 25 * 1024 * 1024;
 
+export function mobileVoiceRecordActionDisabled(input: {
+  editable: boolean;
+  sending: boolean;
+  running: boolean;
+  queueWhileRunning: boolean;
+}): boolean {
+  return !input.editable || input.sending || (input.running && !input.queueWhileRunning);
+}
+
 export function mergeMobileDraftWithVoiceTranscript(
   draft: string,
   transcript: string,

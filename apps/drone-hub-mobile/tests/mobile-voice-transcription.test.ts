@@ -2,12 +2,32 @@ import { describe, expect, test } from 'bun:test';
 import {
   formatMobileVoiceDuration,
   mergeMobileDraftWithVoiceTranscript,
+  mobileVoiceRecordActionDisabled,
   mobileVoiceStatusLabel,
   resolveMobileGroqTranscriptionResponse,
   shouldDiscardMobileVoiceWhenInactive,
 } from '../src/local-assistant/mobile-voice-transcription-model';
 
 describe('mobile voice transcription', () => {
+  test('allows recording while a running chat accepts queued prompts', () => {
+    expect(
+      mobileVoiceRecordActionDisabled({
+        editable: true,
+        sending: false,
+        running: true,
+        queueWhileRunning: true,
+      }),
+    ).toBe(false);
+    expect(
+      mobileVoiceRecordActionDisabled({
+        editable: true,
+        sending: false,
+        running: true,
+        queueWhileRunning: false,
+      }),
+    ).toBe(true);
+  });
+
   test('appends a transcript to an existing draft like the desktop composer', () => {
     expect(mergeMobileDraftWithVoiceTranscript('', '  hello world  ')).toBe('hello world');
     expect(mergeMobileDraftWithVoiceTranscript('typed draft  ', 'voice text')).toBe(
