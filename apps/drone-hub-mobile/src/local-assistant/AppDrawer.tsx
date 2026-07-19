@@ -3,6 +3,7 @@ import * as Clipboard from 'expo-clipboard';
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   Modal,
   Platform,
   Pressable,
@@ -243,8 +244,8 @@ const EMPTY_DRONE_STATE_SUMMARY: DroneStateSummary = { working: 0, idle: 0, issu
 
 function droneDisplayState(drone: MobileDroneSummary): DroneDisplayState {
   const rawState = `${drone.phase ?? ''} ${drone.status ?? ''}`.toLowerCase();
-  if (drone.statusOk === false) return 'offline';
   if (drone.busyChats.length > 0) return 'working';
+  if (drone.statusOk === false) return 'offline';
   if (rawState.includes('block') || rawState.includes('error')) return 'blocked';
   if (rawState.includes('wait')) return 'waiting';
   if (rawState.includes('start') || rawState.includes('creat') || rawState.includes('seed'))
@@ -306,7 +307,7 @@ function DroneStateCounts({
     <View style={[styles.fleetStates, compact && styles.fleetStatesCompact]}>
       {summary.working > 0 ? (
         <View accessibilityLabel={`${summary.working} working`} style={styles.fleetState}>
-          <LoaderCircle color={colors.warning} size={12} strokeWidth={2.2} />
+          <WorkingStatusIndicator />
           <Text style={[styles.fleetStateText, styles.fleetStateTextWorking]}>
             {summary.working}
           </Text>
@@ -354,7 +355,7 @@ function SwitchItemState({
   unread?: boolean;
 }) {
   const stateColor = switchStateColor(state);
-  const indicatorColor = unread && state !== 'working' ? colors.warning : stateColor;
+  const indicatorColor = unread && state !== 'working' ? colors.online : stateColor;
   const stateLabel = switchStateLabel(state);
   return (
     <View
@@ -370,14 +371,14 @@ function SwitchItemState({
       style={styles.switchItemMetaRow}
     >
       {state === 'working' ? (
-        <PulsingStatusDot color={indicatorColor} />
+        <WorkingStatusIndicator />
       ) : (
         <View accessible={false} style={styles.switchStateIndicator}>
           <View style={[styles.switchStateDot, { backgroundColor: indicatorColor }]} />
         </View>
       )}
       <Text numberOfLines={1} style={[styles.switchItemMeta, { color: stateColor }]}>
-        {stateLabel}
+        <Text style={{ color: indicatorColor }}>{stateLabel}</Text>
         {detail ? ` · ${detail}` : ''}
       </Text>
       {chatCount != null && chatCount > 1 ? (
@@ -393,13 +394,14 @@ function SwitchItemState({
   );
 }
 
-function PulsingStatusDot({ color }: { color: string }) {
+function WorkingStatusIndicator() {
   const phase = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
     const animation = Animated.loop(
       Animated.timing(phase, {
         toValue: 1,
-        duration: 1400,
+        duration: 900,
+        easing: Easing.linear,
         useNativeDriver: true,
       }),
     );
@@ -407,28 +409,21 @@ function PulsingStatusDot({ color }: { color: string }) {
     return () => animation.stop();
   }, [phase]);
   return (
-    <View accessible={false} style={styles.switchStateIndicator}>
+    <View accessible={false} style={styles.workingStatusIndicator}>
       <Animated.View
-        style={[
-          styles.pulsingStatusRing,
-          {
-            borderColor: color,
-            opacity: phase.interpolate({
-              inputRange: [0, 0.7, 1],
-              outputRange: [0.72, 0.18, 0],
-            }),
-            transform: [
-              {
-                scale: phase.interpolate({
-                  inputRange: [0, 1],
-                  outputRange: [0.62, 1.38],
-                }),
-              },
-            ],
-          },
-        ]}
-      />
-      <View style={[styles.pulsingStatusCore, { backgroundColor: color }]} />
+        style={{
+          transform: [
+            {
+              rotate: phase.interpolate({
+                inputRange: [0, 1],
+                outputRange: ['0deg', '360deg'],
+              }),
+            },
+          ],
+        }}
+      >
+        <LoaderCircle color={colors.warning} size={12} strokeWidth={2.4} />
+      </Animated.View>
     </View>
   );
 }
@@ -451,6 +446,7 @@ function DrawerDroneNode({
   const selected = drone.id === activeDroneId;
   const selectedChat = selected && chats.includes(activeChatName) ? activeChatName : chats[0]!;
   const displayState = droneDisplayState(drone);
+  const unread = (drone.unreadChats?.length ?? 0) > 0;
   return (
     <View style={styles.droneNode}>
       <Pressable
@@ -465,11 +461,6 @@ function DrawerDroneNode({
           pressed && styles.pressed,
         ]}
       >
-        <QuadDroneIcon
-          color={selected ? colors.accent : colors.muted}
-          size={14}
-          strokeWidth={1.7}
-        />
         <View style={styles.switchItemCopy}>
           <View style={styles.switchItemTitleRow}>
             <Text numberOfLines={1} style={[styles.switchItemTitle, selected && styles.activeText]}>
@@ -484,7 +475,7 @@ function DrawerDroneNode({
             state={displayState}
             detail={drone.runtime}
             chatCount={chats.length}
-            unread={(drone.unreadChats?.length ?? 0) > 0}
+            unread={unread}
           />
         </View>
       </Pressable>
@@ -1402,14 +1393,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   switchStateDot: { width: 6, height: 6, borderRadius: 3 },
-  pulsingStatusRing: {
-    position: 'absolute',
-    width: 9,
-    height: 9,
-    borderRadius: 4.5,
-    borderWidth: 1.25,
-  },
-  pulsingStatusCore: { width: 5, height: 5, borderRadius: 2.5 },
+  workingStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
   chatCount: {
     flexDirection: 'row',
     alignItems: 'center',

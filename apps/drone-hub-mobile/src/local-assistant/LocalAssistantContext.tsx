@@ -11,6 +11,7 @@ import {
 import type {
   LocalAssistantMessage,
   LocalAssistantApproval,
+  LocalAssistantPromptImage,
   LocalAssistantQueuedPrompt,
   LocalAssistantThinkingLevel,
   LocalAssistantThread,
@@ -52,19 +53,32 @@ export type LocalAssistantContextValue = {
     },
   ): Promise<void>;
   resolveApproval(threadId: string, approvalId: string, approved: boolean): void;
-  sendPrompt(threadId: string, prompt: string): Promise<void>;
+  sendPrompt(
+    threadId: string,
+    prompt: string,
+    promptImages?: LocalAssistantPromptImage[],
+  ): Promise<void>;
   cancelQueuedPrompt(threadId: string, promptId: string): Promise<void>;
   stop(threadId: string): void;
 };
 
 const LocalAssistantContext = React.createContext<LocalAssistantContextValue | null>(null);
 
-function userMessage(prompt: string): LocalAssistantMessage {
+function userMessage(
+  prompt: string,
+  promptImages: LocalAssistantPromptImage[],
+): LocalAssistantMessage {
   return {
     id: Crypto.randomUUID(),
     createdAt: new Date().toISOString(),
     role: 'user',
-    content: prompt,
+    content:
+      promptImages.length > 0
+        ? [
+            ...(prompt ? [{ type: 'text' as const, text: prompt }] : []),
+            ...promptImages,
+          ]
+        : prompt,
   };
 }
 
@@ -77,9 +91,13 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
   const [pendingApprovals, setPendingApprovals] = React.useState<LocalAssistantApproval[]>([]);
   const threadsRef = React.useRef<LocalAssistantThread[]>([]);
   const abortRef = React.useRef<{ threadId: string; controller: AbortController } | null>(null);
-  const sendPromptRef = React.useRef<(threadId: string, prompt: string) => Promise<void>>(
-    async () => {},
-  );
+  const sendPromptRef = React.useRef<
+    (
+      threadId: string,
+      prompt: string,
+      promptImages?: LocalAssistantPromptImage[],
+    ) => Promise<void>
+  >(async () => {});
   const drainQueuedPromptsRef = React.useRef<() => void>(() => {});
   const drainingQueuedPromptRef = React.useRef(false);
   const persistenceRef = React.useRef(Promise.resolve());
@@ -292,15 +310,29 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
   );
 
   const sendPrompt = React.useCallback(
-    async (threadId: string, rawPrompt: string) => {
+    async (
+      threadId: string,
+      rawPrompt: string,
+      rawPromptImages: LocalAssistantPromptImage[] = [],
+    ) => {
       const prompt = rawPrompt.trim();
-      if (!prompt) return;
+      const promptImages = rawPromptImages.filter(
+        (image) =>
+          image?.type === 'image' &&
+          Boolean(String(image.data ?? '').trim()) &&
+          Boolean(String(image.mimeType ?? '').trim()),
+      );
+      if (!prompt && promptImages.length === 0) return;
       const current = threadsRef.current.find((thread) => thread.id === threadId);
       if (!current) throw new Error('Built-in chat was not found');
       if (abortRef.current) {
+        if (promptImages.length > 0) {
+          throw new Error('Wait for the current response before sending images.');
+        }
         const queued: LocalAssistantQueuedPrompt = {
           id: `mobile_queued_${Crypto.randomUUID()}`,
           prompt,
+          promptImages: [],
           createdAt: new Date().toISOString(),
           status: 'queued',
           error: null,
@@ -345,7 +377,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
           model: latest.model || settings.model,
           status: 'running',
           error: null,
-          messages: [...latest.messages, userMessage(prompt)],
+          messages: [...latest.messages, userMessage(prompt, promptImages)],
         });
         if (!running) throw new Error('Built-in chat was not found');
         const workspaceRuntime = createWorkspaceToolRuntime(running, mesh.request);
@@ -354,6 +386,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
           apiKey,
           codexAuth: settings.provider === 'codex' ? await readLocalAssistantCodexAuth() : null,
           prompt,
+          promptImages,
           thread: running,
           history: latest.messages,
           workspaceRuntime,
@@ -470,7 +503,7 @@ export function LocalAssistantProvider({ children }: { children: React.ReactNode
           };
         });
         if (!claimed) return;
-        await sendPromptRef.current(thread.id, queued.prompt);
+        await sendPromptRef.current(thread.id, queued.prompt, queued.promptImages);
       } catch (nextError: any) {
         await mutateThread(thread.id, (latest) => ({
           ...latest,

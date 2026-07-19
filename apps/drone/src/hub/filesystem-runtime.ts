@@ -932,6 +932,7 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
   });
   const {
     assistantAbortDroneTransferFile,
+    assistantBatchDroneFiles,
     assistantCommitDroneTransferFile,
     assistantCreateDroneDirectory,
     assistantCreateDroneTransferDirectory,
@@ -964,6 +965,7 @@ export function createFilesystemRuntime(dependencies: FilesystemRuntimeDependenc
     buildFsSearchScript,
     handleFsActionRoute,
     assistantAbortDroneTransferFile,
+    assistantBatchDroneFiles,
     assistantCommitDroneTransferFile,
     assistantCreateDroneDirectory,
     assistantCreateDroneTransferDirectory,

@@ -6,6 +6,7 @@ import type { LocalCodexAuth } from './codex-auth-format';
 import { createCodexMobileStream } from './codex-chat-client';
 import type {
   LocalAssistantMessage,
+  LocalAssistantPromptImage,
   LocalAssistantThread,
   LocalBlipSessionSnapshot,
 } from './local-assistant-types';
@@ -86,6 +87,7 @@ export async function runMobileBlip(input: {
   apiKey: string | null;
   codexAuth: LocalCodexAuth | null;
   prompt: string;
+  promptImages?: LocalAssistantPromptImage[];
   thread: LocalAssistantThread;
   history: LocalAssistantMessage[];
   workspaceRuntime: MobileWorkspaceToolRuntime;
@@ -204,7 +206,7 @@ export async function runMobileBlip(input: {
   input.signal.addEventListener('abort', abort, { once: true });
   if (input.signal.aborted) handle.abort();
   try {
-    await handle.prompt(input.prompt);
+    await handle.prompt({ text: input.prompt, images: input.promptImages ?? [] });
     if (input.signal.aborted)
       throw Object.assign(new Error('Assistant run stopped'), { name: 'AbortError' });
     if (finishedError) throw new Error(finishedError);

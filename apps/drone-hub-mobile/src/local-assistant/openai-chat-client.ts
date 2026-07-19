@@ -16,8 +16,15 @@ type ProviderToolCall = {
   function: { name: string; arguments: string };
 };
 
+type ProviderUserContent =
+  | string
+  | Array<
+      | { type: 'text'; text: string }
+      | { type: 'image_url'; image_url: { url: string } }
+    >;
+
 type ProviderMessage =
-  | { role: 'developer' | 'user'; content: string }
+  | { role: 'developer' | 'user'; content: ProviderUserContent }
   | { role: 'assistant'; content: string | null; tool_calls?: ProviderToolCall[] }
   | { role: 'tool'; content: string; tool_call_id: string };
 
@@ -38,9 +45,29 @@ function contentText(content: Message['content']): string {
     .join('\n');
 }
 
+function providerUserContent(content: Message['content']): ProviderUserContent {
+  if (typeof content === 'string') return content;
+  const parts: Exclude<ProviderUserContent, string> = [];
+  for (const part of content) {
+    if (part.type === 'text' && part.text) {
+      parts.push({ type: 'text', text: part.text });
+      continue;
+    }
+    if (part.type === 'image' && part.data && part.mimeType) {
+      parts.push({
+        type: 'image_url',
+        image_url: { url: `data:${part.mimeType};base64,${part.data}` },
+      });
+    }
+  }
+  return parts.length > 0 ? parts : '';
+}
+
 function providerMessages(context: Context): ProviderMessage[] {
   return context.messages.flatMap((message): ProviderMessage[] => {
-    if (message.role === 'user') return [{ role: 'user', content: contentText(message.content) }];
+    if (message.role === 'user') {
+      return [{ role: 'user', content: providerUserContent(message.content) }];
+    }
     if (message.role === 'toolResult') {
       return [
         {

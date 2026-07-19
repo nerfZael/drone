@@ -14,8 +14,8 @@ describe('chat auto rename', () => {
   });
 
   test('builds bounded conflict candidates', () => {
-    expect(buildAutoRenamedChatCandidate('fix-login', 1)).toBe('fix-login');
-    expect(buildAutoRenamedChatCandidate('fix-login', 2)).toBe('fix-login (2)');
+    expect(buildAutoRenamedChatCandidate('Fix login', 1)).toBe('Fix login');
+    expect(buildAutoRenamedChatCandidate('Fix login', 2)).toBe('Fix login (2)');
     expect(buildAutoRenamedChatCandidate('a'.repeat(80), 12)).toHaveLength(64);
     expect(buildAutoRenamedChatCandidate('a'.repeat(80), 12)).toEndWith(' (12)');
   });

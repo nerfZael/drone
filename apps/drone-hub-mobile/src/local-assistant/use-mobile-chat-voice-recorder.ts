@@ -14,6 +14,7 @@ import { readGroqApiKey } from './local-assistant-settings';
 import { transcribeMobileVoiceRecording } from './mobile-groq-transcription';
 import {
   MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES,
+  shouldDiscardMobileVoiceWhenInactive,
   type MobileVoiceRecordingStatus,
 } from './mobile-voice-transcription-model';
 
@@ -27,6 +28,32 @@ const MOBILE_VOICE_RECORDING_OPTIONS = {
     maxFileSize: MOBILE_GROQ_TRANSCRIPTION_MAX_BYTES,
   },
 };
+
+const APP_FOREGROUND_RESUME_TIMEOUT_MS = 3_000;
+
+async function waitForAppForeground(): Promise<boolean> {
+  if (AppState.currentState === 'active') return true;
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    let subscription: { remove(): void } | null = null;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const finish = (active: boolean) => {
+      if (settled) return;
+      settled = true;
+      if (timer) clearTimeout(timer);
+      subscription?.remove();
+      resolve(active);
+    };
+    timer = setTimeout(
+      () => finish(AppState.currentState === 'active'),
+      APP_FOREGROUND_RESUME_TIMEOUT_MS,
+    );
+    subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') finish(true);
+    });
+    if (AppState.currentState === 'active') finish(true);
+  });
+}
 
 export function useMobileChatVoiceRecorder({
   onError,
@@ -149,9 +176,10 @@ export function useMobileChatVoiceRecorder({
       const permission = await requestRecordingPermissionsAsync();
       if (generationRef.current !== generation || !mountedRef.current) return;
       if (!permission.granted) throw new Error('Microphone permission was denied.');
-      if (AppState.currentState !== 'active') {
+      if (!(await waitForAppForeground())) {
         throw new Error('Voice recording was cancelled when the app left the foreground.');
       }
+      if (generationRef.current !== generation || !mountedRef.current) return;
       await setAudioModeAsync({ allowsRecording: true, playsInSilentMode: true });
       if (generationRef.current !== generation || !mountedRef.current) {
         await deactivateRecordingMode();
@@ -164,7 +192,10 @@ export function useMobileChatVoiceRecorder({
       }
       const uri = recorder.uri;
       recordingUriRef.current = uri;
-      if (AppState.currentState !== 'active') {
+      if (!(await waitForAppForeground())) {
+        throw new Error('Voice recording was cancelled when the app left the foreground.');
+      }
+      if (generationRef.current !== generation || !mountedRef.current) {
         await recorder.stop().catch(() => undefined);
         deleteRecordingFile(uri);
         recordingUriRef.current = null;
@@ -189,12 +220,10 @@ export function useMobileChatVoiceRecorder({
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') return;
       const interruptedStatus = statusRef.current;
-      if (
-        interruptedStatus === 'starting' ||
-        interruptedStatus === 'recording' ||
-        interruptedStatus === 'paused' ||
-        interruptedStatus === 'transcribing'
-      ) {
+      // Android can temporarily report a non-active state while its microphone
+      // permission UI is open. The startup flow checks AppState after permission
+      // and recorder preparation, so only discard sessions that have really begun.
+      if (shouldDiscardMobileVoiceWhenInactive(interruptedStatus)) {
         void discardRecording().then(() => {
           if (mountedRef.current) {
             onError(

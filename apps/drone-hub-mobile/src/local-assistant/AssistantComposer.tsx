@@ -12,6 +12,7 @@ import { colors } from '../theme';
 import {
   formatMobileVoiceDuration,
   mergeMobileDraftWithVoiceTranscript,
+  mobileVoiceRecordActionDisabled,
   mobileVoiceStatusLabel,
 } from './mobile-voice-transcription-model';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
@@ -134,8 +135,8 @@ export function AssistantComposer({
   showAttachments = true,
   hasAttachments = false,
   onAddAttachment,
-  sendLabel,
-  sendPlacement = 'controls',
+  attachmentActionsDisabled = false,
+  sendBlocked = false,
   footer,
   onInputFocus,
   onInputBlur,
@@ -158,8 +159,8 @@ export function AssistantComposer({
   showAttachments?: boolean;
   hasAttachments?: boolean;
   onAddAttachment?(): void;
-  sendLabel?: string;
-  sendPlacement?: 'controls' | 'below';
+  attachmentActionsDisabled?: boolean;
+  sendBlocked?: boolean;
   footer?: any;
   onInputFocus?(target: number): void;
   onInputBlur?(): void;
@@ -188,13 +189,24 @@ export function AssistantComposer({
   const voiceCanPauseOrStop = voiceStatus === 'recording' || voiceStatus === 'paused';
   const attachmentsEnabled = showAttachments && Boolean(onAddAttachment);
   const attachmentActionDisabled =
-    !editable || sending || voiceActive || (running && !queueWhileRunning);
+    attachmentActionsDisabled ||
+    !editable ||
+    sending ||
+    voiceActive ||
+    (running && !queueWhileRunning);
+  const voiceRecordActionDisabled = mobileVoiceRecordActionDisabled({
+    editable,
+    sending,
+    running,
+    queueWhileRunning,
+  });
   const expanded =
     focused || Boolean(value.trim()) || hasAttachments || running || voiceActive || Boolean(voiceError);
   const canSend =
     (Boolean(value.trim()) || hasAttachments || voiceCanPauseOrStop) &&
     !sending &&
     editable &&
+    !sendBlocked &&
     !voiceActionInFlight &&
     voiceStatus !== 'starting' &&
     voiceStatus !== 'transcribing';
@@ -378,13 +390,13 @@ export function AssistantComposer({
             <Pressable
               accessibilityRole="button"
               accessibilityLabel="Record voice message"
-              accessibilityState={{ disabled: !editable || sending }}
-              disabled={!editable || sending}
+              accessibilityState={{ disabled: voiceRecordActionDisabled }}
+              disabled={voiceRecordActionDisabled}
               hitSlop={6}
               onPress={() => void beginVoiceRecording()}
               style={({ pressed }) => [
                 styles.collapsedVoiceButton,
-                (!editable || sending) && styles.disabled,
+                voiceRecordActionDisabled && styles.disabled,
                 pressed && styles.pressed,
               ]}
             >
@@ -454,7 +466,7 @@ export function AssistantComposer({
                 <IconButton
                   label="Record voice message"
                   icon={Mic}
-                  disabled={!editable || running || sending}
+                  disabled={voiceRecordActionDisabled}
                   onPress={() => void beginVoiceRecording()}
                 />
               </>
@@ -489,55 +501,19 @@ export function AssistantComposer({
             {running && onStop ? (
               <IconButton label="Stop assistant" icon={Square} onPress={onStop} />
             ) : null}
-            {sendPlacement === 'controls' && (!running || queueWhileRunning) ? (
-              sendLabel ? (
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel={sendLabel}
-                  accessibilityState={{ disabled: !canSend }}
-                  disabled={!canSend}
-                  onPress={() => void send()}
-                  style={({ pressed }) => [
-                    styles.sendButton,
-                    !canSend && styles.disabled,
-                    pressed && styles.pressed,
-                  ]}
-                >
-                  <Text numberOfLines={1} style={styles.sendButtonText}>
-                    {sendLabel}
-                  </Text>
-                  <ArrowUp color={colors.crust} size={15} strokeWidth={2.7} />
-                </Pressable>
-              ) : (
-                <IconButton
-                  label="Send message"
-                  icon={ArrowUp}
-                  accent
-                  disabled={!canSend}
-                  onPress={() => void send()}
-                />
-              )
+            {!running || queueWhileRunning ? (
+              <IconButton
+                label="Send message"
+                icon={ArrowUp}
+                accent
+                disabled={!canSend}
+                onPress={() => void send()}
+              />
             ) : null}
           </View>
         ) : null}
       </View>
       {footer ? <View style={styles.footer}>{footer}</View> : null}
-      {sendPlacement === 'below' && (!running || queueWhileRunning) ? (
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={sendLabel || 'Send message'}
-          accessibilityState={{ disabled: !canSend }}
-          disabled={!canSend}
-          onPress={() => void send()}
-          style={({ pressed }) => [
-            styles.sendButtonBelow,
-            !canSend && styles.disabled,
-            pressed && styles.pressed,
-          ]}
-        >
-          <Text style={styles.sendButtonBelowText}>{sendLabel || 'Send message'}</Text>
-        </Pressable>
-      ) : null}
     </View>
   );
 }
@@ -649,40 +625,6 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface1,
   },
   iconButtonAccent: { borderColor: colors.accent, backgroundColor: colors.accent },
-  sendButton: {
-    minHeight: 32,
-    maxWidth: 154,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 6,
-    paddingHorizontal: 10,
-    borderRadius: 5,
-    backgroundColor: colors.accent,
-  },
-  sendButtonText: {
-    flexShrink: 1,
-    color: colors.crust,
-    fontSize: 10,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-    letterSpacing: 0.25,
-  },
-  sendButtonBelow: {
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 10,
-    borderRadius: 8,
-    backgroundColor: colors.accent,
-  },
-  sendButtonBelowText: {
-    color: colors.crust,
-    fontSize: 12,
-    fontWeight: '900',
-    textTransform: 'uppercase',
-    letterSpacing: 0.45,
-  },
   footer: { paddingTop: 10, paddingBottom: 10 },
   modelControl: {
     minHeight: 32,

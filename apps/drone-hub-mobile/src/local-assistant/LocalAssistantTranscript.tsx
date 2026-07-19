@@ -20,6 +20,7 @@ import {
   type AssistantToolRenderItem,
 } from '@drone/assistant-chat';
 import { colors } from '../theme';
+import { QueuedPromptRows, type MobileQueuedPrompt } from '../components/QueuedPromptRows';
 import { ContextMenu } from '../components/Ui';
 import { NativeMarkdown } from './NativeMarkdown';
 import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
@@ -413,6 +414,9 @@ export function MobileAssistantTranscript({
   messages,
   running = false,
   currentReasoning = '',
+  queuedPrompts = [],
+  cancellingPromptId = '',
+  onCancelQueuedPrompt,
   loading = false,
   emptyTitle = 'The assistant lives here.',
   emptyBody = 'Ask a question, or attach a remote workspace and let this phone inspect and edit it.',
@@ -426,6 +430,9 @@ export function MobileAssistantTranscript({
   messages: AssistantMessage[];
   running?: boolean;
   currentReasoning?: string;
+  queuedPrompts?: MobileQueuedPrompt[];
+  cancellingPromptId?: string;
+  onCancelQueuedPrompt?: (promptId: string) => void;
   loading?: boolean;
   emptyTitle?: string;
   emptyBody?: string;
@@ -471,20 +478,9 @@ export function MobileAssistantTranscript({
       </View>
     );
   }
-  const lastUserIndex = messages.reduce(
-    (latest, message, index) => (message.role === 'user' ? index : latest),
-    -1,
-  );
-  const assistantStarted = messages.slice(lastUserIndex + 1).some((message) => {
-    if (message.role !== 'assistant') return false;
-    return Boolean(
-      visibleMessageText(message).trim() ||
-      messageImageParts(message).length > 0 ||
-      attachments(message).length > 0 ||
-      message.errorMessage,
-    );
-  });
-  if (items.length === 0 && !running) {
+  const activePrompts = queuedPrompts.filter((prompt) => prompt.status === 'pending');
+  const inactivePrompts = queuedPrompts.filter((prompt) => prompt.status !== 'pending');
+  if (items.length === 0 && !running && queuedPrompts.length === 0) {
     return (
       <View style={styles.emptyTranscript}>
         <View style={styles.emptyOrbit}>
@@ -628,10 +624,17 @@ export function MobileAssistantTranscript({
           </TappableMessageView>
         );
       })}
+      {activePrompts.length > 0 ? (
+        <QueuedPromptRows
+          prompts={activePrompts}
+          cancellingId={cancellingPromptId}
+          onCancel={onCancelQueuedPrompt}
+        />
+      ) : null}
       {running ? (
         currentReasoning.trim() ? (
           <View style={styles.reasoning}>
-            {!assistantStarted ? <Text style={styles.messageRole}>{assistantLabel}</Text> : null}
+            <Text style={styles.messageRole}>{assistantLabel}</Text>
             <View style={styles.reasoningHead}>
               <TypingDots label={`${assistantLabel} is working`} />
               <Text style={styles.reasoningLabel}>Reasoning</Text>
@@ -640,10 +643,17 @@ export function MobileAssistantTranscript({
           </View>
         ) : (
           <View style={styles.waiting}>
-            {!assistantStarted ? <Text style={styles.messageRole}>{assistantLabel}</Text> : null}
+            <Text style={styles.messageRole}>{assistantLabel}</Text>
             <TypingDots label={`${assistantLabel} is working`} />
           </View>
         )
+      ) : null}
+      {inactivePrompts.length > 0 ? (
+        <QueuedPromptRows
+          prompts={inactivePrompts}
+          cancellingId={cancellingPromptId}
+          onCancel={onCancelQueuedPrompt}
+        />
       ) : null}
       <ContextMenu
         visible={Boolean(messageActionTarget)}
@@ -717,8 +727,9 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     paddingHorizontal: 13,
     paddingVertical: 10,
-    backgroundColor: colors.borderStrong,
-    borderWidth: 0,
+    backgroundColor: colors.surface1,
+    borderWidth: 1,
+    borderColor: colors.surface2,
     borderRadius: 10,
     borderBottomRightRadius: 3,
   },

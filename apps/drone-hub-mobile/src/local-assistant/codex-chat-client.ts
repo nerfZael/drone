@@ -31,6 +31,26 @@ function contentText(content: Message['content']): string {
     .join('\n');
 }
 
+function codexUserContent(content: Message['content']): any[] {
+  if (typeof content === 'string') {
+    return content ? [{ type: 'input_text', text: content }] : [];
+  }
+  const parts: any[] = [];
+  for (const part of content) {
+    if (part.type === 'text' && part.text) {
+      parts.push({ type: 'input_text', text: part.text });
+      continue;
+    }
+    if (part.type === 'image' && part.data && part.mimeType) {
+      parts.push({
+        type: 'input_image',
+        image_url: `data:${part.mimeType};base64,${part.data}`,
+      });
+    }
+  }
+  return parts;
+}
+
 function codexCallId(value: string): string {
   return value.split('|', 1)[0] || value;
 }
@@ -38,8 +58,8 @@ function codexCallId(value: string): string {
 function codexInput(context: Context): any[] {
   return context.messages.flatMap((message) => {
     if (message.role === 'user') {
-      const text = contentText(message.content);
-      return text ? [{ role: 'user', content: [{ type: 'input_text', text }] }] : [];
+      const content = codexUserContent(message.content);
+      return content.length > 0 ? [{ role: 'user', content }] : [];
     }
     if (message.role === 'toolResult') {
       return [

@@ -1,4 +1,5 @@
 import React from 'react';
+import { fromByteArray } from 'base64-js';
 import type { AssistantMessage } from '@drone/assistant-chat';
 import {
   ActivityIndicator,
@@ -14,7 +15,6 @@ import {
 import MessageCircle from 'lucide-react-native/icons/message-circle';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ConfirmDialog, ErrorBanner } from '../components/Ui';
-import { QueuedPromptRows } from '../components/QueuedPromptRows';
 import {
   AppDrawer,
   type AppDrawerNavigationItem,
@@ -37,6 +37,15 @@ import {
   type MobileDroneCreateDefaults,
   type MobileDroneCreatePayload,
 } from '../drones/NewDroneScreen';
+import {
+  mobileDroneCreatePreferencesFromPayload,
+  resolveMobileDroneCreateDefaults,
+  type MobileDroneCreatePreferences,
+} from '../drones/create-preferences-model';
+import {
+  loadMobileDroneCreatePreferences,
+  saveMobileDroneCreatePreferences,
+} from '../drones/create-preferences-storage';
 import {
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   mobileRepoLabel,
@@ -67,12 +76,26 @@ import {
 } from '../local-assistant/AssistantApprovalCard';
 
 const APP_HEADER_HEIGHT = 58;
+const NEW_DRONE_ATTACHMENT_READY_TIMEOUT_MS = 2 * 60_000;
+const NEW_DRONE_ATTACHMENT_READY_POLL_MS = 750;
 const EMPTY_CHAT_HISTORY_PAGE: MobileChatHistoryPage = {
   beforeCursor: null,
   hasOlder: false,
   responseTruncated: false,
   contentTruncated: false,
 };
+
+function inlinePromptAttachments(images: readonly MobileChatImage[]) {
+  return images.map((image) => ({
+    name: image.name,
+    mime: image.mime,
+    dataBase64: fromByteArray(image.bytes),
+  }));
+}
+
+function wait(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 export type DronesAppHeaderState = {
   title: string;
@@ -197,6 +220,7 @@ export function DronesScreen({
   const runVersion = React.useRef(0);
   const busyVersion = React.useRef(0);
   const modelRequestVersion = React.useRef(0);
+  const createDefaultsRequestVersion = React.useRef(0);
   const chatTabsRef = React.useRef<ScrollView>(null);
   const createModelCatalogCache = React.useRef(new Map<string, MobileDroneCreateModel[]>());
   const createRepoBranchesCache = React.useRef(new Map<string, MobileDroneCreateRepo>());
@@ -337,6 +361,8 @@ export function DronesScreen({
   loadDronesRef.current = loadDrones;
 
   React.useEffect(() => {
+    const createDefaultsVersion = ++createDefaultsRequestVersion.current;
+    selectedRef.current = null;
     setDrones([]);
     setDroneSidebarOrder(EMPTY_MOBILE_DRONE_SIDEBAR_ORDER);
     setSelected(null);
@@ -381,6 +407,21 @@ export function DronesScreen({
     busyVersion.current += 1;
     modelRequestVersion.current += 1;
     loadedDronesTargetIdRef.current = '';
+    if (targetSupportsDrones) {
+      void loadMobileDroneCreatePreferences(targetId).then((remembered) => {
+        if (
+          targetIdRef.current !== targetId ||
+          createDefaultsRequestVersion.current !== createDefaultsVersion ||
+          selectedRef.current
+        ) {
+          return;
+        }
+        const defaults = resolveMobileDroneCreateDefaults({ remembered });
+        setNewDroneDefaults(defaults);
+        setNewDroneDraft(defaults.draft === true);
+        setNewDroneScreenVersion((value) => value + 1);
+      });
+    }
   }, [targetId, targetSupportsDrones]);
   React.useEffect(() => {
     if (meshRouteAvailable && targetSupportsDrones) {
@@ -392,6 +433,7 @@ export function DronesScreen({
 
   const openDrone = (drone: MobileDroneSummary, requestedChat?: string) =>
     run('chats', async () => {
+      createDefaultsRequestVersion.current += 1;
       const destinationId = targetId;
       const requestVersion = ++openDroneVersion.current;
       const knownChats = drone.chats;
@@ -712,6 +754,57 @@ export function DronesScreen({
     }
   };
 
+  const sendChatPromptWithImages = async (input: {
+    destinationId: string;
+    droneId: string;
+    chatName: string;
+    prompt: string;
+    images: readonly MobileChatImage[];
+  }) => {
+    if (input.destinationId === mesh.identity?.id) {
+      return await requestDroneControl(input.destinationId, 'chat.prompt', {
+        droneId: input.droneId,
+        chatName: input.chatName,
+        prompt: input.prompt,
+        ...(input.images.length > 0
+          ? { attachments: inlinePromptAttachments(input.images) }
+          : {}),
+      });
+    }
+
+    const attachmentIds: string[] = [];
+    try {
+      for (const image of input.images) {
+        const attachment = await mesh.uploadChatAttachment({
+          targetDeviceId: input.destinationId,
+          droneId: input.droneId,
+          chatName: input.chatName,
+          name: image.name,
+          mime: image.mime,
+          bytes: image.bytes,
+        });
+        attachmentIds.push(attachment.attachmentId);
+      }
+      return await requestDroneControl(input.destinationId, 'chat.prompt', {
+        droneId: input.droneId,
+        chatName: input.chatName,
+        prompt: input.prompt,
+        ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
+      });
+    } catch (error) {
+      await Promise.all(
+        attachmentIds.map((uploadId) =>
+          requestDroneControl(input.destinationId, 'chat.prompt', {
+            droneId: input.droneId,
+            chatName: input.chatName,
+            attachmentTransfer: { action: 'abort', uploadId },
+          }).catch(() => undefined),
+        ),
+      );
+      throw error;
+    }
+  };
+
   const sendPrompt = (promptOverride?: string) => {
     const nextPrompt = String(promptOverride ?? prompt);
     const images = promptImages;
@@ -720,55 +813,31 @@ export function DronesScreen({
       const destinationId = targetId;
       const droneId = selected.id;
       const activeChat = chatName;
-      const attachmentIds: string[] = [];
-      try {
-        for (const image of images) {
-          const attachment = await mesh.uploadChatAttachment({
-            targetDeviceId: destinationId,
-            droneId,
-            chatName: activeChat,
-            name: image.name,
-            mime: image.mime,
-            bytes: image.bytes,
-          });
-          attachmentIds.push(attachment.attachmentId);
-        }
-        const result = await requestDroneControl(destinationId, 'chat.prompt', {
-          droneId,
-          chatName: activeChat,
-          prompt: nextPrompt,
-          ...(attachmentIds.length > 0 ? { attachmentIds } : {}),
-        });
-        if (targetIdRef.current !== destinationId) return;
-        setPrompt('');
-        setPromptImages([]);
-        const promptId = String(result?.promptId ?? '').trim();
-        const queuedPromptId = String(result?.queuedPrompt?.id ?? '').trim();
-        const acceptedPromptId = promptId || queuedPromptId;
-        if (acceptedPromptId) {
-          const promptSummary =
-            nextPrompt.trim() || `Attached ${images.length} image${images.length === 1 ? '' : 's'}`;
-          setPendingPrompts((current) => [
-            ...current.filter((item) => String(item?.id ?? '') !== acceptedPromptId),
-            {
-              id: acceptedPromptId,
-              at: new Date().toISOString(),
-              prompt: promptSummary,
-              state: queuedPromptId || result?.pendingState === 'queued' ? 'queued' : 'sending',
-            },
-          ]);
-        }
-      } catch (nextError) {
-        await Promise.all(
-          attachmentIds.map((uploadId) =>
-            requestDroneControl(destinationId, 'chat.prompt', {
-              droneId,
-              chatName: activeChat,
-              attachmentTransfer: { action: 'abort', uploadId },
-            }).catch(() => undefined),
-          ),
-        );
-        throw nextError;
+      const result = await sendChatPromptWithImages({
+        destinationId,
+        droneId,
+        chatName: activeChat,
+        prompt: nextPrompt,
+        images,
+      });
+      if (targetIdRef.current !== destinationId) return;
+      setPrompt('');
+      setPromptImages([]);
+      const promptId = String(result?.promptId ?? '').trim();
+      const queuedPromptId = String(result?.queuedPrompt?.id ?? '').trim();
+      const acceptedPromptId = promptId || queuedPromptId;
+      if (acceptedPromptId) {
+        const promptSummary =
+          nextPrompt.trim() || `Attached ${images.length} image${images.length === 1 ? '' : 's'}`;
+        setPendingPrompts((current) => [
+          ...current.filter((item) => String(item?.id ?? '') !== acceptedPromptId),
+          {
+            id: acceptedPromptId,
+            at: new Date().toISOString(),
+            prompt: promptSummary,
+            state: queuedPromptId || result?.pendingState === 'queued' ? 'queued' : 'sending',
+          },
+        ]);
       }
       if (targetIdRef.current !== destinationId) return;
       await readChat(droneId, activeChat);
@@ -776,14 +845,80 @@ export function DronesScreen({
     });
   };
 
-  const createDrone = async (payload: MobileDroneCreatePayload): Promise<boolean> => {
+  const waitForCreatedDrone = async (destinationId: string, droneId: string): Promise<void> => {
+    const deadline = Date.now() + NEW_DRONE_ATTACHMENT_READY_TIMEOUT_MS;
+    while (Date.now() < deadline) {
+      if (targetIdRef.current !== destinationId) {
+        throw new Error('The selected Drone Hub changed while the drone was starting.');
+      }
+      const result = await requestDroneControl(destinationId, 'drones.list', {
+        includeCreateOptions: false,
+      });
+      const drone = normalizeMobileDroneListPayload(result).drones.find(
+        (candidate) => candidate.id === droneId,
+      );
+      if (drone?.phase === 'error' || drone?.statusOk === false) {
+        throw new Error(drone.statusError || 'The drone failed while starting.');
+      }
+      if (drone && !['starting', 'creating', 'seeding'].includes(drone.phase)) return;
+      await wait(NEW_DRONE_ATTACHMENT_READY_POLL_MS);
+    }
+    throw new Error('Timed out waiting for the drone to accept image attachments.');
+  };
+
+  const createDrone = async (
+    payload: MobileDroneCreatePayload,
+    preferences?: MobileDroneCreatePreferences,
+    initialImages: readonly MobileChatImage[] = [],
+  ): Promise<boolean> => {
     let created = false;
     await run(`create-${payload.runtime}`, async () => {
       const destinationId = targetId;
-      await requestDroneControl(destinationId, `drone.create.${payload.runtime}`, payload);
-      if (targetIdRef.current !== destinationId) return;
+      const localTarget = destinationId === mesh.identity?.id;
+      const createPayload =
+        initialImages.length === 0 || localTarget
+          ? {
+              ...payload,
+              ...(initialImages.length > 0
+                ? { seedAttachments: inlinePromptAttachments(initialImages) }
+                : {}),
+            }
+          : Object.fromEntries(
+              Object.entries(payload).filter(
+                ([key]) => key !== 'seedPrompt' && key !== 'seedSubmittedAt',
+              ),
+            );
+      const result = await requestDroneControl(
+        destinationId,
+        `drone.create.${payload.runtime}`,
+        createPayload,
+      );
       created = true;
-      await loadDrones();
+      await saveMobileDroneCreatePreferences(
+        destinationId,
+        preferences ?? mobileDroneCreatePreferencesFromPayload(payload),
+      ).catch(() => undefined);
+      if (targetIdRef.current !== destinationId) return;
+      try {
+        if (initialImages.length > 0 && !localTarget) {
+          const droneId = String(result?.id ?? result?.droneId ?? '').trim();
+          if (!droneId) throw new Error('The Drone Hub did not return the new drone id.');
+          await waitForCreatedDrone(destinationId, droneId);
+          await sendChatPromptWithImages({
+            destinationId,
+            droneId,
+            chatName: 'default',
+            prompt: String(payload.seedPrompt ?? ''),
+            images: initialImages,
+          });
+        }
+      } catch (nextError: any) {
+        throw new Error(
+          `Drone created, but its first message could not be sent: ${nextError?.message ?? String(nextError)}`,
+        );
+      } finally {
+        await loadDrones();
+      }
     });
     return created;
   };
@@ -916,9 +1051,26 @@ export function DronesScreen({
       .finally(() => setCancellingPromptId((current) => (current === promptId ? '' : current)));
   };
 
-  const openNewDroneScreen = (defaults: MobileDroneCreateDefaults | null = null) => {
+  const openNewDroneScreen = async (
+    overrides: MobileDroneCreateDefaults | null = null,
+  ): Promise<void> => {
+    const destinationId = targetId;
+    const requestVersion = ++createDefaultsRequestVersion.current;
+    const contextualRepoPath = overrides?.repoPath ?? selected?.repoPath ?? '';
+    const remembered = await loadMobileDroneCreatePreferences(destinationId);
+    if (
+      targetIdRef.current !== destinationId ||
+      createDefaultsRequestVersion.current !== requestVersion
+    ) {
+      return;
+    }
+    const defaults = resolveMobileDroneCreateDefaults({
+      remembered,
+      repoPath: contextualRepoPath,
+      overrides,
+    });
     setNewDroneDefaults(defaults);
-    setNewDroneDraft(false);
+    setNewDroneDraft(defaults.draft === true);
     setNewDroneScreenVersion((value) => value + 1);
     setSelected(null);
     setChats([]);
@@ -945,13 +1097,14 @@ export function DronesScreen({
 
   const openNewDroneFromCurrent = () => {
     if (!selected) return;
-    openNewDroneScreen({
+    void openNewDroneScreen({
       mode: 'with-chat',
       runtime: selected.runtime === 'host' ? 'host' : 'container',
       group: selected.group ?? '',
       repoPath: selected.repoPath,
       ...(chatAgentId ? { agent: chatAgentId } : {}),
       agentPermissionMode: chatAgentPermissionMode,
+      ...(chatModelProvider ? { provider: chatModelProvider } : {}),
       ...(chatModel ? { model: chatModel } : {}),
       ...(chatReasoning ? { reasoning: chatReasoning } : {}),
     });
@@ -1262,7 +1415,7 @@ export function DronesScreen({
           targetSupportsDrones && meshRouteAvailable
             ? () => {
                 onDrawerOpenChange(false);
-                openNewDroneScreen();
+                void openNewDroneScreen();
               }
             : undefined
         }
@@ -1433,6 +1586,9 @@ export function DronesScreen({
                         emptyTitle="This drone chat is ready."
                         emptyBody="Send a prompt to start the conversation."
                         assistantLabel="Agent"
+                        queuedPrompts={visiblePendingPrompts}
+                        cancellingPromptId={cancellingPromptId}
+                        onCancelQueuedPrompt={cancelPendingPrompt}
                         linkedPullRequests={linkedPullRequests}
                         onLoadFullMessage={(message) => void loadFullChatMessage(message)}
                         fullMessageLoadingId={fullMessageBusyId}
@@ -1456,11 +1612,6 @@ export function DronesScreen({
                               }
                             : undefined
                         }
-                      />
-                      <QueuedPromptRows
-                        prompts={visiblePendingPrompts}
-                        cancellingId={cancellingPromptId}
-                        onCancel={cancelPendingPrompt}
                       />
                       {pendingApprovals.map((approval) => (
                         <AssistantApprovalCard
@@ -1487,7 +1638,9 @@ export function DronesScreen({
                       editable
                       queueWhileRunning
                       hasAttachments={promptImages.length > 0}
-                      onAddAttachment={phoneTarget ? undefined : () => void addPromptImages()}
+                      onAddAttachment={() => void addPromptImages()}
+                      attachmentActionsDisabled={phoneTarget && running}
+                      sendBlocked={phoneTarget && running && promptImages.length > 0}
                       footer={
                         <ChatImageStrip
                           images={promptImages}

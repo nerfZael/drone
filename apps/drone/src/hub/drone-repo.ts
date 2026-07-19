@@ -24,9 +24,10 @@ export async function runGitInDroneOrThrow(opts: {
   repoPathInContainer: string;
   args: string[];
   okCodes?: number[];
+  runGit?: typeof runGitInDrone;
 }): Promise<{ code: number; stdout: string; stderr: string }> {
   const okCodes = Array.isArray(opts.okCodes) && opts.okCodes.length > 0 ? opts.okCodes : [0];
-  const r = await runGitInDrone(opts);
+  const r = await (opts.runGit ?? runGitInDrone)(opts);
   if (!okCodes.includes(r.code)) {
     const msg = (r.stderr || r.stdout || `git ${opts.args.join(' ')} failed (exit ${r.code})`).trim();
     throw new Error(msg);
@@ -37,18 +38,21 @@ export async function runGitInDroneOrThrow(opts: {
 export async function droneRepoChangesSummary(opts: {
   container: string;
   repoPathInContainer: string;
+  runGit?: typeof runGitInDrone;
 }): Promise<{ repoRoot: string; summary: ReturnType<typeof parseGitStatusPorcelainV2Z> }> {
   const repoPathInContainer = normalizeContainerPath(opts.repoPathInContainer);
   const repoRootRaw = await runGitInDroneOrThrow({
     container: opts.container,
     repoPathInContainer,
     args: ['rev-parse', '--show-toplevel'],
+    runGit: opts.runGit,
   });
   const repoRoot = String(repoRootRaw.stdout ?? '').trim() || repoPathInContainer;
   const statusRaw = await runGitInDroneOrThrow({
     container: opts.container,
     repoPathInContainer,
     args: ['status', '--porcelain=v2', '--branch', '--untracked-files=all', '-z'],
+    runGit: opts.runGit,
   });
   const parsed = parseGitStatusPorcelainV2Z(statusRaw.stdout);
   const pathsToHash = parsed.entries
@@ -58,6 +62,7 @@ export async function droneRepoChangesSummary(opts: {
     container: opts.container,
     repoPathInContainer,
     repoRelativePaths: pathsToHash,
+    runGit: opts.runGit,
   });
   const entries = parsed.entries.map((entry) => {
     const worktreeContentHash = worktreeHashes.get(entry.path) ?? null;

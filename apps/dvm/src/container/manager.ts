@@ -15,7 +15,7 @@ type DvmExportManifestV1 = {
   imageRef: string;
   networks?: string[];
   environment?: string[];
-  ports?: Array<{ containerPort: number; hostPort?: number }>;
+  ports?: Array<{ containerPort: number; hostPort?: number; hostIp?: string }>;
   persistence?: { enabled: boolean; volumeName?: string; path?: string };
   notes?: string[];
 };
@@ -447,7 +447,7 @@ export class ContainerManager {
     const committedImage = await this.docker.commitContainer(containerName, repo, tag);
 
     // Merge existing port mappings with requested ones (requested wins).
-    const byContainerPort = new Map<number, { containerPort: number; hostPort?: number }>();
+    const byContainerPort = new Map<number, { containerPort: number; hostPort?: number; hostIp?: string }>();
     for (const p of details.ports ?? []) byContainerPort.set(p.containerPort, { ...p });
     for (const p of portsToExpose ?? []) byContainerPort.set(p.containerPort, { ...p });
     const mergedPorts = Array.from(byContainerPort.values());

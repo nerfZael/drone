@@ -20,11 +20,17 @@ import {
   type AssistantModelChoice,
 } from '../local-assistant/AssistantModelPicker';
 import { colors } from '../theme';
+import { ChatImageStrip } from './ChatImageStrip';
 import {
   mobileRepoLabel,
   type MobileDroneCreateModel,
   type MobileDroneCreateRepo,
 } from './drone-sidebar-model';
+import {
+  mobileDroneCreatePreferencesFromSelection,
+  type MobileDroneCreatePreferences,
+} from './create-preferences-model';
+import { pickChatImages, type MobileChatImage } from './pick-chat-images';
 
 export type MobileDroneCreateMode = 'with-chat' | 'without-chat';
 export type MobileDroneCreateRuntime = 'container' | 'host';
@@ -64,8 +70,12 @@ export type MobileDroneCreatePayload = {
 export type MobileDroneCreateDefaults = {
   mode?: MobileDroneCreateMode;
   runtime?: MobileDroneCreateRuntime;
+  draft?: boolean;
+  persistVolume?: boolean;
   group?: string;
   repoPath?: string;
+  repoBranchSource?: MobileDroneCreateBranchSource;
+  pullHostBranchBeforeCreate?: boolean;
   agent?: MobileDroneAgentId;
   agentPermissionMode?: MobileDroneAgentPermissionMode;
   model?: string;
@@ -249,7 +259,11 @@ export function NewDroneScreen({
     refresh?: boolean,
   ): Promise<MobileDroneCreateModel[]>;
   onLoadRepoBranches(repoPath: string, refresh?: boolean): Promise<MobileDroneCreateRepo>;
-  onCreate(payload: MobileDroneCreatePayload): Promise<boolean>;
+  onCreate(
+    payload: MobileDroneCreatePayload,
+    preferences: MobileDroneCreatePreferences,
+    initialImages?: readonly MobileChatImage[],
+  ): Promise<boolean>;
 }) {
   const [mode, setMode] = React.useState<MobileDroneCreateMode>(
     initialValues?.mode ?? 'with-chat',
@@ -257,7 +271,9 @@ export function NewDroneScreen({
   const [runtime, setRuntime] = React.useState<MobileDroneCreateRuntime>(
     localDevice ? 'host' : (initialValues?.runtime ?? 'container'),
   );
-  const [persistVolume, setPersistVolume] = React.useState(false);
+  const [persistVolume, setPersistVolume] = React.useState(
+    initialValues?.persistVolume ?? false,
+  );
   const [name, setName] = React.useState('');
   const [group, setGroup] = React.useState(initialValues?.group ?? '');
   const [detailsOpen, setDetailsOpen] = React.useState(false);
@@ -277,11 +293,15 @@ export function NewDroneScreen({
   const [modelsError, setModelsError] = React.useState<string | null>(null);
   const [modelPickerOpen, setModelPickerOpen] = React.useState(false);
   const [repoPath, setRepoPath] = React.useState(initialValues?.repoPath ?? '');
-  const [branchSource, setBranchSource] =
-    React.useState<MobileDroneCreateBranchSource>('host');
+  const [branchSource, setBranchSource] = React.useState<MobileDroneCreateBranchSource>(
+    initialValues?.repoBranchSource ?? 'host',
+  );
   const [remoteBranch, setRemoteBranch] = React.useState('');
-  const [pullHostBranch, setPullHostBranch] = React.useState(false);
+  const [pullHostBranch, setPullHostBranch] = React.useState(
+    initialValues?.pullHostBranchBeforeCreate ?? false,
+  );
   const [initialMessage, setInitialMessage] = React.useState('');
+  const [initialImages, setInitialImages] = React.useState<MobileChatImage[]>([]);
   const [repoPickerOpen, setRepoPickerOpen] = React.useState(false);
   const [branchPickerOpen, setBranchPickerOpen] = React.useState(false);
   const [branchesLoading, setBranchesLoading] = React.useState(false);
@@ -323,6 +343,10 @@ export function NewDroneScreen({
     setRepoPath('');
     setPersistVolume(false);
   }, [localDevice]);
+
+  React.useEffect(() => {
+    if (draft) setInitialImages([]);
+  }, [draft]);
 
   React.useEffect(() => {
     const subscription = Keyboard.addListener('keyboardDidShow', () => {
@@ -445,9 +469,19 @@ export function NewDroneScreen({
     setAgentPickerOpen(false);
   };
 
+  const addInitialImages = async () => {
+    try {
+      setFormError(null);
+      const images = await pickChatImages(initialImages);
+      if (images.length > 0) setInitialImages((current) => [...current, ...images]);
+    } catch (error: any) {
+      setFormError(error?.message ?? String(error));
+    }
+  };
+
   const submit = async (promptOverride?: string) => {
     const prompt = String(promptOverride ?? initialMessage).trim();
-    if (mode === 'with-chat' && !prompt) {
+    if (mode === 'with-chat' && !prompt && initialImages.length === 0) {
       setFormError('Add a first message, or choose Create empty drone.');
       return;
     }
@@ -457,7 +491,7 @@ export function NewDroneScreen({
     }
     setFormError(null);
     const effectiveBranchSource = runtime === 'host' ? 'host' : branchSource;
-    const created = await onCreate({
+    const payload: MobileDroneCreatePayload = {
       runtime,
       ...(name.trim() ? { name: name.trim() } : {}),
       ...(group.trim() ? { group: group.trim() } : {}),
@@ -484,10 +518,29 @@ export function NewDroneScreen({
             seedSubmittedAt: new Date().toISOString(),
           }
         : {}),
-    });
+    };
+    const created = await onCreate(
+      payload,
+      mobileDroneCreatePreferencesFromSelection({
+        mode,
+        runtime,
+        draft,
+        persistVolume: runtime === 'container' && persistVolume,
+        agent,
+        agentPermissionMode,
+        model,
+        provider: modelProvider,
+        reasoning,
+        repoBranchSource: effectiveBranchSource,
+        pullHostBranchBeforeCreate:
+          effectiveBranchSource === 'host' && pullHostBranch,
+      }),
+      mode === 'with-chat' ? initialImages : [],
+    );
     if (!created) return;
     setName('');
     setInitialMessage('');
+    setInitialImages([]);
   };
 
   return (
@@ -515,6 +568,7 @@ export function NewDroneScreen({
           if (value === 'without-chat') {
             setAgentPickerOpen(false);
             setModelPickerOpen(false);
+            setInitialImages([]);
           }
         }}
       />
@@ -761,11 +815,20 @@ export function NewDroneScreen({
               placeholder="Tell this drone what to do…"
               sending={busy}
               editable={!busy}
-              showAttachments={false}
-              sendLabel={busy ? 'Creating…' : 'Create & start chat'}
-              sendPlacement="below"
+              showAttachments={!draft}
+              hasAttachments={initialImages.length > 0}
+              onAddAttachment={draft ? undefined : () => void addInitialImages()}
               footer={
                 <>
+                  <ChatImageStrip
+                    images={initialImages}
+                    disabled={busy}
+                    onRemove={(id) =>
+                      setInitialImages((current) =>
+                        current.filter((image) => image.id !== id),
+                      )
+                    }
+                  />
                   <View style={styles.composerConfigRow}>
                     <Pressable
                       accessibilityRole="button"

@@ -60,6 +60,10 @@ export function registerAssistantRoutes(
     respond(200, await assistantService.systemPromptSettings());
   });
 
+  apiRouter.get('/api/assistant/default-model', async ({ json: respond }) => {
+    respond(200, await assistantService.defaultSettings());
+  });
+
   apiRouter.post('/api/assistant/system-prompt', async ({ readJson, json: respond }) => {
     try {
       respond(200, await assistantService.updateSystemPrompt((await readJson()) ?? {}));

@@ -1,6 +1,18 @@
 import React from 'react';
 import { maybeExtractApiKey } from './helpers';
-import type { ApiKeySettingsResponse, LlmProviderId, LlmSettingsResponse } from './settings-types';
+import {
+  llmDefaultModelChoices,
+  resolveLlmDefaultModelDraft,
+  selectLlmDefaultModel,
+  type LlmDefaultModelChoice,
+  type LlmDefaultModelDraft,
+} from './llm-default-model';
+import type {
+  ApiKeySettingsResponse,
+  LlmDefaultModelSettingsResponse,
+  LlmProviderId,
+  LlmSettingsResponse,
+} from './settings-types';
 
 type RequestJsonFn = <T>(url: string, init?: RequestInit) => Promise<T>;
 type ApiKeyProviderId = 'openai' | 'gemini' | 'groq';
@@ -16,6 +28,9 @@ export type UseLlmSettingsResult = {
   llmSettingsLoading: boolean;
   llmSettingsError: string | null;
   llmProviderDraft: LlmProviderId;
+  llmDefaultModelSettings: LlmDefaultModelSettingsResponse | null;
+  llmDefaultModelDraft: LlmDefaultModelDraft;
+  llmDefaultModelChoices: LlmDefaultModelChoice[];
   savingLlmProvider: boolean;
   showGeminiKey: boolean;
   revealingGeminiKey: boolean;
@@ -33,7 +48,9 @@ export type UseLlmSettingsResult = {
   showGroqKey: boolean;
   revealingGroqKey: boolean;
   llmSettingsNotice: string | null;
-  setLlmProviderDraft: React.Dispatch<React.SetStateAction<LlmProviderId>>;
+  setLlmProviderDraft: (provider: LlmProviderId) => void;
+  setLlmDefaultModelDraft: (model: string) => void;
+  setLlmDefaultReasoningDraft: (thinkingLevel: string) => void;
   updateOpenAiSettingsDraft: (raw: string) => void;
   updateGeminiSettingsDraft: (raw: string) => void;
   updateGroqSettingsDraft: (raw: string) => void;
@@ -47,7 +64,15 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
   const [llmSettings, setLlmSettings] = React.useState<LlmSettingsResponse | null>(null);
   const [llmSettingsLoading, setLlmSettingsLoading] = React.useState(false);
   const [llmSettingsError, setLlmSettingsError] = React.useState<string | null>(null);
-  const [llmProviderDraft, setLlmProviderDraft] = React.useState<LlmProviderId>('openai');
+  const [llmProviderDraft, setLlmProviderDraftValue] = React.useState<LlmProviderId>('openai');
+  const [llmDefaultModelSettings, setLlmDefaultModelSettings] =
+    React.useState<LlmDefaultModelSettingsResponse | null>(null);
+  const [llmDefaultModelDraft, setLlmDefaultModelDraftValue] =
+    React.useState<LlmDefaultModelDraft>({
+      provider: 'openai',
+      model: '',
+      thinkingLevel: '',
+    });
   const [savingLlmProvider, setSavingLlmProvider] = React.useState(false);
   const [showGeminiKey, setShowGeminiKey] = React.useState(false);
   const [revealingGeminiKey, setRevealingGeminiKey] = React.useState(false);
@@ -73,9 +98,16 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
     setLlmSettingsLoading(true);
     setLlmSettingsError(null);
     try {
-      const data = await requestJson<LlmSettingsResponse>('/api/settings/llm');
+      const [data, defaults] = await Promise.all([
+        requestJson<LlmSettingsResponse>('/api/settings/llm'),
+        requestJson<LlmDefaultModelSettingsResponse>('/api/assistant/default-model'),
+      ]);
       setLlmSettings(data);
-      setLlmProviderDraft(data.provider.selected);
+      setLlmDefaultModelSettings(defaults);
+      setLlmProviderDraftValue(data.provider.selected);
+      setLlmDefaultModelDraftValue(
+        resolveLlmDefaultModelDraft(defaults.models, data.provider.selected, defaults.defaultModel),
+      );
     } catch (e: any) {
       setLlmSettingsError(e?.message ?? String(e));
     } finally {
@@ -86,6 +118,42 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
   React.useEffect(() => {
     void loadLlmSettings();
   }, [loadLlmSettings]);
+
+  const setLlmProviderDraft = React.useCallback(
+    (provider: LlmProviderId) => {
+      setLlmProviderDraftValue(provider);
+      setLlmDefaultModelDraftValue(
+        resolveLlmDefaultModelDraft(
+          llmDefaultModelSettings?.models ?? [],
+          provider,
+          llmDefaultModelSettings?.defaultModel,
+        ),
+      );
+    },
+    [llmDefaultModelSettings],
+  );
+
+  const setLlmDefaultModelDraft = React.useCallback(
+    (model: string) => {
+      setLlmDefaultModelDraftValue((current) =>
+        selectLlmDefaultModel(llmDefaultModelSettings?.models ?? [], current, model),
+      );
+    },
+    [llmDefaultModelSettings],
+  );
+
+  const setLlmDefaultReasoningDraft = React.useCallback((thinkingLevel: string) => {
+    setLlmDefaultModelDraftValue((current) => ({ ...current, thinkingLevel }));
+  }, []);
+
+  const defaultModelChoices = React.useMemo(
+    () =>
+      llmDefaultModelChoices(
+        llmDefaultModelSettings?.models ?? [],
+        llmDefaultModelDraft.provider,
+      ),
+    [llmDefaultModelDraft.provider, llmDefaultModelSettings],
+  );
 
   const updateProviderKeySettings = React.useCallback((provider: LlmProviderId | ApiKeyProviderId, data: ApiKeySettingsResponse) => {
     setLlmSettings((prev) => {
@@ -274,20 +342,46 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
     setLlmSettingsError(null);
     setLlmSettingsNotice(null);
     try {
+      const selectedModel = defaultModelChoices.find(
+        (choice) => choice.id === llmDefaultModelDraft.model,
+      );
+      if (!selectedModel) throw new Error('Select a default model for this provider.');
+      if (!selectedModel.reasoningLevels.includes(llmDefaultModelDraft.thinkingLevel)) {
+        throw new Error('Select a supported reasoning level for this model.');
+      }
+      const defaults = await requestJson<LlmDefaultModelSettingsResponse>(
+        '/api/assistant/default-model',
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(llmDefaultModelDraft),
+        },
+      );
       const data = await requestJson<LlmSettingsResponse>('/api/settings/llm', {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ provider: llmProviderDraft }),
       });
+      setLlmDefaultModelSettings(defaults);
       setLlmSettings((prev) => (prev ? { ...prev, provider: data.provider } : data));
-      setLlmProviderDraft(data.provider.selected);
-      setLlmSettingsNotice(`Using ${providerLabel(data.provider.selected)} for LLM calls.`);
+      setLlmProviderDraftValue(data.provider.selected);
+      setLlmDefaultModelDraftValue(
+        resolveLlmDefaultModelDraft(defaults.models, data.provider.selected, defaults.defaultModel),
+      );
+      setLlmSettingsNotice(
+        `Using ${providerLabel(data.provider.selected)} with ${selectedModel.label} (${llmDefaultModelDraft.thinkingLevel}) by default.`,
+      );
     } catch (e: any) {
-      setLlmSettingsError(e?.message ?? String(e));
+      const message = e?.message ?? String(e);
+      // Provider selection and assistant defaults live behind separate APIs. If
+      // one succeeds and the other fails, reload both so the form reflects the
+      // actual persisted state and a retry cannot overwrite it from stale data.
+      await loadLlmSettings();
+      setLlmSettingsError(message);
     } finally {
       setSavingLlmProvider(false);
     }
-  }, [llmProviderDraft, requestJson]);
+  }, [defaultModelChoices, llmDefaultModelDraft, llmProviderDraft, loadLlmSettings, requestJson]);
 
   const updateOpenAiSettingsDraft = React.useCallback((raw: string) => {
     setOpenAiDraftLoadedFromSettings(false);
@@ -309,6 +403,9 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
     llmSettingsLoading,
     llmSettingsError,
     llmProviderDraft,
+    llmDefaultModelSettings,
+    llmDefaultModelDraft,
+    llmDefaultModelChoices: defaultModelChoices,
     savingLlmProvider,
     showGeminiKey,
     revealingGeminiKey,
@@ -327,6 +424,8 @@ export function useLlmSettings(requestJson: RequestJsonFn): UseLlmSettingsResult
     revealingGroqKey,
     llmSettingsNotice,
     setLlmProviderDraft,
+    setLlmDefaultModelDraft,
+    setLlmDefaultReasoningDraft,
     updateOpenAiSettingsDraft,
     updateGeminiSettingsDraft,
     updateGroqSettingsDraft,

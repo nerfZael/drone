@@ -32,9 +32,9 @@ describe('name suggestion model', () => {
 
   test('sends GPT-5.6 Luna with no reasoning through the OpenAI fallback', async () => {
     const originalFetch = globalThis.fetch;
-    let requestBody: any = null;
+    const requestBodies: any[] = [];
     globalThis.fetch = (async (_input: RequestInfo | URL, init?: RequestInit) => {
-      requestBody = JSON.parse(String(init?.body ?? '{}'));
+      requestBodies.push(JSON.parse(String(init?.body ?? '{}')));
       return new Response(
         JSON.stringify({
           id: 'resp-name-test',
@@ -48,7 +48,7 @@ describe('name suggestion model', () => {
               content: [
                 {
                   type: 'output_text',
-                  text: JSON.stringify({ name: 'fix-login-loop' }),
+                  text: JSON.stringify({ name: 'fix login loop' }),
                   annotations: [],
                 },
               ],
@@ -70,10 +70,21 @@ describe('name suggestion model', () => {
         provider: 'openai',
         apiKey: 'test-openai-key',
       });
-      expect(name).toBe('fix-login-loop');
+      expect(name).toBe('Fix login loop');
+      const requestBody = requestBodies[0];
       expect(requestBody?.model).toBe(DEFAULT_DRONE_NAME_MODEL_ID);
       expect(requestBody?.reasoning).toEqual({ effort: 'none' });
       expect(requestBody?.temperature).toBeUndefined();
+      expect(JSON.stringify(requestBody)).toContain('Fix login loop');
+      expect(JSON.stringify(requestBody)).toContain('do not default to dash-case');
+
+      const identifier = await suggestDroneNameFromMessage('Fix the login redirect loop', {
+        provider: 'openai',
+        apiKey: 'test-openai-key',
+        style: 'identifier',
+      });
+      expect(identifier).toBe('fix-login-loop');
+      expect(JSON.stringify(requestBodies[1])).toContain('identifier must be dash-case');
     } finally {
       globalThis.fetch = originalFetch;
     }
