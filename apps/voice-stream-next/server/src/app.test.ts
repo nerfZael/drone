@@ -152,7 +152,7 @@ describe('app configuration', () => {
     expect(Array.from(binaryChunk(fragments) ?? [])).toEqual([1, 2, 3, 4, 6, 7]);
   });
 
-  test('assembles reconnect fragments before final clipboard transcription', async () => {
+  test('assembles reconnect fragments when the final clipboard connection has no audio', async () => {
     process.env.VOICE_STREAM_NEXT_DATA_DIR = path.join(process.cwd(), 'server', 'data', 'tests', crypto.randomUUID());
     process.env.VOICE_STREAM_NEXT_TEST_TRANSCRIPT = 'complete reconnect transcript';
     const built = await buildApp({ logger: false });
@@ -177,6 +177,7 @@ describe('app configuration', () => {
     const wsUrl = `ws://127.0.0.1:${port}/api/voice/stream?${query.toString()}`;
     const firstSocket = new WebSocket(wsUrl);
     let secondSocket: WebSocket | null = null;
+    let thirdSocket: WebSocket | null = null;
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -209,8 +210,23 @@ describe('app configuration', () => {
 
       const secondPcm = new Int16Array(4096).fill(222);
       secondSocket.send(secondPcm);
-      const finish = waitForWebSocketMessage(secondSocket, 'finish');
-      secondSocket.send(JSON.stringify({ type: 'end' }));
+
+      thirdSocket = new WebSocket(wsUrl);
+      await new Promise<void>((resolve, reject) => {
+        thirdSocket!.once('open', resolve);
+        thirdSocket!.once('error', reject);
+      });
+      thirdSocket.send(JSON.stringify({ type: 'client_hello', protocolVersion: 1, client: 'test', mode: 'clipboard' }));
+      thirdSocket.send(JSON.stringify({ type: 'pause', reason: 'test reconnect while paused' }));
+      await waitForTestCondition('second superseded stream fragment', () =>
+        built.db.listLogs(user.id, 50).filter((entry) => {
+          if (entry.message !== 'Voice stream disconnected') return false;
+          return JSON.parse(entry.detailsJson || '{}').finalizeReason === 'superseded';
+        }).length >= 2,
+      );
+
+      const finish = waitForWebSocketMessage(thirdSocket, 'finish');
+      thirdSocket.send(JSON.stringify({ type: 'end' }));
       expect((await finish).transcriptText).toBe('complete reconnect transcript');
 
       const recording = built.db.voiceRecordingForSession(user.id, session.id);
@@ -218,6 +234,15 @@ describe('app configuration', () => {
       const expectedPcm = Buffer.concat([Buffer.from(firstPcm.buffer), Buffer.from(secondPcm.buffer)]);
       const savedPcm = wavPcm16Data(new Uint8Array(readFileSync(recording!.filePath))).pcm;
       expect(Buffer.from(savedPcm).equals(expectedPcm)).toBe(true);
+      const finalRequestLog = built.db.listLogs(user.id, 50).find((entry) => {
+        if (entry.message !== 'Voice final transcription request started') return false;
+        return JSON.parse(entry.detailsJson || '{}').finalizeReason === 'client_end';
+      });
+      expect(finalRequestLog).toBeTruthy();
+      const finalRequestDetails = JSON.parse(finalRequestLog!.detailsJson || '{}');
+      expect(finalRequestDetails.fragmentBytes).toBe(0);
+      expect(finalRequestDetails.bytes).toBe(expectedPcm.byteLength);
+      expect(finalRequestDetails.recordingId).toBe(recording!.id);
 
       await terminateWebSocketAndWait(firstSocket);
       const stablePcm = wavPcm16Data(new Uint8Array(readFileSync(recording!.filePath))).pcm;
@@ -226,6 +251,7 @@ describe('app configuration', () => {
     } finally {
       firstSocket.terminate();
       secondSocket?.terminate();
+      thirdSocket?.terminate();
       for (const client of built.app.websocketServer.clients) client.terminate();
       built.app.server.closeAllConnections?.();
       built.app.server.close();

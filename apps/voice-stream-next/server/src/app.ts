@@ -6318,6 +6318,10 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           appendExisting: true,
         });
       }
+      let availableRecording = savedRecording?.recording ?? null;
+      if (!availableRecording && recordingMode && !discardRecording && recordingPcm.byteLength === 0) {
+        availableRecording = db.voiceRecordingForSession(device.userId, session.id);
+      }
       let transcript = '';
       let assistantText = '';
       let runtime = 'fallback';
@@ -6337,7 +6341,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             detailsJson: JSON.stringify({
               mode: streamMode,
               voiceSessionId: session.id,
-              recordingId: savedRecording?.recording.id ?? null,
+              recordingId: availableRecording?.id ?? null,
               fragmentBytes: recordingPcm.byteLength,
               savedPcmBytes: savedRecording?.savedPcmBytes ?? null,
               finalizeReason,
@@ -6345,9 +6349,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           });
         } else {
           let transcriptionPcm = recordingPcm;
-          if (savedRecording?.recording) {
+          if (availableRecording) {
             try {
-              transcriptionPcm = readVoiceRecordingPcm(savedRecording.recording).pcm;
+              transcriptionPcm = readVoiceRecordingPcm(availableRecording).pcm;
             } catch (error: any) {
               addLog(device.userId, {
                 deviceId: device.id,
@@ -6357,7 +6361,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
                 detailsJson: JSON.stringify({
                   mode: streamMode,
                   voiceSessionId: session.id,
-                  recordingId: savedRecording.recording.id,
+                  recordingId: availableRecording.id,
                   error: error?.message ?? String(error),
                   fragmentBytes: recordingPcm.byteLength,
                 }),
@@ -6372,7 +6376,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             detailsJson: JSON.stringify({
               mode: streamMode,
               voiceSessionId: session.id,
-              recordingId: savedRecording?.recording.id ?? null,
+              recordingId: availableRecording?.id ?? null,
               bytes: transcriptionPcm.byteLength,
               fragmentBytes: recordingPcm.byteLength,
               audioMs: pcmDurationMs(transcriptionPcm.byteLength),
@@ -6397,7 +6401,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
                   detailsJson: JSON.stringify({
                     mode: streamMode,
                     voiceSessionId: session.id,
-                    recordingId: savedRecording?.recording.id ?? null,
+                    recordingId: availableRecording?.id ?? null,
                     finalizeReason,
                     ...attempt,
                   }),
@@ -6412,7 +6416,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
                   detailsJson: JSON.stringify({
                     mode: streamMode,
                     voiceSessionId: session.id,
-                    recordingId: savedRecording?.recording.id ?? null,
+                    recordingId: availableRecording?.id ?? null,
                     finalizeReason,
                     provider: attempt.result.provider,
                     model: attempt.result.model,
@@ -6434,7 +6438,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
                   detailsJson: JSON.stringify({
                     mode: streamMode,
                     voiceSessionId: session.id,
-                    recordingId: savedRecording?.recording.id ?? null,
+                    recordingId: availableRecording?.id ?? null,
                     finalizeReason,
                     error: attempt.error instanceof Error ? attempt.error.message : String(attempt.error),
                     elapsedMs: attempt.elapsedMs,
@@ -6450,7 +6454,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
                   detailsJson: JSON.stringify({
                     mode: streamMode,
                     voiceSessionId: session.id,
-                    recordingId: savedRecording?.recording.id ?? null,
+                    recordingId: availableRecording?.id ?? null,
                     finalizeReason,
                     ...chunk,
                   }),
@@ -6465,7 +6469,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
                   detailsJson: JSON.stringify({
                     mode: streamMode,
                     voiceSessionId: session.id,
-                    recordingId: savedRecording?.recording.id ?? null,
+                    recordingId: availableRecording?.id ?? null,
                     finalizeReason,
                     index: chunk.index,
                     startMs: chunk.startMs,
@@ -6492,7 +6496,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
                   detailsJson: JSON.stringify({
                     mode: streamMode,
                     voiceSessionId: session.id,
-                    recordingId: savedRecording?.recording.id ?? null,
+                    recordingId: availableRecording?.id ?? null,
                     finalizeReason,
                     index: chunk.index,
                     startMs: chunk.startMs,
@@ -6514,7 +6518,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
               detailsJson: JSON.stringify({
                 mode: streamMode,
                 voiceSessionId: session.id,
-                recordingId: savedRecording?.recording.id ?? null,
+                recordingId: availableRecording?.id ?? null,
                 error: error?.message ?? String(error),
                 elapsedMs: Date.now() - finalTranscriptionStartedAt,
                 bytes: transcriptionPcm.byteLength,
@@ -6535,7 +6539,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             detailsJson: JSON.stringify({
               mode: streamMode,
               voiceSessionId: session.id,
-              recordingId: savedRecording?.recording.id ?? null,
+              recordingId: availableRecording?.id ?? null,
               provider: transcription.provider,
               model: transcription.model,
               audioDurationMs: transcription.audioDurationMs,
@@ -6555,9 +6559,9 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
         }
         if (transcript) {
           addTranscript(device.userId, session.id, transcript);
-          if (savedRecording) {
+          if (availableRecording) {
             emitAppEvent(device.userId, 'voice_recording_changed', {
-              recordingId: savedRecording.recording.id,
+              recordingId: availableRecording.id,
               voiceSessionId: session.id,
               deviceId: device.id,
               mode: recordingMode ?? streamMode,
@@ -6674,12 +6678,13 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
             stage: 'finalization_fallback',
             appendExisting: true,
           });
+          availableRecording = savedRecording?.recording ?? availableRecording;
         }
         if (shouldCompleteSession) {
           db.endVoiceSession(device.userId, session.id);
-          if (savedRecording) {
+          if (availableRecording) {
             emitAppEvent(device.userId, 'voice_recording_changed', {
-              recordingId: savedRecording.recording.id,
+              recordingId: availableRecording.id,
               voiceSessionId: session.id,
               deviceId: device.id,
               mode: recordingMode ?? streamMode,
@@ -6731,7 +6736,7 @@ export async function buildApp(options: AppOptions = {}): Promise<{ app: Fastify
           mode: streamMode,
           finalizeReason,
           sessionCompleted: shouldCompleteSession,
-          recordingId: savedRecording?.recording.id ?? null,
+          recordingId: availableRecording?.id ?? null,
           fragmentBytes: recordingPcm.byteLength,
           savedPcmBytes: savedRecording?.savedPcmBytes ?? null,
         }),
