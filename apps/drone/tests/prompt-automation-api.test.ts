@@ -414,6 +414,48 @@ describeSocketSuite('prompt automation api', () => {
     expect(String(transcriptRows[0]?.output ?? '')).toBe('done');
   });
 
+  test('stop endpoint uses the native assistant runtime for native chats', async () => {
+    const droneId = 'drone-stop-native-response';
+    const nativeChatId = 'native-stop-chat';
+    const now = new Date().toISOString();
+    await updateRegistry((reg: any) => {
+      reg.drones = reg.drones ?? {};
+      reg.drones[droneId] = {
+        id: droneId,
+        name: droneId,
+        hostPort: mockDaemon?.port ?? 1,
+        token: 'mock-token',
+        containerPort: 7777,
+        repoPath: '',
+        createdAt: now,
+        chats: {
+          default: {
+            id: nativeChatId,
+            createdAt: now,
+            agent: { kind: 'native' },
+            turns: [],
+            pendingPrompts: [],
+          },
+        },
+      };
+    });
+
+    const opened = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/native`,
+      { method: 'POST' },
+    );
+    expect(opened.r.status).toBe(200);
+    expect(String(opened.data?.nativeChatId ?? '')).toBe(nativeChatId);
+
+    const stopped = await apiFetch(
+      `/api/drones/${encodeURIComponent(droneId)}/chats/default/stop`,
+      { method: 'POST' },
+    );
+    expect(stopped.r.status).toBe(200);
+    expect(stopped.data?.mode).toBe('transcript');
+    expect(Boolean(stopped.data?.stopped)).toBe(true);
+  });
+
   test('automation stop all cancels an active automation transcript run', async () => {
     const droneId = 'drone-stop-active-automation-response';
     const now = new Date().toISOString();

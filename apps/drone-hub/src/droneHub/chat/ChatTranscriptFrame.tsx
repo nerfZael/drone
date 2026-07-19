@@ -1,12 +1,13 @@
 import React from 'react';
 import { TranscriptSkeleton } from './TranscriptSkeleton';
 
-type ChatTranscriptFrameProps = {
+export type ChatTranscriptFrameProps = {
   loading: boolean;
   loadingMessage?: string;
   hasContent: boolean;
   emptyState: React.ReactNode;
   children: React.ReactNode;
+  contentRef?: React.Ref<HTMLDivElement>;
 };
 
 export const ChatTranscriptFrame = React.forwardRef<HTMLDivElement, ChatTranscriptFrameProps>(function ChatTranscriptFrame(
@@ -16,6 +17,7 @@ export const ChatTranscriptFrame = React.forwardRef<HTMLDivElement, ChatTranscri
     hasContent,
     emptyState,
     children,
+    contentRef,
   },
   ref,
 ) {
@@ -24,7 +26,7 @@ export const ChatTranscriptFrame = React.forwardRef<HTMLDivElement, ChatTranscri
       {loading ? (
         <TranscriptSkeleton message={loadingMessage} />
       ) : hasContent ? (
-        <div className="mx-auto flex max-w-[1170px] flex-col gap-6 px-6 py-5">
+        <div ref={contentRef} className="mx-auto flex max-w-[1170px] flex-col gap-6 px-6 py-5">
           {children}
         </div>
       ) : (

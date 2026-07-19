@@ -197,7 +197,6 @@ describe('drone hub ui store migration', () => {
           createDraftDrone: { key: 'tab', mod: false, ctrl: false, meta: false, alt: false, shift: false },
           createDroneChat: { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false },
           markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-          toggleTldr: null,
         },
       },
       12,

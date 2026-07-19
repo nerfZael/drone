@@ -189,7 +189,6 @@ export function DraftChatWorkspace({
             }${sleepBetweenRunsSeconds > 0 ? ` (${sleepBetweenRunsLabel.toLowerCase()} between runs)` : ''}.`;
       actions.push({
         id: `draft-automation:${automationId}`,
-        kind: 'automation',
         label: `Run ${automationLabel}`,
         onSelect: () => {
           void onStartDraftAutomation({
@@ -221,7 +220,6 @@ export function DraftChatWorkspace({
         },
         title,
         disabled: controlsLocked || !supportsDraftAutomation || !prompt || !createWithChat,
-        active: false,
         defaultRuns: runs,
         minRuns: AUTOMATION_RUNS_MIN,
         maxRuns: AUTOMATION_RUNS_MAX,

@@ -1,6 +1,14 @@
 import React from 'react';
 
-import { MarkdownMessage, type MarkdownTextMentionLink } from '../chat/MarkdownMessage';
+import {
+  AgentMessageExtras,
+  extractAgentMessageContent,
+  type AgentMessageExtrasProps,
+} from '../chat/AgentMessageExtras';
+import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
+import { ChatMessageBody } from '../chat/ChatMessageBody';
+import { ChatMessageCopyAction } from '../chat/ChatMessageCopyAction';
+import { ChatMessageFrame } from '../chat/ChatMessageFrame';
 import { IconDrone } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import {
@@ -28,6 +36,16 @@ import type {
   AssistantMessage,
   AssistantQueuedPrompt,
 } from './assistant-types';
+
+function assistantVisibleText(message: AssistantMessage): string {
+  if (typeof message.content === 'string') return message.content;
+  if (!Array.isArray(message.content)) return '';
+  return message.content
+    .filter((part) => part?.type === 'text')
+    .map((part) => String(part.text ?? ''))
+    .filter(Boolean)
+    .join('\n');
+}
 
 export function AssistantQueuedPromptRow({
   prompt,
@@ -678,6 +696,7 @@ export function ToolActivityRow({
 
 export function AssistantMessageRow({
   message,
+  messageExtras,
   droneMentionLinks,
   onOpenDroneMention,
   showToolCalls = true,
@@ -685,6 +704,7 @@ export function AssistantMessageRow({
   showReasoning = false,
 }: {
   message: AssistantMessage;
+  messageExtras?: Omit<AgentMessageExtrasProps, 'text' | 'tasks'>;
   droneMentionLinks?: MarkdownTextMentionLink[];
   onOpenDroneMention?: (mention: MarkdownTextMentionLink) => void;
   showToolCalls?: boolean;
@@ -693,6 +713,16 @@ export function AssistantMessageRow({
 }) {
   const calls = showToolCalls ? toolCalls(message) : [];
   const content = message.content;
+  const visibleText =
+    message.role === 'assistant' ? assistantVisibleText(message) : messageText(message);
+  const agentMessage = React.useMemo(
+    () =>
+      extractAgentMessageContent(
+        visibleText,
+        message.role === 'assistant' && !message.errorMessage,
+      ),
+    [message.errorMessage, message.role, visibleText],
+  );
   const structuredAssistant =
     message.role === 'assistant' &&
     Array.isArray(content) &&
@@ -727,13 +757,16 @@ export function AssistantMessageRow({
           );
         }
       } else if (part.type === 'text') {
-        const t = String(part.text ?? '').trim();
+        const t = extractAgentMessageContent(
+          String(part.text ?? ''),
+          !message.errorMessage,
+        ).text.trim();
         if (t) {
           blocks.push(
-            <MarkdownMessage
+            <ChatMessageBody
               key={`tx:${i}`}
+              role="assistant"
               text={t}
-              className="dh-markdown text-[12px]"
               textMentionLinks={droneMentionLinks}
               onOpenTextMention={onOpenDroneMention}
             />,
@@ -743,57 +776,41 @@ export function AssistantMessageRow({
     }
     body = blocks.length > 0 ? <div className="space-y-1">{blocks}</div> : null;
   } else {
-    const text = messageText(message);
+    const text = message.role === 'assistant' ? agentMessage.text : visibleText;
     const images = messageImageParts(message);
-    const textBody = text ? (
-      message.role === 'assistant' ? (
-        <MarkdownMessage
-          text={text}
-          className="dh-markdown text-[12px]"
-          textMentionLinks={droneMentionLinks}
-          onOpenTextMention={onOpenDroneMention}
-        />
-      ) : (
-        <div className="whitespace-pre-wrap break-words text-[12px] text-[var(--fg-secondary)]">
-          {text}
-        </div>
-      )
+    body = text || images.length > 0 || message.errorMessage ? (
+      <ChatMessageBody
+        role={message.role === 'user' ? 'user' : 'assistant'}
+        text={text}
+        error={Boolean(message.errorMessage)}
+        errorMessage={message.errorMessage}
+        images={images.map((image, index) => ({
+          key: `${image.mimeType}:${index}`,
+          src: `data:${image.mimeType};base64,${image.data}`,
+          alt: 'Attached image',
+        }))}
+        textMentionLinks={droneMentionLinks}
+        onOpenTextMention={onOpenDroneMention}
+      />
     ) : null;
-    const imageBody =
-      images.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {images.map((image, index) => (
-            <img
-              key={`${image.mimeType}:${index}`}
-              src={`data:${image.mimeType};base64,${image.data}`}
-              alt="Attached image"
-              className="max-h-44 max-w-[min(260px,100%)] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] object-contain"
-            />
-          ))}
-        </div>
-      ) : null;
-    body =
-      textBody || imageBody ? (
-        <div className="space-y-2">
-          {textBody}
-          {imageBody}
-        </div>
-      ) : null;
   }
 
-  if (message.role === 'assistant' && !body && !message.errorMessage && calls.length === 0)
+  if (
+    message.role === 'assistant' &&
+    !body &&
+    !message.errorMessage &&
+    calls.length === 0 &&
+    agentMessage.tasks.length === 0
+  )
     return null;
 
   return (
-    <div
-      className={`px-3 py-2 ${message.role === 'user' ? 'bg-[rgba(255,255,255,.025)] border-y border-[var(--border-subtle)]' : ''}`}
+    <ChatMessageFrame
+      role={message.role === 'user' ? 'user' : 'assistant'}
+      at={message.createdAt}
+      error={Boolean(message.errorMessage)}
     >
-      <div
-        className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
-        style={{ fontFamily: 'var(--display)' }}
-      >
-        {message.role === 'user' ? 'You' : 'Assistant'}
-      </div>
+      {message.role === 'user' ? <ChatMessageCopyAction text={visibleText} /> : null}
       {body}
       {!body && message.errorMessage ? (
         <div className="text-[12px] text-[var(--red)]">{message.errorMessage}</div>
@@ -809,6 +826,17 @@ export function AssistantMessageRow({
           ))}
         </div>
       ) : null}
-    </div>
+      {message.role === 'assistant' ? (
+        <AgentMessageExtras
+          {...messageExtras}
+          text={agentMessage.text}
+          tasks={agentMessage.tasks}
+          messageId={
+            messageExtras?.messageId ??
+            String(message.id ?? message.createdAt ?? message.timestamp ?? 'assistant-message')
+          }
+        />
+      ) : null}
+    </ChatMessageFrame>
   );
 }

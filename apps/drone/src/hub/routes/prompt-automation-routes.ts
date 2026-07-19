@@ -230,13 +230,22 @@ export function createPromptAutomationRouteHandler(
                   })
               : [];
           if (promptIds.length > 0) {
-            await stopTranscriptPendingPrompts({
-              droneId,
-              chatName,
-              droneEntry: resolved.drone,
-              promptIds,
-              includeAutomation: true,
-            });
+            const { chat } = await getChatEntry({ droneId, chatName });
+            if (inferChatAgent(chat, resolved.drone).kind === 'native') {
+              await stopChatResponse({
+                droneId,
+                chatName,
+                droneEntry: resolved.drone,
+              });
+            } else {
+              await stopTranscriptPendingPrompts({
+                droneId,
+                chatName,
+                droneEntry: resolved.drone,
+                promptIds,
+                includeAutomation: true,
+              });
+            }
           }
           json(res, 200, {
             ok: true,

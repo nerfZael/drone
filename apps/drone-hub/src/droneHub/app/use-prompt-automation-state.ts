@@ -140,7 +140,7 @@ function automationActionTitle(opts: {
   } = opts;
 
   if (active) return `Stop "${configLabel}".`;
-  if (!supportedMode) return 'Switch to a builtin agent (transcript mode) to run automations.';
+  if (!supportedMode) return 'Switch to the chat transcript to run automations.';
   if (!configPrompt) return `Set a prompt for "${configLabel}" in Settings > Automation first.`;
   if (laneBusy) return `Queue "${configLabel}" (${configRuns} runs${sleepSuffix}). It will run after ${queueAfterText}.`;
   if (configOnFailurePrompt) {
@@ -339,7 +339,7 @@ export function usePromptAutomationState({
       setStopPromptAutomationError(null);
       if (chatUiMode !== 'transcript') {
         setPromptAutomationBusy(false);
-        setPromptAutomationError('Automation is only available in transcript mode (builtin agents).');
+        setPromptAutomationError('Automation is only available in the chat transcript.');
         return false;
       }
       const automationId = String(launch?.automationId ?? '').trim();
@@ -502,7 +502,6 @@ export function usePromptAutomationState({
       const queuedForAction = queuedByAutomationId.get(config.automationId) ?? 0;
       return {
         id: `automation:${config.automationId}`,
-        kind: 'automation',
         label: laneBusy ? `Queue ${config.automationLabel}` : `Run ${config.automationLabel}`,
         onSelect: () => {
           startPromptAutomation(automation);
@@ -523,7 +522,6 @@ export function usePromptAutomationState({
           supportedMode,
         }),
         disabled: promptAutomationBusy || Boolean(stoppingPromptAutomationMode) || !supportedMode || config.prompt.length === 0,
-        active: false,
         defaultRuns: config.runs,
         minRuns: AUTOMATION_RUNS_MIN,
         maxRuns: AUTOMATION_RUNS_MAX,

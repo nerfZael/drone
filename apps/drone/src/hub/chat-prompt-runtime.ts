@@ -129,6 +129,7 @@ type ChatPromptRuntimeDependencyName =
   | 'patchChatMetadataInStore'
   | 'playbookMetaFromEntry'
   | 'promptNativeChat'
+  | 'stopNativeChat'
   | 'projectCanonicalChatToRegistry'
   | 'promptWithImageAttachments'
   | 'readBuiltinTranscriptSessionId'
@@ -277,6 +278,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     patchChatMetadataInStore,
     playbookMetaFromEntry,
     promptNativeChat,
+    stopNativeChat,
     nativeChatIsBusy,
     nativeChatError,
     nativeChatLatestAssistantText,
@@ -1614,6 +1616,22 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     });
   }
 
+  async function stopNativeChatResponse(opts: {
+    droneId: string;
+    chatName: string;
+  }): Promise<StopChatResponseResult> {
+    const { chat } = await getChatEntry({ droneId: opts.droneId, chatName: opts.chatName });
+    const nativeChatId = String(chat?.id ?? '').trim();
+    if (!nativeChatId) throw new Error('native chat has no stable identity');
+    await stopNativeChat(nativeChatId);
+    return {
+      mode: 'transcript',
+      stopped: true,
+      stoppedPromptIds: [],
+      clearedPromptIds: [],
+    };
+  }
+
   async function stopCliChatResponse(opts: {
     droneId: string;
     chatName: string;
@@ -1668,6 +1686,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const agent = inferChatAgent(chat, opts.droneEntry);
     if (agent.kind === 'builtin') {
       return await stopTranscriptChatResponse(opts);
+    }
+    if (agent.kind === 'native') {
+      return await stopNativeChatResponse(opts);
     }
     return await stopCliChatResponse(opts);
   }

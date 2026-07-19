@@ -90,7 +90,6 @@ type DroneSDK = {
   drones: DroneCollection;
   groups: GroupCollection;
   broadcast: BroadcastAPI;
-  ai?: AIClient;
 };
 ```
 
@@ -565,18 +564,6 @@ The MVP SDK should align with current repo behavior:
 - Drone removal maps to Hub delete-action settings and may archive instead of hard-delete.
 
 The SDK should not expose tmux or daemon details in its primary surface, even if the transport uses them internally.
-
-## Optional AI Module
-
-The SDK may expose an optional `ai` client if model access is already configured in the Hub.
-
-```ts
-type AIClient = {
-  ask(prompt: string, input?: RequestOptions): Promise<string>;
-};
-```
-
-This module is optional and must not block use of the core drone APIs.
 
 ## MVP Non-Goals and Deferred Decisions
 

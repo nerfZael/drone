@@ -1,6 +1,5 @@
 export { createDroneSDK } from './core';
 export type {
-  AIClient,
   ChatEvent,
   ChatMessage,
   ChatSummary,

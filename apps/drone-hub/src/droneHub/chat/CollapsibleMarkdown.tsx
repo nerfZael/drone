@@ -1,5 +1,9 @@
 import React from 'react';
-import { MarkdownMessage, type MarkdownFileReference } from './MarkdownMessage';
+import {
+  MarkdownMessage,
+  type MarkdownFileReference,
+  type MarkdownTextMentionLink,
+} from './MarkdownMessage';
 import { IconChevron } from './icons';
 
 function parseFenceMarker(line: string): { markerChar: '`' | '~'; markerLength: number } | null {
@@ -95,6 +99,8 @@ export function CollapsibleMarkdown({
   fadeTo,
   onOpenFileReference,
   onOpenLink,
+  textMentionLinks,
+  onOpenTextMention,
   maxHeightPx = 240,
   collapseAfterLines = 40,
   preserveLeadParagraph = false,
@@ -105,6 +111,8 @@ export function CollapsibleMarkdown({
   fadeTo: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
+  textMentionLinks?: MarkdownTextMentionLink[];
+  onOpenTextMention?: (mention: MarkdownTextMentionLink) => void;
   maxHeightPx?: number;
   collapseAfterLines?: number;
   preserveLeadParagraph?: boolean;
@@ -206,7 +214,14 @@ export function CollapsibleMarkdown({
     >
       {isLong && leadSplit ? (
         <>
-          <MarkdownMessage text={leadSplit.lead} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} />
+          <MarkdownMessage
+            text={leadSplit.lead}
+            className={className}
+            onOpenFileReference={onOpenFileReference}
+            onOpenLink={onOpenLink}
+            textMentionLinks={textMentionLinks}
+            onOpenTextMention={onOpenTextMention}
+          />
           {!collapsed ? (
             <div className={`output-collapse ${collapsed ? 'collapsed' : ''}`} style={style}>
               <MarkdownMessage
@@ -214,6 +229,8 @@ export function CollapsibleMarkdown({
                 className={className}
                 onOpenFileReference={onOpenFileReference}
                 onOpenLink={onOpenLink}
+                textMentionLinks={textMentionLinks}
+                onOpenTextMention={onOpenTextMention}
               />
             </div>
           ) : null}
@@ -225,11 +242,20 @@ export function CollapsibleMarkdown({
             className={className}
             onOpenFileReference={onOpenFileReference}
             onOpenLink={onOpenLink}
+            textMentionLinks={textMentionLinks}
+            onOpenTextMention={onOpenTextMention}
           />
         </div>
       ) : (
         <div className={`output-collapse ${isLong && collapsed ? 'collapsed' : ''}`} style={style}>
-          <MarkdownMessage text={text} className={className} onOpenFileReference={onOpenFileReference} onOpenLink={onOpenLink} />
+          <MarkdownMessage
+            text={text}
+            className={className}
+            onOpenFileReference={onOpenFileReference}
+            onOpenLink={onOpenLink}
+            textMentionLinks={textMentionLinks}
+            onOpenTextMention={onOpenTextMention}
+          />
         </div>
       )}
       {isLong && (

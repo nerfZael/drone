@@ -67,6 +67,5 @@ describe('shortcut defaults', () => {
       alt: false,
       shift: false,
     });
-    expect(defaults.toggleTldr).toBeNull();
   });
 });

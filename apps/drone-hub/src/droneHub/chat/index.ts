@@ -1,13 +1,35 @@
 export { ChatTabs } from './ChatTabs';
 export { ChatInput } from './ChatInput';
-export { ChatTranscriptFrame } from './ChatTranscriptFrame';
+export {
+  ChatSurface,
+  ChatSurfaceComposer,
+  ChatSurfaceTranscript,
+  useAgentChatSurfaceAdapter,
+  type ChatSurfaceComposerProps,
+  type ChatSurfaceProps,
+  type ChatSurfaceTranscriptProps,
+} from './ChatSurface';
+export {
+  AgentChatTranscript,
+  type AgentChatTranscriptItem,
+  type AgentChatTranscriptItemKind,
+  type AgentChatTranscriptProps,
+} from './AgentChatTranscript';
+export { ChatTranscriptFrame, type ChatTranscriptFrameProps } from './ChatTranscriptFrame';
 export type {
   ChatDraftAutomationPayload,
   ChatImageAttachmentPayload,
   ChatInputAutomationAction,
+  ChatInputProps,
   ChatSendContext,
   ChatSendPayload,
 } from './ChatInput';
+export {
+  adaptExternalAgentChatSurface,
+  adaptNativeAgentChatSurface,
+  type AgentChatSurfaceAdapter,
+  type AgentChatSurfaceCapabilities,
+} from './agent-chat-surface-adapters';
 export { EmptyState } from './EmptyState';
 export { CollapsibleOutput } from './CollapsibleOutput';
 export { TranscriptTurn } from './TranscriptTurn';
@@ -15,6 +37,24 @@ export type { DroneHubTask } from './drone-hub-task-parser';
 export type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 export { PromptLoopTranscriptGroup } from './PromptLoopTranscriptGroup';
 export { AutomationLaneStatusCard } from './AutomationLaneStatusCard';
+export { ChatComposerMenu, type ChatComposerMenuAction } from './ChatComposerMenu';
+export {
+  ChatComposerControls,
+  type ChatComposerButtonControl,
+  type ChatComposerControl,
+  type ChatComposerControlsConfig,
+  type ChatComposerSegmentedControl,
+  type ChatComposerSelectControl,
+  type ChatComposerTextControl,
+} from './ChatComposerControls';
+export {
+  ChatComposerContext,
+  type ChatComposerContextConfig,
+  type ChatComposerContextItem,
+} from './ChatComposerContext';
+export { ChatMessageFrame } from './ChatMessageFrame';
+export { ChatMessageBody, type ChatMessageImage } from './ChatMessageBody';
+export { ChatMessageCopyAction } from './ChatMessageCopyAction';
 export { PendingTranscriptTurn } from './PendingTranscriptTurn';
 export { RelativeTimeText } from './RelativeTimeText';
 export { TranscriptSkeleton } from './TranscriptSkeleton';

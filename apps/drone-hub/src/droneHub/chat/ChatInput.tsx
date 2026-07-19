@@ -14,6 +14,8 @@ import {
 } from '../app/automation-config';
 import { CHAT_DRAFT_AUTOMATION_STOP_PHRASE_DEFAULT } from '../app/chat-draft-automation';
 import { AutomationRunnerPanel } from './AutomationRunnerPanel';
+import { ChatComposerContext, type ChatComposerContextConfig } from './ChatComposerContext';
+import { ChatComposerControls, type ChatComposerControlsConfig } from './ChatComposerControls';
 import {
   CHAT_INPUT_MAX_BYTES_EACH,
   CHAT_INPUT_MAX_BYTES_TOTAL,
@@ -21,10 +23,12 @@ import {
   CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS,
   blobToBase64,
   fileToBase64,
+  filesFromClipboardData,
   formatBytes,
   imageFilesFromClipboardData,
   isLikelyImageFile,
   makeDraftImageAttachmentId,
+  mimeForChatAttachmentFile,
   revokeDraftImagePreviewUrls,
   textByteLength,
   type DraftChatAttachment,
@@ -39,6 +43,7 @@ export type ChatAttachmentPayload = {
   mime: string;
   size: number;
   dataBase64: string;
+  disposition?: 'artifact' | 'prompt';
 };
 
 export type ChatImageAttachmentPayload = ChatAttachmentPayload;
@@ -61,18 +66,43 @@ export type ChatDraftAutomationPayload = ChatSendPayload & {
 
 export type ChatInputAutomationAction = {
   id: string;
-  kind?: 'automation' | 'control';
   label: string;
   onSelect: () => void;
   onSelectWithRuns?: (runs: number) => void;
   title?: string;
   disabled?: boolean;
-  active?: boolean;
   statusText?: string;
   defaultRuns?: number;
   minRuns?: number;
   maxRuns?: number;
   sleepBetweenRunsLabel?: string;
+};
+
+export type ChatInputProps = {
+  resetKey: string;
+  droneName: string;
+  draftValue?: string;
+  onDraftValueChange?: (next: string) => void;
+  promptError: string | null;
+  sending: boolean;
+  waiting: boolean;
+  disabled?: boolean;
+  autoFocus?: boolean;
+  focusTargetId?: string;
+  modeHint?: string;
+  attachmentsEnabled?: boolean;
+  attachmentMode?: 'images' | 'files';
+  composerContext?: ChatComposerContextConfig;
+  composerControls?: ChatComposerControlsConfig;
+  automationActions?: ChatInputAutomationAction[];
+  automationMenuLabel?: string;
+  allowSendWhileWaiting?: boolean;
+  onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
+  onPublish?: () => Promise<boolean> | boolean;
+  publishing?: boolean;
+  onSendAutomation?: (payload: ChatDraftAutomationPayload) => Promise<boolean>;
+  onStop?: () => Promise<void> | void;
+  stopping?: boolean;
 };
 
 export function ChatInput({
@@ -88,38 +118,19 @@ export function ChatInput({
   focusTargetId,
   modeHint = '',
   attachmentsEnabled,
+  attachmentMode = 'images',
+  composerContext,
+  composerControls,
   automationActions,
   automationMenuLabel = 'Automations',
-  lockComposerWhileAutomationActive = true,
+  allowSendWhileWaiting = false,
   onSend,
   onPublish,
   publishing = false,
   onSendAutomation,
   onStop,
   stopping = false,
-}: {
-  resetKey: string;
-  droneName: string;
-  draftValue?: string;
-  onDraftValueChange?: (next: string) => void;
-  promptError: string | null;
-  sending: boolean;
-  waiting: boolean;
-  disabled?: boolean;
-  autoFocus?: boolean;
-  focusTargetId?: string;
-  modeHint?: string;
-  attachmentsEnabled?: boolean;
-  automationActions?: ChatInputAutomationAction[];
-  automationMenuLabel?: string;
-  lockComposerWhileAutomationActive?: boolean;
-  onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
-  onPublish?: () => Promise<boolean> | boolean;
-  publishing?: boolean;
-  onSendAutomation?: (payload: ChatDraftAutomationPayload) => Promise<boolean>;
-  onStop?: () => Promise<void> | void;
-  stopping?: boolean;
-}) {
+}: ChatInputProps) {
   const [uncontrolledDraft, setUncontrolledDraft] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
@@ -150,29 +161,14 @@ export function ChatInput({
       ),
     [automationActions],
   );
-  const activeAutomationAction = React.useMemo(
-    () => availableAutomationActions.find((action) => Boolean(action?.active)) ?? null,
-    [availableAutomationActions],
-  );
-  const hasActiveAutomation = Boolean(activeAutomationAction);
-  const composerLocked =
-    Boolean(disabled) || (lockComposerWhileAutomationActive && hasActiveAutomation);
+  const composerLocked = Boolean(disabled);
   const attachmentControlsLocked = composerLocked || sending;
-  const visibleAutomationActions = React.useMemo(
-    () =>
-      availableAutomationActions.filter((action) => {
-        const kind = String(action.kind ?? '').trim().toLowerCase();
-        if (kind === 'control') return true;
-        return kind === '' || kind === 'automation';
-      }),
-    [availableAutomationActions],
-  );
   const selectedAutomationAction = React.useMemo(
     () =>
-      visibleAutomationActions.find((action) => action.id === selectedAutomationActionId) ??
-      visibleAutomationActions[0] ??
+      availableAutomationActions.find((action) => action.id === selectedAutomationActionId) ??
+      availableAutomationActions[0] ??
       null,
-    [selectedAutomationActionId, visibleAutomationActions],
+    [availableAutomationActions, selectedAutomationActionId],
   );
 
   const attachmentsOn = attachmentsEnabled !== false;
@@ -182,6 +178,10 @@ export function ChatInput({
   );
   const textAttachmentCount = React.useMemo(
     () => attachments.filter((attachment) => attachment.kind === 'text').length,
+    [attachments],
+  );
+  const fileAttachmentCount = React.useMemo(
+    () => attachments.filter((attachment) => attachment.kind === 'file').length,
     [attachments],
   );
   React.useEffect(() => {
@@ -246,14 +246,16 @@ export function ChatInput({
   }, [controlledDraftEnabled, resetKey]);
 
   React.useEffect(() => {
-    if (visibleAutomationActions.length === 0) {
+    if (availableAutomationActions.length === 0) {
       setSelectedAutomationActionId('');
       return;
     }
-    const existing = visibleAutomationActions.some((action) => action.id === selectedAutomationActionId);
+    const existing = availableAutomationActions.some(
+      (action) => action.id === selectedAutomationActionId,
+    );
     if (existing) return;
-    setSelectedAutomationActionId(visibleAutomationActions[0].id);
-  }, [selectedAutomationActionId, visibleAutomationActions]);
+    setSelectedAutomationActionId(availableAutomationActions[0].id);
+  }, [availableAutomationActions, selectedAutomationActionId]);
 
   React.useEffect(() => {
     const action = selectedAutomationAction;
@@ -290,6 +292,7 @@ export function ChatInput({
   }, [automationPanelOpen]);
 
   const showStopAction = waiting && typeof onStop === 'function';
+  const showSeparateStopAction = showStopAction && allowSendWhileWaiting;
   const hasModeHint = modeHint.trim().length > 0;
   const supportsDraftAutomation = typeof onSendAutomation === 'function';
   const draftAutomationActive = draftAutomationEnabled && supportsDraftAutomation;
@@ -299,7 +302,7 @@ export function ChatInput({
   const voicePauseButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const voiceStopButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const trimmed = draft.trim();
-  const sendDisabled = composerLocked || voiceActionInFlight || (trimmed.length === 0 && attachments.length === 0 && !voiceRecordingActive);
+  const sendDisabled = sending || composerLocked || voiceActionInFlight || (trimmed.length === 0 && attachments.length === 0 && !voiceRecordingActive);
 
   React.useEffect(() => {
     if (supportsDraftAutomation || !draftAutomationEnabled) return;
@@ -344,7 +347,10 @@ export function ChatInput({
     return existingCount <= 0 ? 'pasted-text.txt' : `pasted-text-${existingCount + 1}.txt`;
   }
 
-  function addFiles(files: File[] | FileList | null | undefined) {
+  function addFiles(
+    files: File[] | FileList | null | undefined,
+    options: { source?: 'file' | 'paste' } = {},
+  ) {
     if (!attachmentsOn) return;
     if (!files) return;
     const list: File[] = Array.isArray(files) ? files : Array.from(files);
@@ -357,23 +363,24 @@ export function ChatInput({
 
       for (const f of list) {
         if (!f) continue;
-        if (!isLikelyImageFile(f)) {
+        const image = isLikelyImageFile(f);
+        if (attachmentMode === 'images' && !image) {
           setAttachmentError('Only image files can be attached.');
           continue;
         }
         const size = Number((f as any).size ?? 0);
         if (!Number.isFinite(size) || size <= 0) {
-          setAttachmentError('One of the selected images is empty or unreadable.');
+          setAttachmentError(`One of the selected ${attachmentMode === 'files' ? 'files' : 'images'} is empty or unreadable.`);
           continue;
         }
         if (size > CHAT_INPUT_MAX_BYTES_EACH) {
           setAttachmentError(
-            `Image too large (${formatBytes(size)}). Max per image is ${formatBytes(CHAT_INPUT_MAX_BYTES_EACH)}.`,
+            `${attachmentMode === 'files' ? 'File' : 'Image'} too large (${formatBytes(size)}). Max per ${attachmentMode === 'files' ? 'file' : 'image'} is ${formatBytes(CHAT_INPUT_MAX_BYTES_EACH)}.`,
           );
           continue;
         }
         if (next.length >= CHAT_INPUT_MAX_IMAGES) {
-          setAttachmentError(`Too many images. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
+          setAttachmentError(`Too many attachments. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
           break;
         }
         if (total + size > CHAT_INPUT_MAX_BYTES_TOTAL) {
@@ -383,10 +390,32 @@ export function ChatInput({
           break;
         }
 
-        const mime = String((f as any).type ?? '').trim() || 'application/octet-stream';
-        const name = String((f as any).name ?? '').trim() || `image-${next.length + 1}`;
-        const previewUrl = URL.createObjectURL(f);
-        next.push({ kind: 'image', id: makeDraftImageAttachmentId(), file: f, name, mime, size: Math.floor(size), previewUrl });
+        const mime = mimeForChatAttachmentFile(f);
+        const name = String((f as any).name ?? '').trim() || `attachment-${next.length + 1}`;
+        const disposition = options.source === 'paste' && image ? 'prompt' : 'artifact';
+        if (image) {
+          const previewUrl = URL.createObjectURL(f);
+          next.push({
+            kind: 'image',
+            id: makeDraftImageAttachmentId(),
+            file: f,
+            name,
+            mime,
+            size: Math.floor(size),
+            previewUrl,
+            disposition,
+          });
+        } else {
+          next.push({
+            kind: 'file',
+            id: makeDraftImageAttachmentId(),
+            file: f,
+            name,
+            mime,
+            size: Math.floor(size),
+            disposition,
+          });
+        }
         total += size;
       }
 
@@ -401,6 +430,19 @@ export function ChatInput({
     const size = textByteLength(text);
     setAttachmentError(null);
     setAttachments((prev) => {
+      const total = prev.reduce((sum, attachment) => sum + (Number(attachment.size) || 0), 0);
+      if (prev.length >= CHAT_INPUT_MAX_IMAGES) {
+        setAttachmentError(`Too many attachments. Max is ${CHAT_INPUT_MAX_IMAGES}.`);
+        return prev;
+      }
+      if (size > CHAT_INPUT_MAX_BYTES_EACH) {
+        setAttachmentError(`Pasted text too large (${formatBytes(size)}). Max per attachment is ${formatBytes(CHAT_INPUT_MAX_BYTES_EACH)}.`);
+        return prev;
+      }
+      if (total + size > CHAT_INPUT_MAX_BYTES_TOTAL) {
+        setAttachmentError(`Attachments too large in total. Max total is ${formatBytes(CHAT_INPUT_MAX_BYTES_TOTAL)}.`);
+        return prev;
+      }
       const textCount = prev.filter((attachment) => attachment.kind === 'text').length;
       return [
         ...prev,
@@ -411,6 +453,7 @@ export function ChatInput({
           name: makePastedTextAttachmentName(textCount),
           mime: 'text/plain',
           size,
+          disposition: 'artifact',
         },
       ];
     });
@@ -449,13 +492,23 @@ export function ChatInput({
                 mime: a.mime,
                 size: a.size,
                 dataBase64: await fileToBase64(a.file),
+                disposition: a.disposition,
               }
-            : {
+            : a.kind === 'text'
+              ? {
                 name: a.name,
                 mime: a.mime,
                 size: a.size,
                 dataBase64: await blobToBase64(new Blob([a.text], { type: a.mime })),
-              },
+                disposition: a.disposition,
+              }
+              : {
+                  name: a.name,
+                  mime: a.mime,
+                  size: a.size,
+                  dataBase64: await fileToBase64(a.file),
+                  disposition: a.disposition,
+                },
         ),
       );
     } catch (e: any) {
@@ -520,6 +573,7 @@ export function ChatInput({
   }
 
   const sendNow = (context: ChatSendContext) => {
+    if (sending || composerLocked) return;
     const actionToken = beginVoiceAction();
     if (actionToken == null) return;
     void (async () => {
@@ -541,7 +595,7 @@ export function ChatInput({
 
   const selectedAutomationActionDisabled = React.useMemo(() => {
     if (!selectedAutomationAction) return true;
-    return (Boolean(disabled) && !Boolean(selectedAutomationAction.active)) || Boolean(selectedAutomationAction.disabled);
+    return Boolean(disabled) || Boolean(selectedAutomationAction.disabled);
   }, [disabled, selectedAutomationAction]);
 
   const selectedAutomationRuns = React.useMemo(() => {
@@ -584,7 +638,7 @@ export function ChatInput({
     [draftAutomationSleepAmount, draftAutomationSleepUnit],
   );
   const sendButtonLabel =
-    showStopAction
+    showStopAction && !showSeparateStopAction
       ? stopping
         ? 'Stopping...'
         : 'Stop'
@@ -594,7 +648,7 @@ export function ChatInput({
           : 'Sending...'
         : sending
           ? 'Sending...'
-          : waiting
+          : waiting && !allowSendWhileWaiting
             ? 'Waiting...'
             : draftAutomationActive
               ? 'Start loop'
@@ -623,7 +677,7 @@ export function ChatInput({
         if (attachmentControlsLocked) return;
         e.preventDefault();
         setDragActive(false);
-        addFiles(e.dataTransfer?.files ?? null);
+        addFiles(e.dataTransfer?.files ?? null, { source: 'file' });
       }}
     >
       <div className="max-w-[1170px] mx-auto">
@@ -640,6 +694,7 @@ export function ChatInput({
         >
           {/* Top accent line */}
           <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-[var(--user-muted)] to-transparent opacity-25" />
+          <ChatComposerContext config={composerContext} />
           {attachmentsOn && attachments.length > 0 && (
             <div className="px-3 pt-3">
               <div className="flex items-center justify-between gap-2">
@@ -650,6 +705,7 @@ export function ChatInput({
                   {attachments.length} attachment{attachments.length === 1 ? '' : 's'} attached
                   {imageAttachmentCount > 0 ? ` • ${imageAttachmentCount} image${imageAttachmentCount === 1 ? '' : 's'}` : ''}
                   {textAttachmentCount > 0 ? ` • ${textAttachmentCount} text attachment${textAttachmentCount === 1 ? '' : 's'}` : ''}
+                  {fileAttachmentCount > 0 ? ` • ${fileAttachmentCount} file${fileAttachmentCount === 1 ? '' : 's'}` : ''}
                 </div>
                 <button
                   type="button"
@@ -661,7 +717,7 @@ export function ChatInput({
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
-                  title="Attach more images"
+                  title={attachmentMode === 'files' ? 'Attach more files' : 'Attach more images'}
                 >
                   Add
                 </button>
@@ -681,7 +737,7 @@ export function ChatInput({
                           className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)]"
                           style={{ fontFamily: 'var(--display)' }}
                         >
-                          Text attachment
+                          {a.kind === 'text' ? 'Text attachment' : 'File attachment'}
                         </div>
                         <div className="mt-1 truncate text-[10px] text-[var(--fg-secondary)]">{a.name}</div>
                         <div className="mt-0.5 text-[9px] text-[var(--muted-dim)]">{formatBytes(a.size)}</div>
@@ -713,11 +769,11 @@ export function ChatInput({
                 <input
                   ref={fileInputRef}
                   type="file"
-                  accept="image/*"
+                  accept={attachmentMode === 'images' ? 'image/*' : undefined}
                   multiple
                   className="hidden"
                   onChange={(e) => {
-                    addFiles(e.currentTarget.files);
+                    addFiles(e.currentTarget.files, { source: 'file' });
                     // allow re-selecting same file
                     e.currentTarget.value = '';
                   }}
@@ -732,8 +788,8 @@ export function ChatInput({
                       ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
                   }`}
-                  title="Attach images (paste or drag and drop also works)"
-                  aria-label="Attach images"
+                  title={attachmentMode === 'files' ? 'Attach files (paste or drag and drop also works)' : 'Attach images (paste or drag and drop also works)'}
+                  aria-label={attachmentMode === 'files' ? 'Attach files' : 'Attach images'}
                 >
                   <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                     <path d="M6.5 5.5h3" />
@@ -831,9 +887,13 @@ export function ChatInput({
               value={draft}
               onChange={(e) => setDraft(e.target.value)}
               onPaste={(e) => {
-                const files = imageFilesFromClipboardData(e.clipboardData);
+                const files = attachmentMode === 'files'
+                  ? filesFromClipboardData(e.clipboardData)
+                  : imageFilesFromClipboardData(e.clipboardData);
                 if (attachmentsOn && !attachmentControlsLocked && files.length > 0) {
-                  addFiles(files);
+                  e.preventDefault();
+                  addFiles(files, { source: 'paste' });
+                  return;
                 }
                 const pastedText = String(e.clipboardData?.getData('text/plain') ?? '');
                 if (
@@ -865,6 +925,7 @@ export function ChatInput({
               autoFocus={Boolean(autoFocus)}
               aria-label={`Message ${droneName}`}
             />
+            <ChatComposerControls config={composerControls} />
             {supportsDraftAutomation && (
               <button
                 type="button"
@@ -896,9 +957,9 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => setAutomationPanelOpen((open) => !open)}
-                  disabled={Boolean(disabled) && !hasActiveAutomation}
+                  disabled={Boolean(disabled)}
                   className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[10px] font-semibold tracking-wide uppercase border transition-all ${
-                    Boolean(disabled) && !hasActiveAutomation
+                    Boolean(disabled)
                       ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                   }`}
@@ -937,18 +998,29 @@ export function ChatInput({
                 {publishing ? 'Publishing...' : 'Publish'}
               </button>
             ) : null}
+            {showSeparateStopAction ? (
+              <button
+                type="button"
+                onClick={() => void onStop?.()}
+                disabled={stopping}
+                className="inline-flex h-9 items-center justify-center rounded-md border border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--red)] hover:bg-[rgba(255,90,90,.14)] disabled:cursor-not-allowed disabled:opacity-50"
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                {stopping ? 'Stopping...' : 'Stop'}
+              </button>
+            ) : null}
             <button
               type="button"
               onClick={() => {
-                if (showStopAction) {
+                if (showStopAction && !showSeparateStopAction) {
                   void onStop?.();
                   return;
                 }
                 sendNow({ trigger: 'button', modifierKey: false });
               }}
-              disabled={showStopAction ? stopping : sendDisabled}
+              disabled={showStopAction && !showSeparateStopAction ? stopping : sendDisabled}
               className={`inline-flex items-center justify-center h-9 min-w-[80px] px-4 rounded-md text-[11px] font-semibold tracking-wide uppercase border transition-all ${
-                showStopAction
+                showStopAction && !showSeparateStopAction
                   ? stopping
                     ? 'opacity-50 cursor-not-allowed bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)]'
                     : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.35)] text-[var(--red)] hover:bg-[rgba(255,90,90,.14)]'
@@ -957,7 +1029,7 @@ export function ChatInput({
                     : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
               }`}
               style={{ fontFamily: 'var(--display)' }}
-              title={showStopAction ? 'Stop response' : 'Send'}
+              title={showStopAction && !showSeparateStopAction ? 'Stop response' : 'Send'}
             >
               {sendButtonLabel}
             </button>
@@ -1027,12 +1099,12 @@ export function ChatInput({
           )}
           <AutomationRunnerPanel
             open={automationPanelOpen}
-            actions={visibleAutomationActions}
+            actions={availableAutomationActions}
             selectedAction={selectedAutomationAction}
             selectedActionId={selectedAutomationAction?.id ?? ''}
             onSelectActionId={(nextId) => {
               setSelectedAutomationActionId(nextId);
-              const nextAction = visibleAutomationActions.find((action) => action.id === nextId) ?? null;
+              const nextAction = availableAutomationActions.find((action) => action.id === nextId) ?? null;
               if (nextAction && typeof nextAction.defaultRuns === 'number') {
                 setAutomationRunsDraft(String(nextAction.defaultRuns));
               }
@@ -1041,7 +1113,7 @@ export function ChatInput({
             onRunsDraftChange={setAutomationRunsDraft}
             selectedRuns={selectedAutomationRuns}
             selectedActionDisabled={selectedAutomationActionDisabled}
-            controlsDisabled={Boolean(disabled) && !hasActiveAutomation}
+            controlsDisabled={Boolean(disabled)}
             onTriggerAction={triggerSelectedAutomationAction}
           />
           {hasModeHint && (

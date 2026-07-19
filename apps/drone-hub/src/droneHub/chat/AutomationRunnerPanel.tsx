@@ -73,9 +73,7 @@ export function AutomationRunnerPanel({
             className={`h-9 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
               selectedActionDisabled || !selectedAction
                 ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : selectedAction.active
-                  ? 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
-                  : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
+                : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title={selectedAction?.title}

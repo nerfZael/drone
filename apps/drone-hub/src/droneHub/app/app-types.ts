@@ -10,12 +10,6 @@ export type ChatModelOption = {
   isCurrent?: boolean;
 };
 
-export type TldrState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'ready'; summary: string }
-  | { status: 'error'; error: string };
-
 export type AgentSuggestionState =
   | { status: 'idle' }
   | { status: 'loading' }
