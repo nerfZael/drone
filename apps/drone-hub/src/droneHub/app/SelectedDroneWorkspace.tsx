@@ -2516,7 +2516,6 @@ export function SelectedDroneWorkspace({
               waiting={chatInputWaiting}
               composerControls={externalComposerControls}
               automationActions={chatAutomationActions}
-              lockComposerWhileAutomationActive={false}
               modeHint={automationModeHint}
               autoFocus={shouldAutoFocusInput}
               onStop={

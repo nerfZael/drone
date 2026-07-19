@@ -757,7 +757,10 @@ export function AssistantMessageRow({
           );
         }
       } else if (part.type === 'text') {
-        const t = extractAgentMessageContent(String(part.text ?? '')).text.trim();
+        const t = extractAgentMessageContent(
+          String(part.text ?? ''),
+          !message.errorMessage,
+        ).text.trim();
         if (t) {
           blocks.push(
             <ChatMessageBody

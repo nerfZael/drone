@@ -1,13 +1,13 @@
 import React from 'react';
 import { stripAnsi } from '../../domain';
 import type { PendingPrompt } from '../types';
-import { copyText } from '../app/clipboard';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
+import { ChatMessageCopyAction } from './ChatMessageCopyAction';
 import { ChatMessageFrame } from './ChatMessageFrame';
 import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
 import { RelativeTimeText } from './RelativeTimeText';
-import { IconCopy, TypingDots } from './icons';
+import { TypingDots } from './icons';
 import { AgentPlanList } from './AgentPlanList';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
@@ -31,8 +31,6 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   cancelBusy?: boolean;
   cancelError?: string | null;
 }) {
-  const [copiedToastRole, setCopiedToastRole] = React.useState<'user' | 'agent' | null>(null);
-  const copiedToastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
   const isFailed = item.state === 'failed';
@@ -57,27 +55,6 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       : item.state === 'sent'
         ? 'Waiting…'
         : 'Typing…';
-  const showCopiedToast = React.useCallback((role: 'user' | 'agent') => {
-    setCopiedToastRole(role);
-    if (copiedToastTimerRef.current != null) clearTimeout(copiedToastTimerRef.current);
-    copiedToastTimerRef.current = setTimeout(() => {
-      setCopiedToastRole((prev) => (prev === role ? null : prev));
-      copiedToastTimerRef.current = null;
-    }, 1200);
-  }, []);
-  React.useEffect(
-    () => () => {
-      if (copiedToastTimerRef.current != null) {
-        clearTimeout(copiedToastTimerRef.current);
-        copiedToastTimerRef.current = null;
-      }
-    },
-    [],
-  );
-  React.useEffect(() => {
-    setCopiedToastRole(null);
-  }, [item.id, item.state, item.updatedAt]);
-
   const pendingHeader = (
     <>
       <span
@@ -117,27 +94,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   return (
     <div className="group/pending-turn animate-fade-in opacity-90">
       <ChatMessageFrame role="user" at={item.at} showRoleIcon={showRoleIcons} headerEnd={pendingHeader}>
-        {copiedToastRole === 'user' ? (
-          <div
-            role="status"
-            aria-live="polite"
-            className="pointer-events-none absolute right-10 top-2 z-20 rounded border border-[rgba(148,163,184,.28)] bg-[rgba(0,0,0,.42)] px-2 py-0.5 text-[9px] uppercase tracking-wide text-[var(--fg-secondary)]"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            Copied
-          </div>
-        ) : null}
-        {userCopyText.length > 0 ? (
-          <button
-            type="button"
-            onClick={() => void copyText(userCopyText).then(() => showCopiedToast('user'))}
-            className="pointer-events-none absolute right-2 top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] text-[var(--muted)] opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:border-[var(--user-muted)] hover:bg-[rgba(0,0,0,.25)] hover:text-[var(--user)] focus-visible:pointer-events-auto focus-visible:opacity-100"
-            title="Copy user message"
-            aria-label="Copy user message"
-          >
-            <IconCopy className="h-3.5 w-3.5 opacity-90" />
-          </button>
-        ) : null}
+        <ChatMessageCopyAction text={userCopyText} />
         {promptText ? (
           <CollapsibleMarkdown
             text={promptText}
@@ -163,62 +120,44 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           error={isFailed && !isStopped}
           warning={isStopped}
         >
-              {copiedToastRole === 'agent' ? (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className="absolute top-2 right-10 z-20 pointer-events-none rounded border border-[rgba(148,163,184,.28)] bg-[rgba(0,0,0,.42)] px-2 py-0.5 text-[9px] uppercase tracking-wide text-[var(--fg-secondary)]"
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  Copied
-                </div>
-              ) : null}
-              {agentCopyText.length > 0 ? (
-                <button
-                  type="button"
-                  onClick={() => {
-                    void copyText(agentCopyText).then(() => showCopiedToast('agent'));
-                  }}
-                  className="absolute top-2 right-2 z-10 inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity pointer-events-none opacity-0 group-hover:opacity-100 group-hover:pointer-events-auto focus-visible:opacity-100 focus-visible:pointer-events-auto bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]"
-                  title="Copy agent message"
-                  aria-label="Copy agent message"
-                >
-                  <IconCopy className="w-3.5 h-3.5 opacity-90" />
-                </button>
-              ) : null}
-              {isFailed ? (
-                <div
-                  className={`text-[12.5px] leading-[1.6] whitespace-pre-wrap ${
-                    isStopped ? 'text-[var(--yellow)]' : 'text-[var(--red)]'
-                  }`}
-                >
-                  {stripAnsi(item.error || 'failed to send')}
-                </div>
-              ) : (
-                <>
-                  <div className="text-[12.5px] leading-[1.6] text-[var(--muted)] flex items-center gap-2">
-                    <TypingDots color="var(--accent)" />
-                    {item.state === 'sending' ? 'Sending…' : item.state === 'sent' ? 'Waiting…' : 'Typing…'}
-                  </div>
-                  {observability ? (
-                    <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-[10.5px] leading-[1.45] text-[var(--yellow)]">
-                      <div>{observability.message}</div>
-                      {observability.lastCheckedAt ? (
-                        <div className="mt-0.5 text-[9px] text-[var(--muted-dim)] font-mono">
-                          Last checked <RelativeTimeText at={observability.lastCheckedAt} />
-                        </div>
-                      ) : null}
+          <ChatMessageCopyAction text={agentCopyText} />
+          {isFailed ? (
+            <div
+              className={`whitespace-pre-wrap text-[12.5px] leading-[1.6] ${
+                isStopped ? 'text-[var(--yellow)]' : 'text-[var(--red)]'
+              }`}
+            >
+              {stripAnsi(item.error || 'failed to send')}
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center gap-2 text-[12.5px] leading-[1.6] text-[var(--muted)]">
+                <TypingDots color="var(--accent)" />
+                {item.state === 'sending' ? 'Sending…' : item.state === 'sent' ? 'Waiting…' : 'Typing…'}
+              </div>
+              {observability ? (
+                <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-[10.5px] leading-[1.45] text-[var(--yellow)]">
+                  <div>{observability.message}</div>
+                  {observability.lastCheckedAt ? (
+                    <div className="mt-0.5 font-mono text-[9px] text-[var(--muted-dim)]">
+                      Last checked <RelativeTimeText at={observability.lastCheckedAt} />
                     </div>
                   ) : null}
-                  <AgentPlanList plan={item.agentPlan} running />
-                  {cancelError ? (
-                    <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap">{stripAnsi(cancelError)}</div>
-                  ) : null}
-                </>
-              )}
+                </div>
+              ) : null}
+              <AgentPlanList plan={item.agentPlan} running />
+              {cancelError ? (
+                <div className="mt-2 whitespace-pre-wrap text-[10px] text-[var(--red)]">
+                  {stripAnsi(cancelError)}
+                </div>
+              ) : null}
+            </>
+          )}
         </ChatMessageFrame>
       ) : cancelError ? (
-        <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap text-right">{stripAnsi(cancelError)}</div>
+        <div className="mt-2 whitespace-pre-wrap text-right text-[10px] text-[var(--red)]">
+          {stripAnsi(cancelError)}
+        </div>
       ) : null}
     </div>
   );

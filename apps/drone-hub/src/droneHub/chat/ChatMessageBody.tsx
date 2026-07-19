@@ -15,7 +15,6 @@ export function ChatMessageBody({
   error = false,
   errorMessage,
   images = [],
-  muted = false,
   preserveLeadParagraph = false,
   toggleOnMessageClick = false,
   onOpenFileReference,
@@ -28,7 +27,6 @@ export function ChatMessageBody({
   error?: boolean;
   errorMessage?: string;
   images?: ChatMessageImage[];
-  muted?: boolean;
   preserveLeadParagraph?: boolean;
   toggleOnMessageClick?: boolean;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
@@ -42,7 +40,7 @@ export function ChatMessageBody({
   const className =
     role === 'user'
       ? 'dh-markdown--user'
-      : `dh-markdown--transcript ${muted ? 'dh-markdown--muted' : error ? 'dh-markdown--error' : 'dh-markdown--agent'}`;
+      : `dh-markdown--transcript ${error ? 'dh-markdown--error' : 'dh-markdown--agent'}`;
 
   if (!hasText && !normalizedError && images.length === 0) return null;
 

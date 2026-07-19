@@ -150,7 +150,6 @@ export const TranscriptTurn = React.memo(
           at={agentIso}
           error={!item.ok}
           showRoleIcon={showRoleIcons}
-          messageId={messageId}
           headerEnd={autoContinueBadge ? (
             <span
               className={`inline-flex h-3.5 w-3.5 items-center justify-center ${autoContinueBadge.toneClassName}`}

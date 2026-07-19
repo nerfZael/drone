@@ -54,7 +54,7 @@ export function ChatMessageCopyAction({
             }, 1200);
           });
         }}
-        className="inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] text-[var(--muted)] opacity-0 transition-opacity group-hover:opacity-100 hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)] hover:text-[var(--accent)] focus-visible:opacity-100"
+        className="pointer-events-none inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] text-[var(--muted)] opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)] hover:text-[var(--accent)] focus-visible:pointer-events-auto focus-visible:opacity-100"
         title="Copy message"
         aria-label="Copy message"
       >

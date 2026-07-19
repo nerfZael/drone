@@ -1789,7 +1789,6 @@ export function AssistantDock({
               composerContext={nativeComposerContext}
               composerControls={nativeComposerControls}
               automationActions={automationFeatures.actions}
-              lockComposerWhileAutomationActive={false}
               onStop={() => stop()}
               stopping={assistantStopBusy}
               onSend={async (payload) => await sendPrompt(payload)}

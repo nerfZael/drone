@@ -502,7 +502,6 @@ export function usePromptAutomationState({
       const queuedForAction = queuedByAutomationId.get(config.automationId) ?? 0;
       return {
         id: `automation:${config.automationId}`,
-        kind: 'automation',
         label: laneBusy ? `Queue ${config.automationLabel}` : `Run ${config.automationLabel}`,
         onSelect: () => {
           startPromptAutomation(automation);
@@ -523,7 +522,6 @@ export function usePromptAutomationState({
           supportedMode,
         }),
         disabled: promptAutomationBusy || Boolean(stoppingPromptAutomationMode) || !supportedMode || config.prompt.length === 0,
-        active: false,
         defaultRuns: config.runs,
         minRuns: AUTOMATION_RUNS_MIN,
         maxRuns: AUTOMATION_RUNS_MAX,

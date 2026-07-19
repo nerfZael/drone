@@ -66,13 +66,11 @@ export type ChatDraftAutomationPayload = ChatSendPayload & {
 
 export type ChatInputAutomationAction = {
   id: string;
-  kind?: 'automation' | 'control';
   label: string;
   onSelect: () => void;
   onSelectWithRuns?: (runs: number) => void;
   title?: string;
   disabled?: boolean;
-  active?: boolean;
   statusText?: string;
   defaultRuns?: number;
   minRuns?: number;
@@ -98,7 +96,6 @@ export type ChatInputProps = {
   composerControls?: ChatComposerControlsConfig;
   automationActions?: ChatInputAutomationAction[];
   automationMenuLabel?: string;
-  lockComposerWhileAutomationActive?: boolean;
   allowSendWhileWaiting?: boolean;
   onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onPublish?: () => Promise<boolean> | boolean;
@@ -126,7 +123,6 @@ export function ChatInput({
   composerControls,
   automationActions,
   automationMenuLabel = 'Automations',
-  lockComposerWhileAutomationActive = true,
   allowSendWhileWaiting = false,
   onSend,
   onPublish,
@@ -165,29 +161,14 @@ export function ChatInput({
       ),
     [automationActions],
   );
-  const activeAutomationAction = React.useMemo(
-    () => availableAutomationActions.find((action) => Boolean(action?.active)) ?? null,
-    [availableAutomationActions],
-  );
-  const hasActiveAutomation = Boolean(activeAutomationAction);
-  const composerLocked =
-    Boolean(disabled) || (lockComposerWhileAutomationActive && hasActiveAutomation);
+  const composerLocked = Boolean(disabled);
   const attachmentControlsLocked = composerLocked || sending;
-  const visibleAutomationActions = React.useMemo(
-    () =>
-      availableAutomationActions.filter((action) => {
-        const kind = String(action.kind ?? '').trim().toLowerCase();
-        if (kind === 'control') return true;
-        return kind === '' || kind === 'automation';
-      }),
-    [availableAutomationActions],
-  );
   const selectedAutomationAction = React.useMemo(
     () =>
-      visibleAutomationActions.find((action) => action.id === selectedAutomationActionId) ??
-      visibleAutomationActions[0] ??
+      availableAutomationActions.find((action) => action.id === selectedAutomationActionId) ??
+      availableAutomationActions[0] ??
       null,
-    [selectedAutomationActionId, visibleAutomationActions],
+    [availableAutomationActions, selectedAutomationActionId],
   );
 
   const attachmentsOn = attachmentsEnabled !== false;
@@ -265,14 +246,16 @@ export function ChatInput({
   }, [controlledDraftEnabled, resetKey]);
 
   React.useEffect(() => {
-    if (visibleAutomationActions.length === 0) {
+    if (availableAutomationActions.length === 0) {
       setSelectedAutomationActionId('');
       return;
     }
-    const existing = visibleAutomationActions.some((action) => action.id === selectedAutomationActionId);
+    const existing = availableAutomationActions.some(
+      (action) => action.id === selectedAutomationActionId,
+    );
     if (existing) return;
-    setSelectedAutomationActionId(visibleAutomationActions[0].id);
-  }, [selectedAutomationActionId, visibleAutomationActions]);
+    setSelectedAutomationActionId(availableAutomationActions[0].id);
+  }, [availableAutomationActions, selectedAutomationActionId]);
 
   React.useEffect(() => {
     const action = selectedAutomationAction;
@@ -612,7 +595,7 @@ export function ChatInput({
 
   const selectedAutomationActionDisabled = React.useMemo(() => {
     if (!selectedAutomationAction) return true;
-    return (Boolean(disabled) && !Boolean(selectedAutomationAction.active)) || Boolean(selectedAutomationAction.disabled);
+    return Boolean(disabled) || Boolean(selectedAutomationAction.disabled);
   }, [disabled, selectedAutomationAction]);
 
   const selectedAutomationRuns = React.useMemo(() => {
@@ -974,9 +957,9 @@ export function ChatInput({
                 <button
                   type="button"
                   onClick={() => setAutomationPanelOpen((open) => !open)}
-                  disabled={Boolean(disabled) && !hasActiveAutomation}
+                  disabled={Boolean(disabled)}
                   className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[10px] font-semibold tracking-wide uppercase border transition-all ${
-                    Boolean(disabled) && !hasActiveAutomation
+                    Boolean(disabled)
                       ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                       : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                   }`}
@@ -1116,12 +1099,12 @@ export function ChatInput({
           )}
           <AutomationRunnerPanel
             open={automationPanelOpen}
-            actions={visibleAutomationActions}
+            actions={availableAutomationActions}
             selectedAction={selectedAutomationAction}
             selectedActionId={selectedAutomationAction?.id ?? ''}
             onSelectActionId={(nextId) => {
               setSelectedAutomationActionId(nextId);
-              const nextAction = visibleAutomationActions.find((action) => action.id === nextId) ?? null;
+              const nextAction = availableAutomationActions.find((action) => action.id === nextId) ?? null;
               if (nextAction && typeof nextAction.defaultRuns === 'number') {
                 setAutomationRunsDraft(String(nextAction.defaultRuns));
               }
@@ -1130,7 +1113,7 @@ export function ChatInput({
             onRunsDraftChange={setAutomationRunsDraft}
             selectedRuns={selectedAutomationRuns}
             selectedActionDisabled={selectedAutomationActionDisabled}
-            controlsDisabled={Boolean(disabled) && !hasActiveAutomation}
+            controlsDisabled={Boolean(disabled)}
             onTriggerAction={triggerSelectedAutomationAction}
           />
           {hasModeHint && (

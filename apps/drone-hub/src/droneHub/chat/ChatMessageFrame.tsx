@@ -12,9 +12,6 @@ export function ChatMessageFrame({
   headerEnd,
   children,
   className = '',
-  onMouseEnter,
-  onMouseLeave,
-  messageId,
 }: {
   role: 'user' | 'assistant';
   at?: string;
@@ -24,9 +21,6 @@ export function ChatMessageFrame({
   headerEnd?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
-  onMouseEnter?: () => void;
-  onMouseLeave?: () => void;
-  messageId?: string;
 }) {
   const user = role === 'user';
   const label = user ? 'You' : 'Agent';
@@ -56,9 +50,6 @@ export function ChatMessageFrame({
         </div>
       </div>
       <div
-        data-message-id={messageId}
-        onMouseEnter={onMouseEnter}
-        onMouseLeave={onMouseLeave}
         className={`group relative rounded-lg border px-4 py-3 ${
           user
             ? 'rounded-tr-sm border-[rgba(148,163,184,.14)] bg-[var(--user-dim)]'
