@@ -4,6 +4,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 
 import {
   AgentChatTranscript,
+  ChatLoadingState,
   ChatMessageBody,
   ChatSurface,
   ChatSurfaceComposer,
@@ -35,6 +36,32 @@ function renderComposer(adapter: AgentChatSurfaceAdapter) {
 }
 
 describe('agent chat surface adapters', () => {
+  test('both agent types use the same centered conversation loader', () => {
+    const loaderHtml = renderToStaticMarkup(<ChatLoadingState />);
+
+    expect(loaderHtml).toContain('role="status"');
+    expect(loaderHtml).toContain('Loading conversation…');
+    expect(loaderHtml).toContain('animate-spin');
+    expect(loaderHtml).not.toContain('animate-pulse');
+
+    for (const adapter of [adaptExternalAgentChatSurface(), adaptNativeAgentChatSurface()]) {
+      const html = renderToStaticMarkup(
+        <ChatSurface adapter={adapter}>
+          <AgentChatTranscript
+            loading
+            hasContent={false}
+            emptyState={null}
+            items={TRANSCRIPT_ITEMS}
+          />
+        </ChatSurface>,
+      );
+
+      expect(html).toContain('Loading conversation…');
+      expect(html).toContain('animate-spin');
+      expect(html).not.toContain('Visible message');
+    }
+  });
+
   test('external agents use image attachments without native tool activity', () => {
     const adapter = adaptExternalAgentChatSurface();
     const html = renderComposer(adapter);

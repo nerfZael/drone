@@ -1,3 +1,4 @@
+import type { BlipHistoryPage } from '@blip/protocol';
 import type { DraftChatAttachment } from '../chat/chat-input-attachments';
 import type {
   AssistantDroneNameMap,
@@ -46,6 +47,10 @@ export type PendingAssistantScopeSave = {
 };
 
 export type AssistantSnapshot = NativeChatSnapshot;
+export type AssistantBootstrapSnapshot = AssistantSnapshot & {
+  nativeChatId?: string;
+  initialHistory?: BlipHistoryPage;
+};
 export type AssistantDefaultSettings = NativeAgentDefaultSettings;
 
 export type AssistantSystemPromptSettings = {

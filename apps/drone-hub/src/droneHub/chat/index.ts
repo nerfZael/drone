@@ -57,4 +57,4 @@ export { ChatMessageBody, type ChatMessageImage } from './ChatMessageBody';
 export { ChatMessageCopyAction } from './ChatMessageCopyAction';
 export { PendingTranscriptTurn } from './PendingTranscriptTurn';
 export { RelativeTimeText } from './RelativeTimeText';
-export { TranscriptSkeleton } from './TranscriptSkeleton';
+export { ChatLoadingState } from './ChatLoadingState';

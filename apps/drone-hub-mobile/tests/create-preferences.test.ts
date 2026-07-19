@@ -15,8 +15,9 @@ describe('mobile new drone preferences', () => {
       repoPath: '/work/repo-a',
       draft: true,
       persistVolume: true,
-      repoBranchSource: 'host',
-      pullHostBranchBeforeCreate: true,
+      repoBranchSource: 'remote',
+      remoteBranch: 'origin/feature-a',
+      pullHostBranchBeforeCreate: false,
       seedAgent: { kind: 'builtin', id: 'codex' },
       seedModel: 'gpt-5.4',
       seedReasoning: 'high',
@@ -34,8 +35,9 @@ describe('mobile new drone preferences', () => {
       model: 'gpt-5.4',
       provider: '',
       reasoning: 'high',
-      repoBranchSource: 'host',
-      pullHostBranchBeforeCreate: true,
+      repoBranchSource: 'remote',
+      repoCreateRemoteBranch: 'origin/feature-a',
+      pullHostBranchBeforeCreate: false,
     });
     expect(preferences).not.toHaveProperty('name');
     expect(preferences).not.toHaveProperty('group');
@@ -54,6 +56,7 @@ describe('mobile new drone preferences', () => {
       provider: 'anthropic',
       reasoning: 'medium',
       repoBranchSource: 'remote',
+      repoCreateRemoteBranch: 'origin/repo-a',
       pullHostBranchBeforeCreate: false,
     });
 
@@ -94,6 +97,7 @@ describe('mobile new drone preferences', () => {
         provider: 'openai',
         reasoning: 'high',
         repoBranchSource: 'host',
+        repoCreateRemoteBranch: '',
         pullHostBranchBeforeCreate: false,
       }),
     ).toMatchObject({

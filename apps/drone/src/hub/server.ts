@@ -5721,6 +5721,7 @@ export async function startDroneHubApiServer(opts: {
   });
   registerNativeChatRoutes(apiRouter, {
     nativeChatLifecycle,
+    nativeChatHistoryPage: (threadId, input) => blipAssistantHost.historyPage(threadId, input),
     getChatEntry,
     inferChatAgent,
     resolveDroneOrPendingForReadRef,

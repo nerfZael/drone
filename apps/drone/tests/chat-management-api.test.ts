@@ -656,11 +656,18 @@ describeSocketSuite('chat management api', () => {
     expect(cloned.r.status).toBe(201);
 
     const opened = await apiFetch(
-      `/api/drones/${encodeURIComponent(droneId)}/chats/review/native`,
+      `/api/drones/${encodeURIComponent(droneId)}/chats/review/native?includeHistory=1`,
       { method: 'POST' },
     );
     expect(opened.r.status).toBe(200);
     expect(String(opened.data?.nativeChatId ?? '')).toMatch(/^[0-9a-f-]{36}$/i);
+    expect(opened.data?.initialHistory).toEqual({
+      version: 1,
+      threadId: opened.data.nativeChatId,
+      sessionId: null,
+      entries: [],
+      page: { limit: 80, beforeCursor: null, hasOlder: false },
+    });
   });
 
   test('clears read-only agent permission mode when switching to an unsupported agent', async () => {

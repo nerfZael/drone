@@ -105,7 +105,7 @@ type UseDroneCreationActionsArgs = {
     },
   ) => void;
   rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
-  rememberNewDronePreferences: (preferences: DesktopNewDronePreferences) => void;
+  rememberNewDronePreferences: (repoPath: string, preferences: DesktopNewDronePreferences) => void;
   setStartupSeedByDrone: React.Dispatch<React.SetStateAction<StartupSeedMap>>;
   isValidDroneName: (name: string) => boolean;
   hasWhitespaceInNameRaw: (nameRaw: string) => boolean;
@@ -530,6 +530,21 @@ export function useDroneCreationActions({
       }
       const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
 
+      if (acceptedByName.size > 0 && !isClone) {
+        rememberNewDronePreferences(repoPath, {
+          mode: 'with-chat',
+          runtime,
+          createAsDraft,
+          persistVolume: persistVolume === true,
+          spawnAgentKey,
+          spawnModel: String(spawnModelForSeed ?? '').trim(),
+          spawnReasoning: String(spawnReasoningForSeed ?? '').trim(),
+          spawnAgentPermissionMode,
+          repoBranchSource: repoBranchSelection.repoBranchSource,
+          repoCreateRemoteBranch: repoBranchSelection.remoteBranch ?? '',
+          pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
+        });
+      }
       if (acceptedByName.size > 0) {
         if (seedModel) rememberSeenModels([seedModel]);
         replaceOptimisticStartupSeeds(setStartupSeedByDrone, Array.from(optimisticSeeds), Array.from(acceptedByName.values()), {
@@ -801,7 +816,7 @@ export function useDroneCreationActions({
           const createdName = String((data as any)?.name ?? name ?? '').trim() || droneId;
           if (!droneId) throw new Error('create drone did not return an id');
           createdDrone = true;
-          rememberNewDronePreferences({
+          rememberNewDronePreferences(repoPath, {
             mode: effectiveCreateMode,
             runtime,
             createAsDraft,
@@ -810,6 +825,9 @@ export function useDroneCreationActions({
             spawnModel: String(spawnModelForSeed ?? '').trim(),
             spawnReasoning: String(spawnReasoningForSeed ?? '').trim(),
             spawnAgentPermissionMode,
+            repoBranchSource: effectiveRepoBranchSource,
+            repoCreateRemoteBranch: remoteBranch,
+            pullHostBranchBeforeCreate,
           });
 
           if (optimisticSeeds.length > 0) {

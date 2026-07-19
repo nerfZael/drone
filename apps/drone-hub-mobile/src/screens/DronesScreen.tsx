@@ -408,7 +408,7 @@ export function DronesScreen({
     modelRequestVersion.current += 1;
     loadedDronesTargetIdRef.current = '';
     if (targetSupportsDrones) {
-      void loadMobileDroneCreatePreferences(targetId).then((remembered) => {
+      void loadMobileDroneCreatePreferences(targetId, '').then((remembered) => {
         if (
           targetIdRef.current !== targetId ||
           createDefaultsRequestVersion.current !== createDefaultsVersion ||
@@ -896,6 +896,7 @@ export function DronesScreen({
       created = true;
       await saveMobileDroneCreatePreferences(
         destinationId,
+        String(payload.repoPath ?? '').trim(),
         preferences ?? mobileDroneCreatePreferencesFromPayload(payload),
       ).catch(() => undefined);
       if (targetIdRef.current !== destinationId) return;
@@ -1057,7 +1058,7 @@ export function DronesScreen({
     const destinationId = targetId;
     const requestVersion = ++createDefaultsRequestVersion.current;
     const contextualRepoPath = overrides?.repoPath ?? selected?.repoPath ?? '';
-    const remembered = await loadMobileDroneCreatePreferences(destinationId);
+    const remembered = await loadMobileDroneCreatePreferences(destinationId, contextualRepoPath);
     if (
       targetIdRef.current !== destinationId ||
       createDefaultsRequestVersion.current !== requestVersion
@@ -1678,6 +1679,10 @@ export function DronesScreen({
             localDevice={phoneTarget}
             onDetectModels={detectCreateModels}
             onLoadRepoBranches={loadCreateRepoBranches}
+            onLoadRepoPreferences={(repoPath) =>
+              loadMobileDroneCreatePreferences(targetId, repoPath)
+            }
+            onRememberedDraftChange={setNewDroneDraft}
             onCreate={createDrone}
           />
         ) : (

@@ -75,6 +75,7 @@ export type MobileDroneCreateDefaults = {
   group?: string;
   repoPath?: string;
   repoBranchSource?: MobileDroneCreateBranchSource;
+  repoCreateRemoteBranch?: string;
   pullHostBranchBeforeCreate?: boolean;
   agent?: MobileDroneAgentId;
   agentPermissionMode?: MobileDroneAgentPermissionMode;
@@ -244,6 +245,8 @@ export function NewDroneScreen({
   localDevice = false,
   onDetectModels,
   onLoadRepoBranches,
+  onLoadRepoPreferences,
+  onRememberedDraftChange,
   onCreate,
 }: {
   repos: MobileDroneCreateRepo[];
@@ -259,6 +262,8 @@ export function NewDroneScreen({
     refresh?: boolean,
   ): Promise<MobileDroneCreateModel[]>;
   onLoadRepoBranches(repoPath: string, refresh?: boolean): Promise<MobileDroneCreateRepo>;
+  onLoadRepoPreferences(repoPath: string): Promise<MobileDroneCreatePreferences | null>;
+  onRememberedDraftChange(draft: boolean): void;
   onCreate(
     payload: MobileDroneCreatePayload,
     preferences: MobileDroneCreatePreferences,
@@ -296,7 +301,9 @@ export function NewDroneScreen({
   const [branchSource, setBranchSource] = React.useState<MobileDroneCreateBranchSource>(
     initialValues?.repoBranchSource ?? 'host',
   );
-  const [remoteBranch, setRemoteBranch] = React.useState('');
+  const [remoteBranch, setRemoteBranch] = React.useState(
+    initialValues?.repoCreateRemoteBranch ?? '',
+  );
   const [pullHostBranch, setPullHostBranch] = React.useState(
     initialValues?.pullHostBranchBeforeCreate ?? false,
   );
@@ -309,6 +316,7 @@ export function NewDroneScreen({
   const [formError, setFormError] = React.useState<string | null>(null);
   const modelRequestId = React.useRef(0);
   const branchRequestId = React.useRef(0);
+  const preferenceRequestId = React.useRef(0);
   const pageRef = React.useRef<ScrollView>(null);
   const composerFocusedRef = React.useRef(false);
   const selectedRepo = repos.find((repo) => repo.path === repoPath) ?? null;
@@ -398,6 +406,7 @@ export function NewDroneScreen({
     () => () => {
       modelRequestId.current += 1;
       branchRequestId.current += 1;
+      preferenceRequestId.current += 1;
     },
     [],
   );
@@ -420,6 +429,18 @@ export function NewDroneScreen({
         if (branchRequestId.current === requestId) setBranchesLoading(false);
       });
   }, [onLoadRepoBranches, repoPath, selectedRepo?.branchesLoaded]);
+
+  React.useEffect(() => {
+    if (
+      branchSource !== 'remote' ||
+      !remoteBranch ||
+      !selectedRepo?.branchesLoaded ||
+      selectedRepo.remoteBranches.some((branch) => branch.name === remoteBranch)
+    ) {
+      return;
+    }
+    setRemoteBranch('');
+  }, [branchSource, remoteBranch, selectedRepo]);
 
   React.useEffect(() => {
     if (!model) {
@@ -450,11 +471,39 @@ export function NewDroneScreen({
   }, [loadingOptions, repoPath, repos]);
 
   const chooseRepo = (path: string) => {
+    const requestId = ++preferenceRequestId.current;
+    modelRequestId.current += 1;
     setRepoPath(path);
     setRepoPickerOpen(false);
+    setMode('with-chat');
+    setRuntime(localDevice ? 'host' : 'container');
+    setPersistVolume(false);
+    setAgent('native');
+    setAgentPermissionMode('full-access');
+    setModels([]);
+    setModel('');
+    setModelProvider('');
+    setReasoning('');
+    onRememberedDraftChange(false);
     setBranchSource('host');
     setRemoteBranch('');
+    setPullHostBranch(false);
     setBranchPickerOpen(false);
+    void onLoadRepoPreferences(path).then((remembered) => {
+      if (preferenceRequestId.current !== requestId || !remembered) return;
+      setMode(remembered.mode);
+      setRuntime(localDevice ? 'host' : remembered.runtime);
+      setPersistVolume(remembered.persistVolume);
+      setAgent(localDevice ? 'native' : remembered.agent);
+      setAgentPermissionMode(localDevice ? 'full-access' : remembered.agentPermissionMode);
+      setModel(remembered.model);
+      setModelProvider(remembered.provider);
+      setReasoning(remembered.reasoning);
+      onRememberedDraftChange(remembered.draft);
+      setBranchSource(localDevice ? 'host' : remembered.repoBranchSource);
+      setRemoteBranch(localDevice ? '' : remembered.repoCreateRemoteBranch);
+      setPullHostBranch(remembered.pullHostBranchBeforeCreate);
+    });
   };
 
   const chooseAgent = (nextAgent: MobileDroneAgentId) => {
@@ -532,6 +581,7 @@ export function NewDroneScreen({
         provider: modelProvider,
         reasoning,
         repoBranchSource: effectiveBranchSource,
+        repoCreateRemoteBranch: effectiveBranchSource === 'remote' ? remoteBranch : '',
         pullHostBranchBeforeCreate:
           effectiveBranchSource === 'host' && pullHostBranch,
       }),
