@@ -6,6 +6,12 @@ import type { AgentChatSurfaceAdapter } from './agent-chat-surface-adapters';
 
 const ChatSurfaceAdapterContext = React.createContext<AgentChatSurfaceAdapter | null>(null);
 
+export function useAgentChatSurfaceAdapter(): AgentChatSurfaceAdapter {
+  const adapter = React.useContext(ChatSurfaceAdapterContext);
+  if (!adapter) throw new Error('Agent chat surface components must be rendered inside ChatSurface.');
+  return adapter;
+}
+
 export type ChatSurfaceProps = {
   adapter: AgentChatSurfaceAdapter;
   children: React.ReactNode;
@@ -77,8 +83,7 @@ export type ChatSurfaceComposerProps = Omit<
 };
 
 export function ChatSurfaceComposer({ overlay, ...composer }: ChatSurfaceComposerProps) {
-  const adapter = React.useContext(ChatSurfaceAdapterContext);
-  if (!adapter) throw new Error('ChatSurfaceComposer must be rendered inside ChatSurface.');
+  const adapter = useAgentChatSurfaceAdapter();
   const { attachments, sendWhileWaiting } = adapter.capabilities;
 
   return (

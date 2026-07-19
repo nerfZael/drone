@@ -2,8 +2,8 @@ import React from 'react';
 import { stripAnsi } from '../../domain';
 import type { TranscriptItem } from '../types';
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
-import { copyText } from '../app/clipboard';
-import { CollapsibleMarkdown } from './CollapsibleMarkdown';
+import { ChatMessageBody } from './ChatMessageBody';
+import { ChatMessageCopyAction } from './ChatMessageCopyAction';
 import { DroneHubTaskList } from './DroneHubTaskList';
 import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
@@ -12,7 +12,7 @@ import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { extractAgentCopilotFromAgentMessage } from './agent-copilot-parser';
 import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
 import { collectInlineAgentMedia, type InlineAgentMedia } from './inline-agent-media';
-import { IconAlert, IconCheck, IconCopy, IconImage, IconJobs, IconOpen, IconSnapshot, IconSpinner, IconTldr } from './icons';
+import { IconAlert, IconCheck, IconImage, IconJobs, IconOpen, IconSnapshot, IconSpinner, IconTldr } from './icons';
 import { VideoPreview } from '../media/VideoPreview';
 import { AgentPlanList } from './AgentPlanList';
 import { LinkedPullRequestCards, type LinkedPullRequestContext } from './LinkedPullRequestCards';
@@ -135,8 +135,6 @@ export const TranscriptTurn = React.memo(
     const transcriptInlineImages = useDroneHubUiStore((s) => s.transcriptInlineImages);
     const inlineImagesOverride = useDroneHubUiStore((s) => s.transcriptInlineImageOverrides[messageId]);
     const setInlineImagesOverride = useDroneHubUiStore((s) => s.setTranscriptInlineImageOverride);
-    const [copiedToastRole, setCopiedToastRole] = React.useState<'user' | 'agent' | null>(null);
-    const copiedToastTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
     const attachments = normalizeImageAttachmentRefs((item as any).attachments);
     const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
     const cleaned = item.ok ? stripAnsi(item.output) : stripAnsi(item.error || 'failed');
@@ -201,62 +199,16 @@ export const TranscriptTurn = React.memo(
     React.useEffect(() => {
       setFailedInlineMediaById({});
     }, [messageId]);
-    React.useEffect(() => {
-      setCopiedToastRole(null);
-    }, [messageId]);
-    React.useEffect(
-      () => () => {
-        if (copiedToastTimerRef.current != null) {
-          clearTimeout(copiedToastTimerRef.current);
-          copiedToastTimerRef.current = null;
-        }
-      },
-      [],
-    );
-
-    const userCopyText = String(promptText ?? '');
-    const agentCopyText = String(cleanedAgentMessage ?? '');
-    const showCopiedToast = React.useCallback((role: 'user' | 'agent') => {
-      setCopiedToastRole(role);
-      if (copiedToastTimerRef.current != null) clearTimeout(copiedToastTimerRef.current);
-      copiedToastTimerRef.current = setTimeout(() => {
-        setCopiedToastRole((prev) => (prev === role ? null : prev));
-        copiedToastTimerRef.current = null;
-      }, 1200);
-    }, []);
     return (
       <div className="animate-fade-in">
         <ChatMessageFrame role="user" at={promptIso} showRoleIcon={showRoleIcons}>
-          {copiedToastRole === 'user' ? (
-            <div
-              role="status"
-              aria-live="polite"
-              className="pointer-events-none absolute right-10 top-2 z-20 rounded border border-[rgba(148,163,184,.28)] bg-[rgba(0,0,0,.42)] px-2 py-0.5 text-[9px] uppercase tracking-wide text-[var(--fg-secondary)]"
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              Copied
-            </div>
-          ) : null}
-          {userCopyText.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => void copyText(userCopyText).then(() => showCopiedToast('user'))}
-              className="pointer-events-none absolute right-2 top-2 z-10 inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] text-[var(--muted)] opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:border-[var(--user-muted)] hover:bg-[rgba(0,0,0,.25)] hover:text-[var(--user)] focus-visible:pointer-events-auto focus-visible:opacity-100"
-              title="Copy user message"
-              aria-label="Copy user message"
-            >
-              <IconCopy className="h-3.5 w-3.5 opacity-90" />
-            </button>
-          ) : null}
-          {promptText ? (
-            <CollapsibleMarkdown
-              text={promptText}
-              fadeTo="var(--user-dim)"
-              className="dh-markdown--user"
-              onOpenFileReference={onOpenFileReference}
-              onOpenLink={onOpenLink}
-            />
-          ) : null}
+          <ChatMessageCopyAction text={promptText} />
+          <ChatMessageBody
+            role="user"
+            text={promptText}
+            onOpenFileReference={onOpenFileReference}
+            onOpenLink={onOpenLink}
+          />
           <ImageAttachmentChips
             attachments={attachments}
             droneId={droneId}
@@ -285,27 +237,16 @@ export const TranscriptTurn = React.memo(
             </span>
           ) : null}
         >
-              {copiedToastRole === 'agent' ? (
-                <div
-                  role="status"
-                  aria-live="polite"
-                  className="absolute top-2 right-10 z-20 pointer-events-none rounded border border-[rgba(148,163,184,.28)] bg-[rgba(0,0,0,.42)] px-2 py-0.5 text-[9px] uppercase tracking-wide text-[var(--fg-secondary)]"
-                  style={{ fontFamily: 'var(--display)' }}
-                >
-                  Copied
-                </div>
-              ) : null}
-              {displayedText ? (
-                <CollapsibleMarkdown
-                  text={displayedText}
-                  fadeTo={item.ok ? 'var(--accent-subtle)' : 'var(--red-subtle)'}
-                  className={`dh-markdown--transcript ${showingTldr ? 'dh-markdown--muted' : item.ok ? 'dh-markdown--agent' : 'dh-markdown--error'}`}
-                  preserveLeadParagraph
-                  toggleOnMessageClick
-                  onOpenFileReference={onOpenFileReference}
-                  onOpenLink={onOpenLink}
-                />
-              ) : null}
+              <ChatMessageBody
+                role="assistant"
+                text={displayedText}
+                error={!item.ok}
+                muted={showingTldr}
+                preserveLeadParagraph
+                toggleOnMessageClick
+                onOpenFileReference={onOpenFileReference}
+                onOpenLink={onOpenLink}
+              />
               {actionsEnabled && item.ok && droneHubTasks.length > 0 ? (
                 <DroneHubTaskList tasks={droneHubTasks} onSpawnTask={onSpawnDroneHubTask} />
               ) : null}
@@ -385,19 +326,7 @@ export const TranscriptTurn = React.memo(
               />
 
               <div className="absolute bottom-2 right-2 flex items-center gap-1">
-                {agentCopyText.length > 0 ? (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void copyText(agentCopyText).then(() => showCopiedToast('agent'));
-                    }}
-                    className="inline-flex items-center justify-center w-7 h-7 rounded border transition-opacity opacity-0 group-hover:opacity-100 focus-visible:opacity-100 bg-[rgba(0,0,0,.15)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)]"
-                    title="Copy agent message"
-                    aria-label="Copy agent message"
-                  >
-                    <IconCopy className="w-3.5 h-3.5 opacity-90" />
-                  </button>
-                ) : null}
+                <ChatMessageCopyAction text={cleanedAgentMessage} position="inline" />
                 {inlineMedia.length > 0 && (
                   <button
                     type="button"

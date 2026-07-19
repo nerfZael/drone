@@ -14,6 +14,8 @@ import {
 } from '../app/automation-config';
 import { CHAT_DRAFT_AUTOMATION_STOP_PHRASE_DEFAULT } from '../app/chat-draft-automation';
 import { AutomationRunnerPanel } from './AutomationRunnerPanel';
+import { ChatComposerContext, type ChatComposerContextConfig } from './ChatComposerContext';
+import { ChatComposerControls, type ChatComposerControlsConfig } from './ChatComposerControls';
 import {
   CHAT_INPUT_MAX_BYTES_EACH,
   CHAT_INPUT_MAX_BYTES_TOTAL,
@@ -92,8 +94,8 @@ export type ChatInputProps = {
   modeHint?: string;
   attachmentsEnabled?: boolean;
   attachmentMode?: 'images' | 'files';
-  composerHeader?: React.ReactNode;
-  composerControls?: React.ReactNode;
+  composerContext?: ChatComposerContextConfig;
+  composerControls?: ChatComposerControlsConfig;
   automationActions?: ChatInputAutomationAction[];
   automationMenuLabel?: string;
   lockComposerWhileAutomationActive?: boolean;
@@ -120,7 +122,7 @@ export function ChatInput({
   modeHint = '',
   attachmentsEnabled,
   attachmentMode = 'images',
-  composerHeader,
+  composerContext,
   composerControls,
   automationActions,
   automationMenuLabel = 'Automations',
@@ -709,7 +711,7 @@ export function ChatInput({
         >
           {/* Top accent line */}
           <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-[var(--user-muted)] to-transparent opacity-25" />
-          {composerHeader}
+          <ChatComposerContext config={composerContext} />
           {attachmentsOn && attachments.length > 0 && (
             <div className="px-3 pt-3">
               <div className="flex items-center justify-between gap-2">
@@ -940,7 +942,7 @@ export function ChatInput({
               autoFocus={Boolean(autoFocus)}
               aria-label={`Message ${droneName}`}
             />
-            {composerControls}
+            <ChatComposerControls config={composerControls} />
             {supportsDraftAutomation && (
               <button
                 type="button"

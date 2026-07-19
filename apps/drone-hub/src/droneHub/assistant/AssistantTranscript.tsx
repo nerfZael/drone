@@ -1,6 +1,8 @@
 import React from 'react';
 
-import { MarkdownMessage, type MarkdownTextMentionLink } from '../chat/MarkdownMessage';
+import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
+import { ChatMessageBody } from '../chat/ChatMessageBody';
+import { ChatMessageCopyAction } from '../chat/ChatMessageCopyAction';
 import { ChatMessageFrame } from '../chat/ChatMessageFrame';
 import { IconDrone } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
@@ -731,10 +733,10 @@ export function AssistantMessageRow({
         const t = String(part.text ?? '').trim();
         if (t) {
           blocks.push(
-            <MarkdownMessage
+            <ChatMessageBody
               key={`tx:${i}`}
+              role="assistant"
               text={t}
-              className="dh-markdown text-[12px]"
               textMentionLinks={droneMentionLinks}
               onOpenTextMention={onOpenDroneMention}
             />,
@@ -746,40 +748,21 @@ export function AssistantMessageRow({
   } else {
     const text = messageText(message);
     const images = messageImageParts(message);
-    const textBody = text ? (
-      message.role === 'assistant' ? (
-        <MarkdownMessage
-          text={text}
-          className="dh-markdown text-[12px]"
-          textMentionLinks={droneMentionLinks}
-          onOpenTextMention={onOpenDroneMention}
-        />
-      ) : (
-        <div className="whitespace-pre-wrap break-words text-[12px] text-[var(--fg-secondary)]">
-          {text}
-        </div>
-      )
+    body = text || images.length > 0 || message.errorMessage ? (
+      <ChatMessageBody
+        role={message.role === 'user' ? 'user' : 'assistant'}
+        text={text}
+        error={Boolean(message.errorMessage)}
+        errorMessage={message.errorMessage}
+        images={images.map((image, index) => ({
+          key: `${image.mimeType}:${index}`,
+          src: `data:${image.mimeType};base64,${image.data}`,
+          alt: 'Attached image',
+        }))}
+        textMentionLinks={droneMentionLinks}
+        onOpenTextMention={onOpenDroneMention}
+      />
     ) : null;
-    const imageBody =
-      images.length > 0 ? (
-        <div className="flex flex-wrap gap-2">
-          {images.map((image, index) => (
-            <img
-              key={`${image.mimeType}:${index}`}
-              src={`data:${image.mimeType};base64,${image.data}`}
-              alt="Attached image"
-              className="max-h-44 max-w-[min(260px,100%)] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] object-contain"
-            />
-          ))}
-        </div>
-      ) : null;
-    body =
-      textBody || imageBody ? (
-        <div className="space-y-2">
-          {textBody}
-          {imageBody}
-        </div>
-      ) : null;
   }
 
   if (message.role === 'assistant' && !body && !message.errorMessage && calls.length === 0)
@@ -791,6 +774,10 @@ export function AssistantMessageRow({
       at={message.createdAt}
       error={Boolean(message.errorMessage)}
     >
+      <ChatMessageCopyAction
+        text={messageText(message)}
+        position={message.role === 'user' ? 'top' : 'bottom'}
+      />
       {body}
       {!body && message.errorMessage ? (
         <div className="text-[12px] text-[var(--red)]">{message.errorMessage}</div>

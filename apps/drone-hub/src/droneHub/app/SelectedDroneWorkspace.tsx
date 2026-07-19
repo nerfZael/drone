@@ -1,12 +1,15 @@
 import React from 'react';
 import { createPortal } from 'react-dom';
 import {
+  AgentChatTranscript,
   PromptLoopTranscriptGroup,
   AutomationLaneStatusCard,
   ChatSurface,
   ChatSurfaceComposer,
-  ChatSurfaceTranscript,
   adaptExternalAgentChatSurface,
+  adaptNativeAgentChatSurface,
+  type AgentChatTranscriptItem,
+  type ChatComposerControlsConfig,
   type DroneHubTask,
   type DroneHubTaskSpawnMode,
   type ChatSendPayload,
@@ -104,31 +107,7 @@ type DockerSizePayload = {
 };
 
 const EXTERNAL_AGENT_CHAT_SURFACE = adaptExternalAgentChatSurface();
-
-function ExternalChatSurfaceBoundary({
-  active,
-  hidden,
-  className,
-  children,
-}: {
-  active: boolean;
-  hidden: boolean;
-  className: string;
-  children: React.ReactNode;
-}) {
-  if (active) {
-    return (
-      <ChatSurface adapter={EXTERNAL_AGENT_CHAT_SURFACE} className={className} ariaHidden={hidden}>
-        {children}
-      </ChatSurface>
-    );
-  }
-  return (
-    <div className={className} aria-hidden={hidden}>
-      {children}
-    </div>
-  );
-}
+const NATIVE_AGENT_CHAT_SURFACE = adaptNativeAgentChatSurface();
 
 function HeaderDropdownPortal({
   open,
@@ -1176,6 +1155,253 @@ export function SelectedDroneWorkspace({
     });
   }, [setAgentMenuOpen, setHeaderOverflowOpen, setTerminalMenuOpen]);
 
+  const externalComposerControls: ChatComposerControlsConfig | undefined =
+    hasChats && modelControlEnabled
+      ? {
+          onboardingId: 'chat.composer.model',
+          controls:
+            availableChatModels.length > 0
+              ? [
+                  {
+                    kind: 'select',
+                    id: 'external-model',
+                    value: currentModel ?? '',
+                    label: modelLabel,
+                    title: 'Choose model for this chat',
+                    entries: modelMenuEntries,
+                    disabled: modelDisabled,
+                    searchable: true,
+                    searchPlaceholder: 'Search models',
+                    onValueChange: (next) => {
+                      void setChatModel(next || null).catch((err: any) =>
+                        setChatInfoError(err?.message ?? String(err)),
+                      );
+                    },
+                  },
+                  {
+                    kind: 'button',
+                    id: 'external-model-refresh',
+                    label: 'Refresh',
+                    title: chatModelsError
+                      ? `Refresh model list: ${chatModelsError}`
+                      : 'Refresh model list from the agent CLI',
+                    disabled: modelDisabled || loadingChatModels,
+                    active: loadingChatModels,
+                    icon: 'refresh',
+                    onSelect: () => setChatModelsRefreshNonce((nonce) => nonce + 1),
+                  },
+                ]
+              : [
+                  {
+                    kind: 'text',
+                    id: 'external-model-manual',
+                    value: manualChatModelInput,
+                    placeholder: 'Model id',
+                    title: 'Type a model id and press Enter',
+                    disabled: modelDisabled,
+                    onValueChange: setManualChatModelInput,
+                    onSubmit: applyManualChatModel,
+                  },
+                  {
+                    kind: 'button',
+                    id: 'external-model-apply',
+                    label: 'Set',
+                    title: 'Use this model for the chat',
+                    disabled: modelDisabled,
+                    onSelect: applyManualChatModel,
+                  },
+                  {
+                    kind: 'button',
+                    id: 'external-model-refresh',
+                    label: 'Refresh',
+                    title: chatModelsError
+                      ? `Refresh model list: ${chatModelsError}`
+                      : 'Refresh model list from the agent CLI',
+                    disabled: modelDisabled || loadingChatModels,
+                    active: loadingChatModels,
+                    icon: 'refresh',
+                    onSelect: () => setChatModelsRefreshNonce((nonce) => nonce + 1),
+                  },
+                ],
+        }
+      : undefined;
+
+  const externalTranscriptItems: AgentChatTranscriptItem[] = [];
+  for (const entry of chatTimelineBlocks) {
+    if (entry.source === 'transcript') {
+      const block = entry.block;
+      if (block.kind === 'pending-prompt') {
+        const prompt = block.item;
+        externalTranscriptItems.push({
+          key: block.key,
+          kind: 'pending',
+          content: (
+            <PendingTranscriptTurn
+              item={prompt}
+              showRoleIcons={false}
+              onCancelQueued={requestCancelPendingPrompt}
+              onOpenFileReference={onOpenMarkdownFileReference}
+              onOpenLink={tryOpenMarkdownPullRequest}
+              droneId={currentDrone.id}
+              droneHomePath={currentDroneHomePath}
+              cancelBusy={Boolean(cancellingPendingPromptById[prompt.id])}
+              cancelError={cancelPendingPromptErrorById[prompt.id] ?? null}
+            />
+          ),
+        });
+        continue;
+      }
+      if (block.kind === 'prompt-loop-group') {
+        const runningGroup =
+          Boolean(promptAutomationJob?.running) &&
+          Boolean(runningAutomationIdentity) &&
+          block.identity === runningAutomationIdentity;
+        externalTranscriptItems.push({
+          key: block.key,
+          kind: 'automation',
+          content: (
+            <PromptLoopTranscriptGroup
+              runs={block.runs}
+              pendingRuns={pendingPromptLoopByIdentity.get(block.identity) ?? []}
+              headerBadgeLabel={runningGroup ? runningAutomationProgressLabel : undefined}
+              headerBadgeTone={runningGroup ? 'running' : undefined}
+              headerActions={runningGroup ? runningPromptLoopHeaderActions : undefined}
+              headerError={runningGroup ? stopPromptAutomationError : null}
+              onOpenFileReference={onOpenMarkdownFileReference}
+              onOpenLink={tryOpenMarkdownPullRequest}
+              linkedPullRequestContext={linkedPullRequestContext}
+            />
+          ),
+        });
+        continue;
+      }
+      const messageId = transcriptMessageId(block.item);
+      externalTranscriptItems.push({
+        key: block.key,
+        kind: 'message',
+        content: (
+          <TranscriptTurn
+            item={block.item}
+            parsingJobs={Boolean(parsingJobsByTurn[block.item.turn])}
+            onCreateJobs={parseJobsFromAgentMessage}
+            onSpawnDroneHubTask={spawnCurrentDroneHubTask}
+            messageId={messageId}
+            tldr={tldrByMessageId[messageId] ?? null}
+            showTldr={Boolean(showTldrByMessageId[messageId])}
+            onToggleTldr={toggleTldrForAgentMessage}
+            onRollbackDockerSnapshot={rollbackDockerSnapshot}
+            onHoverAgentMessage={handleAgentMessageHover}
+            onOpenFileReference={onOpenMarkdownFileReference}
+            onOpenLink={tryOpenMarkdownPullRequest}
+            linkedPullRequestContext={linkedPullRequestContext}
+            droneId={currentDrone.id}
+            droneHomePath={currentDroneHomePath}
+            showRoleIcons={false}
+            dockerSnapshotsEnabled={dockerSnapshotAfterAgentMessageEnabled}
+          />
+        ),
+      });
+      continue;
+    }
+
+    const block = entry.block;
+    if (block.kind === 'pending-prompt') {
+      const prompt = block.item;
+      externalTranscriptItems.push({
+        key: block.key,
+        kind: 'pending',
+        content: (
+          <PendingTranscriptTurn
+            item={prompt}
+            showRoleIcons={false}
+            onCancelQueued={requestCancelPendingPrompt}
+            onOpenFileReference={onOpenMarkdownFileReference}
+            onOpenLink={tryOpenMarkdownPullRequest}
+            droneId={currentDrone.id}
+            droneHomePath={currentDroneHomePath}
+            cancelBusy={Boolean(cancellingPendingPromptById[prompt.id])}
+            cancelError={cancelPendingPromptErrorById[prompt.id] ?? null}
+          />
+        ),
+      });
+      continue;
+    }
+    if (block.kind === 'prompt-loop-group') {
+      const runningGroup =
+        Boolean(promptAutomationJob?.running) &&
+        Boolean(runningAutomationIdentity) &&
+        block.identity === runningAutomationIdentity;
+      externalTranscriptItems.push({
+        key: block.key,
+        kind: 'automation',
+        content: (
+          <PromptLoopTranscriptGroup
+            runs={[]}
+            pendingRuns={block.pendingRuns}
+            headerBadgeLabel={runningGroup ? runningAutomationProgressLabel : undefined}
+            headerBadgeTone={runningGroup ? 'running' : undefined}
+            headerActions={runningGroup ? runningPromptLoopHeaderActions : undefined}
+            headerError={runningGroup ? stopPromptAutomationError : null}
+            onOpenFileReference={onOpenMarkdownFileReference}
+            onOpenLink={tryOpenMarkdownPullRequest}
+            linkedPullRequestContext={linkedPullRequestContext}
+          />
+        ),
+      });
+      continue;
+    }
+    if (block.kind === 'queued-automation') {
+      const queued = queuedAutomationById.get(block.queueId);
+      if (!queued) continue;
+      const queueId = String(queued.queueId ?? '').trim();
+      externalTranscriptItems.push({
+        key: block.key,
+        kind: 'automation',
+        content: (
+          <AutomationLaneStatusCard
+            status="queued"
+            automationLabel={
+              String(queued.automationLabel ?? '').trim() ||
+              String(queued.automationId ?? '').trim() ||
+              'Automation'
+            }
+            runsTotal={Number(queued.runsTotal ?? 0) || 0}
+            atIso={queued.enqueuedAt}
+            queueId={queueId}
+            cancelBusy={Boolean(cancellingQueuedAutomationById[queueId])}
+            cancelError={cancelQueuedAutomationErrorById[queueId] ?? null}
+            onCancelQueued={cancelQueuedPromptAutomation}
+          />
+        ),
+      });
+      continue;
+    }
+    if (!promptAutomationJob?.running) continue;
+    externalTranscriptItems.push({
+      key: block.key,
+      kind: 'automation',
+      content: (
+        <AutomationLaneStatusCard
+          status={currentAutomationCardStatus}
+          automationLabel={String(promptAutomationJob.automationLabel ?? '').trim() || 'Automation'}
+          runsTotal={Number(promptAutomationJob.runsTotal ?? 0) || 0}
+          runsCompleted={Number(promptAutomationJob.runsCompleted ?? 0) || 0}
+          atIso={promptAutomationJob.startedAt ?? promptAutomationJob.updatedAt}
+          stopAllBusy={stoppingPromptAutomationMode === 'all'}
+          stopRunsOnlyBusy={stoppingPromptAutomationMode === 'runs-only'}
+          stopError={stopPromptAutomationError}
+          onStopAll={() => stopPromptAutomation({ mode: 'all', clearQueued: false })}
+          onStopRunsOnly={() => stopPromptAutomation({ mode: 'runs-only', clearQueued: false })}
+        />
+      ),
+    });
+  }
+  externalTranscriptItems.push({
+    key: 'external-chat-end',
+    kind: 'sentinel',
+    content: <div ref={chatEndRef as React.RefObject<HTMLDivElement>} />,
+  });
+
   return (
     <>
       {/* Header - spans full workspace width */}
@@ -2046,9 +2272,9 @@ export function SelectedDroneWorkspace({
               </div>
             </div>
           )}
-          <ExternalChatSurfaceBoundary
-            active={genericChatActive}
-            hidden={fleetDropHintVisible}
+          <ChatSurface
+            adapter={nativeChatActive ? NATIVE_AGENT_CHAT_SURFACE : EXTERNAL_AGENT_CHAT_SURFACE}
+            ariaHidden={fleetDropHintVisible}
             className={cn(
               'flex-1 flex min-h-0 flex-col transition-opacity duration-150',
               fleetDropHintVisible && 'pointer-events-none select-none opacity-0',
@@ -2070,7 +2296,7 @@ export function SelectedDroneWorkspace({
                 onHistoryChange={setNativeHistoryObserved}
               />
             ) : chatUiMode === 'transcript' ? (
-              <ChatSurfaceTranscript
+              <AgentChatTranscript
                 scrollRef={transcriptScrollRef}
                 loading={loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0}
                 hasContent={Boolean((transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0)}
@@ -2087,143 +2313,8 @@ export function SelectedDroneWorkspace({
                     }
                   />
                 }
-              >
-                    {chatTimelineBlocks.map((entry) => {
-                      if (entry.source === 'transcript') {
-                        const block = entry.block;
-                        if (block.kind === 'pending-prompt') {
-                          const p = block.item;
-                          return (
-                            <PendingTranscriptTurn
-                              key={block.key}
-                              item={p}
-                              showRoleIcons={false}
-                              onCancelQueued={requestCancelPendingPrompt}
-                              onOpenFileReference={onOpenMarkdownFileReference}
-                              onOpenLink={tryOpenMarkdownPullRequest}
-                              droneId={currentDrone.id}
-                              droneHomePath={currentDroneHomePath}
-                              cancelBusy={Boolean(cancellingPendingPromptById[p.id])}
-                              cancelError={cancelPendingPromptErrorById[p.id] ?? null}
-                            />
-                          );
-                        }
-                        if (block.kind === 'prompt-loop-group') {
-                          const runningGroup =
-                            Boolean(promptAutomationJob?.running) && Boolean(runningAutomationIdentity) && block.identity === runningAutomationIdentity;
-                          return (
-                            <PromptLoopTranscriptGroup
-                              key={block.key}
-                              runs={block.runs}
-                              pendingRuns={pendingPromptLoopByIdentity.get(block.identity) ?? []}
-                              headerBadgeLabel={runningGroup ? runningAutomationProgressLabel : undefined}
-                              headerBadgeTone={runningGroup ? 'running' : undefined}
-                              headerActions={runningGroup ? runningPromptLoopHeaderActions : undefined}
-                              headerError={runningGroup ? stopPromptAutomationError : null}
-                              onOpenFileReference={onOpenMarkdownFileReference}
-                              onOpenLink={tryOpenMarkdownPullRequest}
-                              linkedPullRequestContext={linkedPullRequestContext}
-                            />
-                          );
-                        }
-                        const messageId = transcriptMessageId(block.item);
-                        return (
-                          <TranscriptTurn
-                            key={block.key}
-                            item={block.item}
-                            parsingJobs={Boolean(parsingJobsByTurn[block.item.turn])}
-                            onCreateJobs={parseJobsFromAgentMessage}
-                            onSpawnDroneHubTask={spawnCurrentDroneHubTask}
-                            messageId={messageId}
-                            tldr={tldrByMessageId[messageId] ?? null}
-                            showTldr={Boolean(showTldrByMessageId[messageId])}
-                            onToggleTldr={toggleTldrForAgentMessage}
-                            onRollbackDockerSnapshot={rollbackDockerSnapshot}
-                            onHoverAgentMessage={handleAgentMessageHover}
-                            onOpenFileReference={onOpenMarkdownFileReference}
-                            onOpenLink={tryOpenMarkdownPullRequest}
-                            linkedPullRequestContext={linkedPullRequestContext}
-                            droneId={currentDrone.id}
-                            droneHomePath={currentDroneHomePath}
-                            showRoleIcons={false}
-                            dockerSnapshotsEnabled={dockerSnapshotAfterAgentMessageEnabled}
-                          />
-                        );
-                      }
-
-                      const item = entry.block;
-                      if (item.kind === 'pending-prompt') {
-                        const p = item.item;
-                        return (
-                          <PendingTranscriptTurn
-                            key={item.key}
-                            item={p}
-                            showRoleIcons={false}
-                            onCancelQueued={requestCancelPendingPrompt}
-                            onOpenFileReference={onOpenMarkdownFileReference}
-                            onOpenLink={tryOpenMarkdownPullRequest}
-                            droneId={currentDrone.id}
-                            droneHomePath={currentDroneHomePath}
-                            cancelBusy={Boolean(cancellingPendingPromptById[p.id])}
-                            cancelError={cancelPendingPromptErrorById[p.id] ?? null}
-                          />
-                        );
-                      }
-                      if (item.kind === 'prompt-loop-group') {
-                        const runningGroup =
-                          Boolean(promptAutomationJob?.running) && Boolean(runningAutomationIdentity) && item.identity === runningAutomationIdentity;
-                        return (
-                          <PromptLoopTranscriptGroup
-                            key={item.key}
-                            runs={[]}
-                            pendingRuns={item.pendingRuns}
-                            headerBadgeLabel={runningGroup ? runningAutomationProgressLabel : undefined}
-                            headerBadgeTone={runningGroup ? 'running' : undefined}
-                            headerActions={runningGroup ? runningPromptLoopHeaderActions : undefined}
-                            headerError={runningGroup ? stopPromptAutomationError : null}
-                            onOpenFileReference={onOpenMarkdownFileReference}
-                            onOpenLink={tryOpenMarkdownPullRequest}
-                            linkedPullRequestContext={linkedPullRequestContext}
-                          />
-                        );
-                      }
-                      if (item.kind === 'queued-automation') {
-                        const queued = queuedAutomationById.get(item.queueId);
-                        if (!queued) return null;
-                        const queueId = String(queued.queueId ?? '').trim();
-                        return (
-                          <AutomationLaneStatusCard
-                            key={item.key}
-                            status="queued"
-                            automationLabel={String(queued.automationLabel ?? '').trim() || String(queued.automationId ?? '').trim() || 'Automation'}
-                            runsTotal={Number(queued.runsTotal ?? 0) || 0}
-                            atIso={queued.enqueuedAt}
-                            queueId={queueId}
-                            cancelBusy={Boolean(cancellingQueuedAutomationById[queueId])}
-                            cancelError={cancelQueuedAutomationErrorById[queueId] ?? null}
-                            onCancelQueued={cancelQueuedPromptAutomation}
-                          />
-                        );
-                      }
-                      if (!promptAutomationJob?.running) return null;
-                      return (
-                        <AutomationLaneStatusCard
-                          key={item.key}
-                          status={currentAutomationCardStatus}
-                          automationLabel={String(promptAutomationJob.automationLabel ?? '').trim() || 'Automation'}
-                          runsTotal={Number(promptAutomationJob.runsTotal ?? 0) || 0}
-                          runsCompleted={Number(promptAutomationJob.runsCompleted ?? 0) || 0}
-                          atIso={promptAutomationJob.startedAt ?? promptAutomationJob.updatedAt}
-                          stopAllBusy={stoppingPromptAutomationMode === 'all'}
-                          stopRunsOnlyBusy={stoppingPromptAutomationMode === 'runs-only'}
-                          stopError={stopPromptAutomationError}
-                          onStopAll={() => stopPromptAutomation({ mode: 'all', clearQueued: false })}
-                          onStopRunsOnly={() => stopPromptAutomation({ mode: 'runs-only', clearQueued: false })}
-                        />
-                      );
-                    })}
-                    <div ref={chatEndRef as React.RefObject<HTMLDivElement>} />
-              </ChatSurfaceTranscript>
+                items={externalTranscriptItems}
+              />
             ) : (
               <div
                 ref={outputScrollRef as React.RefObject<HTMLDivElement>}
@@ -2379,68 +2470,7 @@ export function SelectedDroneWorkspace({
             sending={sendingPrompt}
             publishing={publishingDraft}
             waiting={chatInputWaiting}
-            composerControls={hasChats && modelControlEnabled ? (
-              <div data-onboarding-id="chat.composer.model" className="flex min-w-0 flex-shrink-0 items-center gap-1.5">
-                {availableChatModels.length > 0 ? (
-                  <UiMenuSelect
-                    variant="toolbar"
-                    value={currentModel ?? ''}
-                    onValueChange={(next) => {
-                      void setChatModel(next || null).catch((err: any) => setChatInfoError(err?.message ?? String(err)));
-                    }}
-                    entries={modelMenuEntries}
-                    disabled={modelDisabled}
-                    triggerClassName="h-9 min-w-[112px] max-w-[180px] justify-between px-2 text-[10px] uppercase tracking-wide"
-                    title="Choose model for this chat."
-                    triggerLabel={modelLabel}
-                    chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                    panelClassName="bottom-full mb-1.5 w-[260px]"
-                    menuClassName="max-h-[240px] overflow-y-auto"
-                    searchable
-                    searchPlaceholder="Search models"
-                  />
-                ) : (
-                  <>
-                    <input
-                      value={manualChatModelInput}
-                      onChange={(event) => setManualChatModelInput(event.target.value)}
-                      onKeyDown={(event) => {
-                        if (event.key !== 'Enter') return;
-                        event.preventDefault();
-                        applyManualChatModel();
-                      }}
-                      disabled={modelDisabled}
-                      placeholder="Model id"
-                      className={`h-9 w-[112px] rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
-                        modelDisabled ? 'cursor-not-allowed opacity-40' : 'hover:border-[var(--border)] hover:text-[var(--fg-secondary)]'
-                      }`}
-                      title="Type a model id and press Enter."
-                    />
-                    <button
-                      type="button"
-                      onClick={applyManualChatModel}
-                      disabled={modelDisabled}
-                      className="h-9 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-40"
-                      style={{ fontFamily: 'var(--display)' }}
-                    >
-                      Set
-                    </button>
-                  </>
-                )}
-                <button
-                  type="button"
-                  onClick={() => setChatModelsRefreshNonce((nonce) => nonce + 1)}
-                  disabled={modelDisabled || loadingChatModels}
-                  className="flex h-9 w-9 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-40"
-                  title={chatModelsError ? `Refresh model list: ${chatModelsError}` : 'Refresh model list from the agent CLI'}
-                  aria-label={loadingChatModels ? 'Loading models' : 'Refresh model list'}
-                >
-                  <svg className={loadingChatModels ? 'animate-spin' : ''} width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" aria-hidden="true">
-                    <path d="M13 5V2.8l-1.2 1.1A5.5 5.5 0 1 0 13.2 9" />
-                  </svg>
-                </button>
-              </div>
-            ) : undefined}
+            composerControls={externalComposerControls}
             automationActions={chatAutomationActions}
             lockComposerWhileAutomationActive={false}
             autoFocus={shouldAutoFocusInput}
@@ -2481,7 +2511,7 @@ export function SelectedDroneWorkspace({
               </button>
             </div>
           ) : null}
-          </ExternalChatSurfaceBoundary>
+          </ChatSurface>
         </div>
         }
       />

@@ -4,10 +4,17 @@ export {
   ChatSurface,
   ChatSurfaceComposer,
   ChatSurfaceTranscript,
+  useAgentChatSurfaceAdapter,
   type ChatSurfaceComposerProps,
   type ChatSurfaceProps,
   type ChatSurfaceTranscriptProps,
 } from './ChatSurface';
+export {
+  AgentChatTranscript,
+  type AgentChatTranscriptItem,
+  type AgentChatTranscriptItemKind,
+  type AgentChatTranscriptProps,
+} from './AgentChatTranscript';
 export { ChatTranscriptFrame, type ChatTranscriptFrameProps } from './ChatTranscriptFrame';
 export type {
   ChatDraftAutomationPayload,
@@ -31,7 +38,23 @@ export type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 export { PromptLoopTranscriptGroup } from './PromptLoopTranscriptGroup';
 export { AutomationLaneStatusCard } from './AutomationLaneStatusCard';
 export { ChatComposerMenu, type ChatComposerMenuAction } from './ChatComposerMenu';
+export {
+  ChatComposerControls,
+  type ChatComposerButtonControl,
+  type ChatComposerControl,
+  type ChatComposerControlsConfig,
+  type ChatComposerSegmentedControl,
+  type ChatComposerSelectControl,
+  type ChatComposerTextControl,
+} from './ChatComposerControls';
+export {
+  ChatComposerContext,
+  type ChatComposerContextConfig,
+  type ChatComposerContextItem,
+} from './ChatComposerContext';
 export { ChatMessageFrame } from './ChatMessageFrame';
+export { ChatMessageBody, type ChatMessageImage } from './ChatMessageBody';
+export { ChatMessageCopyAction } from './ChatMessageCopyAction';
 export { PendingTranscriptTurn } from './PendingTranscriptTurn';
 export { RelativeTimeText } from './RelativeTimeText';
 export { TranscriptSkeleton } from './TranscriptSkeleton';

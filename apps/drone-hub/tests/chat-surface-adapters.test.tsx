@@ -3,12 +3,19 @@ import { describe, expect, test } from 'bun:test';
 import { renderToStaticMarkup } from 'react-dom/server';
 
 import {
+  AgentChatTranscript,
+  ChatMessageBody,
   ChatSurface,
   ChatSurfaceComposer,
   adaptExternalAgentChatSurface,
   adaptNativeAgentChatSurface,
   type AgentChatSurfaceAdapter,
 } from '../src/droneHub/chat';
+
+const TRANSCRIPT_ITEMS = [
+  { key: 'message', kind: 'message' as const, content: <div>Visible message</div> },
+  { key: 'tool', kind: 'tool' as const, content: <div>Visible tool call</div> },
+];
 
 function renderComposer(adapter: AgentChatSurfaceAdapter) {
   return renderToStaticMarkup(
@@ -71,5 +78,83 @@ describe('agent chat surface adapters', () => {
       sendWhileWaiting: true,
       toolActivity: 'visible',
     });
+  });
+
+  test('the shared transcript hides tool items for external agents', () => {
+    const html = renderToStaticMarkup(
+      <ChatSurface adapter={adaptExternalAgentChatSurface()}>
+        <AgentChatTranscript
+          loading={false}
+          hasContent
+          emptyState={null}
+          items={TRANSCRIPT_ITEMS}
+        />
+      </ChatSurface>,
+    );
+
+    expect(html).toContain('Visible message');
+    expect(html).not.toContain('Visible tool call');
+  });
+
+  test('the shared transcript includes tool items for native agents', () => {
+    const html = renderToStaticMarkup(
+      <ChatSurface adapter={adaptNativeAgentChatSurface()}>
+        <AgentChatTranscript
+          loading={false}
+          hasContent
+          emptyState={null}
+          items={TRANSCRIPT_ITEMS}
+        />
+      </ChatSurface>,
+    );
+
+    expect(html).toContain('Visible message');
+    expect(html).toContain('Visible tool call');
+  });
+
+  test('the shared composer renders structured model controls and menu actions', () => {
+    const html = renderToStaticMarkup(
+      <ChatSurface adapter={adaptExternalAgentChatSurface()}>
+        <ChatSurfaceComposer
+          resetKey="structured-controls"
+          droneName="Test agent"
+          promptError={null}
+          sending={false}
+          waiting={false}
+          composerControls={{
+            controls: [
+              {
+                kind: 'select',
+                id: 'model',
+                value: 'model-a',
+                label: 'Model A',
+                title: 'Choose model',
+                entries: [{ value: 'model-a', label: 'Model A' }],
+                onValueChange: () => {},
+              },
+            ],
+            menuActions: [{ id: 'files', label: 'Thread files', onSelect: () => {} }],
+          }}
+          onSend={async () => true}
+        />
+      </ChatSurface>,
+    );
+
+    expect(html).toContain('Model A');
+    expect(html).toContain('Chat options');
+    expect(html).not.toContain('Thread files');
+  });
+
+  test('the shared message body renders the same markdown and images for either controller', () => {
+    const html = renderToStaticMarkup(
+      <ChatMessageBody
+        role="assistant"
+        text="**Shared response**"
+        images={[{ key: 'image', src: 'data:image/png;base64,AA==', alt: 'Attached image' }]}
+      />,
+    );
+
+    expect(html).toContain('<strong>Shared response</strong>');
+    expect(html).toContain('Attached image');
   });
 });
