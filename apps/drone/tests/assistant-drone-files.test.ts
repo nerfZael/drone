@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { applyPatchHunks, parsePatch } from '@blip/tools';
 
 import { HubAssistantService } from '../src/hub/assistant';
 import { updateRegistry } from '../src/host/registry';
@@ -75,6 +76,55 @@ describe('assistant drone workspace target execution', () => {
       expect(read.details.content).toBe('hello');
       expect(write.details.size).toBe(7);
       expect(writes).toEqual([{ droneId: 'drone-a', path: 'src/a.ts', content: 'updated' }]);
+    });
+  });
+
+  test('sends patch mutations through one batch callback', async () => {
+    await withTempDroneDataDir('assistant-drone-patch-batch-', async () => {
+      await markDroneReady('drone-a');
+      const batches: any[] = [];
+      const service = new HubAssistantService({
+        listDrones: async () => [],
+        readDroneFile: async ({ droneId, path }) => ({
+          droneId,
+          path,
+          relativePath: path,
+          kind: 'text',
+          content: 'before',
+        }),
+        statDronePath: async ({ droneId, path }) => ({ droneId, path, exists: false }),
+        batchDroneFiles: async (input) => {
+          batches.push(input);
+        },
+      });
+      const created = await ensureTestNativeChat(service, { chatName: 'batch patch' });
+      await service.updateAccessScope({
+        threadId: created.chatId,
+        readMode: 'selected',
+        writeMode: 'selected',
+        droneIds: ['drone-a'],
+      });
+
+      await service.executeDroneWorkspaceTool(
+        created.chatId,
+        'drone-a',
+        {
+          tool: 'apply_patch',
+          args: {
+            patch: ['*** Begin Patch', '*** Add File: added.txt', '+added', '*** End Patch'].join(
+              '\n',
+            ),
+          },
+        },
+        { parse: parsePatch, applyHunks: applyPatchHunks },
+      );
+
+      expect(batches).toEqual([
+        {
+          droneId: 'drone-a',
+          operations: [{ type: 'write', path: 'added.txt', content: 'added' }],
+        },
+      ]);
     });
   });
 

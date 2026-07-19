@@ -23,6 +23,7 @@ export interface ContainerConfig {
 export interface PortMapping {
   containerPort: number;
   hostPort?: number;
+  hostIp?: string;
 }
 
 export interface VolumeMount {
@@ -109,9 +110,10 @@ export class DockerClient {
     if (info.NetworkSettings?.Ports) {
       for (const [containerPort, hostBindings] of Object.entries(info.NetworkSettings.Ports)) {
         const portNum = parseInt(containerPort.split('/')[0]);
-        const bindings = hostBindings as Array<{ HostPort: string }> | null | undefined;
+        const bindings = hostBindings as Array<{ HostIp?: string; HostPort: string }> | null | undefined;
         const hostPort = bindings?.[0]?.HostPort ? parseInt(bindings[0].HostPort) : undefined;
-        ports.push({ containerPort: portNum, hostPort });
+        const hostIp = String(bindings?.[0]?.HostIp ?? '').trim() || undefined;
+        ports.push({ containerPort: portNum, hostPort, ...(hostIp ? { hostIp } : {}) });
       }
     }
 
@@ -172,14 +174,17 @@ export class DockerClient {
     // Ensure image exists locally before creating container
     await this.ensureImage(config.image);
 
-    const portBindings: { [key: string]: Array<{ HostPort: string }> } = {};
+    const portBindings: { [key: string]: Array<{ HostIp?: string; HostPort: string }> } = {};
     const exposedPorts: { [key: string]: {} } = {};
 
     for (const port of config.ports) {
       const key = `${port.containerPort}/tcp`;
       exposedPorts[key] = {};
       if (port.hostPort) {
-        portBindings[key] = [{ HostPort: port.hostPort.toString() }];
+        portBindings[key] = [{
+          HostPort: port.hostPort.toString(),
+          ...(port.hostIp ? { HostIp: port.hostIp } : {}),
+        }];
       }
     }
 

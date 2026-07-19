@@ -42,6 +42,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
   } = deps;
   const {
     assistantAbortDroneTransferFile,
+    assistantBatchDroneFiles,
     assistantCommitDroneTransferFile,
     assistantCreateDroneDirectory,
     assistantCreateDroneTransferDirectory,
@@ -169,6 +170,8 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
       await assistantReadDroneFile({ droneId, path, startLine, endLine }),
     writeDroneFile: async ({ droneId, path, content }) =>
       await assistantWriteDroneFile({ droneId, path, content }),
+    batchDroneFiles: async ({ droneId, operations }) =>
+      await assistantBatchDroneFiles({ droneId, operations }),
     deleteDroneFile: async ({ droneId, path }) => await assistantDeleteDroneFile({ droneId, path }),
     moveDroneFile: async ({ droneId, fromPath, toPath }) =>
       await assistantMoveDroneFile({ droneId, fromPath, toPath }),
