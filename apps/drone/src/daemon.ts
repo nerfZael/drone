@@ -49,6 +49,17 @@ type PromptJobDiagnostics = {
   jobRuntimeMs?: number;
 };
 
+type SessionProbeStatus = 'alive' | 'missing' | 'unknown';
+
+type SessionProbe = {
+  status: SessionProbeStatus;
+  checkedAt: string;
+  consecutiveMissing?: number;
+  missingSince?: string;
+  error?: string;
+  stdoutBytes?: number;
+};
+
 type PromptJob = {
   id: string;
   kind: string;
@@ -64,10 +75,12 @@ type PromptJob = {
   stderrPath: string;
   exitPath: string;
   wrapperPath?: string;
+  wrapperStatePath?: string;
+  heartbeatPath?: string;
   startedAt?: string;
   finishedAt?: string;
   exitCode?: number;
-  exitStatusSource?: 'exit-file' | 'missing-exit-file';
+  exitStatusSource?: 'exit-file' | 'wrapper-state' | 'transcript-terminal' | 'missing-exit-file';
   stdout?: string;
   stderr?: string;
   wrapperLog?: string;
@@ -79,9 +92,18 @@ type PromptJob = {
   wrapperTruncated?: boolean;
   transcript?: BuiltinPromptJobTranscript;
   diagnostics?: PromptJobDiagnostics;
+  sessionProbe?: SessionProbe;
+  terminalObservedAt?: string;
+  terminalObservedStatus?: 'success' | 'failure';
   failureReason?: string;
   error?: string;
 };
+
+const PROMPT_SESSION_MISSING_CONFIRMATIONS = 3;
+const PROMPT_SESSION_MISSING_GRACE_MS = 1_500;
+const PROMPT_WRAPPER_HEARTBEAT_FRESH_MS = 6_000;
+const PROMPT_TERMINAL_EXIT_GRACE_MS = 5_000;
+const PROMPT_LATE_RECOVERY_POLL_MS = 5_000;
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -150,6 +172,24 @@ async function fileSizeSafe(p: string): Promise<number> {
     return Number.isFinite(st.size) && st.size > 0 ? Math.floor(st.size) : 0;
   } catch {
     return 0;
+  }
+}
+
+async function readTextTailSafe(p: string, maxBytes = 128 * 1024): Promise<string> {
+  let handle: FileHandle | null = null;
+  try {
+    handle = await fs.open(p, 'r');
+    const stat = await handle.stat();
+    const size = Number.isFinite(stat.size) && stat.size > 0 ? Math.floor(stat.size) : 0;
+    if (size <= 0) return '';
+    const readBytes = Math.min(size, Math.max(1, Math.floor(maxBytes)));
+    const buffer = Buffer.alloc(readBytes);
+    const { bytesRead } = await handle.read(buffer, 0, readBytes, size - readBytes);
+    return buffer.subarray(0, bytesRead).toString('utf8');
+  } catch {
+    return '';
+  } finally {
+    await handle?.close().catch(() => {});
   }
 }
 
@@ -244,7 +284,13 @@ async function startPromptJob(job: PromptJob): Promise<void> {
   const quotedExitPath = bashQuote(job.exitPath);
   const wrapperPath =
     job.wrapperPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper.log`);
+  const wrapperStatePath =
+    job.wrapperStatePath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper-state.json`);
+  const heartbeatPath =
+    job.heartbeatPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.heartbeat`);
   const quotedWrapperPath = bashQuote(wrapperPath);
+  const quotedWrapperStatePath = bashQuote(wrapperStatePath);
+  const quotedHeartbeatPath = bashQuote(heartbeatPath);
   const cd = job.cwd ? `cd ${bashQuote(job.cwd)}\n` : '';
   const envLines =
     job.env && Object.keys(job.env).length > 0
@@ -261,15 +307,53 @@ async function startPromptJob(job: PromptJob): Promise<void> {
     `stderr_path=${quotedStderrPath}`,
     `exit_path=${quotedExitPath}`,
     `wrapper_path=${quotedWrapperPath}`,
+    `wrapper_state_path=${quotedWrapperStatePath}`,
+    `heartbeat_path=${quotedHeartbeatPath}`,
     'wrote_exit=0',
+    'heartbeat_pid=',
+    'write_wrapper_state() {',
+    '  phase="$1"',
+    '  code="${2:-}"',
+    '  state_tmp="$wrapper_state_path.tmp.$$"',
+    '  if [ -n "$code" ]; then',
+    '    printf \'{"phase":"%s","at":"%s","pid":%s,"exitCode":%s}\\n\' "$phase" "$(date -Is)" "$$" "$code" > "$state_tmp" 2>/dev/null || return 0',
+    '  else',
+    '    printf \'{"phase":"%s","at":"%s","pid":%s}\\n\' "$phase" "$(date -Is)" "$$" > "$state_tmp" 2>/dev/null || return 0',
+    '  fi',
+    '  mv -f "$state_tmp" "$wrapper_state_path" 2>/dev/null || true',
+    '}',
+    'write_heartbeat() {',
+    '  heartbeat_tmp="$heartbeat_path.tmp.$$"',
+    '  date -Is > "$heartbeat_tmp" 2>/dev/null && mv -f "$heartbeat_tmp" "$heartbeat_path" 2>/dev/null || true',
+    '}',
+    'heartbeat_loop() {',
+    '  while :; do',
+    '    write_heartbeat',
+    '    sleep 2',
+    '  done',
+    '}',
+    'stop_heartbeat() {',
+    '  if [ -n "$heartbeat_pid" ]; then',
+    '    kill "$heartbeat_pid" 2>/dev/null || true',
+    '    wait "$heartbeat_pid" 2>/dev/null || true',
+    '    heartbeat_pid=',
+    '  fi',
+    '}',
+    'write_wrapper_state starting',
+    'write_heartbeat',
+    'heartbeat_loop &',
+    'heartbeat_pid=$!',
     'printf \'%s\\n\' "prompt wrapper: started at $(date -Is) pid $$" > "$wrapper_path" 2>/dev/null || true',
+    'write_wrapper_state running',
     'record_wrapper_exit() {',
     '  wrapper_code=$?',
+    '  stop_heartbeat',
     '  if [ "$wrote_exit" != "1" ]; then',
     '    printf \'%s\\n\' "prompt wrapper: exited before command exit capture at $(date -Is) with wrapper code $wrapper_code" >> "$wrapper_path" 2>/dev/null || true',
     '    if [ ! -e "$exit_path" ]; then',
     '      printf %s "$wrapper_code" > "$exit_path" 2>/dev/null || true',
     '    fi',
+    '    write_wrapper_state exited "$wrapper_code"',
     '  fi',
     '}',
     'trap record_wrapper_exit EXIT',
@@ -281,11 +365,13 @@ async function startPromptJob(job: PromptJob): Promise<void> {
     // Run and capture exit code.
     `${quotedCmd} ${quotedArgs} > ${quotedStdoutPath} 2> ${quotedStderrPath}`,
     'code=$?',
+    'stop_heartbeat',
     'printf \'%s\\n\' "prompt wrapper: command exited at $(date -Is) with code $code" >> "$wrapper_path" 2>/dev/null || true',
     `if [ "$code" -ne 0 ] && [ ! -s ${quotedStdoutPath} ] && [ ! -s ${quotedStderrPath} ]; then`,
     `  printf '%s\n' "prompt wrapper: command exited with code $code without writing stdout/stderr" >> ${quotedStderrPath}`,
     'fi',
     `printf %s \"$code\" > ${quotedExitPath}`,
+    'write_wrapper_state finished "$code"',
     'wrote_exit=1',
     'exit 0',
   ]
@@ -301,7 +387,14 @@ async function startPromptJob(job: PromptJob): Promise<void> {
 
 function promptJobSupportsTranscript(kindRaw: unknown): boolean {
   const kind = String(kindRaw ?? '').trim();
-  return kind === 'cursor' || kind === 'codex' || kind === 'claude' || kind === 'opencode' || kind === 'pi' || kind === 'blip';
+  return (
+    kind === 'cursor' ||
+    kind === 'codex' ||
+    kind === 'claude' ||
+    kind === 'opencode' ||
+    kind === 'pi' ||
+    kind === 'blip'
+  );
 }
 
 async function parsePromptJobTranscriptFromFile(
@@ -404,10 +497,91 @@ function buildPromptJobDiagnostics(
   return Object.keys(diagnostics).length > 0 ? diagnostics : undefined;
 }
 
-async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
+type PromptWrapperState = {
+  phase?: 'starting' | 'running' | 'finished' | 'exited';
+  at?: string;
+  pid?: number;
+  exitCode?: number;
+};
+
+async function readPromptWrapperState(job: PromptJob): Promise<PromptWrapperState | null> {
+  const statePath =
+    job.wrapperStatePath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.wrapper-state.json`);
+  const value = await readJsonFile<PromptWrapperState | null>(statePath, null);
+  return value && typeof value === 'object' ? value : null;
+}
+
+async function promptHeartbeatAgeMs(job: PromptJob, nowMs = Date.now()): Promise<number | null> {
+  const heartbeatPath =
+    job.heartbeatPath ?? path.join(path.dirname(job.stdoutPath), `${job.id}.heartbeat`);
+  try {
+    const stat = await fs.stat(heartbeatPath);
+    const age = nowMs - stat.mtimeMs;
+    return Number.isFinite(age) ? Math.max(0, Math.round(age)) : null;
+  } catch {
+    return null;
+  }
+}
+
+function transcriptTerminalStatusFromJsonl(
+  kind: string,
+  raw: string,
+): 'success' | 'failure' | null {
+  let terminal: 'success' | 'failure' | null = null;
+  for (const line of String(raw ?? '').split(/\r?\n/)) {
+    let event: any;
+    try {
+      event = JSON.parse(line);
+    } catch {
+      continue;
+    }
+    if (!event || typeof event !== 'object' || Array.isArray(event)) continue;
+    const type = String(event.type ?? '').trim();
+    if (kind === 'codex') {
+      if (type === 'response.failed' || type === 'error') terminal = 'failure';
+      if (type === 'turn.completed' || type === 'response.completed') terminal = 'success';
+      continue;
+    }
+    if (type === 'session_error' || type === 'response.failed') terminal = 'failure';
+    if (type === 'session_finished') {
+      const status = String(event.status ?? '')
+        .trim()
+        .toLowerCase();
+      terminal = ['failed', 'error', 'canceled', 'cancelled'].includes(status)
+        ? 'failure'
+        : 'success';
+    }
+    if (type === 'response.completed') terminal = 'success';
+  }
+  return terminal;
+}
+
+async function promptTranscriptTerminalStatus(
+  job: PromptJob,
+): Promise<'success' | 'failure' | null> {
+  const tail = await readTextTailSafe(job.stdoutPath);
+  return transcriptTerminalStatusFromJsonl(job.kind, tail);
+}
+
+async function finalizePromptJob(
+  job: PromptJob,
+  opts?: { allowTerminalSuccess?: boolean; settleMs?: number },
+): Promise<PromptJob> {
   // Some CLIs (notably Codex JSON mode) may continue appending output briefly
   // after the tmux session has exited. Wait for output/exit artifacts to settle.
   let exitCode = await readIntSafe(job.exitPath);
+  let exitCodeFromWrapperState = false;
+  if (exitCode == null) {
+    const wrapperState = await readPromptWrapperState(job);
+    if (
+      (wrapperState?.phase === 'finished' || wrapperState?.phase === 'exited') &&
+      typeof wrapperState.exitCode === 'number' &&
+      Number.isFinite(wrapperState.exitCode)
+    ) {
+      exitCode = Math.floor(wrapperState.exitCode);
+      exitCodeFromWrapperState = true;
+    }
+  }
   let stdoutRead = await readTextSafeDetailed(job.stdoutPath);
   let stderrRead = await readTextSafeDetailed(job.stderrPath);
   let wrapperRead = await readTextSafeDetailed(
@@ -421,15 +595,12 @@ async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
     /"type":"thread\.started"/.test(stdoutRead.text) &&
     /"type":"turn\.started"/.test(stdoutRead.text);
   const hasCodexTerminalEvent =
-    /"type":"turn\.completed"/.test(stdoutRead.text) ||
-    /"type":"response\.completed"/.test(stdoutRead.text) ||
-    /"type":"response\.failed"/.test(stdoutRead.text) ||
-    /"type":"error"/.test(stdoutRead.text);
+    job.kind === 'codex' && (await promptTranscriptTerminalStatus(job)) != null;
   const shouldWaitForCodexFlush =
     job.kind === 'codex' && startedLikeCodexTurn && !hasCodexTerminalEvent;
 
   if (exitCode == null || shouldWaitForCodexFlush) {
-    const settleDeadline = Date.now() + 10_000;
+    const settleDeadline = Date.now() + Math.max(0, opts?.settleMs ?? 10_000);
     let stableReads = 0;
     let lastOutSize = await fileSizeSafe(job.stdoutPath);
     let lastErrSize = await fileSizeSafe(job.stderrPath);
@@ -446,6 +617,18 @@ async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
       }
 
       exitCode = await readIntSafe(job.exitPath);
+      if (exitCode != null) exitCodeFromWrapperState = false;
+      if (exitCode == null) {
+        const wrapperState = await readPromptWrapperState(job);
+        if (
+          (wrapperState?.phase === 'finished' || wrapperState?.phase === 'exited') &&
+          typeof wrapperState.exitCode === 'number' &&
+          Number.isFinite(wrapperState.exitCode)
+        ) {
+          exitCode = Math.floor(wrapperState.exitCode);
+          exitCodeFromWrapperState = true;
+        }
+      }
       stdoutRead = await readTextSafeDetailed(job.stdoutPath);
       stderrRead = await readTextSafeDetailed(job.stderrPath);
       wrapperRead = await readTextSafeDetailed(
@@ -455,21 +638,29 @@ async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
       stderr = stderrRead.text;
       wrapperLog = wrapperRead.text;
       const codexNowTerminal =
-        /"type":"turn\.completed"/.test(stdoutRead.text) ||
-        /"type":"response\.completed"/.test(stdoutRead.text) ||
-        /"type":"response\.failed"/.test(stdoutRead.text) ||
-        /"type":"error"/.test(stdoutRead.text);
+        job.kind === 'codex' && (await promptTranscriptTerminalStatus(job)) != null;
       if (shouldWaitForCodexFlush && codexNowTerminal && (exitCode != null || stableReads >= 2))
         break;
       if (exitCode != null && stableReads >= 2) break;
     }
   }
 
-  const ok = exitCode === 0;
+  const terminalStatus =
+    exitCode == null && opts?.allowTerminalSuccess
+      ? ((await promptTranscriptTerminalStatus(job)) ?? job.terminalObservedStatus ?? null)
+      : null;
+  const ok = exitCode === 0 || (exitCode == null && terminalStatus === 'success');
   const finishedAt = nowIso();
   const transcript = await parsePromptJobTranscriptFromFile(job, stdoutRead, finishedAt);
   const diagnostics = buildPromptJobDiagnostics({ ...job, finishedAt }, transcript, wrapperLog);
-  const exitStatusSource = exitCode == null ? 'missing-exit-file' : 'exit-file';
+  const exitStatusSource =
+    exitCode != null
+      ? exitCodeFromWrapperState
+        ? 'wrapper-state'
+        : 'exit-file'
+      : terminalStatus === 'success'
+        ? 'transcript-terminal'
+        : 'missing-exit-file';
   const failureReason = ok
     ? undefined
     : exitCode == null
@@ -492,6 +683,9 @@ async function finalizePromptJob(job: PromptJob): Promise<PromptJob> {
     wrapperTruncated: wrapperRead.truncated,
     ...(transcript ? { transcript } : {}),
     ...(diagnostics ? { diagnostics } : {}),
+    sessionProbe: undefined,
+    terminalObservedAt: undefined,
+    terminalObservedStatus: undefined,
     state: ok ? 'done' : 'failed',
     failureReason,
     error: ok
@@ -547,7 +741,7 @@ async function cancelPromptJob(job: PromptJob): Promise<PromptJob> {
     };
   }
 
-  if (!(await sessionExists(job.session))) {
+  if ((await probeSession(job.session)).status === 'missing') {
     return await finalizePromptJob(job);
   }
 
@@ -559,11 +753,11 @@ async function cancelPromptJob(job: PromptJob): Promise<PromptJob> {
 
   const deadline = Date.now() + 1500;
   while (Date.now() < deadline) {
-    if (!(await sessionExists(job.session))) break;
+    if ((await probeSession(job.session)).status === 'missing') break;
     await sleep(100);
   }
 
-  if (await sessionExists(job.session)) {
+  if ((await probeSession(job.session)).status !== 'missing') {
     try {
       await killSession(job.session);
     } catch {
@@ -619,28 +813,242 @@ async function tmux(args: string[]): Promise<{ stdout: string; stderr: string }>
   }
 }
 
-async function sessionExists(session: string): Promise<boolean> {
+function tmuxErrorText(error: any): string {
+  return [error?.message, error?.stderr, error?.stdout]
+    .map((value) => String(value ?? '').trim())
+    .filter(Boolean)
+    .filter((value, index, values) => values.indexOf(value) === index)
+    .join(' | ')
+    .slice(0, 2_000);
+}
+
+function tmuxErrorMeansSessionMissing(error: any): boolean {
+  const text = tmuxErrorText(error).toLowerCase();
+  return (
+    text.includes("can't find session") ||
+    text.includes('no such session') ||
+    text.includes('no server running')
+  );
+}
+
+async function probeSession(session: string): Promise<{
+  status: SessionProbeStatus;
+  error?: string;
+}> {
   try {
     await tmux(['has-session', '-t', session]);
     try {
       const pane = await tmux(['display-message', '-p', '-t', `${session}:0.0`, '#{pane_dead}']);
       if (String(pane.stdout ?? '').trim() === '1') {
-        // A dead pane can keep the session object around (e.g. remain-on-exit),
-        // which would otherwise make prompt jobs look "running" forever.
+        // A dead pane can keep the session name reserved (for example when
+        // remain-on-exit was enabled externally), so preserve the previous
+        // best-effort cleanup without treating unrelated tmux errors as death.
         try {
           await killSession(session);
         } catch {
-          // ignore (best-effort cleanup)
+          // ignore cleanup failure; the dead pane is still strong evidence
         }
-        return false;
+        return { status: 'missing' };
       }
     } catch {
       // If pane status cannot be read, fall back to "session exists".
     }
-    return true;
-  } catch {
-    return false;
+    return { status: 'alive' };
+  } catch (error: any) {
+    const detail = tmuxErrorText(error) || 'tmux session probe failed';
+    return tmuxErrorMeansSessionMissing(error)
+      ? { status: 'missing', error: detail }
+      : { status: 'unknown', error: detail };
   }
+}
+
+async function sessionExists(session: string): Promise<boolean> {
+  // Preserve the boolean API's historical semantics for non-prompt process
+  // endpoints. Prompt lifecycle decisions use probeSession directly so an
+  // unknown probe can never be mistaken for a confirmed missing session.
+  return (await probeSession(session)).status === 'alive';
+}
+
+async function cleanupPromptSession(job: PromptJob): Promise<void> {
+  try {
+    await killSession(job.session);
+  } catch {
+    // The session normally disappears on its own. Cleanup is best-effort for
+    // terminal-event inference and dead panes that tmux keeps around.
+  }
+}
+
+function promptJobStartedAgeMs(job: PromptJob, nowMs: number): number | null {
+  const startedMs = parseIsoLikeMs(job.startedAt);
+  if (startedMs == null) return null;
+  return Math.max(0, nowMs - startedMs);
+}
+
+function sameSessionProbe(
+  left: SessionProbe | undefined,
+  right: SessionProbe | undefined,
+): boolean {
+  if (!left || !right) return left === right;
+  const { checkedAt: _leftCheckedAt, ...leftStable } = left;
+  const { checkedAt: _rightCheckedAt, ...rightStable } = right;
+  return JSON.stringify(leftStable) === JSON.stringify(rightStable);
+}
+
+async function advanceRunningPromptJob(job: PromptJob): Promise<PromptJob> {
+  const exitCode = await readIntSafe(job.exitPath);
+  const wrapperState = await readPromptWrapperState(job);
+  const wrapperFinished =
+    (wrapperState?.phase === 'finished' || wrapperState?.phase === 'exited') &&
+    typeof wrapperState.exitCode === 'number' &&
+    Number.isFinite(wrapperState.exitCode);
+  if (exitCode != null || wrapperFinished) {
+    return await finalizePromptJob(job, { allowTerminalSuccess: true, settleMs: 2_000 });
+  }
+
+  const now = nowIso();
+  const nowMs = Date.parse(now);
+  const terminalStatus = await promptTranscriptTerminalStatus(job);
+  const terminalObservedStatus = terminalStatus ?? job.terminalObservedStatus;
+  const terminalObservedAt = terminalStatus
+    ? terminalStatus === job.terminalObservedStatus
+      ? (job.terminalObservedAt ?? now)
+      : now
+    : job.terminalObservedAt;
+  const terminalObservedMs = parseIsoLikeMs(terminalObservedAt);
+  if (
+    terminalObservedStatus &&
+    terminalObservedMs != null &&
+    nowMs - terminalObservedMs >= PROMPT_TERMINAL_EXIT_GRACE_MS
+  ) {
+    const next = await finalizePromptJob(
+      { ...job, terminalObservedAt, terminalObservedStatus },
+      { allowTerminalSuccess: true, settleMs: 500 },
+    );
+    await cleanupPromptSession(job);
+    return next;
+  }
+
+  const probe = await probeSession(job.session);
+  if (probe.status === 'alive') {
+    if (
+      !job.sessionProbe &&
+      terminalObservedAt === job.terminalObservedAt &&
+      terminalObservedStatus === job.terminalObservedStatus
+    )
+      return job;
+    return {
+      ...job,
+      updatedAt: now,
+      sessionProbe: undefined,
+      terminalObservedAt,
+      terminalObservedStatus,
+    };
+  }
+
+  const stdoutBytes = await fileSizeSafe(job.stdoutPath);
+  const heartbeatAgeMs = await promptHeartbeatAgeMs(job, nowMs);
+  const heartbeatFresh =
+    heartbeatAgeMs != null && heartbeatAgeMs <= PROMPT_WRAPPER_HEARTBEAT_FRESH_MS;
+  const outputAdvanced =
+    typeof job.sessionProbe?.stdoutBytes === 'number' && stdoutBytes > job.sessionProbe.stdoutBytes;
+
+  if (probe.status === 'unknown') {
+    const nextProbe: SessionProbe = {
+      status: 'unknown',
+      checkedAt: now,
+      ...(probe.error ? { error: probe.error } : {}),
+      stdoutBytes,
+    };
+    if (job.sessionProbe?.status !== 'unknown' || job.sessionProbe?.error !== probe.error) {
+      // eslint-disable-next-line no-console
+      console.warn(`prompt session probe unknown for ${job.id}: ${probe.error ?? 'unknown error'}`);
+    }
+    if (
+      sameSessionProbe(job.sessionProbe, nextProbe) &&
+      terminalObservedAt === job.terminalObservedAt &&
+      terminalObservedStatus === job.terminalObservedStatus
+    ) {
+      return job;
+    }
+    return {
+      ...job,
+      updatedAt: now,
+      sessionProbe: nextProbe,
+      terminalObservedAt,
+      terminalObservedStatus,
+    };
+  }
+
+  const priorMissing = job.sessionProbe?.status === 'missing' ? job.sessionProbe : undefined;
+  const missingSince =
+    heartbeatFresh || outputAdvanced ? undefined : (priorMissing?.missingSince ?? now);
+  const consecutiveMissing =
+    heartbeatFresh || outputAdvanced ? 0 : (priorMissing?.consecutiveMissing ?? 0) + 1;
+  const nextProbe: SessionProbe = {
+    status: 'missing',
+    checkedAt: now,
+    consecutiveMissing,
+    ...(missingSince ? { missingSince } : {}),
+    ...(probe.error ? { error: probe.error } : {}),
+    stdoutBytes,
+  };
+  const missingSinceMs = parseIsoLikeMs(missingSince) ?? nowMs;
+  const startedAgeMs = promptJobStartedAgeMs(job, nowMs);
+  const startupGraceElapsed =
+    startedAgeMs == null || startedAgeMs >= PROMPT_WRAPPER_HEARTBEAT_FRESH_MS;
+  const confirmedMissing =
+    !heartbeatFresh &&
+    !outputAdvanced &&
+    startupGraceElapsed &&
+    consecutiveMissing >= PROMPT_SESSION_MISSING_CONFIRMATIONS &&
+    nowMs - missingSinceMs >= PROMPT_SESSION_MISSING_GRACE_MS;
+
+  if (confirmedMissing) {
+    // eslint-disable-next-line no-console
+    console.warn(
+      `prompt session confirmed missing for ${job.id} after ${consecutiveMissing} probes` +
+        (probe.error ? `: ${probe.error}` : ''),
+    );
+    const next = await finalizePromptJob(
+      { ...job, sessionProbe: nextProbe, terminalObservedAt, terminalObservedStatus },
+      { allowTerminalSuccess: true, settleMs: 2_000 },
+    );
+    await cleanupPromptSession(job);
+    return next;
+  }
+
+  if (
+    sameSessionProbe(job.sessionProbe, nextProbe) &&
+    terminalObservedAt === job.terminalObservedAt &&
+    terminalObservedStatus === job.terminalObservedStatus
+  ) {
+    return job;
+  }
+  return {
+    ...job,
+    updatedAt: now,
+    sessionProbe: nextProbe,
+    terminalObservedAt,
+    terminalObservedStatus,
+  };
+}
+
+async function recoverLatePromptCompletion(job: PromptJob): Promise<PromptJob> {
+  if (job.state !== 'failed' || job.exitStatusSource !== 'missing-exit-file') return job;
+  const exitCode = await readIntSafe(job.exitPath);
+  const wrapperState = await readPromptWrapperState(job);
+  const wrapperFinished =
+    (wrapperState?.phase === 'finished' || wrapperState?.phase === 'exited') &&
+    typeof wrapperState.exitCode === 'number' &&
+    Number.isFinite(wrapperState.exitCode);
+  const terminalStatus = await promptTranscriptTerminalStatus(job);
+  if (exitCode == null && !wrapperFinished && terminalStatus !== 'success') return job;
+  const next = await finalizePromptJob(job, { allowTerminalSuccess: true, settleMs: 500 });
+  if (next.state === 'done') {
+    // eslint-disable-next-line no-console
+    console.warn(`recovered late prompt completion for ${job.id}`);
+  }
+  return next;
 }
 
 async function startSession(opts: {
@@ -894,59 +1302,98 @@ async function main() {
   const promptOutDir = path.join(promptsDir, 'out');
   await ensureDir(promptJobsDir);
   await ensureDir(promptOutDir);
-  let promptPumpBusy = false;
-  async function pumpPrompts() {
-    if (promptPumpBusy) return;
-    promptPumpBusy = true;
-    try {
-      const idx = await loadPromptIndex(promptsDir);
-      const order = Array.isArray(idx.order) ? idx.order.map(String).filter(Boolean) : [];
-      // First, finalize any running jobs whose session ended.
-      for (const id of order) {
-        const job = await loadPromptJob(promptsDir, id);
-        if (!job) continue;
-        if (job.state !== 'running') continue;
-        const alive = await sessionExists(job.session);
-        if (alive) continue;
-        const next = await finalizePromptJob(job);
-        await savePromptJob(promptsDir, next);
-      }
+  let promptMutationTail: Promise<void> = Promise.resolve();
+  let promptPumpInFlight: Promise<void> | null = null;
+  const promptLateRecoveryLastChecked = new Map<string, number>();
 
-      // Start next queued if none running.
-      const anyRunning = await (async () => {
-        for (const id of order) {
-          const job = await loadPromptJob(promptsDir, id);
-          if (job && job.state === 'running') return true;
-        }
-        return false;
-      })();
-      if (anyRunning) return;
+  async function withPromptMutationLock<T>(run: () => Promise<T>): Promise<T> {
+    const result = promptMutationTail.then(run, run);
+    promptMutationTail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return await result;
+  }
 
-      let startId: string | null = null;
-      for (const id of order) {
-        const job = await loadPromptJob(promptsDir, id);
-        if (job && job.state === 'queued') {
-          startId = id;
-          break;
-        }
-      }
-      if (!startId) return;
-      const job = await loadPromptJob(promptsDir, startId);
-      if (!job) return;
-      const startedAt = nowIso();
-      const running: PromptJob = { ...job, state: 'running', startedAt, updatedAt: startedAt };
-      await savePromptJob(promptsDir, running);
-      await startPromptJob(running);
-    } finally {
-      promptPumpBusy = false;
+  async function pumpPromptsUnlocked(): Promise<void> {
+    const idx = await loadPromptIndex(promptsDir);
+    const order = Array.isArray(idx.order) ? idx.order.map(String).filter(Boolean) : [];
+    const orderSet = new Set(order);
+    for (const id of promptLateRecoveryLastChecked.keys()) {
+      if (!orderSet.has(id)) promptLateRecoveryLastChecked.delete(id);
     }
+    // First, reconcile running jobs from durable wrapper artifacts and a
+    // corroborated tmux probe. Also revisit provisional missing-exit failures
+    // so a late exit/terminal event can repair the persisted result.
+    for (const id of order) {
+      const job = await loadPromptJob(promptsDir, id);
+      if (!job) continue;
+      if (job.state === 'running') {
+        const next = await advanceRunningPromptJob(job);
+        if (next !== job) await savePromptJob(promptsDir, next);
+        continue;
+      }
+      if (job.state === 'failed' && job.exitStatusSource === 'missing-exit-file') {
+        const checkedAt = promptLateRecoveryLastChecked.get(id) ?? 0;
+        if (Date.now() - checkedAt < PROMPT_LATE_RECOVERY_POLL_MS) continue;
+        promptLateRecoveryLastChecked.set(id, Date.now());
+        const next = await recoverLatePromptCompletion(job);
+        if (next !== job) {
+          promptLateRecoveryLastChecked.delete(id);
+          await savePromptJob(promptsDir, next);
+        }
+      }
+    }
+
+    // Start next queued if none running.
+    const anyRunning = await (async () => {
+      for (const id of order) {
+        const job = await loadPromptJob(promptsDir, id);
+        if (job && job.state === 'running') return true;
+      }
+      return false;
+    })();
+    if (anyRunning) return;
+
+    let startId: string | null = null;
+    for (const id of order) {
+      const job = await loadPromptJob(promptsDir, id);
+      if (job && job.state === 'queued') {
+        startId = id;
+        break;
+      }
+    }
+    if (!startId) return;
+    const job = await loadPromptJob(promptsDir, startId);
+    if (!job) return;
+    const startedAt = nowIso();
+    const running: PromptJob = { ...job, state: 'running', startedAt, updatedAt: startedAt };
+    await savePromptJob(promptsDir, running);
+    await startPromptJob(running);
+  }
+
+  function pumpPrompts(): Promise<void> {
+    if (promptPumpInFlight) return promptPumpInFlight;
+    const current = withPromptMutationLock(pumpPromptsUnlocked);
+    promptPumpInFlight = current;
+    const clearCurrent = () => {
+      if (promptPumpInFlight === current) promptPumpInFlight = null;
+    };
+    void current.then(clearCurrent, clearCurrent);
+    return current;
   }
 
   // Resume any queued/running prompts on daemon restart.
   setInterval(() => {
-    void pumpPrompts();
+    void pumpPrompts().catch((error) => {
+      // eslint-disable-next-line no-console
+      console.error(`prompt pump failed: ${String(error?.message ?? error)}`);
+    });
   }, 400);
-  void pumpPrompts();
+  void pumpPrompts().catch((error) => {
+    // eslint-disable-next-line no-console
+    console.error(`initial prompt pump failed: ${String(error?.message ?? error)}`);
+  });
 
   async function readState(): Promise<DroneState> {
     try {
@@ -1009,17 +1456,13 @@ async function main() {
               ) as Record<string, string>)
             : undefined;
 
-        const existing = await loadPromptJob(promptsDir, id);
-        if (existing) {
-          json(res, 200, { ok: true, id, state: existing.state, note: 'already exists' });
-          return;
-        }
-
         const session = promptSessionName(id);
         const stdoutPath = path.join(promptOutDir, `${id}.stdout.txt`);
         const stderrPath = path.join(promptOutDir, `${id}.stderr.txt`);
         const exitPath = path.join(promptOutDir, `${id}.exit.txt`);
         const wrapperPath = path.join(promptOutDir, `${id}.wrapper.log`);
+        const wrapperStatePath = path.join(promptOutDir, `${id}.wrapper-state.json`);
+        const heartbeatPath = path.join(promptOutDir, `${id}.heartbeat`);
 
         const createdAt = nowIso();
         const job: PromptJob = {
@@ -1037,13 +1480,24 @@ async function main() {
           stderrPath,
           exitPath,
           wrapperPath,
+          wrapperStatePath,
+          heartbeatPath,
         };
-        await savePromptJob(promptsDir, job);
-        const idx = await loadPromptIndex(promptsDir);
-        const order = Array.isArray(idx.order) ? idx.order.map(String) : [];
-        if (!order.includes(id)) order.push(id);
-        idx.order = order.slice(-400);
-        await savePromptIndex(promptsDir, idx);
+        const existing = await withPromptMutationLock(async () => {
+          const current = await loadPromptJob(promptsDir, id);
+          if (current) return current;
+          await savePromptJob(promptsDir, job);
+          const idx = await loadPromptIndex(promptsDir);
+          const order = Array.isArray(idx.order) ? idx.order.map(String) : [];
+          if (!order.includes(id)) order.push(id);
+          idx.order = order.slice(-400);
+          await savePromptIndex(promptsDir, idx);
+          return null;
+        });
+        if (existing) {
+          json(res, 200, { ok: true, id, state: existing.state, note: 'already exists' });
+          return;
+        }
         void pumpPrompts();
         json(res, 202, { ok: true, id, state: 'queued' });
         return;
@@ -1121,34 +1575,40 @@ async function main() {
       const promptMatch = pathname.match(/^\/v1\/prompts\/([^/]+)$/);
       if (method === 'GET' && promptMatch) {
         const id = decodeURIComponent(promptMatch[1] ?? '');
-        const job = await loadPromptJob(promptsDir, id);
+        const job = await withPromptMutationLock(async () => {
+          const current = await loadPromptJob(promptsDir, id);
+          if (!current) return null;
+          // Best-effort reconcile from wrapper artifacts and corroborated
+          // session liveness if it changed since the last pump.
+          if (current.state === 'running') {
+            let next = await advanceRunningPromptJob(current);
+            if (next.state === 'running') next = await refreshPromptJobTranscript(next);
+            if (next !== current) await savePromptJob(promptsDir, next);
+            return next;
+          }
+          if (current.state === 'failed' && current.exitStatusSource === 'missing-exit-file') {
+            const next = await recoverLatePromptCompletion(current);
+            if (next !== current) {
+              promptLateRecoveryLastChecked.delete(id);
+              await savePromptJob(promptsDir, next);
+              return next;
+            }
+          }
+          if (
+            (current.state === 'done' || current.state === 'failed') &&
+            !promptJobHasParsedTranscript(current)
+          ) {
+            const next = await refreshPromptJobTranscript(current);
+            if (next !== current) {
+              await savePromptJob(promptsDir, next);
+              return next;
+            }
+          }
+          return current;
+        });
         if (!job) {
           json(res, 404, { error: 'not found' });
           return;
-        }
-        // Best-effort finalize if it ended since last pump.
-        if (job.state === 'running') {
-          const alive = await sessionExists(job.session);
-          if (!alive) {
-            const next = await finalizePromptJob(job);
-            await savePromptJob(promptsDir, next);
-            json(res, 200, { ok: true, job: next });
-            return;
-          }
-          const next = await refreshPromptJobTranscript(job);
-          json(res, 200, { ok: true, job: next });
-          return;
-        }
-        if (
-          (job.state === 'done' || job.state === 'failed') &&
-          !promptJobHasParsedTranscript(job)
-        ) {
-          const next = await refreshPromptJobTranscript(job);
-          if (next !== job) {
-            await savePromptJob(promptsDir, next);
-            json(res, 200, { ok: true, job: next });
-            return;
-          }
         }
         json(res, 200, { ok: true, job });
         return;
@@ -1157,13 +1617,17 @@ async function main() {
       const promptCancelMatch = pathname.match(/^\/v1\/prompts\/([^/]+)\/cancel$/);
       if (method === 'POST' && promptCancelMatch) {
         const id = decodeURIComponent(promptCancelMatch[1] ?? '');
-        const job = await loadPromptJob(promptsDir, id);
-        if (!job) {
+        const next = await withPromptMutationLock(async () => {
+          const current = await loadPromptJob(promptsDir, id);
+          if (!current) return null;
+          const canceled = await cancelPromptJob(current);
+          await savePromptJob(promptsDir, canceled);
+          return canceled;
+        });
+        if (!next) {
           json(res, 404, { error: 'not found' });
           return;
         }
-        const next = await cancelPromptJob(job);
-        await savePromptJob(promptsDir, next);
         void pumpPrompts();
         json(res, 200, { ok: true, job: next });
         return;

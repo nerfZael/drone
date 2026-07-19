@@ -162,7 +162,8 @@ describe('shouldRetryFailedPendingPrompt', () => {
   test('does not retry terminal auth failures', () => {
     expect(
       shouldRetryFailedPendingPrompt({
-        error: 'Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.',
+        error:
+          'Your access token could not be refreshed because your refresh token was already used. Please log out and sign in again.',
         updatedAt: '2026-06-13T23:41:42.221Z',
         nowMs: Date.parse('2026-06-13T23:42:00.000Z'),
       }),
@@ -179,6 +180,22 @@ describe('shouldRetryFailedPendingPrompt', () => {
     ).toBe(true);
   });
 
+  test('retries recent provisional missing-exit failures for late reconciliation', () => {
+    const nowMs = Date.parse('2026-07-19T16:00:00.000Z');
+    for (const error of [
+      'prompt wrapper ended without writing an exit code; the tmux session may have been killed',
+      'Codex turn started but exited before producing a response.',
+    ]) {
+      expect(
+        shouldRetryFailedPendingPrompt({
+          error,
+          updatedAt: '2026-07-19T15:55:00.000Z',
+          nowMs,
+        }),
+      ).toBe(true);
+    }
+  });
+
   test('stops retrying old transcript parse failures', () => {
     expect(
       shouldRetryFailedPendingPrompt({
@@ -192,16 +209,30 @@ describe('shouldRetryFailedPendingPrompt', () => {
 
 describe('looksLikeTransientPromptEnqueueError', () => {
   test('matches daemon and timeout delivery interruptions', () => {
-    expect(looksLikeTransientPromptEnqueueError('prompt enqueue failed for drone/default (timed out after 180s)')).toBe(true);
-    expect(looksLikeTransientPromptEnqueueError('request timeout after 5000ms: POST /v1/prompts/enqueue')).toBe(true);
+    expect(
+      looksLikeTransientPromptEnqueueError(
+        'prompt enqueue failed for drone/default (timed out after 180s)',
+      ),
+    ).toBe(true);
+    expect(
+      looksLikeTransientPromptEnqueueError(
+        'request timeout after 5000ms: POST /v1/prompts/enqueue',
+      ),
+    ).toBe(true);
     expect(looksLikeTransientPromptEnqueueError('drone daemon not ready after 20000ms')).toBe(true);
     expect(looksLikeTransientPromptEnqueueError('fetch failed: ECONNREFUSED 127.0.0.1')).toBe(true);
-    expect(looksLikeTransientPromptEnqueueError('timed out acquiring registry lock (10000ms)')).toBe(true);
+    expect(
+      looksLikeTransientPromptEnqueueError('timed out acquiring registry lock (10000ms)'),
+    ).toBe(true);
   });
 
   test('does not retry terminal auth failures', () => {
     expect(looksLikeTransientPromptEnqueueError('unauthorized')).toBe(false);
-    expect(looksLikeTransientPromptEnqueueError('authentication failed; please log out and sign in again')).toBe(false);
+    expect(
+      looksLikeTransientPromptEnqueueError(
+        'authentication failed; please log out and sign in again',
+      ),
+    ).toBe(false);
   });
 });
 

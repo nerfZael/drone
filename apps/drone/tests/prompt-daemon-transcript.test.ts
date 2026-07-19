@@ -131,6 +131,72 @@ async function waitForRunningPromptJob(
   throw new Error(`timed out waiting for running prompt job ${id}: ${JSON.stringify(lastJob)}`);
 }
 
+async function waitForTerminalPromptJob(
+  baseUrl: string,
+  token: string,
+  id: string,
+  timeoutMs = 15_000,
+): Promise<any> {
+  const startedAt = Date.now();
+  let lastJob: any = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    const response = await fetch(`${baseUrl}/v1/prompts/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const data: any = await response.json();
+    lastJob = data?.job ?? data;
+    if (['done', 'failed', 'canceled'].includes(String(lastJob?.state ?? ''))) return lastJob;
+    await Bun.sleep(100);
+  }
+  throw new Error(`timed out waiting for terminal prompt job ${id}: ${JSON.stringify(lastJob)}`);
+}
+
+async function waitForRecoveredPromptJob(
+  baseUrl: string,
+  token: string,
+  id: string,
+  timeoutMs = 15_000,
+): Promise<any> {
+  const startedAt = Date.now();
+  let lastJob: any = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    const response = await fetch(`${baseUrl}/v1/prompts/${encodeURIComponent(id)}`, {
+      headers: { authorization: `Bearer ${token}` },
+    });
+    const data: any = await response.json();
+    lastJob = data?.job ?? data;
+    if (lastJob?.state === 'done') return lastJob;
+    if (lastJob?.state === 'failed' && lastJob?.exitStatusSource !== 'missing-exit-file') {
+      throw new Error(`late prompt recovery became terminal: ${JSON.stringify(lastJob)}`);
+    }
+    await Bun.sleep(100);
+  }
+  throw new Error(`timed out waiting for recovered prompt job ${id}: ${JSON.stringify(lastJob)}`);
+}
+
+function writeTmuxProbeShim(root: string, mode: 'missing' | 'unknown'): string {
+  const shimDir = path.join(root, `tmux-shim-${mode}`);
+  const shimPath = path.join(shimDir, 'tmux');
+  fs.mkdirSync(shimDir, { recursive: true });
+  fs.writeFileSync(
+    shimPath,
+    `#!/usr/bin/env bash
+if [ "\${1:-}" = "has-session" ]; then
+  if [ "${mode}" = "missing" ]; then
+    printf '%s\n' "can't find session: synthetic-test" >&2
+    exit 1
+  fi
+  printf '%s\n' "synthetic transient tmux client failure" >&2
+  exit 75
+fi
+exec "\${REAL_TMUX}" "\$@"
+`,
+    'utf8',
+  );
+  fs.chmodSync(shimPath, 0o755);
+  return shimDir;
+}
+
 describeRuntimeSuite('prompt daemon transcripts', () => {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-prompt-daemon-transcript-'));
   const processes: Array<ReturnType<typeof Bun.spawn>> = [];
@@ -369,4 +435,377 @@ function emit(event) {
     expect(job.diagnostics.wrapperRuntimeMs).toBeGreaterThanOrEqual(500);
   }, 20_000);
 
+  for (const mode of ['unknown', 'missing'] as const) {
+    test(`keeps a live prompt running through a synthetic tmux ${mode} probe`, async () => {
+      const port = await allocatePort();
+      const dataDir = path.join(tempRoot, `daemon-${mode}-${port}`);
+      fs.mkdirSync(dataDir, { recursive: true });
+      const scriptPath = path.join(tempRoot, `tmux-${mode}-${port}.js`);
+      fs.writeFileSync(
+        scriptPath,
+        `
+console.log(JSON.stringify({ type: 'thread.started', thread_id: 'thread-${mode}' }));
+console.log(JSON.stringify({ type: 'turn.started' }));
+setTimeout(() => {
+  console.log(JSON.stringify({ type: 'item.completed', item: { id: 'message', type: 'agent_message', text: 'Recovered ${mode} probe.' } }));
+  console.log(JSON.stringify({ type: 'turn.completed' }));
+}, 2500);
+`,
+        'utf8',
+      );
+
+      const realTmux = String(cp.spawnSync('which', ['tmux'], { encoding: 'utf8' }).stdout).trim();
+      const shimDir = writeTmuxProbeShim(tempRoot, mode);
+      const token = 'daemon-token';
+      const daemon = Bun.spawn(
+        [
+          process.execPath,
+          daemonEntry,
+          '--host',
+          '127.0.0.1',
+          '--port',
+          String(port),
+          '--data-dir',
+          dataDir,
+          '--token',
+          token,
+        ],
+        {
+          cwd: process.cwd(),
+          env: {
+            ...process.env,
+            PATH: `${shimDir}${path.delimiter}${process.env.PATH ?? ''}`,
+            REAL_TMUX: realTmux,
+          },
+          stdout: 'ignore',
+          stderr: 'pipe',
+        },
+      );
+      processes.push(daemon);
+      const baseUrl = `http://127.0.0.1:${port}`;
+      await waitForHealth(baseUrl, token, daemon);
+
+      if (mode === 'unknown') {
+        fs.writeFileSync(
+          path.join(dataDir, 'state.json'),
+          JSON.stringify({
+            process: {
+              session: 'synthetic-unknown-status',
+              cmd: 'synthetic',
+              args: [],
+              logPath: '/tmp/synthetic.log',
+              startedAt: new Date().toISOString(),
+            },
+          }),
+          'utf8',
+        );
+        const statusResponse = await fetch(`${baseUrl}/v1/status`, {
+          headers: { authorization: `Bearer ${token}` },
+        });
+        const status: any = await statusResponse.json();
+        expect(status.process.running).toBe(false);
+      }
+
+      const id = `tmux-${mode}-${port}`;
+      const enqueue = await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ id, kind: 'codex', cmd: process.execPath, args: [scriptPath] }),
+      });
+      expect(enqueue.status).toBe(202);
+
+      const running = await waitForRunningPromptJob(
+        baseUrl,
+        token,
+        id,
+        (job) =>
+          job?.sessionProbe?.status === mode &&
+          typeof job?.heartbeatPath === 'string' &&
+          fs.existsSync(job.heartbeatPath),
+      );
+      expect(running.sessionProbe.status).toBe(mode);
+      expect(fs.existsSync(running.heartbeatPath)).toBe(true);
+
+      const job = await waitForPromptJob(baseUrl, token, id);
+      expect(job.state).toBe('done');
+      expect(job.exitCode).toBe(0);
+      expect(job.transcript).toMatchObject({
+        kind: 'codex',
+        message: `Recovered ${mode} probe.`,
+        terminalEvent: 'turn.completed',
+      });
+      expect(JSON.parse(fs.readFileSync(job.wrapperStatePath, 'utf8'))).toMatchObject({
+        phase: 'finished',
+        exitCode: 0,
+      });
+    }, 20_000);
+  }
+
+  test('repairs a provisional missing-exit failure when completion artifacts arrive later', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-late-recovery-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const scriptPath = path.join(tempRoot, `late-recovery-${port}.js`);
+    fs.writeFileSync(
+      scriptPath,
+      `
+console.log(JSON.stringify({ type: 'thread.started', thread_id: 'thread-late' }));
+console.log(JSON.stringify({ type: 'turn.started' }));
+setTimeout(() => {
+  console.log(JSON.stringify({ type: 'item.completed', item: { id: 'message', type: 'agent_message', text: 'Late completion recovered.' } }));
+  console.log(JSON.stringify({ type: 'turn.completed' }));
+}, 1800);
+`,
+      'utf8',
+    );
+
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      { cwd: process.cwd(), stdout: 'ignore', stderr: 'pipe' },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
+
+    const id = `late-recovery-${port}`;
+    await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ id, kind: 'codex', cmd: process.execPath, args: [scriptPath] }),
+    });
+    const running = await waitForRunningPromptJob(baseUrl, token, id, () => true);
+    const jobPath = path.join(dataDir, 'prompts', 'jobs', `${id}.json`);
+    fs.writeFileSync(
+      jobPath,
+      JSON.stringify(
+        {
+          ...running,
+          state: 'failed',
+          finishedAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+          exitStatusSource: 'missing-exit-file',
+          failureReason: 'prompt wrapper ended without writing an exit code',
+          error: 'Codex turn started but exited before producing a response.',
+        },
+        null,
+        2,
+      ),
+      'utf8',
+    );
+
+    const recovered = await waitForRecoveredPromptJob(baseUrl, token, id);
+    expect(recovered.state).toBe('done');
+    expect(recovered.exitStatusSource).toBe('exit-file');
+    expect(recovered.transcript).toMatchObject({
+      message: 'Late completion recovered.',
+      terminalEvent: 'turn.completed',
+    });
+    expect(recovered.error).toBeUndefined();
+    expect(recovered.failureReason).toBeUndefined();
+  }, 20_000);
+
+  test('preserves every prompt when enqueue requests mutate the queue concurrently', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-concurrent-enqueue-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      { cwd: process.cwd(), stdout: 'ignore', stderr: 'pipe' },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
+
+    const ids = Array.from({ length: 12 }, (_, index) => `concurrent-${port}-${index}`);
+    const responses = await Promise.all(
+      ids.map((id) =>
+        fetch(`${baseUrl}/v1/prompts/enqueue`, {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${token}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({
+            id,
+            kind: 'shell',
+            cmd: process.execPath,
+            args: ['-e', 'setTimeout(() => {}, 30000)'],
+          }),
+        }),
+      ),
+    );
+    expect(responses.every((response) => response.status === 202)).toBe(true);
+
+    const queue = JSON.parse(fs.readFileSync(path.join(dataDir, 'prompts', 'queue.json'), 'utf8'));
+    expect(new Set(queue.order)).toEqual(new Set(ids));
+    for (const id of ids) {
+      expect(fs.existsSync(path.join(dataDir, 'prompts', 'jobs', `${id}.json`))).toBe(true);
+    }
+
+    const cancellations = await Promise.all(
+      ids.map((id) =>
+        fetch(`${baseUrl}/v1/prompts/${encodeURIComponent(id)}/cancel`, {
+          method: 'POST',
+          headers: { authorization: `Bearer ${token}` },
+        }),
+      ),
+    );
+    expect(cancellations.every((response) => response.status === 200)).toBe(true);
+  }, 20_000);
+
+  test('accepts a successful terminal transcript when the wrapper does not exit promptly', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-terminal-authority-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const scriptPath = path.join(tempRoot, `terminal-authority-${port}.js`);
+    fs.writeFileSync(
+      scriptPath,
+      `
+console.log(JSON.stringify({ type: 'thread.started', thread_id: 'thread-terminal-authority' }));
+console.log(JSON.stringify({ type: 'turn.started' }));
+console.log(JSON.stringify({ type: 'item.completed', item: { id: 'message', type: 'agent_message', text: 'Terminal event is authoritative.' } }));
+console.log(JSON.stringify({ type: 'error', message: 'transient event before completion' }));
+console.log('{"type": "turn.completed"}');
+setTimeout(() => {}, 30000);
+`,
+      'utf8',
+    );
+
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      { cwd: process.cwd(), stdout: 'ignore', stderr: 'pipe' },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
+
+    const id = `terminal-authority-${port}`;
+    await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ id, kind: 'codex', cmd: process.execPath, args: [scriptPath] }),
+    });
+
+    const completed = await waitForPromptJob(baseUrl, token, id);
+    expect(completed.exitCode).toBeUndefined();
+    expect(completed.exitStatusSource).toBe('transcript-terminal');
+    expect(completed.transcript).toMatchObject({
+      message: 'Terminal event is authoritative.',
+      terminalEvent: 'turn.completed',
+    });
+    expect(cp.spawnSync('tmux', ['has-session', '-t', completed.session]).status).not.toBe(0);
+
+    const wrapperState = JSON.parse(fs.readFileSync(completed.wrapperStatePath, 'utf8'));
+    const pgidResult = cp.spawnSync('ps', ['-o', 'pgid=', '-p', String(wrapperState.pid)], {
+      encoding: 'utf8',
+    });
+    const processGroupId = Number(String(pgidResult.stdout ?? '').trim());
+    if (Number.isFinite(processGroupId) && processGroupId > 1) {
+      process.kill(-processGroupId, 'SIGKILL');
+    }
+  }, 20_000);
+
+  test('still fails a genuinely terminated wrapper with captured exit evidence', async () => {
+    const port = await allocatePort();
+    const dataDir = path.join(tempRoot, `daemon-killed-wrapper-${port}`);
+    fs.mkdirSync(dataDir, { recursive: true });
+    const token = 'daemon-token';
+    const daemon = Bun.spawn(
+      [
+        process.execPath,
+        daemonEntry,
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(port),
+        '--data-dir',
+        dataDir,
+        '--token',
+        token,
+      ],
+      { cwd: process.cwd(), stdout: 'ignore', stderr: 'pipe' },
+    );
+    processes.push(daemon);
+    const baseUrl = `http://127.0.0.1:${port}`;
+    await waitForHealth(baseUrl, token, daemon);
+
+    const id = `killed-wrapper-${port}`;
+    await fetch(`${baseUrl}/v1/prompts/enqueue`, {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        id,
+        kind: 'codex',
+        cmd: process.execPath,
+        args: ['-e', 'setTimeout(() => {}, 30000)'],
+      }),
+    });
+    const running = await waitForRunningPromptJob(
+      baseUrl,
+      token,
+      id,
+      (job) => typeof job?.wrapperStatePath === 'string' && fs.existsSync(job.wrapperStatePath),
+    );
+    const wrapperState = JSON.parse(fs.readFileSync(running.wrapperStatePath, 'utf8'));
+    const wrapperPid = Number(wrapperState.pid);
+    const pgidResult = cp.spawnSync('ps', ['-o', 'pgid=', '-p', String(wrapperPid)], {
+      encoding: 'utf8',
+    });
+    const processGroupId = Number(String(pgidResult.stdout ?? '').trim());
+    expect(Number.isFinite(processGroupId) && processGroupId > 1).toBe(true);
+    process.kill(-processGroupId, 'SIGKILL');
+
+    const terminal = await waitForTerminalPromptJob(baseUrl, token, id, 20_000);
+    expect(terminal.state).toBe('failed');
+    expect(terminal.exitStatusSource).toBe('missing-exit-file');
+    expect(terminal.failureReason).toContain('without writing an exit code');
+  }, 25_000);
 });

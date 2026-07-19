@@ -17,7 +17,9 @@ function parseTimestampMs(raw: string | null | undefined): number | null {
 }
 
 function looksLikeTerminalFailedPromptError(raw: unknown): boolean {
-  const msg = String(raw ?? '').trim().toLowerCase();
+  const msg = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (!msg) return false;
   return (
     msg.includes('access token could not be refreshed') ||
@@ -29,7 +31,9 @@ function looksLikeTerminalFailedPromptError(raw: unknown): boolean {
 }
 
 export function looksLikeTransientPromptEnqueueError(raw: unknown): boolean {
-  const msg = String(raw ?? '').trim().toLowerCase();
+  const msg = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (!msg) return false;
   if (looksLikeTerminalFailedPromptError(msg)) return false;
   return (
@@ -50,9 +54,15 @@ export function looksLikeTransientPromptEnqueueError(raw: unknown): boolean {
 }
 
 function looksLikeRecoverableTranscriptParseFailure(raw: unknown): boolean {
-  const msg = String(raw ?? '').trim().toLowerCase();
+  const msg = String(raw ?? '')
+    .trim()
+    .toLowerCase();
   if (!msg) return false;
-  return msg.includes('finished but no') && msg.includes('message was parsed');
+  return (
+    (msg.includes('finished but no') && msg.includes('message was parsed')) ||
+    msg.includes('prompt wrapper ended without writing an exit code') ||
+    msg.includes('codex turn started but exited before producing a response')
+  );
 }
 
 export function shouldRetryFailedPendingPrompt(opts: {
@@ -65,7 +75,8 @@ export function shouldRetryFailedPendingPrompt(opts: {
   if (!looksLikeRecoverableTranscriptParseFailure(opts.error)) return false;
   const tsMs = parseTimestampMs(opts.updatedAt ?? opts.at);
   if (!Number.isFinite(tsMs)) return true;
-  const nowMs = typeof opts.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+  const nowMs =
+    typeof opts.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
   const ageMs = nowMs - Number(tsMs);
   return !Number.isFinite(ageMs) || ageMs < 0 || ageMs <= FAILED_PROMPT_RETRY_WINDOW_MS;
 }
@@ -105,15 +116,20 @@ const MIN_SENT_STALE_MS = 10 * 60_000;
  * Returns the stale pending state when a prompt has been waiting too long to
  * reconcile from daemon job status lookups.
  */
-export function stalePendingPromptState(opts: PendingPromptStalenessOpts): 'sending' | 'sent' | null {
+export function stalePendingPromptState(
+  opts: PendingPromptStalenessOpts,
+): 'sending' | 'sent' | null {
   const state = String(opts.state ?? '').trim();
   if (state !== 'sending' && state !== 'sent') return null;
   const tsMs = parseTimestampMs(opts.updatedAt ?? opts.at);
   if (!Number.isFinite(tsMs)) return null;
-  const nowMs = typeof opts.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
+  const nowMs =
+    typeof opts.nowMs === 'number' && Number.isFinite(opts.nowMs) ? opts.nowMs : Date.now();
   const ageMs = nowMs - Number(tsMs);
   if (!Number.isFinite(ageMs) || ageMs < 0) return null;
-  const enqueueTimeoutMs = Number.isFinite(opts.enqueueTimeoutMs) ? Math.max(1, Math.floor(opts.enqueueTimeoutMs)) : MIN_SENDING_STALE_MS;
+  const enqueueTimeoutMs = Number.isFinite(opts.enqueueTimeoutMs)
+    ? Math.max(1, Math.floor(opts.enqueueTimeoutMs))
+    : MIN_SENDING_STALE_MS;
   const staleAfterMs =
     state === 'sending'
       ? Math.max(enqueueTimeoutMs, MIN_SENDING_STALE_MS)

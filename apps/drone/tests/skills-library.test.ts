@@ -16,7 +16,9 @@ import {
   type SkillRecord,
 } from '../src/hub/skills';
 
-async function withTempHomes<T>(fn: (ctx: { tempRoot: string; homeDir: string; xdgDataHome: string }) => Promise<T>): Promise<T> {
+async function withTempHomes<T>(
+  fn: (ctx: { tempRoot: string; homeDir: string; xdgDataHome: string }) => Promise<T>,
+): Promise<T> {
   const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-skills-library-'));
   const homeDir = path.join(tempRoot, 'home');
   const xdgDataHome = path.join(tempRoot, 'xdg-data');
@@ -150,6 +152,63 @@ describe('skills library normalization and rendering', () => {
 });
 
 describe('skills library projection', () => {
+  test('continues healthy targets after one projection fails and releases the lock', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-skill-projection-failure-'));
+    try {
+      const invalidRoot = path.join(tempRoot, 'not-a-directory');
+      const healthyRoot = path.join(tempRoot, 'healthy', 'skills');
+      fs.writeFileSync(invalidRoot, 'file\n', 'utf8');
+
+      await expect(
+        syncSkillLibraryToHostTargets({
+          targets: [
+            { agent: 'codex', rootPath: invalidRoot },
+            { agent: 'codex', rootPath: healthyRoot },
+          ],
+          skills: [sampleSkill()],
+        }),
+      ).rejects.toThrow(`host skill projection failed for codex target ${invalidRoot}`);
+      expect(fs.existsSync(path.join(healthyRoot, 'repo-review', 'SKILL.md'))).toBe(true);
+
+      const subsequentRoot = path.join(tempRoot, 'subsequent', 'skills');
+      await syncSkillLibraryToHostTargets({
+        targets: [{ agent: 'codex', rootPath: subsequentRoot }],
+        skills: [sampleSkill()],
+      });
+      expect(fs.existsSync(path.join(subsequentRoot, 'repo-review', 'SKILL.md'))).toBe(true);
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('serializes concurrent projections into the shared host skill root', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-skill-projection-concurrent-'));
+    try {
+      const sharedRoot = path.join(tempRoot, '.agents', 'skills');
+      await Promise.all(
+        Array.from({ length: 12 }, () =>
+          syncSkillLibraryToHostTargets({
+            targets: [{ agent: 'codex', rootPath: sharedRoot }],
+            skills: [sampleSkill()],
+          }),
+        ),
+      );
+
+      const manifest = JSON.parse(
+        fs.readFileSync(path.join(sharedRoot, '.drone-managed-skills.json'), 'utf8'),
+      );
+      expect(manifest.managedSlugs).toEqual(['repo-review']);
+      expect(fs.readFileSync(path.join(sharedRoot, 'repo-review', 'SKILL.md'), 'utf8')).toContain(
+        'name: "Repo Review"',
+      );
+      expect(
+        fs.readFileSync(path.join(sharedRoot, 'repo-review', 'scripts', 'check.sh'), 'utf8'),
+      ).toContain('echo check');
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('writes native skill packages and only cleans up managed skill directories', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'drone-skill-projection-'));
     try {
@@ -173,9 +232,15 @@ describe('skills library projection', () => {
 
       const codexSkillRoot = path.join(codexRoot, 'repo-review');
       expect(fs.existsSync(path.join(codexSkillRoot, 'SKILL.md'))).toBe(true);
-      expect(fs.readFileSync(path.join(codexSkillRoot, 'SKILL.md'), 'utf8')).toContain('name: "Repo Review"');
-      expect(fs.readFileSync(path.join(codexSkillRoot, 'agents', 'openai.yaml'), 'utf8')).toContain('tools:');
-      expect(fs.readFileSync(path.join(codexSkillRoot, 'scripts', 'check.sh'), 'utf8')).toContain('echo check');
+      expect(fs.readFileSync(path.join(codexSkillRoot, 'SKILL.md'), 'utf8')).toContain(
+        'name: "Repo Review"',
+      );
+      expect(fs.readFileSync(path.join(codexSkillRoot, 'agents', 'openai.yaml'), 'utf8')).toContain(
+        'tools:',
+      );
+      expect(fs.readFileSync(path.join(codexSkillRoot, 'scripts', 'check.sh'), 'utf8')).toContain(
+        'echo check',
+      );
 
       const claudeSkill = fs.readFileSync(path.join(claudeRoot, 'repo-review', 'SKILL.md'), 'utf8');
       expect(claudeSkill).toContain('argument-hint: "<pr-number>"');

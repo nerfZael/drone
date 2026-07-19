@@ -11,6 +11,11 @@ import { bashQuote } from './hub-format';
 
 const MANAGED_SKILLS_MANIFEST = '.drone-managed-skills.json';
 
+// Host drones project into the same user-level skill roots. Serialize those
+// projections so concurrent drone provisioning cannot remove a package while
+// another projection is writing it.
+let hostSkillProjectionTail: Promise<void> = Promise.resolve();
+
 export type SkillFileKind = 'script' | 'reference' | 'asset' | 'extra';
 
 export type SkillFileEntry = {
@@ -75,8 +80,18 @@ type ManifestShape = {
 };
 
 async function loadDvmHelpers(): Promise<{
-  dvmCopyToContainer: (container: string, srcPath: string, destPath: string, opts?: { clean?: boolean; timeoutMs?: number }) => Promise<void>;
-  dvmExec: (container: string, cmd: string, args?: string[], opts?: { timeoutMs?: number }) => Promise<{ stdout?: string; stderr?: string }>;
+  dvmCopyToContainer: (
+    container: string,
+    srcPath: string,
+    destPath: string,
+    opts?: { clean?: boolean; timeoutMs?: number },
+  ) => Promise<void>;
+  dvmExec: (
+    container: string,
+    cmd: string,
+    args?: string[],
+    opts?: { timeoutMs?: number },
+  ) => Promise<{ stdout?: string; stderr?: string }>;
 }> {
   const mod = await import('../host/dvm');
   return {
@@ -121,11 +136,18 @@ function normalizeStringMap(raw: unknown): Record<string, string> | undefined {
 }
 
 function normalizeSkillFilePath(raw: unknown): string {
-  const text = String(raw ?? '').trim().replace(/\\/g, '/');
+  const text = String(raw ?? '')
+    .trim()
+    .replace(/\\/g, '/');
   if (!text) throw new Error('missing file path');
   if (text.startsWith('/')) throw new Error(`invalid file path: ${text}`);
   const normalized = path.posix.normalize(text);
-  if (!normalized || normalized === '.' || normalized.startsWith('../') || normalized.includes('/../')) {
+  if (
+    !normalized ||
+    normalized === '.' ||
+    normalized.startsWith('../') ||
+    normalized.includes('/../')
+  ) {
     throw new Error(`invalid file path: ${text}`);
   }
   if (normalized === 'SKILL.md') throw new Error('SKILL.md is managed by the Hub');
@@ -148,7 +170,9 @@ function normalizeSkillFiles(raw: unknown): SkillFileEntry[] {
     const filePath = normalizeSkillFilePath((item as any).path);
     if (seen.has(filePath)) throw new Error(`duplicate file path: ${filePath}`);
     const content = typeof (item as any).content === 'string' ? (item as any).content : '';
-    const rawKind = String((item as any).kind ?? '').trim().toLowerCase();
+    const rawKind = String((item as any).kind ?? '')
+      .trim()
+      .toLowerCase();
     const kind: SkillFileKind =
       rawKind === 'script' || rawKind === 'reference' || rawKind === 'asset' || rawKind === 'extra'
         ? rawKind
@@ -172,26 +196,40 @@ function normalizeClaudeOverlay(raw: unknown): SkillClaudeOverlay | undefined {
           .filter(Boolean)
       : undefined;
   const hooks =
-    (raw as any).hooks && typeof (raw as any).hooks === 'object' && !Array.isArray((raw as any).hooks)
+    (raw as any).hooks &&
+    typeof (raw as any).hooks === 'object' &&
+    !Array.isArray((raw as any).hooks)
       ? ((raw as any).hooks as Record<string, unknown>)
       : undefined;
   const overlay: SkillClaudeOverlay = {
     argumentHint: normalizeOptionalString((raw as any).argumentHint),
-    disableModelInvocation: typeof (raw as any).disableModelInvocation === 'boolean' ? Boolean((raw as any).disableModelInvocation) : undefined,
-    userInvocable: typeof (raw as any).userInvocable === 'boolean' ? Boolean((raw as any).userInvocable) : undefined,
+    disableModelInvocation:
+      typeof (raw as any).disableModelInvocation === 'boolean'
+        ? Boolean((raw as any).disableModelInvocation)
+        : undefined,
+    userInvocable:
+      typeof (raw as any).userInvocable === 'boolean'
+        ? Boolean((raw as any).userInvocable)
+        : undefined,
     allowedTools,
     model: normalizeOptionalString((raw as any).model),
     context: normalizeOptionalString((raw as any).context),
     agent: normalizeOptionalString((raw as any).agent),
     hooks,
   };
-  return Object.values(overlay).some((value) => value != null && (!(Array.isArray(value)) || value.length > 0)) ? overlay : undefined;
+  return Object.values(overlay).some(
+    (value) => value != null && (!Array.isArray(value) || value.length > 0),
+  )
+    ? overlay
+    : undefined;
 }
 
 function normalizeCursorOverlay(raw: unknown): SkillCursorOverlay | undefined {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
   const disableModelInvocation =
-    typeof (raw as any).disableModelInvocation === 'boolean' ? Boolean((raw as any).disableModelInvocation) : undefined;
+    typeof (raw as any).disableModelInvocation === 'boolean'
+      ? Boolean((raw as any).disableModelInvocation)
+      : undefined;
   return disableModelInvocation == null ? undefined : { disableModelInvocation };
 }
 
@@ -208,17 +246,24 @@ function normalizeSkillOverlays(raw: unknown): SkillOverlaySet | undefined {
     claude: normalizeClaudeOverlay((raw as any).claude),
     cursor: normalizeCursorOverlay((raw as any).cursor),
     opencode:
-      (raw as any).opencode && typeof (raw as any).opencode === 'object' && !Array.isArray((raw as any).opencode)
+      (raw as any).opencode &&
+      typeof (raw as any).opencode === 'object' &&
+      !Array.isArray((raw as any).opencode)
         ? {}
         : undefined,
   };
-  return overlay.codex || overlay.claude || overlay.cursor || overlay.opencode ? overlay : undefined;
+  return overlay.codex || overlay.claude || overlay.cursor || overlay.opencode
+    ? overlay
+    : undefined;
 }
 
 function normalizeStoredSkillRecord(raw: unknown, fallbackId?: string): SkillRecord | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
   const record = raw as any;
-  const id = normalizeOptionalString(record.id) || normalizeOptionalString(fallbackId) || crypto.randomUUID();
+  const id =
+    normalizeOptionalString(record.id) ||
+    normalizeOptionalString(fallbackId) ||
+    crypto.randomUUID();
   const name = normalizeOptionalString(record.name);
   const description = normalizeOptionalString(record.description);
   if (!name || !description) return null;
@@ -236,18 +281,31 @@ function normalizeStoredSkillRecord(raw: unknown, fallbackId?: string): SkillRec
     slug,
     name,
     description,
-    ...(normalizeOptionalString(record.license) ? { license: normalizeOptionalString(record.license) } : {}),
-    ...(normalizeOptionalString(record.compatibility) ? { compatibility: normalizeOptionalString(record.compatibility) } : {}),
-    ...(normalizeStringMap(record.metadata) ? { metadata: normalizeStringMap(record.metadata) } : {}),
+    ...(normalizeOptionalString(record.license)
+      ? { license: normalizeOptionalString(record.license) }
+      : {}),
+    ...(normalizeOptionalString(record.compatibility)
+      ? { compatibility: normalizeOptionalString(record.compatibility) }
+      : {}),
+    ...(normalizeStringMap(record.metadata)
+      ? { metadata: normalizeStringMap(record.metadata) }
+      : {}),
     markdownBody,
     files: normalizeSkillFiles(record.files),
-    ...(normalizeSkillOverlays(record.overlays) ? { overlays: normalizeSkillOverlays(record.overlays) } : {}),
+    ...(normalizeSkillOverlays(record.overlays)
+      ? { overlays: normalizeSkillOverlays(record.overlays) }
+      : {}),
     createdAt: normalizeOptionalString(record.createdAt) || new Date().toISOString(),
-    updatedAt: normalizeOptionalString(record.updatedAt) || normalizeOptionalString(record.createdAt) || new Date().toISOString(),
+    updatedAt:
+      normalizeOptionalString(record.updatedAt) ||
+      normalizeOptionalString(record.createdAt) ||
+      new Date().toISOString(),
   };
 }
 
-export function listSkillsFromRegistry(reg: DroneRegistry | Record<string, unknown>): SkillRecord[] {
+export function listSkillsFromRegistry(
+  reg: DroneRegistry | Record<string, unknown>,
+): SkillRecord[] {
   const rawSkills = (reg as any)?.skills;
   if (!rawSkills || typeof rawSkills !== 'object' || Array.isArray(rawSkills)) return [];
   const out: SkillRecord[] = [];
@@ -305,16 +363,28 @@ function assertSkillSlugAvailable(skills: SkillRecord[], slug: string, selfId?: 
 
 function normalizeIncomingSkillInput(input: any, existing?: SkillRecord): SkillRecord {
   const name = normalizeNonEmptyString(input?.name ?? existing?.name, 'name');
-  const description = normalizeNonEmptyString(input?.description ?? existing?.description, 'description');
+  const description = normalizeNonEmptyString(
+    input?.description ?? existing?.description,
+    'description',
+  );
   const slug = normalizeSkillSlug(input?.slug ?? existing?.slug ?? name);
   const createdAt = existing?.createdAt ?? new Date().toISOString();
-  const files = input && Object.prototype.hasOwnProperty.call(input, 'files') ? normalizeSkillFiles(input.files) : existing?.files ?? [];
+  const files =
+    input && Object.prototype.hasOwnProperty.call(input, 'files')
+      ? normalizeSkillFiles(input.files)
+      : (existing?.files ?? []);
   const metadata =
-    input && Object.prototype.hasOwnProperty.call(input, 'metadata') ? normalizeStringMap(input.metadata) : existing?.metadata;
+    input && Object.prototype.hasOwnProperty.call(input, 'metadata')
+      ? normalizeStringMap(input.metadata)
+      : existing?.metadata;
   const overlays =
-    input && Object.prototype.hasOwnProperty.call(input, 'overlays') ? normalizeSkillOverlays(input.overlays) : existing?.overlays;
+    input && Object.prototype.hasOwnProperty.call(input, 'overlays')
+      ? normalizeSkillOverlays(input.overlays)
+      : existing?.overlays;
   const markdownBody =
-    input && typeof input === 'object' && Object.prototype.hasOwnProperty.call(input, 'markdownBody')
+    input &&
+    typeof input === 'object' &&
+    Object.prototype.hasOwnProperty.call(input, 'markdownBody')
       ? typeof input.markdownBody === 'string'
         ? input.markdownBody
         : ''
@@ -326,13 +396,15 @@ function normalizeIncomingSkillInput(input: any, existing?: SkillRecord): SkillR
           ? typeof input.body === 'string'
             ? input.body
             : ''
-          : existing?.markdownBody ?? '';
+          : (existing?.markdownBody ?? '');
   const record: SkillRecord = {
     id: existing?.id ?? crypto.randomUUID(),
     slug,
     name,
     description,
-    ...(normalizeOptionalString(input?.license ?? existing?.license) ? { license: normalizeOptionalString(input?.license ?? existing?.license) } : {}),
+    ...(normalizeOptionalString(input?.license ?? existing?.license)
+      ? { license: normalizeOptionalString(input?.license ?? existing?.license) }
+      : {}),
     ...(normalizeOptionalString(input?.compatibility ?? existing?.compatibility)
       ? { compatibility: normalizeOptionalString(input?.compatibility ?? existing?.compatibility) }
       : {}),
@@ -406,7 +478,12 @@ function yamlLinesForValue(key: string, value: unknown, indent = ''): string[] {
     if (value.length === 0) return [];
     const lines: string[] = [`${indent}${key}:`];
     for (const item of value) {
-      if (item == null || typeof item === 'string' || typeof item === 'number' || typeof item === 'boolean') {
+      if (
+        item == null ||
+        typeof item === 'string' ||
+        typeof item === 'number' ||
+        typeof item === 'boolean'
+      ) {
         lines.push(`${indent}  - ${yamlScalar(item as any)}`);
         continue;
       }
@@ -431,20 +508,30 @@ function yamlLinesForValue(key: string, value: unknown, indent = ''): string[] {
   return [`${indent}${key}: ${yamlScalar(value as any)}`];
 }
 
-function skillFrontmatter(skill: SkillRecord, agent: SkillProjectionAgent): Record<string, unknown> {
+function skillFrontmatter(
+  skill: SkillRecord,
+  agent: SkillProjectionAgent,
+): Record<string, unknown> {
   const frontmatter: Record<string, unknown> = {
     name: skill.name,
     description: skill.description,
   };
   if (skill.license) frontmatter.license = skill.license;
   if (skill.compatibility) frontmatter.compatibility = skill.compatibility;
-  if (skill.metadata && Object.keys(skill.metadata).length > 0) frontmatter.metadata = skill.metadata;
+  if (skill.metadata && Object.keys(skill.metadata).length > 0)
+    frontmatter.metadata = skill.metadata;
   if (agent === 'claude' && skill.overlays?.claude) {
     const claude = skill.overlays.claude;
     if (claude.argumentHint) frontmatter['argument-hint'] = claude.argumentHint;
-    if (typeof claude.disableModelInvocation === 'boolean') frontmatter['disable-model-invocation'] = claude.disableModelInvocation;
-    if (typeof claude.userInvocable === 'boolean') frontmatter['user-invocable'] = claude.userInvocable;
-    if (claude.allowedTools && Array.isArray(claude.allowedTools) && claude.allowedTools.length > 0) {
+    if (typeof claude.disableModelInvocation === 'boolean')
+      frontmatter['disable-model-invocation'] = claude.disableModelInvocation;
+    if (typeof claude.userInvocable === 'boolean')
+      frontmatter['user-invocable'] = claude.userInvocable;
+    if (
+      claude.allowedTools &&
+      Array.isArray(claude.allowedTools) &&
+      claude.allowedTools.length > 0
+    ) {
       frontmatter['allowed-tools'] = claude.allowedTools;
     }
     if (claude.model) frontmatter.model = claude.model;
@@ -452,7 +539,11 @@ function skillFrontmatter(skill: SkillRecord, agent: SkillProjectionAgent): Reco
     if (claude.agent) frontmatter.agent = claude.agent;
     if (claude.hooks && Object.keys(claude.hooks).length > 0) frontmatter.hooks = claude.hooks;
   }
-  if (agent === 'cursor' && skill.overlays?.cursor && typeof skill.overlays.cursor.disableModelInvocation === 'boolean') {
+  if (
+    agent === 'cursor' &&
+    skill.overlays?.cursor &&
+    typeof skill.overlays.cursor.disableModelInvocation === 'boolean'
+  ) {
     frontmatter['disable-model-invocation'] = skill.overlays.cursor.disableModelInvocation;
   }
   return frontmatter;
@@ -469,14 +560,20 @@ export function renderSkillMarkdown(skill: SkillRecord, agent: SkillProjectionAg
   return `${lines.join('\n')}\n`;
 }
 
-function buildSkillFileMap(skill: SkillRecord, agent: SkillProjectionAgent): Map<string, { content: string; kind: SkillFileKind | 'managed' }> {
+function buildSkillFileMap(
+  skill: SkillRecord,
+  agent: SkillProjectionAgent,
+): Map<string, { content: string; kind: SkillFileKind | 'managed' }> {
   const out = new Map<string, { content: string; kind: SkillFileKind | 'managed' }>();
   out.set('SKILL.md', { content: renderSkillMarkdown(skill, agent), kind: 'managed' });
   for (const file of skill.files) {
     out.set(file.path, { content: file.content, kind: file.kind });
   }
   if (agent === 'codex' && skill.overlays?.codex?.openaiYaml) {
-    out.set('agents/openai.yaml', { content: `${String(skill.overlays.codex.openaiYaml).replace(/\s+$/, '')}\n`, kind: 'managed' });
+    out.set('agents/openai.yaml', {
+      content: `${String(skill.overlays.codex.openaiYaml).replace(/\s+$/, '')}\n`,
+      kind: 'managed',
+    });
   }
   return out;
 }
@@ -486,7 +583,10 @@ type RenderedSkillPackage = {
   files: Map<string, { content: string; kind: SkillFileKind | 'managed' }>;
 };
 
-function renderSkillPackages(skills: SkillRecord[], agent: SkillProjectionAgent): RenderedSkillPackage[] {
+function renderSkillPackages(
+  skills: SkillRecord[],
+  agent: SkillProjectionAgent,
+): RenderedSkillPackage[] {
   return skills.map((skill) => ({
     slug: skill.slug,
     files: buildSkillFileMap(skill, agent),
@@ -505,21 +605,31 @@ async function readManagedManifestFromHost(rootPath: string): Promise<ManifestSh
   try {
     const raw = await fs.readFile(manifestPathForTarget(rootPath), 'utf8');
     const parsed = JSON.parse(raw) as ManifestShape;
-    const managedSlugs = Array.isArray(parsed?.managedSlugs) ? parsed.managedSlugs.map((value) => normalizeSkillSlug(value)) : [];
+    const managedSlugs = Array.isArray(parsed?.managedSlugs)
+      ? parsed.managedSlugs.map((value) => normalizeSkillSlug(value))
+      : [];
     return { managedSlugs };
   } catch {
     return { managedSlugs: [] };
   }
 }
 
-async function readManagedManifestFromContainer(containerName: string, rootPath: string): Promise<ManifestShape> {
+async function readManagedManifestFromContainer(
+  containerName: string,
+  rootPath: string,
+): Promise<ManifestShape> {
   try {
     const { dvmExec } = await loadDvmHelpers();
-    const read = await dvmExec(containerName, 'bash', ['-lc', `cat ${bashQuote(manifestPathForTargetPosix(rootPath))} 2>/dev/null || true`]);
+    const read = await dvmExec(containerName, 'bash', [
+      '-lc',
+      `cat ${bashQuote(manifestPathForTargetPosix(rootPath))} 2>/dev/null || true`,
+    ]);
     const raw = String(read.stdout ?? '').trim();
     if (!raw) return { managedSlugs: [] };
     const parsed = JSON.parse(raw) as ManifestShape;
-    const managedSlugs = Array.isArray(parsed?.managedSlugs) ? parsed.managedSlugs.map((value) => normalizeSkillSlug(value)) : [];
+    const managedSlugs = Array.isArray(parsed?.managedSlugs)
+      ? parsed.managedSlugs.map((value) => normalizeSkillSlug(value))
+      : [];
     return { managedSlugs };
   } catch {
     return { managedSlugs: [] };
@@ -530,7 +640,10 @@ function manifestForPackages(packages: RenderedSkillPackage[]): ManifestShape {
   return { managedSlugs: packages.map((entry) => entry.slug).sort((a, b) => a.localeCompare(b)) };
 }
 
-async function writeRenderedPackagesToHost(rootPath: string, packages: RenderedSkillPackage[]): Promise<void> {
+async function writeRenderedPackagesToHost(
+  rootPath: string,
+  packages: RenderedSkillPackage[],
+): Promise<void> {
   const targetRoot = path.resolve(rootPath);
   const previous = await readManagedManifestFromHost(targetRoot);
   const next = manifestForPackages(packages);
@@ -553,7 +666,11 @@ async function writeRenderedPackagesToHost(rootPath: string, packages: RenderedS
       }
     }
   }
-  await fs.writeFile(manifestPathForTarget(targetRoot), `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  await fs.writeFile(
+    manifestPathForTarget(targetRoot),
+    `${JSON.stringify(next, null, 2)}\n`,
+    'utf8',
+  );
 }
 
 async function removeManagedPackagesFromHost(rootPath: string): Promise<void> {
@@ -565,7 +682,11 @@ async function removeManagedPackagesFromHost(rootPath: string): Promise<void> {
   await fs.rm(manifestPathForTarget(targetRoot), { force: true }).catch(() => {});
 }
 
-async function writeRenderedPackagesToContainer(containerName: string, rootPath: string, packages: RenderedSkillPackage[]): Promise<void> {
+async function writeRenderedPackagesToContainer(
+  containerName: string,
+  rootPath: string,
+  packages: RenderedSkillPackage[],
+): Promise<void> {
   const { dvmCopyToContainer, dvmExec } = await loadDvmHelpers();
   const targetRoot = path.posix.normalize(rootPath);
   const previous = await readManagedManifestFromContainer(containerName, targetRoot);
@@ -575,7 +696,9 @@ async function writeRenderedPackagesToContainer(containerName: string, rootPath:
     'set -euo pipefail',
     `root=${bashQuote(targetRoot)}`,
     'mkdir -p "$root"',
-    ...previous.managedSlugs.filter((slug) => !nextSet.has(slug)).map((slug) => `rm -rf "$root/${slug}"`),
+    ...previous.managedSlugs
+      .filter((slug) => !nextSet.has(slug))
+      .map((slug) => `rm -rf "$root/${slug}"`),
   ].join('\n');
   await dvmExec(containerName, 'bash', ['-lc', cleanupScript]);
 
@@ -592,17 +715,30 @@ async function writeRenderedPackagesToContainer(containerName: string, rootPath:
           await fs.chmod(absPath, 0o755).catch(() => {});
         }
       }
-      await dvmCopyToContainer(containerName, localSkillRoot, path.posix.join(targetRoot, pkg.slug), { clean: true });
+      await dvmCopyToContainer(
+        containerName,
+        localSkillRoot,
+        path.posix.join(targetRoot, pkg.slug),
+        { clean: true },
+      );
     }
     const localManifestPath = path.join(tempRoot, MANAGED_SKILLS_MANIFEST);
     await fs.writeFile(localManifestPath, `${JSON.stringify(next, null, 2)}\n`, 'utf8');
-    await dvmCopyToContainer(containerName, localManifestPath, manifestPathForTargetPosix(targetRoot), { clean: false });
+    await dvmCopyToContainer(
+      containerName,
+      localManifestPath,
+      manifestPathForTargetPosix(targetRoot),
+      { clean: false },
+    );
   } finally {
     await fs.rm(tempRoot, { recursive: true, force: true }).catch(() => {});
   }
 }
 
-async function removeManagedPackagesFromContainer(containerName: string, rootPath: string): Promise<void> {
+async function removeManagedPackagesFromContainer(
+  containerName: string,
+  rootPath: string,
+): Promise<void> {
   const { dvmExec } = await loadDvmHelpers();
   const targetRoot = path.posix.normalize(rootPath);
   const previous = await readManagedManifestFromContainer(containerName, targetRoot);
@@ -615,18 +751,74 @@ async function removeManagedPackagesFromContainer(containerName: string, rootPat
   await dvmExec(containerName, 'bash', ['-lc', cleanupScript]);
 }
 
-export async function syncSkillLibraryToHostTargets(opts: { targets: SkillProjectionTarget[]; skills?: SkillRecord[] }): Promise<void> {
-  const skills = Array.isArray(opts.skills) ? opts.skills : await listSkills();
-  for (const target of opts.targets) {
-    const rootPath = String(target.rootPath ?? '').trim();
-    if (!rootPath) continue;
-    if (target.cleanupOnly) {
-      await removeManagedPackagesFromHost(rootPath);
-      continue;
-    }
-    const packages = renderSkillPackages(skills, target.agent);
-    await writeRenderedPackagesToHost(rootPath, packages);
+async function withHostSkillProjectionLock<T>(run: () => Promise<T>): Promise<T> {
+  const result = hostSkillProjectionTail.then(run, run);
+  hostSkillProjectionTail = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return await result;
+}
+
+function isMissingProjectionPathError(error: unknown): boolean {
+  const code = String((error as any)?.code ?? '').trim();
+  return code === 'ENOENT' || code === 'ENOTDIR';
+}
+
+async function syncSkillLibraryToHostTarget(
+  target: SkillProjectionTarget,
+  skills: SkillRecord[],
+): Promise<void> {
+  const rootPath = String(target.rootPath ?? '').trim();
+  if (!rootPath) return;
+  if (target.cleanupOnly) {
+    await removeManagedPackagesFromHost(rootPath);
+    return;
   }
+  const packages = renderSkillPackages(skills, target.agent);
+  await writeRenderedPackagesToHost(rootPath, packages);
+}
+
+export async function syncSkillLibraryToHostTargets(opts: {
+  targets: SkillProjectionTarget[];
+  skills?: SkillRecord[];
+}): Promise<void> {
+  await withHostSkillProjectionLock(async () => {
+    // Read the implicit library snapshot after acquiring the lock. Otherwise a
+    // slower, earlier call can queue behind a later call and overwrite it with
+    // stale skill data once its pre-lock read eventually completes.
+    const skills = Array.isArray(opts.skills) ? opts.skills : await listSkills();
+    const failures: Error[] = [];
+    for (const target of opts.targets) {
+      let completed = false;
+      for (let attempt = 0; attempt < 2 && !completed; attempt++) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await syncSkillLibraryToHostTarget(target, skills);
+          completed = true;
+        } catch (error: any) {
+          if (attempt === 0 && isMissingProjectionPathError(error)) continue;
+          const cause = error instanceof Error ? error : new Error(String(error));
+          const rootPath = String(target.rootPath ?? '').trim() || '<empty>';
+          const failure = new Error(
+            `host skill projection failed for ${target.agent} target ${rootPath}: ${cause.message}`,
+            { cause },
+          );
+          failures.push(failure);
+        }
+      }
+    }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) {
+      const combined = new Error(
+        `${failures.length} host skill projection targets failed: ${failures
+          .map((error) => error.message)
+          .join(' | ')}`,
+      );
+      (combined as any).errors = failures;
+      throw combined;
+    }
+  });
 }
 
 export async function syncSkillLibraryToContainerTargets(opts: {
