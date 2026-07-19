@@ -245,8 +245,14 @@ const EMPTY_DRONE_STATE_SUMMARY: DroneStateSummary = { working: 0, idle: 0, issu
 function droneDisplayState(drone: MobileDroneSummary): DroneDisplayState {
   const rawState = `${drone.phase ?? ''} ${drone.status ?? ''}`.toLowerCase();
   if (drone.busyChats.length > 0) return 'working';
+  if (
+    rawState.includes('block') ||
+    rawState.includes('error') ||
+    rawState.includes('fail') ||
+    rawState.includes('problem')
+  )
+    return 'blocked';
   if (drone.statusOk === false) return 'offline';
-  if (rawState.includes('block') || rawState.includes('error')) return 'blocked';
   if (rawState.includes('wait')) return 'waiting';
   if (rawState.includes('start') || rawState.includes('creat') || rawState.includes('seed'))
     return 'starting';
@@ -356,14 +362,14 @@ function SwitchItemState({
 }) {
   const stateColor = switchStateColor(state);
   const indicatorColor = unread && state !== 'working' ? colors.online : stateColor;
-  const stateLabel = switchStateLabel(state);
+  const stateLabel = unread && state === 'idle' ? 'Unread' : switchStateLabel(state);
   return (
     <View
       accessible
       accessibilityLabel={[
         stateLabel,
         detail,
-        unread ? 'unread chat' : '',
+        unread && stateLabel !== 'Unread' ? 'unread chat' : '',
         chatCount != null && chatCount > 1 ? `${chatCount} chats` : '',
       ]
         .filter(Boolean)
