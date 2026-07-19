@@ -3,6 +3,15 @@ export type DroneClient = {
   token: string;
 };
 
+export class DroneApiRequestError extends Error {
+  readonly statusCode: number;
+
+  constructor(statusCode: number, message: string) {
+    super(message);
+    this.statusCode = statusCode;
+  }
+}
+
 function resolveTimeoutMs(): number {
   const raw = process.env.DRONE_HTTP_TIMEOUT_MS;
   if (!raw) return 5000;
@@ -10,42 +19,236 @@ function resolveTimeoutMs(): number {
   return Number.isFinite(n) && n > 0 ? n : 5000;
 }
 
-async function req(client: DroneClient, method: string, pathname: string, body?: any): Promise<any> {
+type ResponseHandle = {
+  response: Response;
+  release: () => void;
+};
+
+async function openResponse(
+  client: DroneClient,
+  method: string,
+  pathname: string,
+  options?: { body?: BodyInit; contentType?: string; timeoutMs?: number },
+): Promise<ResponseHandle> {
   const url = new URL(pathname, client.baseUrl).toString();
-  const timeoutMs = resolveTimeoutMs();
+  const timeoutMs = options?.timeoutMs ?? resolveTimeoutMs();
   const controller = new AbortController();
-  const t = setTimeout(() => controller.abort(), timeoutMs);
-  let res: Response;
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  timeout.unref?.();
   try {
-    res = await fetch(url, {
+    const response = await fetch(url, {
       method,
       headers: {
         authorization: `Bearer ${client.token}`,
-        'content-type': body ? 'application/json' : 'application/json',
+        ...(options?.contentType ? { 'content-type': options.contentType } : {}),
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body: options?.body,
       signal: controller.signal,
     });
+    if (!response.ok) {
+      const text = await response.text();
+      let parsed: any = null;
+      try {
+        parsed = text ? JSON.parse(text) : null;
+      } catch {
+        // Use the response text below.
+      }
+      throw new DroneApiRequestError(
+        response.status,
+        parsed?.error ?? text ?? `${method} ${pathname} failed`,
+      );
+    }
+    return { response, release: () => clearTimeout(timeout) };
   } catch (err: any) {
+    clearTimeout(timeout);
     if (err?.name === 'AbortError') {
       throw new Error(`request timeout after ${timeoutMs}ms: ${method} ${pathname}`);
     }
     throw err;
-  } finally {
-    clearTimeout(t);
   }
-  const text = await res.text();
-  let json: any = null;
+}
+
+async function consumeResponse<T>(
+  client: DroneClient,
+  method: string,
+  pathname: string,
+  options: { body?: BodyInit; contentType?: string; timeoutMs?: number } | undefined,
+  consume: (response: Response) => Promise<T>,
+): Promise<T> {
+  const handle = await openResponse(client, method, pathname, options);
   try {
-    json = text ? JSON.parse(text) : null;
-  } catch {
-    // ignore
+    return await consume(handle.response);
+  } catch (error: any) {
+    if (error?.name === 'AbortError') {
+      const timeoutMs = options?.timeoutMs ?? resolveTimeoutMs();
+      throw new Error(`request timeout after ${timeoutMs}ms: ${method} ${pathname}`);
+    }
+    throw error;
+  } finally {
+    handle.release();
   }
-  if (!res.ok) {
-    const msg = json?.error ?? text ?? `${method} ${pathname} failed`;
-    throw new Error(msg);
-  }
-  return json;
+}
+
+async function req(
+  client: DroneClient,
+  method: string,
+  pathname: string,
+  body?: any,
+): Promise<any> {
+  return await consumeResponse(
+    client,
+    method,
+    pathname,
+    {
+      ...(body == null ? {} : { body: JSON.stringify(body) }),
+      contentType: 'application/json',
+    },
+    async (response) => {
+      const text = await response.text();
+      try {
+        return text ? JSON.parse(text) : null;
+      } catch {
+        return null;
+      }
+    },
+  );
+}
+
+function workspaceUrl(pathname: string, params: Record<string, string | number>): string {
+  const search = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) search.set(key, String(value));
+  return `${pathname}?${search.toString()}`;
+}
+
+export async function workspaceReadFile(
+  client: DroneClient,
+  filePath: string,
+): Promise<{ data: Buffer; size: number; mtimeMs: number | null }> {
+  return await consumeResponse(
+    client,
+    'GET',
+    workspaceUrl('/v1/workspace/file', { path: filePath }),
+    { timeoutMs: 15_000 },
+    async (response) => {
+      const data = Buffer.from(await response.arrayBuffer());
+      const size = Number(response.headers.get('x-drone-file-size') ?? data.length);
+      const rawMtimeMs = response.headers.get('x-drone-file-mtime-ms');
+      const mtimeMs = rawMtimeMs == null ? null : Number(rawMtimeMs);
+      return {
+        data,
+        size: Number.isFinite(size) ? Math.max(0, Math.floor(size)) : data.length,
+        mtimeMs:
+          mtimeMs != null && Number.isFinite(mtimeMs) ? Math.max(0, Math.floor(mtimeMs)) : null,
+      };
+    },
+  );
+}
+
+export async function workspaceWriteFile(
+  client: DroneClient,
+  filePath: string,
+  content: Buffer,
+): Promise<{ path: string; size: number; mtimeMs: number }> {
+  return await consumeResponse(
+    client,
+    'PUT',
+    workspaceUrl('/v1/workspace/file', { path: filePath }),
+    {
+      body: content as unknown as BodyInit,
+      contentType: 'application/octet-stream',
+      timeoutMs: 15_000,
+    },
+    async (response) => (await response.json()) as any,
+  );
+}
+
+export async function workspaceReadChunk(
+  client: DroneClient,
+  input: { path: string; offset: number; length: number },
+): Promise<Buffer> {
+  return await consumeResponse(
+    client,
+    'GET',
+    workspaceUrl('/v1/workspace/chunk', input),
+    { timeoutMs: 15_000 },
+    async (response) => Buffer.from(await response.arrayBuffer()),
+  );
+}
+
+export async function workspaceWriteChunk(
+  client: DroneClient,
+  input: { path: string; offset: number; data: Buffer },
+): Promise<{ offset: number }> {
+  return await consumeResponse(
+    client,
+    'PUT',
+    workspaceUrl('/v1/workspace/chunk', { path: input.path, offset: input.offset }),
+    {
+      body: input.data as unknown as BodyInit,
+      contentType: 'application/octet-stream',
+      timeoutMs: 15_000,
+    },
+    async (response) => (await response.json()) as any,
+  );
+}
+
+export async function workspaceExec(
+  client: DroneClient,
+  input: {
+    cmd: string;
+    args?: string[];
+    cwd?: string;
+    timeoutMs?: number;
+    maxOutputBytes?: number;
+  },
+): Promise<{
+  code: number;
+  stdout: string;
+  stderr: string;
+  timedOut?: boolean;
+  stdoutBytes?: number;
+  stderrBytes?: number;
+  stdoutTruncated?: boolean;
+  stderrTruncated?: boolean;
+}> {
+  const requestedTimeoutMs = Number(input.timeoutMs ?? 30_000);
+  const commandTimeoutMs = Number.isFinite(requestedTimeoutMs)
+    ? Math.max(1, Math.min(10 * 60_000, Math.floor(requestedTimeoutMs)))
+    : 30_000;
+  const timeoutMs = commandTimeoutMs + 5_000;
+  return await consumeResponse(
+    client,
+    'POST',
+    '/v1/workspace/exec',
+    {
+      body: JSON.stringify(input),
+      contentType: 'application/json',
+      timeoutMs,
+    },
+    async (response) => (await response.json()) as any,
+  );
+}
+
+export type WorkspaceBatchOperation =
+  | { type: 'write'; path: string; content: string }
+  | { type: 'move'; fromPath: string; toPath: string }
+  | { type: 'delete'; path: string };
+
+export async function workspaceBatch(
+  client: DroneClient,
+  operations: WorkspaceBatchOperation[],
+): Promise<{ applied: number }> {
+  return await consumeResponse(
+    client,
+    'POST',
+    '/v1/workspace/batch',
+    {
+      body: JSON.stringify({ operations }),
+      contentType: 'application/json',
+      timeoutMs: 30_000,
+    },
+    async (response) => (await response.json()) as any,
+  );
 }
 
 export async function health(client: DroneClient) {

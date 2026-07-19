@@ -17,6 +17,10 @@ export type AssistantToolCallbacks = {
     path: string;
     content: string;
   }) => Promise<AssistantDroneFileWriteResult>;
+  batchDroneFiles?: (opts: {
+    droneId: string;
+    operations: AssistantDroneFileBatchOperation[];
+  }) => Promise<void>;
   deleteDroneFile?: (opts: {
     droneId: string;
     path: string;
@@ -95,6 +99,11 @@ export type AssistantToolCallbacks = {
   }) => Promise<AssistantDroneBashResult>;
   listDroneChangedFiles?: (opts: { droneId: string }) => Promise<any>;
 };
+
+export type AssistantDroneFileBatchOperation =
+  | { type: 'write'; path: string; content: string }
+  | { type: 'move'; fromPath: string; toPath: string }
+  | { type: 'delete'; path: string };
 
 export type AssistantDroneFileEntry = {
   name: string;

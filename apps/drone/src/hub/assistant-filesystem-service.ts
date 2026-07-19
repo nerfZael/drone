@@ -1,7 +1,17 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 
-import { dvmExec, run as runHostCommand } from '../host/dvm';
+import {
+  workspaceBatch,
+  workspaceExec,
+  workspaceReadChunk,
+  workspaceReadFile,
+  workspaceWriteChunk,
+  workspaceWriteFile,
+  type DroneClient,
+  type WorkspaceBatchOperation,
+} from '../host/api';
+import { run as runHostCommand } from '../host/dvm';
 import type { DroneRuntime } from '../host/runtime';
 import {
   ASSISTANT_BASH_MAX_COMMAND_BYTES,
@@ -30,7 +40,7 @@ import { droneRepoChangesSummary } from './drone-repo';
 import { gitRepoChangesSummary, gitTopLevel } from './repoOps';
 
 type ContainerAccess = {
-  containerName: string;
+  droneEntry: any;
 };
 
 export type AssistantFilesystemDependencies = {
@@ -67,6 +77,33 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     withLockedDroneContainer,
   } = deps;
   const NON_REPO_HOME_CWD = deps.nonRepoHomeCwd;
+
+  function daemonClientForDrone(drone: any): DroneClient {
+    const hostPort = Number(drone?.hostPort);
+    const token = String(drone?.token ?? '').trim();
+    if (!Number.isFinite(hostPort) || hostPort <= 0 || !token) {
+      throw new Error('container drone is missing its daemon connection');
+    }
+    return { baseUrl: `http://127.0.0.1:${Math.floor(hostPort)}`, token };
+  }
+
+  async function runContainerCommand(
+    drone: any,
+    cmd: string,
+    args: string[],
+    opts?: { timeoutMs?: number },
+  ) {
+    const client = daemonClientForDrone(drone);
+    const result = await workspaceExec(client, {
+      cmd,
+      args,
+      ...(opts?.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+    });
+    if (result.stdoutTruncated || result.stderrTruncated) {
+      throw new Error('container command output exceeded the daemon response limit');
+    }
+    return result;
+  }
 
   async function readHostFileBytes(opts: {
     targetPath: string;
@@ -221,8 +258,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     ].join('\n');
     const r = await withReadonlyDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => {
-        return await dvmExec(containerName, 'bash', ['-lc', script]);
+      async ({ droneEntry }) => {
+        return await runContainerCommand(droneEntry, 'bash', ['-lc', script]);
       },
     );
     if (r.code !== 0)
@@ -281,8 +318,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     ].join('\n');
     const r = await withReadonlyDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => {
-        return await dvmExec(containerName, 'bash', ['-lc', script], {
+      async ({ droneEntry }) => {
+        return await runContainerCommand(droneEntry, 'bash', ['-lc', script], {
           timeoutMs: FS_LIST_TIMEOUT_MS,
         });
       },
@@ -333,52 +370,21 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
       };
     }
 
-    const script = [
-      'set -euo pipefail',
-      `target=${bashQuote(target.targetPath)}`,
-      `max=${String(FS_EDITOR_MAX_BYTES)}`,
-      'if [ ! -f "$target" ]; then echo "__ERR__\tnot-file"; exit 3; fi',
-      'size=$(wc -c < "$target" | tr -d "[:space:]")',
-      'if [ -z "$size" ]; then size=0; fi',
-      'if [ "$size" -gt "$max" ]; then printf "__ERR__\ttoo-large\t%s\n" "$size"; exit 4; fi',
-      'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
-      'mime=""',
-      'if command -v file >/dev/null 2>&1; then mime=$(file -Lb --mime-type -- "$target" 2>/dev/null || true); fi',
-      'printf "__META__\t%s\t%s\t%s\n" "$mime" "$size" "$mtime"',
-      'base64 < "$target" | tr -d "\\n"',
-    ].join('\n');
-    const r = await withReadonlyDroneContainer(
+    const read = await withReadonlyDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => {
-        return await dvmExec(containerName, 'bash', ['-lc', script]);
-      },
+      async ({ droneEntry }) =>
+        await workspaceReadFile(daemonClientForDrone(droneEntry), target.targetPath),
     );
-    const out = `${String(r.stdout ?? '')}\n${String(r.stderr ?? '')}`;
-    if (r.code !== 0) {
-      if (/__ERR__\s+not-file\b/i.test(out))
-        throw new Error(`file not found: ${target.targetPath}`);
-      const large = out.match(/__ERR__\s+too-large\s+(\d+)/i);
-      if (large) throw new Error(`file too large (${large[1]} bytes, max ${FS_EDITOR_MAX_BYTES})`);
-      throw new Error((r.stderr || r.stdout || 'failed reading file').trim());
-    }
-    const stdout = String(r.stdout ?? '');
-    const firstNl = stdout.indexOf('\n');
-    if (firstNl < 0) throw new Error('file response malformed');
-    const meta = stdout.slice(0, firstNl).split('\t');
-    if (meta.length < 4 || meta[0] !== '__META__') throw new Error('file metadata missing');
-    const buf = Buffer.from(stdout.slice(firstNl + 1).trim(), 'base64');
-    ensureAssistantTextFile(target.targetPath, buf, String(meta[1] ?? ''));
-    const sizeNum = Number(meta[2] ?? 0);
-    const mtimeSec = Number(meta[3] ?? 0);
-    const ranged = applyAssistantReadLineRange(buf.toString('utf8'), opts);
+    ensureAssistantTextFile(target.targetPath, read.data, null);
+    const ranged = applyAssistantReadLineRange(read.data.toString('utf8'), opts);
     return {
       droneId: target.id,
       path: target.targetPath,
       relativePath: assistantRelativePathForDrone(target.drone, target.targetPath),
       kind: 'text',
       content: ranged.content,
-      size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : 0,
-      mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+      size: read.size,
+      mtimeMs: read.mtimeMs,
       ...(ranged.lineRange ? { lineRange: ranged.lineRange } : {}),
     };
   }
@@ -432,20 +438,16 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
         await handle.close();
       }
     }
-    const script = [
-      'set -euo pipefail',
-      `target=${bashQuote(target.targetPath)}`,
-      `[ -f "$target" ] || { echo "file not found" >&2; exit 4; }`,
-      `dd if="$target" iflag=skip_bytes,count_bytes skip=${offset} count=${length} status=none | base64 | tr -d "\\n"`,
-    ].join('\n');
-    const result = await withReadonlyDroneContainer(
+    const data = await withReadonlyDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => await dvmExec(containerName, 'bash', ['-lc', script]),
+      async ({ droneEntry }) =>
+        await workspaceReadChunk(daemonClientForDrone(droneEntry), {
+          path: target.targetPath,
+          offset,
+          length,
+        }),
     );
-    if (result.code !== 0)
-      throw new Error((result.stderr || result.stdout || 'failed reading transfer chunk').trim());
-    const dataBase64 = String(result.stdout ?? '').trim();
-    return { dataBase64, bytes: Buffer.from(dataBase64, 'base64').length };
+    return { dataBase64: data.toString('base64'), bytes: data.length };
   }
 
   async function assistantCreateDroneTransferDirectory(opts: {
@@ -463,8 +465,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     }
     const result = await withLockedDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) =>
-        await dvmExec(containerName, 'bash', [
+      async ({ droneEntry }) =>
+        await runContainerCommand(droneEntry, 'bash', [
           '-lc',
           `mkdir -p -- ${bashQuote(target.targetPath)}`,
         ]),
@@ -530,7 +532,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     ].join('\n');
     const result = await withLockedDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => await dvmExec(containerName, 'bash', ['-lc', script]),
+      async ({ droneEntry }) => await runContainerCommand(droneEntry, 'bash', ['-lc', script]),
     );
     if (result.code !== 0) {
       if (String(result.stdout).includes('__TYPE__'))
@@ -585,27 +587,11 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
         await handle.close();
       }
     }
-    const script = [
-      'set -euo pipefail',
-      `temp=${bashQuote(temp)}`,
-      `offset=${offset}`,
-      `length=${data.length}`,
-      `data=${bashQuote(data.toString('base64'))}`,
-      '[ ! -L "$temp" ] && [ -f "$temp" ] || { echo "invalid transfer temporary path" >&2; exit 7; }',
-      'current=$(stat -c %s -- "$temp")',
-      'if [ "$current" -eq $((offset + length)) ]; then existing=$(dd if="$temp" iflag=skip_bytes,count_bytes skip="$offset" count="$length" status=none | base64 | tr -d "\\n"); [ "$existing" = "$data" ] && { echo "$current"; exit 0; }; fi',
-      '[ "$current" -eq "$offset" ] || { echo "offset mismatch: $current" >&2; exit 6; }',
-      'printf "%s" "$data" | base64 -d >> "$temp"',
-      'sync "$temp" 2>/dev/null || true',
-      'echo $((offset + length))',
-    ].join('\n');
-    const result = await withLockedDroneContainer(
+    return await withLockedDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => await dvmExec(containerName, 'bash', ['-lc', script]),
+      async ({ droneEntry }) =>
+        await workspaceWriteChunk(daemonClientForDrone(droneEntry), { path: temp, offset, data }),
     );
-    if (result.code !== 0)
-      throw new Error((result.stderr || result.stdout || 'failed writing transfer chunk').trim());
-    return { offset: Math.max(0, Number(String(result.stdout).trim()) || 0) };
   }
 
   async function assistantCommitDroneTransferFile(opts: {
@@ -655,7 +641,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     ].join('\n');
     const result = await withLockedDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => await dvmExec(containerName, 'bash', ['-lc', script]),
+      async ({ droneEntry }) => await runContainerCommand(droneEntry, 'bash', ['-lc', script]),
     );
     if (result.code !== 0) {
       if (String(result.stdout).includes('__EXISTS__'))
@@ -685,8 +671,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     }
     await withLockedDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => {
-        await dvmExec(containerName, 'bash', ['-lc', `rm -f -- ${bashQuote(temp)}`]);
+      async ({ droneEntry }) => {
+        await runContainerCommand(droneEntry, 'bash', ['-lc', `rm -f -- ${bashQuote(temp)}`]);
       },
     );
   }
@@ -721,36 +707,93 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
       };
     }
 
-    const contentBase64 = Buffer.from(content, 'utf8').toString('base64');
-    const script = [
-      'set -euo pipefail',
-      `target=${bashQuote(target.targetPath)}`,
-      `data=${bashQuote(contentBase64)}`,
-      'mkdir -p "$(dirname -- "$target")"',
-      'printf "%s" "$data" | base64 -d > "$target"',
-      'size=$(stat -c %s -- "$target" 2>/dev/null || echo 0)',
-      'mtime=$(stat -c %Y -- "$target" 2>/dev/null || echo 0)',
-      'printf "__META__\t%s\t%s\n" "$size" "$mtime"',
-    ].join('\n');
-    const r = await withLockedDroneContainer(
+    const written = await withLockedDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => {
-        return await dvmExec(containerName, 'bash', ['-lc', script]);
-      },
+      async ({ droneEntry }) =>
+        await workspaceWriteFile(
+          daemonClientForDrone(droneEntry),
+          target.targetPath,
+          Buffer.from(content, 'utf8'),
+        ),
     );
-    if (r.code !== 0) throw new Error((r.stderr || r.stdout || 'failed writing file').trim());
-    const meta = String(r.stdout ?? '')
-      .trim()
-      .split('\t');
-    const sizeNum = Number(meta[1] ?? 0);
-    const mtimeSec = Number(meta[2] ?? 0);
     return {
       droneId: target.id,
       path: target.targetPath,
       relativePath: assistantRelativePathForDrone(target.drone, target.targetPath),
-      size: Number.isFinite(sizeNum) ? Math.max(0, Math.floor(sizeNum)) : nextBytes,
-      mtimeMs: Number.isFinite(mtimeSec) ? Math.max(0, Math.floor(mtimeSec * 1000)) : null,
+      size: written.size,
+      mtimeMs: written.mtimeMs,
     };
+  }
+
+  async function assistantBatchDroneFiles(opts: {
+    droneId: string;
+    operations: WorkspaceBatchOperation[];
+  }): Promise<void> {
+    if (!Array.isArray(opts.operations) || opts.operations.length === 0) return;
+    const first = opts.operations[0];
+    const firstPath = first.type === 'move' ? first.fromPath : first.path;
+    const target = await resolveAssistantDroneFsTarget({
+      droneId: opts.droneId,
+      path: firstPath,
+      fallbackToHome: false,
+    });
+
+    if (target.runtime === 'host') {
+      for (const operation of opts.operations) {
+        if (operation.type === 'move') {
+          await assistantMoveDroneFile({
+            droneId: opts.droneId,
+            fromPath: operation.fromPath,
+            toPath: operation.toPath,
+          });
+        } else if (operation.type === 'write') {
+          await assistantWriteDroneFile({
+            droneId: opts.droneId,
+            path: operation.path,
+            content: operation.content,
+          });
+        } else {
+          await assistantDeleteDroneFile({ droneId: opts.droneId, path: operation.path });
+        }
+      }
+      return;
+    }
+
+    const normalized: WorkspaceBatchOperation[] = [];
+    for (const operation of opts.operations) {
+      if (operation.type === 'move') {
+        const from = await resolveAssistantDroneFsTarget({
+          droneId: opts.droneId,
+          path: operation.fromPath,
+          fallbackToHome: false,
+        });
+        const to = await resolveAssistantDroneFsTarget({
+          droneId: opts.droneId,
+          path: operation.toPath,
+          fallbackToHome: false,
+        });
+        normalized.push({ type: 'move', fromPath: from.targetPath, toPath: to.targetPath });
+      } else if (operation.type === 'write') {
+        const resolved = await resolveAssistantDroneFsTarget({
+          droneId: opts.droneId,
+          path: operation.path,
+          fallbackToHome: false,
+        });
+        normalized.push({ type: 'write', path: resolved.targetPath, content: operation.content });
+      } else {
+        const resolved = await resolveAssistantDroneFsTarget({
+          droneId: opts.droneId,
+          path: operation.path,
+          fallbackToHome: false,
+        });
+        normalized.push({ type: 'delete', path: resolved.targetPath });
+      }
+    }
+
+    await withLockedDroneContainer(
+      { requestedDroneName: target.name, droneEntry: target.drone },
+      async ({ droneEntry }) => await workspaceBatch(daemonClientForDrone(droneEntry), normalized),
+    );
   }
 
   async function assistantDeleteDroneFile(opts: { droneId: string; path: string }): Promise<any> {
@@ -775,8 +818,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     ].join('\n');
     const r = await withLockedDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => {
-        return await dvmExec(containerName, 'bash', ['-lc', script]);
+      async ({ droneEntry }) => {
+        return await runContainerCommand(droneEntry, 'bash', ['-lc', script]);
       },
     );
     if (r.code !== 0) {
@@ -810,7 +853,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     );
     const result = await withLockedDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => dvmExec(containerName, 'bash', ['-lc', script]),
+      async ({ droneEntry }) => runContainerCommand(droneEntry, 'bash', ['-lc', script]),
     );
     if (result.code !== 0)
       throw new Error((result.stderr || result.stdout || 'failed creating directory').trim());
@@ -849,7 +892,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     ].join('\n');
     const result = await withLockedDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => dvmExec(containerName, 'bash', ['-lc', script]),
+      async ({ droneEntry }) => runContainerCommand(droneEntry, 'bash', ['-lc', script]),
     );
     if (result.code !== 0) {
       const output = `${result.stdout || ''}\n${result.stderr || ''}`;
@@ -899,8 +942,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     ].join('\n');
     const r = await withLockedDroneContainer(
       { requestedDroneName: from.name, droneEntry: from.drone },
-      async ({ containerName }) => {
-        return await dvmExec(containerName, 'bash', ['-lc', script]);
+      async ({ droneEntry }) => {
+        return await runContainerCommand(droneEntry, 'bash', ['-lc', script]);
       },
     );
     if (r.code !== 0) {
@@ -956,7 +999,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     ].join('\n');
     const result = await withLockedDroneContainer(
       { requestedDroneName: from.name, droneEntry: from.drone },
-      async ({ containerName }) => dvmExec(containerName, 'bash', ['-lc', script]),
+      async ({ droneEntry }) => runContainerCommand(droneEntry, 'bash', ['-lc', script]),
     );
     if (result.code !== 0) {
       const output = `${result.stdout || ''}\n${result.stderr || ''}`;
@@ -1049,8 +1092,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
         ? await runHostCommand('bash', ['-lc', script], { timeoutMs: 10_000 })
         : await withReadonlyDroneContainer(
             { requestedDroneName: target.name, droneEntry: target.drone },
-            async ({ containerName }) => {
-              return await dvmExec(containerName, 'bash', ['-lc', script]);
+            async ({ droneEntry }) => {
+              return await runContainerCommand(droneEntry, 'bash', ['-lc', script]);
             },
           );
     if (r.code !== 0) {
@@ -1130,8 +1173,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
         ? await runHostCommand('bash', ['-lc', script], { timeoutMs: 10_000 })
         : await withReadonlyDroneContainer(
             { requestedDroneName: target.name, droneEntry: target.drone },
-            async ({ containerName }) => {
-              return await dvmExec(containerName, 'bash', ['-lc', script]);
+            async ({ droneEntry }) => {
+              return await runContainerCommand(droneEntry, 'bash', ['-lc', script]);
             },
           );
     if (r.code !== 0) {
@@ -1254,8 +1297,17 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     const repoPathInContainer = droneRepoPathInContainer(target.drone);
     const result = await withReadonlyDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => {
-        return await droneRepoChangesSummary({ container: containerName, repoPathInContainer });
+      async ({ droneEntry }) => {
+        return await droneRepoChangesSummary({
+          container: target.name,
+          repoPathInContainer,
+          runGit: async (input) =>
+            await runContainerCommand(droneEntry, 'git', [
+              '-C',
+              normalizeContainerPath(input.repoPathInContainer),
+              ...input.args,
+            ]),
+        });
       },
     );
     return formatAssistantChangedFilesResult({
@@ -1322,8 +1374,8 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
     ].join('\n');
     const r = await withLockedDroneContainer(
       { requestedDroneName: target.name, droneEntry: target.drone },
-      async ({ containerName }) => {
-        return await dvmExec(containerName, 'bash', ['-lc', script], {
+      async ({ droneEntry }) => {
+        return await runContainerCommand(droneEntry, 'bash', ['-lc', script], {
           timeoutMs: timeoutMs + 5000,
         });
       },
@@ -1381,6 +1433,7 @@ export function createAssistantFilesystemService(deps: AssistantFilesystemDepend
 
   return {
     assistantAbortDroneTransferFile,
+    assistantBatchDroneFiles,
     assistantCommitDroneTransferFile,
     assistantCreateDroneDirectory,
     assistantCreateDroneTransferDirectory,
