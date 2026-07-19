@@ -646,8 +646,6 @@ export function GroupMultiChatColumn({
     if (!ok) setQuickActionError('No preview URL available yet.');
   }, [disabledByProvisioning, drone]);
 
-  const noopToggleTldr = React.useCallback((_item: TranscriptItem) => {}, []);
-  const noopHoverAgentMessage = React.useCallback((_item: TranscriptItem | null) => {}, []);
 
   return (
     <section
@@ -799,10 +797,6 @@ export function GroupMultiChatColumn({
                   onCreateJobs={onCreateJobs}
                   onSpawnDroneHubTask={spawnDroneHubTaskForColumn}
                   messageId={messageId}
-                  tldr={null}
-                  showTldr={false}
-                  onToggleTldr={noopToggleTldr}
-                  onHoverAgentMessage={noopHoverAgentMessage}
                   droneId={drone.id}
                   droneHomePath={droneHome}
                   showRoleIcons={false}

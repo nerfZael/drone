@@ -395,13 +395,6 @@ describe('drone-sdk core', () => {
         const observedUrl = String(input);
         const headers = new Headers(init?.headers as HeadersInit | undefined);
         observed.push({ url: observedUrl, auth: String(headers.get('authorization') ?? '') });
-        const pathname = new URL(observedUrl).pathname;
-        if (pathname.endsWith('/api/tldr/from-message')) {
-          return new Response(JSON.stringify({ ok: true, tldr: 'auto-summary' }), {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          });
-        }
         return new Response(JSON.stringify({ id: 'drone-1', name: 'auto-drone' }), {
           status: 200,
           headers: { 'content-type': 'application/json' },
@@ -410,13 +403,9 @@ describe('drone-sdk core', () => {
 
       const sdk = createDroneSDK();
       const drone = await sdk.drones.create('auto-drone');
-      expect(sdk.ai).toBeTruthy();
-      const aiSummary = await sdk.ai!.ask('summarize this');
 
       expect(drone.id).toBe('drone-1');
-      expect(aiSummary).toBe('auto-summary');
       expect(observed.some((entry) => entry.url === 'http://127.0.0.1:9988/api/drones')).toBe(true);
-      expect(observed.some((entry) => entry.url === 'http://127.0.0.1:9988/api/tldr/from-message')).toBe(true);
       expect(observed.every((entry) => entry.auth === 'Bearer token-from-file')).toBe(true);
     } finally {
       if (previousDataDir === undefined) delete process.env.DRONE_DATA_DIR;

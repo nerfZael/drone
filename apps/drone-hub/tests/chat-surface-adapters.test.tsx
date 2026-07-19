@@ -11,6 +11,7 @@ import {
   adaptNativeAgentChatSurface,
   type AgentChatSurfaceAdapter,
 } from '../src/droneHub/chat';
+import { AssistantMessageRow } from '../src/droneHub/assistant/AssistantTranscript';
 
 const TRANSCRIPT_ITEMS = [
   { key: 'message', kind: 'message' as const, content: <div>Visible message</div> },
@@ -156,5 +157,48 @@ describe('agent chat surface adapters', () => {
 
     expect(html).toContain('<strong>Shared response</strong>');
     expect(html).toContain('Attached image');
+  });
+
+  test('native assistant messages use shared tasks, linked requests, and inline media', () => {
+    const html = renderToStaticMarkup(
+      <AssistantMessageRow
+        message={{
+          id: 'native-message',
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: [
+                'Implemented the change.',
+                '![Screenshot](https://example.com/screenshot.png)',
+                'PR: https://github.com/nerfZael/drone/pull/609',
+                '{"type":"drone-hub-task","name":"Follow up","description":"Finish the remaining work."}',
+              ].join('\n\n'),
+            },
+          ],
+        }}
+        messageExtras={{
+          messageId: 'native-message',
+          onCreateJobs: () => {},
+          onSpawnTask: async () => ({ ok: true }),
+          linkedPullRequestContext: {
+            droneId: 'drone-a',
+            repoPath: '/work/repo',
+            repoAttached: true,
+            disabled: true,
+            openPullRequestsData: null,
+            openPullRequestsLoading: false,
+            openPullRequestsError: null,
+          },
+        }}
+      />,
+    );
+
+    expect(html).toContain('Drone tasks');
+    expect(html).toContain('Follow up');
+    expect(html).toContain('screenshot.png');
+    expect(html).toContain('Linked request');
+    expect(html).toContain('#609');
+    expect(html).not.toContain('&quot;type&quot;:&quot;drone-hub-task&quot;');
   });
 });

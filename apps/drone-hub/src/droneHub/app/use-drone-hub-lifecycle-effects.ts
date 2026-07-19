@@ -41,7 +41,6 @@ type UseDroneHubLifecycleEffectsArgs = {
   createDroneChatFromShortcut: () => Promise<boolean>;
   openGroupMultiChat: (group: string) => void;
   openSidebarVisibleMultiChat: () => void;
-  toggleTldrFromShortcut: () => void;
   toggleVoiceClipboardRecording: () => boolean;
   createOpen: boolean;
   setCreateRepoMenuOpen: Setter<boolean>;
@@ -110,7 +109,6 @@ export function useDroneHubLifecycleEffects({
   createDroneChatFromShortcut,
   openGroupMultiChat,
   openSidebarVisibleMultiChat,
-  toggleTldrFromShortcut,
   toggleVoiceClipboardRecording,
   createOpen,
   setCreateRepoMenuOpen,
@@ -266,10 +264,6 @@ export function useDroneHubLifecycleEffects({
     const shortcutActionHandlers: Record<ShortcutActionId, (event: KeyboardEvent) => boolean> = {
       openHome: () => {
         openHome();
-        return true;
-      },
-      toggleTldr: () => {
-        toggleTldrFromShortcut();
         return true;
       },
       createDraftDrone: (event) => {
@@ -452,7 +446,6 @@ export function useDroneHubLifecycleEffects({
     shortcutBindings,
     onDeleteSelectedDroneFromInputShortcut,
     onMarkSelectedDronesUnreadShortcut,
-    toggleTldrFromShortcut,
     toggleVoiceClipboardRecording,
   ]);
 

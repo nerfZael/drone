@@ -3,7 +3,6 @@ import { describe, expect, test } from 'bun:test';
 import { HubRouter } from '../src/hub/hub-router';
 import { createEditorRouteHandler } from '../src/hub/routes/editor-routes';
 import { registerFleetRoutes } from '../src/hub/routes/fleet-routes';
-import { registerMessageRoutes } from '../src/hub/routes/message-routes';
 import { registerOperationalRoutes } from '../src/hub/routes/operational-routes';
 import { registerSettingsRoutes } from '../src/hub/routes/settings-routes';
 import { registerSystemRoutes } from '../src/hub/routes/system-routes';
@@ -115,31 +114,6 @@ describe('extracted Hub route modules', () => {
       {
         status: 200,
         body: { ok: true, welcomeDismissedAt: '2026-01-02T00:00:00.000Z' },
-      },
-    ]);
-  });
-
-  test('keeps message routes behind provider configuration', async () => {
-    const { router, request, responses } = routeHarness({ response: 'Finished the work.' });
-    registerMessageRoutes(router, {
-      resolveEffectiveLlmProvider: async () => ({ provider: 'openai' }),
-      resolveEffectiveProviderApiKeySettings: async () => ({ apiKey: null }),
-      resolveEffectiveAgentSuggestionSettings: async () => ({}),
-      resolveNameSuggestionLlmSettings: async () => ({ provider: 'openai', apiKey: null }),
-      logProviderApiKeyResolution: async () => {},
-      llmProviderEnvLogMeta: () => ({}),
-      normalizeDroneIdentity: (value: string) => value,
-      hubLog: () => {},
-    });
-
-    expect(await request('POST', '/api/tldr/from-message')).toBe(true);
-    expect(responses).toEqual([
-      {
-        status: 412,
-        body: {
-          ok: false,
-          error: 'Missing OpenAI API key. Configure it in Settings.',
-        },
       },
     ]);
   });

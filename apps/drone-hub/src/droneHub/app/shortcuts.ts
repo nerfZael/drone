@@ -9,7 +9,6 @@ export type ShortcutActionId =
   | 'toggleSidebarCollapsed'
   | 'toggleRightPanelOpen'
   | 'toggleRightPanelWidth'
-  | 'toggleTldr'
   | 'openHoveredGroupMultiChat'
   | 'openPullRequestsTab'
   | 'openChangesTab'
@@ -87,11 +86,6 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Reopens or focuses the active workspace tool pane.',
   },
   {
-    id: 'toggleTldr',
-    label: 'Toggle TLDR',
-    description: 'Shows or hides TLDR cards in transcript view.',
-  },
-  {
     id: 'openHoveredGroupMultiChat',
     label: 'Open hovered group multi-chat',
     description: 'Opens multi-chat for the hovered sidebar group, or all visible sidebar drones when hovering sidebar background.',
@@ -139,7 +133,6 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleRightPanelOpen: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleRightPanelWidth: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  toggleTldr: null,
   openHoveredGroupMultiChat: { key: 'g', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openPullRequestsTab: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openChangesTab: { key: 'c', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -210,7 +203,6 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     toggleSidebarCollapsed: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed),
     toggleRightPanelOpen: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelOpen),
     toggleRightPanelWidth: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelWidth),
-    toggleTldr: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleTldr),
     openHoveredGroupMultiChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openHoveredGroupMultiChat),
     openPullRequestsTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openPullRequestsTab),
     openChangesTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openChangesTab),

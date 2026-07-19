@@ -42,7 +42,7 @@ import {
 } from './DockableDroneWorkspace';
 import { DroneWorkspaceHeaderFrame } from './DroneWorkspaceHeaderFrame';
 import { type RightPanelTab } from './app-config';
-import type { AgentSuggestionState, ChatModelOption, StartupSeedState, TldrState } from './app-types';
+import type { AgentSuggestionState, ChatModelOption, StartupSeedState } from './app-types';
 import { chatConfigResolutionState } from './chat-selection-model';
 import type { RepoOpErrorMeta } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
@@ -242,10 +242,6 @@ type SelectedDroneWorkspaceProps = {
     task: DroneHubTask;
     mode: DroneHubTaskSpawnMode;
   }) => Promise<{ ok: boolean; error?: string | null }>;
-  tldrByMessageId: Record<string, TldrState | null>;
-  showTldrByMessageId: Record<string, boolean>;
-  toggleTldrForAgentMessage: (item: TranscriptItem) => void;
-  handleAgentMessageHover: (item: TranscriptItem | null) => void;
   latestAgentSuggestionTarget: TranscriptItem | null;
   latestAgentSuggestionState: AgentSuggestionState | null;
   requestAgentSuggestionForMessage: (item: TranscriptItem, opts?: { force?: boolean }) => Promise<void>;
@@ -366,10 +362,6 @@ export function SelectedDroneWorkspace({
   parsingJobsByTurn,
   parseJobsFromAgentMessage,
   spawnDroneHubTaskFromAgentMessage,
-  tldrByMessageId,
-  showTldrByMessageId,
-  toggleTldrForAgentMessage,
-  handleAgentMessageHover,
   latestAgentSuggestionTarget,
   latestAgentSuggestionState,
   requestAgentSuggestionForMessage,
@@ -1286,11 +1278,7 @@ export function SelectedDroneWorkspace({
             onCreateJobs={parseJobsFromAgentMessage}
             onSpawnDroneHubTask={spawnCurrentDroneHubTask}
             messageId={messageId}
-            tldr={tldrByMessageId[messageId] ?? null}
-            showTldr={Boolean(showTldrByMessageId[messageId])}
-            onToggleTldr={toggleTldrForAgentMessage}
             onRollbackDockerSnapshot={rollbackDockerSnapshot}
-            onHoverAgentMessage={handleAgentMessageHover}
             onOpenFileReference={onOpenMarkdownFileReference}
             onOpenLink={tryOpenMarkdownPullRequest}
             linkedPullRequestContext={linkedPullRequestContext}
@@ -2293,6 +2281,16 @@ export function SelectedDroneWorkspace({
               <AssistantDock
                 key={`${currentDrone.id}:${activeChatName}`}
                 nativeChat={{ droneId: currentDrone.id, chatName: activeChatName }}
+                messageFeatures={{
+                  parsingJobsByTurn,
+                  onCreateJobs: parseJobsFromAgentMessage,
+                  onSpawnTask: spawnCurrentDroneHubTask,
+                  linkedPullRequestContext,
+                  droneId: currentDrone.id,
+                  droneHomePath: currentDroneHomePath,
+                  onOpenFileReference: onOpenMarkdownFileReference,
+                  onOpenLink: tryOpenMarkdownPullRequest,
+                }}
                 onHistoryChange={setNativeHistoryObserved}
               />
             ) : chatUiMode === 'transcript' ? (

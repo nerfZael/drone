@@ -68,7 +68,7 @@ import { useDroneHubLifecycleEffects } from './droneHub/app/use-drone-hub-lifecy
 import { useDroneHubRegistryData } from './droneHub/app/use-drone-hub-registry-data';
 import { useDroneHubToolbarMenuState } from './droneHub/app/use-drone-hub-toolbar-menu-state';
 import { useVoiceClipboardRecorder } from './droneHub/app/use-voice-clipboard-recorder';
-import { useTranscriptTldrState } from './droneHub/app/use-transcript-tldr-state';
+import { transcriptMessageId } from './droneHub/app/transcript-message-id';
 import { useAgentSuggestionState } from './droneHub/app/use-agent-suggestion-state';
 import { useWorkspaceNavigationActions } from './droneHub/app/use-workspace-navigation-actions';
 import { useWorkspaceActions } from './droneHub/app/use-workspace-actions';
@@ -666,18 +666,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   });
   const chatEndRef = React.useRef<HTMLDivElement | null>(null);
   const chatUiModeRef = React.useRef<'transcript' | 'cli'>('transcript');
-  const {
-    transcriptMessageId,
-    tldrByMessageId,
-    showTldrByMessageId,
-    toggleTldrForAgentMessage,
-    handleAgentMessageHover,
-    toggleTldrFromShortcut,
-  } = useTranscriptTldrState({
-    transcripts,
-    chatUiModeRef,
-    requestJson,
-  });
   const prevChatItemsLenRef = React.useRef(0);
 
   React.useEffect(() => {
@@ -3295,7 +3283,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     createDroneChatFromShortcut,
     openGroupMultiChat,
     openSidebarVisibleMultiChat,
-    toggleTldrFromShortcut,
     toggleVoiceClipboardRecording,
     createOpen,
     setCreateRepoMenuOpen,
@@ -4155,10 +4142,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     visiblePendingPromptsWithStartup,
     transcriptMessageId,
     parsingJobsByTurn,
-    tldrByMessageId,
-    showTldrByMessageId,
-    toggleTldrForAgentMessage,
-    handleAgentMessageHover,
     latestAgentSuggestionTarget,
     latestAgentSuggestionState,
     requestAgentSuggestionForMessage,

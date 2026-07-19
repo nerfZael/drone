@@ -210,10 +210,6 @@ export type DroneTransport = {
   ): Promise<ChatMessage[]>;
 };
 
-export type AIClient = {
-  ask(prompt: string, input?: RequestOptions): Promise<string>;
-};
-
 export type DroneSDKOptions = {
   transport?: DroneTransport;
   defaults?: RequestOptions;

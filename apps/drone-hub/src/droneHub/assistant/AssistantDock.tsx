@@ -12,7 +12,11 @@ import {
   type ChatComposerMenuAction,
   type ChatComposerContextConfig,
   type ChatSendPayload,
+  type DroneHubTask,
+  type DroneHubTaskSpawnMode,
 } from '../chat';
+import type { LinkedPullRequestContext } from '../chat/LinkedPullRequestCards';
+import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-dnd';
 import { CodexConnectControl } from '../app/CodexConnectControl';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
@@ -222,11 +226,27 @@ export type NativeChatBinding = {
   chatName: string;
 };
 
+export type AssistantMessageFeatures = {
+  parsingJobsByTurn: Record<number, unknown>;
+  onCreateJobs: (opts: { turn: number; message: string }) => void;
+  onSpawnTask: (
+    mode: DroneHubTaskSpawnMode,
+    task: DroneHubTask,
+  ) => Promise<{ ok: boolean; error?: string | null }>;
+  linkedPullRequestContext: LinkedPullRequestContext;
+  droneId: string;
+  droneHomePath: string;
+  onOpenFileReference: (ref: MarkdownFileReference) => void;
+  onOpenLink: (href: string) => boolean;
+};
+
 export function AssistantDock({
   nativeChat,
+  messageFeatures,
   onHistoryChange,
 }: {
   nativeChat: NativeChatBinding;
+  messageFeatures: AssistantMessageFeatures;
   onHistoryChange?: (hasHistory: boolean) => void;
 }) {
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
@@ -1468,12 +1488,25 @@ export function AssistantDock({
   }
   for (const item of visibleItems) {
     if (item.type === 'message') {
+      const jobsTurn = -(item.sourceMessageIndex + 1);
       nativeTranscriptItems.push({
         key: item.key,
         kind: 'message',
         content: (
           <AssistantMessageRow
             message={item.message}
+            messageExtras={{
+              messageId: `${activeThreadId}:${item.key}`,
+              parsingJobs: Boolean(messageFeatures.parsingJobsByTurn[jobsTurn]),
+              onCreateJobs: (message) => messageFeatures.onCreateJobs({ turn: jobsTurn, message }),
+              onSpawnTask: messageFeatures.onSpawnTask,
+              linkedPullRequestContext: messageFeatures.linkedPullRequestContext,
+              droneId: messageFeatures.droneId,
+              droneHomePath: messageFeatures.droneHomePath,
+              onOpenFileReference: messageFeatures.onOpenFileReference,
+              onOpenLink: messageFeatures.onOpenLink,
+              linkedCardsClassName: 'mb-8 md:mb-0 md:mr-40',
+            }}
             droneMentionLinks={droneMentionLinks}
             onOpenDroneMention={openDroneMention}
             showToolCalls={toolActivityVisible && item.showToolCalls}

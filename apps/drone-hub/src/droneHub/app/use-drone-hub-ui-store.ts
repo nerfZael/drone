@@ -508,18 +508,8 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     alt: false,
     shift: false,
   });
-  const usesLegacyTldrShortcut = isExactShortcutBinding(raw.toggleTldr, {
-    key: 'w',
-    mod: false,
-    ctrl: false,
-    meta: false,
-    alt: false,
-    shift: false,
-  });
-  if (!hasCreateDroneChatBinding && usesLegacyUnreadShortcut && usesLegacyTldrShortcut) {
-    next.createDroneChat = { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false };
+  if (!hasCreateDroneChatBinding && usesLegacyUnreadShortcut) {
     next.markSelectedDronesUnread = { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false };
-    next.toggleTldr = null;
     changed = true;
   }
   const hasCreateChildDraftDroneBinding = Object.prototype.hasOwnProperty.call(next, 'createChildDraftDrone');
@@ -539,7 +529,7 @@ function migrateLegacyShortcutBindings(value: unknown): unknown {
     alt: false,
     shift: false,
   });
-  if (!hasCreateChildDraftDroneBinding && usesLegacyCreateChatShortcut && usesCurrentUnreadShortcut && next.toggleTldr == null) {
+  if (!hasCreateChildDraftDroneBinding && usesLegacyCreateChatShortcut && usesCurrentUnreadShortcut) {
     next.createChildDraftDrone = { key: 'q', mod: false, ctrl: false, meta: false, alt: false, shift: false };
     next.createDroneChat = { key: 'w', mod: false, ctrl: false, meta: false, alt: false, shift: false };
     changed = true;

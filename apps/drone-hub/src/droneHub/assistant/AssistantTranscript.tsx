@@ -1,5 +1,10 @@
 import React from 'react';
 
+import {
+  AgentMessageExtras,
+  extractAgentMessageContent,
+  type AgentMessageExtrasProps,
+} from '../chat/AgentMessageExtras';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { ChatMessageCopyAction } from '../chat/ChatMessageCopyAction';
@@ -31,6 +36,16 @@ import type {
   AssistantMessage,
   AssistantQueuedPrompt,
 } from './assistant-types';
+
+function assistantVisibleText(message: AssistantMessage): string {
+  if (typeof message.content === 'string') return message.content;
+  if (!Array.isArray(message.content)) return '';
+  return message.content
+    .filter((part) => part?.type === 'text')
+    .map((part) => String(part.text ?? ''))
+    .filter(Boolean)
+    .join('\n');
+}
 
 export function AssistantQueuedPromptRow({
   prompt,
@@ -681,6 +696,7 @@ export function ToolActivityRow({
 
 export function AssistantMessageRow({
   message,
+  messageExtras,
   droneMentionLinks,
   onOpenDroneMention,
   showToolCalls = true,
@@ -688,6 +704,7 @@ export function AssistantMessageRow({
   showReasoning = false,
 }: {
   message: AssistantMessage;
+  messageExtras?: Omit<AgentMessageExtrasProps, 'text' | 'tasks'>;
   droneMentionLinks?: MarkdownTextMentionLink[];
   onOpenDroneMention?: (mention: MarkdownTextMentionLink) => void;
   showToolCalls?: boolean;
@@ -696,6 +713,16 @@ export function AssistantMessageRow({
 }) {
   const calls = showToolCalls ? toolCalls(message) : [];
   const content = message.content;
+  const visibleText =
+    message.role === 'assistant' ? assistantVisibleText(message) : messageText(message);
+  const agentMessage = React.useMemo(
+    () =>
+      extractAgentMessageContent(
+        visibleText,
+        message.role === 'assistant' && !message.errorMessage,
+      ),
+    [message.errorMessage, message.role, visibleText],
+  );
   const structuredAssistant =
     message.role === 'assistant' &&
     Array.isArray(content) &&
@@ -730,7 +757,7 @@ export function AssistantMessageRow({
           );
         }
       } else if (part.type === 'text') {
-        const t = String(part.text ?? '').trim();
+        const t = extractAgentMessageContent(String(part.text ?? '')).text.trim();
         if (t) {
           blocks.push(
             <ChatMessageBody
@@ -746,7 +773,7 @@ export function AssistantMessageRow({
     }
     body = blocks.length > 0 ? <div className="space-y-1">{blocks}</div> : null;
   } else {
-    const text = messageText(message);
+    const text = message.role === 'assistant' ? agentMessage.text : visibleText;
     const images = messageImageParts(message);
     body = text || images.length > 0 || message.errorMessage ? (
       <ChatMessageBody
@@ -765,7 +792,13 @@ export function AssistantMessageRow({
     ) : null;
   }
 
-  if (message.role === 'assistant' && !body && !message.errorMessage && calls.length === 0)
+  if (
+    message.role === 'assistant' &&
+    !body &&
+    !message.errorMessage &&
+    calls.length === 0 &&
+    agentMessage.tasks.length === 0
+  )
     return null;
 
   return (
@@ -774,10 +807,7 @@ export function AssistantMessageRow({
       at={message.createdAt}
       error={Boolean(message.errorMessage)}
     >
-      <ChatMessageCopyAction
-        text={messageText(message)}
-        position={message.role === 'user' ? 'top' : 'bottom'}
-      />
+      {message.role === 'user' ? <ChatMessageCopyAction text={visibleText} /> : null}
       {body}
       {!body && message.errorMessage ? (
         <div className="text-[12px] text-[var(--red)]">{message.errorMessage}</div>
@@ -792,6 +822,17 @@ export function AssistantMessageRow({
             </ToolDisclosure>
           ))}
         </div>
+      ) : null}
+      {message.role === 'assistant' ? (
+        <AgentMessageExtras
+          {...messageExtras}
+          text={agentMessage.text}
+          tasks={agentMessage.tasks}
+          messageId={
+            messageExtras?.messageId ??
+            String(message.id ?? message.createdAt ?? message.timestamp ?? 'assistant-message')
+          }
+        />
       ) : null}
     </ChatMessageFrame>
   );

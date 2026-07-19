@@ -7,7 +7,6 @@ import { suggestReplyToAgentMessage } from '../agent-suggestion';
 import { providerDisplayName, type LlmProviderId } from '../hub-settings';
 import { errorMessage } from '../hub-http';
 import type { HubRouter } from '../hub-router';
-import { tldrFromAgentMessage } from '../tldr-from-message';
 
 type ServiceFunction = (...args: any[]) => any;
 
@@ -53,55 +52,6 @@ export function registerMessageRoutes(apiRouter: HubRouter, deps: MessageRouteDe
     normalizeDroneIdentity,
     hubLog,
   } = deps;
-
-  apiRouter.post('/api/tldr/from-message', async ({ method, url, readJson, fail, json }) => {
-    const input = normalizeMessageContext(await readJson());
-    if (!input.response) return fail(400, 'missing response');
-
-    let selectedProvider: LlmProviderId | null = null;
-    try {
-      const { provider } = await resolveEffectiveLlmProvider();
-      selectedProvider = provider;
-      const resolved = await resolveEffectiveProviderApiKeySettings(provider);
-      if (!resolved.apiKey) {
-        await logProviderApiKeyResolution(
-          'warn',
-          'tldr/from-message rejected: missing provider key',
-          provider,
-          { pathname: url.pathname, method },
-        );
-        json(412, {
-          ok: false,
-          error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
-        });
-        return;
-      }
-      const tldr = await tldrFromAgentMessage(input, {
-        provider,
-        apiKey: resolved.apiKey,
-      });
-      json(200, { ok: true, tldr });
-    } catch (error) {
-      const details = {
-        model: String(process.env.DRONE_HUB_TLDR_MODEL ?? '').trim() || null,
-        error: errorMessage(error),
-      };
-      if (selectedProvider) {
-        await logProviderApiKeyResolution(
-          'error',
-          'tldr/from-message request failed',
-          selectedProvider,
-          { pathname: url.pathname, method, ...details },
-        );
-      } else {
-        hubLog('error', 'tldr/from-message request failed', {
-          ...llmProviderEnvLogMeta(),
-          ...details,
-        });
-      }
-      json(500, { ok: false, error: errorMessage(error) });
-    }
-  });
 
   apiRouter.post(
     '/api/agent-suggestion/from-message',

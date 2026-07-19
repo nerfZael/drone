@@ -1,10 +1,9 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { ConflictError, NotFoundError, TimeoutError, TransportError, ValidationError } from './errors';
+import { ConflictError, NotFoundError, ValidationError } from './errors';
 import { hubTransport } from './hub';
 import type {
-  AIClient,
   ChatEvent,
   ChatMessage,
   ChatSummary,
@@ -42,7 +41,6 @@ type DroneSDK = {
   drones: DroneCollection;
   groups: GroupCollection;
   broadcast: BroadcastAPI;
-  ai?: AIClient;
 };
 
 export type DroneCollection = {
@@ -415,62 +413,12 @@ function resolveDiscoveredHubConnection(): ResolvedHubConnection | null {
   };
 }
 
-function createHubAIClient(connection: ResolvedHubConnection, defaults?: RequestOptions): AIClient {
-  return {
-    async ask(prompt: string, input?: RequestOptions): Promise<string> {
-      const text = String(prompt ?? '').trim();
-      if (!text) throw new ValidationError('prompt cannot be empty');
-      const requestOptions = mergeOptions(defaults, input);
-      const timeoutMs = requestOptions?.timeoutMs ?? 5000;
-      const timeoutController = new AbortController();
-      const signal = mergeAbortSignals(timeoutController.signal, requestOptions?.signal);
-      const timer = setTimeout(() => timeoutController.abort(), timeoutMs);
-      try {
-        const response = await fetch(new URL('/api/tldr/from-message', connection.baseUrl).toString(), {
-          method: 'POST',
-          signal,
-          headers: {
-            authorization: `Bearer ${connection.token}`,
-            'content-type': 'application/json',
-          },
-          body: JSON.stringify({
-            response: text,
-            prompt: '',
-            context: [],
-          }),
-        });
-        const raw = await response.text();
-        let data: any = null;
-        try {
-          data = raw ? JSON.parse(raw) : null;
-        } catch {
-          data = null;
-        }
-        if (!response.ok) {
-          const message = String(data?.error ?? raw ?? 'ai ask failed').trim();
-          throw new TransportError(message || 'ai ask failed', response.status);
-        }
-        return String(data?.tldr ?? '').trim();
-      } catch (error: any) {
-        if (error?.name === 'AbortError') {
-          throw new TimeoutError(`ai ask timeout after ${timeoutMs}ms`);
-        }
-        throw error;
-      } finally {
-        clearTimeout(timer);
-      }
-    },
-  };
-}
-
 class DroneSDKImpl implements DroneSDK {
   readonly drones: DroneCollection;
   readonly groups: GroupCollection;
   readonly broadcast: BroadcastAPI;
-  readonly ai?: AIClient;
 
-  constructor(private readonly ctx: SDKContext, ai?: AIClient) {
-    this.ai = ai;
+  constructor(private readonly ctx: SDKContext) {
     this.drones = new DroneCollectionImpl(ctx);
     this.groups = new GroupCollectionImpl(ctx);
     this.broadcast = new BroadcastAPIImpl(ctx);
@@ -1134,9 +1082,8 @@ function resolveDefaultTransport(): DroneTransport {
 }
 
 export function createDroneSDK(options: DroneSDKOptions = {}): DroneSDK {
-  const discoveredConnection = resolveDiscoveredHubConnection();
   return new DroneSDKImpl({
     transport: options.transport ?? resolveDefaultTransport(),
     defaults: options.defaults,
-  }, discoveredConnection ? createHubAIClient(discoveredConnection, options.defaults) : undefined);
+  });
 }
