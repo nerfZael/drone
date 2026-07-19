@@ -1,5 +1,7 @@
 import React from 'react';
-import { TranscriptSkeleton } from './TranscriptSkeleton';
+import { ChatLoadingState } from './ChatLoadingState';
+
+const useClientLayoutEffect = typeof window === 'undefined' ? React.useEffect : React.useLayoutEffect;
 
 export type ChatTranscriptFrameProps = {
   loading: boolean;
@@ -8,23 +10,43 @@ export type ChatTranscriptFrameProps = {
   emptyState: React.ReactNode;
   children: React.ReactNode;
   contentRef?: React.Ref<HTMLDivElement>;
+  initialScrollKey?: string;
 };
 
 export const ChatTranscriptFrame = React.forwardRef<HTMLDivElement, ChatTranscriptFrameProps>(function ChatTranscriptFrame(
   {
     loading,
-    loadingMessage = 'Loading chat messages...',
+    loadingMessage = 'Loading conversation…',
     hasContent,
     emptyState,
     children,
     contentRef,
+    initialScrollKey,
   },
   ref,
 ) {
+  const scrollNodeRef = React.useRef<HTMLDivElement | null>(null);
+  const lastInitialScrollKeyRef = React.useRef<string | null>(null);
+  React.useImperativeHandle(ref, () => scrollNodeRef.current as HTMLDivElement);
+
+  useClientLayoutEffect(() => {
+    if (!initialScrollKey || loading || !hasContent) return;
+    if (lastInitialScrollKeyRef.current === initialScrollKey) return;
+    lastInitialScrollKeyRef.current = initialScrollKey;
+
+    const scrollToBottom = () => {
+      const node = scrollNodeRef.current;
+      if (node) node.scrollTop = node.scrollHeight;
+    };
+    scrollToBottom();
+    const frame = requestAnimationFrame(scrollToBottom);
+    return () => cancelAnimationFrame(frame);
+  }, [hasContent, initialScrollKey, loading]);
+
   return (
-    <div ref={ref} className="h-full min-h-0 min-w-0 overflow-auto">
+    <div ref={scrollNodeRef} className="h-full min-h-0 min-w-0 overflow-auto">
       {loading ? (
-        <TranscriptSkeleton message={loadingMessage} />
+        <ChatLoadingState message={loadingMessage} />
       ) : hasContent ? (
         <div ref={contentRef} className="mx-auto flex max-w-[1170px] flex-col gap-6 px-6 py-5">
           {children}

@@ -50,7 +50,7 @@ describe('native chat selection state', () => {
     ).toBe(currentChat);
   });
 
-  test('stops showing a loading skeleton when chat metadata finishes without a result', () => {
+  test('stops showing a loading state when chat metadata finishes without a result', () => {
     expect(
       chatConfigResolutionState({
         currentChatIsDraft: false,

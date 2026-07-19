@@ -1600,7 +1600,7 @@ export function AssistantDock({
   }
 
   return (
-    <div data-assistant-dock-root="true" className="flex h-full min-h-0 bg-[var(--panel-alt)]">
+    <div data-assistant-dock-root="true" className="flex h-full min-h-0">
       <div className="relative flex min-w-0 flex-1 flex-col outline-none">
         {settingsOpen ? (
           <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
@@ -1740,12 +1740,11 @@ export function AssistantDock({
             <AgentChatTranscript
               scrollRef={scrollRef}
               contentRef={scrollContentRef}
+              initialScrollKey={`${nativeDroneId}:${nativeChatName}:${activeThreadId ?? ''}`}
               loading={Boolean(
                 (loading && !snapshot) || (blipSession.historyLoading && visibleItems.length === 0),
               )}
-              loadingMessage={
-                loading && !snapshot ? 'Loading built-in agent...' : 'Loading conversation...'
-              }
+              loadingMessage="Loading conversation…"
               hasContent={Boolean(
                 blipSession.hasOlder ||
                 visibleItems.length > 0 ||
