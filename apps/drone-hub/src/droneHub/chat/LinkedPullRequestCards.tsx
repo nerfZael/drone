@@ -150,23 +150,56 @@ function LinkedPullRequestCard({
   return (
     <section className="border-l-2 border-[rgba(167,139,250,.32)] pl-3">
       <div className="min-w-0 py-1 pr-1">
-        <div className="flex flex-wrap items-center gap-1.5">
-          <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-            Linked request
-          </span>
-          <span className="font-mono text-[10px] text-[var(--accent)]">#{link.pullNumber}</span>
-          <span
-            aria-live="polite"
-            className={`inline-flex items-center gap-1 rounded border px-1.5 py-[1px] text-[9px] capitalize ${
-              pullRequest
-                ? pullRequestStateClassName(pullRequest.state)
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]'
-            }`}
-            title={loadError ?? statusLabel}
-          >
-            {loading ? <IconSpinner className="h-2.5 w-2.5" /> : null}
-            {statusLabel}
-          </span>
+        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
+          <div className="flex items-center gap-1.5">
+            <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              Linked request
+            </span>
+            <span className="font-mono text-[10px] text-[var(--accent)]">#{link.pullNumber}</span>
+            <span
+              aria-live="polite"
+              className={`inline-flex items-center gap-1 rounded border px-1.5 py-[1px] text-[9px] capitalize ${
+                pullRequest
+                  ? pullRequestStateClassName(pullRequest.state)
+                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]'
+              }`}
+              title={loadError ?? statusLabel}
+            >
+              {loading ? <IconSpinner className="h-2.5 w-2.5" /> : null}
+              {statusLabel}
+            </span>
+          </div>
+          {actionNotice ? (
+            <span role="status" className="ml-auto text-[9px] text-[var(--green)]">
+              {actionNotice}
+            </span>
+          ) : isOpen && sameRepo ? (
+            <div
+              className="ml-auto flex shrink-0 items-center gap-1 border-l border-[var(--border-subtle)] pl-2"
+              aria-label="Pull request actions"
+            >
+              <button
+                type="button"
+                onClick={() => void mergePullRequest()}
+                disabled={!canManage || Boolean(blockedReason) || Boolean(busyAction) || anyActionBusy}
+                className="h-5 rounded border border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--green)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
+                style={{ fontFamily: 'var(--display)' }}
+                title={blockedReason ? `Cannot merge: ${blockedReason}` : forceReason ? `Force merge: ${forceReason}` : `Merge PR #${link.pullNumber}`}
+              >
+                {busyAction === 'merge' ? 'Merging…' : blockedReason ? 'Blocked' : forceReason ? 'Force merge' : 'Merge'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void closePullRequest()}
+                disabled={!canManage || Boolean(busyAction) || anyActionBusy}
+                className="h-5 rounded border border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--red)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
+                style={{ fontFamily: 'var(--display)' }}
+                title="Close this pull request without merging"
+              >
+                {busyAction === 'close' ? 'Closing…' : 'Close'}
+              </button>
+            </div>
+          ) : null}
         </div>
         <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1.5">
           <a
@@ -180,39 +213,7 @@ function LinkedPullRequestCard({
           >
             {pullRequest?.title ?? `${link.owner}/${link.repo} pull request #${link.pullNumber}`}
           </a>
-          <div className="flex shrink-0 flex-wrap items-center gap-1" aria-label="Pull request status and actions">
-            {actionNotice ? (
-              <span role="status" className="text-[9px] text-[var(--green)]">
-                {actionNotice}
-              </span>
-            ) : pullRequest ? (
-              <PullRequestStatusBadgeStrip pullRequest={pullRequest} compact />
-            ) : null}
-            {isOpen && sameRepo ? (
-              <>
-                <button
-                  type="button"
-                  onClick={() => void mergePullRequest()}
-                  disabled={!canManage || Boolean(blockedReason) || Boolean(busyAction) || anyActionBusy}
-                  className="h-6 rounded border border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--green)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
-                  style={{ fontFamily: 'var(--display)' }}
-                  title={blockedReason ? `Cannot merge: ${blockedReason}` : forceReason ? `Force merge: ${forceReason}` : `Merge PR #${link.pullNumber}`}
-                >
-                  {busyAction === 'merge' ? 'Merging…' : blockedReason ? 'Blocked' : forceReason ? 'Force merge' : 'Merge'}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void closePullRequest()}
-                  disabled={!canManage || Boolean(busyAction) || anyActionBusy}
-                  className="h-6 rounded border border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--red)] hover:brightness-110 disabled:cursor-not-allowed disabled:opacity-45"
-                  style={{ fontFamily: 'var(--display)' }}
-                  title="Close this pull request without merging"
-                >
-                  {busyAction === 'close' ? 'Closing…' : 'Close'}
-                </button>
-              </>
-            ) : null}
-          </div>
+          {pullRequest && !actionNotice ? <PullRequestStatusBadgeStrip pullRequest={pullRequest} compact /> : null}
         </div>
         <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-[9px] text-[var(--muted-dim)]">
           <span className="font-mono">{link.owner}/{link.repo}</span>

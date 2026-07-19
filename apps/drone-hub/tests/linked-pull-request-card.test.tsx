@@ -150,7 +150,8 @@ describe('linked pull request messages', () => {
     expect(html).not.toContain('shadow-[inset_3px_0_0');
     expect(html).toContain('Force merge');
     expect(html).toContain('Close');
-    expect(html.indexOf('Checks pending')).toBeLessThan(html.indexOf('Force merge'));
+    expect(html.indexOf('Force merge')).toBeLessThan(html.indexOf('Add resilient workspace file and folder transfers'));
+    expect(html.indexOf('Add resilient workspace file and folder transfers')).toBeLessThan(html.indexOf('Checks pending'));
     expect(html.match(/href=/g)).toHaveLength(1);
   });
 
