@@ -40,16 +40,26 @@ function mergeEntries(
   return [...bySequence.values()].sort((a, b) => a.sequence - b.sequence);
 }
 
-export function useBlipThreadSession(
-  threadId: string,
-  enabled: boolean,
-  onNativeChange?: () => void,
-) {
+type BlipThreadSessionOptions = {
+  threadId: string;
+  enabled: boolean;
+  onNativeChange?: () => void;
+  initialHistory?: BlipHistoryPage | null;
+};
+
+export function useBlipThreadSession({
+  threadId,
+  enabled,
+  onNativeChange,
+  initialHistory,
+}: BlipThreadSessionOptions) {
   const [entries, setEntries] = React.useState<BlipHistoryEntry[]>([]);
+  const [entriesThreadId, setEntriesThreadId] = React.useState('');
   const [beforeCursor, setBeforeCursor] = React.useState<number | null>(null);
   const [hasOlder, setHasOlder] = React.useState(false);
   const [historyLoading, setHistoryLoading] = React.useState(false);
   const [olderLoading, setOlderLoading] = React.useState(false);
+  const [runtimeThreadId, setRuntimeThreadId] = React.useState('');
   const [running, setRunning] = React.useState(false);
   const [streamingText, setStreamingText] = React.useState('');
   const [toolProgress, setToolProgress] = React.useState<Record<string, BlipHistoryMessage>>({});
@@ -61,6 +71,7 @@ export function useBlipThreadSession(
   const onNativeChangeRef = React.useRef(onNativeChange);
   threadIdRef.current = threadId;
   onNativeChangeRef.current = onNativeChange;
+  const bootstrapHistory = initialHistory?.threadId === threadId ? initialHistory : null;
 
   const refreshHistory = React.useCallback(
     async (options?: { quiet?: boolean }) => {
@@ -71,6 +82,7 @@ export function useBlipThreadSession(
         const page = await requestHistory(threadId, { limit: 80 });
         if (threadIdRef.current !== threadId) return;
         setEntries((current) => mergeEntries(current, page.entries));
+        setEntriesThreadId(threadId);
         const persistedToolCalls = new Set(
           page.entries.flatMap((entry) => {
             const message = entry.message as any;
@@ -106,9 +118,13 @@ export function useBlipThreadSession(
   );
 
   React.useEffect(() => {
-    setEntries([]);
-    setBeforeCursor(null);
-    setHasOlder(false);
+    setEntries(bootstrapHistory?.entries ?? []);
+    setEntriesThreadId(threadId);
+    setBeforeCursor(bootstrapHistory?.page.beforeCursor ?? null);
+    setHasOlder(bootstrapHistory?.page.hasOlder ?? false);
+    setHistoryLoading(false);
+    setOlderLoading(false);
+    setRuntimeThreadId(threadId);
     setRunning(false);
     setStreamingText('');
     setToolProgress({});
@@ -116,16 +132,26 @@ export function useBlipThreadSession(
     setHistoryError(null);
     seenEventKeysRef.current = [];
     latestHistoryRequestRef.current += 1;
-    if (enabled && threadId) void refreshHistory();
-  }, [enabled, refreshHistory, threadId]);
+    if (enabled && threadId && !bootstrapHistory) void refreshHistory();
+  }, [bootstrapHistory, enabled, refreshHistory, threadId]);
+
+  const activeBeforeCursor =
+    entriesThreadId === threadId
+      ? beforeCursor
+      : (bootstrapHistory?.page.beforeCursor ?? null);
+  const activeHasOlder =
+    entriesThreadId === threadId
+      ? hasOlder
+      : (bootstrapHistory?.page.hasOlder ?? false);
 
   const loadOlder = React.useCallback(async () => {
-    if (!enabled || !threadId || !hasOlder || !beforeCursor || olderLoading) return;
+    if (!enabled || !threadId || !activeHasOlder || !activeBeforeCursor || olderLoading) return;
     setOlderLoading(true);
     try {
-      const page = await requestHistory(threadId, { before: beforeCursor, limit: 80 });
+      const page = await requestHistory(threadId, { before: activeBeforeCursor, limit: 80 });
       if (threadIdRef.current !== threadId) return;
       setEntries((current) => mergeEntries(current, page.entries));
+      setEntriesThreadId(threadId);
       setBeforeCursor(page.page.beforeCursor);
       setHasOlder(page.page.hasOlder);
       setHistoryError(null);
@@ -135,7 +161,7 @@ export function useBlipThreadSession(
     } finally {
       if (threadIdRef.current === threadId) setOlderLoading(false);
     }
-  }, [beforeCursor, enabled, hasOlder, olderLoading, threadId]);
+  }, [activeBeforeCursor, activeHasOlder, enabled, olderLoading, threadId]);
 
   const handleRuntimeEvent = React.useCallback(
     (event: BlipRuntimeEvent) => {
@@ -205,6 +231,7 @@ export function useBlipThreadSession(
         envelope.threadId === threadId
       ) {
         const nextRunning = envelope.running === true;
+        setRuntimeThreadId(threadId);
         setRunning(nextRunning);
         if (!nextRunning) setStreamingText('');
         void refreshHistory({ quiet: true });
@@ -248,29 +275,41 @@ export function useBlipThreadSession(
 
   const streamingMessage = React.useMemo<BlipHistoryMessage | null>(
     () =>
-      streamingText
+      runtimeThreadId === threadId && streamingText
         ? {
             role: 'assistant',
             content: [{ type: 'text', text: streamingText }],
             timestamp: Date.now(),
           }
         : null,
-    [streamingText],
+    [runtimeThreadId, streamingText, threadId],
+  );
+  const visibleEntries = React.useMemo(
+    () =>
+      entriesThreadId === threadId
+        ? entries
+        : (bootstrapHistory?.entries ?? []),
+    [bootstrapHistory?.entries, entries, entriesThreadId, threadId],
   );
   const messages = React.useMemo(
-    () => [...entries.map((entry) => entry.message), ...Object.values(toolProgress)],
-    [entries, toolProgress],
+    () => [
+      ...visibleEntries.map((entry) => entry.message),
+      ...(runtimeThreadId === threadId ? Object.values(toolProgress) : []),
+    ],
+    [runtimeThreadId, threadId, toolProgress, visibleEntries],
   );
+  const historyReady =
+    !enabled || !threadId || entriesThreadId === threadId || Boolean(bootstrapHistory);
 
   return {
     messages,
     streamingMessage,
-    running,
-    runError,
-    historyError,
-    historyLoading,
-    olderLoading,
-    hasOlder,
+    running: runtimeThreadId === threadId && running,
+    runError: runtimeThreadId === threadId ? runError : null,
+    historyError: entriesThreadId === threadId ? historyError : null,
+    historyLoading: historyLoading || !historyReady,
+    olderLoading: entriesThreadId === threadId && olderLoading,
+    hasOlder: activeHasOlder,
     loadOlder,
     refreshHistory,
     handleStreamEvent,
