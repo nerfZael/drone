@@ -1319,6 +1319,9 @@ let nativeChatPromptHandler: (input: {
 }) => Promise<void> = async () => {
   throw new Error('native chat runtime is not ready');
 };
+let nativeChatStopHandler: (nativeChatId: string) => Promise<void> = async () => {
+  throw new Error('native chat runtime is not ready');
+};
 let nativeChatIsBusyHandler: (nativeChatId: string) => Promise<boolean> = async () => false;
 let nativeChatErrorHandler: (nativeChatId: string) => Promise<string> = async () => '';
 let nativeChatLatestAssistantTextHandler: (nativeChatId: string) => Promise<string> = async () => '';
@@ -3700,6 +3703,7 @@ promptRuntime = createChatPromptRuntime({
   patchChatMetadataInStore,
   playbookMetaFromEntry,
   promptNativeChat: (input: any) => nativeChatPromptHandler(input),
+  stopNativeChat: (nativeChatId: string) => nativeChatStopHandler(nativeChatId),
   nativeChatIsBusy: (nativeChatId: string) => nativeChatIsBusyHandler(nativeChatId),
   nativeChatError: (nativeChatId: string) => nativeChatErrorHandler(nativeChatId),
   nativeChatLatestAssistantText: (nativeChatId: string) =>
@@ -4713,6 +4717,10 @@ export async function startDroneHubApiServer(opts: {
       prompt: promptWithFiles,
       promptImages,
     });
+  };
+  nativeChatStopHandler = async (nativeChatId: string) => {
+    blipAssistantHost.stopThread(nativeChatId);
+    await assistantService.stopThread(nativeChatId);
   };
 
   function writeHubSseEvent(res: http.ServerResponse, event: string, data: any): void {

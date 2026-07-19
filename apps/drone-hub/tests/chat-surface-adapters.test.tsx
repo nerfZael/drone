@@ -146,6 +146,34 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('Thread files');
   });
 
+  test('the shared composer exposes the same automation controls for both agent types', () => {
+    for (const adapter of [adaptExternalAgentChatSurface(), adaptNativeAgentChatSurface()]) {
+      const html = renderToStaticMarkup(
+        <ChatSurface adapter={adapter}>
+          <ChatSurfaceComposer
+            resetKey={`automations-${adapter.agentType}`}
+            droneName="Test agent"
+            promptError={null}
+            sending={false}
+            waiting={false}
+            automationActions={[
+              {
+                id: 'automation-review',
+                label: 'Run review',
+                onSelect: () => {},
+              },
+            ]}
+            onSend={async () => true}
+            onSendAutomation={async () => true}
+          />
+        </ChatSurface>,
+      );
+
+      expect(html).toContain('Repeat');
+      expect(html).toContain('Automations');
+    }
+  });
+
   test('the shared message body renders the same markdown and images for either controller', () => {
     const html = renderToStaticMarkup(
       <ChatMessageBody

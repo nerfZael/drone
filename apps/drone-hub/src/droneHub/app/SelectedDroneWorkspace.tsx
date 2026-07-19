@@ -9,6 +9,7 @@ import {
   adaptExternalAgentChatSurface,
   adaptNativeAgentChatSurface,
   type AgentChatTranscriptItem,
+  type ChatDraftAutomationPayload,
   type ChatComposerControlsConfig,
   type DroneHubTask,
   type DroneHubTaskSpawnMode,
@@ -639,6 +640,7 @@ export function SelectedDroneWorkspace({
   const automations = useDroneHubUiStore((s) => s.automations);
   const {
     promptAutomationJob,
+    automationModeHint,
     cancelQueuedAutomationErrorById,
     cancellingQueuedAutomationById,
     cancelQueuedPromptAutomation,
@@ -651,9 +653,25 @@ export function SelectedDroneWorkspace({
   } = usePromptAutomationState({
     droneId: currentDrone.id,
     chatName: activeChatName,
-    chatUiMode,
+    chatUiMode: nativeChatActive ? 'transcript' : chatUiMode,
     automations,
   });
+  const sendChatAutomation = React.useCallback(
+    async (payload: ChatDraftAutomationPayload): Promise<boolean> => {
+      try {
+        const launch = createDraftChatAutomationLaunch({
+          prompt: payload.prompt,
+          runs: payload.runs,
+          sleepAmount: payload.sleepAmount,
+          sleepUnit: payload.sleepUnit,
+        });
+        return await startPromptAutomationLaunch(launch);
+      } catch {
+        return false;
+      }
+    },
+    [startPromptAutomationLaunch],
+  );
   const transcriptRenderBlocks = React.useMemo<TranscriptRenderBlock[]>(
     () => buildTranscriptRenderBlocks(transcripts ?? []),
     [transcripts],
@@ -900,6 +918,56 @@ export function SelectedDroneWorkspace({
       </div>
     );
   }, [promptAutomationJob, stopPromptAutomation, stoppingPromptAutomationMode]);
+  const queuedAutomationStatusContent = (queued: (typeof queuedAutomationItems)[number]) => {
+    const queueId = String(queued.queueId ?? '').trim();
+    return (
+      <AutomationLaneStatusCard
+        status="queued"
+        automationLabel={
+          String(queued.automationLabel ?? '').trim() ||
+          String(queued.automationId ?? '').trim() ||
+          'Automation'
+        }
+        runsTotal={Number(queued.runsTotal ?? 0) || 0}
+        atIso={queued.enqueuedAt}
+        queueId={queueId}
+        cancelBusy={Boolean(cancellingQueuedAutomationById[queueId])}
+        cancelError={cancelQueuedAutomationErrorById[queueId] ?? null}
+        onCancelQueued={cancelQueuedPromptAutomation}
+      />
+    );
+  };
+  const runningAutomationStatusContent = promptAutomationJob?.running ? (
+    <AutomationLaneStatusCard
+      status={currentAutomationCardStatus}
+      automationLabel={String(promptAutomationJob.automationLabel ?? '').trim() || 'Automation'}
+      runsTotal={Number(promptAutomationJob.runsTotal ?? 0) || 0}
+      runsCompleted={Number(promptAutomationJob.runsCompleted ?? 0) || 0}
+      atIso={promptAutomationJob.startedAt ?? promptAutomationJob.updatedAt}
+      stopAllBusy={stoppingPromptAutomationMode === 'all'}
+      stopRunsOnlyBusy={stoppingPromptAutomationMode === 'runs-only'}
+      stopError={stopPromptAutomationError}
+      onStopAll={() => stopPromptAutomation({ mode: 'all', clearQueued: false })}
+      onStopRunsOnly={() => stopPromptAutomation({ mode: 'runs-only', clearQueued: false })}
+    />
+  ) : null;
+  const nativeAutomationTranscriptItems: AgentChatTranscriptItem[] = [];
+  if (runningAutomationStatusContent) {
+    nativeAutomationTranscriptItems.push({
+      key: `native-automation-running:${String(promptAutomationJob?.jobKey ?? 'current')}`,
+      kind: 'automation',
+      content: runningAutomationStatusContent,
+    });
+  }
+  for (const queued of queuedAutomationItems) {
+    const queueId = String(queued.queueId ?? '').trim();
+    if (!queueId) continue;
+    nativeAutomationTranscriptItems.push({
+      key: `native-automation-queued:${queueId}`,
+      kind: 'automation',
+      content: queuedAutomationStatusContent(queued),
+    });
+  }
   const shouldAutoFocusInput = React.useMemo(() => {
     if (chatUiMode === 'transcript') {
       return !loadingTranscript && (transcripts?.length ?? 0) === 0 && visiblePendingPromptsWithStartup.length === 0;
@@ -1341,47 +1409,18 @@ export function SelectedDroneWorkspace({
     if (block.kind === 'queued-automation') {
       const queued = queuedAutomationById.get(block.queueId);
       if (!queued) continue;
-      const queueId = String(queued.queueId ?? '').trim();
       externalTranscriptItems.push({
         key: block.key,
         kind: 'automation',
-        content: (
-          <AutomationLaneStatusCard
-            status="queued"
-            automationLabel={
-              String(queued.automationLabel ?? '').trim() ||
-              String(queued.automationId ?? '').trim() ||
-              'Automation'
-            }
-            runsTotal={Number(queued.runsTotal ?? 0) || 0}
-            atIso={queued.enqueuedAt}
-            queueId={queueId}
-            cancelBusy={Boolean(cancellingQueuedAutomationById[queueId])}
-            cancelError={cancelQueuedAutomationErrorById[queueId] ?? null}
-            onCancelQueued={cancelQueuedPromptAutomation}
-          />
-        ),
+        content: queuedAutomationStatusContent(queued),
       });
       continue;
     }
-    if (!promptAutomationJob?.running) continue;
+    if (!runningAutomationStatusContent) continue;
     externalTranscriptItems.push({
       key: block.key,
       kind: 'automation',
-      content: (
-        <AutomationLaneStatusCard
-          status={currentAutomationCardStatus}
-          automationLabel={String(promptAutomationJob.automationLabel ?? '').trim() || 'Automation'}
-          runsTotal={Number(promptAutomationJob.runsTotal ?? 0) || 0}
-          runsCompleted={Number(promptAutomationJob.runsCompleted ?? 0) || 0}
-          atIso={promptAutomationJob.startedAt ?? promptAutomationJob.updatedAt}
-          stopAllBusy={stoppingPromptAutomationMode === 'all'}
-          stopRunsOnlyBusy={stoppingPromptAutomationMode === 'runs-only'}
-          stopError={stopPromptAutomationError}
-          onStopAll={() => stopPromptAutomation({ mode: 'all', clearQueued: false })}
-          onStopRunsOnly={() => stopPromptAutomation({ mode: 'runs-only', clearQueued: false })}
-        />
-      ),
+      content: runningAutomationStatusContent,
     });
   }
   externalTranscriptItems.push({
@@ -2291,6 +2330,12 @@ export function SelectedDroneWorkspace({
                   onOpenFileReference: onOpenMarkdownFileReference,
                   onOpenLink: tryOpenMarkdownPullRequest,
                 }}
+                automationFeatures={{
+                  actions: chatAutomationActions,
+                  transcriptItems: nativeAutomationTranscriptItems,
+                  modeHint: automationModeHint,
+                  onSend: sendChatAutomation,
+                }}
                 onHistoryChange={setNativeHistoryObserved}
               />
             ) : chatUiMode === 'transcript' ? (
@@ -2472,6 +2517,7 @@ export function SelectedDroneWorkspace({
               composerControls={externalComposerControls}
               automationActions={chatAutomationActions}
               lockComposerWhileAutomationActive={false}
+              modeHint={automationModeHint}
               autoFocus={shouldAutoFocusInput}
               onStop={
                 !currentChatIsDraft && canStopResponse ? () => requestStopResponse() : undefined
@@ -2479,23 +2525,7 @@ export function SelectedDroneWorkspace({
               stopping={stoppingResponse}
               onPublish={currentChatIsDraft ? publishSelectedDraft : undefined}
               onSend={async (payload: ChatSendPayload) => await sendPromptText(payload)}
-              onSendAutomation={
-                chatUiMode === 'transcript'
-                  ? async (payload) => {
-                      try {
-                        const launch = createDraftChatAutomationLaunch({
-                          prompt: payload.prompt,
-                          runs: payload.runs,
-                          sleepAmount: payload.sleepAmount,
-                          sleepUnit: payload.sleepUnit,
-                        });
-                        return await startPromptAutomationLaunch(launch);
-                      } catch {
-                        return false;
-                      }
-                    }
-                  : undefined
-              }
+              onSendAutomation={chatUiMode === 'transcript' ? sendChatAutomation : undefined}
             />
           ) : null}
           {fileOpenToast ? (
