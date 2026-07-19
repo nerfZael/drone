@@ -16,6 +16,7 @@ export type MobileDroneCreatePreferences = {
   provider: string;
   reasoning: string;
   repoBranchSource: 'host' | 'remote';
+  repoCreateRemoteBranch: string;
   pullHostBranchBeforeCreate: boolean;
 };
 
@@ -55,6 +56,7 @@ export function normalizeMobileDroneCreatePreferences(
     provider: trimmed(candidate.provider),
     reasoning: trimmed(candidate.reasoning),
     repoBranchSource: candidate.repoBranchSource === 'remote' ? 'remote' : 'host',
+    repoCreateRemoteBranch: trimmed(candidate.repoCreateRemoteBranch),
     pullHostBranchBeforeCreate: candidate.pullHostBranchBeforeCreate === true,
   };
 }
@@ -77,6 +79,7 @@ export function mobileDroneCreatePreferencesFromPayload(
     provider: trimmed(payload.seedProvider),
     reasoning: trimmed(payload.seedReasoning),
     repoBranchSource: payload.repoBranchSource === 'remote' ? 'remote' : 'host',
+    repoCreateRemoteBranch: trimmed(payload.remoteBranch),
     pullHostBranchBeforeCreate: payload.pullHostBranchBeforeCreate === true,
   };
 }
