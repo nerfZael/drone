@@ -1,5 +1,8 @@
 import { describe, expect, test } from 'bun:test';
-import { normalizeDesktopNewDronePreferences } from '../src/droneHub/app/new-drone-preferences';
+import {
+  normalizeDesktopNewDronePreferences,
+  normalizeDesktopNewDronePreferencesByRepo,
+} from '../src/droneHub/app/new-drone-preferences';
 
 describe('desktop new drone preferences', () => {
   test('normalizes the device-scoped creation fields', () => {
@@ -13,6 +16,9 @@ describe('desktop new drone preferences', () => {
         spawnModel: ' gpt-5.4 ',
         spawnReasoning: ' high ',
         spawnAgentPermissionMode: 'read-only',
+        repoBranchSource: 'remote',
+        repoCreateRemoteBranch: ' origin/feature-a ',
+        pullHostBranchBeforeCreate: false,
         name: 'do-not-remember',
         group: 'do-not-remember',
         repoPath: '/do/not/remember',
@@ -26,6 +32,9 @@ describe('desktop new drone preferences', () => {
       spawnModel: 'gpt-5.4',
       spawnReasoning: 'high',
       spawnAgentPermissionMode: 'read-only',
+      repoBranchSource: 'remote',
+      repoCreateRemoteBranch: 'origin/feature-a',
+      pullHostBranchBeforeCreate: false,
     });
   });
 
@@ -39,7 +48,22 @@ describe('desktop new drone preferences', () => {
       spawnModel: '',
       spawnReasoning: '',
       spawnAgentPermissionMode: 'full-access',
+      repoBranchSource: 'host',
+      repoCreateRemoteBranch: '',
+      pullHostBranchBeforeCreate: true,
     });
     expect(normalizeDesktopNewDronePreferences(null)).toBeNull();
+  });
+
+  test('keeps creation preferences isolated by repository key', () => {
+    const normalized = normalizeDesktopNewDronePreferencesByRepo({
+      '/repos/a': { runtime: 'container', repoBranchSource: 'remote', repoCreateRemoteBranch: 'origin/a' },
+      '/repos/b': { runtime: 'host', repoBranchSource: 'host' },
+    });
+
+    expect(normalized['/repos/a']?.runtime).toBe('container');
+    expect(normalized['/repos/a']?.repoCreateRemoteBranch).toBe('origin/a');
+    expect(normalized['/repos/b']?.runtime).toBe('host');
+    expect(normalized['/repos/b']?.repoCreateRemoteBranch).toBe('');
   });
 });
