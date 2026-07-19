@@ -246,6 +246,7 @@ export function NewDroneScreen({
   onDetectModels,
   onLoadRepoBranches,
   onLoadRepoPreferences,
+  onRememberedDraftChange,
   onCreate,
 }: {
   repos: MobileDroneCreateRepo[];
@@ -262,6 +263,7 @@ export function NewDroneScreen({
   ): Promise<MobileDroneCreateModel[]>;
   onLoadRepoBranches(repoPath: string, refresh?: boolean): Promise<MobileDroneCreateRepo>;
   onLoadRepoPreferences(repoPath: string): Promise<MobileDroneCreatePreferences | null>;
+  onRememberedDraftChange(draft: boolean): void;
   onCreate(
     payload: MobileDroneCreatePayload,
     preferences: MobileDroneCreatePreferences,
@@ -470,18 +472,34 @@ export function NewDroneScreen({
 
   const chooseRepo = (path: string) => {
     const requestId = ++preferenceRequestId.current;
+    modelRequestId.current += 1;
     setRepoPath(path);
     setRepoPickerOpen(false);
+    setMode('with-chat');
     setRuntime(localDevice ? 'host' : 'container');
     setPersistVolume(false);
+    setAgent('native');
+    setAgentPermissionMode('full-access');
+    setModels([]);
+    setModel('');
+    setModelProvider('');
+    setReasoning('');
+    onRememberedDraftChange(false);
     setBranchSource('host');
     setRemoteBranch('');
     setPullHostBranch(false);
     setBranchPickerOpen(false);
     void onLoadRepoPreferences(path).then((remembered) => {
       if (preferenceRequestId.current !== requestId || !remembered) return;
+      setMode(remembered.mode);
       setRuntime(localDevice ? 'host' : remembered.runtime);
       setPersistVolume(remembered.persistVolume);
+      setAgent(localDevice ? 'native' : remembered.agent);
+      setAgentPermissionMode(localDevice ? 'full-access' : remembered.agentPermissionMode);
+      setModel(remembered.model);
+      setModelProvider(remembered.provider);
+      setReasoning(remembered.reasoning);
+      onRememberedDraftChange(remembered.draft);
       setBranchSource(localDevice ? 'host' : remembered.repoBranchSource);
       setRemoteBranch(localDevice ? '' : remembered.repoCreateRemoteBranch);
       setPullHostBranch(remembered.pullHostBranchBeforeCreate);

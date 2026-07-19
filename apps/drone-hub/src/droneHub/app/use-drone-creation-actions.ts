@@ -530,7 +530,7 @@ export function useDroneCreationActions({
       }
       const rejected = Array.isArray(resp?.rejected) ? resp.rejected : [];
 
-      if (acceptedByName.size > 0) {
+      if (acceptedByName.size > 0 && !isClone) {
         rememberNewDronePreferences(repoPath, {
           mode: 'with-chat',
           runtime,
@@ -544,6 +544,8 @@ export function useDroneCreationActions({
           repoCreateRemoteBranch: repoBranchSelection.remoteBranch ?? '',
           pullHostBranchBeforeCreate: repoBranchSelection.pullHostBranchBeforeCreate,
         });
+      }
+      if (acceptedByName.size > 0) {
         if (seedModel) rememberSeenModels([seedModel]);
         replaceOptimisticStartupSeeds(setStartupSeedByDrone, Array.from(optimisticSeeds), Array.from(acceptedByName.values()), {
           runtime,
