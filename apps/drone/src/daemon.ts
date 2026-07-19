@@ -15,6 +15,12 @@ import {
 } from './hub/builtin-transcript-sessions';
 import { preferredTerminalSessionLogsRoot } from './host/session-logs';
 import { missingHostDependencyMessage } from './host/runtime';
+import {
+  DAEMON_JSON_MAX_BYTES,
+  DaemonHttpError,
+  handleDaemonWorkspaceRequest,
+  readLimitedJson,
+} from './daemon-workspace';
 
 const execFileAsync = promisify(execFile);
 
@@ -594,11 +600,7 @@ function json(res: http.ServerResponse, status: number, obj: any) {
 }
 
 async function readJson(req: http.IncomingMessage): Promise<any> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  const raw = Buffer.concat(chunks).toString('utf8').trim();
-  if (!raw) return {};
-  return JSON.parse(raw);
+  return await readLimitedJson(req, DAEMON_JSON_MAX_BYTES);
 }
 
 function wrapTmuxError(error: any): Error {
@@ -972,9 +974,16 @@ async function main() {
       }
 
       if (method === 'GET' && pathname === '/v1/health') {
-        json(res, 200, { ok: true, name: 'drone-daemon', time: new Date().toISOString() });
+        json(res, 200, {
+          ok: true,
+          name: 'drone-daemon',
+          time: new Date().toISOString(),
+          capabilities: ['workspace-v1'],
+        });
         return;
       }
+
+      if (await handleDaemonWorkspaceRequest({ req, res, method, pathname, url: u })) return;
 
       if (method === 'POST' && pathname === '/v1/prompts/enqueue') {
         const body = await readJson(req);
@@ -1515,7 +1524,15 @@ async function main() {
 
       json(res, 404, { error: 'not found' });
     } catch (err: any) {
-      json(res, 500, { error: err?.message ?? String(err) });
+      const fileErrorCode = String(err?.code ?? '');
+      const inferredStatus =
+        fileErrorCode === 'ENOENT' || fileErrorCode === 'ENOTDIR'
+          ? 404
+          : fileErrorCode === 'EEXIST' || fileErrorCode === 'ENOTEMPTY'
+            ? 409
+            : 500;
+      const status = err instanceof DaemonHttpError ? err.statusCode : inferredStatus;
+      json(res, status, { error: err?.message ?? String(err) });
     }
   });
 

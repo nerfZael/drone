@@ -1665,7 +1665,7 @@ createCommand
             copyPersistenceVolume: true,
             ...(typeof persistVolume === 'boolean' ? { persistVolume } : {}),
             ports: [
-              { hostPort: hostPortDaemon, containerPort },
+              { hostPort: hostPortDaemon, containerPort, hostIp: '127.0.0.1' },
               { hostPort: hostPortRdp, containerPort: 3389 },
               { hostPort: hostPortNoVnc, containerPort: 6080 },
               { hostPort: hostPort3000, containerPort: 3000 },
@@ -1696,7 +1696,7 @@ createCommand
           await dvmCreate(containerName, {
             ...(persistVolume === false ? { persist: false } : {}),
             ports: [
-              { hostPort: hostPortDaemon, containerPort },
+              { hostPort: hostPortDaemon, containerPort, hostIp: '127.0.0.1' },
               { hostPort: hostPortRdp, containerPort: 3389 },
               { hostPort: hostPortNoVnc, containerPort: 6080 },
               { hostPort: hostPort3000, containerPort: 3000 },

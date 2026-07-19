@@ -1401,10 +1401,15 @@ export class HubAssistantService {
     const applyHunks = params?.applyHunks;
     if (typeof applyHunks !== 'function') throw new Error('patch hunk engine unavailable');
     const readFile = this.requireFileCallback('readDroneFile');
-    const writeFile = this.requireFileCallback('writeDroneFile');
-    const deleteFile = this.requireFileCallback('deleteDroneFile');
-    const moveFile = this.requireFileCallback('moveDroneFile');
     const statPath = this.requireFileCallback('statDronePath');
+    const batchFiles = this.tools.batchDroneFiles;
+    const individualFiles = batchFiles
+      ? null
+      : {
+          write: this.requireFileCallback('writeDroneFile'),
+          delete: this.requireFileCallback('deleteDroneFile'),
+          move: this.requireFileCallback('moveDroneFile'),
+        };
     const staged = new Map<string, AssistantPatchStagedFile>();
     const applied: AssistantApplyPatchResult['operations'] = [];
 
@@ -1527,21 +1532,41 @@ export class HubAssistantService {
     }
 
     const movedSources = new Set<string>();
-    for (const file of staged.values()) {
-      if (!file.deleted && file.moveFrom) {
-        await moveFile({ droneId, fromPath: file.moveFrom, toPath: file.path });
-        movedSources.add(file.moveFrom);
+    if (batchFiles) {
+      const mutations: Parameters<typeof batchFiles>[0]['operations'] = [];
+      for (const file of staged.values()) {
+        if (!file.deleted && file.moveFrom) {
+          mutations.push({ type: 'move', fromPath: file.moveFrom, toPath: file.path });
+          movedSources.add(file.moveFrom);
+        }
       }
-    }
-    for (const file of staged.values()) {
-      if (!file.deleted && file.content != null) {
-        await writeFile({ droneId, path: file.path, content: file.content });
+      for (const file of staged.values()) {
+        if (!file.deleted && file.content != null) {
+          mutations.push({ type: 'write', path: file.path, content: file.content });
+        }
       }
-    }
-    for (const file of staged.values()) {
-      if (!file.deleted || !file.existsBefore) continue;
-      if (movedSources.has(file.path)) continue;
-      await deleteFile({ droneId, path: file.path });
+      for (const file of staged.values()) {
+        if (!file.deleted || !file.existsBefore || movedSources.has(file.path)) continue;
+        mutations.push({ type: 'delete', path: file.path });
+      }
+      if (mutations.length > 0) await batchFiles({ droneId, operations: mutations });
+    } else {
+      if (!individualFiles) throw new Error('assistant file mutation tools unavailable');
+      for (const file of staged.values()) {
+        if (!file.deleted && file.moveFrom) {
+          await individualFiles.move({ droneId, fromPath: file.moveFrom, toPath: file.path });
+          movedSources.add(file.moveFrom);
+        }
+      }
+      for (const file of staged.values()) {
+        if (!file.deleted && file.content != null) {
+          await individualFiles.write({ droneId, path: file.path, content: file.content });
+        }
+      }
+      for (const file of staged.values()) {
+        if (!file.deleted || !file.existsBefore || movedSources.has(file.path)) continue;
+        await individualFiles.delete({ droneId, path: file.path });
+      }
     }
 
     return { ok: true, droneId, operations: applied };

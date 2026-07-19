@@ -14,6 +14,122 @@ afterEach(() => {
 });
 
 describe('phone Blip session', () => {
+  test('sends prompt images to the mobile Built-in model transport', async () => {
+    const thread: LocalAssistantThread = {
+      id: 'mobile_blip_image',
+      title: 'Image prompt',
+      createdAt: '2026-07-18T00:00:00.000Z',
+      updatedAt: '2026-07-18T00:00:00.000Z',
+      model: 'gpt-test',
+      thinkingLevel: 'low',
+      status: 'running',
+      error: null,
+      workspaceTargets: [],
+      messages: [],
+      queuedPrompts: [],
+    };
+    let requestBody: any = null;
+    globalThis.fetch = (async (_url, init) => {
+      requestBody = JSON.parse(String(init?.body ?? '{}'));
+      return {
+        ok: true,
+        json: async () => ({
+          choices: [{ finish_reason: 'stop', message: { content: 'I can see the image.' } }],
+        }),
+      } as Response;
+    }) as typeof fetch;
+
+    const messages = await runMobileBlip({
+      provider: 'openai',
+      apiKey: 'test-key',
+      codexAuth: null,
+      prompt: 'What is shown?',
+      promptImages: [{ type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' }],
+      thread,
+      history: [],
+      workspaceRuntime: createWorkspaceToolRuntime(thread, async () => ({})),
+      signal: new AbortController().signal,
+      onMessages: async () => undefined,
+      onStreamingMessages: () => undefined,
+    });
+
+    const userContent = requestBody?.messages?.find(
+      (message: any) => message.role === 'user',
+    )?.content;
+    expect(userContent).toEqual([
+      { type: 'text', text: 'What is shown?' },
+      {
+        type: 'image_url',
+        image_url: { url: 'data:image/png;base64,aW1hZ2U=' },
+      },
+    ]);
+    expect(messages[0]?.content).toEqual([
+      { type: 'text', text: 'What is shown?' },
+      { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },
+    ]);
+  });
+
+  test('sends prompt images through the mobile Codex Built-in transport', async () => {
+    const thread: LocalAssistantThread = {
+      id: 'mobile_codex_image',
+      title: 'Codex image prompt',
+      createdAt: '2026-07-18T00:00:00.000Z',
+      updatedAt: '2026-07-18T00:00:00.000Z',
+      model: 'gpt-test',
+      thinkingLevel: 'low',
+      status: 'running',
+      error: null,
+      workspaceTargets: [],
+      messages: [],
+      queuedPrompts: [],
+    };
+    let requestBody: any = null;
+    globalThis.fetch = (async (_url, init) => {
+      requestBody = JSON.parse(String(init?.body ?? '{}'));
+      return new Response(
+        `data: ${JSON.stringify({
+          type: 'response.completed',
+          response: {
+            status: 'completed',
+            output: [
+              {
+                type: 'message',
+                role: 'assistant',
+                status: 'completed',
+                content: [{ type: 'output_text', text: 'I can see the image.' }],
+              },
+            ],
+          },
+        })}\n\n`,
+        { status: 200, headers: { 'content-type': 'text/event-stream' } },
+      );
+    }) as typeof fetch;
+
+    await runMobileBlip({
+      provider: 'codex',
+      apiKey: null,
+      codexAuth: {
+        accessToken: 'access-token',
+        refreshToken: 'refresh-token',
+        accountId: 'account-id',
+        expiresAt: null,
+      },
+      prompt: 'What is shown?',
+      promptImages: [{ type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' }],
+      thread,
+      history: [],
+      workspaceRuntime: createWorkspaceToolRuntime(thread, async () => ({})),
+      signal: new AbortController().signal,
+      onMessages: async () => undefined,
+      onStreamingMessages: () => undefined,
+    });
+
+    expect(requestBody?.input?.find((item: any) => item.role === 'user')?.content).toEqual([
+      { type: 'input_text', text: 'What is shown?' },
+      { type: 'input_image', image_url: 'data:image/png;base64,aW1hZ2U=' },
+    ]);
+  });
+
   test('uses the shared Blip tool loop with the React Native model transport', async () => {
     const thread: LocalAssistantThread = {
       id: 'mobile_blip_1',
