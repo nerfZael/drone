@@ -1,13 +1,28 @@
 export { ChatTabs } from './ChatTabs';
 export { ChatInput } from './ChatInput';
-export { ChatTranscriptFrame } from './ChatTranscriptFrame';
+export {
+  ChatSurface,
+  ChatSurfaceComposer,
+  ChatSurfaceTranscript,
+  type ChatSurfaceComposerProps,
+  type ChatSurfaceProps,
+  type ChatSurfaceTranscriptProps,
+} from './ChatSurface';
+export { ChatTranscriptFrame, type ChatTranscriptFrameProps } from './ChatTranscriptFrame';
 export type {
   ChatDraftAutomationPayload,
   ChatImageAttachmentPayload,
   ChatInputAutomationAction,
+  ChatInputProps,
   ChatSendContext,
   ChatSendPayload,
 } from './ChatInput';
+export {
+  adaptExternalAgentChatSurface,
+  adaptNativeAgentChatSurface,
+  type AgentChatSurfaceAdapter,
+  type AgentChatSurfaceCapabilities,
+} from './agent-chat-surface-adapters';
 export { EmptyState } from './EmptyState';
 export { CollapsibleOutput } from './CollapsibleOutput';
 export { TranscriptTurn } from './TranscriptTurn';

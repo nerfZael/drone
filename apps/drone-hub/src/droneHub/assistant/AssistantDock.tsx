@@ -5,9 +5,11 @@ import { MarkdownMessage } from '../chat/MarkdownMessage';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import {
   ChatComposerMenu,
-  ChatInput,
-  ChatTranscriptFrame,
+  ChatSurface,
+  ChatSurfaceComposer,
+  ChatSurfaceTranscript,
   EmptyState,
+  adaptNativeAgentChatSurface,
   type ChatComposerMenuAction,
   type ChatSendPayload,
 } from '../chat';
@@ -103,6 +105,7 @@ const ASSISTANT_SCROLL_BOTTOM_THRESHOLD_PX = 48;
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
 const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
 const EMPTY_ASSISTANT_WORKSPACES: AssistantWorkspaceSummary[] = [];
+const NATIVE_AGENT_CHAT_SURFACE = adaptNativeAgentChatSurface();
 
 function readInitialFilesOpen(): boolean {
   if (typeof window === 'undefined') return false;
@@ -1377,131 +1380,252 @@ export function AssistantDock({
     },
   ];
 
+  const nativeComposerOverlay = (
+    <>
+      {toolsPanelOpen ? (
+        <AssistantToolsPanel
+          tools={availableTools}
+          enabledTools={enabledToolNames}
+          disabled={!activeThread}
+          onToggleTool={toggleAssistantTool}
+          onToggleTools={toggleAssistantTools}
+          onEnableAll={() => updateEnabledTools(availableTools.map((tool) => tool.name))}
+          onDisableAll={() => updateEnabledTools([])}
+          onClose={() => setToolsPanelOpen(false)}
+          placement="composer"
+        />
+      ) : null}
+      {workspacesPanelOpen ? (
+        <AssistantWorkspacesPanel
+          workspaces={availableWorkspaces}
+          enabledWorkspaceIds={enabledWorkspaceDraftIds}
+          disabled={!activeThread}
+          onToggleWorkspace={toggleAssistantWorkspace}
+          onEnableAll={() => updateEnabledWorkspaces(availableWorkspaces.map((workspace) => workspace.id))}
+          onDisableAll={() => updateEnabledWorkspaces([])}
+          onOpenRemoteAccess={() => {
+            setWorkspacesPanelOpen(false);
+            setWorkspaceAccessOpen(true);
+          }}
+          onClose={() => setWorkspacesPanelOpen(false)}
+          placement="composer"
+        />
+      ) : null}
+    </>
+  );
+
+  const nativeComposerHeader = referencedDrones.length > 0 || droneReferenceDropActive ? (
+    <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
+      <div className="mb-1.5 flex items-center justify-between gap-2">
+        <div className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+          {referencedDrones.length > 0
+            ? `${referencedDrones.length} drone${referencedDrones.length === 1 ? '' : 's'} referenced`
+            : 'Drop drones to reference them'}
+        </div>
+      </div>
+      {referencedDrones.length > 0 ? (
+        <div className="flex gap-2 overflow-x-auto pb-0.5 no-scrollbar">
+          {referencedDrones.map((drone) => {
+            const label = drone.name || drone.id;
+            return (
+              <div
+                key={drone.id}
+                className="relative w-[190px] flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-2 py-1.5"
+              >
+                <div className="flex min-w-0 items-center gap-1.5">
+                  <IconDrone className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" />
+                  <span className="min-w-0 truncate text-[10px] font-medium text-[var(--fg-secondary)]" title={label}>
+                    {label}
+                  </span>
+                </div>
+                <div className="mt-1 truncate font-mono text-[9px] text-[var(--muted-dim)]" title={drone.id}>
+                  {drone.id}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => removeReferencedDrone(drone.id)}
+                  disabled={droneReferenceControlsLocked}
+                  className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel-raised)] text-[10px] font-bold text-[var(--muted)] hover:border-[var(--red)] hover:text-[var(--red)] disabled:opacity-45"
+                  title={`Remove ${label}`}
+                  aria-label={`Remove ${label}`}
+                >
+                  x
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5 text-[10px] text-[var(--accent)]">
+          Release to add drone names and IDs to this message.
+        </div>
+      )}
+    </div>
+  ) : null;
+
+  const nativeComposerControls = (
+    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+      <NativeAgentModelControls
+        thread={activeThread}
+        models={snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS}
+        defaultModel={snapshot?.defaultModel}
+        busy={defaultModelBusy}
+        className=""
+        onUpdate={(patch) => void updateThread(patch)}
+        onSetDefault={() => void setActiveModelAsDefault()}
+      />
+      <ChatComposerMenu actions={composerMenuActions} />
+    </div>
+  );
+
   return (
     <div data-assistant-dock-root="true" className="flex h-full min-h-0 bg-[var(--panel-alt)]">
       <div className="relative flex min-w-0 flex-1 flex-col outline-none">
-      {settingsOpen ? (
-        <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
-          <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
-            <div className="mb-4 flex items-start justify-between gap-3">
-              <div>
-                <div className="flex items-center gap-2 text-[15px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
-                  <IconSettings className="h-4 w-4 text-[var(--muted)]" />
-                  Settings
+        {settingsOpen ? (
+          <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
+            <div className="mx-auto w-full max-w-3xl p-4 sm:p-6">
+              <div className="mb-4 flex items-start justify-between gap-3">
+                <div>
+                  <div
+                    className="flex items-center gap-2 text-[15px] font-semibold text-[var(--fg)]"
+                    style={{ fontFamily: 'var(--display)' }}
+                  >
+                    <IconSettings className="h-4 w-4 text-[var(--muted)]" />
+                    Settings
+                  </div>
+                  <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
+                    Defaults apply to newly created chats. Existing chats keep their current
+                    configuration.
+                  </div>
                 </div>
-                <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Defaults apply to newly created chats. Existing chats keep their current configuration.</div>
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen(false)}
+                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg)]"
+                  title="Close settings"
+                  aria-label="Close settings"
+                >
+                  ×
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setSettingsOpen(false)}
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg)]"
-                title="Close settings"
-                aria-label="Close settings"
-              >
-                ×
-              </button>
+              <AssistantToolsPanel
+                variant="settings"
+                tools={availableTools}
+                enabledTools={defaultEnabledToolDraftNames}
+                disabled={defaultToolsBusy}
+                onToggleTool={toggleDefaultTool}
+                onToggleTools={toggleDefaultTools}
+                onEnableAll={() =>
+                  void updateDefaultEnabledTools(availableTools.map((tool) => tool.name))
+                }
+                onDisableAll={() => void updateDefaultEnabledTools([])}
+              />
             </div>
-            <AssistantToolsPanel
-              variant="settings"
-              tools={availableTools}
-              enabledTools={defaultEnabledToolDraftNames}
-              disabled={defaultToolsBusy}
-              onToggleTool={toggleDefaultTool}
-              onToggleTools={toggleDefaultTools}
-              onEnableAll={() => void updateDefaultEnabledTools(availableTools.map((tool) => tool.name))}
-              onDisableAll={() => void updateDefaultEnabledTools([])}
+          </div>
+        ) : null}
+
+        {workspaceAccessOpen && activeThread ? (
+          <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
+            <AssistantWorkspaceAccessView
+              key={activeThread.id}
+              requestJson={requestJson}
+              threadId={activeThread.id}
+              threadTitle={activeThread.title}
+              onClose={() => setWorkspaceAccessOpen(false)}
             />
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {workspaceAccessOpen && activeThread ? (
-        <div className="absolute inset-0 z-20 overflow-y-auto bg-[var(--panel-alt)]">
-          <AssistantWorkspaceAccessView
-            key={activeThread.id}
-            requestJson={requestJson}
-            threadId={activeThread.id}
-            threadTitle={activeThread.title}
-            onClose={() => setWorkspaceAccessOpen(false)}
+        {showExistingDroneAccess ? (
+          <div
+            ref={setScopeDropNodeRef}
+            className={`flex-shrink-0 border-b border-[var(--border)] px-2 py-1.5 transition-colors ${
+              scopeDropActive ? 'bg-[var(--accent-subtle)]' : 'bg-[rgba(0,0,0,.08)]'
+            }`}
+          >
+            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+              <div
+                className="mr-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+                style={{ fontFamily: 'var(--display)' }}
+              >
+                Existing drones
+              </div>
+              <div className="flex flex-shrink-0 items-center gap-1">
+                <ScopeModeControl label="R" mode={scopeReadMode} onChange={updateScopeReadMode} />
+                <ScopeModeControl label="W" mode={scopeWriteMode} onChange={updateScopeWriteMode} />
+                <ScopeModeControl
+                  label="X"
+                  mode={scopeExecuteMode}
+                  onChange={updateScopeExecuteMode}
+                />
+              </div>
+              <div className="min-w-[120px] flex-1 overflow-hidden">
+                {scopeDrones.length === 0 ? (
+                  <div className="truncate text-[10px] text-[var(--muted-dim)]">
+                    {scopeReadMode === 'selected' ||
+                    scopeWriteMode === 'selected' ||
+                    scopeExecuteMode === 'selected'
+                      ? 'No selected drones. Drop drones here to allow existing-drone access.'
+                      : 'Drop drones here to limit existing-drone access.'}
+                  </div>
+                ) : (
+                  <div className="flex min-w-0 gap-1 overflow-x-auto no-scrollbar">
+                    {scopeDrones.map((drone) => (
+                      <span
+                        key={drone.id}
+                        className="inline-flex max-w-[150px] flex-shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-1.5 py-0.5 text-[10px] text-[var(--fg-secondary)]"
+                      >
+                        <span className="min-w-0 truncate">{drone.name || drone.id}</span>
+                        <button
+                          type="button"
+                          onClick={() => removeScopeDrone(drone.id)}
+                          className="text-[11px] leading-none text-[var(--muted-dim)] hover:text-[var(--red)]"
+                          title={`Remove ${drone.name || drone.id} from assistant scope`}
+                          aria-label={`Remove ${drone.name || drone.id} from assistant scope`}
+                        >
+                          x
+                        </button>
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
+        {filesOpen ? (
+          <AssistantThreadFilesView
+            threadId={activeThread?.id ?? ''}
+            files={artifactFiles}
+            selectedPath={selectedArtifactPath}
+            selectedFile={selectedArtifactFile}
+            loading={artifactsLoading}
+            error={artifactsError}
+            onSelectPath={setSelectedArtifactPath}
+            onRefresh={() => {
+              void loadArtifactFiles();
+              void loadSelectedArtifactFile();
+            }}
+            onClose={() => setFilesOpen(false)}
           />
-        </div>
-      ) : null}
-
-      {showExistingDroneAccess ? <div
-        ref={setScopeDropNodeRef}
-        className={`flex-shrink-0 border-b border-[var(--border)] px-2 py-1.5 transition-colors ${
-          scopeDropActive ? 'bg-[var(--accent-subtle)]' : 'bg-[rgba(0,0,0,.08)]'
-        }`}
-      >
-        <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-          <div className="mr-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-            Existing drones
-          </div>
-          <div className="flex flex-shrink-0 items-center gap-1">
-            <ScopeModeControl label="R" mode={scopeReadMode} onChange={updateScopeReadMode} />
-            <ScopeModeControl label="W" mode={scopeWriteMode} onChange={updateScopeWriteMode} />
-            <ScopeModeControl label="X" mode={scopeExecuteMode} onChange={updateScopeExecuteMode} />
-          </div>
-          <div className="min-w-[120px] flex-1 overflow-hidden">
-            {scopeDrones.length === 0 ? (
-              <div className="truncate text-[10px] text-[var(--muted-dim)]">
-                {scopeReadMode === 'selected' || scopeWriteMode === 'selected' || scopeExecuteMode === 'selected'
-                  ? 'No selected drones. Drop drones here to allow existing-drone access.'
-                  : 'Drop drones here to limit existing-drone access.'}
-              </div>
-            ) : (
-              <div className="flex min-w-0 gap-1 overflow-x-auto no-scrollbar">
-                {scopeDrones.map((drone) => (
-                  <span
-                    key={drone.id}
-                    className="inline-flex max-w-[150px] flex-shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-1.5 py-0.5 text-[10px] text-[var(--fg-secondary)]"
-                  >
-                    <span className="min-w-0 truncate">{drone.name || drone.id}</span>
-                    <button
-                      type="button"
-                      onClick={() => removeScopeDrone(drone.id)}
-                      className="text-[11px] leading-none text-[var(--muted-dim)] hover:text-[var(--red)]"
-                      title={`Remove ${drone.name || drone.id} from assistant scope`}
-                      aria-label={`Remove ${drone.name || drone.id} from assistant scope`}
-                    >
-                      x
-                    </button>
-                  </span>
-                ))}
-              </div>
-            )}
-          </div>
-        </div>
-      </div> : null}
-
-      {filesOpen ? (
-        <AssistantThreadFilesView
-          threadId={activeThread?.id ?? ''}
-          files={artifactFiles}
-          selectedPath={selectedArtifactPath}
-          selectedFile={selectedArtifactFile}
-          loading={artifactsLoading}
-          error={artifactsError}
-          onSelectPath={setSelectedArtifactPath}
-          onRefresh={() => {
-            void loadArtifactFiles();
-            void loadSelectedArtifactFile();
-          }}
-          onClose={() => setFilesOpen(false)}
-        />
-      ) : (
-        <div
-          ref={setDroneReferenceDropNodeRef}
-          className={`flex min-h-0 flex-1 flex-col ${
-            droneReferenceDropActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''
-          }`}
-        >
-          <div className="relative min-h-0 flex-1">
-            <ChatTranscriptFrame
-              ref={scrollRef}
+        ) : (
+          <ChatSurface
+            adapter={NATIVE_AGENT_CHAT_SURFACE}
+            rootRef={setDroneReferenceDropNodeRef}
+            className={`flex min-h-0 flex-1 flex-col ${
+              droneReferenceDropActive ? 'ring-1 ring-inset ring-[var(--accent-muted)]' : ''
+            }`}
+          >
+            <ChatSurfaceTranscript
+              scrollRef={scrollRef}
               contentRef={scrollContentRef}
-              loading={Boolean((loading && !snapshot) || (blipSession.historyLoading && visibleItems.length === 0))}
-              loadingMessage={loading && !snapshot ? 'Loading built-in agent...' : 'Loading conversation...'}
+              loading={Boolean(
+                (loading && !snapshot) || (blipSession.historyLoading && visibleItems.length === 0),
+              )}
+              loadingMessage={
+                loading && !snapshot ? 'Loading built-in agent...' : 'Loading conversation...'
+              }
               hasContent={Boolean(
                 blipSession.hasOlder ||
                 visibleItems.length > 0 ||
@@ -1510,15 +1634,15 @@ export function AssistantDock({
                 visibleQueuedPrompts.length > 0 ||
                 error ||
                 blipSession.runError ||
-                blipSession.historyError
+                blipSession.historyError,
               )}
-              emptyState={(
+              emptyState={
                 <EmptyState
                   icon={<IconDrone className="h-8 w-8 text-[var(--muted)]" />}
                   title="No messages yet"
                   description="Send a prompt to start the conversation. Drone messaging will ask for approval first."
                 />
-              )}
+              }
             >
               {blipSession.hasOlder ? (
                 <div className="text-center">
@@ -1539,153 +1663,80 @@ export function AssistantDock({
                     message={item.message}
                     droneMentionLinks={droneMentionLinks}
                     onOpenDroneMention={openDroneMention}
-                    showToolCalls={item.showToolCalls}
+                    showToolCalls={
+                      NATIVE_AGENT_CHAT_SURFACE.capabilities.toolActivity === 'visible' &&
+                      item.showToolCalls
+                    }
                     isStreamingAssistant={
-                      item.message.role === 'assistant' && item.sourceMessageIndex === streamingAssistantSourceIndex
+                      item.message.role === 'assistant' &&
+                      item.sourceMessageIndex === streamingAssistantSourceIndex
                     }
                     showReasoning={running && item.key === latestActivityItemKey}
                   />
-                ) : item.type === 'tool' ? (
-                  <ToolActivityRow key={item.key} call={item.call} result={item.result} droneNameById={droneNameById} />
-                ) : (
+                ) : item.type === 'tool' &&
+                  NATIVE_AGENT_CHAT_SURFACE.capabilities.toolActivity === 'visible' ? (
+                  <ToolActivityRow
+                    key={item.key}
+                    call={item.call}
+                    result={item.result}
+                    droneNameById={droneNameById}
+                  />
+                ) : item.type === 'toolGroup' &&
+                  NATIVE_AGENT_CHAT_SURFACE.capabilities.toolActivity === 'visible' ? (
                   <RepeatedToolActivityRow key={item.key} items={item.items} />
-                ),
+                ) : null,
               )}
-                {showThinking ? <AssistantThinkingRow /> : null}
-                {activePendingApprovals.map((approval) => (
-                  <ApprovalCard
-                    key={approval.id}
-                    approval={approval}
-                    busy={approvalBusyId === approval.id}
-                    onApprove={() => void resolveApproval(approval, true)}
-                    onDeny={() => void resolveApproval(approval, false)}
-                  />
-                ))}
-                {visibleQueuedPrompts.map((prompt) => (
-                  <AssistantQueuedPromptRow
-                    key={prompt.id}
-                    prompt={prompt}
-                    cancelling={queuedPromptBusyId === prompt.id}
-                    onCancel={() => void cancelQueuedPrompt(prompt.id)}
-                  />
-                ))}
-                {error || blipSession.runError || blipSession.historyError ? <div className="mx-3 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-3 py-2 text-[11px] text-[var(--red)]">{error ?? blipSession.runError ?? blipSession.historyError}</div> : null}
-            </ChatTranscriptFrame>
-          </div>
+              {showThinking ? <AssistantThinkingRow /> : null}
+              {activePendingApprovals.map((approval) => (
+                <ApprovalCard
+                  key={approval.id}
+                  approval={approval}
+                  busy={approvalBusyId === approval.id}
+                  onApprove={() => void resolveApproval(approval, true)}
+                  onDeny={() => void resolveApproval(approval, false)}
+                />
+              ))}
+              {visibleQueuedPrompts.map((prompt) => (
+                <AssistantQueuedPromptRow
+                  key={prompt.id}
+                  prompt={prompt}
+                  cancelling={queuedPromptBusyId === prompt.id}
+                  onCancel={() => void cancelQueuedPrompt(prompt.id)}
+                />
+              ))}
+              {error || blipSession.runError || blipSession.historyError ? (
+                <div className="mx-3 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-3 py-2 text-[11px] text-[var(--red)]">
+                  {error ?? blipSession.runError ?? blipSession.historyError}
+                </div>
+              ) : null}
+            </ChatSurfaceTranscript>
 
-      <div className="relative flex-shrink-0">
-        {toolsPanelOpen ? (
-          <AssistantToolsPanel
-            tools={availableTools}
-            enabledTools={enabledToolNames}
-            disabled={!activeThread}
-            onToggleTool={toggleAssistantTool}
-            onToggleTools={toggleAssistantTools}
-            onEnableAll={() => updateEnabledTools(availableTools.map((tool) => tool.name))}
-            onDisableAll={() => updateEnabledTools([])}
-            onClose={() => setToolsPanelOpen(false)}
-            placement="composer"
-          />
-        ) : null}
-        {workspacesPanelOpen ? (
-          <AssistantWorkspacesPanel
-            workspaces={availableWorkspaces}
-            enabledWorkspaceIds={enabledWorkspaceDraftIds}
-            disabled={!activeThread}
-            onToggleWorkspace={toggleAssistantWorkspace}
-            onEnableAll={() => updateEnabledWorkspaces(availableWorkspaces.map((workspace) => workspace.id))}
-            onDisableAll={() => updateEnabledWorkspaces([])}
-            onOpenRemoteAccess={() => {
-              setWorkspacesPanelOpen(false);
-              setWorkspaceAccessOpen(true);
-            }}
-            onClose={() => setWorkspacesPanelOpen(false)}
-            placement="composer"
-          />
-        ) : null}
-        <ChatInput
-          resetKey={activeThreadId || nativeChatName}
-          droneName="assistant"
-          focusTargetId="assistant-chat"
-          draftValue={draft}
-          onDraftValueChange={setDraft}
-          promptError={attachmentError}
-          sending={scopeSyncBusy}
-          waiting={running}
-          disabled={!activeThread}
-          attachmentsEnabled
-          attachmentMode="files"
-          allowSendWhileWaiting
-          modeHint={running ? (promptDeliveryMode === 'asap' ? 'Sends at the next turn' : 'Queues after the current run') : ''}
-          composerHeader={referencedDrones.length > 0 || droneReferenceDropActive ? (
-            <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
-              <div className="mb-1.5 flex items-center justify-between gap-2">
-                <div className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                  {referencedDrones.length > 0
-                    ? `${referencedDrones.length} drone${referencedDrones.length === 1 ? '' : 's'} referenced`
-                    : 'Drop drones to reference them'}
-                </div>
-              </div>
-              {referencedDrones.length > 0 ? (
-                <div className="flex gap-2 overflow-x-auto pb-0.5 no-scrollbar">
-                  {referencedDrones.map((drone) => {
-                    const label = drone.name || drone.id;
-                    return (
-                      <div
-                        key={drone.id}
-                        className="relative w-[190px] flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-2 py-1.5"
-                      >
-                        <div className="flex min-w-0 items-center gap-1.5">
-                          <IconDrone className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" />
-                          <span className="min-w-0 truncate text-[10px] font-medium text-[var(--fg-secondary)]" title={label}>
-                            {label}
-                          </span>
-                        </div>
-                        <div className="mt-1 truncate font-mono text-[9px] text-[var(--muted-dim)]" title={drone.id}>
-                          {drone.id}
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => removeReferencedDrone(drone.id)}
-                          disabled={droneReferenceControlsLocked}
-                          className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel-raised)] text-[10px] font-bold text-[var(--muted)] hover:border-[var(--red)] hover:text-[var(--red)] disabled:opacity-45"
-                          title={`Remove ${label}`}
-                          aria-label={`Remove ${label}`}
-                        >
-                          x
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : (
-                <div className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5 text-[10px] text-[var(--accent)]">
-                  Release to add drone names and IDs to this message.
-                </div>
-              )}
-            </div>
-          ) : null}
-          composerControls={(
-            <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-              <NativeAgentModelControls
-                thread={activeThread}
-                models={snapshot?.models ?? EMPTY_ASSISTANT_MODEL_OPTIONS}
-                defaultModel={snapshot?.defaultModel}
-                busy={defaultModelBusy}
-                className=""
-                onUpdate={(patch) => void updateThread(patch)}
-                onSetDefault={() => void setActiveModelAsDefault()}
-              />
-              <ChatComposerMenu actions={composerMenuActions} />
-            </div>
-          )}
-          onStop={() => stop()}
-          stopping={assistantStopBusy}
-          onSend={async (payload) => await sendPrompt(payload)}
-        />
-          </div>
-        </div>
-      )}
+            <ChatSurfaceComposer
+              overlay={nativeComposerOverlay}
+              resetKey={activeThreadId || nativeChatName}
+              droneName="assistant"
+              focusTargetId="assistant-chat"
+              draftValue={draft}
+              onDraftValueChange={setDraft}
+              promptError={attachmentError}
+              sending={scopeSyncBusy}
+              waiting={running}
+              disabled={!activeThread}
+              modeHint={
+                running
+                  ? promptDeliveryMode === 'asap'
+                    ? 'Sends at the next turn'
+                    : 'Queues after the current run'
+                  : ''
+              }
+              composerHeader={nativeComposerHeader}
+              composerControls={nativeComposerControls}
+              onStop={() => stop()}
+              stopping={assistantStopBusy}
+              onSend={async (payload) => await sendPrompt(payload)}
+            />
+          </ChatSurface>
+        )}
       </div>
       {systemPromptOpen ? (
         <AssistantSystemPromptModal
@@ -1703,8 +1754,14 @@ export function AssistantDock({
           onModeChange={setSystemPromptMode}
           onDraftChange={setSystemPromptDraft}
           onThreadDraftChange={setThreadSystemPromptDraft}
-          onUseGlobalForThread={() => setThreadSystemPromptDraft(threadSystemPromptSettings?.threadSystemPrompt.globalPrompt ?? '')}
-          onUseDefaultForGlobal={() => setSystemPromptDraft(systemPromptSettings?.assistantSystemPrompt.defaultPrompt ?? '')}
+          onUseGlobalForThread={() =>
+            setThreadSystemPromptDraft(
+              threadSystemPromptSettings?.threadSystemPrompt.globalPrompt ?? '',
+            )
+          }
+          onUseDefaultForGlobal={() =>
+            setSystemPromptDraft(systemPromptSettings?.assistantSystemPrompt.defaultPrompt ?? '')
+          }
           onClose={() => setSystemPromptOpen(false)}
           onSaveGlobal={() => void saveSystemPromptSettings()}
           onSaveThread={() => void saveThreadSystemPromptSettings()}

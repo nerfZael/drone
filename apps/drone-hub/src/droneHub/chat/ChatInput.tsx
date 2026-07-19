@@ -78,6 +78,34 @@ export type ChatInputAutomationAction = {
   sleepBetweenRunsLabel?: string;
 };
 
+export type ChatInputProps = {
+  resetKey: string;
+  droneName: string;
+  draftValue?: string;
+  onDraftValueChange?: (next: string) => void;
+  promptError: string | null;
+  sending: boolean;
+  waiting: boolean;
+  disabled?: boolean;
+  autoFocus?: boolean;
+  focusTargetId?: string;
+  modeHint?: string;
+  attachmentsEnabled?: boolean;
+  attachmentMode?: 'images' | 'files';
+  composerHeader?: React.ReactNode;
+  composerControls?: React.ReactNode;
+  automationActions?: ChatInputAutomationAction[];
+  automationMenuLabel?: string;
+  lockComposerWhileAutomationActive?: boolean;
+  allowSendWhileWaiting?: boolean;
+  onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
+  onPublish?: () => Promise<boolean> | boolean;
+  publishing?: boolean;
+  onSendAutomation?: (payload: ChatDraftAutomationPayload) => Promise<boolean>;
+  onStop?: () => Promise<void> | void;
+  stopping?: boolean;
+};
+
 export function ChatInput({
   resetKey,
   droneName,
@@ -104,33 +132,7 @@ export function ChatInput({
   onSendAutomation,
   onStop,
   stopping = false,
-}: {
-  resetKey: string;
-  droneName: string;
-  draftValue?: string;
-  onDraftValueChange?: (next: string) => void;
-  promptError: string | null;
-  sending: boolean;
-  waiting: boolean;
-  disabled?: boolean;
-  autoFocus?: boolean;
-  focusTargetId?: string;
-  modeHint?: string;
-  attachmentsEnabled?: boolean;
-  attachmentMode?: 'images' | 'files';
-  composerHeader?: React.ReactNode;
-  composerControls?: React.ReactNode;
-  automationActions?: ChatInputAutomationAction[];
-  automationMenuLabel?: string;
-  lockComposerWhileAutomationActive?: boolean;
-  allowSendWhileWaiting?: boolean;
-  onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
-  onPublish?: () => Promise<boolean> | boolean;
-  publishing?: boolean;
-  onSendAutomation?: (payload: ChatDraftAutomationPayload) => Promise<boolean>;
-  onStop?: () => Promise<void> | void;
-  stopping?: boolean;
-}) {
+}: ChatInputProps) {
   const [uncontrolledDraft, setUncontrolledDraft] = React.useState('');
   const [attachments, setAttachments] = React.useState<DraftChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);

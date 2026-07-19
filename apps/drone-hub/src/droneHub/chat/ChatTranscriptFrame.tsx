@@ -1,7 +1,7 @@
 import React from 'react';
 import { TranscriptSkeleton } from './TranscriptSkeleton';
 
-type ChatTranscriptFrameProps = {
+export type ChatTranscriptFrameProps = {
   loading: boolean;
   loadingMessage?: string;
   hasContent: boolean;

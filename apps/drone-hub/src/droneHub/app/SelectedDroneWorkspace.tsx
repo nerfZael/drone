@@ -3,8 +3,10 @@ import { createPortal } from 'react-dom';
 import {
   PromptLoopTranscriptGroup,
   AutomationLaneStatusCard,
-  ChatInput,
-  ChatTranscriptFrame,
+  ChatSurface,
+  ChatSurfaceComposer,
+  ChatSurfaceTranscript,
+  adaptExternalAgentChatSurface,
   type DroneHubTask,
   type DroneHubTaskSpawnMode,
   type ChatSendPayload,
@@ -100,6 +102,33 @@ type DockerSizePayload = {
   name?: string;
   dockerSize: DockerSizeSummary;
 };
+
+const EXTERNAL_AGENT_CHAT_SURFACE = adaptExternalAgentChatSurface();
+
+function ExternalChatSurfaceBoundary({
+  active,
+  hidden,
+  className,
+  children,
+}: {
+  active: boolean;
+  hidden: boolean;
+  className: string;
+  children: React.ReactNode;
+}) {
+  if (active) {
+    return (
+      <ChatSurface adapter={EXTERNAL_AGENT_CHAT_SURFACE} className={className} ariaHidden={hidden}>
+        {children}
+      </ChatSurface>
+    );
+  }
+  return (
+    <div className={className} aria-hidden={hidden}>
+      {children}
+    </div>
+  );
+}
 
 function HeaderDropdownPortal({
   open,
@@ -2017,14 +2046,15 @@ export function SelectedDroneWorkspace({
               </div>
             </div>
           )}
-          <div
+          <ExternalChatSurfaceBoundary
+            active={genericChatActive}
+            hidden={fleetDropHintVisible}
             className={cn(
               'flex-1 flex min-h-0 flex-col transition-opacity duration-150',
               fleetDropHintVisible && 'pointer-events-none select-none opacity-0',
             )}
-            aria-hidden={fleetDropHintVisible}
           >
-          <div className="flex-1 min-h-0 relative">
+          <div className="relative flex min-h-0 flex-1 flex-col">
             {chatConfigPending ? (
               <TranscriptSkeleton message="Loading chat..." />
             ) : chatConfigFailed ? (
@@ -2040,8 +2070,8 @@ export function SelectedDroneWorkspace({
                 onHistoryChange={setNativeHistoryObserved}
               />
             ) : chatUiMode === 'transcript' ? (
-              <ChatTranscriptFrame
-                ref={transcriptScrollRef}
+              <ChatSurfaceTranscript
+                scrollRef={transcriptScrollRef}
                 loading={loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0}
                 hasContent={Boolean((transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0)}
                 emptyState={
@@ -2193,7 +2223,7 @@ export function SelectedDroneWorkspace({
                       );
                     })}
                     <div ref={chatEndRef as React.RefObject<HTMLDivElement>} />
-              </ChatTranscriptFrame>
+              </ChatSurfaceTranscript>
             ) : (
               <div
                 ref={outputScrollRef as React.RefObject<HTMLDivElement>}
@@ -2337,7 +2367,7 @@ export function SelectedDroneWorkspace({
             </div>
           ) : null}
 
-          {genericChatActive ? <ChatInput
+          {genericChatActive ? <ChatSurfaceComposer
             resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
             droneName={currentDrone.name}
             focusTargetId="primary-chat"
@@ -2451,7 +2481,7 @@ export function SelectedDroneWorkspace({
               </button>
             </div>
           ) : null}
-          </div>
+          </ExternalChatSurfaceBoundary>
         </div>
         }
       />
