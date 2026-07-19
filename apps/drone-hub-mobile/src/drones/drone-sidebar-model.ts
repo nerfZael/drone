@@ -314,6 +314,7 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
   schemaVersion: number | null;
   sidebar: MobileDroneSidebarOrder;
   createRepos: MobileDroneCreateRepo[];
+  deleteMode: 'archive' | 'permanent';
 } {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
     return {
@@ -321,6 +322,7 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
       schemaVersion: null,
       sidebar: EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
       createRepos: [],
+      deleteMode: 'permanent',
     };
   }
   const value = raw as Record<string, unknown>;
@@ -344,12 +346,25 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
     !Array.isArray(value.createOptions)
       ? (value.createOptions as Record<string, unknown>)
       : {};
-  const createRepos = Array.isArray(createOptions.repos)
+  const optionRepos = Array.isArray(createOptions.repos)
     ? createOptions.repos.flatMap((rawRepo): MobileDroneCreateRepo[] => {
         const repo = normalizeMobileDroneCreateRepo(rawRepo);
         return repo ? [repo] : [];
       })
     : [];
+  const registeredRepoPaths = stringList(sidebar.registeredRepoPaths);
+  const createRepoByPath = new Map(optionRepos.map((repo) => [repo.path, repo]));
+  for (const path of registeredRepoPaths) {
+    if (createRepoByPath.has(path)) continue;
+    createRepoByPath.set(path, {
+      path,
+      hostBranch: null,
+      remoteBranches: [],
+      branchesError: null,
+      branchesLoaded: false,
+    });
+  }
+  const createRepos = [...createRepoByPath.values()];
   return {
     drones,
     schemaVersion:
@@ -357,13 +372,14 @@ export function normalizeMobileDroneListPayload(raw: unknown): {
         ? value.schemaVersion
         : null,
     sidebar: {
-      registeredRepoPaths: stringList(sidebar.registeredRepoPaths),
+      registeredRepoPaths,
       groupCreatedAtByName: nullableStringMap(sidebar.groupCreatedAtByName),
       sidebarGroupOrder: stringList(sidebar.sidebarGroupOrder),
       sidebarDroneOrderByGroup: stringListMap(sidebar.sidebarDroneOrderByGroup),
       sidebarNodeOrderByParent: stringListMap(sidebar.sidebarNodeOrderByParent),
     },
     createRepos,
+    deleteMode: value.deleteMode === 'archive' ? 'archive' : 'permanent',
   };
 }
 

@@ -257,15 +257,19 @@ export function createDroneControlCapability(
           }
         }
         const result = await localHubRequest(access, '/api/drones');
-        const [reposResult, groupsResult, preferencesResult] = await Promise.all([
+        const [reposResult, groupsResult, preferencesResult, deleteSettingsResult] = await Promise.all([
           localHubRequest(access, '/api/repos').catch(() => ({})),
           localHubRequest(access, '/api/groups').catch(() => ({})),
           localHubRequest(access, '/api/settings/ui-preferences').catch(() => ({})),
+          localHubRequest(access, '/api/settings/delete-action').catch(() => ({})),
         ]);
         const drones: ReturnType<typeof deviceMeshDroneSummary>[] = Array.isArray(result.drones)
           ? result.drones.map(deviceMeshDroneSummary)
           : [];
         const preferences = object(preferencesResult.uiPreferences);
+        const deleteMode = object(deleteSettingsResult.deleteAction).mode === 'archive'
+          ? 'archive'
+          : 'permanent';
         const groups: unknown[] = Array.isArray(groupsResult.groups) ? groupsResult.groups : [];
         const repoPaths = textList(
           Array.isArray(reposResult.repos)
@@ -284,6 +288,7 @@ export function createDroneControlCapability(
             : [];
         return {
           schemaVersion: 6,
+          deleteMode,
           drones,
           repoPathByDroneId: Object.fromEntries(
             drones
@@ -358,7 +363,17 @@ export function createDroneControlCapability(
       const droneId = requiredText(payload.droneId, 'droneId');
       const encodedDrone = encodeURIComponent(droneId);
       if (operation === 'drone.delete') {
-        await localHubRequest(access, `/api/drones/${encodedDrone}`, { method: 'DELETE' });
+        // Do not guess for a destructive operation. Falling back to permanent deletion when the
+        // settings request fails can bypass an explicitly configured archive policy.
+        const settings = await localHubRequest(access, '/api/settings/delete-action');
+        const deleteMode = object(settings.deleteAction).mode === 'archive' ? 'archive' : 'permanent';
+        await localHubRequest(
+          access,
+          deleteMode === 'archive'
+            ? `/api/drones/${encodedDrone}/archive`
+            : `/api/drones/${encodedDrone}`,
+          { method: deleteMode === 'archive' ? 'POST' : 'DELETE' },
+        );
         return { deleted: true, droneId };
       }
       if (operation === 'chats.list') {

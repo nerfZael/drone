@@ -129,7 +129,12 @@ export const TranscriptTurn = React.memo(
     const canRollbackDockerSnapshot = Boolean(item.ok && dockerSnapshot?.id && dockerSnapshot.status === 'ready' && onRollbackDockerSnapshot);
     return (
       <div className="animate-fade-in">
-        <ChatMessageFrame role="user" at={promptIso} showRoleIcon={showRoleIcons}>
+        <ChatMessageFrame
+          role="user"
+          at={promptIso}
+          showRoleIcon={showRoleIcons}
+          showRoleLabel={showRoleIcons}
+        >
           <ChatMessageCopyAction text={promptText} />
           <ChatMessageBody
             role="user"
@@ -150,6 +155,8 @@ export const TranscriptTurn = React.memo(
           at={agentIso}
           error={!item.ok}
           showRoleIcon={showRoleIcons}
+          showRoleLabel={showRoleIcons}
+          plainAssistant={!showRoleIcons}
           headerEnd={autoContinueBadge ? (
             <span
               className={`inline-flex h-3.5 w-3.5 items-center justify-center ${autoContinueBadge.toneClassName}`}

@@ -527,6 +527,8 @@ code, pre {
 .dh-markdown--transcript {
   --dh-prose-max: 72ch;
   width: 100%;
+  font-size: .9375rem;
+  line-height: 1.68;
 }
 .dh-markdown--transcript > * {
   max-width: min(100%, var(--dh-prose-max));
@@ -543,7 +545,10 @@ code, pre {
 .dh-markdown--agent { color: var(--fg-secondary); }
 .dh-markdown--muted { color: var(--fg-secondary); }
 .dh-markdown--error { color: var(--red); }
-.dh-markdown--user { color: var(--fg-secondary); }
+.dh-markdown--user {
+  color: var(--fg-secondary);
+  font-size: .9375rem;
+}
 .dh-markdown--user code {
   background: rgba(148, 163, 184, .08);
   border-color: rgba(148, 163, 184, .10);

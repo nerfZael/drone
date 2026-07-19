@@ -52,6 +52,7 @@ import {
   mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneCreateRepo,
   normalizeMobileDroneCreateModelCatalog,
+  normalizeMobileDrone,
   normalizeMobileNativeChatHistory,
   normalizeMobileDroneListPayload,
   normalizeMobileDroneTurns,
@@ -62,7 +63,11 @@ import {
   type MobileDroneSidebarOrder,
   type MobileDroneSummary,
 } from '../drones/drone-sidebar-model';
-import { mobileDronePendingPrompts } from '../drones/mobile-pending-prompts';
+import {
+  mergeOptimisticMobilePendingPrompts,
+  mobileDronePendingPrompts,
+  optimisticMobilePendingPrompt,
+} from '../drones/mobile-pending-prompts';
 import { useDroneLinkedPullRequests } from '../drones/use-drone-linked-pull-requests';
 import { useLocalDroneControl } from '../drones/local-drone-control';
 import { ChatImageStrip } from '../drones/ChatImageStrip';
@@ -95,6 +100,38 @@ function inlinePromptAttachments(images: readonly MobileChatImage[]) {
 
 function wait(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function nativeUserMessageMatchesOptimisticPrompt(
+  messages: readonly AssistantMessage[],
+  pending: any,
+): boolean {
+  if (pending?.optimisticSent !== true) return false;
+  const pendingText = String(pending?.prompt ?? '').trim();
+  const pendingAt = Date.parse(String(pending?.at ?? ''));
+  const pendingImageCount = Math.max(0, Number(pending?.imageCount) || 0);
+  return messages.some((message: any) => {
+    if (message?.role !== 'user') return false;
+    const messageAt = Date.parse(String(message?.createdAt ?? message?.timestamp ?? ''));
+    if (
+      Number.isFinite(pendingAt) &&
+      Number.isFinite(messageAt) &&
+      messageAt < pendingAt - 2_000
+    )
+      return false;
+    const parts = Array.isArray(message?.content) ? message.content : [];
+    const messageText = (
+      typeof message?.content === 'string'
+        ? message.content
+        : parts
+            .filter((part: any) => part?.type === 'text')
+            .map((part: any) => String(part?.text ?? ''))
+            .join('\n')
+    ).trim();
+    const imageCount = parts.filter((part: any) => part?.type === 'image').length;
+    return (pendingText && messageText === pendingText) ||
+      (!messageText && pendingImageCount > 0 && imageCount === pendingImageCount);
+  });
 }
 
 export type DronesAppHeaderState = {
@@ -198,12 +235,17 @@ export function DronesScreen({
   const [prompt, setPrompt] = React.useState('');
   const [promptImages, setPromptImages] = React.useState<MobileChatImage[]>([]);
   const [createRepos, setCreateRepos] = React.useState<MobileDroneCreateRepo[]>([]);
+  const [createOptionsLoading, setCreateOptionsLoading] = React.useState(false);
   const [busy, setBusy] = React.useState('');
   const [dronesLoaded, setDronesLoaded] = React.useState(false);
   const [droneListError, setDroneListError] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
   const [deleteCandidate, setDeleteCandidate] = React.useState<MobileDroneSummary | null>(null);
   const [deleting, setDeleting] = React.useState(false);
+  const [deleteMode, setDeleteMode] = React.useState<'archive' | 'permanent'>('permanent');
+  const [droneOperationById, setDroneOperationById] = React.useState<
+    Record<string, 'archiving' | 'deleting'>
+  >({});
   const [newDroneDefaults, setNewDroneDefaults] = React.useState<MobileDroneCreateDefaults | null>(
     null,
   );
@@ -221,6 +263,7 @@ export function DronesScreen({
   const busyVersion = React.useRef(0);
   const modelRequestVersion = React.useRef(0);
   const createDefaultsRequestVersion = React.useRef(0);
+  const createOptionsRequestVersion = React.useRef(0);
   const chatTabsRef = React.useRef<ScrollView>(null);
   const createModelCatalogCache = React.useRef(new Map<string, MobileDroneCreateModel[]>());
   const createRepoBranchesCache = React.useRef(new Map<string, MobileDroneCreateRepo>());
@@ -271,6 +314,18 @@ export function DronesScreen({
         }
         const normalized = normalizeMobileDroneListPayload(result);
         const nextDrones = normalized.drones;
+        setDeleteMode(normalized.deleteMode);
+        if (normalized.createRepos.length > 0) {
+          setCreateRepos((current) => {
+            const currentByPath = new Map(current.map((repo) => [repo.path, repo]));
+            return normalized.createRepos.map(
+              (repo) =>
+                createRepoBranchesCache.current.get(`${targetId}:${repo.path}`) ??
+                currentByPath.get(repo.path) ??
+                repo,
+            );
+          });
+        }
         loadedDronesTargetIdRef.current = targetId;
         setDrones(nextDrones);
         setDroneSidebarOrder(normalized.sidebar);
@@ -319,24 +374,41 @@ export function DronesScreen({
           );
         }
         if (!quiet) {
+          const optionsRequestVersion = ++createOptionsRequestVersion.current;
+          setCreateOptionsLoading(true);
           try {
             const optionsResult = await requestDroneControl(targetId, 'drones.list', {
               includeCreateOptions: true,
             });
-            if (targetIdRef.current !== targetId || droneListVersion.current !== requestVersion)
+            if (
+              targetIdRef.current !== targetId ||
+              droneListVersion.current !== requestVersion ||
+              createOptionsRequestVersion.current !== optionsRequestVersion
+            )
               return;
             const options = normalizeMobileDroneListPayload(optionsResult);
+            setDeleteMode(options.deleteMode);
             setCreateRepos(
               options.createRepos.map(
                 (repo) => createRepoBranchesCache.current.get(`${targetId}:${repo.path}`) ?? repo,
               ),
             );
           } catch (nextError: any) {
-            if (targetIdRef.current === targetId && droneListVersion.current === requestVersion) {
+            if (
+              targetIdRef.current === targetId &&
+              droneListVersion.current === requestVersion &&
+              createOptionsRequestVersion.current === optionsRequestVersion
+            ) {
               setError(
                 `Drones loaded, but creation options are unavailable: ${nextError?.message ?? String(nextError)}`,
               );
             }
+          } finally {
+            if (
+              targetIdRef.current === targetId &&
+              createOptionsRequestVersion.current === optionsRequestVersion
+            )
+              setCreateOptionsLoading(false);
           }
         }
       } catch (nextError: any) {
@@ -388,6 +460,7 @@ export function DronesScreen({
     setPrompt('');
     setPromptImages([]);
     setCreateRepos([]);
+    setCreateOptionsLoading(false);
     setBusy('');
     setDronesLoaded(false);
     setDroneListError(null);
@@ -396,6 +469,8 @@ export function DronesScreen({
     setModelBusy(false);
     setDeleteCandidate(null);
     setDeleting(false);
+    setDeleteMode('permanent');
+    setDroneOperationById({});
     setNewDroneDefaults(null);
     setNewDroneDraft(false);
     setNewDroneScreenVersion((value) => value + 1);
@@ -406,6 +481,7 @@ export function DronesScreen({
     runVersion.current += 1;
     busyVersion.current += 1;
     modelRequestVersion.current += 1;
+    createOptionsRequestVersion.current += 1;
     loadedDronesTargetIdRef.current = '';
     if (targetSupportsDrones) {
       void loadMobileDroneCreatePreferences(targetId, '').then((remembered) => {
@@ -514,7 +590,8 @@ export function DronesScreen({
     setNativeChatId(String(result?.nativeChatId ?? '').trim());
     setNativeThread(result?.thread ?? null);
     setPendingApprovals(Array.isArray(result?.pendingApprovals) ? result.pendingApprovals : []);
-    setTurns(Array.isArray(result?.turns) ? result.turns : []);
+    const nextTurns = Array.isArray(result?.turns) ? result.turns : [];
+    setTurns(nextTurns);
     const page = result?.historyKind === 'messages' ? nativeHistory.page : result?.page;
     const beforeCursor = Number(page?.beforeCursor);
     setChatHistoryPage({
@@ -523,7 +600,17 @@ export function DronesScreen({
       responseTruncated: page?.responseTruncated === true,
       contentTruncated: page?.contentTruncated === true,
     });
-    setPendingPrompts(Array.isArray(result?.pending) ? result.pending : []);
+    setPendingPrompts((current) =>
+      mergeOptimisticMobilePendingPrompts({
+        serverPrompts: result?.pending,
+        localPrompts: richMessages
+          ? current.filter(
+              (prompt) => !nativeUserMessageMatchesOptimisticPrompt(richMessages, prompt),
+            )
+          : current,
+        turns: nextTurns,
+      }),
+    );
     if (result?.readState?.unread === false) {
       const clearUnreadChat = (drone: MobileDroneSummary): MobileDroneSummary =>
         drone.id !== droneId || !(drone.unreadChats ?? []).includes(nextChat)
@@ -809,36 +896,58 @@ export function DronesScreen({
     const nextPrompt = String(promptOverride ?? prompt);
     const images = promptImages;
     if (!selected || (!nextPrompt.trim() && images.length === 0)) return;
+    const optimisticId = `mobile-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+    const promptSummary =
+      nextPrompt.trim() || `Attached ${images.length} image${images.length === 1 ? '' : 's'}`;
+    setPrompt('');
+    setPromptImages([]);
+    setPendingPrompts((current) => [
+      ...current,
+      optimisticMobilePendingPrompt({
+        id: optimisticId,
+        prompt: promptSummary,
+        imageCount: images.length,
+      }),
+    ]);
     return run('prompt', async () => {
       const destinationId = targetId;
       const droneId = selected.id;
       const activeChat = chatName;
-      const result = await sendChatPromptWithImages({
-        destinationId,
-        droneId,
-        chatName: activeChat,
-        prompt: nextPrompt,
-        images,
-      });
+      let result: any;
+      try {
+        result = await sendChatPromptWithImages({
+          destinationId,
+          droneId,
+          chatName: activeChat,
+          prompt: nextPrompt,
+          images,
+        });
+      } catch (nextError: any) {
+        setPendingPrompts((current) =>
+          current.map((item) =>
+            item?.id === optimisticId
+              ? {
+                  ...item,
+                  state: 'failed',
+                  error: nextError?.message ?? String(nextError),
+                }
+              : item,
+          ),
+        );
+        throw nextError;
+      }
       if (targetIdRef.current !== destinationId) return;
-      setPrompt('');
-      setPromptImages([]);
       const promptId = String(result?.promptId ?? '').trim();
       const queuedPromptId = String(result?.queuedPrompt?.id ?? '').trim();
       const acceptedPromptId = promptId || queuedPromptId;
-      if (acceptedPromptId) {
-        const promptSummary =
-          nextPrompt.trim() || `Attached ${images.length} image${images.length === 1 ? '' : 's'}`;
-        setPendingPrompts((current) => [
-          ...current.filter((item) => String(item?.id ?? '') !== acceptedPromptId),
-          {
-            id: acceptedPromptId,
-            at: new Date().toISOString(),
-            prompt: promptSummary,
-            state: queuedPromptId || result?.pendingState === 'queued' ? 'queued' : 'sending',
-          },
-        ]);
-      }
+      if (acceptedPromptId)
+        setPendingPrompts((current) =>
+          current.map((item) =>
+            item?.id === optimisticId
+              ? { ...item, id: acceptedPromptId, state: 'sending', optimisticSent: true }
+              : item,
+          ),
+        );
       if (targetIdRef.current !== destinationId) return;
       await readChat(droneId, activeChat);
       await loadDrones(true);
@@ -894,6 +1003,74 @@ export function DronesScreen({
         createPayload,
       );
       created = true;
+      const createdDroneId = String(result?.id ?? result?.droneId ?? result?.drone?.id ?? '').trim();
+      const startsWithChat = Boolean(payload.seedAgent);
+      const initialPromptSummary =
+        String(payload.seedPrompt ?? '').trim() ||
+        (initialImages.length > 0
+          ? `Attached ${initialImages.length} image${initialImages.length === 1 ? '' : 's'}`
+          : '');
+      let optimisticPromptId = '';
+      if (targetIdRef.current === destinationId && createdDroneId && startsWithChat) {
+        const optimisticDrone = normalizeMobileDrone(
+          result?.drone ?? {
+            id: createdDroneId,
+            name: result?.name ?? payload.name ?? createdDroneId,
+            runtime: payload.runtime,
+            phase: result?.phase ?? 'starting',
+            status: 'Starting…',
+            group: payload.group,
+            repoPath: payload.repoPath,
+            chats: ['default'],
+            busyChats: ['default'],
+          },
+        );
+        if (optimisticDrone) {
+          optimisticPromptId =
+            String(result?.initialMessage?.promptId ?? '').trim() ||
+            `mobile-create-${createdDroneId}-${Date.now()}`;
+          selectedRef.current = optimisticDrone;
+          chatNameRef.current = 'default';
+          setDrones((current) => [
+            optimisticDrone,
+            ...current.filter((drone) => drone.id !== optimisticDrone.id),
+          ]);
+          setSelected(optimisticDrone);
+          setChats(['default']);
+          setChatName('default');
+          setChatModel(String(payload.seedModel ?? ''));
+          setChatReasoning(String(payload.seedReasoning ?? ''));
+          setChatModelProvider(String(payload.seedProvider ?? payload.seedAgent?.kind ?? 'drone'));
+          setChatAgentId(
+            payload.seedAgent?.kind === 'builtin'
+              ? mobileDroneAgentId(payload.seedAgent.id)
+              : null,
+          );
+          setChatAgentPermissionMode(
+            payload.seedAgentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
+          );
+          setTurns([]);
+          setNativeMessages(null);
+          setNativeChatId('');
+          setNativeThread(null);
+          setPendingApprovals([]);
+          setPendingPrompts(
+            initialPromptSummary
+              ? [
+                  optimisticMobilePendingPrompt({
+                    id: optimisticPromptId,
+                    prompt: initialPromptSummary,
+                    imageCount: initialImages.length,
+                    at: payload.seedSubmittedAt,
+                  }),
+                ]
+              : [],
+          );
+          setPrompt('');
+          setPromptImages([]);
+          setComposerFocusKey(`${createdDroneId}:default:${Date.now()}`);
+        }
+      }
       await saveMobileDroneCreatePreferences(
         destinationId,
         String(payload.repoPath ?? '').trim(),
@@ -905,15 +1082,40 @@ export function DronesScreen({
           const droneId = String(result?.id ?? result?.droneId ?? '').trim();
           if (!droneId) throw new Error('The Drone Hub did not return the new drone id.');
           await waitForCreatedDrone(destinationId, droneId);
-          await sendChatPromptWithImages({
+          const promptResult = await sendChatPromptWithImages({
             destinationId,
             droneId,
             chatName: 'default',
             prompt: String(payload.seedPrompt ?? ''),
             images: initialImages,
           });
+          const acceptedPromptId = String(
+            promptResult?.promptId ?? promptResult?.queuedPrompt?.id ?? '',
+          ).trim();
+          if (acceptedPromptId && optimisticPromptId) {
+            setPendingPrompts((current) =>
+              current.map((item) =>
+                item?.id === optimisticPromptId
+                  ? { ...item, id: acceptedPromptId, state: 'sending', optimisticSent: true }
+                  : item,
+              ),
+            );
+          }
         }
       } catch (nextError: any) {
+        if (targetIdRef.current === destinationId && optimisticPromptId) {
+          setPendingPrompts((current) =>
+            current.map((item) =>
+              item?.id === optimisticPromptId
+                ? {
+                    ...item,
+                    state: 'failed',
+                    error: nextError?.message ?? String(nextError),
+                  }
+                : item,
+            ),
+          );
+        }
         throw new Error(
           `Drone created, but its first message could not be sent: ${nextError?.message ?? String(nextError)}`,
         );
@@ -1058,6 +1260,39 @@ export function DronesScreen({
     const destinationId = targetId;
     const requestVersion = ++createDefaultsRequestVersion.current;
     const contextualRepoPath = overrides?.repoPath ?? selected?.repoPath ?? '';
+    const optionsRequestVersion = ++createOptionsRequestVersion.current;
+    setCreateOptionsLoading(true);
+    void requestDroneControl(destinationId, 'drones.list', { includeCreateOptions: true })
+      .then((result) => {
+        if (
+          targetIdRef.current !== destinationId ||
+          createDefaultsRequestVersion.current !== requestVersion ||
+          createOptionsRequestVersion.current !== optionsRequestVersion
+        )
+          return;
+        const options = normalizeMobileDroneListPayload(result);
+        setDeleteMode(options.deleteMode);
+        setCreateRepos(
+          options.createRepos.map(
+            (repo) =>
+              createRepoBranchesCache.current.get(`${destinationId}:${repo.path}`) ?? repo,
+          ),
+        );
+      })
+      .catch((nextError: any) => {
+        if (
+          targetIdRef.current === destinationId &&
+          createOptionsRequestVersion.current === optionsRequestVersion
+        )
+          setError(`Creation options are unavailable: ${nextError?.message ?? String(nextError)}`);
+      })
+      .finally(() => {
+        if (
+          targetIdRef.current === destinationId &&
+          createOptionsRequestVersion.current === optionsRequestVersion
+        )
+          setCreateOptionsLoading(false);
+      });
     const remembered = await loadMobileDroneCreatePreferences(destinationId, contextualRepoPath);
     if (
       targetIdRef.current !== destinationId ||
@@ -1404,6 +1639,7 @@ export function DronesScreen({
         droneSidebarOrder={droneSidebarOrder}
         activeDroneId={selected?.id ?? ''}
         activeChatName={chatName}
+        droneOperationById={droneOperationById}
         dronesLoading={
           meshRouteAvailable && targetSupportsDrones && (!dronesLoaded || busy === 'drones')
         }
@@ -1633,7 +1869,7 @@ export function DronesScreen({
                       onOpenModel={() => void openModelPicker()}
                       modelLabel={displayedModel}
                       reasoningLabel={chatReasoning}
-                      placeholder={`Message ${selected.name}…`}
+                      placeholder="Ask the agent"
                       sending={busy === 'prompt'}
                       running={running}
                       editable
@@ -1671,7 +1907,9 @@ export function DronesScreen({
           <NewDroneScreen
             key={`${targetId}:${newDroneScreenVersion}`}
             repos={createRepos}
-            loadingOptions={meshRouteAvailable && (!dronesLoaded || busy === 'drones')}
+            loadingOptions={
+              meshRouteAvailable && (!dronesLoaded || busy === 'drones' || createOptionsLoading)
+            }
             busy={busy.startsWith('create-')}
             draft={newDroneDraft}
             requestError={error}
@@ -1711,38 +1949,58 @@ export function DronesScreen({
       />
       <ConfirmDialog
         visible={Boolean(deleteCandidate)}
-        title="Delete drone?"
-        message={`Delete “${deleteCandidate?.name ?? 'this drone'}” from ${activeTarget?.name ?? 'the selected device'}? The Hub’s deletion settings determine whether it is archived first or permanently removed.`}
-        confirmLabel="Delete drone"
+        title={deleteMode === 'archive' ? 'Archive drone?' : 'Delete drone?'}
+        message={
+          deleteMode === 'archive'
+            ? `Archive “${deleteCandidate?.name ?? 'this drone'}” on ${activeTarget?.name ?? 'the selected device'}? It will leave the active list and follow the Hub’s archive retention settings.`
+            : `Permanently delete “${deleteCandidate?.name ?? 'this drone'}” from ${activeTarget?.name ?? 'the selected device'}?`
+        }
+        confirmLabel={deleteMode === 'archive' ? 'Archive drone' : 'Delete drone'}
         destructive
         busy={deleting}
         onCancel={() => setDeleteCandidate(null)}
-        onConfirm={() =>
-          void (async () => {
-            if (!deleteCandidate) return;
-            const destinationId = targetId;
-            const droneId = deleteCandidate.id;
-            setDeleting(true);
-            setError(null);
-            try {
-              await requestDroneControl(destinationId, 'drone.delete', { droneId });
+        onConfirm={() => {
+          if (!deleteCandidate) return;
+          const destinationId = targetId;
+          const droneId = deleteCandidate.id;
+          const operation = deleteMode === 'archive' ? 'archiving' : 'deleting';
+          setDeleting(true);
+          setError(null);
+          setDroneOperationById((current) => ({ ...current, [droneId]: operation }));
+          requestAnimationFrame(() => {
+            if (targetIdRef.current !== destinationId) return;
+            setDeleteCandidate(null);
+            setDeleting(false);
+          });
+          void requestDroneControl(destinationId, 'drone.delete', { droneId })
+            .then(async () => {
               if (targetIdRef.current !== destinationId) return;
-              setDeleteCandidate(null);
               setDrones((current) => current.filter((drone) => drone.id !== droneId));
               if (selectedRef.current?.id === droneId) {
+                selectedRef.current = null;
                 setSelected(null);
                 setChats([]);
                 setTurns([]);
+                setNativeMessages(null);
+                setPendingPrompts([]);
               }
               await loadDrones(true);
-            } catch (nextError: any) {
+            })
+            .catch((nextError: any) => {
               if (targetIdRef.current === destinationId)
                 setError(nextError?.message ?? String(nextError));
-            } finally {
+            })
+            .finally(() => {
+              if (targetIdRef.current !== destinationId) return;
               setDeleting(false);
-            }
-          })()
-        }
+              setDroneOperationById((current) => {
+                if (!current[droneId]) return current;
+                const next = { ...current };
+                delete next[droneId];
+                return next;
+              });
+            });
+        }}
       />
     </View>
   );

@@ -2,6 +2,7 @@ import React from 'react';
 import {
   ActivityIndicator,
   Animated,
+  Easing,
   Image,
   Pressable,
   ScrollView,
@@ -64,6 +65,39 @@ function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
       {dots.map((opacity, index) => (
         <Animated.View key={index} style={[styles.typingDot, { opacity }]} />
       ))}
+    </View>
+  );
+}
+
+function ConversationLoadingState() {
+  const rotation = React.useRef(new Animated.Value(0)).current;
+
+  React.useEffect(() => {
+    const animation = Animated.loop(
+      Animated.timing(rotation, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [rotation]);
+
+  const rotate = rotation.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg'],
+  });
+
+  return (
+    <View accessibilityLabel="Loading conversation" accessibilityRole="progressbar" style={styles.loadingTranscript}>
+      <View style={styles.loadingSpinner}>
+        <View style={styles.loadingSpinnerBase} />
+        <Animated.View style={[styles.loadingSpinnerArc, { transform: [{ rotate }] }]} />
+        <View style={styles.loadingSpinnerCore} />
+      </View>
+      <Text style={styles.loadingTranscriptText}>Loading conversation…</Text>
     </View>
   );
 }
@@ -238,7 +272,6 @@ function TransferToolRow({
             </Text>
           ) : null}
         </View>
-        <Text style={styles.disclosure}>{open ? 'Hide' : 'Details'}</Text>
       </Pressable>
       {open && files.length > 0 ? (
         <View style={styles.transferFiles}>
@@ -321,7 +354,6 @@ function ToolRow({ item, nested = false }: { item: AssistantToolRenderItem; nest
             {toolLabel(item.call?.name ?? item.result?.toolName)}
           </Text>
         </View>
-        <Text style={styles.disclosure}>{open ? 'Hide' : 'Details'}</Text>
       </Pressable>
       {open ? (
         <View style={styles.toolDetails}>
@@ -362,12 +394,13 @@ function ToolGroupRow({ item }: { item: Extract<AssistantRenderItem, { type: 'to
       >
         <ToolStatus failed={failed} pending={pending} />
         <View style={styles.toolCopy}>
-          <Text numberOfLines={1} style={styles.toolTitle}>
-            {name}
-          </Text>
+          <View style={styles.toolTitleRow}>
+            <Text numberOfLines={1} style={styles.toolTitle}>
+              {name}
+            </Text>
+            <Text style={styles.toolCount}>×{item.items.length}</Text>
+          </View>
         </View>
-        <Text style={styles.toolCount}>×{item.items.length}</Text>
-        <Text style={styles.disclosure}>{open ? 'Hide' : 'Details'}</Text>
       </Pressable>
       {open ? (
         <View style={styles.groupDetails}>
@@ -472,11 +505,7 @@ export function MobileAssistantTranscript({
     });
   }, []);
   if (loading) {
-    return (
-      <View style={styles.loadingTranscript}>
-        <ActivityIndicator color={colors.accent} size="small" />
-      </View>
-    );
+    return <ConversationLoadingState />;
   }
   const activePrompts = queuedPrompts.filter((prompt) => prompt.status === 'pending');
   const inactivePrompts = queuedPrompts.filter((prompt) => prompt.status !== 'pending');
@@ -834,6 +863,11 @@ const styles = StyleSheet.create({
     includeFontPadding: false,
   },
   toolCopy: { flex: 1, minWidth: 0 },
+  toolTitleRow: {
+    alignItems: 'center',
+    flexDirection: 'row',
+    gap: 5,
+  },
   toolTitle: {
     color: colors.muted,
     fontSize: 10,
@@ -842,28 +876,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.45,
   },
   toolCount: {
-    color: colors.text,
-    backgroundColor: colors.crust,
-    borderWidth: 1,
-    borderColor: colors.surface1,
-    borderRadius: 4,
-    paddingHorizontal: 5,
-    paddingVertical: 1,
+    color: colors.subtle,
     fontSize: 9,
     fontWeight: '800',
-  },
-  disclosure: {
-    color: colors.subtle,
-    backgroundColor: colors.crust,
-    borderWidth: 1,
-    borderColor: colors.surface1,
-    borderRadius: 4,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
-    fontSize: 8,
-    fontWeight: '800',
-    textTransform: 'uppercase',
-    letterSpacing: 0.35,
   },
   toolDetails: {
     gap: 6,
@@ -962,7 +977,49 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 28,
   },
-  loadingTranscript: { flex: 1, minHeight: 280, alignItems: 'center', justifyContent: 'center' },
+  loadingTranscript: {
+    flex: 1,
+    minHeight: 280,
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+  },
+  loadingSpinner: { width: 36, height: 36, alignItems: 'center', justifyContent: 'center' },
+  loadingSpinnerBase: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.whiteWashSoft,
+  },
+  loadingSpinnerArc: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    borderRadius: 18,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    borderTopColor: colors.accent,
+  },
+  loadingSpinnerCore: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: colors.accent,
+  },
+  loadingTranscriptText: {
+    color: colors.muted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+  },
   emptyOrbit: {
     width: 72,
     height: 72,

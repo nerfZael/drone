@@ -168,12 +168,6 @@ function ThinkingPulseDots() {
 export function AssistantThinkingRow() {
   return (
     <div className="px-3 py-2">
-      <div
-        className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
-        style={{ fontFamily: 'var(--display)' }}
-      >
-        Agent
-      </div>
       <ThinkingPulseDots />
     </div>
   );
@@ -694,6 +688,152 @@ export function ToolActivityRow({
   );
 }
 
+const ACTIVE_TOOL_WINDOW_SIZE = 5;
+
+export function formatAssistantRunDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(Number(durationMs) / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
+  if (minutes > 0) return `${minutes}m ${seconds}s`;
+  return `${seconds}s`;
+}
+
+function ToolRunChevron({ open }: { open: boolean }) {
+  return (
+    <svg
+      className={`h-3.5 w-3.5 flex-shrink-0 transition-transform ${open ? 'rotate-90' : ''}`}
+      viewBox="0 0 14 14"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.5"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="m5 3 4 4-4 4" />
+    </svg>
+  );
+}
+
+export function ToolRunActivity({
+  items,
+  active,
+  startedAt,
+  endedAt,
+  droneNameById = {},
+}: {
+  items: AssistantToolRenderItem[];
+  active: boolean;
+  startedAt?: number;
+  endedAt?: number;
+  droneNameById?: AssistantDroneNameMap;
+}) {
+  const [expanded, setExpanded] = React.useState(false);
+  const fallbackStart = React.useRef(Date.now()).current;
+  const [now, setNow] = React.useState(() => Date.now());
+
+  React.useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+
+  if (items.length === 0) return null;
+  const start = Number.isFinite(startedAt) ? Number(startedAt) : fallbackStart;
+  const end = active ? now : Number.isFinite(endedAt) ? Number(endedAt) : start;
+  const duration = formatAssistantRunDuration(Math.max(0, end - start));
+  const hiddenCount = Math.max(0, items.length - ACTIVE_TOOL_WINDOW_SIZE);
+  const visibleItems = expanded || !active ? items : items.slice(-ACTIVE_TOOL_WINDOW_SIZE);
+  const callLabel = `${items.length} tool ${items.length === 1 ? 'call' : 'calls'}`;
+
+  if (!active && !expanded) {
+    return (
+      <div>
+        <button
+          type="button"
+          aria-expanded={false}
+          onClick={() => setExpanded(true)}
+          className="flex w-full items-center gap-2 border-b border-[var(--border-subtle)] py-2 text-left text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+        >
+          <span
+            className="text-sm font-semibold"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Worked for {duration}
+          </span>
+          <span className="text-xs text-[var(--muted-dim)]">{callLabel}</span>
+          <span className="text-[var(--muted-dim)]">
+            <ToolRunChevron open={false} />
+          </span>
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <div>
+      {active ? (
+        <div className="flex min-h-9 items-center gap-2 border-b border-[var(--border-subtle)] py-1.5">
+          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent)]" />
+          <span
+            className="text-sm font-semibold text-[var(--accent)]"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Working for {duration}
+          </span>
+          <span className="text-xs text-[var(--muted-dim)]">{callLabel}</span>
+          {hiddenCount > 0 ? (
+            <button
+              type="button"
+              aria-expanded={expanded}
+              onClick={() => setExpanded((value) => !value)}
+              className="ml-auto rounded px-1.5 py-1 text-[10px] font-medium text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+            >
+              {expanded ? 'Show latest 5' : `Show all (${items.length})`}
+            </button>
+          ) : null}
+        </div>
+      ) : (
+        <button
+          type="button"
+          aria-expanded={true}
+          aria-label="Collapse tool calls"
+          onClick={() => setExpanded(false)}
+          className="flex min-h-9 w-full items-center gap-2 border-b border-[var(--border-subtle)] py-1.5 text-left text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+        >
+          <span
+            className="text-sm font-semibold"
+            style={{ fontFamily: 'var(--display)' }}
+          >
+            Worked for {duration}
+          </span>
+          <span className="text-xs text-[var(--muted-dim)]">{callLabel}</span>
+          <span className="text-[var(--muted-dim)]">
+            <ToolRunChevron open />
+          </span>
+        </button>
+      )}
+      {active && hiddenCount > 0 && !expanded ? (
+        <div className="pb-1 pt-1.5 text-[0.6875rem] text-[var(--muted-dim)]">
+          Showing the latest {ACTIVE_TOOL_WINDOW_SIZE}; {hiddenCount} earlier
+        </div>
+      ) : null}
+      <div className="mt-1 space-y-1">
+        {visibleItems.map((item) => (
+          <ToolActivityRow
+            key={item.key}
+            call={item.call}
+            result={item.result}
+            droneNameById={droneNameById}
+          />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 export function AssistantMessageRow({
   message,
   messageExtras,
@@ -767,6 +907,8 @@ export function AssistantMessageRow({
               key={`tx:${i}`}
               role="assistant"
               text={t}
+              onOpenFileReference={messageExtras?.onOpenFileReference}
+              onOpenLink={messageExtras?.onOpenLink}
               textMentionLinks={droneMentionLinks}
               onOpenTextMention={onOpenDroneMention}
             />,
@@ -789,6 +931,8 @@ export function AssistantMessageRow({
           src: `data:${image.mimeType};base64,${image.data}`,
           alt: 'Attached image',
         }))}
+        onOpenFileReference={messageExtras?.onOpenFileReference}
+        onOpenLink={messageExtras?.onOpenLink}
         textMentionLinks={droneMentionLinks}
         onOpenTextMention={onOpenDroneMention}
       />
@@ -809,6 +953,8 @@ export function AssistantMessageRow({
       role={message.role === 'user' ? 'user' : 'assistant'}
       at={message.createdAt}
       error={Boolean(message.errorMessage)}
+      showRoleLabel={false}
+      plainAssistant
     >
       {message.role === 'user' ? <ChatMessageCopyAction text={visibleText} /> : null}
       {body}

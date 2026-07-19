@@ -31,6 +31,10 @@ import {
   type MobileDroneCreatePreferences,
 } from './create-preferences-model';
 import { pickChatImages, type MobileChatImage } from './pick-chat-images';
+import {
+  ExternalAgentPicker,
+  type ExternalAgentPickerOption,
+} from './ExternalAgentPicker';
 
 export type MobileDroneCreateMode = 'with-chat' | 'without-chat';
 export type MobileDroneCreateRuntime = 'container' | 'host';
@@ -38,14 +42,16 @@ export type MobileDroneCreateBranchSource = 'host' | 'remote';
 export type MobileDroneAgentPermissionMode = 'full-access' | 'read-only';
 export type MobileDroneAgentId = 'native' | 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
 
-const AGENTS: Array<{ id: MobileDroneAgentId; label: string }> = [
-  { id: 'native', label: 'Built-in' },
-  { id: 'cursor', label: 'Cursor Agent' },
-  { id: 'codex', label: 'Codex' },
-  { id: 'claude', label: 'Claude Code' },
-  { id: 'opencode', label: 'OpenCode' },
-  { id: 'pi', label: 'Pi' },
-  { id: 'blip', label: 'Blip' },
+type ExternalAgentId = Exclude<MobileDroneAgentId, 'native'>;
+type MobileDroneAgentMode = 'builtin' | 'external';
+
+const EXTERNAL_AGENTS: Array<ExternalAgentPickerOption & { id: ExternalAgentId }> = [
+  { id: 'cursor', label: 'Cursor Agent', detail: 'Use Cursor’s external coding agent.' },
+  { id: 'codex', label: 'Codex', detail: 'Use the OpenAI Codex CLI agent.' },
+  { id: 'claude', label: 'Claude Code', detail: 'Use Anthropic’s Claude Code agent.' },
+  { id: 'opencode', label: 'OpenCode', detail: 'Use the OpenCode coding agent.' },
+  { id: 'pi', label: 'Pi', detail: 'Use the Pi coding agent.' },
+  { id: 'blip', label: 'Blip', detail: 'Use the portable Blip agent runtime.' },
 ];
 
 export type MobileDroneCreatePayload = {
@@ -285,6 +291,10 @@ export function NewDroneScreen({
   const [agent, setAgent] = React.useState<MobileDroneAgentId>(
     localDevice ? 'native' : (initialValues?.agent ?? 'native'),
   );
+  const [lastExternalAgent, setLastExternalAgent] = React.useState<ExternalAgentId>(() => {
+    const initialAgent = initialValues?.agent;
+    return initialAgent && initialAgent !== 'native' ? initialAgent : 'codex';
+  });
   const [agentPickerOpen, setAgentPickerOpen] = React.useState(false);
   const [agentPermissionMode, setAgentPermissionMode] =
     React.useState<MobileDroneAgentPermissionMode>(
@@ -320,6 +330,7 @@ export function NewDroneScreen({
   const pageRef = React.useRef<ScrollView>(null);
   const composerFocusedRef = React.useRef(false);
   const selectedRepo = repos.find((repo) => repo.path === repoPath) ?? null;
+  const agentMode: MobileDroneAgentMode = agent === 'native' ? 'builtin' : 'external';
   const readOnlySupported = agent === 'codex' || agent === 'blip';
   const selectedModel =
     models.find(
@@ -348,6 +359,7 @@ export function NewDroneScreen({
     if (!localDevice) return;
     setRuntime('host');
     setAgent('native');
+    setAgentPickerOpen(false);
     setRepoPath('');
     setPersistVolume(false);
   }, [localDevice]);
@@ -479,6 +491,7 @@ export function NewDroneScreen({
     setRuntime(localDevice ? 'host' : 'container');
     setPersistVolume(false);
     setAgent('native');
+    setAgentPickerOpen(false);
     setAgentPermissionMode('full-access');
     setModels([]);
     setModel('');
@@ -495,6 +508,9 @@ export function NewDroneScreen({
       setRuntime(localDevice ? 'host' : remembered.runtime);
       setPersistVolume(remembered.persistVolume);
       setAgent(localDevice ? 'native' : remembered.agent);
+      if (!localDevice && remembered.agent !== 'native') {
+        setLastExternalAgent(remembered.agent);
+      }
       setAgentPermissionMode(localDevice ? 'full-access' : remembered.agentPermissionMode);
       setModel(remembered.model);
       setModelProvider(remembered.provider);
@@ -515,7 +531,17 @@ export function NewDroneScreen({
       setReasoning('');
       setAgent(nextAgent);
     }
+    if (nextAgent !== 'native') setLastExternalAgent(nextAgent);
     setAgentPickerOpen(false);
+  };
+
+  const chooseAgentMode = (nextMode: MobileDroneAgentMode) => {
+    if (nextMode === 'builtin') {
+      chooseAgent('native');
+      return;
+    }
+    chooseAgent(lastExternalAgent);
+    requestAnimationFrame(() => setAgentPickerOpen(true));
   };
 
   const addInitialImages = async () => {
@@ -862,7 +888,7 @@ export function NewDroneScreen({
                 (modelsLoading ? 'Detecting models…' : 'Default model')
               }
               reasoningLabel={reasoning}
-              placeholder="Tell this drone what to do…"
+              placeholder="Ask the agent"
               sending={busy}
               editable={!busy}
               showAttachments={!draft}
@@ -880,29 +906,38 @@ export function NewDroneScreen({
                     }
                   />
                   <View style={styles.composerConfigRow}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Choose agent"
-                      accessibilityState={{ expanded: agentPickerOpen, disabled: busy || localDevice }}
+                    <Segmented<MobileDroneAgentMode>
+                      label="Agent"
+                      value={agentMode}
+                      onChange={chooseAgentMode}
                       disabled={busy || localDevice}
-                      onPress={() => setAgentPickerOpen((open) => !open)}
-                      style={({ pressed }) => [
-                        styles.agentPickerTrigger,
-                        styles.agentPickerInline,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <View style={styles.agentPickerValue}>
-                        <Text numberOfLines={1} style={styles.agentPickerText}>
-                          {AGENTS.find((option) => option.id === agent)?.label ?? agent}
+                      options={
+                        localDevice
+                          ? [{ value: 'builtin', label: 'Built-in' }]
+                          : [
+                              { value: 'builtin', label: 'Built-in' },
+                              { value: 'external', label: 'External' },
+                            ]
+                      }
+                    />
+                    {agentMode === 'external' ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel="Choose external agent"
+                        accessibilityState={{ expanded: agentPickerOpen, disabled: busy }}
+                        disabled={busy}
+                        onPress={() => setAgentPickerOpen(true)}
+                        style={({ pressed }) => [
+                          styles.externalAgentTrigger,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <Text numberOfLines={1} style={styles.externalAgentText}>
+                          {EXTERNAL_AGENTS.find((option) => option.id === agent)?.label ?? agent}
                         </Text>
-                      </View>
-                      {agentPickerOpen ? (
-                        <ChevronUp color={colors.accent} size={17} strokeWidth={2.2} />
-                      ) : (
-                        <ChevronDown color={colors.accent} size={17} strokeWidth={2.2} />
-                      )}
-                    </Pressable>
+                        <ChevronDown color={colors.accent} size={16} strokeWidth={2.2} />
+                      </Pressable>
+                    ) : null}
                     <Segmented<MobileDroneAgentPermissionMode>
                       label="Access"
                       value={agentPermissionMode}
@@ -921,34 +956,14 @@ export function NewDroneScreen({
                       }
                     />
                   </View>
-                  {agentPickerOpen ? (
-                    <View accessibilityRole="radiogroup" style={styles.agentOptions}>
-                      {(localDevice ? AGENTS.filter((option) => option.id === 'native') : AGENTS).map((option) => {
-                        const active = option.id === agent;
-                        return (
-                          <Pressable
-                            key={option.id}
-                            accessibilityRole="radio"
-                            accessibilityState={{ checked: active, disabled: busy }}
-                            disabled={busy}
-                            onPress={() => chooseAgent(option.id)}
-                            style={({ pressed }) => [
-                              styles.agentOption,
-                              active && styles.agentOptionActive,
-                              pressed && styles.pressed,
-                            ]}
-                          >
-                            <View style={[styles.radioRing, active && styles.radioRingActive]}>
-                              {active ? <View style={styles.radioDot} /> : null}
-                            </View>
-                            <Text style={[styles.agentOptionText, active && styles.activeText]}>
-                              {option.label}
-                            </Text>
-                          </Pressable>
-                        );
-                      })}
-                    </View>
-                  ) : null}
+                  <ExternalAgentPicker
+                    open={agentMode === 'external' && agentPickerOpen}
+                    value={agent === 'native' ? lastExternalAgent : agent}
+                    options={EXTERNAL_AGENTS}
+                    disabled={busy}
+                    onClose={() => setAgentPickerOpen(false)}
+                    onSelect={(value) => chooseAgent(value as ExternalAgentId)}
+                  />
                   {!readOnlySupported ? (
                     <Text style={styles.helper}>
                       Read-only access is available for Codex and Blip.
@@ -1122,40 +1137,19 @@ const styles = StyleSheet.create({
     flexWrap: 'wrap',
     gap: 8,
   },
-  agentPickerTrigger: {
+  externalAgentTrigger: {
     minHeight: 34,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    gap: 12,
+    gap: 10,
     paddingHorizontal: 10,
     borderRadius: 7,
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
     backgroundColor: colors.accentDark,
   },
-  agentPickerInline: { flex: 1, minWidth: 130 },
-  agentPickerValue: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', gap: 10 },
-  agentPickerText: { flexShrink: 1, color: colors.textStrong, fontSize: 12, fontWeight: '800' },
-  agentOptions: { overflow: 'hidden', borderRadius: 7, backgroundColor: colors.panel },
-  agentOption: {
-    minHeight: 44,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 11,
-    paddingHorizontal: 13,
-  },
-  agentOptionActive: { backgroundColor: colors.accentWash },
-  agentOptionText: { color: colors.text, fontSize: 12, fontWeight: '700' },
-  radioRing: {
-    width: 16,
-    height: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 8,
-    borderWidth: 1.5,
-    borderColor: colors.overlay0,
-  },
-  radioRingActive: { borderColor: colors.accent },
-  radioDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.accent },
+  externalAgentText: { flexShrink: 1, color: colors.textStrong, fontSize: 12, fontWeight: '800' },
   activeText: { color: colors.accent },
   pickerTrigger: {
     minHeight: 48,

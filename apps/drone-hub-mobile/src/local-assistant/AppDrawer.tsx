@@ -75,6 +75,7 @@ export type AppDrawerProps = {
   droneSidebarOrder?: MobileDroneSidebarOrder;
   activeDroneId?: string;
   activeChatName?: string;
+  droneOperationById?: Record<string, 'archiving' | 'deleting'>;
   dronesLoading?: boolean;
   dronesReachable?: boolean;
   dronesError?: string | null;
@@ -238,7 +239,7 @@ function droneFolderContains(folder: MobileDroneGroupFolder, droneId: string): b
 }
 
 type DroneDisplayState = 'working' | 'waiting' | 'starting' | 'blocked' | 'offline' | 'idle';
-type SwitchDisplayState = DroneDisplayState | 'done';
+type SwitchDisplayState = DroneDisplayState | 'done' | 'archiving' | 'deleting';
 type DroneStateSummary = { working: number; idle: number; issues: number };
 const EMPTY_DRONE_STATE_SUMMARY: DroneStateSummary = { working: 0, idle: 0, issues: 0 };
 
@@ -342,7 +343,8 @@ function switchStateLabel(state: SwitchDisplayState): string {
 }
 
 function switchStateColor(state: SwitchDisplayState): string {
-  if (state === 'working') return colors.warning;
+  if (state === 'working' || state === 'archiving' || state === 'deleting')
+    return colors.warning;
   if (state === 'waiting' || state === 'starting') return colors.info;
   if (state === 'blocked' || state === 'offline') return colors.danger;
   if (state === 'done') return colors.online;
@@ -376,7 +378,7 @@ function SwitchItemState({
         .join(', ')}
       style={styles.switchItemMetaRow}
     >
-      {state === 'working' ? (
+      {state === 'working' || state === 'archiving' || state === 'deleting' ? (
         <WorkingStatusIndicator />
       ) : (
         <View accessible={false} style={styles.switchStateIndicator}>
@@ -439,26 +441,30 @@ function DrawerDroneNode({
   depth,
   activeDroneId,
   activeChatName,
+  droneOperationById,
   onSelect,
 }: {
   node: MobileDroneTreeNode;
   depth: number;
   activeDroneId: string;
   activeChatName: string;
+  droneOperationById: Record<string, 'archiving' | 'deleting'>;
   onSelect(droneId: string, chatName: string): void;
 }) {
   const { drone } = node;
   const chats = drone.chats.length > 0 ? drone.chats : ['default'];
   const selected = drone.id === activeDroneId;
   const selectedChat = selected && chats.includes(activeChatName) ? activeChatName : chats[0]!;
-  const displayState = droneDisplayState(drone);
+  const operation = droneOperationById[drone.id];
+  const displayState = operation ?? droneDisplayState(drone);
   const unread = (drone.unreadChats?.length ?? 0) > 0;
   return (
     <View style={styles.droneNode}>
       <Pressable
         accessibilityRole="button"
-        accessibilityState={{ selected }}
+        accessibilityState={{ selected, disabled: Boolean(operation) }}
         accessibilityLabel={`Open ${drone.name} chat`}
+        disabled={Boolean(operation)}
         onPress={() => onSelect(drone.id, selectedChat)}
         style={({ pressed }) => [
           styles.switchItemRow,
@@ -494,6 +500,7 @@ function DrawerDroneNode({
               depth={depth + 1}
               activeDroneId={activeDroneId}
               activeChatName={activeChatName}
+              droneOperationById={droneOperationById}
               onSelect={onSelect}
             />
           ))}
@@ -508,12 +515,14 @@ function DrawerDroneFolder({
   depth,
   activeDroneId,
   activeChatName,
+  droneOperationById,
   onSelect,
 }: {
   folder: MobileDroneGroupFolder;
   depth: number;
   activeDroneId: string;
   activeChatName: string;
+  droneOperationById: Record<string, 'archiving' | 'deleting'>;
   onSelect(droneId: string, chatName: string): void;
 }) {
   const [collapsed, setCollapsed] = React.useState(false);
@@ -558,6 +567,7 @@ function DrawerDroneFolder({
               depth={depth + 1}
               activeDroneId={activeDroneId}
               activeChatName={activeChatName}
+              droneOperationById={droneOperationById}
               onSelect={onSelect}
             />
           ))}
@@ -572,12 +582,14 @@ function DrawerDroneEntry({
   depth,
   activeDroneId,
   activeChatName,
+  droneOperationById,
   onSelect,
 }: {
   entry: MobileDroneSidebarEntry;
   depth: number;
   activeDroneId: string;
   activeChatName: string;
+  droneOperationById: Record<string, 'archiving' | 'deleting'>;
   onSelect(droneId: string, chatName: string): void;
 }) {
   return entry.kind === 'drone' ? (
@@ -586,6 +598,7 @@ function DrawerDroneEntry({
       depth={depth}
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
+      droneOperationById={droneOperationById}
       onSelect={onSelect}
     />
   ) : (
@@ -594,6 +607,7 @@ function DrawerDroneEntry({
       depth={depth}
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
+      droneOperationById={droneOperationById}
       onSelect={onSelect}
     />
   );
@@ -763,6 +777,7 @@ function AppDrawerView({
   droneSidebarOrder = EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   activeDroneId = '',
   activeChatName = 'default',
+  droneOperationById = {},
   dronesLoading = false,
   dronesReachable = true,
   dronesError = null,
@@ -1048,6 +1063,7 @@ function AppDrawerView({
                           depth={0}
                           activeDroneId={activeDroneId}
                           activeChatName={activeChatName}
+                          droneOperationById={droneOperationById}
                           onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
                         />
                       ))

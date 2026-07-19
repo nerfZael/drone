@@ -12,7 +12,12 @@ import {
   adaptNativeAgentChatSurface,
   type AgentChatSurfaceAdapter,
 } from '../src/droneHub/chat';
-import { AssistantMessageRow } from '../src/droneHub/assistant/AssistantTranscript';
+import {
+  AssistantMessageRow,
+  AssistantThinkingRow,
+  ToolRunActivity,
+  formatAssistantRunDuration,
+} from '../src/droneHub/assistant/AssistantTranscript';
 
 const TRANSCRIPT_ITEMS = [
   { key: 'message', kind: 'message' as const, content: <div>Visible message</div> },
@@ -140,6 +145,26 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('Visible tool call');
   });
 
+  test('the shared transcript compacts adjacent native tool activity', () => {
+    const html = renderToStaticMarkup(
+      <ChatSurface adapter={adaptNativeAgentChatSurface()}>
+        <AgentChatTranscript
+          loading={false}
+          hasContent
+          emptyState={null}
+          items={[
+            { key: 'message', kind: 'message', content: <div>Message</div> },
+            { key: 'tool-a', kind: 'tool', content: <div>First tool</div> },
+            { key: 'tool-b', kind: 'tool', content: <div>Second tool</div> },
+          ]}
+        />
+      </ChatSurface>,
+    );
+
+    expect(html).toContain('data-transcript-item-kind="tool"');
+    expect(html).toContain('class="-mt-5"');
+  });
+
   test('the shared composer renders structured model controls and menu actions', () => {
     const html = renderToStaticMarkup(
       <ChatSurface adapter={adaptExternalAgentChatSurface()}>
@@ -255,5 +280,92 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('Linked request');
     expect(html).toContain('#609');
     expect(html).not.toContain('&quot;type&quot;:&quot;drone-hub-task&quot;');
+  });
+
+  test('native assistant messages make file references openable', () => {
+    const html = renderToStaticMarkup(
+      <AssistantMessageRow
+        message={{
+          id: 'native-file-reference',
+          role: 'assistant',
+          content: [{ type: 'text', text: 'See `README.md` for details.' }],
+        }}
+        messageExtras={{
+          messageId: 'native-file-reference',
+          onOpenFileReference: () => {},
+        }}
+      />,
+    );
+
+    expect(html).toContain('class="dh-inline-code-file-link"');
+    expect(html).toContain('aria-label="Open file README.md"');
+  });
+
+  test('native chat uses unlabeled plain agent messages and compact user bubbles', () => {
+    const assistantHtml = renderToStaticMarkup(
+      <AssistantMessageRow
+        message={{ id: 'plain-agent', role: 'assistant', content: 'A plain response.' }}
+        messageExtras={{ messageId: 'plain-agent' }}
+      />,
+    );
+    const userHtml = renderToStaticMarkup(
+      <AssistantMessageRow message={{ id: 'plain-user', role: 'user', content: 'A prompt.' }} />,
+    );
+    const thinkingHtml = renderToStaticMarkup(<AssistantThinkingRow />);
+
+    expect(assistantHtml).toContain('A plain response.');
+    expect(assistantHtml).not.toContain('>Agent<');
+    expect(assistantHtml).not.toContain('bg-[var(--accent-subtle)]');
+    expect(assistantHtml).not.toContain('rounded-lg border px-4 py-3');
+    expect(userHtml).toContain('bg-[var(--user-dim)]');
+    expect(userHtml).not.toContain('>You<');
+    expect(thinkingHtml).not.toContain('>Agent<');
+  });
+
+  test('active tool runs show only the latest five calls without an inner scroller', () => {
+    const items = Array.from({ length: 7 }, (_, index) => ({
+      type: 'tool' as const,
+      key: `tool-${index + 1}`,
+      call: { id: `call-${index + 1}`, name: `tool_${index + 1}`, args: {} },
+    }));
+    const html = renderToStaticMarkup(
+      <ToolRunActivity items={items} active startedAt={Date.now() - 5_000} />,
+    );
+
+    expect(html).toContain('Working for');
+    expect(html).toContain('Show all (7)');
+    expect(html).toContain('Showing the latest 5; 2 earlier');
+    expect(html).not.toContain('Tool 1');
+    expect(html).not.toContain('Tool 2');
+    expect(html).toContain('Tool 3');
+    expect(html).toContain('Tool 7');
+    expect(html).not.toContain('overflow-y-auto');
+  });
+
+  test('completed tool runs collapse to a precise duration summary', () => {
+    const html = renderToStaticMarkup(
+      <ToolRunActivity
+        items={[
+          {
+            type: 'tool',
+            key: 'completed-tool',
+            call: { id: 'completed-call', name: 'read_file', args: {} },
+          },
+        ]}
+        active={false}
+        startedAt={1_000}
+        endedAt={3_724_000}
+      />,
+    );
+
+    expect(formatAssistantRunDuration(3_723_000)).toBe('1h 2m 3s');
+    expect(html).toContain('Worked for 1h 2m 3s');
+    expect(html).toContain('1 tool call');
+    expect(html).toContain('class="flex w-full items-center gap-2');
+    expect(html).toContain('text-sm font-semibold');
+    expect(html).toContain('text-xs text-[var(--muted-dim)]');
+    expect(html).not.toContain('uppercase');
+    expect(html).not.toContain('ml-auto');
+    expect(html).not.toContain('Read file');
   });
 });

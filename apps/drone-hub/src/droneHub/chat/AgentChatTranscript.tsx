@@ -28,12 +28,21 @@ export type AgentChatTranscriptProps = Omit<ChatSurfaceTranscriptProps, 'childre
 export function AgentChatTranscript({ items, ...frame }: AgentChatTranscriptProps) {
   const adapter = useAgentChatSurfaceAdapter();
   const toolActivityVisible = adapter.capabilities.toolActivity === 'visible';
+  const visibleItems = toolActivityVisible
+    ? items
+    : items.filter((item) => item.kind !== 'tool');
 
   return (
     <ChatSurfaceTranscript {...frame}>
-      {items.map((item) => {
-        if (item.kind === 'tool' && !toolActivityVisible) return null;
-        return <React.Fragment key={item.key}>{item.content}</React.Fragment>;
+      {visibleItems.map((item, index) => {
+        const followsTool = item.kind === 'tool' && visibleItems[index - 1]?.kind === 'tool';
+        return followsTool ? (
+          <div key={item.key} data-transcript-item-kind={item.kind} className="-mt-5">
+            {item.content}
+          </div>
+        ) : (
+          <React.Fragment key={item.key}>{item.content}</React.Fragment>
+        );
       })}
     </ChatSurfaceTranscript>
   );

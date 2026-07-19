@@ -44,10 +44,7 @@ import {
   AssistantQueuedPromptRow,
   AssistantMessageRow,
   AssistantThinkingRow,
-  ChatsIdleActivityRow,
-  MessageDroneActivityRow,
-  RepeatedToolActivityRow,
-  ToolActivityRow,
+  ToolRunActivity,
 } from './AssistantTranscript';
 import { ApprovalCard } from './AssistantWorkflowCards';
 import { buildNativeAgentComposerControls } from './native-agent-composer-controls';
@@ -113,6 +110,14 @@ const ASSISTANT_SCROLL_BOTTOM_THRESHOLD_PX = 48;
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
 const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
 const EMPTY_ASSISTANT_WORKSPACES: AssistantWorkspaceSummary[] = [];
+
+function assistantMessageTimestampMs(message: AssistantMessage | undefined): number | undefined {
+  if (!message) return undefined;
+  const value = message.createdAt ?? message.timestamp;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
+  const parsed = Date.parse(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
 
 function readInitialFilesOpen(): boolean {
   if (typeof window === 'undefined') return false;
@@ -1514,7 +1519,22 @@ export function AssistantDock({
       ),
     });
   }
-  for (const item of visibleItems) {
+  const toolCallStartedAt = new Map<string, number>();
+  for (const message of visibleMessages) {
+    if (message.role !== 'assistant') continue;
+    const timestamp = assistantMessageTimestampMs(message);
+    if (timestamp === undefined) continue;
+    for (const call of toolCalls(message)) toolCallStartedAt.set(call.id, timestamp);
+  }
+  let lastToolItemIndex = -1;
+  for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
+    if (visibleItems[index]?.type === 'message') continue;
+    lastToolItemIndex = index;
+    break;
+  }
+
+  for (let itemIndex = 0; itemIndex < visibleItems.length; itemIndex += 1) {
+    const item = visibleItems[itemIndex]!;
     if (item.type === 'message') {
       const jobsTurn = -(item.sourceMessageIndex + 1);
       nativeTranscriptItems.push({
@@ -1548,24 +1568,71 @@ export function AssistantDock({
       });
       continue;
     }
-    if (item.type === 'tool') {
-      nativeTranscriptItems.push({
-        key: item.key,
-        kind: 'tool',
-        content: (
-          <ToolActivityRow
-            call={item.call}
-            result={item.result}
-            droneNameById={droneNameById}
-          />
-        ),
-      });
-      continue;
+
+    const runItems: AssistantToolRenderItem[] = [];
+    const runStartIndex = itemIndex;
+    while (itemIndex < visibleItems.length) {
+      const runItem = visibleItems[itemIndex]!;
+      if (runItem.type === 'message') break;
+      if (runItem.type === 'tool') runItems.push(runItem);
+      else runItems.push(...runItem.items);
+      itemIndex += 1;
     }
+    const runEndIndex = itemIndex - 1;
+    itemIndex = runEndIndex;
+
+    let precedingUserAt: number | undefined;
+    let precedingAssistantAt: number | undefined;
+    for (let previousIndex = runStartIndex - 1; previousIndex >= 0; previousIndex -= 1) {
+      const previous = visibleItems[previousIndex];
+      if (previous?.type !== 'message') continue;
+      if (previous.message.role === 'user') {
+        precedingUserAt = assistantMessageTimestampMs(previous.message);
+        break;
+      }
+      if (previous.message.role === 'assistant') {
+        precedingAssistantAt = assistantMessageTimestampMs(previous.message) ?? precedingAssistantAt;
+      }
+    }
+    const callStartedAt = runItems
+      .map((runItem) => toolCallStartedAt.get(String(runItem.call?.id ?? '')))
+      .filter((timestamp): timestamp is number => timestamp !== undefined);
+    const resultEndedAt = runItems
+      .map((runItem) => assistantMessageTimestampMs(runItem.result))
+      .filter((timestamp): timestamp is number => timestamp !== undefined);
+    let followingAssistantAt: number | undefined;
+    for (let nextIndex = runEndIndex + 1; nextIndex < visibleItems.length; nextIndex += 1) {
+      const next = visibleItems[nextIndex];
+      if (next?.type !== 'message') continue;
+      if (next.message.role === 'user') break;
+      if (next.message.role !== 'assistant') continue;
+      followingAssistantAt = assistantMessageTimestampMs(next.message);
+      if (followingAssistantAt !== undefined) break;
+    }
+    const startedAt =
+      precedingAssistantAt ??
+      (callStartedAt.length > 0 ? Math.min(...callStartedAt) : precedingUserAt);
+    const endedAt =
+      followingAssistantAt ??
+      (resultEndedAt.length > 0
+        ? Math.max(...resultEndedAt)
+        : callStartedAt.length > 0
+          ? Math.max(...callStartedAt)
+          : undefined);
+    const runActive = running && runEndIndex === lastToolItemIndex;
+    const runKey = `tool-run:${runItems[0]?.key ?? runStartIndex}:${runActive ? 'active' : 'complete'}`;
     nativeTranscriptItems.push({
-      key: item.key,
+      key: runKey,
       kind: 'tool',
-      content: <RepeatedToolActivityRow items={item.items} />,
+      content: (
+        <ToolRunActivity
+          items={runItems}
+          active={runActive}
+          startedAt={startedAt}
+          endedAt={endedAt}
+          droneNameById={droneNameById}
+        />
+      ),
     });
   }
   if (showThinking) {

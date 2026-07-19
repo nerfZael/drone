@@ -7,6 +7,7 @@ import {
 import {
   buildMobileDroneRepoGroups,
   normalizeMobileDrones,
+  normalizeMobileDroneListPayload,
   type MobileDroneGroupFolder,
   type MobileDroneSidebarEntry,
   type MobileDroneTreeNode,
@@ -49,6 +50,31 @@ function mobileEntryShape(entry: MobileDroneSidebarEntry): TreeShape {
 }
 
 describe('mobile sidebar tree parity', () => {
+  test('exposes registered repositories in the create selector without expanded options', () => {
+    const result = normalizeMobileDroneListPayload({
+      schemaVersion: 6,
+      drones: [],
+      sidebar: { registeredRepoPaths: ['/work/alpha', '/work/beta'] },
+    });
+
+    expect(result.createRepos).toEqual([
+      {
+        path: '/work/alpha',
+        hostBranch: null,
+        remoteBranches: [],
+        branchesError: null,
+        branchesLoaded: false,
+      },
+      {
+        path: '/work/beta',
+        hostBranch: null,
+        remoteBranches: [],
+        branchesError: null,
+        branchesLoaded: false,
+      },
+    ]);
+  });
+
   test('projects the canonical desktop hierarchy and ordering without drift', () => {
     const drones = normalizeMobileDrones([
       { id: 'direct-new', name: 'Direct new', repoPath: '/repo', createdAt: '2026-04-04T00:00:00Z' },

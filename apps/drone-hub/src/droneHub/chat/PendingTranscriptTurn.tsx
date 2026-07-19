@@ -93,7 +93,13 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
 
   return (
     <div className="group/pending-turn animate-fade-in opacity-90">
-      <ChatMessageFrame role="user" at={item.at} showRoleIcon={showRoleIcons} headerEnd={pendingHeader}>
+      <ChatMessageFrame
+        role="user"
+        at={item.at}
+        showRoleIcon={showRoleIcons}
+        showRoleLabel={showRoleIcons}
+        headerEnd={pendingHeader}
+      >
         <ChatMessageCopyAction text={userCopyText} />
         {promptText ? (
           <CollapsibleMarkdown
@@ -117,6 +123,8 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           role="assistant"
           at={item.at}
           showRoleIcon={showRoleIcons}
+          showRoleLabel={showRoleIcons}
+          plainAssistant={!showRoleIcons}
           error={isFailed && !isStopped}
           warning={isStopped}
         >
