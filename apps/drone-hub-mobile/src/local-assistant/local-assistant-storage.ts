@@ -77,14 +77,37 @@ function cleanDetails(value: unknown): unknown {
   }
 }
 
-function cleanMessage(value: any): LocalAssistantMessage | null {
+function cleanMessage(value: any, stripImageData = false): LocalAssistantMessage | null {
   if (!value || !['user', 'assistant', 'toolResult'].includes(value.role)) return null;
+  const rawContent = Array.isArray(value.content) ? value.content.slice(0, 30) : null;
+  const imageAttachments = rawContent
+    ? rawContent.flatMap((part: any) => {
+        if (part?.type !== 'image' || !String(part?.data ?? '').trim()) return [];
+        return [
+          {
+            name: 'Prompt image',
+            mime: String(part?.mimeType ?? '').trim() || 'image/png',
+            size: Math.floor((String(part.data).length * 3) / 4),
+          },
+        ];
+      })
+    : [];
   const content =
     typeof value.content === 'string'
       ? value.content.slice(0, MAX_STORED_MESSAGE_CHARS)
-      : Array.isArray(value.content)
-        ? value.content.slice(0, 30)
+      : rawContent
+        ? stripImageData
+          ? rawContent.filter((part: any) => part?.type !== 'image')
+          : rawContent
         : '';
+  const cleanedDetails = cleanDetails(value.details);
+  const details =
+    stripImageData && imageAttachments.length > 0
+      ? {
+          ...(cleanedDetails && typeof cleanedDetails === 'object' ? cleanedDetails : {}),
+          attachments: imageAttachments,
+        }
+      : cleanedDetails;
   return {
     id: String(value.id ?? '').slice(0, 100),
     createdAt: String(value.createdAt ?? new Date().toISOString()),
@@ -96,27 +119,44 @@ function cleanMessage(value: any): LocalAssistantMessage | null {
     errorMessage: value.errorMessage
       ? String(value.errorMessage).slice(0, MAX_STORED_MESSAGE_CHARS)
       : undefined,
-    details: cleanDetails(value.details),
+    details,
   };
 }
 
-export function boundLocalAssistantMessages(values: unknown[]): LocalAssistantMessage[] {
+function boundedMessageCharacters(message: LocalAssistantMessage): number {
+  if (!Array.isArray(message.content)) return JSON.stringify(message).length;
+  return JSON.stringify({
+    ...message,
+    content: message.content.map((part) =>
+      part?.type === 'image' ? { ...part, data: '' } : part,
+    ),
+  }).length;
+}
+
+function boundMessages(
+  values: unknown[],
+  stripImageData: boolean,
+): LocalAssistantMessage[] {
   const messages = values
     .slice(-MAX_MESSAGES_PER_THREAD)
-    .map(cleanMessage)
+    .map((message) => cleanMessage(message, stripImageData))
     .filter((message: LocalAssistantMessage | null): message is LocalAssistantMessage =>
       Boolean(message),
     );
   let storedCharacters = messages.reduce(
-    (total, message) => total + JSON.stringify(message).length,
+    (total, message) => total + boundedMessageCharacters(message),
     0,
   );
   while (messages.length > 1 && storedCharacters > MAX_STORED_THREAD_CHARS) {
     const removed = messages.shift();
-    if (removed) storedCharacters -= JSON.stringify(removed).length;
+    if (removed) storedCharacters -= boundedMessageCharacters(removed);
   }
   while (messages.length > 0 && messages[0].role !== 'user') messages.shift();
   return messages;
+}
+
+export function boundLocalAssistantMessages(values: unknown[]): LocalAssistantMessage[] {
+  return boundMessages(values, false);
 }
 
 export function cleanLocalWorkspaceTargets(values: unknown[]): LocalWorkspaceTarget[] {
@@ -174,7 +214,7 @@ function cleanThread(value: any): LocalAssistantThread | null {
         ]
       : [];
   const workspaceTargets = cleanLocalWorkspaceTargets(rawWorkspaces);
-  const messages = boundLocalAssistantMessages(Array.isArray(value.messages) ? value.messages : []);
+  const messages = boundMessages(Array.isArray(value.messages) ? value.messages : [], true);
   const queuedPrompts = (Array.isArray(value.queuedPrompts) ? value.queuedPrompts : [])
     .slice(0, 20)
     .map(
@@ -185,6 +225,7 @@ function cleanThread(value: any): LocalAssistantThread | null {
         prompt: String(prompt?.prompt ?? '')
           .trim()
           .slice(0, 32_000),
+        promptImages: [],
         createdAt: String(prompt?.createdAt ?? new Date().toISOString()),
         status: prompt?.status === 'failed' ? ('failed' as const) : ('queued' as const),
         error: prompt?.error ? String(prompt.error).slice(0, 2_000) : null,

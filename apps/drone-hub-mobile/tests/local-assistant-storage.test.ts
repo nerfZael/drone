@@ -95,6 +95,67 @@ describe('local assistant storage', () => {
     expect((messages[1].details as any).files).toHaveLength(100);
   });
 
+  test('keeps prompt images in memory but stores only bounded attachment metadata', () => {
+    const imageMessage = {
+      id: 'image-message',
+      createdAt: '2026-07-18T00:00:00.000Z',
+      role: 'user',
+      content: [
+        { type: 'text', text: 'Inspect this' },
+        { type: 'image', data: 'a'.repeat(1_000_000), mimeType: 'image/png' },
+      ],
+    };
+
+    expect((boundLocalAssistantMessages([imageMessage])[0]?.content as any[])[1]).toMatchObject({
+      type: 'image',
+      mimeType: 'image/png',
+    });
+
+    const stored = parseLocalAssistantThreads(
+      JSON.stringify([
+        {
+          id: 'thread-with-image',
+          title: 'Image thread',
+          model: 'gpt-test',
+          thinkingLevel: 'low',
+          messages: [imageMessage],
+          queuedPrompts: [],
+        },
+      ]),
+    );
+    expect(stored?.[0]?.messages[0]?.content).toEqual([
+      { type: 'text', text: 'Inspect this' },
+    ]);
+    expect(stored?.[0]?.messages[0]?.details).toMatchObject({
+      attachments: [{ mime: 'image/png' }],
+    });
+  });
+
+  test('does not count in-memory image data against the transcript text limit', () => {
+    const messages = boundLocalAssistantMessages([
+      {
+        id: 'image-message',
+        createdAt: '2026-07-18T00:00:00.000Z',
+        role: 'user',
+        content: [
+          { type: 'text', text: 'Inspect this' },
+          { type: 'image', data: 'a'.repeat(1_000_000), mimeType: 'image/png' },
+        ],
+      },
+      {
+        id: 'assistant-message',
+        createdAt: '2026-07-18T00:00:01.000Z',
+        role: 'assistant',
+        content: 'The image looks good.',
+      },
+    ]);
+
+    expect(messages.map((message) => message.id)).toEqual([
+      'image-message',
+      'assistant-message',
+    ]);
+  });
+
   test('keeps an actionable bounded manifest for exceptionally large paths', () => {
     const details = transferDetails(500, 2_000);
     const messages = boundLocalAssistantMessages([

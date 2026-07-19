@@ -24,9 +24,16 @@ export type LocalWorkspaceTarget = {
   execute: boolean;
 };
 
+export type LocalAssistantPromptImage = {
+  type: 'image';
+  data: string;
+  mimeType: string;
+};
+
 export type LocalAssistantQueuedPrompt = {
   id: string;
   prompt: string;
+  promptImages: LocalAssistantPromptImage[];
   createdAt: string;
   status: 'queued' | 'failed';
   error: string | null;
