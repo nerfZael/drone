@@ -32,14 +32,18 @@ export const ChatTranscriptFrame = React.forwardRef<HTMLDivElement, ChatTranscri
   useClientLayoutEffect(() => {
     if (!initialScrollKey || loading || !hasContent) return;
     if (lastInitialScrollKeyRef.current === initialScrollKey) return;
-    lastInitialScrollKeyRef.current = initialScrollKey;
 
     const scrollToBottom = () => {
       const node = scrollNodeRef.current;
       if (node) node.scrollTop = node.scrollHeight;
     };
     scrollToBottom();
-    const frame = requestAnimationFrame(scrollToBottom);
+    // Selection effects can replace the previous chat's cached content after this layout pass.
+    // Only mark the new chat as initialized once that state has had a frame to settle.
+    const frame = requestAnimationFrame(() => {
+      scrollToBottom();
+      lastInitialScrollKeyRef.current = initialScrollKey;
+    });
     return () => cancelAnimationFrame(frame);
   }, [hasContent, initialScrollKey, loading]);
 
