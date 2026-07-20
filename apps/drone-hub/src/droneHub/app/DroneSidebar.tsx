@@ -2368,7 +2368,7 @@ export function DroneSidebar({
         onWheel={sidebarCapabilities.sidebarOptions ? onSidebarWheel : undefined}
       >
         <div
-          className={`flex h-[3.25rem] flex-shrink-0 items-center px-3.5 border-b border-[var(--border)] relative select-none ${
+          className={`relative flex h-[3.25rem] flex-shrink-0 select-none items-center border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] px-3.5 ${
             sidebarDockDragEnabled
               ? `touch-none ${sidebarDockDragActive ? 'cursor-grabbing' : 'cursor-grab'}`
               : ''
@@ -2390,7 +2390,7 @@ export function DroneSidebar({
         {sidebarCapabilities.headerActions ? (
           <>
             <div
-              className="grid min-h-14 flex-shrink-0 grid-cols-3 border-b border-[var(--border)] bg-[var(--sidebar-section-bg)]"
+              className="grid min-h-14 flex-shrink-0 grid-cols-3 border-b border-[var(--sidebar-section-border)] bg-[var(--sidebar-section-bg)]"
               role="tablist"
               aria-label="Drone Hub sections"
             >
@@ -2431,7 +2431,7 @@ export function DroneSidebar({
                   onClick={onClick}
                   className={`relative flex min-w-0 flex-col items-center justify-center gap-[3px] px-0.5 text-[.625rem] font-bold tracking-[.00625rem] transition-colors ${
                     tabActive
-                      ? 'bg-[var(--selected)] text-[var(--accent-muted)]'
+                      ? 'bg-[var(--sidebar-tab-active-bg)] text-[var(--accent-muted)]'
                       : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]'
                   }`}
                 >
@@ -2453,7 +2453,7 @@ export function DroneSidebar({
                 event.preventDefault();
                 openRepositoryOverview();
               }}
-              className="flex min-h-[3.125rem] flex-shrink-0 cursor-pointer items-center justify-between gap-2.5 border-b border-[var(--border)] bg-[var(--sidebar-section-bg)] px-3.5 transition-colors hover:bg-[var(--hover)]"
+              className="flex min-h-[3.125rem] flex-shrink-0 cursor-pointer items-center justify-between gap-2.5 border-b border-[var(--sidebar-section-border)] bg-[var(--sidebar-section-bg)] px-3.5 transition-colors hover:bg-[var(--hover)]"
             >
               <span className="min-w-0 flex-1 truncate text-[.625rem] font-extrabold text-[var(--muted)]">
                 {dronesCount} {dronesCount === 1 ? 'drone' : 'drones'} · {repositoryNavigationItems.length}{' '}
@@ -2494,7 +2494,7 @@ export function DroneSidebar({
                     onOpenDraftChatComposer();
                   }}
                   disabled={!sidebarCapabilities.createDrones}
-                  className="inline-flex h-9 w-9 items-center justify-center rounded-[.375rem] border border-[var(--border)] bg-[var(--panel-raised)] text-[var(--accent)] transition-colors hover:bg-[var(--selected)] disabled:cursor-not-allowed disabled:opacity-40"
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-[.375rem] border border-[var(--sidebar-create-border)] bg-[var(--sidebar-create-bg)] text-[var(--accent)] transition-colors hover:bg-[var(--sidebar-create-hover-bg)] disabled:cursor-not-allowed disabled:opacity-40"
                   title="Create new drone"
                   aria-label="Create new drone"
                 >

@@ -87,8 +87,16 @@ describe('desktop themes', () => {
     expect(catppuccinCss).toContain('--chat-composer-control-radius: .3125rem');
     expect(catppuccinCss).toContain('--chat-composer-shadow: 0 .3125rem .75rem rgba(17, 17, 27, .22)');
     expect(catppuccinCss).toContain('--chat-composer-input: #313244');
+    expect(catppuccinCss).toContain('--app-header-bg: #181825');
+    expect(catppuccinCss).toContain('--app-header-border: #45475a');
+    expect(catppuccinCss).toContain('--workspace-header-title-fg: #cdd6f4');
     expect(catppuccinCss).toContain('--sidebar-bg: #1e1e2e');
-    expect(catppuccinCss).toContain('--sidebar-section-bg: #181825');
+    expect(catppuccinCss).toContain('--sidebar-section-bg: #1e1e2e');
+    expect(catppuccinCss).toContain('--sidebar-section-border: #313244');
+    expect(catppuccinCss).toContain('--sidebar-tab-active-bg: transparent');
+    expect(catppuccinCss).toContain('--sidebar-create-bg: transparent');
+    expect(catppuccinCss).toContain('--sidebar-create-border: transparent');
+    expect(catppuccinCss).toContain('--sidebar-create-hover-bg: #313244');
     expect(catppuccinCss).toContain('--sidebar-brand-fg: #f5e0dc');
     expect(catppuccinCss).toContain('--sidebar-brand-size: .9375rem');
     expect(catppuccinCss).toContain('--sidebar-brand-weight: 800');

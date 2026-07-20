@@ -12,7 +12,7 @@ export function DroneWorkspaceHeaderFrame({
   return (
     <div
       data-drone-selected-header={selectedHeader ? 'true' : undefined}
-      className="relative h-[3.25rem] flex-shrink-0 border-b border-[var(--border)] bg-[var(--panel-alt)]"
+      className="relative h-[3.25rem] flex-shrink-0 border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)]"
     >
       {children}
     </div>

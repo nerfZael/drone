@@ -1442,7 +1442,7 @@ export function SelectedDroneWorkspace({
               )}
               <div className="flex min-w-0 flex-col justify-center gap-0.5">
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="max-w-[min(34vw,360px)] truncate dh-type-title">
+                  <span className="max-w-[min(34vw,360px)] truncate dh-type-title dh-type-workspace-title">
                     {currentDroneLabel}
                   </span>
                   {showRespondingAsStatusInHeader ? (

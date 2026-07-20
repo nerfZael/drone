@@ -24,6 +24,9 @@
   --panel-alt: #171d27;
   --panel-raised: #1c2330;
   --workspace: var(--panel);
+  --app-header-bg: var(--panel-alt);
+  --app-header-border: var(--border);
+  --workspace-header-title-fg: var(--fg-strong);
 
   --border: #3b4557;
   --border-subtle: #293241;
@@ -35,6 +38,11 @@
   --sidebar-action-fg: var(--muted);
   --sidebar-bg: var(--panel-alt);
   --sidebar-section-bg: var(--panel-alt);
+  --sidebar-section-border: var(--border);
+  --sidebar-tab-active-bg: var(--selected);
+  --sidebar-create-bg: var(--panel-raised);
+  --sidebar-create-border: var(--border);
+  --sidebar-create-hover-bg: var(--selected);
   --sidebar-brand-fg: var(--sidebar-heading-fg);
   --sidebar-brand-size: var(--text-12);
   --sidebar-brand-weight: 500;
@@ -203,6 +211,9 @@
   --panel-alt: #181825;
   --panel-raised: #313244;
   --workspace: #1e1e2e;
+  --app-header-bg: #181825;
+  --app-header-border: #45475a;
+  --workspace-header-title-fg: #cdd6f4;
   --border: #45475a;
   --border-subtle: #313244;
   --chrome-muted: #9399b2;
@@ -212,7 +223,12 @@
   --sidebar-heading-fg: #bac2de;
   --sidebar-action-fg: #9399b2;
   --sidebar-bg: #1e1e2e;
-  --sidebar-section-bg: #181825;
+  --sidebar-section-bg: #1e1e2e;
+  --sidebar-section-border: #313244;
+  --sidebar-tab-active-bg: transparent;
+  --sidebar-create-bg: transparent;
+  --sidebar-create-border: transparent;
+  --sidebar-create-hover-bg: #313244;
   --sidebar-brand-fg: #f5e0dc;
   --sidebar-brand-size: .9375rem;
   --sidebar-brand-weight: 800;
@@ -764,6 +780,10 @@ code, pre {
   font-weight: var(--weight-semibold);
   letter-spacing: -0.01em;
   color: var(--fg-strong);
+}
+
+.dh-type-workspace-title {
+  color: var(--workspace-header-title-fg);
 }
 
 .dh-type-meta,
