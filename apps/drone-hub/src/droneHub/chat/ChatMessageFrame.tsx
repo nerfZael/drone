@@ -29,36 +29,36 @@ export function ChatMessageFrame({
   const user = role === 'user';
   const label = user ? 'You' : 'Agent';
   const transparentAssistant = !user && plainAssistant && !error && !warning;
-  const showHeader = showRoleLabel || Boolean(at || headerEnd);
+  const showHeader = showRoleLabel || Boolean(headerEnd);
   const surfaceClass = transparentAssistant
     ? 'py-1'
     : user
-      ? 'rounded-lg rounded-tr-sm border border-[var(--user-border)] bg-[var(--user-dim)] px-4 py-3'
+      ? 'rounded-[var(--radius-large)] rounded-tr-sm border border-[var(--user-bubble-border)] bg-[var(--user-bubble)] px-4 py-3 text-[var(--user-bubble-fg)]'
       : warning
-        ? 'rounded-lg rounded-tl-sm border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-4 py-3'
+        ? 'rounded-[var(--radius-large)] rounded-tl-sm border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-4 py-3'
         : error
-          ? 'rounded-lg rounded-tl-sm border border-[var(--red-border)] bg-[var(--red-subtle)] px-4 py-3'
-          : 'rounded-lg rounded-tl-sm border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-4 py-3';
+          ? 'rounded-[var(--radius-large)] rounded-tl-sm border border-[var(--red-border)] bg-[var(--red-subtle)] px-4 py-3'
+          : 'rounded-[var(--radius-large)] rounded-tl-sm border border-[var(--assistant-bubble-border)] bg-[var(--assistant-bubble)] px-4 py-3';
   const bubble = (
-    <div className={`${showRoleIcon ? (user ? 'max-w-[85%]' : 'min-w-0 flex-1') : user ? 'max-w-full' : 'w-full'} min-w-[120px]`}>
+    <div className={`group/message relative ${showRoleIcon ? (user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'min-w-0 flex-1') : user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'w-full'} min-w-[120px]`}>
+      {at ? (
+        <RelativeTimeText
+          at={at}
+          className={`pointer-events-none absolute bottom-full z-10 mb-1 whitespace-nowrap font-mono text-[var(--text-9)] leading-none text-[var(--muted-dim)] opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 ${user ? 'right-0' : 'left-0'}`}
+          title={new Date(at).toLocaleString()}
+        />
+      ) : null}
       {showHeader ? (
         <div className={`mb-1.5 flex items-center gap-2 ${user ? 'justify-end' : 'justify-between'}`}>
           {!user && showRoleLabel ? (
-            <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]" style={{ fontFamily: 'var(--display)' }}>
+            <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]" style={{ fontFamily: 'var(--display)' }}>
               {label}
             </span>
           ) : null}
           <div className="flex items-center gap-1.5">
             {user ? headerEnd : null}
-            {at ? (
-              <RelativeTimeText
-                at={at}
-                className="font-mono text-[9px] leading-none text-[var(--muted-dim)]"
-                title={new Date(at).toLocaleString()}
-              />
-            ) : null}
             {user && showRoleLabel ? (
-              <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--user-muted)]" style={{ fontFamily: 'var(--display)' }}>
+              <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--user-muted)]" style={{ fontFamily: 'var(--display)' }}>
                 {label}
               </span>
             ) : null}

@@ -19,7 +19,7 @@ export function AssistantWorkspaceAccessView({
 
   if (mesh.loading && !mesh.status) {
     return (
-      <div className="flex min-h-48 items-center justify-center text-[12px] text-[var(--muted)]">
+      <div className="flex min-h-48 items-center justify-center text-[var(--text-12)] text-[var(--muted)]">
         Loading device access…
       </div>
     );
@@ -27,7 +27,7 @@ export function AssistantWorkspaceAccessView({
 
   if (!mesh.status) {
     return (
-      <div className="p-4 text-[12px] text-[var(--red)]">
+      <div className="p-4 text-[var(--text-12)] text-[var(--red)]">
         {mesh.error || 'Device access is unavailable.'}
       </div>
     );

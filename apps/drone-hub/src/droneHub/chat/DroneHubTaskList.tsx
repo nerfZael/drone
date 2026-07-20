@@ -122,10 +122,10 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
   });
 
   return (
-    <div className="mt-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-inset)] overflow-hidden">
+    <div className="mt-3 rounded-[var(--radius-xlarge)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] overflow-hidden">
       <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
         <div
-          className="text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--muted-dim)]"
+          className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-[0.08em] uppercase text-[var(--muted-dim)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           Drone tasks
@@ -138,7 +138,7 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
                 void spawnAllTasks('spawn');
               }}
               disabled={!canSpawnAny || Boolean(spawningAllMode)}
-              className="inline-flex items-center justify-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)] disabled:opacity-45 disabled:cursor-default"
+              className="inline-flex items-center justify-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)] disabled:opacity-45 disabled:cursor-default"
               style={{ fontFamily: 'var(--display)' }}
               title="Spawn all tasks as fresh drones"
             >
@@ -150,7 +150,7 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
                 void spawnAllTasks('clone');
               }}
               disabled={!canCloneAny || Boolean(spawningAllMode)}
-              className="inline-flex items-center justify-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)] disabled:opacity-45 disabled:cursor-default"
+              className="inline-flex items-center justify-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)] disabled:opacity-45 disabled:cursor-default"
               style={{ fontFamily: 'var(--display)' }}
               title="Spawn all tasks as full clones"
             >
@@ -182,7 +182,7 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
                 >
                   <div className="flex items-center gap-2">
                     <IconChevron down={expanded} className="w-3 h-3 text-[var(--muted)]" />
-                    <span className="truncate text-[13px] font-medium text-[var(--fg)]">{task.name}</span>
+                    <span className="truncate text-[var(--text-13)] font-medium text-[var(--fg)]">{task.name}</span>
                   </div>
                 </button>
                 <div className="flex items-center gap-1.5">
@@ -194,7 +194,7 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
                       void spawnTask(taskKey, 'spawn', task);
                     }}
                     disabled={spawning || spawned || Boolean(spawningAllMode)}
-                    className={`inline-flex items-center justify-center h-7 px-2.5 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                    className={`inline-flex items-center justify-center h-7 px-2.5 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                       spawning || spawned || cloneSpawning || cloneSpawned
                         ? 'opacity-100'
                         : 'opacity-0 group-hover/task:opacity-100 focus-visible:opacity-100'
@@ -225,7 +225,7 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
                       void spawnTask(taskKey, 'clone', task);
                     }}
                     disabled={cloneSpawning || cloneSpawned || Boolean(spawningAllMode)}
-                    className={`inline-flex items-center justify-center h-7 px-2.5 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                    className={`inline-flex items-center justify-center h-7 px-2.5 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                       spawning || spawned || cloneSpawning || cloneSpawned
                         ? 'opacity-100'
                         : 'opacity-0 group-hover/task:opacity-100 focus-visible:opacity-100'
@@ -252,13 +252,13 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
               </div>
               {expanded ? (
                 <div className="px-3 pb-3">
-                  <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap">
+                  <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[var(--text-12)] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap">
                     {task.description}
                   </div>
                 </div>
               ) : null}
-              {error ? <div className="px-3 pb-3 text-[11px] text-[var(--red)]">{error}</div> : null}
-              {cloneError ? <div className="px-3 pb-3 text-[11px] text-[var(--red)]">{cloneError}</div> : null}
+              {error ? <div className="px-3 pb-3 text-[var(--text-11)] text-[var(--red)]">{error}</div> : null}
+              {cloneError ? <div className="px-3 pb-3 text-[var(--text-11)] text-[var(--red)]">{cloneError}</div> : null}
             </div>
           );
         })}

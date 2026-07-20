@@ -36,41 +36,41 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
   return (
     <div className="flex flex-col gap-4">
       {profileSettingsError && (
-        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
           {profileSettingsError}
         </div>
       )}
       {profileSettingsNotice && (
-        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
+        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
           {profileSettingsNotice}
         </div>
       )}
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)] gap-4">
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-4 py-4 flex flex-col gap-4">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-4 py-4 flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Active profile
             </div>
-            <div className="text-[20px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
+            <div className="text-[20px] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>
               {activeProfileName ? formatProfileDisplayName(activeProfileName) : 'Default'}
             </div>
-            <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
               Profiles isolate drone state, repo registrations, Hub onboarding state, and DVM base-image config.
             </div>
           </div>
 
           <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 flex flex-col gap-2">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Resolved paths</div>
-            <div className="text-[11px] text-[var(--muted-dim)] break-all">Drone: {profileSettings?.droneDataDir ?? 'Loading…'}</div>
-            <div className="text-[11px] text-[var(--muted-dim)] break-all">DVM: {profileSettings?.dvmDataDir ?? 'Loading…'}</div>
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Resolved paths</div>
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)] break-all">Drone: {profileSettings?.droneDataDir ?? 'Loading…'}</div>
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)] break-all">DVM: {profileSettings?.dvmDataDir ?? 'Loading…'}</div>
           </div>
 
           <div className="flex flex-col gap-2">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Create profile</div>
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Create profile</div>
             <input
               value={createProfileDraft}
               onChange={(e) => setCreateProfileDraft(e.target.value)}
-              className="h-10 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+              className="h-10 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
               placeholder="Enter profile name"
               disabled={isBusy}
             />
@@ -78,7 +78,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
               type="button"
               onClick={() => void createProfile()}
               disabled={!createProfileDraftTrimmed || isBusy}
-              className={`h-10 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-10 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 !createProfileDraftTrimmed || isBusy
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -90,21 +90,21 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
           </div>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-4 py-4 flex flex-col gap-3">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-4 py-4 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-3">
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                 Available profiles
               </div>
-              <div className="text-[12px] text-[var(--muted)] mt-1">Switch, rename, or remove isolated Hub workspaces.</div>
+              <div className="text-[var(--text-12)] text-[var(--muted)] mt-1">Switch, rename, or remove isolated Hub workspaces.</div>
             </div>
-            <div className="text-[11px] text-[var(--muted-dim)]">{profileList.length} total</div>
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">{profileList.length} total</div>
           </div>
 
           {profileSettingsLoading && !profileSettings ? (
-            <div className="text-[12px] text-[var(--muted-dim)]">Loading profiles…</div>
+            <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading profiles…</div>
           ) : profileList.length === 0 ? (
-            <div className="text-[12px] text-[var(--muted-dim)]">No profiles found.</div>
+            <div className="text-[var(--text-12)] text-[var(--muted-dim)]">No profiles found.</div>
           ) : (
             <div className="flex flex-col gap-3">
               {profileList.map((item) => {
@@ -136,7 +136,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                                     [item.name]: e.target.value,
                                   }))
                                 }
-                                className="h-10 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+                                className="h-10 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
                                 disabled={renaming}
                               />
                               <div className="flex items-center gap-2">
@@ -144,7 +144,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                                   type="button"
                                   onClick={() => void renameProfile(item.name, renameDraft)}
                                   disabled={!String(renameDraft).trim() || renaming}
-                                  className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                                  className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                                     !String(renameDraft).trim() || renaming
                                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                                       : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -164,7 +164,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                                     });
                                   }}
                                   disabled={renaming}
-                                  className="h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                                  className="h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                                   style={{ fontFamily: 'var(--display)' }}
                                 >
                                   Cancel
@@ -174,17 +174,17 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                           ) : (
                             <>
                               <div className="flex flex-wrap items-center gap-2">
-                                <div className="text-[16px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
+                                <div className="text-[16px] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>
                                   {formatProfileDisplayName(item.name)}
                                 </div>
                                 {item.active && (
-                                  <span className="rounded-full border border-[var(--green-border)] bg-[var(--green-subtle)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--green)]">
+                                  <span className="rounded-full border border-[var(--green-border)] bg-[var(--green-subtle)] px-2 py-0.5 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--green)]">
                                     Active
                                   </span>
                                 )}
                               </div>
-                              <div className="text-[11px] text-[var(--muted-dim)] break-all mt-2">Drone: {item.droneDataDir}</div>
-                              <div className="text-[11px] text-[var(--muted-dim)] break-all">DVM: {item.dvmDataDir}</div>
+                              <div className="text-[var(--text-11)] text-[var(--muted-dim)] break-all mt-2">Drone: {item.droneDataDir}</div>
+                              <div className="text-[var(--text-11)] text-[var(--muted-dim)] break-all">DVM: {item.dvmDataDir}</div>
                             </>
                           )}
                         </div>
@@ -195,7 +195,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                               type="button"
                               onClick={() => void activateProfile(item.name)}
                               disabled={item.active || rowBusy}
-                              className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                              className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                                 item.active || rowBusy
                                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -214,7 +214,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                                 }));
                               }}
                               disabled={rowBusy}
-                              className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                              className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                                 rowBusy
                                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -233,7 +233,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                                 void deleteProfile(item.name);
                               }}
                               disabled={item.active || rowBusy}
-                              className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                              className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                                 item.active || rowBusy
                                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                                   : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
@@ -246,7 +246,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                         )}
                       </div>
                       {item.active && !editing && (
-                        <div className="text-[11px] text-[var(--muted-dim)]">
+                        <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
                           Active profiles cannot be deleted. Switch to another profile first.
                         </div>
                       )}

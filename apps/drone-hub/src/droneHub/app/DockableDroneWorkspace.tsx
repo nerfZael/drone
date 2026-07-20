@@ -271,7 +271,7 @@ function WorkspaceTab(props: IDockviewPanelHeaderProps) {
 
 function WorkspaceWatermark() {
   return (
-    <div className="h-full flex items-center justify-center bg-[var(--panel)] text-[12px] text-[var(--muted)]">
+    <div className="h-full flex items-center justify-center bg-[var(--panel)] text-[var(--text-12)] text-[var(--muted)]">
       Open a pane from the toolbar.
     </div>
   );
@@ -594,7 +594,7 @@ export function DockableDroneWorkspace({
               <button
                 type="button"
                 onClick={() => setMobileActivePanel('chat')}
-                className={`inline-flex h-8 items-center rounded-md border px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                className={`inline-flex h-8 items-center rounded-[var(--radius-medium)] border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
                   mobileActivePanel === 'chat'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]'
@@ -609,7 +609,7 @@ export function DockableDroneWorkspace({
                   setMobileActivePanel('tool');
                   onActiveToolTabChange?.(activeToolTab);
                 }}
-                className={`inline-flex h-8 items-center rounded-md border px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                className={`inline-flex h-8 items-center rounded-[var(--radius-medium)] border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
                   mobileActivePanel === 'tool'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]'

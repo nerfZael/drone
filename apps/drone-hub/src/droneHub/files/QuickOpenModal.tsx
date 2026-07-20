@@ -88,7 +88,7 @@ export function QuickOpenModal({
         if (event.target === event.currentTarget) onClose();
       }}
     >
-      <div className="mx-auto flex max-h-[72vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel)] shadow-2xl">
+      <div className="mx-auto flex max-h-[72vh] w-full max-w-2xl flex-col overflow-hidden rounded-[var(--radius-large)] border border-[var(--border)] bg-[var(--panel)] shadow-2xl">
         <div className="border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2">
           <input
             ref={inputRef}
@@ -116,7 +116,7 @@ export function QuickOpenModal({
               }
             }}
             placeholder="Search files by path"
-            className="h-9 w-full rounded-md border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-3 font-mono text-[13px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+            className="h-9 w-full rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-3 font-mono text-[var(--text-13)] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
             spellCheck={false}
           />
         </div>
@@ -137,26 +137,26 @@ export function QuickOpenModal({
                 <Icon className="h-4 w-4 flex-shrink-0 text-[var(--muted)]" />
                 <div className="min-w-0 flex-1">
                   <div className="flex min-w-0 items-center gap-2">
-                    <span className="truncate text-[12px] font-medium">{item.name}</span>
+                    <span className="truncate text-[var(--text-12)] font-medium">{item.name}</span>
                     {item.source === 'recent' ? (
-                      <span className="shrink-0 rounded border border-[var(--border-subtle)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+                      <span className="shrink-0 rounded border border-[var(--border-subtle)] px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)]">
                         Recent
                       </span>
                     ) : null}
                   </div>
-                  <div className="mt-0.5 truncate font-mono text-[10px] text-[var(--muted-dim)]">{itemDetailText(item)}</div>
+                  <div className="mt-0.5 truncate font-mono text-[var(--text-10)] text-[var(--muted-dim)]">{itemDetailText(item)}</div>
                 </div>
                 {active ? <IconChevron className="h-3.5 w-3.5 -rotate-90 text-[var(--accent)]" /> : null}
               </button>
             );
           })}
           {items.length === 0 && emptyMessage ? (
-            <div className={`px-4 py-8 text-center text-[12px] ${error ? 'text-[var(--red)]' : 'text-[var(--muted)]'}`}>
+            <div className={`px-4 py-8 text-center text-[var(--text-12)] ${error ? 'text-[var(--red)]' : 'text-[var(--muted)]'}`}>
               {emptyMessage}
             </div>
           ) : null}
         </div>
-        <div className="flex items-center justify-between gap-3 border-t border-[var(--border-subtle)] px-3 py-2 text-[10px] text-[var(--muted)]">
+        <div className="flex items-center justify-between gap-3 border-t border-[var(--border-subtle)] px-3 py-2 text-[var(--text-10)] text-[var(--muted)]">
           <span>
             {loading
               ? 'Searching...'

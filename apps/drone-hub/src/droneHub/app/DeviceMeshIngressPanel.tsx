@@ -102,7 +102,7 @@ export function DeviceMeshIngressPanel({
 
   if (!status) {
     return (
-      <div className="flex min-h-24 flex-col items-center justify-center gap-2 text-center text-[11px] text-[var(--muted)]">
+      <div className="flex min-h-24 flex-col items-center justify-center gap-2 text-center text-[var(--text-11)] text-[var(--muted)]">
         {error ? (
           <>
             <span className="text-[var(--red)]">{error}</span>
@@ -114,7 +114,7 @@ export function DeviceMeshIngressPanel({
                   setError(nextError?.message ?? String(nextError)),
                 );
               }}
-              className="font-semibold uppercase tracking-wider text-[var(--accent)]"
+              className="font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--accent)]"
             >
               Retry
             </button>
@@ -132,16 +132,16 @@ export function DeviceMeshIngressPanel({
     <div className="py-1">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">
+          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
             Secure mesh ingress
           </div>
-          <p className="mt-1 max-w-2xl text-[11px] leading-relaxed text-[var(--muted)]">
+          <p className="mt-1 max-w-2xl text-[var(--text-11)] leading-relaxed text-[var(--muted)]">
             Only pairing, health, and authenticated device WebSockets are exposed on this port. The
             Drone Hub UI and local administration API stay private.
           </p>
         </div>
         <span
-          className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider ${status.running ? 'bg-[var(--green-subtle)] text-[var(--green)]' : 'bg-[var(--red-subtle)] text-[var(--red)]'}`}
+          className={`rounded px-2 py-1 text-[var(--text-9)] font-[var(--weight-bold)] uppercase tracking-wider ${status.running ? 'bg-[var(--green-subtle)] text-[var(--green)]' : 'bg-[var(--red-subtle)] text-[var(--red)]'}`}
         >
           {status.running ? `Localhost:${status.port}` : 'Not running'}
         </span>
@@ -149,25 +149,25 @@ export function DeviceMeshIngressPanel({
 
       <div className="mt-3 grid gap-3 sm:grid-cols-[120px_minmax(0,1fr)]">
         <label className="grid gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-dim)]">
+          <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--muted-dim)]">
             Local port
           </span>
           <input
             inputMode="numeric"
             value={port}
             onChange={(event) => setPort(event.target.value)}
-            className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+            className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-[var(--text-12)] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
           />
         </label>
         <label className="grid gap-1">
-          <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-dim)]">
+          <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--muted-dim)]">
             Reachable HTTPS endpoint
           </span>
           <input
             value={publicEndpoint}
             onChange={(event) => setPublicEndpoint(event.target.value)}
             placeholder="https://your-hub.ngrok.app"
-            className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+            className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-[var(--text-12)] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
           />
         </label>
       </div>
@@ -185,7 +185,7 @@ export function DeviceMeshIngressPanel({
               applyStatus(response.status);
             })
           }
-          className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--fg)] disabled:opacity-50"
+          className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg)] disabled:opacity-50"
         >
           {busy === 'save' ? 'Saving…' : 'Save endpoint'}
         </button>
@@ -202,7 +202,7 @@ export function DeviceMeshIngressPanel({
               applyStatus(response.status);
             })
           }
-          className="rounded border border-[var(--border-subtle)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--fg-secondary)] disabled:opacity-50"
+          className="rounded border border-[var(--border-subtle)] px-3 py-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg-secondary)] disabled:opacity-50"
         >
           {busy === 'detect' ? 'Detecting…' : 'Detect ngrok'}
         </button>
@@ -220,13 +220,13 @@ export function DeviceMeshIngressPanel({
               if (!response.status.publicEndpoint) await waitForNgrokUrl();
             })
           }
-          className="rounded border border-[var(--border-subtle)] px-3 py-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--fg-secondary)] disabled:opacity-50"
+          className="rounded border border-[var(--border-subtle)] px-3 py-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg-secondary)] disabled:opacity-50"
         >
           {busy === 'start' ? 'Starting…' : 'Start ngrok'}
         </button>
       </div>
 
-      <div className="mt-2 text-[10px] text-[var(--muted)]">
+      <div className="mt-2 text-[var(--text-10)] text-[var(--muted)]">
         {status.endpointSource === 'ngrok'
           ? 'ngrok-managed: URL changes are detected and signed route updates are sent to peers.'
           : status.publicEndpoint
@@ -234,7 +234,7 @@ export function DeviceMeshIngressPanel({
             : 'Set a manual HTTPS URL, detect an existing ngrok tunnel, or start one here.'}
       </div>
       {error || status.error || (status.endpointSource === 'ngrok' && status.ngrok.error) ? (
-        <div className="mt-2 text-[11px] text-[var(--red)]">
+        <div className="mt-2 text-[var(--text-11)] text-[var(--red)]">
           {error ?? status.error ?? status.ngrok.error}
         </div>
       ) : null}

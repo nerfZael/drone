@@ -23,7 +23,7 @@ export function SegmentedToolbarToggle<T extends string>({
 }: SegmentedToolbarToggleProps<T>) {
   return (
     <div className="flex items-center gap-1.5">
-      <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+      <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
         {label}
       </span>
       <div className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] p-0.5">
@@ -35,7 +35,7 @@ export function SegmentedToolbarToggle<T extends string>({
               type="button"
               onClick={() => onChange(option.value)}
               disabled={disabled}
-              className={`h-[28px] px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-[28px] px-2 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 active
                   ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
                   : 'bg-transparent border-transparent text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)]'

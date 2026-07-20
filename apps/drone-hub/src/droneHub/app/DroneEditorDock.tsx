@@ -82,7 +82,7 @@ export function DroneEditorDock({
           onGoForward={quickOpen.onGoForward}
         />
       ) : (
-        <div className="h-full flex items-center justify-center px-4 text-center text-[12px] text-[var(--muted)]">
+        <div className="h-full flex items-center justify-center px-4 text-center text-[var(--text-12)] text-[var(--muted)]">
           Open a file from Files, Changes, PRs, or a chat reference.
         </div>
       )}

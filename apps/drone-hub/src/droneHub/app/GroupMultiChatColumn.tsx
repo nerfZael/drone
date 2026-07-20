@@ -649,7 +649,7 @@ export function GroupMultiChatColumn({
 
   return (
     <section
-      className="flex-none h-full rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden flex flex-col"
+      className="flex-none h-full rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden flex flex-col"
       style={{ width: columnWidthPx, minWidth: columnWidthPx }}
     >
       <div className="group/column-header flex-shrink-0 px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)]">
@@ -659,7 +659,7 @@ export function GroupMultiChatColumn({
               <button
                 type="button"
                 onClick={onOpenDrone}
-                className="min-w-0 flex-1 block text-left text-[12px] font-semibold text-[var(--fg-secondary)] hover:text-[var(--accent)] transition-colors truncate"
+                className="min-w-0 flex-1 block text-left text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] hover:text-[var(--accent)] transition-colors truncate"
                 style={{ fontFamily: 'var(--display)' }}
                 title={`Open ${shownName}`}
               >
@@ -698,7 +698,7 @@ export function GroupMultiChatColumn({
               </button>
             </div>
           </div>
-          <div className="text-[10px] text-[var(--muted-dim)] font-mono mt-0.5">chat: {chatName}</div>
+          <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono mt-0.5">chat: {chatName}</div>
           <div className="mt-1.5 flex items-center gap-1.5 flex-wrap">
             <button
               type="button"
@@ -706,7 +706,7 @@ export function GroupMultiChatColumn({
                 void openSshTerminal();
               }}
               disabled={disabledByProvisioning || Boolean(quickActionBusy)}
-              className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+              className={`inline-flex items-center h-5 px-1.5 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 disabledByProvisioning || Boolean(quickActionBusy)
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -722,7 +722,7 @@ export function GroupMultiChatColumn({
                 void openBrowserTab();
               }}
               disabled={disabledByProvisioning || !quickOpenTabUrl}
-              className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+              className={`inline-flex items-center h-5 px-1.5 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 disabledByProvisioning || !quickOpenTabUrl
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
@@ -740,7 +740,7 @@ export function GroupMultiChatColumn({
                     void pullRepoChanges();
                   }}
                   disabled={disabledByProvisioning || Boolean(quickActionBusy)}
-                  className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                  className={`inline-flex items-center h-5 px-1.5 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                     disabledByProvisioning || Boolean(quickActionBusy)
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -760,7 +760,7 @@ export function GroupMultiChatColumn({
                     void pushRepoChanges();
                   }}
                   disabled={disabledByProvisioning || Boolean(quickActionBusy)}
-                  className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                  className={`inline-flex items-center h-5 px-1.5 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                     disabledByProvisioning || Boolean(quickActionBusy)
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -777,14 +777,14 @@ export function GroupMultiChatColumn({
               </>
             ) : null}
           </div>
-          {quickActionError ? <div className="mt-1 text-[10px] text-[var(--red)] truncate" title={quickActionError}>{quickActionError}</div> : null}
+          {quickActionError ? <div className="mt-1 text-[var(--text-10)] text-[var(--red)] truncate" title={quickActionError}>{quickActionError}</div> : null}
         </div>
       </div>
       <div ref={columnScrollRef} className="flex-1 min-h-0 overflow-auto px-3 py-3">
         {loading && !transcripts ? (
           <ChatLoadingState />
         ) : error ? (
-          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">{error}</div>
+          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">{error}</div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
           <div className="space-y-5">
             {(transcripts ?? []).map((item) => {

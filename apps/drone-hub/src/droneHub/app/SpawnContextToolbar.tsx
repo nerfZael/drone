@@ -92,7 +92,7 @@ export function SpawnContextToolbar({
   }, [selectedCatalogModel, setSpawnReasoning, spawnReasoning]);
   const spawnModelMenuDisabled = controlsLocked || spawnModelMenuEntries.length <= 1;
   const isPanelLayout = layout === 'panel';
-  const sectionLabelClassName = 'text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase';
+  const sectionLabelClassName = 'text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase';
   const sectionLabelStyle = { fontFamily: 'var(--display)' } as const;
   const toolbarGroupClassName = 'flex items-center gap-1.5 min-w-0';
 
@@ -100,7 +100,7 @@ export function SpawnContextToolbar({
     return (
       <div className="grid gap-3 lg:grid-cols-2">
         {showAgentControls ? (
-          <div className="min-w-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3">
+          <div className="min-w-0 rounded-[var(--radius-xlarge)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3">
             <div className={sectionLabelClassName} style={sectionLabelStyle}>
               Agent
             </div>
@@ -121,7 +121,7 @@ export function SpawnContextToolbar({
                 type="button"
                 onClick={onOpenCustomAgentModal}
                 disabled={controlsLocked || customButtonDisabled}
-                className={`inline-flex items-center justify-center gap-1 h-9 px-3 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                className={`inline-flex items-center justify-center gap-1 h-9 px-3 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                   controlsLocked || customButtonDisabled
                     ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                     : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -135,7 +135,7 @@ export function SpawnContextToolbar({
           </div>
         ) : null}
         {showAgentControls && spawnAgentConfig.kind !== 'custom' ? (
-          <div className="min-w-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3">
+          <div className="min-w-0 rounded-[var(--radius-xlarge)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3">
             <div className={sectionLabelClassName} style={sectionLabelStyle}>
               Model
             </div>
@@ -176,7 +176,7 @@ export function SpawnContextToolbar({
                   }}
                   disabled={controlsLocked}
                   placeholder="Default model"
-                  className={`h-9 min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
+                  className={`h-9 min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[var(--text-11)] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
                     controlsLocked ? 'opacity-40 cursor-not-allowed' : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
                   }`}
                   title={modelTitle}
@@ -185,7 +185,7 @@ export function SpawnContextToolbar({
                   type="button"
                   onClick={() => setSpawnModel('')}
                   disabled={controlsLocked || !spawnModel.trim()}
-                  className={`inline-flex items-center justify-center gap-1 h-9 px-3 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                  className={`inline-flex items-center justify-center gap-1 h-9 px-3 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                     controlsLocked || !spawnModel.trim()
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -202,8 +202,8 @@ export function SpawnContextToolbar({
         <div
           className={
             repoContainerClassName
-              ? `min-w-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 lg:col-span-2 ${repoContainerClassName}`
-              : 'min-w-0 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 lg:col-span-2'
+              ? `min-w-0 rounded-[var(--radius-xlarge)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 lg:col-span-2 ${repoContainerClassName}`
+              : 'min-w-0 rounded-[var(--radius-xlarge)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 lg:col-span-2'
           }
         >
           <div className={sectionLabelClassName} style={sectionLabelStyle}>
@@ -220,7 +220,7 @@ export function SpawnContextToolbar({
               menuClassName="max-h-[240px] overflow-y-auto"
               title={chatHeaderRepoPath || 'No repo'}
               triggerLabel={chatHeaderRepoPath ? repoPathLabel(chatHeaderRepoPath) : 'No repo'}
-              triggerLabelClassName={chatHeaderRepoPath ? 'font-mono text-[11px]' : undefined}
+              triggerLabelClassName={chatHeaderRepoPath ? 'font-mono text-[var(--text-11)]' : undefined}
               chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
             />
           </div>
@@ -251,7 +251,7 @@ export function SpawnContextToolbar({
             type="button"
             onClick={onOpenCustomAgentModal}
             disabled={controlsLocked || customButtonDisabled}
-            className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+            className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
               controlsLocked || customButtonDisabled
                 ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                 : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -305,7 +305,7 @@ export function SpawnContextToolbar({
             }}
             disabled={controlsLocked}
             placeholder="Default model"
-            className={`h-[28px] ${allowWrap ? 'w-[190px]' : 'w-[170px]'} rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
+            className={`h-[28px] ${allowWrap ? 'w-[190px]' : 'w-[170px]'} rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-11)] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
               controlsLocked ? 'opacity-40 cursor-not-allowed' : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
             }`}
             title={modelTitle}
@@ -314,7 +314,7 @@ export function SpawnContextToolbar({
             type="button"
             onClick={() => setSpawnModel('')}
             disabled={controlsLocked || !spawnModel.trim()}
-            className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+            className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
               controlsLocked || !spawnModel.trim()
                 ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                 : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -341,7 +341,7 @@ export function SpawnContextToolbar({
           menuClassName="max-h-[240px] overflow-y-auto"
           title={chatHeaderRepoPath || 'No repo'}
           triggerLabel={chatHeaderRepoPath ? repoPathLabel(chatHeaderRepoPath) : 'No repo'}
-          triggerLabelClassName={chatHeaderRepoPath ? 'font-mono text-[11px]' : undefined}
+          triggerLabelClassName={chatHeaderRepoPath ? 'font-mono text-[var(--text-11)]' : undefined}
           chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
         />
       </div>

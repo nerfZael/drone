@@ -682,24 +682,22 @@ export function ChatInput({
     >
       <div className="max-w-[1170px] mx-auto">
         {(promptError || attachmentError) && (
-          <div className="mb-2 text-[11px] text-[var(--red)] px-1" title={promptError || attachmentError || undefined}>
+          <div className="mb-2 text-[var(--text-11)] text-[var(--red)] px-1" title={promptError || attachmentError || undefined}>
             {promptError || attachmentError}
           </div>
         )}
         <div
           ref={automationPanelRef}
-          className={`relative rounded-lg border bg-[var(--panel-alt)] shadow-[0_0_40px_var(--shadow-color),0_0_80px_var(--shadow-color)] ${
+          className={`relative rounded-[var(--radius-large)] border bg-[var(--panel-raised)] shadow-[0_8px_24px_var(--shadow-color)] ${
             dragActive ? 'border-[var(--accent)]' : 'border-[var(--border)]'
           }`}
         >
-          {/* Top accent line */}
-          <div className="absolute top-0 left-4 right-4 h-px bg-gradient-to-r from-transparent via-[var(--user-muted)] to-transparent opacity-25" />
           <ChatComposerContext config={composerContext} />
           {attachmentsOn && attachments.length > 0 && (
             <div className="px-3 pt-3">
               <div className="flex items-center justify-between gap-2">
                 <div
-                  className="text-[10px] text-[var(--muted-dim)] tracking-wide uppercase"
+                  className="text-[var(--text-10)] text-[var(--muted-dim)] tracking-wide uppercase"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   {attachments.length} attachment{attachments.length === 1 ? '' : 's'} attached
@@ -711,7 +709,7 @@ export function ChatInput({
                   type="button"
                   onClick={() => openPicker()}
                   disabled={attachmentControlsLocked}
-                  className={`text-[10px] font-semibold tracking-wide uppercase px-2 py-1 rounded border transition-all ${
+                  className={`text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase px-2 py-1 rounded border transition-all ${
                     attachmentControlsLocked
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -734,20 +732,20 @@ export function ChatInput({
                     ) : (
                       <div className="w-[180px] min-h-[56px] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5">
                         <div
-                          className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)]"
+                          className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)]"
                           style={{ fontFamily: 'var(--display)' }}
                         >
                           {a.kind === 'text' ? 'Text attachment' : 'File attachment'}
                         </div>
-                        <div className="mt-1 truncate text-[10px] text-[var(--fg-secondary)]">{a.name}</div>
-                        <div className="mt-0.5 text-[9px] text-[var(--muted-dim)]">{formatBytes(a.size)}</div>
+                        <div className="mt-1 truncate text-[var(--text-10)] text-[var(--fg-secondary)]">{a.name}</div>
+                        <div className="mt-0.5 text-[var(--text-9)] text-[var(--muted-dim)]">{formatBytes(a.size)}</div>
                       </div>
                     )}
                     <button
                       type="button"
                       onClick={() => removeAttachment(a.id)}
                       disabled={attachmentControlsLocked}
-                      className={`absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full border text-[10px] font-bold flex items-center justify-center transition-all ${
+                      className={`absolute -top-1.5 -right-1.5 w-5 h-5 rounded-full border text-[var(--text-10)] font-[var(--weight-bold)] flex items-center justify-center transition-all ${
                         attachmentControlsLocked
                           ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                           : 'bg-[var(--panel-raised)] border-[var(--border)] text-[var(--muted)] hover:text-[var(--red)] hover:border-[var(--red)]'
@@ -783,7 +781,7 @@ export function ChatInput({
                   type="button"
                   onClick={() => openPicker()}
                   disabled={attachmentControlsLocked}
-                  className={`inline-flex items-center justify-center w-[44px] h-[44px] rounded-md border transition-all ${
+                  className={`inline-flex items-center justify-center w-[44px] h-[44px] rounded-[var(--radius-medium)] border transition-all ${
                     attachmentControlsLocked
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
@@ -804,7 +802,7 @@ export function ChatInput({
                 type="button"
                 onClick={() => void startVoiceRecording()}
                 disabled={voiceRecordButtonDisabled}
-                className={`inline-flex h-[44px] w-[44px] flex-shrink-0 items-center justify-center rounded-md border transition-all ${
+                className={`inline-flex h-[44px] w-[44px] flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border transition-all ${
                   voiceRecordButtonDisabled
                     ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                     : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
@@ -825,7 +823,7 @@ export function ChatInput({
                   type="button"
                   onClick={() => void discardVoiceRecording()}
                   disabled={voiceRecordingStatus === 'transcribing' || voiceActionInFlight}
-                  className={`inline-flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
+                  className={`inline-flex h-[var(--control-height)] w-[var(--control-height)] items-center justify-center rounded-[var(--radius-medium)] border transition-all ${
                     voiceRecordingStatus === 'transcribing' || voiceActionInFlight
                       ? 'opacity-40 cursor-not-allowed border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
                       : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
@@ -842,7 +840,7 @@ export function ChatInput({
                   type="button"
                   onClick={() => toggleVoiceRecordingPause()}
                   disabled={voicePauseButtonDisabled}
-                  className={`inline-flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
+                  className={`inline-flex h-[var(--control-height)] w-[var(--control-height)] items-center justify-center rounded-[var(--radius-medium)] border transition-all ${
                     voicePauseButtonDisabled
                       ? 'opacity-40 cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                       : voiceRecordingStatus === 'paused'
@@ -867,7 +865,7 @@ export function ChatInput({
                   type="button"
                   onClick={() => void stopVoiceRecordingAndFillDraft()}
                   disabled={voiceStopButtonDisabled}
-                  className={`inline-flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
+                  className={`inline-flex h-[var(--control-height)] w-[var(--control-height)] items-center justify-center rounded-[var(--radius-medium)] border transition-all ${
                     voiceStopButtonDisabled
                       ? 'opacity-40 cursor-not-allowed border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]'
                       : 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:bg-[var(--green-subtle)]'
@@ -919,7 +917,7 @@ export function ChatInput({
               }}
               rows={1}
               placeholder="Message..."
-              className="min-w-[180px] flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-[13px] leading-[1.35] text-[var(--fg)] placeholder:text-[11px] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--user-muted)] transition-colors"
+              className="min-w-[180px] flex-1 resize-none rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-13)] leading-[1.35] text-[var(--fg)] placeholder:text-[var(--text-11)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--user-muted)] transition-colors"
               style={{ minHeight: CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX }}
               disabled={composerLocked}
               autoFocus={Boolean(autoFocus)}
@@ -938,7 +936,7 @@ export function ChatInput({
                   });
                 }}
                 disabled={Boolean(disabled)}
-                className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                className={`inline-flex items-center gap-1.5 h-[var(--control-height)] px-3 rounded-[var(--radius-medium)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                   Boolean(disabled)
                     ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                     : draftAutomationActive
@@ -949,7 +947,7 @@ export function ChatInput({
                 title="Send this draft as a repeating automation"
               >
                 Repeat
-                <span className="text-[9px] text-[var(--muted-dim)]">{draftAutomationActive ? 'On' : 'Off'}</span>
+                <span className="text-[var(--text-9)] text-[var(--muted-dim)]">{draftAutomationActive ? 'On' : 'Off'}</span>
               </button>
             )}
             {availableAutomationActions.length > 0 && (
@@ -958,7 +956,7 @@ export function ChatInput({
                   type="button"
                   onClick={() => setAutomationPanelOpen((open) => !open)}
                   disabled={Boolean(disabled)}
-                  className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                  className={`inline-flex items-center gap-1.5 h-[var(--control-height)] px-3 rounded-[var(--radius-medium)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                     Boolean(disabled)
                       ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -987,7 +985,7 @@ export function ChatInput({
                   void onPublish();
                 }}
                 disabled={Boolean(disabled) || publishing}
-                className={`inline-flex h-9 items-center justify-center rounded-md border px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                className={`inline-flex h-[var(--control-height)] items-center justify-center rounded-[var(--radius-medium)] border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
                   Boolean(disabled) || publishing
                     ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[var(--muted)] opacity-40'
                     : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -1003,7 +1001,7 @@ export function ChatInput({
                 type="button"
                 onClick={() => void onStop?.()}
                 disabled={stopping}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--red)] hover:bg-[var(--red-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-[var(--control-height)] items-center justify-center rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)] hover:bg-[var(--red-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 {stopping ? 'Stopping...' : 'Stop'}
@@ -1019,7 +1017,7 @@ export function ChatInput({
                 sendNow({ trigger: 'button', modifierKey: false });
               }}
               disabled={showStopAction && !showSeparateStopAction ? stopping : sendDisabled}
-              className={`inline-flex items-center justify-center h-9 min-w-[80px] px-4 rounded-md text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`inline-flex items-center justify-center h-[var(--control-height)] min-w-[80px] px-4 rounded-[var(--radius-medium)] text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 showStopAction && !showSeparateStopAction
                   ? stopping
                     ? 'opacity-50 cursor-not-allowed bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)]'
@@ -1036,21 +1034,21 @@ export function ChatInput({
           </div>
           {draftAutomationActive && (
             <div className="px-3 pb-3">
-              <div className="rounded-md border border-[var(--accent-muted)] bg-[var(--surface-soft)] p-2.5">
+              <div className="rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--surface-soft)] p-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div
-                    className="text-[9px] uppercase tracking-[0.08em] text-[var(--accent)]"
+                    className="text-[var(--text-9)] uppercase tracking-[0.08em] text-[var(--accent)]"
                     style={{ fontFamily: 'var(--display)' }}
                   >
                     Repeat This Message
                   </div>
-                  <div className="text-[10px] text-[var(--muted-dim)]">
+                  <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
                     Stops on <code>{CHAT_DRAFT_AUTOMATION_STOP_PHRASE_DEFAULT}</code>. No final message.
                   </div>
                 </div>
                 <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[110px_minmax(0,1fr)]">
                   <label className="flex flex-col gap-1">
-                    <span className="text-[9px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Count</span>
+                    <span className="text-[var(--text-9)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Count</span>
                     <input
                       type="number"
                       min={AUTOMATION_RUNS_MIN}
@@ -1058,12 +1056,12 @@ export function ChatInput({
                       step={1}
                       value={draftAutomationRunsDraft}
                       onChange={(e) => setDraftAutomationRunsDraft(e.target.value)}
-                      className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                      className="h-[var(--control-height)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
                     />
                   </label>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_120px_minmax(0,1fr)]">
                     <label className="flex flex-col gap-1">
-                      <span className="text-[9px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Every</span>
+                      <span className="text-[var(--text-9)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Every</span>
                       <input
                         type="number"
                         min={AUTOMATION_SLEEP_AMOUNT_MIN}
@@ -1071,15 +1069,15 @@ export function ChatInput({
                         step={1}
                         value={draftAutomationSleepAmountDraft}
                         onChange={(e) => setDraftAutomationSleepAmountDraft(e.target.value)}
-                        className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                        className="h-[var(--control-height)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
                       />
                     </label>
                     <label className="flex flex-col gap-1">
-                      <span className="text-[9px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Unit</span>
+                      <span className="text-[var(--text-9)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Unit</span>
                       <select
                         value={draftAutomationSleepUnit}
                         onChange={(e) => setDraftAutomationSleepUnit(e.target.value as AutomationSleepUnit)}
-                        className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                        className="h-[var(--control-height)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
                       >
                         <option value="seconds">Seconds</option>
                         <option value="minutes">Minutes</option>
@@ -1088,7 +1086,7 @@ export function ChatInput({
                       </select>
                     </label>
                     <div className="flex items-end">
-                      <div className="h-9 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[10px] text-[var(--muted-dim)] flex items-center">
+                      <div className="h-[var(--control-height)] w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-10)] text-[var(--muted-dim)] flex items-center">
                         {draftAutomationRuns} send{draftAutomationRuns === 1 ? '' : 's'} with {draftAutomationSleepLabel.toLowerCase()} between runs
                       </div>
                     </div>
@@ -1118,7 +1116,7 @@ export function ChatInput({
           />
           {hasModeHint && (
             <div
-              className="px-4 pb-2 text-[10px] text-[var(--muted-dim)] tracking-wide uppercase"
+              className="px-4 pb-2 text-[var(--text-10)] text-[var(--muted-dim)] tracking-wide uppercase"
               style={{ fontFamily: 'var(--display)' }}
             >
               {modeHint}

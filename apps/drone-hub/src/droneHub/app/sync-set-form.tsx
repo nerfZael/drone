@@ -57,7 +57,7 @@ export function setSyncSetDraftSourceType(draft: SyncSetDraftInput, nextSourceTy
 }
 
 function formInputClass(disabled: boolean): string {
-  return `h-10 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`;
+  return `h-10 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`;
 }
 
 export function actionButtonClass(enabled: boolean): string {
@@ -82,7 +82,7 @@ export function SyncSetFields(props: {
   return (
     <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
       <div className="flex flex-col gap-2 xl:col-span-2">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Label</div>
+        <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Label</div>
         <input
           value={draft.label}
           onChange={(e) => onChange({ ...draft, label: e.target.value })}
@@ -93,7 +93,7 @@ export function SyncSetFields(props: {
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Source type</div>
+        <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Source type</div>
         <select
           value={draft.sourceType}
           onChange={(e) => onChange(setSyncSetDraftSourceType(draft, e.target.value === 'hub-managed' ? 'hub-managed' : 'host-path'))}
@@ -106,7 +106,7 @@ export function SyncSetFields(props: {
       </div>
 
       <div className="flex flex-col gap-2">
-        <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Target path</div>
+        <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Target path</div>
         <input
           value={draft.targetPath}
           onChange={(e) => onChange({ ...draft, targetPath: e.target.value })}
@@ -119,7 +119,7 @@ export function SyncSetFields(props: {
 
       {draft.sourceType === 'host-path' ? (
         <div className="flex flex-col gap-2 xl:col-span-2">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Source path</div>
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Source path</div>
           <input
             value={draft.sourcePath}
             onChange={(e) => onChange(updateSyncSetDraftSourcePath(draft, e.target.value))}
@@ -128,17 +128,17 @@ export function SyncSetFields(props: {
             disabled={disabled}
             spellCheck={false}
           />
-          <div className="text-[11px] text-[var(--muted-dim)]">
+          <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
             Existing host directories are mirrored into every new drone automatically. Existing drones update only when you click apply.
           </div>
         </div>
       ) : (
         <div className="xl:col-span-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-          <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Hub-managed source</div>
-          <div className="text-[11px] text-[var(--muted-dim)] mt-1 leading-relaxed">
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Hub-managed source</div>
+          <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1 leading-relaxed">
             A dedicated source directory is created on the host for this sync set. New drones always receive a full mirror of that directory after provisioning.
           </div>
-          <label className="mt-3 flex items-start gap-2 text-[12px] text-[var(--muted)]">
+          <label className="mt-3 flex items-start gap-2 text-[var(--text-12)] text-[var(--muted)]">
             <input
               type="checkbox"
               checked={draft.applyToHost}

@@ -128,10 +128,10 @@ export function CommitInspectionView({
         }}
       >
         <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur">
-          <div className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
             Commit List
           </div>
-          <div className="mt-1 text-[10px] text-[var(--muted)]">
+          <div className="mt-1 text-[var(--text-10)] text-[var(--muted)]">
             {commitListLoading ? 'Refreshing commits…' : `${commitList.length} commit${commitList.length === 1 ? '' : 's'}`}
           </div>
         </div>
@@ -155,13 +155,13 @@ export function CommitInspectionView({
                 title={commit.subject}
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="font-mono text-[10px] text-[var(--accent)]">{shortSha(commit.sha)}</span>
-                  <span className="text-[9px] text-[var(--muted-dim)]" title={when.title}>
+                  <span className="font-mono text-[var(--text-10)] text-[var(--accent)]">{shortSha(commit.sha)}</span>
+                  <span className="text-[var(--text-9)] text-[var(--muted-dim)]" title={when.title}>
                     {when.short}
                   </span>
                 </div>
-                <div className="mt-1 text-[11px] font-semibold text-[var(--fg-secondary)] line-clamp-2">{commit.subject}</div>
-                <div className="mt-1 text-[10px] text-[var(--muted)] truncate">{commit.authorName || 'Unknown author'}</div>
+                <div className="mt-1 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] line-clamp-2">{commit.subject}</div>
+                <div className="mt-1 text-[var(--text-10)] text-[var(--muted)] truncate">{commit.authorName || 'Unknown author'}</div>
               </button>
             );
           })}
@@ -191,21 +191,21 @@ export function CommitInspectionView({
 
       <div className="flex-1 min-w-0 min-h-0 overflow-hidden flex flex-col">
         {!selectedCommit ? (
-          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
             Select a commit to inspect its file-level changes.
           </div>
         ) : activeCommitDetailsError ? (
-          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">{activeCommitDetailsError}</div>
+          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--red)]">{activeCommitDetailsError}</div>
         ) : activeCommitDetailsLoading && !activeCommitDetails ? (
-          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">Loading commit details…</div>
+          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">Loading commit details…</div>
         ) : (
           <>
             <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-soft)]">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-mono text-[11px] text-[var(--accent)]">{shortSha(selectedCommit.sha)}</span>
-                <span className="text-[12px] font-semibold text-[var(--fg-secondary)]">{selectedCommit.subject}</span>
+                <span className="font-mono text-[var(--text-11)] text-[var(--accent)]">{shortSha(selectedCommit.sha)}</span>
+                <span className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">{selectedCommit.subject}</span>
               </div>
-              <div className="mt-1 flex items-center gap-1.5 flex-wrap text-[10px] text-[var(--muted)]">
+              <div className="mt-1 flex items-center gap-1.5 flex-wrap text-[var(--text-10)] text-[var(--muted)]">
                 <MetaChip label="author" value={selectedCommit.authorName || '-'} />
                 <MetaChip
                   label="date"
@@ -220,7 +220,7 @@ export function CommitInspectionView({
             </div>
 
             {commitEntries.length === 0 ? (
-              <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">This commit has no file diffs to display.</div>
+              <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">This commit has no file diffs to display.</div>
             ) : viewMode === 'stacked' ? (
               <div className="flex-1 min-h-0 overflow-auto px-2 py-2 flex flex-col gap-2">
                 {commitEntries.map((entry) => {
@@ -231,13 +231,13 @@ export function CommitInspectionView({
                     <section key={`commit:${selectedCommit.sha}:${entry.path}`} className="group/file rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] overflow-hidden">
                       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                         <span
-                          className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}
+                          className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[var(--text-10)] font-mono ${badgeTone(entry)}`}
                           title={statusBadgeTitle(entry, 'pull-preview')}
                         >
                           {statusCharLabel(entry.stagedChar)}
                           {statusCharLabel(entry.unstagedChar)}
                         </span>
-                        <span className="text-[11px] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
+                        <span className="text-[var(--text-11)] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
                           {entry.path}
                         </span>
                         {renderFileQuickActions(entry)}
@@ -254,7 +254,7 @@ export function CommitInspectionView({
                               });
                             }
                           }}
-                          className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                          className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                           title={open ? 'Hide diff' : 'Show diff'}
                         >
                           {open ? 'Hide' : 'Show'}
@@ -269,16 +269,16 @@ export function CommitInspectionView({
               <div ref={splitLayoutRef as React.RefObject<HTMLDivElement>} className="flex-1 min-h-0 overflow-hidden flex">
                 <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[var(--surface-inset)]">
                   <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center justify-between gap-2">
-                    <div className="min-w-0 text-[10px] text-[var(--muted)] font-mono truncate">
+                    <div className="min-w-0 text-[var(--text-10)] text-[var(--muted)] font-mono truncate">
                       {selectedCommitFileEntry ? selectedCommitFileEntry.path : 'No file selected'}
                     </div>
                     <div className="inline-flex items-center gap-1">
                       {selectedCommitFileEntry ? renderFileQuickActions(selectedCommitFileEntry, true) : null}
-                      <div className="text-[9px] text-[var(--muted-dim)] font-mono whitespace-nowrap">{shortSha(selectedCommit.sha)}</div>
+                      <div className="text-[var(--text-9)] text-[var(--muted-dim)] font-mono whitespace-nowrap">{shortSha(selectedCommit.sha)}</div>
                     </div>
                   </div>
                   {!selectedCommitFileEntry ? (
-                    <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
+                    <div className="px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
                   ) : (
                     <DiffBlock
                       state={commitDiffByKey[commitDiffStateKey(selectedCommitFileEntry.path, selectedCommit.sha, contextMode)]}
@@ -320,7 +320,7 @@ export function CommitInspectionView({
                   }}
                 >
                   <div className="shrink-0 px-1.5 py-1 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 flex items-center justify-between gap-1">
-                    <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                    <span className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                       Files
                     </span>
                   </div>

@@ -18,7 +18,7 @@ export function ChatTabs({
           <button
             key={c}
             onClick={() => onSelect(c)}
-            className={`px-3 py-1 rounded text-[11px] font-semibold whitespace-nowrap tracking-wide uppercase transition-all ${
+            className={`px-3 py-1 rounded text-[var(--text-11)] font-[var(--weight-semibold)] whitespace-nowrap tracking-wide uppercase transition-all ${
               active
                 ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)] shadow-[var(--glow-accent)]'
                 : 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border border-transparent'

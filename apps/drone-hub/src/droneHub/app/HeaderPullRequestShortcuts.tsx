@@ -362,7 +362,7 @@ export function HeaderPullRequestShortcuts({
       <button
         type="button"
         onClick={onOpenPullRequestsTab}
-        className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+        className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
           error
             ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
             : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -377,7 +377,7 @@ export function HeaderPullRequestShortcuts({
           key={`header-pr-${pr.number}`}
           type="button"
           onClick={onOpenPullRequestsTab}
-          className="inline-flex items-start gap-1.5 max-w-[280px] px-2 py-1 rounded text-[10px] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:brightness-110 transition-all"
+          className="inline-flex items-start gap-1.5 max-w-[280px] px-2 py-1 rounded text-[var(--text-10)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:brightness-110 transition-all"
           title={`#${pr.number} ${pr.title}`}
         >
           <span className="font-mono pt-[1px]">#{pr.number}</span>
@@ -395,7 +395,7 @@ export function HeaderPullRequestShortcuts({
               void onQuickMerge();
             }}
             disabled={Boolean(busyAction)}
-            className="inline-flex items-center px-2 py-1 rounded text-[9px] font-semibold tracking-wide uppercase border border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed transition-all"
+            className="inline-flex items-center px-2 py-1 rounded text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed transition-all"
             style={{ fontFamily: 'var(--display)' }}
             title={`Quick merge #${firstPr.number}`}
           >
@@ -407,7 +407,7 @@ export function HeaderPullRequestShortcuts({
               void onQuickClose();
             }}
             disabled={Boolean(busyAction)}
-            className="inline-flex items-center px-2 py-1 rounded text-[9px] font-semibold tracking-wide uppercase border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed transition-all"
+            className="inline-flex items-center px-2 py-1 rounded text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed transition-all"
             style={{ fontFamily: 'var(--display)' }}
             title={`Quick close #${firstPr.number}`}
           >

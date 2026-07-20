@@ -48,7 +48,7 @@ function areEnvMapsEqual(a: Record<string, string>, b: Record<string, string>): 
 function AppliedSourceBadge({ source }: { source: 'repo' | 'drone' }) {
   return (
     <span
-      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-semibold tracking-wide uppercase ${
+      className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase ${
         source === 'repo'
           ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
           : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)]'
@@ -217,10 +217,10 @@ export function DroneEnvDock({
     <div className="w-full h-full bg-[var(--panel-alt)] overflow-auto">
       <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Env
           </div>
-          <div className="text-[11px] text-[var(--muted-dim)] truncate" title={droneName}>
+          <div className="text-[var(--text-11)] text-[var(--muted-dim)] truncate" title={droneName}>
             {droneName}
           </div>
         </div>
@@ -228,7 +228,7 @@ export function DroneEnvDock({
           type="button"
           onClick={() => void save()}
           disabled={saving || Boolean(validationError)}
-          className={`h-8 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
+          className={`h-8 rounded border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase ${
             saving || validationError
               ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted-dim)]'
               : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
@@ -239,7 +239,7 @@ export function DroneEnvDock({
         </button>
       </div>
 
-      <div className="px-3 py-3 flex flex-col gap-3 text-[11px]">
+      <div className="px-3 py-3 flex flex-col gap-3 text-[var(--text-11)]">
         {disabled ? (
           <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[var(--muted-dim)]">
             {provisioningText}
@@ -270,19 +270,19 @@ export function DroneEnvDock({
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+                  <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                     Repository Scope
                   </div>
-                  <div className="text-[12px] text-[var(--fg-secondary)] truncate" title={data.repoPath || data.repoLabel}>
+                  <div className="text-[var(--text-12)] text-[var(--fg-secondary)] truncate" title={data.repoPath || data.repoLabel}>
                     {data.repoLabel}
                   </div>
                   {data.repoPath ? (
-                    <div className="text-[10px] text-[var(--muted-dim)] font-mono truncate" title={data.repoPath}>
+                    <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono truncate" title={data.repoPath}>
                       {data.repoPath}
                     </div>
                   ) : null}
                 </div>
-                <label className="inline-flex items-center gap-2 text-[11px] text-[var(--fg-secondary)]">
+                <label className="inline-flex items-center gap-2 text-[var(--text-11)] text-[var(--fg-secondary)]">
                   <input
                     type="checkbox"
                     checked={useRepoVars}
@@ -292,13 +292,13 @@ export function DroneEnvDock({
                   Use repo envs
                 </label>
               </div>
-              <div className="text-[10px] text-[var(--muted-dim)]">
+              <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
                 Repo defaults for new container drones are {data.autoApplyToNewContainerDrones ? 'enabled' : 'disabled'}.
               </div>
             </div>
 
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-2">
-              <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                 Applied Variables
               </div>
               {appliedEntries.length === 0 ? (
@@ -308,8 +308,8 @@ export function DroneEnvDock({
                   {appliedEntries.map((entry) => (
                     <div key={`applied-${entry.source}-${entry.key}`} className="grid grid-cols-[auto_minmax(0,180px)_minmax(0,1fr)] gap-2 items-center">
                       <AppliedSourceBadge source={entry.source} />
-                      <span className="font-mono text-[11px] text-[var(--fg-secondary)] truncate">{entry.key}</span>
-                      <span className="font-mono text-[11px] text-[var(--muted-dim)] truncate" title={entry.value}>
+                      <span className="font-mono text-[var(--text-11)] text-[var(--fg-secondary)] truncate">{entry.key}</span>
+                      <span className="font-mono text-[var(--text-11)] text-[var(--muted-dim)] truncate" title={entry.value}>
                         {entry.value}
                       </span>
                     </div>
@@ -320,7 +320,7 @@ export function DroneEnvDock({
 
             {repoEntries.length > 0 ? (
               <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-2">
-                <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                   Repository Variables
                 </div>
                 {activeRepoEntries.length === 0 ? (
@@ -328,15 +328,15 @@ export function DroneEnvDock({
                 ) : (
                   activeRepoEntries.map((entry) => (
                     <div key={`repo-${entry.key}`} className="grid grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto] gap-2 items-center">
-                      <span className="font-mono text-[11px] text-[var(--fg-secondary)] truncate">{entry.key}</span>
-                      <span className="font-mono text-[11px] text-[var(--muted-dim)] truncate" title={entry.value}>
+                      <span className="font-mono text-[var(--text-11)] text-[var(--fg-secondary)] truncate">{entry.key}</span>
+                      <span className="font-mono text-[var(--text-11)] text-[var(--muted-dim)] truncate" title={entry.value}>
                         {entry.value}
                       </span>
                       <button
                         type="button"
                         onClick={() => setDisabledRepoKeys((prev) => (prev.includes(entry.key) ? prev : [...prev, entry.key].sort()))}
                         disabled={!useRepoVars || saving}
-                        className={`h-8 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
+                        className={`h-8 rounded border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase ${
                           !useRepoVars || saving
                             ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
                             : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
@@ -350,20 +350,20 @@ export function DroneEnvDock({
                 )}
                 {excludedRepoEntries.length > 0 ? (
                   <div className="pt-2 border-t border-[var(--border-subtle)] flex flex-col gap-2">
-                    <div className="text-[10px] text-[var(--muted-dim)] uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
+                    <div className="text-[var(--text-10)] text-[var(--muted-dim)] uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
                       Excluded From This Drone
                     </div>
                     {excludedRepoEntries.map((entry) => (
                       <div key={`excluded-${entry.key}`} className="grid grid-cols-[minmax(0,180px)_minmax(0,1fr)_auto] gap-2 items-center opacity-80">
-                        <span className="font-mono text-[11px] text-[var(--fg-secondary)] truncate">{entry.key}</span>
-                        <span className="font-mono text-[11px] text-[var(--muted-dim)] truncate" title={entry.value}>
+                        <span className="font-mono text-[var(--text-11)] text-[var(--fg-secondary)] truncate">{entry.key}</span>
+                        <span className="font-mono text-[var(--text-11)] text-[var(--muted-dim)] truncate" title={entry.value}>
                           {entry.value}
                         </span>
                         <button
                           type="button"
                           onClick={() => setDisabledRepoKeys((prev) => prev.filter((key) => key !== entry.key))}
                           disabled={saving}
-                          className={`h-8 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
+                          className={`h-8 rounded border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase ${
                             saving
                               ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
                               : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
@@ -380,7 +380,7 @@ export function DroneEnvDock({
             ) : null}
 
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-3">
-              <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                 Custom Variables
               </div>
               <EnvEditorRows

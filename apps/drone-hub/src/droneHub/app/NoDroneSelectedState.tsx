@@ -26,29 +26,28 @@ export function NoDroneSelectedState({
 
   return (
     <main className="dh-launch-state relative flex h-full min-h-0 items-center justify-center overflow-auto px-5 py-10 md:px-10">
-      <div className="dh-launch-grid pointer-events-none absolute inset-0" aria-hidden="true" />
       <section className="relative w-full max-w-[760px] animate-fade-in" aria-labelledby="launch-state-title">
         <div className="mb-7 flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[var(--glow-accent)]">
+          <div className="flex h-11 w-11 items-center justify-center rounded-[var(--radius-xlarge)] border border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]">
             <IconDrone className="h-5 w-5" />
           </div>
           <div>
-            <div className="text-[10px] font-semibold uppercase tracking-[.2em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[.2em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Drone Hub
             </div>
-            <div className="mt-0.5 text-[12px] text-[var(--muted)]">
+            <div className="mt-0.5 text-[var(--text-12)] text-[var(--muted)]">
               {dronesLoading ? 'Loading workspaces…' : hasDrones ? 'Ready when you are' : 'No workspaces yet'}
             </div>
           </div>
         </div>
 
-        <h1 id="launch-state-title" className="max-w-[620px] text-[30px] font-semibold leading-[1.08] tracking-[-.035em] text-[var(--fg)] md:text-[42px]" style={{ fontFamily: 'var(--display)' }}>
+        <h1 id="launch-state-title" className="max-w-[620px] text-[30px] font-[var(--weight-semibold)] leading-[1.08] tracking-[-.035em] text-[var(--fg-strong)] md:text-[42px]" style={{ fontFamily: 'var(--display)' }}>
           {title}
         </h1>
-        <p className="mt-4 max-w-[540px] text-[14px] leading-6 text-[var(--muted)] md:text-[15px]">{description}</p>
+        <p className="mt-4 max-w-[540px] text-[var(--text-14)] leading-6 text-[var(--muted)] md:text-[15px]">{description}</p>
 
         {dronesError ? (
-          <div className="mt-5 rounded-xl border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2.5 text-[12px] text-[var(--red)]" role="alert">
+          <div className="mt-5 rounded-[var(--radius-xlarge)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2.5 text-[var(--text-12)] text-[var(--red)]" role="alert">
             {dronesError}
           </div>
         ) : null}
@@ -79,7 +78,7 @@ export function NoDroneSelectedState({
         </div>
 
         {hasDrones ? (
-          <p className="mt-6 text-[11px] text-[var(--muted-dim)]">Tip: select any drone in the sidebar to return to its latest chat.</p>
+          <p className="mt-6 text-[var(--text-11)] text-[var(--muted-dim)]">Tip: select any drone in the sidebar to return to its latest chat.</p>
         ) : null}
       </section>
     </main>
@@ -105,19 +104,19 @@ function LaunchAction({
     <button
       type="button"
       onClick={onClick}
-      className={`group flex min-h-[112px] items-start gap-3 rounded-xl border p-4 text-left transition-all ${
+      className={`group flex min-h-[112px] items-start gap-3 rounded-[var(--radius-xlarge)] border p-4 text-left transition-all ${
         primary
-          ? 'border-[var(--accent-border)] bg-[linear-gradient(135deg,var(--accent-subtle),var(--selected))] hover:border-[var(--accent)] hover:shadow-[var(--glow-accent)]'
+          ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] hover:border-[var(--accent)]'
           : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:-translate-y-0.5 hover:border-[var(--accent-muted)] hover:bg-[var(--surface-soft)]'
       }`}
     >
-      <span className={`mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-lg border ${primary ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted)] group-hover:text-[var(--accent)]'}`}>
+      <span className={`mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-[var(--radius-large)] border ${primary ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted)] group-hover:text-[var(--accent)]'}`}>
         {icon}
       </span>
       <span className="min-w-0">
-        <span className="block text-[9px] font-semibold uppercase tracking-[.18em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>{eyebrow}</span>
-        <span className="mt-1 block text-[13px] font-semibold text-[var(--fg)]">{title}</span>
-        <span className="mt-1 block text-[12px] leading-5 text-[var(--muted)]">{description}</span>
+        <span className="block text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[.18em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>{eyebrow}</span>
+        <span className="mt-1 block text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]">{title}</span>
+        <span className="mt-1 block text-[var(--text-12)] leading-5 text-[var(--muted)]">{description}</span>
       </span>
     </button>
   );

@@ -171,11 +171,11 @@ function InitialMessageVoiceControls(
   return (
     <div className="flex flex-wrap items-center justify-end gap-1.5">
       {error ? (
-        <span className="max-w-[260px] truncate text-[10px] text-[var(--red)]" title={error}>
+        <span className="max-w-[260px] truncate text-[var(--text-10)] text-[var(--red)]" title={error}>
           {error}
         </span>
       ) : statusLabel ? (
-        <span className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+        <span className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
           {statusLabel}
         </span>
       ) : null}

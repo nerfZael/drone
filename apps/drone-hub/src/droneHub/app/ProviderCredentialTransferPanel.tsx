@@ -60,32 +60,32 @@ export function ProviderCredentialTransferPanel({
 
   return (
     <section>
-      <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--accent)]">
+      <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--accent)]">
         Provider credentials
       </div>
-      <h2 className="mt-1 text-[15px] font-semibold text-[var(--fg)]">Copy from a trusted Hub</h2>
-      <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-[var(--muted)]">
+      <h2 className="mt-1 text-[15px] font-[var(--weight-semibold)] text-[var(--fg-strong)]">Copy from a trusted Hub</h2>
+      <p className="mt-1 max-w-3xl text-[var(--text-11)] leading-relaxed text-[var(--muted)]">
         The source must mark this device as an administrator and grant the exact export operation.
         The credential is encrypted for this one transfer before it crosses the mesh.
       </p>
       {selfIsAdministrator === false ? (
-        <div className="mt-3 text-[11px] text-[var(--yellow)]">
+        <div className="mt-3 text-[var(--text-11)] text-[var(--yellow)]">
           This device is not an administrator and cannot receive provider credentials.
         </div>
       ) : null}
       {sources.length === 0 ? (
-        <div className="mt-3 text-[11px] text-[var(--muted)]">Pair another Hub first.</div>
+        <div className="mt-3 text-[var(--text-11)] text-[var(--muted)]">Pair another Hub first.</div>
       ) : (
         <div className="mt-4 flex flex-wrap items-end gap-2">
           <label className="grid min-w-56 flex-1 gap-1">
-            <span className="text-[10px] font-semibold uppercase tracking-wider text-[var(--muted-dim)]">
+            <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wider text-[var(--muted-dim)]">
               Source device
             </span>
             <select
               value={selectedSource?.id ?? ''}
               onChange={(event) => setSourceDeviceId(event.target.value)}
               disabled={busy !== null}
-              className="h-9 rounded border border-[var(--border)] bg-[var(--panel)] px-3 text-[12px] text-[var(--fg)]"
+              className="h-9 rounded border border-[var(--border)] bg-[var(--panel)] px-3 text-[var(--text-12)] text-[var(--fg)]"
             >
               {sources.map((device) => (
                 <option key={device.id} value={device.id}>
@@ -98,7 +98,7 @@ export function ProviderCredentialTransferPanel({
             type="button"
             disabled={!selectedSource || !selfIsAdministrator || busy !== null}
             onClick={() => void importCredential('openai')}
-            className="h-9 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"
+            className="h-9 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
           >
             {busy === 'openai' ? 'Copying…' : 'Copy OpenAI key'}
           </button>
@@ -106,7 +106,7 @@ export function ProviderCredentialTransferPanel({
             type="button"
             disabled={!selectedSource || !selfIsAdministrator || busy !== null}
             onClick={() => void importCredential('codex')}
-            className="h-9 rounded border border-[var(--border-subtle)] px-3 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"
+            className="h-9 rounded border border-[var(--border-subtle)] px-3 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
           >
             {busy === 'codex' ? 'Copying…' : 'Copy Codex login'}
           </button>
@@ -114,14 +114,14 @@ export function ProviderCredentialTransferPanel({
             type="button"
             disabled={!selectedSource || !selfIsAdministrator || busy !== null}
             onClick={() => void importCredential('groq')}
-            className="h-9 rounded border border-[var(--border-subtle)] px-3 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"
+            className="h-9 rounded border border-[var(--border-subtle)] px-3 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
           >
             {busy === 'groq' ? 'Copying…' : 'Copy GROQ key'}
           </button>
         </div>
       )}
-      {message ? <div className="mt-3 text-[11px] text-[var(--green)]">{message}</div> : null}
-      {error ? <div className="mt-3 text-[11px] text-[var(--red)]">{error}</div> : null}
+      {message ? <div className="mt-3 text-[var(--text-11)] text-[var(--green)]">{message}</div> : null}
+      {error ? <div className="mt-3 text-[var(--text-11)] text-[var(--red)]">{error}</div> : null}
     </section>
   );
 }

@@ -56,8 +56,8 @@ export function RepoBranchSourceControls({
         value: entry.name,
         label: (
           <div className="min-w-0">
-            <div className="truncate font-mono text-[11px] text-[var(--fg)]">{entry.name}</div>
-            <div className="truncate text-[10px] text-[var(--muted-dim)]">
+            <div className="truncate font-mono text-[var(--text-11)] text-[var(--fg)]">{entry.name}</div>
+            <div className="truncate text-[var(--text-10)] text-[var(--muted-dim)]">
               {entry.remote} • {entry.branch}
             </div>
           </div>
@@ -74,60 +74,60 @@ export function RepoBranchSourceControls({
     <div
       className={
         className ??
-        `rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-softest)] ${compact ? 'px-3 py-3' : 'px-4 py-4'}`
+        `rounded-[var(--radius-xlarge)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] ${compact ? 'px-3 py-3' : 'px-4 py-4'}`
       }
     >
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[10px] font-semibold tracking-[0.12em] uppercase text-[var(--muted-dim)]">Repo branch source</div>
-          <div className="mt-1 text-[11px] text-[var(--muted)] font-mono truncate" title={repoPath}>
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-[0.12em] uppercase text-[var(--muted-dim)]">Repo branch source</div>
+          <div className="mt-1 text-[var(--text-11)] text-[var(--muted)] font-mono truncate" title={repoPath}>
             {repoPath}
           </div>
         </div>
-        {loading ? <div className="text-[10px] text-[var(--muted-dim)]">Loading branches…</div> : null}
+        {loading ? <div className="text-[var(--text-10)] text-[var(--muted-dim)]">Loading branches…</div> : null}
       </div>
       <div className={`mt-3 grid gap-3 ${compact ? 'lg:grid-cols-2' : 'md:grid-cols-2'}`}>
         <button
           type="button"
           onClick={() => onBranchSourceChange('host')}
           disabled={disabled}
-          className={`rounded-xl border px-3 py-3 text-left transition-all ${
+          className={`rounded-[var(--radius-xlarge)] border px-3 py-3 text-left transition-all ${
             branchSource === 'host'
               ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
               : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:border-[var(--border)]'
           } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
-          <div className="text-[11px] font-semibold text-[var(--fg)]">Use host branch</div>
-          <div className="mt-1 text-[10px] text-[var(--muted-dim)] uppercase tracking-[0.08em]">Host branch</div>
-          <div className="mt-1 font-mono text-[12px] text-[var(--fg-secondary)]">{hostBranchLabel(hostBranch)}</div>
+          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">Use host branch</div>
+          <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)] uppercase tracking-[0.08em]">Host branch</div>
+          <div className="mt-1 font-mono text-[var(--text-12)] text-[var(--fg-secondary)]">{hostBranchLabel(hostBranch)}</div>
         </button>
         <button
           type="button"
           onClick={() => onBranchSourceChange('remote')}
           disabled={remoteBranchDisabled}
           title={remoteBranchCheckoutDisabledReason ?? undefined}
-          className={`rounded-xl border px-3 py-3 text-left transition-all ${
+          className={`rounded-[var(--radius-xlarge)] border px-3 py-3 text-left transition-all ${
             branchSource === 'remote'
               ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
               : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:border-[var(--border)]'
           } ${remoteBranchDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
-          <div className="text-[11px] font-semibold text-[var(--fg)]">Checkout remote branch</div>
-          <div className="mt-1 text-[10px] text-[var(--muted-dim)]">
+          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">Checkout remote branch</div>
+          <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
             Creates from a remote-tracking ref without changing local branches.
           </div>
-          <div className="mt-2 text-[10px] text-[var(--muted-dim)]">
+          <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
             {remoteBranches.length} remote branch{remoteBranches.length === 1 ? '' : 'es'} available
           </div>
         </button>
       </div>
       {!remoteBranchCheckoutEnabled && remoteBranchCheckoutDisabledReason ? (
-        <div className="mt-3 text-[10px] text-[var(--muted-dim)]">{remoteBranchCheckoutDisabledReason}</div>
+        <div className="mt-3 text-[var(--text-10)] text-[var(--muted-dim)]">{remoteBranchCheckoutDisabledReason}</div>
       ) : null}
 
       {branchSource === 'host' ? (
         <label
-          className={`mt-3 inline-flex items-center gap-2 rounded-lg border border-[var(--border-subtle)] px-3 py-2 text-[11px] ${
+          className={`mt-3 inline-flex items-center gap-2 rounded-[var(--radius-large)] border border-[var(--border-subtle)] px-3 py-2 text-[var(--text-11)] ${
             disabled ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
           }`}
           title="Run git pull --ff-only on the current host branch before creating the drone."
@@ -153,19 +153,19 @@ export function RepoBranchSourceControls({
             searchPlaceholder="Search remote branches"
             emptySearchLabel="No branches found"
             triggerLabel={remoteBranch || 'Select remote branch'}
-            triggerLabelClassName={remoteBranch ? 'font-mono text-[12px]' : undefined}
+            triggerLabelClassName={remoteBranch ? 'font-mono text-[var(--text-12)]' : undefined}
             title={remoteBranch || 'Select remote branch'}
             menuClassName="max-h-[260px] overflow-y-auto"
           />
           {!loading && !error && remoteBranch && !remoteBranchValid ? (
-            <div className="text-[10px] text-[var(--yellow)]">Saved remote branch is not available for this repo. Choose another branch.</div>
+            <div className="text-[var(--text-10)] text-[var(--yellow)]">Saved remote branch is not available for this repo. Choose another branch.</div>
           ) : null}
         </div>
       )}
 
-      {error ? <div className="mt-3 text-[10px] text-[var(--red)] whitespace-pre-wrap">{error}</div> : null}
+      {error ? <div className="mt-3 text-[var(--text-10)] text-[var(--red)] whitespace-pre-wrap">{error}</div> : null}
       {!error && !loading && branchSource === 'remote' && remoteBranches.length === 0 ? (
-        <div className="mt-3 text-[10px] text-[var(--muted-dim)]">No remote-tracking branches were found for this repo.</div>
+        <div className="mt-3 text-[var(--text-10)] text-[var(--muted-dim)]">No remote-tracking branches were found for this repo.</div>
       ) : null}
     </div>
   );

@@ -48,6 +48,8 @@ describe('agent chat surface adapters', () => {
     expect(loaderHtml).toContain('role="status"');
     expect(loaderHtml).toContain('Loading conversation…');
     expect(loaderHtml).toContain('animate-spin');
+    expect(loaderHtml).toContain('dh-type-status');
+    expect(loaderHtml).not.toContain('uppercase');
     expect(loaderHtml).not.toContain('animate-pulse');
 
     for (const adapter of [adaptExternalAgentChatSurface(), adaptNativeAgentChatSurface()]) {
@@ -339,7 +341,8 @@ describe('agent chat surface adapters', () => {
     expect(assistantHtml).not.toContain('>Agent<');
     expect(assistantHtml).not.toContain('bg-[var(--accent-subtle)]');
     expect(assistantHtml).not.toContain('rounded-lg border px-4 py-3');
-    expect(userHtml).toContain('bg-[var(--user-dim)]');
+    expect(userHtml).toContain('bg-[var(--user-bubble)]');
+    expect(userHtml).toContain('text-[var(--user-bubble-fg)]');
     expect(userHtml).not.toContain('>You<');
     expect(thinkingHtml).not.toContain('>Agent<');
   });
@@ -387,7 +390,7 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('Worked for 1h 2m 3s');
     expect(html).toContain('1 tool call');
     expect(html).toContain('class="flex min-h-9 w-full items-center gap-2');
-    expect(html).toContain('text-sm font-semibold');
+    expect(html).toContain('text-sm font-[var(--weight-semibold)]');
     expect(html).toContain('text-xs text-[var(--muted-dim)]');
     expect(html).not.toContain('uppercase');
     expect(html).not.toContain('ml-auto');

@@ -44,11 +44,11 @@ export function DirtyDroneApplyModal({
     >
       <div className="w-full max-w-[640px] overflow-hidden rounded-[18px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] shadow-[0_28px_90px_var(--shadow-color)]">
         <div className="border-b border-[var(--border-subtle)] px-6 py-5">
-          <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.16em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
             Apply Changes
           </div>
-          <div className="mt-2 text-[20px] font-semibold text-[var(--fg)]">Uncommitted drone changes detected</div>
-          <div className="mt-2 text-[13px] leading-6 text-[var(--muted)]">
+          <div className="mt-2 text-[20px] font-[var(--weight-semibold)] text-[var(--fg)]">Uncommitted drone changes detected</div>
+          <div className="mt-2 text-[var(--text-13)] leading-6 text-[var(--muted)]">
             <span className="font-medium text-[var(--fg-secondary)]">{dirtyDroneApplyModal.droneLabel}</span> has uncommitted changes (
             {dirtyLabel}). Choose whether to snapshot everything into a placeholder commit first, or continue and apply committed
             changes only. Cancel leaves both repos unchanged. If your edits are only uncommitted, they remain in Working Tree and
@@ -63,8 +63,8 @@ export function DirtyDroneApplyModal({
             disabled={busy}
             className={`w-full rounded-[16px] border px-4 py-4 text-left transition-all ${actionCardClass(busy)}`}
           >
-            <div className="text-[13px] font-semibold text-[var(--fg)]">Apply committed changes only</div>
-            <div className="mt-1 text-[12px] leading-5 text-[var(--muted)]">
+            <div className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]">Apply committed changes only</div>
+            <div className="mt-1 text-[var(--text-12)] leading-5 text-[var(--muted)]">
               Continue without creating a placeholder commit. Uncommitted edits stay in the drone workspace and are not applied.
             </div>
           </button>
@@ -75,8 +75,8 @@ export function DirtyDroneApplyModal({
             disabled={busy}
             className={`w-full rounded-[16px] border px-4 py-4 text-left transition-all ${actionCardClass(busy)}`}
           >
-            <div className="text-[13px] font-semibold text-[var(--fg)]">Commit all changes and apply</div>
-            <div className="mt-1 text-[12px] leading-5 text-[var(--muted)]">
+            <div className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)]">Commit all changes and apply</div>
+            <div className="mt-1 text-[var(--text-12)] leading-5 text-[var(--muted)]">
               Stage all tracked and untracked edits, create a placeholder commit, then apply that snapshot to the host.
             </div>
           </button>
@@ -87,7 +87,7 @@ export function DirtyDroneApplyModal({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className={`h-9 rounded px-3 text-[11px] font-semibold uppercase tracking-[0.12em] transition-all ${
+            className={`h-9 rounded px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] transition-all ${
               busy
                 ? 'cursor-not-allowed border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-40'
                 : 'border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg)]'

@@ -1518,7 +1518,7 @@ export function AssistantDock({
         <div className="text-center">
           <button
             type="button"
-            className="rounded border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-50"
+            className="rounded border border-[var(--border)] px-2.5 py-1 text-[var(--text-11)] text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-50"
             disabled={blipSession.olderLoading}
             onClick={() => void loadOlderMessages()}
           >
@@ -1688,7 +1688,7 @@ export function AssistantDock({
       key: 'native-transcript-error',
       kind: 'status',
       content: (
-        <div className="mx-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
+        <div className="mx-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
           {transcriptError}
         </div>
       ),
@@ -1704,13 +1704,13 @@ export function AssistantDock({
               <div className="mb-4 flex items-start justify-between gap-3">
                 <div>
                   <div
-                    className="flex items-center gap-2 text-[15px] font-semibold text-[var(--fg)]"
+                    className="flex items-center gap-2 text-[15px] font-[var(--weight-semibold)] text-[var(--fg)]"
                     style={{ fontFamily: 'var(--display)' }}
                   >
                     <IconSettings className="h-4 w-4 text-[var(--muted)]" />
                     Settings
                   </div>
-                  <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
+                  <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
                     Defaults apply to newly created chats. Existing chats keep their current
                     configuration.
                   </div>
@@ -1762,7 +1762,7 @@ export function AssistantDock({
           >
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
               <div
-                className="mr-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+                className="mr-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 Existing drones
@@ -1778,7 +1778,7 @@ export function AssistantDock({
               </div>
               <div className="min-w-[120px] flex-1 overflow-hidden">
                 {scopeDrones.length === 0 ? (
-                  <div className="truncate text-[10px] text-[var(--muted-dim)]">
+                  <div className="truncate text-[var(--text-10)] text-[var(--muted-dim)]">
                     {scopeReadMode === 'selected' ||
                     scopeWriteMode === 'selected' ||
                     scopeExecuteMode === 'selected'
@@ -1790,13 +1790,13 @@ export function AssistantDock({
                     {scopeDrones.map((drone) => (
                       <span
                         key={drone.id}
-                        className="inline-flex max-w-[150px] flex-shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-1.5 py-0.5 text-[10px] text-[var(--fg-secondary)]"
+                        className="inline-flex max-w-[150px] flex-shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-1.5 py-0.5 text-[var(--text-10)] text-[var(--fg-secondary)]"
                       >
                         <span className="min-w-0 truncate">{drone.name || drone.id}</span>
                         <button
                           type="button"
                           onClick={() => removeScopeDrone(drone.id)}
-                          className="text-[11px] leading-none text-[var(--muted-dim)] hover:text-[var(--red)]"
+                          className="text-[var(--text-11)] leading-none text-[var(--muted-dim)] hover:text-[var(--red)]"
                           title={`Remove ${drone.name || drone.id} from assistant scope`}
                           aria-label={`Remove ${drone.name || drone.id} from assistant scope`}
                         >

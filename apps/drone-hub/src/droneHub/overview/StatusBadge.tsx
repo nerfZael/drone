@@ -18,7 +18,7 @@ export function StatusBadge({
   if (hubPhase === 'draft') {
     return (
       <span
-        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-[var(--user-subtle)] text-[var(--muted)] border border-[var(--user-border)]"
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase bg-[var(--user-subtle)] text-[var(--muted)] border border-[var(--user-border)]"
         style={{ fontFamily: 'var(--display)' }}
         title={String(hubMessage ?? 'Draft')}
         aria-label="Draft"
@@ -33,7 +33,7 @@ export function StatusBadge({
     const title = String(hubMessage ?? label);
     return (
       <span
-        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-[var(--yellow-subtle)] text-[var(--yellow)] border border-[var(--yellow-border)]"
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase bg-[var(--yellow-subtle)] text-[var(--yellow)] border border-[var(--yellow-border)]"
         style={{ fontFamily: 'var(--display)' }}
         title={title}
         aria-label={label}
@@ -47,7 +47,7 @@ export function StatusBadge({
     const title = String(hubMessage ?? error ?? 'Error');
     return (
       <span
-        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-[var(--red-subtle)] text-[var(--red)] border border-[var(--red-border)]"
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase bg-[var(--red-subtle)] text-[var(--red)] border border-[var(--red-border)]"
         style={{ fontFamily: 'var(--display)' }}
         title={title}
         aria-label="Error"
@@ -60,7 +60,7 @@ export function StatusBadge({
   if (checking) {
     return (
       <span
-        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-[var(--yellow-subtle)] text-[var(--yellow)] border border-[var(--yellow-border)]"
+        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase bg-[var(--yellow-subtle)] text-[var(--yellow)] border border-[var(--yellow-border)]"
         style={{ fontFamily: 'var(--display)' }}
         title={error || 'Checking status'}
         aria-label="Checking"
@@ -73,7 +73,7 @@ export function StatusBadge({
   if (ok) return null;
   return (
     <span
-      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-[var(--red-subtle)] text-[var(--red)] border border-[var(--red-border)]"
+      className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase bg-[var(--red-subtle)] text-[var(--red)] border border-[var(--red-border)]"
       style={{ fontFamily: 'var(--display)' }}
       title={error || 'offline'}
     >

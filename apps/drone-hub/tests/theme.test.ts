@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   DESKTOP_THEMES,
   applyDesktopTheme,
@@ -54,5 +55,45 @@ describe('desktop themes', () => {
       'editorCursor.foreground': '#CBA6F7',
       'editorWidget.background': '#181825',
     });
+  });
+
+  test('maps Catppuccin desktop surfaces to the mobile visual roles without changing typography or density', () => {
+    const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+    const catppuccinStart = css.indexOf(":root[data-theme='catppuccin-mocha']");
+    const catppuccinEnd = css.indexOf('/* Excalidraw owns', catppuccinStart);
+    const catppuccinCss = css.slice(catppuccinStart, catppuccinEnd);
+
+    expect(catppuccinCss).toContain('--workspace: #1e1e2e');
+    expect(catppuccinCss).toContain('--panel: #181825');
+    expect(catppuccinCss).toContain('--panel-raised: #313244');
+    expect(catppuccinCss).toContain('--border: #45475a');
+    expect(catppuccinCss).toContain('--fg-strong: #f5e0dc');
+    expect(catppuccinCss).toContain('--muted: #bac2de');
+    expect(catppuccinCss).toContain('--user-bubble: #45475a');
+    expect(catppuccinCss).toContain('--user-bubble-border: #585b70');
+    expect(catppuccinCss).toContain('--glow-accent: none');
+    const catppuccinTokenNames = Array.from(catppuccinCss.matchAll(/(--[a-z0-9-]+)\s*:/g), (match) => match[1]);
+    const presentationTokenPrefixes = [
+      '--body-',
+      '--text-',
+      '--weight-',
+      '--control-height',
+      '--radius-',
+      '--sidebar-drone-',
+      '--sidebar-item-',
+    ];
+    const presentationTokenNames = new Set([
+      '--display',
+      '--sans',
+      '--code',
+      '--chat-text-size',
+      '--chat-prose-max',
+    ]);
+    expect(
+      catppuccinTokenNames.filter((token) =>
+        presentationTokenNames.has(token) ||
+        presentationTokenPrefixes.some((prefix) => token.startsWith(prefix)),
+      ),
+    ).toEqual([]);
   });
 });

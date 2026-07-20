@@ -37,7 +37,7 @@ export function DroneTerminalTabsBar({
                 type="button"
                 onClick={() => onActivateSession(session.id)}
                 disabled={busy}
-                className={`min-w-0 max-w-[180px] px-2 py-1 text-[10px] font-semibold tracking-wide uppercase truncate ${
+                className={`min-w-0 max-w-[180px] px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase truncate ${
                   busy ? 'opacity-50 cursor-wait' : active ? '' : 'hover:text-[var(--muted)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
@@ -67,7 +67,7 @@ export function DroneTerminalTabsBar({
           );
         })}
         {sessions.length === 0 ? (
-          <div className="px-2 py-1 text-[10px] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+          <div className="px-2 py-1 text-[var(--text-10)] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
             No terminals
           </div>
         ) : null}
@@ -76,11 +76,11 @@ export function DroneTerminalTabsBar({
         type="button"
         onClick={onCreateSession}
         disabled={disabled}
-        className="inline-flex items-center gap-1 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        className="inline-flex items-center gap-1 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         style={{ fontFamily: 'var(--display)' }}
         title="Open a new terminal tab"
       >
-        <span className="text-[12px] leading-none">+</span>
+        <span className="text-[var(--text-12)] leading-none">+</span>
         <span>New</span>
       </button>
     </div>

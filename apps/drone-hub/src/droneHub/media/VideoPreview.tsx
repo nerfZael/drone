@@ -82,14 +82,14 @@ export function VideoPreview({
   const effectiveSrc = shouldFetchAsBlob(src) ? blobUrl : src;
   if (failed) {
     return (
-      <div className={loadingClassName ?? 'min-h-[120px] flex items-center justify-center text-[11px] text-[var(--muted)] px-3 text-center'}>
+      <div className={loadingClassName ?? 'min-h-[120px] flex items-center justify-center text-[var(--text-11)] text-[var(--muted)] px-3 text-center'}>
         Failed to load video.
       </div>
     );
   }
   if (!effectiveSrc || loading) {
     return (
-      <div className={loadingClassName ?? 'min-h-[120px] flex items-center justify-center text-[11px] text-[var(--muted)] px-3 text-center'}>
+      <div className={loadingClassName ?? 'min-h-[120px] flex items-center justify-center text-[var(--text-11)] text-[var(--muted)] px-3 text-center'}>
         Loading video...
       </div>
     );

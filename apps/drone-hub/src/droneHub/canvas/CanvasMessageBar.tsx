@@ -54,22 +54,22 @@ export function CanvasMessageBar({
         <button
           type="button"
           onClick={onExpand}
-          className="mx-auto flex items-center gap-2 h-8 px-3 rounded-md border border-[var(--accent-muted)] bg-[var(--panel-overlay)] text-[11px] font-semibold text-[var(--accent)] shadow-[0_8px_22px_var(--shadow-color)] hover:bg-[var(--accent-subtle)] transition-colors"
+          className="mx-auto flex items-center gap-2 h-8 px-3 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--panel-overlay)] text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--accent)] shadow-[0_8px_22px_var(--shadow-color)] hover:bg-[var(--accent-subtle)] transition-colors"
           style={{ fontFamily: 'var(--display)' }}
           title={`Message ${targetLabel}`}
         >
           Message {targetLabel}
         </button>
       ) : (
-        <div className="rounded-md border border-[var(--border)] bg-[var(--panel-overlay)] p-2 shadow-[0_10px_28px_var(--shadow-color)]">
+        <div className="rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel-overlay)] p-2 shadow-[0_10px_28px_var(--shadow-color)]">
           <div className="flex items-center gap-2">
-            <span className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            <span className="flex-shrink-0 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               To {targetLabel}
             </span>
             {spawnCountEnabled ? (
               <label className="flex items-center gap-1.5 flex-shrink-0">
                 <span
-                  className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]"
+                  className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   Spawn
@@ -94,7 +94,7 @@ export function CanvasMessageBar({
                       onCollapse();
                     }
                   }}
-                  className="h-8 w-[70px] rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[12px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)]"
+                  className="h-8 w-[70px] rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-12)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)]"
                   title="Number of drones to create from this draft."
                 />
               </label>
@@ -121,13 +121,13 @@ export function CanvasMessageBar({
                 }
               }}
               placeholder={`Message ${targetLabel}...`}
-              className="h-8 min-h-8 max-h-24 flex-1 min-w-0 resize-none rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2.5 py-1.5 text-[12px] leading-[1.25rem] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)]"
+              className="h-8 min-h-8 max-h-24 flex-1 min-w-0 resize-none rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2.5 py-1.5 text-[var(--text-12)] leading-[1.25rem] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)]"
             />
             <button
               type="button"
               onClick={onSend}
               disabled={sendDisabled}
-              className={`h-8 px-3 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+              className={`h-8 px-3 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 sendDisabled
                   ? 'opacity-50 cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                   : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:brightness-110'
@@ -139,14 +139,14 @@ export function CanvasMessageBar({
             <button
               type="button"
               onClick={onCollapse}
-              className="h-8 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] transition-colors"
+              className="h-8 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] transition-colors"
               style={{ fontFamily: 'var(--display)' }}
             >
               Close
             </button>
           </div>
           {error ? (
-            <div className="mt-1 text-[10px] text-[var(--red)]" title={error}>
+            <div className="mt-1 text-[var(--text-10)] text-[var(--red)]" title={error}>
               {error}
             </div>
           ) : null}

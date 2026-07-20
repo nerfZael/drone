@@ -55,7 +55,7 @@ function LogPanel({
   fallbackMaxBytes,
 }: LogPanelProps) {
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
       <div
         role="button"
         tabIndex={0}
@@ -73,10 +73,10 @@ function LogPanel({
         <div className="inline-flex items-center gap-2 min-w-0">
           <IconChevron down={expanded} className="text-[var(--muted-dim)] opacity-80" />
           <div>
-            <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
               {title}
             </div>
-            <div className="text-[11px] text-[var(--muted-dim)] mt-1">{description}</div>
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">{description}</div>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -87,7 +87,7 @@ function LogPanel({
               void loadLogs();
             }}
             disabled={loading}
-            className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+            className={`h-8 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
               loading
                 ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                 : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -104,7 +104,7 @@ function LogPanel({
               void copyLogs();
             }}
             disabled={loading || !String(logs?.text ?? '').trim()}
-            className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all inline-flex items-center gap-1.5 ${
+            className={`h-8 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all inline-flex items-center gap-1.5 ${
               loading || !String(logs?.text ?? '').trim()
                 ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                 : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -121,17 +121,17 @@ function LogPanel({
       {expanded && (
         <>
           {error && (
-            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
               {error}
             </div>
           )}
           {copiedNotice && (
-            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
+            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
               {copiedNotice}
             </div>
           )}
 
-          <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+          <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
             {logs?.logPath ? (
               <>
                 <span className="font-mono text-[var(--fg-secondary)]">{logs.logPath}</span>
@@ -149,9 +149,9 @@ function LogPanel({
             value={logs?.text ?? ''}
             onScroll={handleScroll}
             placeholder={loading ? loadingLabel : emptyLabel}
-            className="w-full min-h-[220px] max-h-[55vh] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] font-mono resize-y focus:outline-none"
+            className="w-full min-h-[220px] max-h-[55vh] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-3 py-2 text-[var(--text-12)] leading-relaxed text-[var(--fg-secondary)] font-mono resize-y focus:outline-none"
           />
-          <div className="text-[10px] text-[var(--muted-dim)]">
+          <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
             Showing up to {(logs?.tailLines ?? fallbackTailLines).toLocaleString()} lines and {(logs?.maxBytes ?? fallbackMaxBytes).toLocaleString()} bytes.
           </div>
         </>

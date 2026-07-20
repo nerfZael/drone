@@ -73,7 +73,7 @@ function PlainTextEditorFallback({
       }}
       readOnly={saving || readOnly}
       spellCheck={false}
-      className="h-full w-full resize-none border-0 bg-[var(--panel-alt)] p-3 font-mono text-[12px] leading-5 text-[var(--fg-secondary)] outline-none"
+      className="h-full w-full resize-none border-0 bg-[var(--panel-alt)] p-3 font-mono text-[var(--text-12)] leading-5 text-[var(--fg-secondary)] outline-none"
       aria-label="Plain text editor"
     />
   );
@@ -157,16 +157,16 @@ function LargeTextFileViewer({
     <div className="h-full min-h-0 flex flex-col bg-[var(--panel-alt)]">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] px-3 py-2">
         <div className="min-w-0">
-          <div className="text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
             Large file
           </div>
-          <div className="mt-0.5 text-[11px] text-[var(--muted-dim)]">{loadedLabel}</div>
+          <div className="mt-0.5 text-[var(--text-11)] text-[var(--muted-dim)]">{loadedLabel}</div>
         </div>
         <button
           type="button"
           onClick={() => void loadNextChunk()}
           disabled={loading || eof}
-          className={`h-7 px-2.5 rounded-md border text-[10px] font-semibold transition-colors ${
+          className={`h-7 px-2.5 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] transition-colors ${
             loading || eof
               ? 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
               : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:shadow-[var(--glow-accent)]'
@@ -176,11 +176,11 @@ function LargeTextFileViewer({
         </button>
       </div>
       {error ? (
-        <div className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
+        <div className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
           {error}
         </div>
       ) : null}
-      <pre className="flex-1 min-h-0 overflow-auto whitespace-pre-wrap break-words p-3 text-[12px] leading-5 text-[var(--fg-secondary)] font-mono">
+      <pre className="flex-1 min-h-0 overflow-auto whitespace-pre-wrap break-words p-3 text-[var(--text-12)] leading-5 text-[var(--fg-secondary)] font-mono">
         {content || (loading ? 'Loading...' : '')}
       </pre>
     </div>
@@ -536,13 +536,13 @@ export function OpenedDroneFilePanel({
   }, [findReferences, goToDefinition]);
 
   const modeButtonClassName = (active: boolean, disabled: boolean) =>
-    `h-7 px-2 rounded-md border text-[10px] font-semibold transition-colors ${
+    `h-7 px-2 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] transition-colors ${
       active
         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
         : 'border-[var(--border-subtle)] bg-transparent text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
     } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`;
   const navButtonClassName = (enabled: boolean) =>
-    `h-7 w-7 rounded-md border text-[13px] font-semibold transition-colors ${
+    `h-7 w-7 rounded-[var(--radius-medium)] border text-[var(--text-13)] font-[var(--weight-semibold)] transition-colors ${
       enabled
         ? 'border-[var(--border-subtle)] bg-transparent text-[var(--fg-secondary)] hover:text-[var(--fg)] hover:bg-[var(--hover)]'
         : 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
@@ -561,13 +561,13 @@ export function OpenedDroneFilePanel({
         <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 min-w-0">
-              <div className="truncate text-[13px] font-medium text-[var(--fg-secondary)]">
+              <div className="truncate text-[var(--text-13)] font-medium text-[var(--fg-secondary)]">
                 {fileName || activeFilePath || 'File'}
               </div>
-              <div className="shrink-0 text-[10px] text-[var(--muted)]">{headerStatusText}</div>
+              <div className="shrink-0 text-[var(--text-10)] text-[var(--muted)]">{headerStatusText}</div>
             </div>
             <div
-              className="mt-0.5 text-[10px] text-[var(--muted-dim)] font-mono truncate"
+              className="mt-0.5 text-[var(--text-10)] text-[var(--muted-dim)] font-mono truncate"
               title={activeFilePath || undefined}
             >
               {activeFilePath}
@@ -597,7 +597,7 @@ export function OpenedDroneFilePanel({
             {openedEditorIsText && !readOnly ? (
               <>
                 {languageStatus ? (
-                  <div className="max-w-[220px] truncate text-[10px] text-[var(--muted)]">
+                  <div className="max-w-[220px] truncate text-[var(--text-10)] text-[var(--muted)]">
                     {languageStatus}
                   </div>
                 ) : null}
@@ -605,7 +605,7 @@ export function OpenedDroneFilePanel({
                   type="button"
                   onClick={goToDefinition}
                   disabled={languageCommandsDisabled || languageLoading === 'definition'}
-                  className={`h-7 px-2.5 rounded-md border text-[10px] font-semibold transition-colors ${
+                  className={`h-7 px-2.5 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] transition-colors ${
                     languageCommandsDisabled || languageLoading === 'definition'
                       ? 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
                       : 'border-[var(--border-subtle)] bg-transparent text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
@@ -620,7 +620,7 @@ export function OpenedDroneFilePanel({
                   type="button"
                   onClick={findReferences}
                   disabled={languageCommandsDisabled || languageLoading === 'references'}
-                  className={`h-7 px-2.5 rounded-md border text-[10px] font-semibold transition-colors ${
+                  className={`h-7 px-2.5 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] transition-colors ${
                     languageCommandsDisabled || languageLoading === 'references'
                       ? 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
                       : 'border-[var(--border-subtle)] bg-transparent text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
@@ -665,7 +665,7 @@ export function OpenedDroneFilePanel({
                   void onSaveFile?.();
                 }}
                 disabled={Boolean(fileLoading) || Boolean(fileSaving) || !fileDirty || !onSaveFile}
-                className={`h-7 px-2.5 rounded-md border text-[10px] font-semibold transition-colors ${
+                className={`h-7 px-2.5 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] transition-colors ${
                   fileLoading || fileSaving || !fileDirty || !onSaveFile
                     ? 'border-[var(--border-subtle)] bg-transparent text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
                     : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:shadow-[var(--glow-accent)]'
@@ -678,14 +678,14 @@ export function OpenedDroneFilePanel({
           </div>
         </div>
         {fileError ? (
-          <div className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
+          <div className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">
             {fileError}
           </div>
         ) : null}
         <div className="flex-1 min-h-[360px] flex flex-col">
           <div className="flex-1 min-h-0">
             {fileLoading ? (
-              <div className="h-full w-full flex items-center justify-center text-[12px] text-[var(--muted)]">
+              <div className="h-full w-full flex items-center justify-center text-[var(--text-12)] text-[var(--muted)]">
                 Loading file...
               </div>
             ) : fileKind === 'image' && openedFileMediaSrc ? (
@@ -747,7 +747,7 @@ export function OpenedDroneFilePanel({
                   label={fileName ?? 'video preview'}
                   mime={fileMime}
                   className="max-w-full max-h-full rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)]"
-                  loadingClassName="min-h-[120px] flex items-center justify-center text-[12px] text-[var(--muted)] px-3 text-center"
+                  loadingClassName="min-h-[120px] flex items-center justify-center text-[var(--text-12)] text-[var(--muted)] px-3 text-center"
                 />
               </div>
             ) : openedFileIsLargeText && activeFilePath ? (
@@ -755,10 +755,10 @@ export function OpenedDroneFilePanel({
             ) : fileKind === 'binary' ? (
               <div className="h-full w-full flex items-center justify-center px-6">
                 <div className="max-w-[560px] rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3 text-center">
-                  <div className="text-[12px] text-[var(--fg-secondary)]">
+                  <div className="text-[var(--text-12)] text-[var(--fg-secondary)]">
                     Binary file preview is not available.
                   </div>
-                  <div className="mt-1 text-[11px] text-[var(--muted)]">
+                  <div className="mt-1 text-[var(--text-11)] text-[var(--muted)]">
                     {fileMime ? `${fileMime} • ` : ''}
                     {formatBytes(fileSize)}
                   </div>
@@ -837,7 +837,7 @@ export function OpenedDroneFilePanel({
                 </React.Suspense>
               </MonacoEditorErrorBoundary>
             ) : (
-              <div className="h-full w-full flex items-center justify-center text-[12px] text-[var(--muted)]">
+              <div className="h-full w-full flex items-center justify-center text-[var(--text-12)] text-[var(--muted)]">
                 No file selected.
               </div>
             )}

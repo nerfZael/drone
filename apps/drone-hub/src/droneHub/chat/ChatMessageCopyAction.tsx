@@ -35,7 +35,7 @@ export function ChatMessageCopyAction({
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none absolute right-8 top-0 rounded border border-[var(--user-border)] bg-[var(--scrim-soft)] px-2 py-1 text-[9px] uppercase tracking-wide text-[var(--fg-secondary)]"
+          className="pointer-events-none absolute right-8 top-0 rounded border border-[var(--user-border)] bg-[var(--scrim-soft)] px-2 py-1 text-[var(--text-9)] uppercase tracking-wide text-[var(--fg-secondary)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           Copied

@@ -127,19 +127,19 @@ export function GroupMultiChatWorkspace({
       <div className="flex-shrink-0 bg-[var(--panel-alt)] border-b border-[var(--border)] px-5 py-3">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-semibold" style={{ fontFamily: 'var(--display)' }}>
+            <div className="text-[var(--text-10)] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-[var(--weight-semibold)]" style={{ fontFamily: 'var(--display)' }}>
               Group Multi-Chat
             </div>
-            <div className="mt-1 text-[15px] font-semibold text-[var(--fg)] truncate" style={{ fontFamily: 'var(--display)' }}>
+            <div className="mt-1 text-[15px] font-[var(--weight-semibold)] text-[var(--fg-strong)] truncate" style={{ fontFamily: 'var(--display)' }}>
               {groupLabel}
             </div>
-            <div className="text-[11px] text-[var(--muted)] mt-1">
+            <div className="text-[var(--text-11)] text-[var(--muted)] mt-1">
               One column per drone. Open any column title to jump into its full chat + panel view.
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
             <div className="inline-flex items-center gap-2 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
-              <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              <span className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                 Width
               </span>
               <input
@@ -157,7 +157,7 @@ export function GroupMultiChatWorkspace({
                 type="button"
                 onClick={() => setGroupMultiChatColumnWidth(GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX)}
                 disabled={groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX}
-                className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+                className={`inline-flex items-center h-5 px-1.5 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                   groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX
                     ? 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
                     : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -168,14 +168,14 @@ export function GroupMultiChatWorkspace({
                 Reset
               </button>
             </div>
-            <span className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-mono text-[var(--muted-dim)]">
+            <span className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] font-mono text-[var(--muted-dim)]">
               {selectedGroupMultiChatData.items.length} drone{selectedGroupMultiChatData.items.length !== 1 ? 's' : ''}
             </span>
             <button
               type="button"
               onClick={() => setGroupMultiChatStatusSort((v) => !v)}
               aria-pressed={groupMultiChatStatusSort}
-              className={`inline-flex items-center h-7 px-2 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+              className={`inline-flex items-center h-7 px-2 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 groupMultiChatStatusSort
                   ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                   : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -192,7 +192,7 @@ export function GroupMultiChatWorkspace({
             <button
               type="button"
               onClick={() => setGroupBroadcastExpanded((v) => !v)}
-              className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+              className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-[var(--radius-medium)] border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 groupBroadcastExpanded
                   ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[var(--glow-accent)]'
                   : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:shadow-[var(--glow-accent)]'
@@ -208,7 +208,7 @@ export function GroupMultiChatWorkspace({
             <button
               type="button"
               onClick={() => setSelectedGroupMultiChat(null)}
-              className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
+              className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
               style={{ fontFamily: 'var(--display)' }}
               title="Exit group multi-chat view"
             >

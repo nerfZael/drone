@@ -63,8 +63,8 @@ export function PlaybookRunLaunchControls({
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] text-[var(--muted-dim)]">
-        <span className="font-semibold text-[var(--fg)] truncate max-w-[200px]">{selectedPlaybook?.label || 'No playbook'}</span>
+      <div className="min-w-0 flex flex-wrap items-center gap-x-2 gap-y-1 text-[var(--text-10)] text-[var(--muted-dim)]">
+        <span className="font-[var(--weight-semibold)] text-[var(--fg)] truncate max-w-[200px]">{selectedPlaybook?.label || 'No playbook'}</span>
         <span className="opacity-30">/</span>
         <span className="truncate max-w-[140px]">{selectedRepoPath ? playbookRunsRepoLabel(selectedRepoPath) : 'No repo'}</span>
         {totalQueuedCount > 0 && (
@@ -83,7 +83,7 @@ export function PlaybookRunLaunchControls({
           onChange={(value) => onSerializeFirstMessageGroupChange(value === 'serialized')}
         />
 
-        <label className="flex items-center gap-1.5 text-[10px] text-[var(--muted-dim)]">
+        <label className="flex items-center gap-1.5 text-[var(--text-10)] text-[var(--muted-dim)]">
           <span className="font-medium" style={{ fontFamily: 'var(--display)' }}>Count</span>
           <input
             type="number"
@@ -92,7 +92,7 @@ export function PlaybookRunLaunchControls({
             step={1}
             value={launchCountInput}
             onChange={(event) => onLaunchCountInputChange(event.target.value)}
-            className="h-7 w-[52px] rounded-md border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-right text-[11px] font-semibold text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+            className="h-7 w-[52px] rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-right text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
             style={{ fontFamily: 'var(--code)' }}
           />
         </label>
@@ -102,7 +102,7 @@ export function PlaybookRunLaunchControls({
             type="button"
             onClick={onRun}
             disabled={runDisabled}
-            className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+            className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-large)] px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
               runDisabled
                 ? 'cursor-not-allowed bg-[var(--surface-strong)] text-[var(--muted-dim)] opacity-40'
                 : 'bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110 shadow-[var(--glow-accent)]'
@@ -155,18 +155,18 @@ export function PlaybookRunQueueSection({
   return (
     <div className="mb-4">
       <div className="flex items-center gap-2.5 mb-2">
-        <span className="text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+        <span className="text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
           Launch Queue
         </span>
-        <span className="rounded-md bg-[var(--surface-soft)] px-1.5 py-0.5 text-[9px] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
+        <span className="rounded-[var(--radius-medium)] bg-[var(--surface-soft)] px-1.5 py-0.5 text-[var(--text-9)] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
           {queue.length}
         </span>
-        <div className="flex-1 h-px bg-[linear-gradient(90deg,var(--border-subtle),transparent)]" />
+        <div className="flex-1 h-px bg-[var(--border-subtle)]" />
         <button
           type="button"
           onClick={onClearQueuedRuns}
           disabled={Boolean(actionBusyByKey['queue:clear'])}
-          className={`h-6 px-2 rounded-md text-[9px] font-semibold tracking-wide uppercase border transition-all ${
+          className={`h-6 px-2 rounded-[var(--radius-medium)] text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
             actionBusyByKey['queue:clear']
               ? 'opacity-40 cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
               : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:bg-[var(--red-subtle)] hover:border-[var(--red-border)]'
@@ -196,16 +196,16 @@ export function PlaybookRunQueueSection({
             return (
               <tr key={item.id}>
                 <td>
-                  <span className="text-[12px] font-medium text-[var(--fg)]">{item.playbookLabel}</span>
+                  <span className="text-[var(--text-12)] font-medium text-[var(--fg)]">{item.playbookLabel}</span>
                   {item.serializeFirstMessageGroup && (
-                    <span className="ml-1.5 inline-flex items-center rounded-md bg-[var(--yellow-subtle)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.06em] text-[var(--yellow)]" style={{ fontFamily: 'var(--display)' }}>
+                    <span className="ml-1.5 inline-flex items-center rounded-[var(--radius-medium)] bg-[var(--yellow-subtle)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.06em] text-[var(--yellow)]" style={{ fontFamily: 'var(--display)' }}>
                       Serial
                     </span>
                   )}
                 </td>
                 <td>
                   <span
-                    className={`inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-[0.06em] ${queueStateClass(item.state)}`}
+                    className={`inline-flex items-center gap-1 rounded-[var(--radius-medium)] border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.06em] ${queueStateClass(item.state)}`}
                     style={{ fontFamily: 'var(--display)' }}
                   >
                     <span className="inline-block h-1 w-1 rounded-full bg-current opacity-70" />
@@ -213,27 +213,27 @@ export function PlaybookRunQueueSection({
                   </span>
                 </td>
                 <td>
-                  <span className="text-[10px] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
+                  <span className="text-[var(--text-10)] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
                     {playbookRunsRepoLabel(item.repoPath)}
                   </span>
                 </td>
                 <td className="text-right">
-                  <span className="text-[11px] font-semibold text-[var(--fg)] tabular-nums" style={{ fontFamily: 'var(--code)' }}>
+                  <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] tabular-nums" style={{ fontFamily: 'var(--code)' }}>
                     {item.requestedCount}
                   </span>
                 </td>
                 <td className="text-right">
-                  <span className="text-[11px] text-[var(--muted)] tabular-nums" style={{ fontFamily: 'var(--code)' }}>
+                  <span className="text-[var(--text-11)] text-[var(--muted)] tabular-nums" style={{ fontFamily: 'var(--code)' }}>
                     {item.launchedCount + item.inFlightCount}
                   </span>
                 </td>
                 <td className="text-right">
-                  <span className="text-[11px] text-[var(--muted)] tabular-nums" style={{ fontFamily: 'var(--code)' }}>
+                  <span className="text-[var(--text-11)] text-[var(--muted)] tabular-nums" style={{ fontFamily: 'var(--code)' }}>
                     {item.remainingCount}
                   </span>
                 </td>
                 <td>
-                  <span className="text-[10px] text-[var(--muted-dim)] tabular-nums" style={{ fontFamily: 'var(--code)' }}>
+                  <span className="text-[var(--text-10)] text-[var(--muted-dim)] tabular-nums" style={{ fontFamily: 'var(--code)' }}>
                     {timeAgo(item.createdAt, nowMs)}
                   </span>
                 </td>
@@ -242,7 +242,7 @@ export function PlaybookRunQueueSection({
                     type="button"
                     onClick={() => onRemoveQueuedRun(item.id)}
                     disabled={Boolean(actionBusyByKey[busyKey])}
-                    className={`inline-flex h-6 w-6 items-center justify-center rounded-md transition-all ${
+                    className={`inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-medium)] transition-all ${
                       actionBusyByKey[busyKey]
                         ? 'opacity-40 cursor-not-allowed text-[var(--muted-dim)]'
                         : 'text-[var(--muted-dim)] hover:bg-[var(--red-subtle)] hover:text-[var(--red)]'
@@ -261,7 +261,7 @@ export function PlaybookRunQueueSection({
       {queue.some((item) => item.error) && (
         <div className="mt-2 flex flex-col gap-1">
           {queue.filter((item) => item.error).map((item) => (
-            <div key={item.id} className="flex items-center gap-1.5 text-[10px] text-[var(--red)]">
+            <div key={item.id} className="flex items-center gap-1.5 text-[var(--text-10)] text-[var(--red)]">
               <span className="h-1 w-1 rounded-full bg-[var(--red)] shrink-0" />
               <span className="truncate">{item.playbookLabel}: {item.error}</span>
             </div>

@@ -4,6 +4,7 @@ import type { DroneSummary } from '../types';
 import { IconBaseImage, IconClone, IconPlus, IconRename, IconSpinner, IconTrash, TypingDots } from './icons';
 import { StatusBadge } from './StatusBadge';
 import type { SidebarDensityMode } from '../app/settings-types';
+import { sidebarItemTypeClass } from '../sidebar/presentation';
 
 type DroneCardProps = {
   drone: DroneSummary;
@@ -183,10 +184,10 @@ export const DroneCard = React.memo(function DroneCard({
         : 'h-7 px-2.5';
   const titleDensityClass =
     density === 'compact'
-      ? 'text-[11px]'
+      ? 'text-[var(--sidebar-drone-compact-size)]'
       : density === 'comfortable'
-        ? 'text-[12.5px]'
-        : 'text-[12px]';
+        ? 'text-[var(--sidebar-drone-comfortable-size)]'
+        : 'text-[var(--sidebar-drone-size)]';
   const stopCardSelection = (e: React.SyntheticEvent) => {
     e.preventDefault();
     e.stopPropagation();
@@ -215,7 +216,7 @@ export const DroneCard = React.memo(function DroneCard({
           onClick();
         }
       }}
-      className={`w-full text-left ${rowDensityClass} flex items-center rounded-md border transition-colors duration-150 group/drone relative ${
+      className={`w-full text-left ${rowDensityClass} flex items-center rounded-[var(--radius-medium)] border transition-colors duration-150 group/drone relative ${
         selected
           ? selectedTone === 'muted'
             ? 'bg-[var(--surface-soft)] border-[var(--border)]'
@@ -251,14 +252,14 @@ export const DroneCard = React.memo(function DroneCard({
           />
         ) : null}
         <span
-          className={`flex-1 min-w-0 truncate ${titleDensityClass} ${selected ? 'font-medium text-[var(--fg)]' : 'text-[var(--fg-secondary)]'}`}
+          className={`flex-1 min-w-0 truncate ${titleDensityClass} ${sidebarItemTypeClass(selected)}`}
           title={`${shownName}${shownName !== drone.name ? ` (${drone.name})` : ''} · created ${timeAgo(drone.createdAt)}`}
         >
           {shownName}
         </span>
         {statusHint ? (
           <span
-            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
+            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
             style={{ fontFamily: 'var(--display)' }}
             title={statusHint}
           >
@@ -278,14 +279,14 @@ export const DroneCard = React.memo(function DroneCard({
               }}
               onMouseDown={stopActionPressPropagation}
               onPointerDown={stopActionPressPropagation}
-              className="text-[10px] text-[var(--red)] truncate max-w-[72px] hover:underline focus:outline-none"
+              className="text-[var(--text-10)] text-[var(--red)] truncate max-w-[72px] hover:underline focus:outline-none"
               title="View full error details"
               aria-label={`View error details for ${shownName}`}
             >
               error
             </button>
           ) : (
-            <span className="text-[10px] text-[var(--red)] truncate max-w-[72px]" title={errText}>error</span>
+            <span className="text-[var(--text-10)] text-[var(--red)] truncate max-w-[72px]" title={errText}>error</span>
           )
         ) : null}
         <div
@@ -304,7 +305,7 @@ export const DroneCard = React.memo(function DroneCard({
           >
             {showInlineError ? null : showOperationStatus ? (
               <span
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-[var(--yellow-subtle)] text-[var(--yellow)] border border-[var(--yellow-border)]"
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase bg-[var(--yellow-subtle)] text-[var(--yellow)] border border-[var(--yellow-border)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title={activeOperationLabel}
                 aria-label={activeOperationLabel}
@@ -327,7 +328,7 @@ export const DroneCard = React.memo(function DroneCard({
           {hasActions && (
             <div
               data-onboarding-id="sidebar.droneCard.actions"
-              className={`absolute right-0 z-10 flex items-center gap-1 rounded-md border border-[var(--border)] py-0.5 pl-3 pr-0.5 shadow-[0_4px_12px_var(--shadow-color)] transition-opacity duration-150 before:absolute before:inset-y-0 before:-left-5 before:w-5 before:bg-gradient-to-l before:from-[var(--panel-raised)] before:to-transparent ${
+              className={`absolute right-0 z-10 flex items-center gap-1 rounded-[var(--radius-medium)] border border-[var(--border)] py-0.5 pl-3 pr-0.5 shadow-[0_4px_12px_var(--shadow-color)] transition-opacity duration-150 before:absolute before:inset-y-0 before:-left-5 before:w-5 before:bg-gradient-to-l before:from-[var(--panel-raised)] before:to-transparent ${
                 pinActionsVisible
                   ? 'opacity-100 pointer-events-auto'
                   : 'opacity-0 pointer-events-none group-hover/drone:opacity-100 group-hover/drone:pointer-events-auto'

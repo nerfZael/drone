@@ -46,13 +46,13 @@ export function DroneDropActionModal({
       <div className="w-full max-w-[560px] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] shadow-[0_28px_90px_var(--shadow-color)]">
         <div className="flex items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-6 py-5">
           <div className="min-w-0">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            <div className="text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.16em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Assign drones
             </div>
-            <div className="mt-2 text-[18px] font-semibold text-[var(--fg)]">
+            <div className="mt-2 text-[18px] font-[var(--weight-semibold)] text-[var(--fg)]">
               Assign {droppedCount} drone{droppedCount === 1 ? '' : 's'} to {targetDroneLabel}?
             </div>
-            <div className="mt-1 text-[13px] leading-5 text-[var(--muted)]">
+            <div className="mt-1 text-[var(--text-13)] leading-5 text-[var(--muted)]">
               This adds every dropped drone to the target drone's assigned relationships.
             </div>
           </div>
@@ -71,8 +71,8 @@ export function DroneDropActionModal({
           <div className="flex max-h-[280px] flex-col gap-2 overflow-y-auto">
             {droppedDrones.map((drone) => (
               <div key={drone.id} className="rounded-[12px] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-3">
-                <div className="truncate text-[13px] font-medium text-[var(--fg-secondary)]">{drone.label}</div>
-                {drone.group ? <div className="truncate text-[10px] text-[var(--muted-dim)]">{drone.group}</div> : null}
+                <div className="truncate text-[var(--text-13)] font-medium text-[var(--fg-secondary)]">{drone.label}</div>
+                {drone.group ? <div className="truncate text-[var(--text-10)] text-[var(--muted-dim)]">{drone.group}</div> : null}
               </div>
             ))}
           </div>
@@ -81,7 +81,7 @@ export function DroneDropActionModal({
               type="button"
               onClick={onRequestClose}
               disabled={assigning}
-              className="inline-flex h-10 items-center justify-center rounded-lg border border-[var(--border-subtle)] px-4 text-[12px] font-semibold text-[var(--muted)] transition-all hover:border-[var(--border)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-10 items-center justify-center rounded-[var(--radius-large)] border border-[var(--border-subtle)] px-4 text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--muted)] transition-all hover:border-[var(--border)] hover:text-[var(--fg-secondary)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               Cancel
             </button>
@@ -89,7 +89,7 @@ export function DroneDropActionModal({
               type="button"
               onClick={() => void handleAssignAll()}
               disabled={assigning}
-              className="inline-flex h-10 items-center justify-center rounded-lg border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-4 text-[12px] font-semibold text-[var(--accent)] transition-all hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+              className="inline-flex h-10 items-center justify-center rounded-[var(--radius-large)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-4 text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--accent)] transition-all hover:border-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
             >
               {assigning ? 'Assigning…' : 'Assign'}
             </button>

@@ -37,12 +37,12 @@ export type DroneHubWorkspaceContentProps = {
 
 function WorkspaceViewFallback() {
   return (
-    <div className="flex-1 min-h-0 bg-[var(--panel)]">
+    <div className="flex-1 min-h-0 bg-[var(--workspace)]">
       <div className="flex h-full w-full items-center justify-center px-4">
         <div
           role="status"
           aria-live="polite"
-          className="inline-flex h-9 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)] shadow-[0_16px_40px_var(--shadow-color)]"
+          className="inline-flex h-9 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-3 text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] shadow-[0_16px_40px_var(--shadow-color)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           <span className="h-2 w-2 rounded-full bg-[var(--accent)] opacity-80 animate-pulse" />
@@ -94,7 +94,7 @@ export function DroneHubWorkspaceContent({
     );
 
   return (
-    <div data-drone-workspace-root="1" className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--panel)]">
+    <div data-drone-workspace-root="1" className="relative flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden bg-[var(--workspace)]">
       <React.Suspense fallback={<WorkspaceViewFallback />}>{workspaceContent}</React.Suspense>
       <div className="absolute inset-0 z-20 pointer-events-none overflow-hidden">
         <div

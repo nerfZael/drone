@@ -46,7 +46,7 @@ export function ChatComposerMenu({
         title={label}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={`inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+        className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-medium)] border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
           open
             ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
             : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -63,7 +63,7 @@ export function ChatComposerMenu({
       {open ? (
         <div
           role="menu"
-          className="absolute bottom-full right-0 z-40 mb-2 w-56 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] py-1 shadow-[0_18px_55px_var(--shadow-color)]"
+          className="absolute bottom-full right-0 z-40 mb-2 w-56 overflow-hidden rounded-[var(--radius-large)] border border-[var(--border)] bg-[var(--panel-alt)] py-1 shadow-[0_18px_55px_var(--shadow-color)]"
         >
           {actions.map((action) => (
             <button
@@ -76,7 +76,7 @@ export function ChatComposerMenu({
                 setOpen(false);
                 action.onSelect();
               }}
-              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[11px] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              className={`flex w-full items-center gap-2 px-3 py-2 text-left text-[var(--text-11)] transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
                 action.active
                   ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
                   : 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
@@ -86,7 +86,7 @@ export function ChatComposerMenu({
                 {action.icon}
               </span>
               <span className="min-w-0 flex-1 truncate">{action.label}</span>
-              {action.badge ? <span className="flex-shrink-0 text-[9px] text-[var(--muted-dim)]">{action.badge}</span> : null}
+              {action.badge ? <span className="flex-shrink-0 text-[var(--text-9)] text-[var(--muted-dim)]">{action.badge}</span> : null}
               {action.active ? <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--accent)]" /> : null}
             </button>
           ))}

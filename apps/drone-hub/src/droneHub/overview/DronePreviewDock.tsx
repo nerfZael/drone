@@ -157,7 +157,7 @@ export function DronePreviewDock({
 
       <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
         <div
-          className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase flex items-center gap-1.5"
+          className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.12em] uppercase flex items-center gap-1.5"
           style={{ fontFamily: 'var(--display)' }}
         >
           <span>Browser</span>
@@ -184,11 +184,11 @@ export function DronePreviewDock({
         </div>
         <div className="min-w-0 flex items-center gap-2">
           {selectedPort ? (
-            <div className="min-w-0 truncate text-[10px] text-[var(--muted-dim)] font-mono" title={`Browser container:${selectedPort.containerPort}`}>
+            <div className="min-w-0 truncate text-[var(--text-10)] text-[var(--muted-dim)] font-mono" title={`Browser container:${selectedPort.containerPort}`}>
               :{selectedPort.containerPort}
             </div>
           ) : (
-            <div className="text-[10px] text-[var(--muted-dim)]">
+            <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
               {usingCustomUrl ? 'custom URL' : showStartupPlaceholder ? startupLabel.toLowerCase() : portsLoading ? 'loading' : 'none selected'}
             </div>
           )}
@@ -196,7 +196,7 @@ export function DronePreviewDock({
             type="button"
             onClick={refreshPreview}
             disabled={!selectedUrl}
-            className={`h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
+            className={`h-5 px-1.5 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
               selectedUrl
                 ? 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                 : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
@@ -213,7 +213,7 @@ export function DronePreviewDock({
                 href={selectedOpenUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="text-[10px] text-[var(--accent)] hover:text-[var(--fg)] transition-colors font-mono whitespace-nowrap"
+                className="text-[var(--text-10)] text-[var(--accent)] hover:text-[var(--fg)] transition-colors font-mono whitespace-nowrap"
                 title={`Open ${selectedOpenUrl} in a new tab`}
               >
                 Open tab →
@@ -243,7 +243,7 @@ export function DronePreviewDock({
                 }
               }}
               placeholder={defaultDisplayUrl || (selectedPort ? `http://localhost:${selectedPort.containerPort}/` : 'http://localhost:3000/')}
-              className={`flex-1 min-w-0 h-7 rounded border px-2 text-[11px] text-[var(--fg-secondary)] font-mono transition-colors ${
+              className={`flex-1 min-w-0 h-7 rounded border px-2 text-[var(--text-11)] text-[var(--fg-secondary)] font-mono transition-colors ${
                 locked
                   ? 'border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] text-[var(--muted)] cursor-default'
                   : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] focus:outline-none focus:border-[var(--accent-muted)]'
@@ -254,7 +254,7 @@ export function DronePreviewDock({
               type="button"
               onClick={savePreviewUrl}
               disabled={locked}
-              className="h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
+              className="h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
               style={{ fontFamily: 'var(--display)' }}
               title={locked ? 'Unlock the browser session to save a new URL.' : 'Save browser URL for this drone'}
             >
@@ -268,7 +268,7 @@ export function DronePreviewDock({
                 onSetPreviewUrlOverride(null);
               }}
               disabled={locked || !usingCustomUrl}
-              className={`h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+              className={`h-7 px-2 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 !locked && usingCustomUrl
                   ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:brightness-110'
                   : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
@@ -279,14 +279,14 @@ export function DronePreviewDock({
               Port URL
             </button>
           </div>
-          {urlError && <div className="mt-1 text-[10px] text-[var(--red)]">{urlError}</div>}
+          {urlError && <div className="mt-1 text-[var(--text-10)] text-[var(--red)]">{urlError}</div>}
         </div>
 
         {!selectedUrl ? (
-          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] text-[11px] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
+          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] text-[var(--text-11)] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
             {showStartupPlaceholder ? (
               <div className="max-w-[340px]">
-                <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                   {startupLabel}
                 </div>
                 <div className="mt-1">
@@ -294,7 +294,7 @@ export function DronePreviewDock({
                     ? 'Still waiting for mapped ports. If this persists, the drone may be stuck provisioning.'
                     : 'Connecting… waiting for mapped ports.'}
                 </div>
-                {startupDetail ? <div className="mt-1 text-[10px] text-[var(--muted-dim)]">{startupDetail}</div> : null}
+                {startupDetail ? <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">{startupDetail}</div> : null}
               </div>
             ) : portsError ? (
               `Ports error: ${portsError}`
@@ -305,11 +305,11 @@ export function DronePreviewDock({
             )}
           </div>
         ) : shouldShowOfflineState ? (
-          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] text-[11px] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
+          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] text-[var(--text-11)] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
             Port looks offline right now.
           </div>
         ) : iframeLoadFailed ? (
-          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] text-[11px] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
+          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] text-[var(--text-11)] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
             This service does not allow iframe embedding.
           </div>
         ) : (

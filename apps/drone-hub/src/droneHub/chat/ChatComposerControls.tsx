@@ -124,7 +124,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
               onValueChange={control.onValueChange}
               entries={control.entries}
               disabled={control.disabled}
-              triggerClassName={`h-9 justify-between px-2 text-[10px] uppercase tracking-wide ${controlWidthClass(control.width)}`}
+              triggerClassName={`h-[var(--control-height)] justify-between px-2 text-[var(--text-10)] uppercase tracking-wide ${controlWidthClass(control.width)}`}
               title={control.title}
               triggerLabel={control.label}
               chevron={() => (
@@ -160,7 +160,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
               }}
               disabled={control.disabled}
               placeholder={control.placeholder}
-              className={`h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[10px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none ${controlWidthClass(control.width)} ${
+              className={`h-[var(--control-height)] rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-10)] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none ${controlWidthClass(control.width)} ${
                 control.disabled
                   ? 'cursor-not-allowed opacity-40'
                   : 'hover:border-[var(--border)] hover:text-[var(--fg-secondary)]'
@@ -174,7 +174,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
           return (
             <div
               key={control.id}
-              className="grid h-9 flex-shrink-0 grid-flow-col overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)]"
+              className="grid h-[var(--control-height)] flex-shrink-0 grid-flow-col overflow-hidden rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)]"
               role="group"
               aria-label={control.label}
             >
@@ -186,7 +186,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
                   onClick={() => control.onValueChange(option.value)}
                   aria-pressed={control.value === option.value}
                   title={option.title}
-                  className={`min-w-[42px] px-2 text-[10px] font-semibold uppercase tracking-wide disabled:opacity-40 ${
+                  className={`min-w-[42px] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide disabled:opacity-40 ${
                     control.value === option.value
                       ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
                       : 'text-[var(--muted)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
@@ -209,8 +209,8 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
             aria-label={control.title}
             title={control.title}
             onClick={control.onSelect}
-            className={`inline-flex h-9 flex-shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-semibold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-              iconOnly ? 'w-9' : 'px-2'
+            className={`inline-flex h-[var(--control-height)] flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+              iconOnly ? 'w-[var(--control-height)]' : 'px-2'
             } ${
               control.active
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'

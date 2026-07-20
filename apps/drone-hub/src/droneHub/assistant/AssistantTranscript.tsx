@@ -9,7 +9,7 @@ import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { ChatMessageCopyAction } from '../chat/ChatMessageCopyAction';
 import { ChatMessageFrame } from '../chat/ChatMessageFrame';
-import { formatWorkingDuration } from '../chat/WorkingElapsedStatus';
+import { AgentRunSummaryLine, formatWorkingDuration } from '../chat/WorkingElapsedStatus';
 import { IconDrone } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import {
@@ -63,8 +63,8 @@ export function AssistantQueuedPromptRow({
   const statusLabel = failed ? 'Failed' : running ? 'Working' : 'Queued';
   return (
     <div className="mx-3 flex justify-end">
-      <div className={`max-w-[88%] rounded-lg border px-3 py-2 ${failed ? 'border-[var(--red-border)] bg-[var(--red-subtle)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)]'}`}>
-        <div className="mb-1 flex items-center gap-2 text-[9px] font-semibold uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
+      <div className={`max-w-[88%] rounded-[var(--radius-large)] border px-3 py-2 ${failed ? 'border-[var(--red-border)] bg-[var(--red-subtle)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)]'}`}>
+        <div className="mb-1 flex items-center gap-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
           <span className={failed ? 'text-[var(--red)]' : 'text-[var(--muted)]'}>{statusLabel}</span>
           {prompt.imageCount > 0 ? <span className="text-[var(--muted-dim)]">{prompt.imageCount} image{prompt.imageCount === 1 ? '' : 's'}</span> : null}
           {!running ? (
@@ -72,7 +72,7 @@ export function AssistantQueuedPromptRow({
               type="button"
               onClick={onCancel}
               disabled={cancelling}
-              className="ml-auto rounded px-1 py-0.5 text-[9px] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
+              className="ml-auto rounded px-1 py-0.5 text-[var(--text-9)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
               aria-label={failed ? 'Dismiss failed prompt' : 'Cancel queued prompt'}
               title={failed ? 'Dismiss failed prompt' : 'Cancel queued prompt'}
             >
@@ -80,8 +80,8 @@ export function AssistantQueuedPromptRow({
             </button>
           ) : null}
         </div>
-        {prompt.prompt ? <div className="whitespace-pre-wrap break-words text-[12px] leading-relaxed text-[var(--fg-secondary)]">{prompt.prompt}</div> : null}
-        {failed && prompt.error ? <div className="mt-1.5 text-[10px] text-[var(--red)]">{prompt.error}</div> : null}
+        {prompt.prompt ? <div className="whitespace-pre-wrap break-words text-[var(--text-12)] leading-relaxed text-[var(--fg-secondary)]">{prompt.prompt}</div> : null}
+        {failed && prompt.error ? <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">{prompt.error}</div> : null}
       </div>
     </div>
   );
@@ -102,7 +102,7 @@ function ToolDisclosure({
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]"
         style={{ fontFamily: 'var(--display)' }}
       >
         {status ? (
@@ -189,32 +189,32 @@ function ReasoningBlock({ text, headerPulse }: { text: string; headerPulse: bool
         className="flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left hover:bg-[var(--surface-strong)]"
       >
         <span
-          className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+          className="flex-shrink-0 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           Reasoning
         </span>
         {headerPulse ? <ThinkingPulseDots /> : null}
-        <span className="ml-auto flex-shrink-0 text-[10px] text-[var(--muted)]">
+        <span className="ml-auto flex-shrink-0 text-[var(--text-10)] text-[var(--muted)]">
           {open ? 'Hide' : 'Show'}
         </span>
       </button>
       {trimmed ? (
         open ? (
           <div className="border-t border-[var(--border-subtle)] px-2.5 py-2">
-            <div className="max-h-[min(70vh,28rem)] overflow-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-[var(--muted)]">
+            <div className="max-h-[min(70vh,28rem)] overflow-auto whitespace-pre-wrap break-words text-[var(--text-11)] leading-relaxed text-[var(--muted)]">
               {trimmed}
             </div>
           </div>
         ) : (
           <div className="border-t border-[var(--border-subtle)] px-2.5 pb-2 pt-1">
-            <div className="line-clamp-3 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-[var(--muted-dim)]">
+            <div className="line-clamp-3 whitespace-pre-wrap break-words text-[var(--text-11)] leading-relaxed text-[var(--muted-dim)]">
               {trimmed}
             </div>
           </div>
         )
       ) : headerPulse ? (
-        <div className="border-t border-[var(--border-subtle)] px-2.5 py-2 text-[11px] text-[var(--muted-dim)]">
+        <div className="border-t border-[var(--border-subtle)] px-2.5 py-2 text-[var(--text-11)] text-[var(--muted-dim)]">
           …
         </div>
       ) : null}
@@ -244,7 +244,7 @@ function ToolDetailsButton({ open, onClick }: { open: boolean; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="ml-auto flex h-5 flex-shrink-0 items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+      className="ml-auto flex h-5 flex-shrink-0 items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
       style={{ fontFamily: 'var(--display)' }}
     >
       {open ? 'Hide details' : 'Details'}
@@ -265,12 +265,12 @@ function ToolPayloadDetails({
       {call ? (
         <div>
           <div
-            className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+            className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             Arguments
           </div>
-          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--muted-dim)]">
+          <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[var(--text-10)] text-[var(--muted-dim)]">
             {JSON.stringify(call.args, null, 2)}
           </pre>
         </div>
@@ -278,21 +278,21 @@ function ToolPayloadDetails({
       {result ? (
         <div className={call ? 'border-t border-[var(--border-subtle)] pt-2' : ''}>
           <div
-            className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+            className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             Result
           </div>
           {resultText ? (
-            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[11px] text-[var(--fg-secondary)]">
+            <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[var(--text-11)] text-[var(--fg-secondary)]">
               {resultText}
             </pre>
           ) : (
-            <div className="mt-1 text-[11px] text-[var(--muted-dim)]">No result payload.</div>
+            <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">No result payload.</div>
           )}
         </div>
       ) : (
-        <div className="text-[11px] text-[var(--muted-dim)]">Waiting for result...</div>
+        <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Waiting for result...</div>
       )}
     </div>
   );
@@ -343,18 +343,18 @@ function TransferActivityRow({
           <div className="min-w-0 flex-1">
             <div className="flex items-center justify-between gap-2">
               <div
-                className="truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+                className="truncate text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 Transfer files
               </div>
-              <div className="tabular-nums text-[10px] text-[var(--muted)]">
+              <div className="tabular-nums text-[var(--text-10)] text-[var(--muted)]">
                 {progress
                   ? `${formatTransferBytes(transferredBytes)} / ${formatTransferBytes(totalBytes)}`
                   : 'Preparing…'}
               </div>
             </div>
-            <div className="mt-1 truncate text-[11px] text-[var(--fg-secondary)]">
+            <div className="mt-1 truncate text-[var(--text-11)] text-[var(--fg-secondary)]">
               {sourceLabel} <span className="text-[var(--muted-dim)]">→</span> {destinationLabel}
             </div>
           </div>
@@ -366,7 +366,7 @@ function TransferActivityRow({
             style={{ width: `${percent}%` }}
           />
         </div>
-        <div className="mt-1.5 flex items-center justify-between text-[10px] text-[var(--muted-dim)]">
+        <div className="mt-1.5 flex items-center justify-between text-[var(--text-10)] text-[var(--muted-dim)]">
           <span>
             {progress?.phase === 'planning'
               ? 'Scanning folder…'
@@ -379,13 +379,13 @@ function TransferActivityRow({
           </span>
         </div>
         {failed && progress?.failure?.error ? (
-          <div className="mt-1.5 text-[10px] text-[var(--red)]">
+          <div className="mt-1.5 text-[var(--text-10)] text-[var(--red)]">
             {progress.failure.error}
             {progress.failure.cleanupError ? ` Cleanup: ${progress.failure.cleanupError}` : ''}
           </div>
         ) : null}
         {failed && progress?.resumeToken ? (
-          <div className="mt-1 text-[10px] text-[var(--muted-dim)]">
+          <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">
             The assistant can resume after {progress.completedFiles ?? 0} committed files.
           </div>
         ) : null}
@@ -405,7 +405,7 @@ function TransferActivityRow({
                   key={`${file.destinationPath}-${index}`}
                   className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5"
                 >
-                  <div className="flex min-w-0 items-center gap-2 text-[10px]">
+                  <div className="flex min-w-0 items-center gap-2 text-[var(--text-10)]">
                     <span className="min-w-0 flex-1 truncate text-[var(--fg-secondary)]">
                       {file.sourcePath}
                     </span>
@@ -426,7 +426,7 @@ function TransferActivityRow({
                     />
                   </div>
                   {file.error && (file.status === 'retrying' || file.status === 'failed') ? (
-                    <div className="mt-1 truncate text-[9px] text-[var(--muted-dim)]">
+                    <div className="mt-1 truncate text-[var(--text-9)] text-[var(--muted-dim)]">
                       {file.error}
                     </div>
                   ) : null}
@@ -469,16 +469,16 @@ export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderI
       >
         <ToolStatusIndicator result={statusResult} />
         <span
-          className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+          className="min-w-0 truncate text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           {label}
         </span>
-        <span className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--fg-secondary)]">
+        <span className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
           x{items.length}
         </span>
         {statusText ? (
-          <span className="hidden flex-shrink-0 text-[10px] text-[var(--muted-dim)] sm:inline">
+          <span className="hidden flex-shrink-0 text-[var(--text-10)] text-[var(--muted-dim)] sm:inline">
             {statusText}
           </span>
         ) : null}
@@ -496,7 +496,7 @@ export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderI
               <div className="flex min-w-0 items-center gap-2 border-b border-[var(--border-subtle)] px-2.5 py-1.5">
                 <ToolStatusIndicator result={item.result} />
                 <div
-                  className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+                  className="min-w-0 flex-1 truncate text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   {label} #{index + 1}
@@ -530,7 +530,7 @@ export function MessageDroneActivityRow({
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <ToolStatusIndicator result={result} />
             <div
-              className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+              className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               Send user message
@@ -541,21 +541,21 @@ export function MessageDroneActivityRow({
             />
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-            <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[11px] text-[var(--fg-secondary)]">
+            <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[var(--text-11)] text-[var(--fg-secondary)]">
               <span className="truncate">{summary.droneLabel || 'Target drone'}</span>
             </span>
             {summary.chatName && summary.chatName !== 'default' ? (
-              <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[11px] text-[var(--muted)]">
+              <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[var(--text-11)] text-[var(--muted)]">
                 <span className="truncate">{summary.chatName}</span>
               </span>
             ) : null}
           </div>
           {preview ? (
-            <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5 text-[12px] leading-5 text-[var(--fg-secondary)]">
+            <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5 text-[var(--text-12)] leading-5 text-[var(--fg-secondary)]">
               {preview}
             </div>
           ) : (
-            <div className="mt-2 text-[11px] text-[var(--muted-dim)]">
+            <div className="mt-2 text-[var(--text-11)] text-[var(--muted-dim)]">
               No message preview available.
             </div>
           )}
@@ -586,7 +586,7 @@ export function ChatsIdleActivityRow({
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
             <ToolStatusIndicator result={result} />
             <div
-              className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+              className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               {label}
@@ -596,7 +596,7 @@ export function ChatsIdleActivityRow({
               onClick={() => setDetailsOpen((value) => !value)}
             />
           </div>
-          <div className="mt-1 text-[12px] text-[var(--fg-secondary)]">
+          <div className="mt-1 text-[var(--text-12)] text-[var(--fg-secondary)]">
             {targetSummary || 'Resolving target drones'}
           </div>
         </div>
@@ -608,18 +608,18 @@ export function ChatsIdleActivityRow({
               key={target.key}
               className="flex min-h-8 min-w-0 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2"
             >
-              <div className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--fg-secondary)]">
+              <div className="min-w-0 flex-1 truncate text-[var(--text-12)] font-medium text-[var(--fg-secondary)]">
                 {target.droneLabel}
               </div>
               {target.chatName && target.chatName !== 'default' ? (
-                <div className="max-w-[42%] truncate rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-1.5 py-0.5 text-[10px] text-[var(--muted)]">
+                <div className="max-w-[42%] truncate rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-1.5 py-0.5 text-[var(--text-10)] text-[var(--muted)]">
                   {target.chatName}
                 </div>
               ) : null}
             </div>
           ))
         ) : (
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-2 text-[11px] text-[var(--muted-dim)]">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-2 text-[var(--text-11)] text-[var(--muted-dim)]">
             Waiting for result...
           </div>
         )}
@@ -657,12 +657,12 @@ export function ToolActivityRow({
         {call ? (
           <div>
             <div
-              className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+              className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               Arguments
             </div>
-            <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--muted-dim)]">
+            <pre className="mt-1 max-h-24 overflow-auto whitespace-pre-wrap break-words text-[var(--text-10)] text-[var(--muted-dim)]">
               {JSON.stringify(call.args, null, 2)}
             </pre>
           </div>
@@ -670,25 +670,25 @@ export function ToolActivityRow({
         {result ? (
           <div className={call ? 'mt-2 border-t border-[var(--border-subtle)] pt-2' : ''}>
             <div
-              className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+              className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               Result
             </div>
             {resultText ? (
-              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[11px] text-[var(--fg-secondary)]">
+              <pre className="mt-1 max-h-32 overflow-auto whitespace-pre-wrap break-words text-[var(--text-11)] text-[var(--fg-secondary)]">
                 {resultText}
               </pre>
             ) : (
-              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">No result payload.</div>
+              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">No result payload.</div>
             )}
           </div>
         ) : (
           <div
             className={
               call
-                ? 'mt-2 border-t border-[var(--border-subtle)] pt-2 text-[11px] text-[var(--muted-dim)]'
-                : 'text-[11px] text-[var(--muted-dim)]'
+                ? 'mt-2 border-t border-[var(--border-subtle)] pt-2 text-[var(--text-11)] text-[var(--muted-dim)]'
+                : 'text-[var(--text-11)] text-[var(--muted-dim)]'
             }
           >
             Waiting for result...
@@ -748,30 +748,19 @@ export function ToolRunActivity({
   if (items.length === 0) return null;
   const start = Number.isFinite(startedAt) ? Number(startedAt) : fallbackStart;
   const end = active ? now : Number.isFinite(endedAt) ? Number(endedAt) : start;
-  const duration = formatAssistantRunDuration(Math.max(0, end - start));
   const callLabel = `${items.length} tool ${items.length === 1 ? 'call' : 'calls'}`;
   const groupedItems = compactRepeatedToolItems(items);
 
   return (
     <div>
-      <button
-        type="button"
-        aria-expanded={expanded}
-        aria-label={expanded ? 'Collapse tool calls' : 'Expand tool calls'}
-        onClick={() => setExpanded((value) => !value)}
-        className="flex min-h-9 w-full items-center gap-2 border-b border-[var(--border-subtle)] py-1.5 text-left text-[var(--muted)] hover:text-[var(--fg-secondary)]"
-      >
-        <span
-          className="text-sm font-semibold"
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          {active ? 'Working' : 'Worked'} for {duration}
-        </span>
-        <span className="text-xs text-[var(--muted-dim)]">{callLabel}</span>
-        <span className="text-[var(--muted-dim)]">
-          <ToolRunChevron open={expanded} />
-        </span>
-      </button>
+      <AgentRunSummaryLine
+        active={active}
+        durationMs={Math.max(0, end - start)}
+        detail={callLabel}
+        trailing={<ToolRunChevron open={expanded} />}
+        expanded={expanded}
+        onToggle={() => setExpanded((value) => !value)}
+      />
       {expanded ? (
         <div className="mt-1 space-y-1">
           {groupedItems.map((item) =>
@@ -917,13 +906,13 @@ export function AssistantMessageRow({
       {message.role === 'user' ? <ChatMessageCopyAction text={visibleText} /> : null}
       {body}
       {!body && message.errorMessage ? (
-        <div className="text-[12px] text-[var(--red)]">{message.errorMessage}</div>
+        <div className="text-[var(--text-12)] text-[var(--red)]">{message.errorMessage}</div>
       ) : null}
       {calls.length > 0 ? (
         <div className="mt-2 space-y-1.5">
           {calls.map((call) => (
             <ToolDisclosure key={call.id} title={toolLabel(call.name)}>
-              <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-words text-[10px] text-[var(--muted-dim)]">
+              <pre className="max-h-24 overflow-auto whitespace-pre-wrap break-words text-[var(--text-10)] text-[var(--muted-dim)]">
                 {JSON.stringify(call.args, null, 2)}
               </pre>
             </ToolDisclosure>

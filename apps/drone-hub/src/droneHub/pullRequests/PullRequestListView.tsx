@@ -32,7 +32,7 @@ export function PullRequestListView({
                 href={pr.htmlUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center justify-center min-w-[44px] h-6 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[10px] font-semibold text-[var(--accent)] hover:brightness-110"
+                className="inline-flex items-center justify-center min-w-[44px] h-6 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--accent)] hover:brightness-110"
                 title={pr.htmlUrl || `#${pr.number}`}
               >
                 #{pr.number}
@@ -41,7 +41,7 @@ export function PullRequestListView({
                 <button
                   type="button"
                   onClick={() => onOpenPullRequest(pr)}
-                  className="block w-full text-left text-[12px] text-[var(--fg-secondary)] hover:text-[var(--fg)] hover:underline truncate"
+                  className="block w-full text-left text-[var(--text-12)] text-[var(--fg-secondary)] hover:text-[var(--fg)] hover:underline truncate"
                   title={`Inspect PR #${pr.number}: ${pr.title}`}
                 >
                   {pr.title}
@@ -53,7 +53,7 @@ export function PullRequestListView({
                   <MetaChip label="updated" value={formatTimestamp(pr.updatedAt)} title={pr.updatedAt} />
                   <PullRequestStatusBadgeStrip pullRequest={pr} />
                   {pr.isCrossRepository ? (
-                    <span className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-[10px] text-[var(--muted)]">
+                    <span className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-[var(--text-10)] text-[var(--muted)]">
                       Cross-repo
                     </span>
                   ) : null}
@@ -65,7 +65,7 @@ export function PullRequestListView({
                     type="button"
                     onClick={() => onMergePullRequest(pr)}
                     disabled={Boolean(busy) || anyBusy || Boolean(blockedReason)}
-                    className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+                    className="h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
                     style={{ fontFamily: 'var(--display)' }}
                     title={
                       blockedReason
@@ -81,7 +81,7 @@ export function PullRequestListView({
                     type="button"
                     onClick={() => onClosePullRequest(pr)}
                     disabled={Boolean(busy) || anyBusy}
-                    className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+                    className="h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
                     style={{ fontFamily: 'var(--display)' }}
                     title="Close pull request without merging"
                   >
@@ -89,11 +89,11 @@ export function PullRequestListView({
                   </button>
                 </div>
                 {blockedReason ? (
-                  <div className="text-[9px] text-[var(--red)] whitespace-nowrap" title={blockedReason}>
+                  <div className="text-[var(--text-9)] text-[var(--red)] whitespace-nowrap" title={blockedReason}>
                     Merge blocked: {blockedReason}
                   </div>
                 ) : forceReason ? (
-                  <div className="text-[9px] text-[var(--yellow)] whitespace-nowrap" title={forceReason}>
+                  <div className="text-[var(--text-9)] text-[var(--yellow)] whitespace-nowrap" title={forceReason}>
                     Force merge: {forceReason}
                   </div>
                 ) : null}

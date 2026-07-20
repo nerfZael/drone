@@ -795,7 +795,7 @@ export function DroneFilesDock({
                 disabled={busy}
                 onClick={(event) => activateEntry(node.entry, event)}
                 onContextMenu={(event) => openEntryContextMenu(node.entry, event)}
-                className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[13px] transition-colors disabled:opacity-60 ${
+                className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[var(--text-13)] transition-colors disabled:opacity-60 ${
                   selected
                     ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                     : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
@@ -810,9 +810,9 @@ export function DroneFilesDock({
                   <IconFolder size={13} />
                 </span>
                 <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
-                {childError ? <span className="px-1 text-[9px] uppercase text-[var(--red)]">Error</span> : null}
+                {childError ? <span className="px-1 text-[var(--text-9)] uppercase text-[var(--red)]">Error</span> : null}
                 {childLoading ? (
-                  <span className="inline-flex items-center gap-1 px-1 text-[9px] uppercase text-[var(--accent)]">
+                  <span className="inline-flex items-center gap-1 px-1 text-[var(--text-9)] uppercase text-[var(--accent)]">
                     <InlineSpinner />
                     Loading
                   </span>
@@ -822,18 +822,18 @@ export function DroneFilesDock({
             {open ? (
               <>
                 {childError ? (
-                  <div className="ml-7 my-0.5 px-2 py-1 text-[10px] text-[var(--red)]">
+                  <div className="ml-7 my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--red)]">
                     {childError}
                   </div>
                 ) : null}
                 {childLoading && !childLoaded ? (
-                  <div className="ml-7 my-0.5 px-2 py-1 text-[10px] text-[var(--muted)]">
+                  <div className="ml-7 my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
                     Loading directory...
                   </div>
                 ) : null}
                 {childLoaded && node.children && node.children.length > 0 ? renderExplorer(node.children, depth + 1) : null}
                 {childLoaded && (!node.children || node.children.length === 0) ? (
-                  <div className="ml-7 my-0.5 px-2 py-1 text-[10px] text-[var(--muted)]">
+                  <div className="ml-7 my-0.5 px-2 py-1 text-[var(--text-10)] text-[var(--muted)]">
                     Directory is empty.
                   </div>
                 ) : null}
@@ -859,7 +859,7 @@ export function DroneFilesDock({
             disabled={busy}
             onClick={(event) => activateEntry(entry, event)}
             onContextMenu={(event) => openEntryContextMenu(entry, event)}
-            className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[13px] transition-colors disabled:opacity-60 ${
+            className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[var(--text-13)] transition-colors disabled:opacity-60 ${
               selected
                 ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                 : active
@@ -934,27 +934,27 @@ export function DroneFilesDock({
       onKeyDown={handleExplorerKeyDown}
     >
       {uploadStatus ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--info-subtle)] border border-[var(--info-border)] text-[12px] text-[var(--fg-secondary)]">
+        <div className="mx-2.5 mt-2 p-2 rounded-[var(--radius-medium)] bg-[var(--info-subtle)] border border-[var(--info-border)] text-[var(--text-12)] text-[var(--fg-secondary)]">
           {uploadStatus}
         </div>
       ) : null}
       {actionStatus ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--info-subtle)] border border-[var(--info-border)] text-[12px] text-[var(--fg-secondary)]">
+        <div className="mx-2.5 mt-2 p-2 rounded-[var(--radius-medium)] bg-[var(--info-subtle)] border border-[var(--info-border)] text-[var(--text-12)] text-[var(--fg-secondary)]">
           {actionStatus}
         </div>
       ) : null}
       {actionError ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[var(--red-border)] text-[12px] text-[var(--red)]">
+        <div className="mx-2.5 mt-2 p-2 rounded-[var(--radius-medium)] bg-[var(--red-subtle)] border border-[var(--red-border)] text-[var(--text-12)] text-[var(--red)]">
           {actionError}
         </div>
       ) : null}
       {uploadError ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[var(--red-border)] text-[12px] text-[var(--red)]">
+        <div className="mx-2.5 mt-2 p-2 rounded-[var(--radius-medium)] bg-[var(--red-subtle)] border border-[var(--red-border)] text-[var(--text-12)] text-[var(--red)]">
           {uploadError}
         </div>
       ) : null}
       {error ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[var(--red-border)] text-[12px] text-[var(--red)]">
+        <div className="mx-2.5 mt-2 p-2 rounded-[var(--radius-medium)] bg-[var(--red-subtle)] border border-[var(--red-border)] text-[var(--text-12)] text-[var(--red)]">
           {error}
         </div>
       ) : null}
@@ -979,19 +979,19 @@ export function DroneFilesDock({
             }}
           >
             {showStartupPlaceholder ? (
-              <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[12px] text-[var(--muted)]">
-                <div className="text-[11px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-12)] text-[var(--muted)]">
+                <div className="text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                   {startupLabel}
                 </div>
                 <div className="mt-1">{startupText}</div>
-                {startupDetail ? <div className="mt-1 text-[11px] text-[var(--muted-dim)]">{startupDetail}</div> : null}
+                {startupDetail ? <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">{startupDetail}</div> : null}
               </div>
             ) : !error && loading && entries.length === 0 ? (
-              <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[12px] text-[var(--muted)]">
+              <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-12)] text-[var(--muted)]">
                 Loading files...
               </div>
             ) : !error && !loading && entries.length === 0 ? (
-              <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[12px] text-[var(--muted)]">
+              <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-12)] text-[var(--muted)]">
                 {readOnly ? 'Directory is empty.' : 'Directory is empty. Right-click to create a file or folder.'}
               </div>
             ) : (
@@ -1049,10 +1049,10 @@ export function DroneFilesDock({
 
       {dragActive ? (
         <div className="pointer-events-none absolute inset-0 z-30 px-3 py-3">
-          <div className="w-full h-full rounded-md border-2 border-dashed border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] flex items-center justify-center text-center px-4">
-            <div className="text-[12px] text-[var(--fg-secondary)]">
+          <div className="w-full h-full rounded-[var(--radius-medium)] border-2 border-dashed border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] flex items-center justify-center text-center px-4">
+            <div className="text-[var(--text-12)] text-[var(--fg-secondary)]">
               Drop files to upload into
-              <div className="mt-1 font-mono text-[11px] text-[var(--accent)] break-all">{normalizedPath}</div>
+              <div className="mt-1 font-mono text-[var(--text-11)] text-[var(--accent)] break-all">{normalizedPath}</div>
             </div>
           </div>
         </div>

@@ -20,7 +20,7 @@ export function ChatComposerContext({ config }: { config?: ChatComposerContextCo
   return (
     <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
       <div
-        className="mb-1.5 min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+        className="mb-1.5 min-w-0 truncate text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
         style={{ fontFamily: 'var(--display)' }}
       >
         {config.label}
@@ -32,11 +32,11 @@ export function ChatComposerContext({ config }: { config?: ChatComposerContextCo
               key={item.id}
               className="relative w-[190px] flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5"
             >
-              <div className="min-w-0 truncate text-[10px] font-medium text-[var(--fg-secondary)]" title={item.label}>
+              <div className="min-w-0 truncate text-[var(--text-10)] font-medium text-[var(--fg-secondary)]" title={item.label}>
                 {item.label}
               </div>
               {item.meta ? (
-                <div className="mt-1 truncate font-mono text-[9px] text-[var(--muted-dim)]" title={item.meta}>
+                <div className="mt-1 truncate font-mono text-[var(--text-9)] text-[var(--muted-dim)]" title={item.meta}>
                   {item.meta}
                 </div>
               ) : null}
@@ -44,7 +44,7 @@ export function ChatComposerContext({ config }: { config?: ChatComposerContextCo
                 type="button"
                 onClick={() => config.onRemove(item.id)}
                 disabled={config.disabled}
-                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel-raised)] text-[10px] font-bold text-[var(--muted)] hover:border-[var(--red)] hover:text-[var(--red)] disabled:opacity-45"
+                className="absolute -right-1.5 -top-1.5 flex h-5 w-5 items-center justify-center rounded-full border border-[var(--border)] bg-[var(--panel-raised)] text-[var(--text-10)] font-[var(--weight-bold)] text-[var(--muted)] hover:border-[var(--red)] hover:text-[var(--red)] disabled:opacity-45"
                 title={`Remove ${item.label}`}
                 aria-label={`Remove ${item.label}`}
               >
@@ -54,7 +54,7 @@ export function ChatComposerContext({ config }: { config?: ChatComposerContextCo
           ))}
         </div>
       ) : (
-        <div className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5 text-[10px] text-[var(--accent)]">
+        <div className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5 text-[var(--text-10)] text-[var(--accent)]">
           {config.emptyHint ?? 'Drop items here to add them to this message.'}
         </div>
       )}

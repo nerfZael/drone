@@ -32,13 +32,13 @@ export function AutomationRunnerPanel({
 
   return (
     <div className="px-3 pb-3">
-      <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-2.5 flex flex-col gap-2">
-        <div className="text-[9px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Automation Runner</div>
+      <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-2.5 flex flex-col gap-2">
+        <div className="text-[var(--text-9)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Automation Runner</div>
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px_auto] gap-2 items-center">
           <select
             value={selectedActionId}
             onChange={(e) => onSelectActionId(e.target.value)}
-            className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+            className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
             disabled={controlsDisabled}
           >
             {actions.map((action) => {
@@ -59,7 +59,7 @@ export function AutomationRunnerPanel({
             value={runsDraft}
             onChange={(e) => onRunsDraftChange(e.target.value)}
             disabled={!selectedAction?.onSelectWithRuns || selectedActionDisabled}
-            className={`h-9 rounded border px-2 text-[12px] focus:outline-none ${
+            className={`h-9 rounded border px-2 text-[var(--text-12)] focus:outline-none ${
               !selectedAction?.onSelectWithRuns || selectedActionDisabled
                 ? 'opacity-50 cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                 : 'border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] text-[var(--fg)] focus:border-[var(--accent-muted)]'
@@ -70,7 +70,7 @@ export function AutomationRunnerPanel({
             type="button"
             onClick={() => onTriggerAction()}
             disabled={selectedActionDisabled || !selectedAction}
-            className={`h-9 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+            className={`h-9 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
               selectedActionDisabled || !selectedAction
                 ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                 : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
@@ -81,7 +81,7 @@ export function AutomationRunnerPanel({
             {selectedAction?.label ?? 'Run'}
           </button>
         </div>
-        <div className="flex flex-wrap items-center gap-3 text-[10px] text-[var(--muted-dim)]">
+        <div className="flex flex-wrap items-center gap-3 text-[var(--text-10)] text-[var(--muted-dim)]">
           <span>
             {selectedAction?.onSelectWithRuns
               ? `Runs: ${selectedRuns ?? selectedAction.defaultRuns ?? 1}`

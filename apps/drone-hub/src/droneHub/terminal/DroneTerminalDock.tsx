@@ -815,7 +815,7 @@ export function DroneTerminalDock({
       className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex flex-col relative"
     >
       {error && (
-        <div className="px-3 py-1 text-[10px] text-[var(--red)] truncate max-w-full border-b border-[var(--border-subtle)] bg-[var(--red-subtle)]">
+        <div className="px-3 py-1 text-[var(--text-10)] text-[var(--red)] truncate max-w-full border-b border-[var(--border-subtle)] bg-[var(--red-subtle)]">
           {error}
         </div>
       )}
@@ -838,20 +838,20 @@ export function DroneTerminalDock({
         ) : null}
         {disabled && (
           <div className="absolute inset-0 z-10 flex items-center justify-center text-center px-6">
-            <div className="max-w-[360px] rounded-md border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] backdrop-blur px-4 py-3">
-              <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            <div className="max-w-[360px] rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] backdrop-blur px-4 py-3">
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                 {provisioningLabel(hubPhase)}
               </div>
-              <div className="mt-1 text-[12px] text-[var(--muted)]">
+              <div className="mt-1 text-[var(--text-12)] text-[var(--muted)]">
                 {startup.timedOut
                   ? 'Still waiting for the terminal to become available.'
                   : 'Connecting terminal…'}
               </div>
               {String(hubMessage ?? '').trim() ? (
-                <div className="mt-1 text-[11px] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
+                <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
               ) : null}
               {startup.timedOut ? (
-                <div className="mt-2 text-[11px] text-[var(--muted-dim)]">
+                <div className="mt-2 text-[var(--text-11)] text-[var(--muted-dim)]">
                   If this persists, check the drone status/error details in the sidebar.
                 </div>
               ) : null}

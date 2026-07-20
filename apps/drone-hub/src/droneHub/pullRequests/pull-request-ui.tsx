@@ -45,7 +45,7 @@ export function MetaChip({
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-[10px] ${
+      className={`inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-[var(--text-10)] ${
         mono ? 'font-mono' : ''
       }`}
       title={title}
@@ -88,7 +88,7 @@ export function PullRequestStatusBadgeStrip({
         <span
           key={`pr-badge-${pullRequest.number}-${badge.key}`}
           className={`inline-flex items-center rounded border py-[1px] ${
-            compact ? 'px-1 text-[9px] leading-none' : 'px-1.5 text-[10px]'
+            compact ? 'px-1 text-[var(--text-9)] leading-none' : 'px-1.5 text-[var(--text-10)]'
           } ${pullRequestBadgeClassNames[badge.tone]}`}
           title={badge.label}
         >

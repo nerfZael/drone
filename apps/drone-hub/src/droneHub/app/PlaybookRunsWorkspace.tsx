@@ -315,31 +315,30 @@ export function PlaybookRunsWorkspace({
   return (
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       {/* ── Header ── */}
-      <div className="relative flex-shrink-0 border-b border-[var(--border-subtle)]">
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,var(--accent-subtle)_0%,transparent_80%)]" />
-        <div className="dh-noise relative">
+      <div className="relative flex-shrink-0 border-b border-[var(--border-subtle)] bg-[var(--panel-alt)]">
+        <div className="relative">
           <div className="px-6 py-5">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3.5 min-w-0">
-                <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[var(--glow-accent)]">
+                <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-[var(--radius-xlarge)] bg-[var(--accent-subtle)] text-[var(--accent)]">
                   <IconBoard />
                 </div>
                 <div className="min-w-0">
                   <div className="flex items-center gap-3">
-                    <span className="text-[15px] font-semibold tracking-tight text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
+                    <span className="text-[15px] font-[var(--weight-semibold)] tracking-tight text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>
                       Playbook Runs
                     </span>
-                    <span className="inline-flex items-center gap-1.5 rounded-md bg-[var(--surface-strong)] px-2.5 py-1 text-[10px] font-medium text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
+                    <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-medium)] bg-[var(--surface-strong)] px-2.5 py-1 text-[var(--text-10)] font-medium text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
                       {filteredRuns.length}<span className="opacity-40">R</span>
                       {totalQueuedCount > 0 && <>{' '}{totalQueuedCount}<span className="opacity-40">Q</span></>}
                     </span>
                     {(runsLoading || playbooksLoading) && (
-                      <span className="flex items-center gap-1.5 text-[10px] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
+                      <span className="flex items-center gap-1.5 text-[var(--text-10)] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
                         <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)] animate-pulse-dot" />Loading
                       </span>
                     )}
                   </div>
-                  <div className="mt-1.5 text-[11px] text-[var(--muted)] leading-relaxed max-w-[52ch]">
+                  <div className="mt-1.5 text-[var(--text-11)] text-[var(--muted)] leading-relaxed max-w-[52ch]">
                     Launch playbooks, monitor active runs, and inspect artifacts.
                   </div>
                 </div>
@@ -348,7 +347,7 @@ export function PlaybookRunsWorkspace({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="inline-flex h-8 items-center justify-center rounded-lg px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)] transition-all hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]"
+                  className="inline-flex h-8 items-center justify-center rounded-[var(--radius-large)] px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)] transition-all hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   Close
@@ -361,11 +360,11 @@ export function PlaybookRunsWorkspace({
           <div className="flex flex-wrap items-center gap-3 px-6 pb-4">
             {/* Playbook filters */}
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-dim)] mr-0.5" style={{ fontFamily: 'var(--display)' }}>Playbook</span>
+              <span className="text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--muted-dim)] mr-0.5" style={{ fontFamily: 'var(--display)' }}>Playbook</span>
               <button
                 type="button"
                 onClick={() => setSelectedPlaybookId('')}
-                className={`inline-flex h-7 items-center rounded-lg px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                className={`inline-flex h-7 items-center rounded-[var(--radius-large)] px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
                   selectedPlaybookId === ''
                     ? 'bg-[var(--fg)] text-[var(--panel)] shadow-[0_2px_8px_var(--shadow-color)]'
                     : 'bg-[var(--surface-strong)] text-[var(--muted-dim)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]'
@@ -373,7 +372,7 @@ export function PlaybookRunsWorkspace({
                 style={{ fontFamily: 'var(--display)' }}
               >
                 All
-                <span className="ml-1.5 text-[9px] opacity-60" style={{ fontFamily: 'var(--code)' }}>{runsForSelectedRepo.length}</span>
+                <span className="ml-1.5 text-[var(--text-9)] opacity-60" style={{ fontFamily: 'var(--code)' }}>{runsForSelectedRepo.length}</span>
               </button>
               {playbooks.map((playbook) => {
                 const active = selectedPlaybookId === playbook.id;
@@ -384,7 +383,7 @@ export function PlaybookRunsWorkspace({
                     <button
                       type="button"
                       onClick={() => setSelectedPlaybookId((current) => (current === playbook.id ? '' : playbook.id))}
-                      className={`inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                      className={`inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-large)] px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
                         active
                           ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-border)]'
                           : 'bg-[var(--surface-strong)] text-[var(--muted-dim)] border border-transparent hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]'
@@ -394,13 +393,13 @@ export function PlaybookRunsWorkspace({
                       {active && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
                       {pendingLaunchCount > 0 && <span className="h-1.5 w-1.5 rounded-full bg-[var(--green)] animate-pulse-dot" />}
                       {playbook.label || 'Untitled'}
-                      <span className="text-[9px] opacity-50" style={{ fontFamily: 'var(--code)' }}>{count}</span>
+                      <span className="text-[var(--text-9)] opacity-50" style={{ fontFamily: 'var(--code)' }}>{count}</span>
                     </button>
                     {active && (
                       <button
                         type="button"
                         onClick={() => onOpenPlaybookSettings(playbook.id)}
-                        className="ml-0.5 inline-flex h-7 items-center rounded-lg px-1.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--accent)] hover:bg-[var(--accent-subtle)]"
+                        className="ml-0.5 inline-flex h-7 items-center rounded-[var(--radius-large)] px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)] hover:bg-[var(--accent-subtle)]"
                         style={{ fontFamily: 'var(--display)' }}
                         title={`Edit "${playbook.label}"`}
                       >
@@ -416,11 +415,11 @@ export function PlaybookRunsWorkspace({
 
             {/* Repo filters */}
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-dim)] mr-0.5" style={{ fontFamily: 'var(--display)' }}>Repo</span>
+              <span className="text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.1em] text-[var(--muted-dim)] mr-0.5" style={{ fontFamily: 'var(--display)' }}>Repo</span>
               <button
                 type="button"
                 onClick={() => setSelectedRepoPath('')}
-                className={`inline-flex h-7 items-center rounded-lg px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                className={`inline-flex h-7 items-center rounded-[var(--radius-large)] px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
                   selectedRepoPath === ''
                     ? 'bg-[var(--fg)] text-[var(--panel)] shadow-[0_2px_8px_var(--shadow-color)]'
                     : 'bg-[var(--surface-strong)] text-[var(--muted-dim)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]'
@@ -428,7 +427,7 @@ export function PlaybookRunsWorkspace({
                 style={{ fontFamily: 'var(--display)' }}
               >
                 All
-                <span className="ml-1.5 text-[9px] opacity-60" style={{ fontFamily: 'var(--code)' }}>{runsForSelectedPlaybook.length}</span>
+                <span className="ml-1.5 text-[var(--text-9)] opacity-60" style={{ fontFamily: 'var(--code)' }}>{runsForSelectedPlaybook.length}</span>
               </button>
               {registeredRepoPaths.map((repoPath) => {
                 const active = selectedRepoPath === repoPath;
@@ -438,7 +437,7 @@ export function PlaybookRunsWorkspace({
                     key={repoPath}
                     type="button"
                     onClick={() => setSelectedRepoPath((current) => (current === repoPath ? '' : repoPath))}
-                    className={`inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-all ${
+                    className={`inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-large)] px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
                       active
                         ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-border)]'
                         : 'bg-[var(--surface-strong)] text-[var(--muted-dim)] border border-transparent hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]'
@@ -447,14 +446,14 @@ export function PlaybookRunsWorkspace({
                   >
                     {active && <span className="h-1.5 w-1.5 rounded-full bg-[var(--accent)]" />}
                     {playbookRunsRepoLabel(repoPath)}
-                    <span className="text-[9px] opacity-50" style={{ fontFamily: 'var(--code)' }}>{count}</span>
+                    <span className="text-[var(--text-9)] opacity-50" style={{ fontFamily: 'var(--code)' }}>{count}</span>
                   </button>
                 );
               })}
             </div>
 
             {(actionError || playbooksError || runsError) && (
-              <div className="ml-auto flex items-center gap-1.5 text-[10px] text-[var(--red)]" style={{ fontFamily: 'var(--code)' }}>
+              <div className="ml-auto flex items-center gap-1.5 text-[var(--text-10)] text-[var(--red)]" style={{ fontFamily: 'var(--code)' }}>
                 <span className="h-1.5 w-1.5 rounded-full bg-[var(--red)]" />
                 {actionError || playbooksError || runsError}
               </div>
@@ -498,12 +497,12 @@ export function PlaybookRunsWorkspace({
 
         {/* Runs table */}
         {runsLoading && filteredRuns.length === 0 ? (
-          <div className="flex items-center gap-2 py-8 text-[11px] text-[var(--muted-dim)]">
+          <div className="flex items-center gap-2 py-8 text-[var(--text-11)] text-[var(--muted-dim)]">
             <IconSpinner className="text-[var(--accent)] opacity-60" />
             Loading runs...
           </div>
         ) : filteredRuns.length === 0 ? (
-          <div className="flex-1 flex items-center justify-center py-12 text-[12px] text-[var(--muted-dim)]">
+          <div className="flex-1 flex items-center justify-center py-12 text-[var(--text-12)] text-[var(--muted-dim)]">
             No runs found for the current filters.
           </div>
         ) : (
@@ -529,19 +528,19 @@ export function PlaybookRunsWorkspace({
                       <button
                         type="button"
                         onClick={() => onOpenRun(run.droneId, run.chatName)}
-                        className="text-[12px] font-medium text-[var(--accent)] hover:underline decoration-[var(--accent-muted)] underline-offset-2"
+                        className="text-[var(--text-12)] font-medium text-[var(--accent)] hover:underline decoration-[var(--accent-muted)] underline-offset-2"
                         title={`Open "${run.playbookLabel}"`}
                       >
                         {run.playbookLabel}
                       </button>
-                      <div className="text-[9px] text-[var(--muted-dim)] mt-0.5" style={{ fontFamily: 'var(--code)' }}>{playbookRunsRepoLabel(run.repoPath)}</div>
+                      <div className="text-[var(--text-9)] text-[var(--muted-dim)] mt-0.5" style={{ fontFamily: 'var(--code)' }}>{playbookRunsRepoLabel(run.repoPath)}</div>
                     </td>
                     <td>
                       <span className={`dh-run-status-badge ${statusClass(run.status)}`}>
                         {run.status}
                       </span>
                       {run.statusError && (
-                        <div className="mt-1 text-[9px] text-[var(--red)] max-w-[140px] leading-relaxed truncate" title={run.statusError}>
+                        <div className="mt-1 text-[var(--text-9)] text-[var(--red)] max-w-[140px] leading-relaxed truncate" title={run.statusError}>
                           {run.statusError}
                         </div>
                       )}
@@ -554,14 +553,14 @@ export function PlaybookRunsWorkspace({
                         title={summaryExpanded ? 'Collapse summary' : 'Expand summary'}
                       >
                         <div
-                          className={`text-[11px] text-[var(--fg-secondary)] whitespace-pre-wrap leading-relaxed ${summaryExpanded ? '' : 'line-clamp-2'}`}
+                          className={`text-[var(--text-11)] text-[var(--fg-secondary)] whitespace-pre-wrap leading-relaxed ${summaryExpanded ? '' : 'line-clamp-2'}`}
                         >
                           {run.lastMessage || <span className="italic text-[var(--muted-dim)]">No output yet.</span>}
                         </div>
                       </button>
                     </td>
                     <td>
-                      <span className="text-[10px] text-[var(--muted-dim)] tabular-nums" style={{ fontFamily: 'var(--code)' }}>
+                      <span className="text-[var(--text-10)] text-[var(--muted-dim)] tabular-nums" style={{ fontFamily: 'var(--code)' }}>
                         {timeAgo(run.updatedAt, nowMs)}
                       </span>
                     </td>
@@ -575,7 +574,7 @@ export function PlaybookRunsWorkspace({
                               type="button"
                               onClick={() => void sendRunAction(run, action)}
                               disabled={Boolean(actionBusyByKey[busyKey])}
-                              className={`h-6 px-2 rounded-md text-[9px] font-semibold tracking-wide uppercase border transition-all ${
+                              className={`h-6 px-2 rounded-[var(--radius-medium)] text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                                 actionBusyByKey[busyKey]
                                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                                   : 'bg-[var(--surface-soft)] border-[var(--border-subtle)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
@@ -602,7 +601,7 @@ export function PlaybookRunsWorkspace({
                               key={normalizedArtifact}
                               type="button"
                               onClick={() => onOpenArtifact(run.droneId, run.chatName, availability.path, availability.name)}
-                              className="h-6 px-2 rounded-md text-[9px] font-semibold tracking-wide border bg-[var(--green-subtle)] border-[var(--green-border)] text-[var(--green)] hover:bg-[var(--green-subtle)] hover:border-[var(--green-border)]"
+                              className="h-6 px-2 rounded-[var(--radius-medium)] text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide border bg-[var(--green-subtle)] border-[var(--green-border)] text-[var(--green)] hover:bg-[var(--green-subtle)] hover:border-[var(--green-border)]"
                               title={availability.path}
                               style={{ fontFamily: 'var(--code)' }}
                             >
@@ -617,7 +616,7 @@ export function PlaybookRunsWorkspace({
                         type="button"
                         onClick={() => void onDeleteRunDrone(run.droneId)}
                         disabled={deleteBusy}
-                        className={`inline-flex h-6 w-6 items-center justify-center rounded-md transition-all ${
+                        className={`inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-medium)] transition-all ${
                           deleteBusy
                             ? 'opacity-40 cursor-not-allowed text-[var(--muted-dim)]'
                             : 'text-[var(--muted-dim)] opacity-0 hover:opacity-100 hover:bg-[var(--red-subtle)] hover:text-[var(--red)]'

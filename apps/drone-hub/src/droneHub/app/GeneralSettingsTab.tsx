@@ -172,67 +172,67 @@ export function GeneralSettingsTab({
   return (
     <>
       {github.githubSettingsError && (
-        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
           {github.githubSettingsError}
         </div>
       )}
       {llmSettingsError && (
-        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
           {llmSettingsError}
         </div>
       )}
       {llmSettingsNotice && (
-        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
+        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
           {llmSettingsNotice}
         </div>
       )}
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
+      <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3">
         {github.githubSettingsLoading && !github.githubSettings ? (
-          <div className="text-[12px] text-[var(--muted-dim)]">Loading GitHub status…</div>
+          <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading GitHub status…</div>
         ) : (
           <div className="flex flex-col gap-3">
             <div className="flex flex-col gap-1">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">GitHub pull requests</div>
-              <div className="text-[12px] text-[var(--muted)]">Hub PR actions use the GitHub API. Host `gh` is used only as an optional auth source.</div>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">GitHub pull requests</div>
+              <div className="text-[var(--text-12)] text-[var(--muted)]">Hub PR actions use the GitHub API. Host `gh` is used only as an optional auth source.</div>
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
               <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">PR transport</div>
-                <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
+                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">PR transport</div>
+                <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
                   {githubStatus?.pullRequestTransport === 'github-api' ? 'GitHub API' : 'Unknown'}
                 </div>
-                <div className="text-[11px] text-[var(--muted-dim)] mt-1">List, inspect, merge, and close PRs without shelling out to container `gh`.</div>
+                <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">List, inspect, merge, and close PRs without shelling out to container `gh`.</div>
               </div>
               <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Effective auth</div>
-                <div className="text-[13px] text-[var(--fg-secondary)] mt-2">{githubAuthLabel}</div>
-                <div className="text-[11px] text-[var(--muted-dim)] mt-1">{githubStatus?.authDetail ?? 'Loading GitHub auth status…'}</div>
+                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Effective auth</div>
+                <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">{githubAuthLabel}</div>
+                <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">{githubStatus?.authDetail ?? 'Loading GitHub auth status…'}</div>
               </div>
               <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-                <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Host gh CLI</div>
-                <div className="text-[13px] text-[var(--fg-secondary)] mt-2">{githubCliLabel}</div>
-                <div className="text-[11px] text-[var(--muted-dim)] mt-1">
+                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Host gh CLI</div>
+                <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">{githubCliLabel}</div>
+                <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
                   {githubStatus?.ghCliVersion ?? (githubStatus?.ghCliInstalled ? 'Version unavailable' : 'Install gh if you want Hub to reuse host GitHub login state.')}
                 </div>
-                {githubStatus?.ghCliPath ? <div className="text-[11px] text-[var(--muted-dim)] mt-1 break-all">{githubStatus.ghCliPath}</div> : null}
+                {githubStatus?.ghCliPath ? <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1 break-all">{githubStatus.ghCliPath}</div> : null}
               </div>
             </div>
           </div>
         )}
       </div>
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
+      <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3">
         {llmSettingsLoading && !llmSettings ? (
-          <div className="text-[12px] text-[var(--muted-dim)]">Loading settings…</div>
+          <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading settings…</div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-5 gap-3">
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Active provider</div>
-              <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Active provider</div>
+              <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
                 {llmProviderLabel(llmSettings?.provider.selected)}
               </div>
-              <div className="text-[11px] text-[var(--muted-dim)] mt-1">
+              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
                 {llmSettings?.provider.source === 'settings'
                   ? 'Selected in settings'
                   : llmSettings?.provider.source === 'environment'
@@ -241,38 +241,38 @@ export function GeneralSettingsTab({
               </div>
             </div>
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">OpenAI key</div>
-              <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">OpenAI key</div>
+              <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
                 {llmSettings?.openai.hasKey ? llmSettings.openai.keyHint ?? 'Configured' : 'Not configured'}
               </div>
-              <div className="text-[11px] text-[var(--muted-dim)] mt-1">
+              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
                 {llmSettings?.openai.updatedAt ? `Updated ${new Date(llmSettings.openai.updatedAt).toLocaleString()}` : 'Stored only when set in Hub'}
               </div>
             </div>
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Gemini key</div>
-              <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Gemini key</div>
+              <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
                 {llmSettings?.gemini.hasKey ? llmSettings.gemini.keyHint ?? 'Configured' : 'Not configured'}
               </div>
-              <div className="text-[11px] text-[var(--muted-dim)] mt-1">
+              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
                 {llmSettings?.gemini.updatedAt ? `Updated ${new Date(llmSettings.gemini.updatedAt).toLocaleString()}` : 'Stored only when set in Hub'}
               </div>
             </div>
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Codex login</div>
-              <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Codex login</div>
+              <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
                 {llmSettings?.codex.hasKey ? llmSettings.codex.keyHint ?? 'Configured' : 'Not configured'}
               </div>
-              <div className="text-[11px] text-[var(--muted-dim)] mt-1">
+              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
                 {llmSettings?.codex.updatedAt ? `Refreshed ${new Date(llmSettings.codex.updatedAt).toLocaleString()}` : 'Uses local Codex CLI auth'}
               </div>
             </div>
             <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">GROQ key</div>
-              <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">GROQ key</div>
+              <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-2">
                 {llmSettings?.groq.hasKey ? llmSettings.groq.keyHint ?? 'Configured' : 'Not configured'}
               </div>
-              <div className="text-[11px] text-[var(--muted-dim)] mt-1">
+              <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1">
                 {llmSettings?.groq.updatedAt ? `Updated ${new Date(llmSettings.groq.updatedAt).toLocaleString()}` : 'Required for voice transcription'}
               </div>
             </div>
@@ -280,8 +280,8 @@ export function GeneralSettingsTab({
         )}
       </div>
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
-        <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase mb-2" style={{ fontFamily: 'var(--display)' }}>
+      <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3">
+        <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase mb-2" style={{ fontFamily: 'var(--display)' }}>
           Active provider
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -289,7 +289,7 @@ export function GeneralSettingsTab({
             type="button"
             onClick={() => setLlmProviderDraft('openai')}
             disabled={savingLlmProvider || llmSettingsLoading}
-            className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+            className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
               llmProviderDraft === 'openai'
                 ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                 : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -302,7 +302,7 @@ export function GeneralSettingsTab({
             type="button"
             onClick={() => setLlmProviderDraft('gemini')}
             disabled={savingLlmProvider || llmSettingsLoading}
-            className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+            className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
               llmProviderDraft === 'gemini'
                 ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                 : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -315,7 +315,7 @@ export function GeneralSettingsTab({
             type="button"
             onClick={() => setLlmProviderDraft('codex')}
             disabled={savingLlmProvider || llmSettingsLoading}
-            className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+            className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
               llmProviderDraft === 'codex'
                 ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                 : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -327,7 +327,7 @@ export function GeneralSettingsTab({
         </div>
         <div className="mt-3 grid grid-cols-1 gap-3 md:grid-cols-[minmax(0,1fr)_180px_auto] md:items-end">
           <div className="flex min-w-0 flex-col gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+            <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
               Default model
             </span>
             <UiMenuSelect
@@ -347,7 +347,7 @@ export function GeneralSettingsTab({
             />
           </div>
           <div className="flex min-w-0 flex-col gap-1.5">
-            <span className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">
+            <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
               Default reasoning
             </span>
             <UiMenuSelect
@@ -375,7 +375,7 @@ export function GeneralSettingsTab({
               !llmProviderDefaultsDirty ||
               !selectedDefaultModel
             }
-            className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+            className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
               savingLlmProvider ||
               llmSettingsLoading ||
               !llmProviderDefaultsDirty ||
@@ -388,25 +388,25 @@ export function GeneralSettingsTab({
             {savingLlmProvider ? 'Saving…' : 'Save defaults'}
           </button>
         </div>
-        <div className="mt-2 text-[11px] leading-relaxed text-[var(--muted-dim)]">
+        <div className="mt-2 text-[var(--text-11)] leading-relaxed text-[var(--muted-dim)]">
           New Built-in chats use this model and reasoning whenever {llmProviderLabel(llmProviderDraft)} is the active provider.
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Codex subscription auth
           </div>
           {llmSettings?.codex.hasKey ? (
-            <div className="text-[11px] text-[var(--muted-dim)]">
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
               {llmSettings.codex.keyHint ?? 'Codex CLI login found'}
               {llmSettings.codex.updatedAt ? ` • Refreshed ${new Date(llmSettings.codex.updatedAt).toLocaleString()}` : ''}
             </div>
           ) : (
-            <div className="text-[11px] text-[var(--muted-dim)]">No Codex CLI login found for the Hub process.</div>
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">No Codex CLI login found for the Hub process.</div>
           )}
-          <div className="text-[12px] leading-relaxed text-[var(--fg-secondary)]">
+          <div className="text-[var(--text-12)] leading-relaxed text-[var(--fg-secondary)]">
             The Built-in agent uses the local file-based Codex login. Connecting here opens
             OpenAI and finishes automatically through a temporary localhost callback.
           </div>
@@ -420,7 +420,7 @@ export function GeneralSettingsTab({
                 type="button"
                 onClick={() => void loadLlmSettings()}
                 disabled={llmSettingsLoading}
-                className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                   llmSettingsLoading
                     ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                     : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -433,17 +433,17 @@ export function GeneralSettingsTab({
           ) : null}
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             OpenAI API key
           </div>
           {llmSettings?.openai.hasKey ? (
-            <div className="text-[11px] text-[var(--muted-dim)]">
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
               {llmSettings.openai.keyHint ?? 'hidden'}
               {llmSettings.openai.updatedAt ? ` • Updated ${new Date(llmSettings.openai.updatedAt).toLocaleString()}` : ''}
             </div>
           ) : (
-            <div className="text-[11px] text-[var(--muted-dim)]">No OpenAI key configured.</div>
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">No OpenAI key configured.</div>
           )}
           <div className="flex items-center gap-2">
             <input
@@ -454,7 +454,7 @@ export function GeneralSettingsTab({
               name="openai-api-key"
               spellCheck={false}
               style={({ WebkitTextSecurity: showOpenAiKey ? 'none' : 'disc' } as React.CSSProperties)}
-              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
+              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
               placeholder="sk-..."
               disabled={savingOpenAiSettings || clearingOpenAiSettings || revealingOpenAiKey}
             />
@@ -462,7 +462,7 @@ export function GeneralSettingsTab({
               type="button"
               onClick={() => void toggleApiKeyVisibility('openai')}
               disabled={savingOpenAiSettings || clearingOpenAiSettings || revealingOpenAiKey}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 savingOpenAiSettings || clearingOpenAiSettings || revealingOpenAiKey
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -477,7 +477,7 @@ export function GeneralSettingsTab({
               type="button"
               onClick={() => void mutateApiKeySettings('openai', 'save')}
               disabled={!openAiSettingsDraft.trim() || savingOpenAiSettings || clearingOpenAiSettings}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 !openAiSettingsDraft.trim() || savingOpenAiSettings || clearingOpenAiSettings
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -490,7 +490,7 @@ export function GeneralSettingsTab({
               type="button"
               onClick={() => void mutateApiKeySettings('openai', 'clear')}
               disabled={clearingOpenAiSettings || savingOpenAiSettings || !llmSettings?.openai.hasKey}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 clearingOpenAiSettings || savingOpenAiSettings || !llmSettings?.openai.hasKey
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
@@ -502,17 +502,17 @@ export function GeneralSettingsTab({
           </div>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Gemini API key
           </div>
           {llmSettings?.gemini.hasKey ? (
-            <div className="text-[11px] text-[var(--muted-dim)]">
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
               {llmSettings.gemini.keyHint ?? 'hidden'}
               {llmSettings.gemini.updatedAt ? ` • Updated ${new Date(llmSettings.gemini.updatedAt).toLocaleString()}` : ''}
             </div>
           ) : (
-            <div className="text-[11px] text-[var(--muted-dim)]">No Gemini key configured.</div>
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">No Gemini key configured.</div>
           )}
           <div className="flex items-center gap-2">
             <input
@@ -523,7 +523,7 @@ export function GeneralSettingsTab({
               name="gemini-api-key"
               spellCheck={false}
               style={({ WebkitTextSecurity: showGeminiKey ? 'none' : 'disc' } as React.CSSProperties)}
-              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
+              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
               placeholder="AIza..."
               disabled={savingGeminiSettings || clearingGeminiSettings || revealingGeminiKey}
             />
@@ -531,7 +531,7 @@ export function GeneralSettingsTab({
               type="button"
               onClick={() => void toggleApiKeyVisibility('gemini')}
               disabled={savingGeminiSettings || clearingGeminiSettings || revealingGeminiKey}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 savingGeminiSettings || clearingGeminiSettings || revealingGeminiKey
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -546,7 +546,7 @@ export function GeneralSettingsTab({
               type="button"
               onClick={() => void mutateApiKeySettings('gemini', 'save')}
               disabled={!geminiSettingsDraft.trim() || savingGeminiSettings || clearingGeminiSettings}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 !geminiSettingsDraft.trim() || savingGeminiSettings || clearingGeminiSettings
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -559,7 +559,7 @@ export function GeneralSettingsTab({
               type="button"
               onClick={() => void mutateApiKeySettings('gemini', 'clear')}
               disabled={clearingGeminiSettings || savingGeminiSettings || !llmSettings?.gemini.hasKey}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 clearingGeminiSettings || savingGeminiSettings || !llmSettings?.gemini.hasKey
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
@@ -571,19 +571,19 @@ export function GeneralSettingsTab({
           </div>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             GROQ API key
           </div>
           {llmSettings?.groq.hasKey ? (
-            <div className="text-[11px] text-[var(--muted-dim)]">
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
               {llmSettings.groq.keyHint ?? 'hidden'}
               {llmSettings.groq.updatedAt ? ` • Updated ${new Date(llmSettings.groq.updatedAt).toLocaleString()}` : ''}
             </div>
           ) : (
-            <div className="text-[11px] text-[var(--muted-dim)]">No GROQ key configured.</div>
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">No GROQ key configured.</div>
           )}
-          <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+          <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
             Used only for the voice-to-clipboard shortcut transcription.
           </div>
           <div className="flex items-center gap-2">
@@ -595,7 +595,7 @@ export function GeneralSettingsTab({
               name="groq-api-key"
               spellCheck={false}
               style={({ WebkitTextSecurity: showGroqKey ? 'none' : 'disc' } as React.CSSProperties)}
-              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
+              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
               placeholder="gsk_..."
               disabled={savingGroqSettings || clearingGroqSettings || revealingGroqKey}
             />
@@ -603,7 +603,7 @@ export function GeneralSettingsTab({
               type="button"
               onClick={() => void toggleApiKeyVisibility('groq')}
               disabled={savingGroqSettings || clearingGroqSettings || revealingGroqKey}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 savingGroqSettings || clearingGroqSettings || revealingGroqKey
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -618,7 +618,7 @@ export function GeneralSettingsTab({
               type="button"
               onClick={() => void mutateApiKeySettings('groq', 'save')}
               disabled={!groqSettingsDraft.trim() || savingGroqSettings || clearingGroqSettings}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 !groqSettingsDraft.trim() || savingGroqSettings || clearingGroqSettings
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -631,7 +631,7 @@ export function GeneralSettingsTab({
               type="button"
               onClick={() => void mutateApiKeySettings('groq', 'clear')}
               disabled={clearingGroqSettings || savingGroqSettings || !llmSettings?.groq.hasKey}
-              className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 clearingGroqSettings || savingGroqSettings || !llmSettings?.groq.hasKey
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
@@ -645,28 +645,28 @@ export function GeneralSettingsTab({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Filesystem uploads
           </div>
-          <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+          <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
             Configure the max size for a single uploaded file. Oversized uploads show an error and point users back to this setting.
           </div>
           {filesystemSettingsError && (
-            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
               {filesystemSettingsError}
             </div>
           )}
           {filesystemSettingsNotice && (
-            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
+            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
               {filesystemSettingsNotice}
             </div>
           )}
           {filesystemSettingsLoading && !filesystemSettings ? (
-            <div className="text-[12px] text-[var(--muted-dim)]">Loading filesystem settings…</div>
+            <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading filesystem settings…</div>
           ) : (
             <>
-              <div className="text-[11px] text-[var(--muted-dim)]">
+              <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
                 Current limit:{' '}
                 <span className="text-[var(--fg-secondary)]">
                   {filesystemSettings ? `${bytesToNearestMiB(filesystemSettings.filesystem.uploadMaxBytes).toLocaleString()} MiB` : '-'}
@@ -675,13 +675,13 @@ export function GeneralSettingsTab({
               </div>
               <div className="flex flex-wrap items-end gap-2">
                 <label className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Max file size (MiB)</span>
+                  <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Max file size (MiB)</span>
                   <input
                     value={uploadMaxMiBDraft}
                     onChange={(e) => setUploadMaxMiBDraft(e.target.value.replace(/[^\d]/g, ''))}
                     inputMode="numeric"
                     pattern="[0-9]*"
-                    className="h-9 w-40 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+                    className="h-9 w-40 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
                     placeholder={String(filesystemDefaultMiB)}
                     disabled={filesystemSettingsLoading || savingFilesystemSettings}
                   />
@@ -690,7 +690,7 @@ export function GeneralSettingsTab({
                   type="button"
                   onClick={() => setUploadMaxMiBDraft(String(filesystemDefaultMiB))}
                   disabled={filesystemSettingsLoading || savingFilesystemSettings}
-                  className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                  className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                     filesystemSettingsLoading || savingFilesystemSettings
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -703,7 +703,7 @@ export function GeneralSettingsTab({
                   type="button"
                   onClick={() => void saveFilesystemSettings()}
                   disabled={!filesystemDirty || filesystemSettingsLoading || savingFilesystemSettings}
-                  className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                  className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                     !filesystemDirty || filesystemSettingsLoading || savingFilesystemSettings
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -713,7 +713,7 @@ export function GeneralSettingsTab({
                   {savingFilesystemSettings ? 'Saving…' : 'Save upload limit'}
                 </button>
               </div>
-              <div className="text-[10px] text-[var(--muted-dim)]">
+              <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
                 Allowed range: {filesystemMinMiB.toLocaleString()} to {filesystemMaxMiB.toLocaleString()} MiB.
               </div>
             </>
@@ -721,12 +721,12 @@ export function GeneralSettingsTab({
         </div>
 
         <div className="flex flex-col gap-4">
-          <section className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
+          <section className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
             <div>
-              <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Appearance
               </div>
-              <div className="mt-1 text-[11px] text-[var(--muted-dim)] leading-relaxed">
+              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
                 Choose the desktop color theme. Both options are dark and the preference is saved for this profile.
               </div>
             </div>
@@ -740,7 +740,7 @@ export function GeneralSettingsTab({
                     role="radio"
                     aria-checked={selected}
                     onClick={() => setThemeId(theme.id)}
-                    className={`min-h-[104px] rounded-md border p-3 text-left transition-all ${
+                    className={`min-h-[104px] rounded-[var(--radius-medium)] border p-3 text-left transition-all ${
                       selected
                         ? 'border-[var(--accent)] bg-[var(--accent-subtle)] shadow-[var(--glow-accent)]'
                         : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
@@ -748,10 +748,10 @@ export function GeneralSettingsTab({
                   >
                     <span className="flex items-start justify-between gap-3">
                       <span>
-                        <span className="block text-[12px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
+                        <span className="block text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>
                           {theme.label}
                         </span>
-                        <span className="mt-1 block text-[10px] leading-relaxed text-[var(--muted)]">
+                        <span className="mt-1 block text-[var(--text-10)] leading-relaxed text-[var(--muted)]">
                           {theme.description}
                         </span>
                       </span>
@@ -775,35 +775,35 @@ export function GeneralSettingsTab({
             </div>
           </section>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-            <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
               Auto-continue
             </div>
-            <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
               Configure the user message Hub sends when a chat-level auto-continue toggle decides an agent stopped mid-task. The default is <span className="text-[var(--fg-secondary)] font-mono">continue</span>.
             </div>
             {agentMessageAutoContinueSettingsError && (
-              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
                 {agentMessageAutoContinueSettingsError}
               </div>
             )}
             {agentMessageAutoContinueSettingsNotice && (
-              <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
+              <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
                 {agentMessageAutoContinueSettingsNotice}
               </div>
             )}
             {agentMessageAutoContinueSettingsLoading && !agentMessageAutoContinueSettings ? (
-              <div className="text-[12px] text-[var(--muted-dim)]">Loading auto-continue settings…</div>
+              <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading auto-continue settings…</div>
             ) : (
               <>
-                <div className="text-[11px] text-[var(--muted-dim)]">
+                <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
                   Current prompt:{' '}
                   <span className="text-[var(--fg-secondary)] font-mono">
                     {JSON.stringify(currentAutoContinuePrompt)}
                   </span>{' '}
                   ({agentMessageAutoContinueSettings?.agentMessageAutoContinue.promptSource === 'settings' ? 'from settings' : 'default'})
                 </div>
-                <div className="text-[11px] text-[var(--muted-dim)]">
+                <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
                   New chats default:{' '}
                   <span className="text-[var(--fg-secondary)]">
                     {currentAutoContinueEnabledByDefault ? 'On' : 'Off'}
@@ -811,7 +811,7 @@ export function GeneralSettingsTab({
                   ({agentMessageAutoContinueSettings?.agentMessageAutoContinue.enabledByDefaultSource === 'settings' ? 'from settings' : 'default'})
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">
+                  <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">
                     Enable for new chats by default
                   </span>
                   <div className="flex flex-wrap items-center gap-2">
@@ -819,7 +819,7 @@ export function GeneralSettingsTab({
                       type="button"
                       onClick={() => setAutoContinueEnabledByDefaultDraft(true)}
                       disabled={agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
-                      className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                      className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                         autoContinueEnabledByDefaultDraft
                           ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                           : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -832,7 +832,7 @@ export function GeneralSettingsTab({
                       type="button"
                       onClick={() => setAutoContinueEnabledByDefaultDraft(false)}
                       disabled={agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
-                      className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                      className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                         !autoContinueEnabledByDefaultDraft
                           ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                           : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -844,12 +844,12 @@ export function GeneralSettingsTab({
                   </div>
                 </div>
                 <label className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Auto-reply prompt</span>
+                  <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Auto-reply prompt</span>
                   <input
                     value={autoContinuePromptDraft}
                     onChange={(e) => setAutoContinuePromptDraft(e.target.value)}
                     maxLength={autoContinuePromptMaxChars}
-                    className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
+                    className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
                     placeholder="continue"
                     disabled={agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
                   />
@@ -866,7 +866,7 @@ export function GeneralSettingsTab({
                       );
                     }}
                     disabled={agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
-                    className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                       agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings
                         ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -879,7 +879,7 @@ export function GeneralSettingsTab({
                     type="button"
                     onClick={() => void saveAgentMessageAutoContinueSettings()}
                     disabled={!autoContinueSettingsDirty || agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
-                    className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                       !autoContinueSettingsDirty || agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings
                         ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -889,49 +889,49 @@ export function GeneralSettingsTab({
                     {savingAgentMessageAutoContinueSettings ? 'Saving…' : 'Save auto-continue settings'}
                   </button>
                 </div>
-                <div className="text-[10px] text-[var(--muted-dim)]">
+                <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
                   Max length: {autoContinuePromptMaxChars} characters.
                 </div>
               </>
             )}
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-            <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
               Agent suggestion
             </div>
-            <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
               Suggest a likely next user reply for each new agent message. The policy stays editable so you can tune it over time.
             </div>
             {agentSuggestionSettingsError && (
-              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
                 {agentSuggestionSettingsError}
               </div>
             )}
             {agentSuggestionSettingsNotice && (
-              <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
+              <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
                 {agentSuggestionSettingsNotice}
               </div>
             )}
             {agentSuggestionSettingsLoading && !agentSuggestionSettings ? (
-              <div className="text-[12px] text-[var(--muted-dim)]">Loading assistant suggestion settings…</div>
+              <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading assistant suggestion settings…</div>
             ) : (
               <>
-                <div className="text-[11px] text-[var(--muted-dim)]">
+                <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
                   New chats default:{' '}
                   <span className="text-[var(--fg-secondary)]">
                     {currentAgentSuggestionEnabledByDefault ? 'On' : 'Off'}
                   </span>{' '}
                   ({agentSuggestionSettings?.agentSuggestion.enabledByDefaultSource === 'settings' ? 'from settings' : 'default'})
                 </div>
-                <div className="text-[11px] text-[var(--muted-dim)]">
+                <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
                   Current policy source:{' '}
                   <span className="text-[var(--fg-secondary)]">
                     {agentSuggestionSettings?.agentSuggestion.policyMarkdownSource === 'settings' ? 'settings' : 'default'}
                   </span>
                 </div>
                 <div className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">
+                  <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">
                     Enable for new chats by default
                   </span>
                   <div className="flex flex-wrap items-center gap-2">
@@ -939,7 +939,7 @@ export function GeneralSettingsTab({
                       type="button"
                       onClick={() => setAgentSuggestionEnabledByDefaultDraft(true)}
                       disabled={agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
-                      className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                      className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                         agentSuggestionEnabledByDefaultDraft
                           ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                           : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -952,7 +952,7 @@ export function GeneralSettingsTab({
                       type="button"
                       onClick={() => setAgentSuggestionEnabledByDefaultDraft(false)}
                       disabled={agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
-                      className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                      className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                         !agentSuggestionEnabledByDefaultDraft
                           ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                           : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -964,13 +964,13 @@ export function GeneralSettingsTab({
                   </div>
                 </div>
                 <label className="flex flex-col gap-1">
-                  <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Policy markdown</span>
+                  <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Policy markdown</span>
                   <textarea
                     value={agentSuggestionPolicyDraft}
                     onChange={(e) => setAgentSuggestionPolicyDraft(e.target.value)}
                     maxLength={agentSuggestionPolicyMaxChars}
                     rows={12}
-                    className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono resize-y"
+                    className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-12)] leading-relaxed text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono resize-y"
                     placeholder="# Agent Suggestion Policy"
                     disabled={agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
                   />
@@ -985,7 +985,7 @@ export function GeneralSettingsTab({
                       );
                     }}
                     disabled={agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
-                    className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                       agentSuggestionSettingsLoading || savingAgentSuggestionSettings
                         ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -998,7 +998,7 @@ export function GeneralSettingsTab({
                     type="button"
                     onClick={() => void saveAgentSuggestionSettings()}
                     disabled={!agentSuggestionSettingsDirty || agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
-                    className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                       !agentSuggestionSettingsDirty || agentSuggestionSettingsLoading || savingAgentSuggestionSettings
                         ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -1008,25 +1008,25 @@ export function GeneralSettingsTab({
                     {savingAgentSuggestionSettings ? 'Saving…' : 'Save assistant suggestion settings'}
                   </button>
                 </div>
-                <div className="text-[10px] text-[var(--muted-dim)]">
+                <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
                   Max length: {agentSuggestionPolicyMaxChars.toLocaleString()} characters.
                 </div>
               </>
             )}
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-            <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
               Transcript
             </div>
-            <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
               Show linked image and video previews inline inside agent messages by default.
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
                 type="button"
                 onClick={() => setTranscriptInlineImages(true)}
-                className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                   transcriptInlineImages
                     ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                     : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -1038,7 +1038,7 @@ export function GeneralSettingsTab({
               <button
                 type="button"
                 onClick={() => setTranscriptInlineImages(false)}
-                className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                   !transcriptInlineImages
                     ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                     : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -1050,11 +1050,11 @@ export function GeneralSettingsTab({
             </div>
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-            <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
               Onboarding
             </div>
-            <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
               Clear onboarding dismissal state and replay the guided tips from step 1.
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -1065,7 +1065,7 @@ export function GeneralSettingsTab({
                   if (!ok) return;
                   onReplayOnboarding();
                 }}
-                className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110"
+                className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Reset onboarding and replay guided tips"
               >
@@ -1078,7 +1078,7 @@ export function GeneralSettingsTab({
                   if (!ok) return;
                   onResetOnboarding();
                 }}
-                className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Clear onboarding dismissals without opening tips"
               >

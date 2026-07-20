@@ -12,6 +12,7 @@ import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { IconAlert, IconCheck, IconSnapshot, IconSpinner } from './icons';
 import { AgentPlanList } from './AgentPlanList';
 import { ChatMessageFrame } from './ChatMessageFrame';
+import { AgentRunSummaryLine } from './WorkingElapsedStatus';
 
 type AutoContinueBadge = {
   title: string;
@@ -123,6 +124,14 @@ export const TranscriptTurn = React.memo(
     const cleanedAgentMessage = agentMessage.text;
     const promptIso = item.promptAt || item.at;
     const agentIso = item.completedAt || item.at;
+    const promptStartedAtMs = Date.parse(String(promptIso ?? ''));
+    const agentCompletedAtMs = Date.parse(String(item.completedAt ?? ''));
+    const completedRunDurationMs =
+      Number.isFinite(promptStartedAtMs) &&
+      Number.isFinite(agentCompletedAtMs) &&
+      agentCompletedAtMs >= promptStartedAtMs
+        ? agentCompletedAtMs - promptStartedAtMs
+        : null;
     const autoContinueBadge = resolveAutoContinueBadge(item.agentMessageAutoContinue);
     const dockerSnapshot = item.dockerSnapshot;
     const dockerSnapshotBusy = dockerSnapshot?.status === 'creating' || dockerSnapshot?.status === 'restoring';
@@ -149,6 +158,10 @@ export const TranscriptTurn = React.memo(
             onOpenFileReference={onOpenFileReference}
           />
         </ChatMessageFrame>
+
+        {completedRunDurationMs !== null ? (
+          <AgentRunSummaryLine active={false} durationMs={completedRunDurationMs} />
+        ) : null}
 
         <ChatMessageFrame
           role="assistant"

@@ -333,34 +333,34 @@ export function PlaybookSettingsSection({
   }, []);
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Playbooks
           </div>
-          <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed mt-1">
+          <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed mt-1">
             Define reusable message sequences for hidden repo runs, plus optional labeled follow-up buttons that can be sent from the runs table.
           </div>
         </div>
         <button
           type="button"
           onClick={addPlaybook}
-          className="h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110"
+          className="h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110"
           style={{ fontFamily: 'var(--display)' }}
         >
           Add playbook
         </button>
       </div>
 
-      {error && <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">{error}</div>}
+      {error && <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">{error}</div>}
 
       {loading ? (
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 text-[var(--text-11)] text-[var(--muted-dim)]">
           Loading playbooks...
         </div>
       ) : playbooks.length === 0 ? (
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 text-[var(--text-11)] text-[var(--muted-dim)]">
           No playbooks yet. Create one here, then run it from the runs tab.
         </div>
       ) : (
@@ -376,7 +376,7 @@ export function PlaybookSettingsSection({
               <div
                 key={playbook.clientId}
                 id={playbook.id ? `playbook-settings-${playbook.id}` : undefined}
-                className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3"
+                className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3"
               >
                 <div className="flex items-center justify-between gap-2">
                   <button
@@ -385,14 +385,14 @@ export function PlaybookSettingsSection({
                     className="min-w-0 text-left"
                     title={expanded ? 'Collapse playbook' : 'Expand playbook'}
                   >
-                    <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                    <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                       Playbook #{index + 1}
                     </div>
-                    <div className="text-[12px] text-[var(--fg)] mt-1">
+                    <div className="text-[var(--text-12)] text-[var(--fg)] mt-1">
                       {playbook.label || 'Untitled playbook'}
                       <span className="text-[var(--muted-dim)]"> {expanded ? '[-]' : '[+]'}</span>
                     </div>
-                    <div className="text-[10px] text-[var(--muted-dim)] mt-1">
+                    <div className="text-[var(--text-10)] text-[var(--muted-dim)] mt-1">
                       {playbook.messages.length} message{playbook.messages.length === 1 ? '' : 's'}, {playbook.artifacts.length} artifact{playbook.artifacts.length === 1 ? '' : 's'}, {playbook.actions.length} action{playbook.actions.length === 1 ? '' : 's'}
                     </div>
                   </button>
@@ -400,7 +400,7 @@ export function PlaybookSettingsSection({
                     <button
                       type="button"
                       onClick={() => toggleExpanded(playbook.clientId)}
-                      className="h-7 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                      className="h-7 px-2 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                       style={{ fontFamily: 'var(--display)' }}
                     >
                       {expanded ? 'Collapse' : 'Expand'}
@@ -417,7 +417,7 @@ export function PlaybookSettingsSection({
                           type="button"
                           onClick={() => void savePlaybook(playbook)}
                           disabled={busy}
-                          className={`h-7 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                          className={`h-7 px-2 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                             busy
                               ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                               : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -430,7 +430,7 @@ export function PlaybookSettingsSection({
                           type="button"
                           onClick={() => void removePlaybook(playbook)}
                           disabled={busy}
-                          className={`h-7 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                          className={`h-7 px-2 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                             busy
                               ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                               : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
@@ -443,18 +443,18 @@ export function PlaybookSettingsSection({
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-2 items-center">
-                      <label className="text-[11px] text-[var(--muted-dim)]">Label</label>
+                      <label className="text-[var(--text-11)] text-[var(--muted-dim)]">Label</label>
                       <input
                         type="text"
                         value={playbook.label}
                         onChange={(e) => updatePlaybook(playbook.clientId, { label: e.target.value })}
-                        className="w-full h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                        className="w-full h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
                         placeholder="e.g. Find biggest bug"
                       />
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-2 items-start">
-                      <label className="text-[11px] text-[var(--muted-dim)] pt-2">Agent</label>
+                      <label className="text-[var(--text-11)] text-[var(--muted-dim)] pt-2">Agent</label>
                       <div className="flex flex-col gap-2">
                         <UiMenuSelect
                           value={selectedAgentKey}
@@ -466,13 +466,13 @@ export function PlaybookSettingsSection({
                           triggerLabel={selectedAgentLabel}
                           title="Choose which agent this playbook run should use."
                         />
-                        <div className="text-[10px] text-[var(--muted-dim)] leading-relaxed">
+                        <div className="text-[var(--text-10)] text-[var(--muted-dim)] leading-relaxed">
                           {playbook.agent.kind === 'builtin'
                             ? "Leave model empty to use this agent's default model."
                             : 'Custom agents manage model selection in their own CLI.'}
                         </div>
                         {customAgentMissing ? (
-                          <div className="text-[10px] text-[var(--red)] leading-relaxed">
+                          <div className="text-[var(--text-10)] text-[var(--red)] leading-relaxed">
                             This playbook references a custom agent that is not currently saved locally.
                           </div>
                         ) : null}
@@ -481,20 +481,20 @@ export function PlaybookSettingsSection({
 
                     {playbook.agent.kind === 'builtin' ? (
                       <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-2 items-center">
-                        <label className="text-[11px] text-[var(--muted-dim)]">Model</label>
+                        <label className="text-[var(--text-11)] text-[var(--muted-dim)]">Model</label>
                         <div className="flex items-center gap-2">
                           <input
                             type="text"
                             value={playbook.model ?? ''}
                             onChange={(e) => updatePlaybook(playbook.clientId, { model: e.target.value.slice(0, PLAYBOOK_MODEL_MAX_CHARS) })}
-                            className="w-full h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)] font-mono"
+                            className="w-full h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)] font-mono"
                             placeholder="Default model"
                           />
                           <button
                             type="button"
                             onClick={() => updatePlaybook(playbook.clientId, { model: null })}
                             disabled={!String(playbook.model ?? '').trim()}
-                            className={`h-8 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                            className={`h-8 px-2 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                               !String(playbook.model ?? '').trim()
                                 ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                                 : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -576,7 +576,7 @@ export function PlaybookSettingsSection({
                     </div>
                   </>
                 ) : (
-                  <div className="text-[11px] text-[var(--muted-dim)] whitespace-pre-wrap line-clamp-2">
+                  <div className="text-[var(--text-11)] text-[var(--muted-dim)] whitespace-pre-wrap line-clamp-2">
                     {playbook.messages[0]?.prompt || 'No messages yet.'}
                   </div>
                 )}

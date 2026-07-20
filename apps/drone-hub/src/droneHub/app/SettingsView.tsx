@@ -217,15 +217,15 @@ export function SettingsView({
       <div className="w-full min-h-full px-4 py-5 sm:px-5 sm:py-6 lg:px-6 lg:py-8">
         <div className="grid grid-cols-1 xl:grid-cols-[240px_minmax(0,1fr)] gap-4 items-start min-h-full">
           <aside className="xl:sticky xl:top-5">
-            <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden">
+            <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden">
               <div className="px-4 py-4 border-b border-[var(--border)]">
-                <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-semibold" style={{ fontFamily: 'var(--display)' }}>
+                <div className="text-[var(--text-10)] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-[var(--weight-semibold)]" style={{ fontFamily: 'var(--display)' }}>
                   Drone Hub
                 </div>
-                <div className="text-[18px] font-semibold text-[var(--fg)] mt-1" style={{ fontFamily: 'var(--display)' }}>
+                <div className="text-[18px] font-[var(--weight-semibold)] text-[var(--fg-strong)] mt-1" style={{ fontFamily: 'var(--display)' }}>
                   Settings
                 </div>
-                <div className="text-[12px] text-[var(--muted)] mt-1 leading-relaxed">
+                <div className="text-[var(--text-12)] text-[var(--muted)] mt-1 leading-relaxed">
                   Split by area so archive controls, shortcuts, automations, and the skill library each have room.
                 </div>
               </div>
@@ -236,14 +236,14 @@ export function SettingsView({
                   return (
                     <button key={tab.id} type="button" onClick={() => handleSelectTab(tab.id)} className={settingsNavButtonClass(active)}>
                       <div
-                        className={`text-[11px] font-semibold uppercase tracking-[0.08em] ${
+                        className={`text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${
                           active ? 'text-[var(--accent)]' : 'text-[var(--muted)]'
                         }`}
                         style={{ fontFamily: 'var(--display)' }}
                       >
                         {tab.label}
                       </div>
-                      <div className={`text-[11px] mt-1 leading-relaxed ${active ? 'text-[var(--fg-secondary)]' : 'text-[var(--muted-dim)]'}`}>
+                      <div className={`text-[var(--text-11)] mt-1 leading-relaxed ${active ? 'text-[var(--fg-secondary)]' : 'text-[var(--muted-dim)]'}`}>
                         {tab.description}
                       </div>
                     </button>
@@ -255,7 +255,7 @@ export function SettingsView({
                 <button
                   type="button"
                   onClick={onBackToWorkspace}
-                  className="w-full h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                  className="w-full h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   Back to drones
@@ -264,22 +264,22 @@ export function SettingsView({
             </div>
           </aside>
 
-          <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden min-w-0">
+          <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden min-w-0">
             <div className="px-5 py-4 border-b border-[var(--border)] flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
-                <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-semibold" style={{ fontFamily: 'var(--display)' }}>
+                <div className="text-[var(--text-10)] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-[var(--weight-semibold)]" style={{ fontFamily: 'var(--display)' }}>
                   {activeTabMeta.label}
                 </div>
-                <h1 className="text-[18px] font-semibold text-[var(--fg)] mt-1" style={{ fontFamily: 'var(--display)' }}>
+                <h1 className="text-[18px] font-[var(--weight-semibold)] text-[var(--fg-strong)] mt-1" style={{ fontFamily: 'var(--display)' }}>
                   {activeTabMeta.title}
                 </h1>
-                <p className="text-[12px] text-[var(--muted)] mt-1 max-w-[72ch]">{activeTabMeta.description}</p>
+                <p className="text-[var(--text-12)] text-[var(--muted)] mt-1 max-w-[72ch]">{activeTabMeta.description}</p>
               </div>
               <button
                 type="button"
                 onClick={handleRefreshAll}
                 disabled={settingsBusy}
-                className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                className={`h-8 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                   settingsBusy
                     ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                     : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'

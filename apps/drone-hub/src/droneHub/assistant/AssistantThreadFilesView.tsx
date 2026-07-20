@@ -167,7 +167,7 @@ export function AssistantThreadFilesView({
                 type="button"
                 onClick={() => toggleDirectory(node.path)}
                 title={node.path}
-                className="flex h-[22px] w-full min-w-0 items-center gap-1 pr-2 text-left text-[13px] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--surface-strong)]"
+                className="flex h-[22px] w-full min-w-0 items-center gap-1 pr-2 text-left text-[var(--text-13)] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--surface-strong)]"
                 style={{ paddingLeft: `${indentPx}px` }}
               >
                 <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
@@ -192,7 +192,7 @@ export function AssistantThreadFilesView({
           type="button"
           onClick={() => onSelectPath(node.path)}
           title={`${node.path} • ${formatUpdatedAt(node.file.updatedAt)} • ${formatArtifactSize(node.file.size)}`}
-          className={`relative flex h-[22px] w-full min-w-0 items-center gap-1 pr-2 text-left text-[13px] transition-colors ${
+          className={`relative flex h-[22px] w-full min-w-0 items-center gap-1 pr-2 text-left text-[var(--text-13)] transition-colors ${
             selected
               ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_0_0_0_1px_var(--info-border)]'
               : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)]'
@@ -219,10 +219,10 @@ export function AssistantThreadFilesView({
         <div className="flex min-w-0 items-center gap-2.5">
           <IconFile className="h-4 w-4 flex-shrink-0 text-[var(--muted)]" />
           <div className="min-w-0">
-            <div className="min-w-0 truncate text-[12px] font-semibold text-[var(--fg-secondary)]">
+            <div className="min-w-0 truncate text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
               Chat files
             </div>
-            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-[var(--muted-dim)]">
+            <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[var(--text-10)] text-[var(--muted-dim)]">
               <span>
                 {files.length} file{files.length === 1 ? '' : 's'}
               </span>
@@ -239,7 +239,7 @@ export function AssistantThreadFilesView({
             type="button"
             onClick={onRefresh}
             disabled={!threadId || loading}
-            className="h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-45"
+            className="h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-45"
             style={{ fontFamily: 'var(--display)' }}
           >
             {loading ? 'Loading' : 'Refresh'}
@@ -247,7 +247,7 @@ export function AssistantThreadFilesView({
           <button
             type="button"
             onClick={onClose}
-            className="h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+            className="h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             Chat
@@ -255,14 +255,14 @@ export function AssistantThreadFilesView({
         </div>
       </div>
       {error ? (
-        <div className="mx-3 mt-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-2.5 py-2 text-[11px] text-[var(--red)]">
+        <div className="mx-3 mt-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-2.5 py-2 text-[var(--text-11)] text-[var(--red)]">
           {error}
         </div>
       ) : null}
       <div className="flex min-h-0 flex-1">
         <aside className="w-[210px] flex-shrink-0 overflow-y-auto border-r border-[var(--border-subtle)] py-1">
           {files.length === 0 ? (
-            <div className="px-2 py-3 text-[11px] text-[var(--muted-dim)]">
+            <div className="px-2 py-3 text-[var(--text-11)] text-[var(--muted-dim)]">
               {loading ? 'Loading files...' : 'No chat files.'}
             </div>
           ) : (
@@ -273,10 +273,10 @@ export function AssistantThreadFilesView({
           {selectedFile ? (
             <div className="flex h-full min-h-0 flex-col">
               <div className="flex-shrink-0 border-b border-[var(--border-subtle)] px-4 py-2">
-                <div className="truncate text-[13px] font-medium text-[var(--fg-secondary)]">
+                <div className="truncate text-[var(--text-13)] font-medium text-[var(--fg-secondary)]">
                   {selectedFile.path}
                 </div>
-                <div className="mt-0.5 truncate text-[11px] text-[var(--muted-dim)]">
+                <div className="mt-0.5 truncate text-[var(--text-11)] text-[var(--muted-dim)]">
                   {formatArtifactSize(selectedFile.size)} ·{' '}
                   {formatUpdatedAt(selectedFile.updatedAt)} · {selectedFile.revision}
                 </div>
@@ -291,17 +291,17 @@ export function AssistantThreadFilesView({
                 ) : selectedFile.content.trim() ? (
                   <MarkdownMessage
                     text={selectedFile.content}
-                    className="dh-markdown text-[13px]"
+                    className="dh-markdown text-[var(--text-13)]"
                   />
                 ) : (
-                  <div className="text-[12px] text-[var(--muted-dim)]">
+                  <div className="text-[var(--text-12)] text-[var(--muted-dim)]">
                     {selectedFile.binary ? 'Binary file preview is unavailable.' : 'Empty file'}
                   </div>
                 )}
               </div>
             </div>
           ) : (
-            <div className="flex h-full items-center justify-center px-4 text-center text-[12px] text-[var(--muted-dim)]">
+            <div className="flex h-full items-center justify-center px-4 text-center text-[var(--text-12)] text-[var(--muted-dim)]">
               {loading ? 'Loading selected file...' : 'No file selected'}
             </div>
           )}

@@ -469,14 +469,14 @@ export function DronePullRequestsDock({
       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
         <div className="min-w-0 flex items-center gap-2">
           <div
-            className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase"
+            className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.12em] uppercase"
             style={{ fontFamily: 'var(--display)' }}
             title={droneName}
           >
             Pull Requests
           </div>
           {activePullRequestNumber ? (
-            <div className="min-w-0 text-[10px] text-[var(--muted)] font-mono truncate" title={activePullRequest?.title || `PR #${activePullRequestNumber}`}>
+            <div className="min-w-0 text-[var(--text-10)] text-[var(--muted)] font-mono truncate" title={activePullRequest?.title || `PR #${activePullRequestNumber}`}>
               / #{activePullRequestNumber}
             </div>
           ) : null}
@@ -486,7 +486,7 @@ export function DronePullRequestsDock({
             <button
               type="button"
               onClick={closeDetailView}
-              className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+              className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
               style={{ fontFamily: 'var(--display)' }}
               title="Return to the pull request list"
             >
@@ -497,7 +497,7 @@ export function DronePullRequestsDock({
                 href={activePullRequest.htmlUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                className="inline-flex items-center h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Open PR on GitHub"
               >
@@ -507,13 +507,13 @@ export function DronePullRequestsDock({
           </div>
         ) : (
           <div className="inline-flex items-center gap-1">
-            <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
+            <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
               Merge
             </span>
             <select
               value={mergeMethod}
               onChange={(event) => setMergeMethod(event.currentTarget.value as RepoPullRequestMergeMethod)}
-              className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--fg-secondary)]"
+              className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]"
               title="Default merge method"
             >
               <option value="merge">merge</option>
@@ -526,7 +526,7 @@ export function DronePullRequestsDock({
                 void mergeAllPullRequests();
               }}
               disabled={!repoAttached || disabled || mergeablePullRequests.length === 0 || anyBusy || Boolean(listError)}
-              className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              className="h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
               style={{ fontFamily: 'var(--display)' }}
               title={
                 mergeablePullRequests.length > 0
@@ -544,7 +544,7 @@ export function DronePullRequestsDock({
                 void closeAllPullRequests();
               }}
               disabled={!repoAttached || disabled || pullRequests.length === 0 || anyBusy || Boolean(listError)}
-              className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              className="h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
               style={{ fontFamily: 'var(--display)' }}
               title="Close all open PRs without merging"
             >
@@ -553,7 +553,7 @@ export function DronePullRequestsDock({
             <button
               type="button"
               onClick={() => setRefreshNonce((n) => n + 1)}
-              className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+              className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
               title="Refresh pull requests"
             >
               Refresh
@@ -564,7 +564,7 @@ export function DronePullRequestsDock({
       {activePullRequestNumber ? (
         <React.Suspense
           fallback={
-            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
               Loading pull request changes...
             </div>
           }
@@ -584,7 +584,7 @@ export function DronePullRequestsDock({
         </React.Suspense>
       ) : (
         <>
-          <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] text-[10px] text-[var(--muted)] flex items-center gap-1.5 min-h-[30px] overflow-x-auto whitespace-nowrap">
+          <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--muted)] flex items-center gap-1.5 min-h-[30px] overflow-x-auto whitespace-nowrap">
             {!repoAttached ? (
               <span title={unavailableReason || 'No repo attached'}>
                 {unavailableReason || 'No repo attached.'}
@@ -611,25 +611,25 @@ export function DronePullRequestsDock({
           </div>
 
           {actionNotice ? (
-            <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--green)] bg-[var(--green-subtle)]">{actionNotice}</div>
+            <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--green)] bg-[var(--green-subtle)]">{actionNotice}</div>
           ) : null}
           {actionError ? (
-            <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--red)] bg-[var(--red-subtle)]">{actionError}</div>
+            <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--red)] bg-[var(--red-subtle)]">{actionError}</div>
           ) : null}
           {bulkActionLabel ? (
-            <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--muted)] bg-[var(--surface-softest)]">
+            <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--muted)] bg-[var(--surface-softest)]">
               {bulkActionLabel}
             </div>
           ) : null}
 
           {!repoAttached ? (
-            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
               {unavailableReason || 'Attach a repo to manage pull requests.'}
             </div>
           ) : disabled ? (
-            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
-              <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-                <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
+              <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
+                <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                   {provisioningLabel(hubPhase)}
                 </div>
                 <div className="mt-1">
@@ -638,36 +638,36 @@ export function DronePullRequestsDock({
                     : 'Waiting for repository...'}
                 </div>
                 {String(hubMessage ?? '').trim() ? (
-                  <div className="mt-1 text-[10px] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
+                  <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
                 ) : null}
               </div>
             </div>
           ) : listError ? (
-            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">
+            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--red)]">
               <div>{listError}</div>
               {listErrorCode ? (
-                <div className="mt-1 text-[10px] text-[var(--muted-dim)] font-mono">
+                <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)] font-mono">
                   code: {listErrorCode}
                 </div>
               ) : null}
               {listErrorDiagnostics?.repoRoot ? (
-                <div className="mt-1 text-[10px] text-[var(--muted-dim)] font-mono break-all">
+                <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)] font-mono break-all">
                   repo: {listErrorDiagnostics.repoRoot}
                 </div>
               ) : null}
               {listErrorDiagnostics?.origin ? (
-                <div className="mt-1 text-[10px] text-[var(--muted-dim)] font-mono break-all">
+                <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)] font-mono break-all">
                   origin: {listErrorDiagnostics.origin}
                 </div>
               ) : null}
               {listErrorDiagnostics?.github ? (
-                <div className="mt-1 text-[10px] text-[var(--muted-dim)] font-mono">
+                <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)] font-mono">
                   github: {listErrorDiagnostics.github.owner}/{listErrorDiagnostics.github.repo}
                 </div>
               ) : null}
             </div>
           ) : pullRequests.length === 0 && !listLoading ? (
-            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">No open pull requests.</div>
+            <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">No open pull requests.</div>
           ) : (
             <PullRequestListView
               pullRequests={pullRequests}

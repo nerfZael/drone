@@ -88,13 +88,13 @@ export function ShortcutSettingsSection() {
   );
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
         <div>
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Keyboard shortcuts
           </div>
-          <div className="text-[11px] text-[var(--muted-dim)] mt-1 leading-relaxed">
+          <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1 leading-relaxed">
             Click a shortcut, then press any key combo (letters, function keys, and modifiers). Ctrl and Cmd are captured as a portable Ctrl/Cmd modifier.
           </div>
         </div>
@@ -104,7 +104,7 @@ export function ShortcutSettingsSection() {
             setCapturingActionId(null);
             resetShortcutBindings();
           }}
-          className="inline-flex items-center justify-center whitespace-nowrap shrink-0 h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+          className="inline-flex items-center justify-center whitespace-nowrap shrink-0 h-8 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
           style={{ fontFamily: 'var(--display)' }}
           title="Reset all shortcuts to defaults"
         >
@@ -118,11 +118,11 @@ export function ShortcutSettingsSection() {
           const isCapturing = capturingActionId === def.id;
           const hasConflict = conflictingActionIds.has(def.id);
           return (
-            <div key={def.id} className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-2">
+            <div key={def.id} className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[12px] text-[var(--fg-secondary)] font-semibold">{def.label}</div>
-                  <div className="text-[11px] text-[var(--muted-dim)] mt-1 leading-relaxed">{def.description}</div>
+                  <div className="text-[var(--text-12)] text-[var(--fg-secondary)] font-[var(--weight-semibold)]">{def.label}</div>
+                  <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1 leading-relaxed">{def.description}</div>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -133,7 +133,7 @@ export function ShortcutSettingsSection() {
                       if (capturingActionId === def.id) setCapturingActionId(null);
                     }}
                     onKeyDown={(e) => handleCaptureKeyDown(def.id, e)}
-                    className={`h-9 min-w-[180px] px-3 rounded text-[11px] font-semibold border transition-all font-mono ${
+                    className={`h-9 min-w-[180px] px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] border transition-all font-mono ${
                       isCapturing
                         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                         : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
@@ -146,7 +146,7 @@ export function ShortcutSettingsSection() {
                     type="button"
                     onClick={() => setShortcutBinding(def.id, null)}
                     disabled={!binding}
-                    className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                    className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                       binding
                         ? 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                         : 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
@@ -162,7 +162,7 @@ export function ShortcutSettingsSection() {
                       const defaultBinding = defaultShortcutBindings[def.id];
                       setShortcutBinding(def.id, defaultBinding ? { ...defaultBinding } : null);
                     }}
-                    className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                    className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                     style={{ fontFamily: 'var(--display)' }}
                     title="Reset this shortcut to its default value"
                   >
@@ -171,7 +171,7 @@ export function ShortcutSettingsSection() {
                 </div>
               </div>
               {hasConflict && (
-                <div className="text-[11px] text-[var(--yellow)]">
+                <div className="text-[var(--text-11)] text-[var(--yellow)]">
                   Conflicts with: {(conflictByActionId.get(def.id) ?? []).join(', ')}. The first matching action in the list will run.
                 </div>
               )}

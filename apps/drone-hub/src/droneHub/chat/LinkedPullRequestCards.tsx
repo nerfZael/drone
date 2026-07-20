@@ -148,16 +148,16 @@ function LinkedPullRequestCard({
   const footerMessage = actionError ?? (loadError ? `Status unavailable: ${loadError}` : null);
 
   return (
-    <section className="w-fit max-w-full self-start overflow-hidden rounded-md border border-[var(--accent-border)] border-l-2 border-l-[var(--accent)] bg-transparent">
+    <section className="w-fit max-w-full self-start overflow-hidden rounded-[var(--radius-medium)] border border-[var(--accent-border)] border-l-2 border-l-[var(--accent)] bg-transparent">
       <div className="min-w-0 py-2 pl-3 pr-2">
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
-          <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+          <span className="text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
             Linked request
           </span>
-          <span className="font-mono text-[10px] text-[var(--accent)]">#{link.pullNumber}</span>
+          <span className="font-mono text-[var(--text-10)] text-[var(--accent)]">#{link.pullNumber}</span>
           <span
             aria-live="polite"
-            className={`inline-flex items-center gap-1 rounded border px-1.5 py-[1px] text-[9px] capitalize ${
+            className={`inline-flex items-center gap-1 rounded border px-1.5 py-[1px] text-[var(--text-9)] capitalize ${
               pullRequest
                 ? pullRequestStateClassName(pullRequest.state)
                 : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]'
@@ -177,13 +177,13 @@ function LinkedPullRequestCard({
               event.preventDefault();
               openRequest(link, onOpenLink);
             }}
-            className="min-w-0 max-w-full truncate text-left text-[12px] font-medium text-[var(--fg-secondary)] outline-none transition-colors hover:text-[var(--fg)] hover:underline focus-visible:text-[var(--fg)] focus-visible:underline"
+            className="min-w-0 max-w-full truncate text-left text-[var(--text-12)] font-medium text-[var(--fg-secondary)] outline-none transition-colors hover:text-[var(--fg)] hover:underline focus-visible:text-[var(--fg)] focus-visible:underline"
             title={pullRequest?.title ?? `Open ${link.owner}/${link.repo} PR #${link.pullNumber}`}
           >
             {pullRequest?.title ?? `${link.owner}/${link.repo} pull request #${link.pullNumber}`}
           </a>
           {actionNotice ? (
-            <span role="status" className="text-[9px] text-[var(--green)]">
+            <span role="status" className="text-[var(--text-9)] text-[var(--green)]">
               {actionNotice}
             </span>
           ) : isOpen && sameRepo ? (
@@ -192,7 +192,7 @@ function LinkedPullRequestCard({
                 type="button"
                 onClick={() => void mergePullRequest()}
                 disabled={!canManage || Boolean(blockedReason) || Boolean(busyAction) || anyActionBusy}
-                className="inline-flex h-6 min-w-[64px] items-center justify-center whitespace-nowrap rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--green)] transition-[background-color,border-color,filter] hover:border-[var(--green)] hover:brightness-110 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--green)] disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex h-6 min-w-[64px] items-center justify-center whitespace-nowrap rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--green)] transition-[background-color,border-color,filter] hover:border-[var(--green)] hover:brightness-110 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--green)] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ fontFamily: 'var(--display)' }}
                 title={blockedReason ? `Cannot merge: ${blockedReason}` : forceReason ? `Force merge: ${forceReason}` : `Merge PR #${link.pullNumber}`}
               >
@@ -202,7 +202,7 @@ function LinkedPullRequestCard({
                 type="button"
                 onClick={() => void closePullRequest()}
                 disabled={!canManage || Boolean(busyAction) || anyActionBusy}
-                className="inline-flex h-6 items-center justify-center whitespace-nowrap rounded border border-[var(--red-border)] bg-transparent px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--red)] transition-[background-color,border-color] hover:border-[var(--red)] hover:bg-[var(--red-subtle)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex h-6 items-center justify-center whitespace-nowrap rounded border border-[var(--red-border)] bg-transparent px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)] transition-[background-color,border-color] hover:border-[var(--red)] hover:bg-[var(--red-subtle)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Close this pull request without merging"
               >
@@ -212,7 +212,7 @@ function LinkedPullRequestCard({
           ) : null}
         </div>
 
-        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[10px] text-[var(--muted-dim)]">
+        <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1 text-[var(--text-10)] text-[var(--muted-dim)]">
           <span className="font-mono text-[var(--muted)]">{link.owner}/{link.repo}</span>
           {pullRequest?.headRefName || pullRequest?.baseRefName ? (
             <>
@@ -230,7 +230,7 @@ function LinkedPullRequestCard({
           ) : null}
         </div>
         {footerMessage ? (
-          <div role="alert" className="mt-2 border-t border-[var(--red-border)] pt-2 text-[9px] text-[var(--red)]">
+          <div role="alert" className="mt-2 border-t border-[var(--red-border)] pt-2 text-[var(--text-9)] text-[var(--red)]">
             {footerMessage}
           </div>
         ) : null}

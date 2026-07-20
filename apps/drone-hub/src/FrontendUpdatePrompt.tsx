@@ -102,14 +102,14 @@ export function FrontendUpdatePrompt() {
         aria-live="polite"
       >
         <div className="min-w-0">
-          <div className="text-[12px] font-semibold text-[var(--fg)]">New Drone Hub is ready</div>
-          <div className="truncate text-[11px] text-[var(--muted)]">
+          <div className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]">New Drone Hub is ready</div>
+          <div className="truncate text-[var(--text-11)] text-[var(--muted)]">
             Refresh to load the latest frontend.
           </div>
         </div>
         <button
           type="button"
-          className="shrink-0 rounded border border-[var(--accent-muted)] bg-[var(--accent)] px-3 py-1.5 text-[12px] font-semibold text-[var(--accent-fg)] hover:brightness-110"
+          className="shrink-0 rounded border border-[var(--accent-muted)] bg-[var(--accent)] px-3 py-1.5 text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--accent-fg)] hover:brightness-110"
           onClick={update.reload}
         >
           Refresh

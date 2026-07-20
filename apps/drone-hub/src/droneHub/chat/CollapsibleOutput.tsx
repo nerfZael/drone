@@ -19,12 +19,12 @@ export function CollapsibleOutput({ text, ok }: { text: string; ok: boolean }) {
     <div className="relative">
       {!showAll && hidden > 0 && (
         <div className="mb-2 flex items-center justify-between gap-2">
-          <div className="text-[11px] text-[var(--muted-dim)]">
+          <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
             {hidden} earlier line{hidden === 1 ? '' : 's'} hidden
           </div>
           <button
             onClick={() => setShowAll(true)}
-            className="text-[11px] font-semibold text-[var(--accent)] hover:text-[var(--fg)] transition-colors"
+            className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--accent)] hover:text-[var(--fg)] transition-colors"
           >
             Show all {total} lines
           </button>
@@ -32,7 +32,7 @@ export function CollapsibleOutput({ text, ok }: { text: string; ok: boolean }) {
       )}
 
       <pre
-        className={`whitespace-pre-wrap text-[12.5px] leading-[1.6] font-mono ${
+        className={`whitespace-pre-wrap text-[var(--text-12-5)] leading-[1.6] font-mono ${
           ok ? 'text-[var(--fg-secondary)]' : 'text-[var(--red)]'
         }`}
       >
@@ -42,7 +42,7 @@ export function CollapsibleOutput({ text, ok }: { text: string; ok: boolean }) {
       {showAll && isLong && (
         <button
           onClick={() => setShowAll(false)}
-          className="mt-2 flex items-center gap-1 text-[11px] font-medium text-[var(--accent)] hover:text-[var(--fg)] transition-colors"
+          className="mt-2 flex items-center gap-1 text-[var(--text-11)] font-medium text-[var(--accent)] hover:text-[var(--fg)] transition-colors"
         >
           <IconChevron down={false} />
           Collapse earlier lines

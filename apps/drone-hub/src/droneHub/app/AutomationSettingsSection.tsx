@@ -14,22 +14,22 @@ export function AutomationSettingsSection() {
   const clearAutomations = useDroneHubUiStore((s) => s.clearAutomations);
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
-      <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
+      <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
         Automation
       </div>
-      <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">
+      <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
         Create reusable automation jobs. Each job runs its prompt repeatedly from chat.
       </div>
       <div className="flex items-center justify-between gap-2">
-        <div className="text-[10px] text-[var(--muted-dim)]">
+        <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
           Runs are clamped to {AUTOMATION_RUNS_MIN}-{AUTOMATION_RUNS_MAX}. Sleep amount uses whole numbers only.
         </div>
         <div className="flex items-center gap-2">
           <button
             type="button"
             onClick={() => addAutomation()}
-            className="h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110"
+            className="h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110"
             style={{ fontFamily: 'var(--display)' }}
             title="Add automation job"
           >
@@ -39,7 +39,7 @@ export function AutomationSettingsSection() {
             type="button"
             onClick={() => clearAutomations()}
             disabled={automations.length === 0}
-            className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+            className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
               automations.length === 0
                 ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                 : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
@@ -53,7 +53,7 @@ export function AutomationSettingsSection() {
       </div>
 
       {automations.length === 0 ? (
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 text-[var(--text-11)] text-[var(--muted-dim)]">
           No automation jobs yet. Create one, then run it from the chat automation button.
         </div>
       ) : (

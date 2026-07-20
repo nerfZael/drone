@@ -68,10 +68,10 @@ export function SkillSourceImportSection({
     <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Import from GitHub
           </div>
-          <div className="text-[11px] text-[var(--muted-dim)] mt-1 leading-relaxed">
+          <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-1 leading-relaxed">
             Browse the curated allowlist, then import only skills the Hub can normalize into the portable library format.
           </div>
         </div>
@@ -88,7 +88,7 @@ export function SkillSourceImportSection({
 
       <div className="grid grid-cols-1 md:grid-cols-[220px_minmax(0,1fr)] gap-3">
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Source repo</span>
+          <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Source repo</span>
           <select
             value={selectedSourceId ?? ''}
             onChange={(e) => selectSource(e.target.value || null)}
@@ -107,7 +107,7 @@ export function SkillSourceImportSection({
           </select>
         </label>
         <label className="flex flex-col gap-1">
-          <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Search candidates</span>
+          <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Search candidates</span>
           <input
             value={sourceSkillSearch}
             onChange={(e) => setSourceSkillSearch(e.target.value)}
@@ -120,18 +120,18 @@ export function SkillSourceImportSection({
       <div className="grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-3 min-w-0">
         <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-2 flex flex-col gap-2 min-w-0">
           <div className="flex items-center justify-between gap-2 px-1">
-            <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Source skills
             </div>
-            <div className="text-[10px] text-[var(--muted-dim)]">{filteredSourceSkills.length}</div>
+            <div className="text-[var(--text-10)] text-[var(--muted-dim)]">{filteredSourceSkills.length}</div>
           </div>
           <div className="flex flex-col gap-2 max-h-[420px] overflow-y-auto pr-1">
             {sourceSkillsLoading ? (
-              <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-4 text-[11px] text-[var(--muted-dim)]">
+              <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
                 Loading source skills…
               </div>
             ) : filteredSourceSkills.length === 0 ? (
-              <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-4 text-[11px] text-[var(--muted-dim)]">
+              <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-4 text-[var(--text-11)] text-[var(--muted-dim)]">
                 {skillSources.length === 0 ? 'No curated sources configured.' : 'No source skills match the current filters.'}
               </div>
             ) : (
@@ -150,15 +150,15 @@ export function SkillSourceImportSection({
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
                       <div className="min-w-0">
-                        <div className="text-[12px] text-[var(--fg-secondary)] font-medium truncate">{candidate.name}</div>
-                        <div className="text-[10px] text-[var(--muted-dim)] font-mono mt-1 break-all">{candidate.path}</div>
+                        <div className="text-[var(--text-12)] text-[var(--fg-secondary)] font-medium truncate">{candidate.name}</div>
+                        <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono mt-1 break-all">{candidate.path}</div>
                       </div>
-                      <div className={`px-2 py-1 rounded border text-[10px] uppercase tracking-[0.08em] ${importStatusClassName(candidate.importStatus)}`}>
+                      <div className={`px-2 py-1 rounded border text-[var(--text-10)] uppercase tracking-[0.08em] ${importStatusClassName(candidate.importStatus)}`}>
                         {candidate.importStatus === 'importable_with_loss' ? 'Lossy' : candidate.importStatus === 'not_importable' ? 'Blocked' : 'Importable'}
                       </div>
                     </div>
-                    <div className="text-[11px] text-[var(--muted-dim)] leading-relaxed">{candidate.description}</div>
-                    <div className="text-[10px] text-[var(--muted-dim)]">
+                    <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">{candidate.description}</div>
+                    <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
                       {candidate.pluginName ? `${candidate.pluginName} • ` : ''}
                       {candidate.slug}
                       {candidate.license ? ` • ${candidate.license}` : ''}
@@ -172,23 +172,23 @@ export function SkillSourceImportSection({
 
         <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-3 flex flex-col gap-3 min-w-0">
           {sourceSkillPreviewLoading ? (
-            <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-6 text-[11px] text-[var(--muted-dim)]">
+            <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-6 text-[var(--text-11)] text-[var(--muted-dim)]">
               Loading preview…
             </div>
           ) : !sourceSkillPreview ? (
-            <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-6 text-[11px] text-[var(--muted-dim)]">
+            <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-6 text-[var(--text-11)] text-[var(--muted-dim)]">
               Select a source skill to inspect its package contents and normalized import preview before importing.
             </div>
           ) : (
             <>
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0">
-                  <div className="text-[13px] font-semibold text-[var(--fg)] truncate">{sourceSkillPreview.candidate.name}</div>
-                  <div className="text-[10px] text-[var(--muted-dim)] font-mono mt-1 break-all">{sourceSkillPreview.candidate.path}</div>
-                  <div className="text-[11px] text-[var(--muted-dim)] mt-2 leading-relaxed">{sourceSkillPreview.candidate.description}</div>
+                  <div className="text-[var(--text-13)] font-[var(--weight-semibold)] text-[var(--fg)] truncate">{sourceSkillPreview.candidate.name}</div>
+                  <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono mt-1 break-all">{sourceSkillPreview.candidate.path}</div>
+                  <div className="text-[var(--text-11)] text-[var(--muted-dim)] mt-2 leading-relaxed">{sourceSkillPreview.candidate.description}</div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <div className={`px-2 py-1 rounded border text-[10px] uppercase tracking-[0.08em] ${importStatusClassName(sourceSkillPreview.candidate.importStatus)}`}>
+                  <div className={`px-2 py-1 rounded border text-[var(--text-10)] uppercase tracking-[0.08em] ${importStatusClassName(sourceSkillPreview.candidate.importStatus)}`}>
                     {sourceSkillPreview.candidate.importStatus === 'importable_with_loss'
                       ? 'Lossy'
                       : sourceSkillPreview.candidate.importStatus === 'not_importable'
@@ -219,24 +219,24 @@ export function SkillSourceImportSection({
               </div>
 
               {sourceSkillPreview.candidate.importReason && (
-                <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-2 text-[11px] text-[var(--muted-dim)]">
+                <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-2 text-[var(--text-11)] text-[var(--muted-dim)]">
                   {sourceSkillPreview.candidate.importReason}
                 </div>
               )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 flex flex-col gap-2">
-                  <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Normalized import</div>
-                  <div className="text-[11px] text-[var(--muted-dim)]">Slug: <span className="font-mono text-[var(--fg-secondary)]">{sourceSkillPreview.normalized.slug}</span></div>
-                  <div className="text-[11px] text-[var(--muted-dim)]">Compatibility: {sourceSkillPreview.normalized.compatibility}</div>
-                  <div className="text-[11px] text-[var(--muted-dim)]">Files carried over: {sourceSkillPreview.normalized.files.length}</div>
-                  <div className="text-[11px] text-[var(--muted-dim)]">Metadata entries: {Object.keys(sourceSkillPreview.normalized.metadata ?? {}).length}</div>
+                  <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Normalized import</div>
+                  <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Slug: <span className="font-mono text-[var(--fg-secondary)]">{sourceSkillPreview.normalized.slug}</span></div>
+                  <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Compatibility: {sourceSkillPreview.normalized.compatibility}</div>
+                  <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Files carried over: {sourceSkillPreview.normalized.files.length}</div>
+                  <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Metadata entries: {Object.keys(sourceSkillPreview.normalized.metadata ?? {}).length}</div>
                 </div>
                 <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 flex flex-col gap-2">
-                  <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Source snapshot</div>
-                  <div className="text-[11px] text-[var(--muted-dim)]">Commit: <span className="font-mono text-[var(--fg-secondary)]">{sourceSkillPreview.sourceCommit}</span></div>
-                  <div className="text-[11px] text-[var(--muted-dim)]">Package files available for review: {previewFileCount}</div>
-                  <div className="text-[11px] text-[var(--muted-dim)]">
+                  <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Source snapshot</div>
+                  <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Commit: <span className="font-mono text-[var(--fg-secondary)]">{sourceSkillPreview.sourceCommit}</span></div>
+                  <div className="text-[var(--text-11)] text-[var(--muted-dim)]">Package files available for review: {previewFileCount}</div>
+                  <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
                     {sourceSkillPreview.candidate.pluginName ? `${sourceSkillPreview.candidate.pluginName} • ` : ''}
                     {sourceSkillPreview.candidate.license ?? 'No license field'}
                   </div>
@@ -245,7 +245,7 @@ export function SkillSourceImportSection({
 
               <div className="grid grid-cols-1 xl:grid-cols-[220px_minmax(0,1fr)] gap-3 min-w-0">
                 <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-2 flex flex-col gap-2 min-w-0">
-                  <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] px-1">Package files</div>
+                  <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] px-1">Package files</div>
                   <div className="flex flex-col gap-1 max-h-[320px] overflow-y-auto pr-1">
                     {sourceSkillPreview.files.map((file) => {
                       const active = selectedSourcePreviewFile?.path === file.path;
@@ -260,8 +260,8 @@ export function SkillSourceImportSection({
                               : 'border-[var(--border-subtle)] bg-[var(--surface-faint)] hover:bg-[var(--hover)]'
                           }`}
                         >
-                          <div className="text-[11px] text-[var(--fg-secondary)] font-mono break-all">{file.path}</div>
-                          <div className="text-[10px] text-[var(--muted-dim)] mt-1 uppercase tracking-[0.08em]">{file.kind}</div>
+                          <div className="text-[var(--text-11)] text-[var(--fg-secondary)] font-mono break-all">{file.path}</div>
+                          <div className="text-[var(--text-10)] text-[var(--muted-dim)] mt-1 uppercase tracking-[0.08em]">{file.kind}</div>
                         </button>
                       );
                     })}
@@ -270,8 +270,8 @@ export function SkillSourceImportSection({
 
                 <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-2 min-w-0">
                   <div className="flex items-center justify-between gap-2">
-                    <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Selected file</div>
-                    <div className="text-[10px] text-[var(--muted-dim)] font-mono break-all">{selectedSourcePreviewFile?.path ?? 'None'}</div>
+                    <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Selected file</div>
+                    <div className="text-[var(--text-10)] text-[var(--muted-dim)] font-mono break-all">{selectedSourcePreviewFile?.path ?? 'None'}</div>
                   </div>
                   <textarea
                     readOnly

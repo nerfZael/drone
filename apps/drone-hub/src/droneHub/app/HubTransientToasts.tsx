@@ -37,17 +37,17 @@ export function HubTransientToasts({
         <div
           onClick={onDismissNameSuggestToast}
           title="Click to dismiss"
-          className={`fixed right-4 z-50 max-w-[420px] rounded-lg border ${nameSuggestToastBorderClass} bg-[var(--panel-alt)] shadow-[0_16px_48px_var(--shadow-color)] px-4 py-3 animate-slide-up ${
+          className={`fixed right-4 z-50 max-w-[420px] rounded-[var(--radius-large)] border ${nameSuggestToastBorderClass} bg-[var(--panel-alt)] shadow-[0_16px_48px_var(--shadow-color)] px-4 py-3 animate-slide-up ${
             jobsModalError && !jobsModalOpen ? 'bottom-[98px]' : 'bottom-4'
           } cursor-pointer`}
         >
           <div className="flex items-start gap-3">
             <div className="min-w-0 flex-1">
-              <div className={`text-[10px] font-semibold mb-1 tracking-wide uppercase ${nameSuggestToastLabelClass}`} style={{ fontFamily: 'var(--display)' }}>
+              <div className={`text-[var(--text-10)] font-[var(--weight-semibold)] mb-1 tracking-wide uppercase ${nameSuggestToastLabelClass}`} style={{ fontFamily: 'var(--display)' }}>
                 {nameSuggestToast.title ?? (nameSuggestToastTone === 'success' ? 'Action completed' : 'Action failed')}
               </div>
               {nameSuggestToast.voiceActive ? <VoiceLevelBars level={voiceLevel} /> : null}
-              <div className="text-[11px] text-[var(--muted)] whitespace-pre-wrap">{nameSuggestToast.message}</div>
+              <div className="text-[var(--text-11)] text-[var(--muted)] whitespace-pre-wrap">{nameSuggestToast.message}</div>
             </div>
             <button
               type="button"
@@ -66,10 +66,10 @@ export function HubTransientToasts({
         <div
           onClick={onDismissJobsModalError}
           title="Click to dismiss"
-          className="fixed bottom-4 right-4 z-50 max-w-[420px] rounded-lg border border-[var(--red-border)] bg-[var(--panel-alt)] shadow-[0_16px_48px_var(--shadow-color)] px-4 py-3 animate-slide-up cursor-pointer"
+          className="fixed bottom-4 right-4 z-50 max-w-[420px] rounded-[var(--radius-large)] border border-[var(--red-border)] bg-[var(--panel-alt)] shadow-[0_16px_48px_var(--shadow-color)] px-4 py-3 animate-slide-up cursor-pointer"
         >
-          <div className="text-[10px] font-semibold text-[var(--red)] mb-1 tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Failed to create jobs</div>
-          <div className="text-[11px] text-[var(--muted)] whitespace-pre-wrap">{jobsModalError}</div>
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--red)] mb-1 tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Failed to create jobs</div>
+          <div className="text-[var(--text-11)] text-[var(--muted)] whitespace-pre-wrap">{jobsModalError}</div>
         </div>
       )}
     </>

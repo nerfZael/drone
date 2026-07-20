@@ -170,14 +170,14 @@ export function CodexConnectControl({
     >
       <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <div className="text-[11px] font-semibold text-[var(--fg)]">
+          <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">
             {finishing
               ? 'Finishing Codex sign-in'
               : waiting
                 ? 'Waiting for Codex sign-in'
                 : 'Codex sign-in required'}
           </div>
-          <div className="mt-0.5 text-[10px] text-[var(--muted)]">
+          <div className="mt-0.5 text-[var(--text-10)] text-[var(--muted)]">
             {finishing
               ? 'Saving the shared Codex login securely…'
               : waiting
@@ -190,7 +190,7 @@ export function CodexConnectControl({
             <button
               type="button"
               onClick={() => openAuthorizationWindow(login.authorizationUrl!)}
-              className="h-8 rounded border border-[var(--border)] px-2.5 text-[10px] font-semibold uppercase tracking-wide text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+              className="h-8 rounded border border-[var(--border)] px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
             >
               Reopen OpenAI
             </button>
@@ -200,7 +200,7 @@ export function CodexConnectControl({
               type="button"
               disabled={busy}
               onClick={() => void (waiting ? cancel() : start())}
-              className={`h-8 rounded border px-2.5 text-[10px] font-semibold uppercase tracking-wide ${
+              className={`h-8 rounded border px-2.5 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide ${
                 waiting
                   ? 'border-[var(--border)] text-[var(--muted)] hover:bg-[var(--hover)]'
                   : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
@@ -211,7 +211,7 @@ export function CodexConnectControl({
           ) : null}
         </div>
       </div>
-      {error ? <div className="mt-2 text-[10px] text-[var(--red)]">{error}</div> : null}
+      {error ? <div className="mt-2 text-[var(--text-10)] text-[var(--red)]">{error}</div> : null}
     </div>
   );
 }

@@ -223,8 +223,7 @@ export function CreateDronesModal({
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-[760px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_var(--shadow-color)] overflow-hidden animate-slide-up relative">
-        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
+      <div className="w-full max-w-[760px] rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_var(--shadow-color)] overflow-hidden animate-slide-up relative">
         <form
           onKeyDown={(e) => {
             if (e.key !== 'Enter') return;
@@ -247,14 +246,14 @@ export function CreateDronesModal({
         >
           <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
             <div className="min-w-0">
-              <div className="font-semibold text-sm text-[var(--fg)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <div className="font-[var(--weight-semibold)] text-sm text-[var(--fg-strong)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 {createMode === 'clone' ? 'Clone drones' : 'Create drones'}
               </div>
-              <div className="text-[10px] text-[var(--muted)] mt-0.5 font-mono">
+              <div className="text-[var(--text-10)] text-[var(--muted)] mt-0.5 font-mono">
                 {createNameEntries.length} drone{createNameEntries.length === 1 ? '' : 's'} ready
               </div>
               {cloneSourceName && (
-                <div className="text-[10px] text-[var(--muted)] mt-1 truncate font-mono" title={`Source: ${cloneSourceName}`}>
+                <div className="text-[var(--text-10)] text-[var(--muted)] mt-1 truncate font-mono" title={`Source: ${cloneSourceName}`}>
                   source: {cloneSourceName}
                 </div>
               )}
@@ -263,7 +262,7 @@ export function CreateDronesModal({
               <button
                 type="submit"
                 disabled={creating || submittingCreate || createNameEntries.length === 0}
-                className={`h-8 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                className={`h-8 px-4 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                   creating || submittingCreate || createNameEntries.length === 0
                     ? 'opacity-70 cursor-wait bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                     : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -309,7 +308,7 @@ export function CreateDronesModal({
             )}
 
             <div className="mb-4">
-              <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Runtime
               </div>
               <div className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] p-0.5">
@@ -317,7 +316,7 @@ export function CreateDronesModal({
                   type="button"
                   onClick={() => onCreateRuntimeChange('container')}
                   disabled={creating}
-                  className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                  className={`h-8 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                     createRuntime === 'container'
                       ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
                       : 'bg-transparent border-transparent text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)]'
@@ -330,7 +329,7 @@ export function CreateDronesModal({
                   type="button"
                   onClick={() => onCreateRuntimeChange('host')}
                   disabled={creating || createMode === 'clone'}
-                  className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                  className={`h-8 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                     createRuntime === 'host'
                       ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
                       : 'bg-transparent border-transparent text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)]'
@@ -340,7 +339,7 @@ export function CreateDronesModal({
                   Host
                 </button>
               </div>
-              <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+              <span className="text-[var(--text-10)] text-[var(--muted-dim)] block mt-1">
                 {createMode === 'clone'
                   ? 'Clone currently uses container runtime only.'
                   : createRuntime === 'host'
@@ -359,9 +358,9 @@ export function CreateDronesModal({
                     onChange={(e) => onCreatePersistVolumeChange(e.target.checked)}
                     disabled={creating}
                   />
-                  <span className="text-[11px] text-[var(--muted)]">Persist volume</span>
+                  <span className="text-[var(--text-11)] text-[var(--muted)]">Persist volume</span>
                 </label>
-                <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                <span className="text-[var(--text-10)] text-[var(--muted-dim)] block mt-1">
                   {createPersistVolume
                     ? 'Mounts /dvm-data on a Docker volume.'
                     : '/dvm-data stays in the container image layer.'}
@@ -378,29 +377,29 @@ export function CreateDronesModal({
                   onChange={(e) => onCreateAsDraftChange(e.target.checked)}
                   disabled={creating}
                 />
-                <span className="text-[11px] text-[var(--muted)]">Create as draft</span>
+                <span className="text-[var(--text-11)] text-[var(--muted)]">Create as draft</span>
               </label>
-              <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+              <span className="text-[var(--text-10)] text-[var(--muted-dim)] block mt-1">
                 Adds the drone to the sidebar and queues messages until you publish it.
               </span>
             </div>
 
             <div className="mb-4">
-              <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Group for created drones
               </div>
               <div className="flex items-center gap-2">
                 <input
                   value={createGroup}
                   onChange={(e) => onCreateGroupChange(e.target.value)}
-                  className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+                  className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
                   placeholder="e.g. auth, billing, frontend"
                   disabled={creating}
                 />
                 <button
                   type="button"
                   onClick={onClearCreateGroup}
-                  className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
+                  className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
                   style={{ fontFamily: 'var(--display)' }}
                   title="Clear group"
                   disabled={creating}
@@ -411,7 +410,7 @@ export function CreateDronesModal({
             </div>
 
             <div className="mb-4">
-              <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Repo path for created drones (optional)
               </div>
               <div className="flex items-center gap-2">
@@ -427,14 +426,14 @@ export function CreateDronesModal({
                   panelClassName="right-auto w-[380px] max-w-[calc(100vw-3rem)]"
                   title={createRepoPath || 'No repo'}
                   triggerLabel={createRepoPath ? repoPathLabel(createRepoPath) : 'No repo'}
-                  triggerLabelClassName={createRepoPath ? 'font-mono text-[12px]' : undefined}
+                  triggerLabelClassName={createRepoPath ? 'font-mono text-[var(--text-12)]' : undefined}
                   chevron={(menuOpen) => <IconChevron down={!menuOpen} className="text-[var(--muted-dim)] opacity-70 flex-shrink-0" />}
                   menuClassName="max-h-[220px] overflow-y-auto"
                 />
                 <button
                   type="button"
                   onClick={onClearCreateRepoPath}
-                  className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
+                  className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
                   style={{ fontFamily: 'var(--display)' }}
                   title="Clear repo path"
                   disabled={creating}
@@ -443,16 +442,16 @@ export function CreateDronesModal({
                 </button>
               </div>
               {registeredRepoPaths.length === 0 ? (
-                <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                <span className="text-[var(--text-10)] text-[var(--muted-dim)] block mt-1">
                   No repos registered yet. Add one from the Repos menu in the sidebar.
                 </span>
               ) : (
-                <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                <span className="text-[var(--text-10)] text-[var(--muted-dim)] block mt-1">
                   Choose a registered repo, or leave this set to No repo.
                 </span>
               )}
               {createMode === 'create' && String(activeRepoPath ?? '').trim() && !String(createRepoPath ?? '').trim() && (
-                <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+                <span className="text-[var(--text-10)] text-[var(--muted-dim)] block mt-1">
                   Tip: you have an active repo selected in the sidebar. Click it again to unselect.
                 </span>
               )}
@@ -493,13 +492,13 @@ export function CreateDronesModal({
                     onChange={(e) => onCloneIncludeChatsChange(e.target.checked)}
                     disabled={creating}
                   />
-                  <span className="text-[11px] text-[var(--muted)]">Include chats (copy transcript history)</span>
+                  <span className="text-[var(--text-11)] text-[var(--muted)]">Include chats (copy transcript history)</span>
                 </label>
               </div>
             )}
 
             <div className="mb-4">
-              <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Agent for created drones
               </div>
               <div className="flex items-center gap-2">
@@ -518,7 +517,7 @@ export function CreateDronesModal({
                   type="button"
                   onClick={onOpenCustomAgentModal}
                   disabled={creating || (createMode === 'clone' && cloneIncludeChats) || hostCustomAgentsUnsupported}
-                  className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                  className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                     creating || (createMode === 'clone' && cloneIncludeChats) || hostCustomAgentsUnsupported
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -529,7 +528,7 @@ export function CreateDronesModal({
                   Custom…
                 </button>
               </div>
-              <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+              <span className="text-[var(--text-10)] text-[var(--muted-dim)] block mt-1">
                 {createMode === 'clone' && cloneIncludeChats
                   ? 'When cloning chats, agents are copied from the source chats.'
                   : hostCustomAgentsUnsupported
@@ -539,7 +538,7 @@ export function CreateDronesModal({
             </div>
 
             <div className="mb-4">
-              <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Agent access
               </div>
               <div className="flex items-center gap-2">
@@ -547,7 +546,7 @@ export function CreateDronesModal({
                   type="button"
                   onClick={() => onSpawnAgentPermissionModeChange('full-access')}
                   disabled={spawnAgentAccessDisabled}
-                  className={`h-9 px-3 rounded border text-[11px] font-semibold tracking-wide uppercase transition-all ${
+                  className={`h-9 px-3 rounded border text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                     !spawnAgentAccessCopiedFromClone && spawnAgentPermissionMode === 'full-access'
                       ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -563,7 +562,7 @@ export function CreateDronesModal({
                     onSpawnAgentPermissionModeChange('read-only');
                   }}
                   disabled={spawnAgentAccessDisabled || !spawnAgentReadOnlySupported}
-                  className={`h-9 px-3 rounded border text-[11px] font-semibold tracking-wide uppercase transition-all ${
+                  className={`h-9 px-3 rounded border text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                     !spawnAgentAccessCopiedFromClone && spawnAgentPermissionMode === 'read-only'
                       ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -580,7 +579,7 @@ export function CreateDronesModal({
                   Read only
                 </button>
               </div>
-              <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+              <span className="text-[var(--text-10)] text-[var(--muted-dim)] block mt-1">
                 {spawnAgentAccessCopiedFromClone
                   ? 'When cloning chats, access is copied from the source chats.'
                   : spawnAgentPermissionMode === 'read-only'
@@ -592,7 +591,7 @@ export function CreateDronesModal({
             </div>
 
             <div className="mb-4">
-              <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Model for created drones (optional)
               </div>
               <div className="flex items-center gap-2">
@@ -615,7 +614,7 @@ export function CreateDronesModal({
                 <input
                   value={spawnModel}
                   onChange={(e) => onSpawnModelChange(e.target.value)}
-                  className={`h-9 flex-1 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[13px] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
+                  className={`h-9 flex-1 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[var(--text-13)] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
                     creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind === 'custom'
                       ? 'opacity-50 cursor-not-allowed'
                       : ''
@@ -627,7 +626,7 @@ export function CreateDronesModal({
                   type="button"
                   onClick={onClearSpawnModel}
                   disabled={creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind === 'custom' || !spawnModel.trim()}
-                  className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+                  className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                     creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind === 'custom' || !spawnModel.trim()
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -640,7 +639,7 @@ export function CreateDronesModal({
                   type="button"
                   onClick={() => void modelCatalog.refresh()}
                   disabled={spawnModelMenuDisabled || modelCatalog.loading}
-                  className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border border-[var(--border-subtle)] text-[var(--muted-dim)] disabled:opacity-40"
+                  className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border border-[var(--border-subtle)] text-[var(--muted-dim)] disabled:opacity-40"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   {modelCatalog.loading ? 'Detecting…' : 'Refresh'}
@@ -648,7 +647,7 @@ export function CreateDronesModal({
               </div>
               {reasoningEntries.length > 0 ? (
                 <div className="mt-2 flex items-center gap-2">
-                  <span className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]">Reasoning</span>
+                  <span className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">Reasoning</span>
                   <UiMenuSelect
                     variant="form"
                     value={spawnReasoning}
@@ -662,8 +661,8 @@ export function CreateDronesModal({
                   />
                 </div>
               ) : null}
-              {modelCatalog.error ? <span className="mt-1 block text-[10px] text-[var(--red)]">{modelCatalog.error}</span> : null}
-              <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
+              {modelCatalog.error ? <span className="mt-1 block text-[var(--text-10)] text-[var(--red)]">{modelCatalog.error}</span> : null}
+              <span className="text-[var(--text-10)] text-[var(--muted-dim)] block mt-1">
                 {createMode === 'clone' && cloneIncludeChats
                   ? 'When cloning chats, model settings are copied from the source chats.'
                   : spawnAgentConfig.kind !== 'custom'
@@ -674,7 +673,7 @@ export function CreateDronesModal({
 
             <div className="mb-4">
               <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
-                <div className="text-[11px] font-semibold text-[var(--muted)]">
+                <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)]">
                   Initial message (sent to every created drone before any per-drone suffix)
                 </div>
                 <div className="flex flex-wrap items-center justify-end gap-2">
@@ -687,7 +686,7 @@ export function CreateDronesModal({
                   <button
                     type="button"
                     onClick={onClearCreateInitialMessage}
-                    className="text-[11px] font-semibold text-[var(--accent)] hover:text-[var(--fg)] hover:underline underline-offset-2 transition-colors disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
+                    className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--accent)] hover:text-[var(--fg)] hover:underline underline-offset-2 transition-colors disabled:opacity-40 disabled:no-underline disabled:cursor-not-allowed"
                     title="Clear initial message"
                     disabled={creating || submittingCreate}
                   >
@@ -699,21 +698,21 @@ export function CreateDronesModal({
                 value={createInitialMessage}
                 onChange={(e) => onCreateInitialMessageChange(e.target.value)}
                 rows={2}
-                className="w-full min-h-[56px] resize-y rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-2 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
+                className="w-full min-h-[56px] resize-y rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-2 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
                 placeholder="If provided, it will be sent once each drone is ready."
                 disabled={creating || submittingCreate}
               />
             </div>
 
             <div className="mb-2 flex items-center justify-between gap-3">
-              <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Drones to create
               </div>
               <button
                 type="button"
                 onClick={onAppendCreateNameRow}
                 disabled={creating}
-                className="h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
+                className="h-8 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Add another drone"
               >
@@ -729,37 +728,37 @@ export function CreateDronesModal({
                 const invalidName = Boolean(rawName) && (droneNameHasWhitespace(rawName) || !isValidDroneNameDashCase(name));
                 const dupName = Boolean(name) && (createNameCounts.get(name) ?? 0) > 1;
                 return (
-                  <div key={`create-row-${idx}`} className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3">
+                  <div key={`create-row-${idx}`} className="rounded-[var(--radius-xlarge)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3">
                     <div className="flex items-start gap-3">
                       <div className="min-w-0 flex-1">
                         <label className="flex flex-col gap-1">
-                          <span className="text-[10px] font-semibold text-[var(--muted-dim)]">Drone name (dash-case)</span>
+                          <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)]">Drone name (dash-case)</span>
                           <input
                             ref={idx === 0 ? createNameRef : null}
                             autoFocus={idx === 0}
                             value={nameRaw}
                             onChange={(e) => onUpdateCreateNameRow(idx, e.target.value)}
-                            className={`w-full h-9 rounded-lg border bg-[var(--panel-raised)] px-3 text-[13px] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
+                            className={`w-full h-9 rounded-[var(--radius-large)] border bg-[var(--panel-raised)] px-3 text-[var(--text-13)] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
                               invalidName || dupName ? 'border-[var(--red-border)]' : 'border-[var(--border-subtle)]'
                             }`}
                             placeholder="e.g. split-server-app"
                             disabled={creating}
                           />
                           {(invalidName || dupName) && (
-                            <span className="text-[10px] text-[var(--red)]">
+                            <span className="text-[var(--text-10)] text-[var(--red)]">
                               {dupName ? 'Duplicate name in list.' : 'Invalid name. Use dash-case with no spaces, max 48 chars.'}
                             </span>
                           )}
                         </label>
                         <label className="flex flex-col gap-1 mt-2">
-                          <span className="text-[10px] font-semibold text-[var(--muted-dim)]">
+                          <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)]">
                             Per-drone message suffix (optional)
                           </span>
                           <textarea
                             value={messageSuffix}
                             onChange={(e) => onUpdateCreateMessageSuffixRow(idx, e.target.value)}
                             rows={2}
-                            className="w-full min-h-[56px] resize-y rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-2 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
+                            className="w-full min-h-[56px] resize-y rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-2 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
                             placeholder="Appended after the initial message for this drone."
                             disabled={creating}
                           />
@@ -769,7 +768,7 @@ export function CreateDronesModal({
                         type="button"
                         onClick={() => onRemoveCreateNameRow(idx)}
                         disabled={creating || createNameRows.length <= 1}
-                        className={`flex-shrink-0 h-8 px-3 rounded-lg text-[12px] font-semibold border transition-colors ${
+                        className={`flex-shrink-0 h-8 px-3 rounded-[var(--radius-large)] text-[var(--text-12)] font-[var(--weight-semibold)] border transition-colors ${
                           creating || createNameRows.length <= 1
                             ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                             : 'bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
@@ -787,7 +786,7 @@ export function CreateDronesModal({
               })}
             </div>
             {createNameEntries.length === 0 && (
-              <div className="mt-2 text-[11px] text-[var(--muted-dim)]">Add at least one valid drone name.</div>
+              <div className="mt-2 text-[var(--text-11)] text-[var(--muted-dim)]">Add at least one valid drone name.</div>
             )}
           </div>
         </form>

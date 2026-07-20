@@ -1,9 +1,9 @@
 import * as React from 'react';
 
 export const dropdownPanelBaseClass =
-  'rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] shadow-[0_16px_48px_var(--shadow-color)] overflow-hidden animate-slide-up';
+  'rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] shadow-[0_16px_48px_var(--shadow-color)] overflow-hidden animate-slide-up';
 
-export const dropdownMenuItemBaseClass = 'w-full text-left px-3 py-2 text-[11px] font-semibold transition-colors focus:outline-none';
+export const dropdownMenuItemBaseClass = 'w-full text-left px-3 py-2.5 text-[var(--text-11)] font-[var(--weight-semibold)] transition-colors focus:outline-none';
 
 export function useDropdownDismiss(
   menuRef: React.RefObject<HTMLElement | null>,

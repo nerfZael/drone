@@ -2675,7 +2675,7 @@ export function DroneChangesDock({
             </span>
             {viewedState !== 'unviewed' ? (
               <span
-                className={`inline-flex items-center justify-center rounded border px-1 font-semibold ${
+                className={`inline-flex items-center justify-center rounded border px-1 font-[var(--weight-semibold)] ${
                   viewedState === 'viewed'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
@@ -2823,7 +2823,7 @@ export function DroneChangesDock({
     >
       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
         <div className="flex items-center gap-2 min-w-0 flex-wrap">
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.12em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Changes
           </div>
           {repoAttached && !disabled && contextMode === 'branch' && primaryView === 'changes' ? (
@@ -2831,7 +2831,7 @@ export function DroneChangesDock({
               <button
                 type="button"
                 onClick={() => setBranchChangesMode('working-tree')}
-                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                   branchChangesMode === 'working-tree'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -2844,7 +2844,7 @@ export function DroneChangesDock({
               <button
                 type="button"
                 onClick={() => setBranchChangesMode('pull-preview')}
-                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                   branchChangesMode === 'pull-preview'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -2862,13 +2862,13 @@ export function DroneChangesDock({
             <>
               {!fixedContextMode ? (
                 <>
-                  <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
+                  <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
                     Context
                   </span>
                   <button
                     type="button"
                     onClick={() => setContextModeState('branch')}
-                    className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                    className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                       contextMode === 'branch'
                         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                         : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -2885,7 +2885,7 @@ export function DroneChangesDock({
                       setContextModeState('pull-request');
                     }}
                     disabled={!pullRequestNumber}
-                    className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                    className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                       contextMode === 'pull-request'
                         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                         : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
@@ -2898,13 +2898,13 @@ export function DroneChangesDock({
                   <span className="mx-1 text-[var(--border-subtle)]">|</span>
                 </>
               ) : null}
-              <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
+              <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
                 View
               </span>
               <button
                 type="button"
                 onClick={() => setPrimaryView('changes')}
-                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                   primaryView === 'changes'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -2917,7 +2917,7 @@ export function DroneChangesDock({
               <button
                 type="button"
                 onClick={() => setPrimaryView('commits')}
-                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                   primaryView === 'commits'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -2933,7 +2933,7 @@ export function DroneChangesDock({
           <button
             type="button"
             onClick={() => setViewMode('stacked')}
-            className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+            className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
               viewMode === 'stacked'
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -2946,7 +2946,7 @@ export function DroneChangesDock({
           <button
             type="button"
             onClick={() => setViewMode('split')}
-            className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+            className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
               viewMode === 'split'
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -2957,13 +2957,13 @@ export function DroneChangesDock({
             Explorer
           </button>
           <span className="mx-1 text-[var(--border-subtle)]">|</span>
-          <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
+          <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)] mr-1" style={{ fontFamily: 'var(--display)' }}>
             Diff
           </span>
           <button
             type="button"
             onClick={() => setDiffViewType('unified')}
-            className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+            className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
               diffViewType === 'unified'
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -2976,7 +2976,7 @@ export function DroneChangesDock({
           <button
             type="button"
             onClick={() => setDiffViewType('split')}
-            className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+            className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
               diffViewType === 'split'
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -2992,7 +2992,7 @@ export function DroneChangesDock({
               <button
                 type="button"
                 onClick={() => setHideViewed((prev) => !prev)}
-                className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                   hideViewed
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -3004,13 +3004,13 @@ export function DroneChangesDock({
               </button>
             </>
           ) : null}
-          <span className="ml-1 text-[9px] text-[var(--muted-dim)] font-mono tabular-nums" title={refreshed.title}>
+          <span className="ml-1 text-[var(--text-9)] text-[var(--muted-dim)] font-mono tabular-nums" title={refreshed.title}>
             Updated {refreshed.text}
           </span>
           <button
             type="button"
             onClick={() => setRefreshNonce((n) => n + 1)}
-            className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+            className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
             title="Refresh changes"
           >
             Refresh
@@ -3018,7 +3018,7 @@ export function DroneChangesDock({
         </div>
       </div>
 
-      <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] text-[10px] text-[var(--muted)] flex items-center gap-1.5 min-h-[30px] overflow-x-auto whitespace-nowrap">
+      <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--muted)] flex items-center gap-1.5 min-h-[30px] overflow-x-auto whitespace-nowrap">
         {!repoAttached ? (
           <span title={unavailableReason || 'No repo attached'}>
             {unavailableReason || 'No repo attached.'}
@@ -3090,7 +3090,7 @@ export function DroneChangesDock({
                 />
                 {activePullRequestStatus ? (
                   <span
-                    className={`inline-flex items-center rounded border px-1.5 py-[1px] text-[10px] font-semibold uppercase tracking-wide ${activePullRequestStatus.className}`}
+                    className={`inline-flex items-center rounded border px-1.5 py-[1px] text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide ${activePullRequestStatus.className}`}
                     title={activePullRequestStatus.title}
                   >
                     {activePullRequestStatus.label}
@@ -3113,7 +3113,7 @@ export function DroneChangesDock({
                 <MetaChip label="status" value="S/U" title={statusLegendTitle} mono />
                 {changes?.branch.head && (
                   <span
-                    className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-[10px]"
+                    className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-[var(--text-10)]"
                     title={changes.branch.head}
                   >
                     <span className="uppercase tracking-[0.08em] text-[var(--muted-dim)]">branch</span>
@@ -3138,7 +3138,7 @@ export function DroneChangesDock({
         )}
       </div>
       {contextMode === 'pull-request' && awaitingPullRequestDetails ? (
-        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] text-[var(--muted)]">
+        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] text-[var(--muted)]">
           Loading PR #{selectedPullRequestNumber} details...
         </div>
       ) : null}
@@ -3146,16 +3146,16 @@ export function DroneChangesDock({
         <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div
-              className="text-[9px] font-semibold tracking-[0.12em] uppercase text-[var(--muted-dim)]"
+              className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-[0.12em] uppercase text-[var(--muted-dim)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               Pull Request
             </div>
-            <div className="mt-1 text-[13px] leading-snug font-semibold text-[var(--fg-secondary)] truncate" title={activePullRequestTitleRaw || undefined}>
+            <div className="mt-1 text-[var(--text-13)] leading-snug font-[var(--weight-semibold)] text-[var(--fg-secondary)] truncate" title={activePullRequestTitleRaw || undefined}>
               <span className="font-mono text-[var(--accent)] mr-1.5">#{activePullRequestNumber}</span>
               <span>{activePullRequestTitleRaw || 'Untitled pull request'}</span>
             </div>
-            <div className="mt-1 inline-flex items-center gap-1.5 text-[10px] text-[var(--muted)]">
+            <div className="mt-1 inline-flex items-center gap-1.5 text-[var(--text-10)] text-[var(--muted)]">
               <MetaChip label="base" value={activePullRequestChanges?.pullRequest.baseRefName ?? '-'} mono />
               <MetaChip label="head" value={activePullRequestChanges?.pullRequest.headRefName ?? '-'} mono />
             </div>
@@ -3167,7 +3167,7 @@ export function DroneChangesDock({
                 void mergeActivePullRequest();
               }}
               disabled={Boolean(pullRequestActionBusy) || Boolean(activePullRequestActionBlockedReason)}
-              className="inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold uppercase tracking-wide border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              className="inline-flex items-center h-6 px-2 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
               title={activePullRequestActionBlockedReason ?? 'Merge pull request'}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -3179,7 +3179,7 @@ export function DroneChangesDock({
                 void closeActivePullRequest();
               }}
               disabled={Boolean(pullRequestActionBusy) || Boolean(activePullRequestActionBlockedReason)}
-              className="inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold uppercase tracking-wide border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              className="inline-flex items-center h-6 px-2 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
               title={activePullRequestActionBlockedReason ?? 'Close pull request without merging'}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -3187,7 +3187,7 @@ export function DroneChangesDock({
             </button>
             {activePullRequestStatus ? (
               <span
-                className={`inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold uppercase tracking-wide ${activePullRequestStatus.className}`}
+                className={`inline-flex items-center h-6 px-2 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${activePullRequestStatus.className}`}
                 title={activePullRequestStatus.title}
                 style={{ fontFamily: 'var(--display)' }}
               >
@@ -3196,7 +3196,7 @@ export function DroneChangesDock({
             ) : null}
             {activePullRequestHtmlUrl ? (
               <a
-                className="inline-flex items-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                className="inline-flex items-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                 href={activePullRequestHtmlUrl}
                 target="_blank"
                 rel="noreferrer"
@@ -3210,20 +3210,20 @@ export function DroneChangesDock({
         </div>
       ) : null}
       {contextMode === 'pull-request' && pullRequestActionNotice ? (
-        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--green)] bg-[var(--green-subtle)]">{pullRequestActionNotice}</div>
+        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--green)] bg-[var(--green-subtle)]">{pullRequestActionNotice}</div>
       ) : null}
       {contextMode === 'pull-request' && pullRequestActionError ? (
-        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--red)] bg-[var(--red-subtle)]">{pullRequestActionError}</div>
+        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] text-[var(--text-10)] text-[var(--red)] bg-[var(--red-subtle)]">{pullRequestActionError}</div>
       ) : null}
 
       {!repoAttached ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
           {unavailableReason || 'Attach a repo to see source-control changes.'}
         </div>
       ) : disabled ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
-          <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
-            <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
+          <div className="rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               {provisioningLabel(hubPhase)}
             </div>
             <div className="mt-1">
@@ -3232,10 +3232,10 @@ export function DroneChangesDock({
                 : 'Waiting for repository…'}
             </div>
             {String(hubMessage ?? '').trim() ? (
-              <div className="mt-1 text-[10px] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
+              <div className="mt-1 text-[var(--text-10)] text-[var(--muted-dim)]">{String(hubMessage ?? '').trim()}</div>
             ) : null}
             {startup.timedOut ? (
-              <div className="mt-2 text-[10px] text-[var(--muted-dim)]">
+              <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
                 If this persists, check the drone status/error details in the sidebar.
               </div>
             ) : null}
@@ -3243,9 +3243,9 @@ export function DroneChangesDock({
         </div>
       ) : primaryView === 'commits' ? (
         commitListError ? (
-          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">{commitListError}</div>
+          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--red)]">{commitListError}</div>
         ) : commitList.length === 0 && !commitListLoading ? (
-          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+          <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
             {contextMode === 'pull-request'
               ? pullRequestNumber
                 ? `No commits found for PR #${pullRequestNumber}.`
@@ -3295,16 +3295,16 @@ export function DroneChangesDock({
           />
         )
       ) : listError ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--red)]">{listError}</div>
+        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--red)]">{listError}</div>
       ) : entries.length === 0 && !listLoading ? (
-        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
+        <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">
           {allEntries.length > 0 && hideViewed ? (
             <div className="inline-flex flex-col items-start gap-2">
               <span>All files in this view are marked viewed. Turn off Hide Viewed to revisit them.</span>
               <button
                 type="button"
                 onClick={() => setHideViewed(false)}
-                className="h-7 px-2.5 rounded-md border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[10px] font-semibold tracking-wide uppercase text-[var(--accent)] hover:bg-[var(--selected)]"
+                className="h-7 px-2.5 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--accent)] hover:bg-[var(--selected)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 Show Viewed Files
@@ -3319,7 +3319,7 @@ export function DroneChangesDock({
               <button
                 type="button"
                 onClick={() => setBranchChangesMode('working-tree')}
-                className="h-7 px-2.5 rounded-md border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[10px] font-semibold tracking-wide uppercase text-[var(--accent)] hover:bg-[var(--selected)]"
+                className="h-7 px-2.5 rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--accent)] hover:bg-[var(--selected)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 Open Working Tree
@@ -3334,11 +3334,11 @@ export function DroneChangesDock({
           {dataMode === 'working-tree' ? (
             <>
               <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center gap-1">
-                <span className="text-[10px] text-[var(--muted)] mr-1">Prefer:</span>
+                <span className="text-[var(--text-10)] text-[var(--muted)] mr-1">Prefer:</span>
                 <button
                   type="button"
                   onClick={() => setStackedPreferredKind('unstaged')}
-                  className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                  className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                     stackedPreferredKind === 'unstaged'
                       ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                       : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -3350,7 +3350,7 @@ export function DroneChangesDock({
                 <button
                   type="button"
                   onClick={() => setStackedPreferredKind('staged')}
-                  className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                  className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                     stackedPreferredKind === 'staged'
                       ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                       : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
@@ -3379,17 +3379,17 @@ export function DroneChangesDock({
                     >
                       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                         <span
-                          className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}
+                          className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[var(--text-10)] font-mono ${badgeTone(entry)}`}
                           title={statusBadgeTitle(entry, dataMode)}
                         >
                           {statusCharLabel(entry.stagedChar)}
                           {statusCharLabel(entry.unstagedChar)}
                         </span>
-                        <span className="text-[11px] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
+                        <span className="text-[var(--text-11)] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
                           {entry.path}
                         </span>
                         {renderFileQuickActions(entry)}
-                        <span className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+                        <span className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                           {k}{fallback ? ' (fallback)' : ''}
                         </span>
                       </div>
@@ -3427,13 +3427,13 @@ export function DroneChangesDock({
                   >
                     <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                       <span
-                        className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}
+                        className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[var(--text-10)] font-mono ${badgeTone(entry)}`}
                         title={statusBadgeTitle(entry, dataMode)}
                       >
                         {statusCharLabel(entry.stagedChar)}
                         {statusCharLabel(entry.unstagedChar)}
                       </span>
-                      <span className="text-[11px] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
+                      <span className="text-[var(--text-11)] text-[var(--fg-secondary)] font-mono truncate flex-1" title={entry.path}>
                         {entry.path}
                       </span>
                       {renderFileQuickActions(entry)}
@@ -3453,7 +3453,7 @@ export function DroneChangesDock({
                             });
                           }
                         }}
-                        className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                        className="h-6 px-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                         title={open ? 'Hide diff' : 'Show diff'}
                       >
                         {open ? 'Hide' : 'Show'}
@@ -3480,7 +3480,7 @@ export function DroneChangesDock({
         <div ref={splitLayoutRef} className="flex-1 min-h-0 overflow-hidden flex">
           <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[var(--surface-inset)]">
             <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center justify-between gap-2">
-              <div className="min-w-0 text-[10px] text-[var(--muted)] font-mono truncate">
+              <div className="min-w-0 text-[var(--text-10)] text-[var(--muted)] font-mono truncate">
                 {selectedEntry ? selectedEntry.path : 'No file selected'}
               </div>
               <div className="inline-flex items-center gap-1">
@@ -3491,7 +3491,7 @@ export function DroneChangesDock({
                       type="button"
                       onClick={() => setSplitKind('unstaged')}
                       disabled={!hasUnstaged(selectedEntry)}
-                      className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                      className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                         splitShownKind === 'unstaged'
                           ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                           : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
@@ -3505,7 +3505,7 @@ export function DroneChangesDock({
                       type="button"
                       onClick={() => setSplitKind('staged')}
                       disabled={!hasStaged(selectedEntry)}
-                      className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
+                      className={`h-6 px-2 rounded-[var(--radius-medium)] border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                         splitShownKind === 'staged'
                           ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                           : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
@@ -3517,7 +3517,7 @@ export function DroneChangesDock({
                     </button>
                   </>
                 ) : (
-                  <div className="text-[9px] text-[var(--muted-dim)] font-mono whitespace-nowrap">
+                  <div className="text-[var(--text-9)] text-[var(--muted-dim)] font-mono whitespace-nowrap">
                     {dataMode === 'pull-request'
                       ? `PR #${activePullRequestChanges?.pullRequest.number ?? pullRequestNumber ?? '-'} ${shortSha(pullBase)}..${shortSha(pullHead)}`
                       : `${shortSha(pullBase)}..${shortSha(pullHead)}`}
@@ -3528,7 +3528,7 @@ export function DroneChangesDock({
 
             {dataMode === 'working-tree' ? (
               !selectedEntry || !splitShownKind ? (
-                <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
+                <div className="px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
               ) : (
                 <DiffBlock
                   state={diffByKey[workingDiffStateKey(selectedEntry.path, splitShownKind)]}
@@ -3541,7 +3541,7 @@ export function DroneChangesDock({
                 />
               )
             ) : !selectedEntry ? (
-              <div className="px-3 py-3 text-[11px] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
+              <div className="px-3 py-3 text-[var(--text-11)] text-[var(--muted)]">Select a changed file to inspect its diff.</div>
             ) : (
               <DiffBlock
                 state={
@@ -3604,7 +3604,7 @@ export function DroneChangesDock({
             }}
           >
             <div className="shrink-0 px-1.5 py-1 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/80 flex items-center justify-between gap-1">
-              <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              <span className="text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                 Zoom {explorerZoomPercent}%
               </span>
               <div className="inline-flex items-center gap-1">
@@ -3612,7 +3612,7 @@ export function DroneChangesDock({
                   type="button"
                   onClick={decreaseExplorerZoom}
                   disabled={explorerZoom <= EXPLORER_ZOOM_MIN}
-                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[11px] font-bold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-11)] font-[var(--weight-bold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Decrease explorer zoom"
                 >
                   -
@@ -3621,7 +3621,7 @@ export function DroneChangesDock({
                   type="button"
                   onClick={increaseExplorerZoom}
                   disabled={explorerZoom >= EXPLORER_ZOOM_MAX}
-                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[11px] font-bold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-11)] font-[var(--weight-bold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Increase explorer zoom"
                 >
                   +
@@ -3630,7 +3630,7 @@ export function DroneChangesDock({
                   type="button"
                   onClick={resetExplorerZoom}
                   disabled={Math.abs(explorerZoom - EXPLORER_ZOOM_DEFAULT) < 0.001}
-                  className="h-6 px-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="h-6 px-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Reset explorer zoom"
                 >
                   100%

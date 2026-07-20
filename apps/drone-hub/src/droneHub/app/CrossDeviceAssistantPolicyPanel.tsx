@@ -36,7 +36,7 @@ type Policy = {
 
 const emptyPolicy: Policy = { version: 2, roots: [], homeTargets: [], deviceGrants: [] };
 const fieldClass =
-  'min-w-0 rounded border border-[var(--border)] bg-[var(--panel)] px-2.5 py-2 text-[11px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]';
+  'min-w-0 rounded border border-[var(--border)] bg-[var(--panel)] px-2.5 py-2 text-[var(--text-11)] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]';
 
 function normalizedPolicy(value: any): Policy {
   return {
@@ -361,7 +361,7 @@ export function CrossDeviceAssistantPolicyPanel({
 
   if (loading)
     return (
-      <section className="rounded-lg border border-[var(--border-subtle)] p-4 text-[12px] text-[var(--muted)]">
+      <section className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] p-4 text-[var(--text-12)] text-[var(--muted)]">
         Loading workspaces…
       </section>
     );
@@ -370,15 +370,15 @@ export function CrossDeviceAssistantPolicyPanel({
     <section className={mode === 'thread' ? 'min-h-full bg-[var(--panel-alt)]' : ''}>
       <div className="flex flex-wrap items-start justify-between gap-3 border-b border-[var(--border-subtle)] p-4">
         <div>
-          <div className="text-[10px] font-semibold uppercase tracking-[.16em] text-[var(--yellow)]">
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[.16em] text-[var(--yellow)]">
             {mode === 'thread' ? 'Thread access' : 'Workspace sharing'}
           </div>
-          <h2 className="mt-1 text-[16px] font-semibold text-[var(--fg)]">
+          <h2 className="mt-1 text-[16px] font-[var(--weight-semibold)] text-[var(--fg-strong)]">
             {mode === 'thread'
               ? threadTitle || 'Remote workspaces'
               : 'Folders available to trusted devices'}
           </h2>
-          <p className="mt-1 max-w-3xl text-[11px] leading-relaxed text-[var(--muted)]">
+          <p className="mt-1 max-w-3xl text-[var(--text-11)] leading-relaxed text-[var(--muted)]">
             {mode === 'thread'
               ? 'Choose which workspaces this thread may use on your connected devices.'
               : 'Add folders on this Hub, then choose what each trusted device may do.'}
@@ -390,14 +390,14 @@ export function CrossDeviceAssistantPolicyPanel({
               type="button"
               disabled={choosing}
               onClick={() => void chooseRoot()}
-              className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"
+              className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
             >
               {choosing ? 'Opening…' : 'Choose folder'}
             </button>
             <button
               type="button"
               onClick={() => addRoot()}
-              className="px-2 py-2 text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--fg)]"
+              className="px-2 py-2 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg)]"
             >
               Add path manually
             </button>
@@ -406,7 +406,7 @@ export function CrossDeviceAssistantPolicyPanel({
           <button
             type="button"
             onClick={onClose}
-            className="px-2 py-1 text-[11px] font-semibold text-[var(--muted)] hover:text-[var(--fg)]"
+            className="px-2 py-1 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)] hover:text-[var(--fg)]"
           >
             Close
           </button>
@@ -454,7 +454,7 @@ export function CrossDeviceAssistantPolicyPanel({
                     type="button"
                     disabled={choosing}
                     onClick={() => void chooseRoot(root.id)}
-                    className="rounded border border-[var(--border-subtle)] px-3 text-[10px] font-semibold text-[var(--fg)] disabled:opacity-50"
+                    className="rounded border border-[var(--border-subtle)] px-3 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
                   >
                     Browse
                   </button>
@@ -469,7 +469,7 @@ export function CrossDeviceAssistantPolicyPanel({
                         ),
                       }))
                     }
-                    className="rounded px-2 text-[10px] font-semibold text-[var(--red)]"
+                    className="rounded px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--red)]"
                   >
                     Remove
                   </button>
@@ -487,10 +487,10 @@ export function CrossDeviceAssistantPolicyPanel({
                         className={`flex flex-wrap items-center gap-3 rounded border px-3 py-2 ${changed ? 'border-[var(--yellow)] bg-[var(--yellow-subtle)]' : 'border-[var(--border-subtle)]'}`}
                       >
                         <div className="min-w-36 flex-1">
-                          <div className="text-[12px] font-semibold text-[var(--fg)]">
+                          <div className="text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]">
                             {device.name}
                           </div>
-                          <div className="mt-0.5 text-[9px] text-[var(--muted)]">
+                          <div className="mt-0.5 text-[var(--text-9)] text-[var(--muted)]">
                             {permissionSummary(grant)}
                             {changed ? ' · changed' : ''}
                           </div>
@@ -498,7 +498,7 @@ export function CrossDeviceAssistantPolicyPanel({
                         {(['read', 'write', 'execute'] as const).map((permission) => (
                           <label
                             key={permission}
-                            className="flex items-center gap-1.5 text-[10px] text-[var(--muted)]"
+                            className="flex items-center gap-1.5 text-[var(--text-10)] text-[var(--muted)]"
                           >
                             <input
                               type="checkbox"
@@ -525,7 +525,7 @@ export function CrossDeviceAssistantPolicyPanel({
                     );
                   })}
                   {availableDevices.length === 0 ? (
-                    <div className="text-[11px] text-[var(--muted)]">
+                    <div className="text-[var(--text-11)] text-[var(--muted)]">
                       Pair another device to grant access.
                     </div>
                   ) : null}
@@ -533,7 +533,7 @@ export function CrossDeviceAssistantPolicyPanel({
               </div>
             ))}
             {policy.roots.length === 0 ? (
-              <div className="rounded border border-dashed border-[var(--border)] px-4 py-8 text-center text-[11px] text-[var(--muted)]">
+              <div className="rounded border border-dashed border-[var(--border)] px-4 py-8 text-center text-[var(--text-11)] text-[var(--muted)]">
                 No workspace folders are exposed by this Hub.
               </div>
             ) : null}
@@ -551,25 +551,25 @@ export function CrossDeviceAssistantPolicyPanel({
                   key={device.id}
                   className="border-b border-[var(--border-subtle)] pb-3 last:border-b-0"
                 >
-                  <div className="flex items-center gap-2 text-[12px] font-semibold text-[var(--fg)]">
+                  <div className="flex items-center gap-2 text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]">
                     <span
                       className={`h-1.5 w-1.5 rounded-full ${connected ? 'bg-[var(--green)]' : 'bg-[var(--muted-dim)]'}`}
                     />
                     {device.name}
-                    <span className="text-[9px] font-normal uppercase tracking-wide text-[var(--muted-dim)]">
+                    <span className="text-[var(--text-9)] font-normal uppercase tracking-wide text-[var(--muted-dim)]">
                       {connected ? 'Connected' : 'Offline'}
                     </span>
                   </div>
                   {!connected ? (
-                    <div className="mt-2 text-[10px] text-[var(--muted)]">
+                    <div className="mt-2 text-[var(--text-10)] text-[var(--muted)]">
                       {selectedCount > 0
                         ? `${selectedCount} saved workspace ${selectedCount === 1 ? 'selection is' : 'selections are'} preserved. Access resumes when this device reconnects.`
                         : 'Workspace access will become available when this device reconnects.'}
                     </div>
                   ) : remote?.loading ? (
-                    <div className="mt-2 text-[10px] text-[var(--muted)]">Loading workspaces…</div>
+                    <div className="mt-2 text-[var(--text-10)] text-[var(--muted)]">Loading workspaces…</div>
                   ) : remote?.error ? (
-                    <div className="mt-2 text-[10px] text-[var(--yellow)]">
+                    <div className="mt-2 text-[var(--text-10)] text-[var(--yellow)]">
                       Connection changed while loading. Retrying automatically…
                     </div>
                   ) : remote &&
@@ -599,11 +599,11 @@ export function CrossDeviceAssistantPolicyPanel({
                             className={`flex flex-wrap items-center gap-3 rounded border px-3 py-2 ${changed ? 'border-[var(--yellow)] bg-[var(--yellow-subtle)]' : 'border-transparent bg-[var(--surface-softest)]'}`}
                           >
                             <div className="min-w-36 flex-1">
-                              <div className="text-[11px] font-semibold text-[var(--fg)]">
+                              <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">
                                 {workspace.name}
                               </div>
                               {changed ? (
-                                <div className="mt-0.5 text-[9px] text-[var(--yellow)]">
+                                <div className="mt-0.5 text-[var(--text-9)] text-[var(--yellow)]">
                                   changed
                                 </div>
                               ) : null}
@@ -613,7 +613,7 @@ export function CrossDeviceAssistantPolicyPanel({
                               return (
                                 <label
                                   key={permission}
-                                  className={`flex items-center gap-1.5 text-[10px] ${allowed ? 'text-[var(--muted)]' : 'text-[var(--muted-dim)] opacity-40'}`}
+                                  className={`flex items-center gap-1.5 text-[var(--text-10)] ${allowed ? 'text-[var(--muted)]' : 'text-[var(--muted-dim)] opacity-40'}`}
                                 >
                                   <input
                                     type="checkbox"
@@ -645,10 +645,10 @@ export function CrossDeviceAssistantPolicyPanel({
                             className="flex items-center gap-3 rounded border border-[var(--yellow)] bg-[var(--yellow-subtle)] px-3 py-2"
                           >
                             <div className="min-w-0 flex-1">
-                              <div className="truncate text-[11px] font-semibold text-[var(--fg)]">
+                              <div className="truncate text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)]">
                                 {target.workspaceName}
                               </div>
-                              <div className="mt-0.5 text-[9px] text-[var(--yellow)]">
+                              <div className="mt-0.5 text-[var(--text-9)] text-[var(--yellow)]">
                                 No longer granted by the destination
                               </div>
                             </div>
@@ -662,7 +662,7 @@ export function CrossDeviceAssistantPolicyPanel({
                                   ),
                                 }))
                               }
-                              className="text-[10px] font-semibold text-[var(--red)]"
+                              className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--red)]"
                             >
                               Remove
                             </button>
@@ -670,7 +670,7 @@ export function CrossDeviceAssistantPolicyPanel({
                         ))}
                     </div>
                   ) : (
-                    <div className="mt-2 text-[10px] text-[var(--muted)]">
+                    <div className="mt-2 text-[var(--text-10)] text-[var(--muted)]">
                       This destination has not granted a workspace to this Hub.
                     </div>
                   )}
@@ -678,7 +678,7 @@ export function CrossDeviceAssistantPolicyPanel({
               );
             })}
             {availableDevices.length === 0 ? (
-              <div className="py-8 text-center text-[11px] text-[var(--muted)]">
+              <div className="py-8 text-center text-[var(--text-11)] text-[var(--muted)]">
                 Pair another device from Devices before assigning a remote workspace.
               </div>
             ) : null}
@@ -693,14 +693,14 @@ export function CrossDeviceAssistantPolicyPanel({
                     ),
                   }))
                 }
-                className="justify-self-start text-[10px] font-semibold text-[var(--red)]"
+                className="justify-self-start text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--red)]"
               >
                 Clear this thread’s workspace access
               </button>
             ) : null}
           </div>
         ) : (
-          <div className="p-4 text-[11px] text-[var(--muted)]">
+          <div className="p-4 text-[var(--text-11)] text-[var(--muted)]">
             Start a Built-in chat to configure its workspace access.
           </div>
         )}
@@ -711,13 +711,13 @@ export function CrossDeviceAssistantPolicyPanel({
           type="button"
           disabled={saving || !dirty}
           onClick={() => void save()}
-          className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-4 py-2 text-[11px] font-semibold text-[var(--fg)] disabled:opacity-50"
+          className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-4 py-2 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--fg)] disabled:opacity-50"
         >
           {saving ? 'Saving…' : 'Apply changes'}
         </button>
         {dirty ? (
           <>
-            <span className="text-[11px] font-semibold text-[var(--yellow)]">Unsaved changes</span>
+            <span className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--yellow)]">Unsaved changes</span>
             <button
               type="button"
               onClick={() => {
@@ -725,15 +725,15 @@ export function CrossDeviceAssistantPolicyPanel({
                 setPolicy(savedPolicy);
                 setError(null);
               }}
-              className="text-[10px] font-semibold text-[var(--muted)]"
+              className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)]"
             >
               Discard
             </button>
           </>
         ) : saved ? (
-          <span className="text-[11px] text-[var(--green)]">Saved</span>
+          <span className="text-[var(--text-11)] text-[var(--green)]">Saved</span>
         ) : null}
-        {error ? <span className="text-[11px] text-[var(--red)]">{error}</span> : null}
+        {error ? <span className="text-[var(--text-11)] text-[var(--red)]">{error}</span> : null}
       </div>
     </section>
   );

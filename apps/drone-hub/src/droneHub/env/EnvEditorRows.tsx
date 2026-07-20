@@ -23,7 +23,7 @@ export function EnvEditorRows({
   return (
     <div className="flex flex-col gap-2">
       {entries.length === 0 ? (
-        <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">
+        <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-3 text-[var(--text-11)] text-[var(--muted-dim)]">
           {emptyMessage}
         </div>
       ) : (
@@ -33,21 +33,21 @@ export function EnvEditorRows({
               value={entry.key}
               onChange={(event) => onChange(entry.id, 'key', event.target.value)}
               disabled={disabled}
-              className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 font-mono text-[11px] text-[var(--fg)] focus:outline-none"
+              className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 font-mono text-[var(--text-11)] text-[var(--fg)] focus:outline-none"
               placeholder="KEY"
             />
             <input
               value={entry.value}
               onChange={(event) => onChange(entry.id, 'value', event.target.value)}
               disabled={disabled}
-              className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 font-mono text-[11px] text-[var(--fg)] focus:outline-none"
+              className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 font-mono text-[var(--text-11)] text-[var(--fg)] focus:outline-none"
               placeholder="value"
             />
             <button
               type="button"
               onClick={() => onRemove(entry.id)}
               disabled={disabled}
-              className={`h-9 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
+              className={`h-9 rounded border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase ${
                 disabled
                   ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
@@ -64,7 +64,7 @@ export function EnvEditorRows({
           type="button"
           onClick={onAdd}
           disabled={disabled}
-          className={`h-8 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
+          className={`h-8 rounded border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase ${
             disabled
               ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
               : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'

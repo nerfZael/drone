@@ -6,7 +6,7 @@ import type { DroneSummary } from '../types';
 import { createCanvasChatNodeId } from './app-config';
 import { normalizedDroneChats } from './chat-node-helpers';
 import { isDroneStartingOrSeeding } from './helpers';
-import { IconChatThread, IconDrone, IconPencil, IconSpinner, IconTrash } from './icons';
+import { IconChatThread, IconPencil, IconSpinner, IconTrash } from './icons';
 import {
   createSidebarChatDragData,
   parseDroneHubDragData,
@@ -32,6 +32,7 @@ import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import type { SidebarDroneTree } from './sidebar-drone-tree';
 import type { DroneDeleteMode, SidebarDensityMode } from './settings-types';
 import type { ChatEditorState } from './use-sidebar-interactions';
+import { sidebarChatRowTone, sidebarDensityClasses } from '../sidebar/presentation';
 
 export type SidebarDroneTreeListProps = {
   droneById: Record<string, DroneSummary>;
@@ -178,48 +179,6 @@ type SidebarDroneNodeProps = SidebarDroneTreeListProps & {
 
 const EMPTY_CHAT_ORDER: string[] = [];
 
-function sidebarTreeDensityClasses(sidebarDensityMode: SidebarDensityMode): {
-  chatRow: string;
-  chatDeleteWidth: string;
-  chatPlaceholderWidth: string;
-  childIndent: string;
-  draftRow: string;
-  draftText: string;
-  leadingIcon: string;
-} {
-  if (sidebarDensityMode === 'compact') {
-    return {
-      chatRow: 'h-6 px-1.5 text-[10.5px]',
-      chatDeleteWidth: 'w-6',
-      chatPlaceholderWidth: 'w-6',
-      childIndent: 'ml-4',
-      draftRow: 'px-2.5 h-7',
-      draftText: 'text-[11.5px]',
-      leadingIcon: 'h-3 w-3 text-[var(--muted-dim)] opacity-75',
-    };
-  }
-  if (sidebarDensityMode === 'comfortable') {
-    return {
-      chatRow: 'h-8 px-2.5 text-[11.5px]',
-      chatDeleteWidth: 'w-8',
-      chatPlaceholderWidth: 'w-8',
-      childIndent: 'ml-6',
-      draftRow: 'px-3 h-9',
-      draftText: 'text-[13px]',
-      leadingIcon: 'h-[15px] w-[15px] text-[var(--muted-dim)] opacity-75',
-    };
-  }
-  return {
-    chatRow: 'h-7 px-2 text-[11px]',
-    chatDeleteWidth: 'w-7',
-    chatPlaceholderWidth: 'w-7',
-    childIndent: 'ml-5',
-    draftRow: 'px-3 h-8',
-    draftText: 'text-[12.5px]',
-    leadingIcon: 'h-3.5 w-3.5 text-[var(--muted-dim)] opacity-75',
-  };
-}
-
 function flattenSidebarTreeOrder(tree: SidebarDroneTree): string[] {
   const out: string[] = [];
   const visit = (droneId: string) => {
@@ -298,7 +257,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
   onOpenDroneErrorModal,
   actionsEnabled = true,
 }: SidebarDroneRowProps) {
-  const densityClasses = sidebarTreeDensityClasses(sidebarDensityMode);
+  const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const isOptimistic = sidebarOptimisticDroneIdSet.has(drone.id);
   const dragDisabled = !sidebarDndEnabled || movingDroneGroups || isOptimistic;
   const selectedDragDroneIds = React.useMemo(
@@ -347,7 +306,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
 
   return (
     <div
-      className={`relative flex items-stretch gap-1 rounded-md transition-colors ${
+      className={`relative flex items-stretch gap-1 rounded-[var(--radius-medium)] transition-colors ${
         dragOverParenting ? 'bg-[var(--info-subtle)] ring-1 ring-[var(--info-border)]' : ''
       }`}
       ref={reorderDropDisabled ? undefined : setNodeRef}
@@ -369,7 +328,6 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           }
           unreadAgentMessage={unread}
           showGroup={showGroup}
-          leadingIcon={<IconDrone className={densityClasses.leadingIcon} />}
           onClick={(rowOpts) => onSelectDroneCard(drone.id, { ...rowOpts, orderedDroneIds: visibleDroneOrder })}
           dragNodeRef={dragDisabled ? undefined : setDragNodeRef}
           draggable={!dragDisabled}
@@ -454,7 +412,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
   onEditorCancel,
   onDeleteChatClick,
 }: SidebarChatRowProps) {
-  const densityClasses = sidebarTreeDensityClasses(sidebarDensityMode);
+  const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const chatKey = `${drone.id}:${chatName}`;
   const chatDragData = React.useMemo(
     () => createSidebarChatDragData(drone.id, chatName, `${uiDroneName(drone.name)} / ${chatName}`),
@@ -496,11 +454,11 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
               }
             }}
             placeholder="Chat name"
-            className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] px-2 py-1 font-mono text-[11px] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
+            className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] px-2 py-1 font-mono text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
           />
           {editorPending ? <IconSpinner className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-90" /> : null}
         </div>
-        {editorError ? <div className="px-1 text-[10px] text-[var(--red)]">{editorError}</div> : null}
+        {editorError ? <div className="px-1 text-[var(--text-10)] text-[var(--red)]">{editorError}</div> : null}
       </div>
     );
   }
@@ -517,11 +475,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
           event.stopPropagation();
           onSelectDroneChat(drone.id, chatName);
         }}
-        className={`flex-1 rounded border text-left transition-colors flex items-center gap-1.5 min-w-0 ${densityClasses.chatRow} ${
-          selected
-            ? 'border-[var(--accent-muted)] bg-[var(--selected)] text-[var(--fg)]'
-            : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-        } {!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${
+        className={`flex-1 rounded border text-left transition-colors flex items-center gap-1.5 min-w-0 ${densityClasses.chatRow} ${sidebarChatRowTone({ selected })} ${!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'} ${
           isDragging ? 'opacity-35' : ''
         }`}
         title={`${uiDroneName(drone.name)} / ${chatName}`}
@@ -535,7 +489,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
           {chatName}
         </span>
         {draft ? (
-          <span className="flex-shrink-0 rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-wide text-[var(--accent)]">
+          <span className="flex-shrink-0 rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
             Draft
           </span>
         ) : null}
@@ -623,7 +577,7 @@ function SidebarDroneChildrenSection({
   return (
     <div
       ref={dropDisabled ? undefined : setNodeRef}
-      className={`${className} rounded-md transition-colors ${
+      className={`${className} rounded-[var(--radius-medium)] transition-colors ${
         highlighted ? 'bg-[var(--info-subtle)] ring-1 ring-[var(--info-border)]' : ''
       }`}
     >
@@ -691,7 +645,7 @@ function SidebarDroneNode({
   onCancelChatEditor,
   actionsEnabled = true,
 }: SidebarDroneNodeProps) {
-  const densityClasses = sidebarTreeDensityClasses(sidebarDensityMode);
+  const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   if (ancestorDroneIds?.has(droneId)) return null;
   const drone = droneById[droneId];
   if (!drone) return null;
@@ -703,14 +657,14 @@ function SidebarDroneNode({
 
   if (drone.id === draftSidebarPlaceholderId) {
     return (
-      <div key={drone.id} className={`w-full text-left flex items-center rounded-md border bg-[var(--selected)] border-[var(--accent-muted)] relative ${densityClasses.draftRow}`}>
+      <div key={drone.id} className={`w-full text-left flex items-center rounded-[var(--radius-medium)] border bg-[var(--selected)] border-[var(--accent-muted)] relative ${densityClasses.draftRow}`}>
         <div className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
         <div className="flex-1 min-w-0 flex items-center gap-1.5">
-          <span className={`flex-1 min-w-0 truncate font-semibold text-[var(--fg)] ${densityClasses.draftText}`} title={`${drone.name} · pending draft`}>
+          <span className={`flex-1 min-w-0 truncate dh-type-sidebar-item-active ${densityClasses.draftText}`} title={`${drone.name} · pending draft`}>
             {drone.name}
           </span>
           <span
-            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
+            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
             style={{ fontFamily: 'var(--display)' }}
             title="Draft"
           >
@@ -797,7 +751,7 @@ function SidebarDroneNode({
                     }
                   }}
                   placeholder="Chat name"
-                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] px-2 py-1 font-mono text-[11px] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
+                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] px-2 py-1 font-mono text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
                 />
                 {chatEditor?.pending ? <IconSpinner className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-90" /> : null}
               </div>
@@ -806,7 +760,7 @@ function SidebarDroneNode({
                 onMouseDown={(event) => event.preventDefault()}
                 onClick={() => onChatEditorCreateAsDraftChange(chatEditor?.createAsDraft !== true)}
                 disabled={chatEditor?.pending}
-                className="flex items-center gap-1.5 px-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)] disabled:opacity-50"
+                className="flex items-center gap-1.5 px-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)] disabled:opacity-50"
               >
                 <span
                   className={`h-3 w-3 rounded-sm border ${
@@ -817,7 +771,7 @@ function SidebarDroneNode({
                 />
                 Draft
               </button>
-              {chatEditor?.error ? <div className="px-1 text-[10px] text-[var(--red)]">{chatEditor.error}</div> : null}
+              {chatEditor?.error ? <div className="px-1 text-[var(--text-10)] text-[var(--red)]">{chatEditor.error}</div> : null}
             </div>
           ) : null}
           {chats.map((chatName) => {

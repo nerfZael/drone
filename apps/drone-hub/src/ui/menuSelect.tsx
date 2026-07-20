@@ -50,9 +50,9 @@ type UiMenuSelectProps = {
 };
 
 const triggerBaseClassNameByVariant: Record<UiMenuSelectVariant, string> = {
-  form: 'w-full h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] focus:outline-none transition-colors flex items-center justify-between gap-2',
+  form: 'w-full h-[var(--control-height)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] focus:outline-none transition-colors flex items-center justify-between gap-2',
   toolbar:
-    'inline-flex items-center gap-1.5 h-[28px] pl-2 pr-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[11px] font-semibold text-[var(--muted)] focus:outline-none transition-all',
+    'inline-flex items-center gap-1.5 h-[28px] pl-2 pr-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)] focus:outline-none transition-all',
 };
 
 const panelPositionClassNameByVariant: Record<UiMenuSelectVariant, string> = {
@@ -238,7 +238,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
           {header ? (
             <div
               className={cn(
-                'px-3 py-2 text-[9px] font-semibold text-[var(--muted-dim)] tracking-[0.12em] uppercase border-b border-[var(--border-subtle)]',
+                'px-3 py-2 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.12em] uppercase border-b border-[var(--border-subtle)]',
                 headerClassName
               )}
               style={headerStyle}
@@ -253,7 +253,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder={searchPlaceholder}
-                className="w-full h-8 rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 text-[11px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
+                className="w-full h-[var(--control-height-compact)] rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 text-[var(--text-11)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
               />
             </div>
           ) : null}
@@ -288,7 +288,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
               );
             })}
             {filteredEntries.every((entry) => !isOptionEntry(entry)) ? (
-              <div className="px-3 py-3 text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]">
+              <div className="px-3 py-3 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]">
                 {emptySearchLabel}
               </div>
             ) : null}

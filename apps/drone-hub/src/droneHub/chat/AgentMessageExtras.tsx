@@ -110,7 +110,7 @@ export function AgentMessageExtras({
             {inlineMedia.map((media) => (
               <div
                 key={media.id}
-                className="relative overflow-hidden rounded-md bg-[var(--surface-inset)]"
+                className="relative overflow-hidden rounded-[var(--radius-medium)] bg-[var(--surface-inset)]"
               >
                 {media.kind === 'image' ? (
                   <button
@@ -120,7 +120,7 @@ export function AgentMessageExtras({
                     title={`Open ${media.label} from message link`}
                   >
                     {failedMediaById[media.id] ? (
-                      <div className="flex min-h-[120px] items-center justify-center px-3 text-center text-[11px] text-[var(--muted)]">
+                      <div className="flex min-h-[120px] items-center justify-center px-3 text-center text-[var(--text-11)] text-[var(--muted)]">
                         Failed to load image.
                       </div>
                     ) : (
@@ -139,7 +139,7 @@ export function AgentMessageExtras({
                     )}
                   </button>
                 ) : failedMediaById[media.id] ? (
-                  <div className="flex min-h-[120px] items-center justify-center px-3 text-center text-[11px] text-[var(--muted)]">
+                  <div className="flex min-h-[120px] items-center justify-center px-3 text-center text-[var(--text-11)] text-[var(--muted)]">
                     Failed to load video.
                   </div>
                 ) : (

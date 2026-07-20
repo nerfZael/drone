@@ -49,7 +49,7 @@ export function ChatMessageBody({
       {hasText ? (
         <CollapsibleMarkdown
           text={rawText}
-          fadeTo={role === 'user' ? 'var(--user-dim)' : error ? 'var(--red-subtle)' : 'var(--accent-subtle)'}
+          fadeTo={role === 'user' ? 'var(--user-bubble)' : error ? 'var(--red-subtle)' : 'var(--assistant-bubble-fade)'}
           className={className}
           preserveLeadParagraph={preserveLeadParagraph}
           toggleOnMessageClick={toggleOnMessageClick}
@@ -60,7 +60,7 @@ export function ChatMessageBody({
         />
       ) : null}
       {!hasText && normalizedError ? (
-        <div className="text-[12px] text-[var(--red)]">{normalizedError}</div>
+        <div className="text-[var(--text-12)] text-[var(--red)]">{normalizedError}</div>
       ) : null}
       {images.length > 0 ? (
         <div className="flex flex-wrap gap-2">

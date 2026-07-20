@@ -41,17 +41,17 @@ export const AutomationLaneStatusCard = React.memo(function AutomationLaneStatus
   const canStop = Boolean(onStopAll) || Boolean(onStopRunsOnly);
 
   return (
-    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3">
+    <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Automation
           </div>
-          <div className="text-[13px] text-[var(--fg-secondary)] mt-1">{label}</div>
+          <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-1">{label}</div>
         </div>
         <div className="flex items-center gap-2">
           <span
-            className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
+            className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[var(--text-9)] tracking-wide uppercase ${
               status === 'running'
                 ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
                 : 'border-[var(--info-border)] bg-[var(--info-subtle)] text-[var(--info)]'
@@ -63,14 +63,14 @@ export const AutomationLaneStatusCard = React.memo(function AutomationLaneStatus
           {ts ? (
             <RelativeTimeText
               at={ts}
-              className="text-[10px] text-[var(--muted-dim)]"
+              className="text-[var(--text-10)] text-[var(--muted-dim)]"
               title={new Date(ts).toLocaleString()}
             />
           ) : null}
         </div>
       </div>
 
-      <div className="mt-2 text-[12px] text-[var(--muted)]">
+      <div className="mt-2 text-[var(--text-12)] text-[var(--muted)]">
         {status === 'running' ? `${Math.max(0, runsCompleted)}/${Math.max(0, runsTotal)} runs` : `${Math.max(0, runsTotal)} runs queued`}
       </div>
 
@@ -83,7 +83,7 @@ export const AutomationLaneStatusCard = React.memo(function AutomationLaneStatus
               onCancelQueued?.(queueId);
             }}
             disabled={cancelBusy}
-            className={`inline-flex items-center h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+            className={`inline-flex items-center h-7 px-2 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
               cancelBusy
                 ? 'opacity-100 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)]'
                 : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[var(--red-border)]'
@@ -103,7 +103,7 @@ export const AutomationLaneStatusCard = React.memo(function AutomationLaneStatus
               type="button"
               onClick={() => onStopAll()}
               disabled={stopAllBusy || stopRunsOnlyBusy}
-              className={`inline-flex items-center h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+              className={`inline-flex items-center h-7 px-2 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 stopAllBusy || stopRunsOnlyBusy
                   ? 'opacity-100 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)]'
                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[var(--red-border)]'
@@ -119,7 +119,7 @@ export const AutomationLaneStatusCard = React.memo(function AutomationLaneStatus
               type="button"
               onClick={() => onStopRunsOnly()}
               disabled={stopAllBusy || stopRunsOnlyBusy}
-              className={`inline-flex items-center h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
+              className={`inline-flex items-center h-7 px-2 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 stopAllBusy || stopRunsOnlyBusy
                   ? 'opacity-100 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)]'
                   : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
@@ -133,8 +133,8 @@ export const AutomationLaneStatusCard = React.memo(function AutomationLaneStatus
         </div>
       ) : null}
 
-      {cancelError ? <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap">{cancelError}</div> : null}
-      {stopError ? <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap">{stopError}</div> : null}
+      {cancelError ? <div className="mt-2 text-[var(--text-10)] text-[var(--red)] whitespace-pre-wrap">{cancelError}</div> : null}
+      {stopError ? <div className="mt-2 text-[var(--text-10)] text-[var(--red)] whitespace-pre-wrap">{stopError}</div> : null}
     </div>
   );
 });

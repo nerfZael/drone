@@ -12,7 +12,7 @@ export const GUIDED_ONBOARDING_STEPS: GuidedOnboardingStep[] = [
         <div>
           Click a drone to open it. Hover a drone row to reveal quick actions (clone, rename, delete) on the right.
         </div>
-        <div className="text-[10px] text-[var(--muted-dim)]">
+        <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
           Tip: use Ctrl/Cmd to multi-select, Shift for range selection.
         </div>
       </div>

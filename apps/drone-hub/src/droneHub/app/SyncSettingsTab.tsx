@@ -95,23 +95,23 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
   return (
     <div className="flex flex-col gap-4">
       {syncSetsError ? (
-        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
           {syncSetsError}
         </div>
       ) : null}
       {syncSetsNotice ? (
-        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
+        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
           {syncSetsNotice}
         </div>
       ) : null}
 
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,360px)_minmax(0,1fr)] gap-4">
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-4 py-4 flex flex-col gap-4">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-4 py-4 flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               New sync set
             </div>
-            <div className="text-[12px] text-[var(--muted)] leading-relaxed">
+            <div className="text-[var(--text-12)] text-[var(--muted)] leading-relaxed">
               Every sync set targets all drones. New drones always receive the latest mirror after provisioning, and existing drones update only when you run apply.
             </div>
           </div>
@@ -127,7 +127,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
             type="button"
             onClick={() => void handleCreate()}
             disabled={!createReady || isCreateBusy}
-            className={`h-10 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${actionButtonClass(
+            className={`h-10 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${actionButtonClass(
               createReady && !isCreateBusy,
             )}`}
             style={{ fontFamily: 'var(--display)' }}
@@ -136,23 +136,23 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
           </button>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-4 py-4 flex flex-col gap-3">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-4 py-4 flex flex-col gap-3">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                 Existing sync sets
               </div>
-              <div className="text-[12px] text-[var(--muted)] mt-1">
+              <div className="text-[var(--text-12)] text-[var(--muted)] mt-1">
                 Full mirror mode. Files missing from the source are removed from targets on apply.
               </div>
             </div>
-            <div className="text-[11px] text-[var(--muted-dim)]">{syncSets.length} total</div>
+            <div className="text-[var(--text-11)] text-[var(--muted-dim)]">{syncSets.length} total</div>
           </div>
 
           {syncSetsLoading && syncSets.length === 0 ? (
-            <div className="text-[12px] text-[var(--muted-dim)]">Loading sync sets…</div>
+            <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading sync sets…</div>
           ) : syncSets.length === 0 ? (
-            <div className="rounded border border-dashed border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-5 text-[12px] text-[var(--muted-dim)]">
+            <div className="rounded border border-dashed border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-5 text-[var(--text-12)] text-[var(--muted-dim)]">
               No sync sets yet.
             </div>
           ) : (
@@ -177,19 +177,19 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div className="min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-2">
-                            <div className="text-[16px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
+                            <div className="text-[16px] font-[var(--weight-semibold)] text-[var(--fg-strong)]" style={{ fontFamily: 'var(--display)' }}>
                               {syncSet.label}
                             </div>
-                            <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
+                            <span className="rounded-full border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 py-0.5 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted)]">
                               {sourceTypeLabel(syncSet.sourceType)}
                             </span>
                             {syncSet.applyToHost ? (
-                              <span className="rounded-full border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--accent)]">
+                              <span className="rounded-full border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-0.5 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--accent)]">
                                 Host target enabled
                               </span>
                             ) : null}
                           </div>
-                          <div className="mt-2 grid grid-cols-1 xl:grid-cols-2 gap-2 text-[11px] text-[var(--muted-dim)]">
+                          <div className="mt-2 grid grid-cols-1 xl:grid-cols-2 gap-2 text-[var(--text-11)] text-[var(--muted-dim)]">
                             <div className="break-all">
                               Source:{' '}
                               <span className="text-[var(--fg-secondary)]">
@@ -210,7 +210,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                             </div>
                           </div>
                           {!syncSet.sourceExists ? (
-                            <div className="mt-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+                            <div className="mt-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
                               Source path is missing or unreadable. Apply will fail until the source exists again.
                             </div>
                           ) : null}
@@ -229,7 +229,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                                   void applySyncSetToExistingDrones(syncSet.id, syncSet.label);
                                 }}
                                 disabled={rowBusy || !syncSet.sourceExists}
-                                className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${actionButtonClass(
+                                className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${actionButtonClass(
                                   !rowBusy && syncSet.sourceExists,
                                 )}`}
                                 style={{ fontFamily: 'var(--display)' }}
@@ -240,7 +240,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                                 type="button"
                                 onClick={() => startEditing(syncSet)}
                                 disabled={rowBusy}
-                                className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${secondaryButtonClass(
+                                className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${secondaryButtonClass(
                                   rowBusy,
                                 )}`}
                                 style={{ fontFamily: 'var(--display)' }}
@@ -255,7 +255,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                                   void deleteSyncSet(syncSet.id, syncSet.label);
                                 }}
                                 disabled={rowBusy}
-                                className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
+                                className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                                   rowBusy
                                     ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                                     : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
@@ -274,7 +274,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                                   if (saved) cancelEditing(syncSet.id);
                                 }}
                                 disabled={!editReady || rowBusy}
-                                className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${actionButtonClass(
+                                className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${actionButtonClass(
                                   editReady && !rowBusy,
                                 )}`}
                                 style={{ fontFamily: 'var(--display)' }}
@@ -285,7 +285,7 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                                 type="button"
                                 onClick={() => cancelEditing(syncSet.id)}
                                 disabled={rowBusy}
-                                className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${secondaryButtonClass(
+                                className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${secondaryButtonClass(
                                   rowBusy,
                                 )}`}
                                 style={{ fontFamily: 'var(--display)' }}
@@ -311,35 +311,35 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                         />
                       ) : (
                         <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,220px)_minmax(0,1fr)] gap-3">
-                          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
-                            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Status</div>
+                          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3">
+                            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Status</div>
                             <div className="mt-3 flex flex-wrap gap-2">
-                              <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] ${syncStatusBadgeClass('synced')}`}>
+                              <span className={`rounded-full border px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${syncStatusBadgeClass('synced')}`}>
                                 Synced {statusSummary.synced}
                               </span>
-                              <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] ${syncStatusBadgeClass('error')}`}>
+                              <span className={`rounded-full border px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${syncStatusBadgeClass('error')}`}>
                                 Errors {statusSummary.errors}
                               </span>
-                              <span className={`rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.08em] ${syncStatusBadgeClass('idle')}`}>
+                              <span className={`rounded-full border px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${syncStatusBadgeClass('idle')}`}>
                                 Idle {statusSummary.idle}
                               </span>
                             </div>
-                            <div className="mt-3 text-[11px] text-[var(--muted-dim)]">
+                            <div className="mt-3 text-[var(--text-11)] text-[var(--muted-dim)]">
                               Recorded targets: {statusSummary.total || 0}
                             </div>
                           </div>
 
-                          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-2">
-                            <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Recent target state</div>
+                          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-2">
+                            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Recent target state</div>
                             {syncSet.targetStatus.length === 0 ? (
-                              <div className="text-[11px] text-[var(--muted-dim)]">
+                              <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
                                 No recorded target state yet. New drones will still receive this sync set automatically.
                               </div>
                             ) : failedStatuses.length > 0 ? (
                               failedStatuses.map((status) => (
                                 <div key={`${syncSet.id}-${status.targetId}`} className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2">
-                                  <div className="text-[11px] text-[var(--red)] font-semibold">{status.targetName}</div>
-                                  <div className="text-[11px] text-[var(--muted)] mt-1 break-words">{status.error ?? 'Sync failed.'}</div>
+                                  <div className="text-[var(--text-11)] text-[var(--red)] font-[var(--weight-semibold)]">{status.targetName}</div>
+                                  <div className="text-[var(--text-11)] text-[var(--muted)] mt-1 break-words">{status.error ?? 'Sync failed.'}</div>
                                 </div>
                               ))
                             ) : (
@@ -348,8 +348,8 @@ export function SyncSettingsTab({ syncSets: syncSetsState }: { syncSets: UseSync
                                   key={`${syncSet.id}-${status.targetId}`}
                                   className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-2 flex flex-wrap items-center justify-between gap-2"
                                 >
-                                  <div className="text-[11px] text-[var(--fg-secondary)]">{status.targetName}</div>
-                                  <div className={`rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] ${syncStatusBadgeClass(status.state)}`}>
+                                  <div className="text-[var(--text-11)] text-[var(--fg-secondary)]">{status.targetName}</div>
+                                  <div className={`rounded-full border px-2 py-0.5 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] ${syncStatusBadgeClass(status.state)}`}>
                                     {status.state}
                                   </div>
                                 </div>

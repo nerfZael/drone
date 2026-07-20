@@ -68,7 +68,7 @@ export function CreateDronesFromAgentMessageModal(props: {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] backdrop-blur-sm px-4" role="dialog" aria-modal="true">
       <div
-        className="w-full max-w-[760px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_var(--shadow-color)] overflow-hidden animate-slide-up relative"
+        className="w-full max-w-[760px] rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_var(--shadow-color)] overflow-hidden animate-slide-up relative"
         onKeyDownCapture={(e) => {
           // Ctrl+Enter: spawn focused job (if inside a job card)
           // Ctrl+Shift+Enter: spawn all (anywhere in popup)
@@ -93,11 +93,10 @@ export function CreateDronesFromAgentMessageModal(props: {
           props.onSpawnOne(jobId);
         }}
       >
-        <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
         <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="font-semibold text-sm text-[var(--fg)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Create drones from agent message</div>
-            <div className="text-[10px] text-[var(--muted)] mt-0.5 font-mono">
+            <div className="font-[var(--weight-semibold)] text-sm text-[var(--fg-strong)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Create drones from agent message</div>
+            <div className="text-[var(--text-10)] text-[var(--muted)] mt-0.5 font-mono">
               {jobsModal.jobs.length} job{jobsModal.jobs.length === 1 ? '' : 's'} detected
             </div>
           </div>
@@ -106,7 +105,7 @@ export function CreateDronesFromAgentMessageModal(props: {
               type="button"
               onClick={props.onSpawnAll}
               disabled={props.spawningAllJobs}
-              className={`h-8 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
+              className={`h-8 px-4 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
                 props.spawningAllJobs
                   ? 'opacity-70 cursor-wait bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
                   : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -137,18 +136,18 @@ export function CreateDronesFromAgentMessageModal(props: {
 
         <div className="px-5 py-4 max-h-[70vh] overflow-auto">
           <div className="mb-4">
-            <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>Group for spawned drones</div>
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>Group for spawned drones</div>
             <div className="flex items-center gap-2">
               <input
                 value={jobsModal.group}
                 onChange={(e) => props.onChangeGroup(e.target.value)}
-                className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+                className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
                 placeholder="e.g. auth, billing, frontend"
               />
               <button
                 type="button"
                 onClick={props.onClearGroup}
-                className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
+                className="h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Clear group"
               >
@@ -158,7 +157,7 @@ export function CreateDronesFromAgentMessageModal(props: {
           </div>
 
           <div className="mb-4">
-            <div className="text-[10px] font-semibold text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>Agent for spawned drones</div>
+            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] mb-1.5 tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>Agent for spawned drones</div>
             <div className="flex items-center gap-2">
               <UiMenuSelect
                 variant="form"
@@ -172,7 +171,7 @@ export function CreateDronesFromAgentMessageModal(props: {
               <button
                 type="button"
                 onClick={props.onOpenCustomAgents}
-                className="h-9 px-3 rounded-lg text-[12px] font-semibold border transition-colors bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                className="h-9 px-3 rounded-[var(--radius-large)] text-[var(--text-12)] font-[var(--weight-semibold)] border transition-colors bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                 title="Manage saved custom agents"
               >
                 Custom…
@@ -181,19 +180,19 @@ export function CreateDronesFromAgentMessageModal(props: {
           </div>
 
           <div className="mb-4">
-            <div className="text-[11px] font-semibold text-[var(--muted)] mb-1">Prefix message (sent to every spawned drone)</div>
+            <div className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)] mb-1">Prefix message (sent to every spawned drone)</div>
             <div className="flex items-start gap-2">
               <textarea
                 value={jobsModal.prefix}
                 onChange={(e) => props.onChangePrefix(e.target.value)}
                 rows={2}
-                className="flex-1 min-h-[56px] resize-y rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-2 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
+                className="flex-1 min-h-[56px] resize-y rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 py-2 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
                 placeholder="e.g. First, please check out branch origin/refactor/server-app-entrypoint"
               />
               <button
                 type="button"
                 onClick={props.onClearPrefix}
-                className="h-9 px-3 rounded-lg text-[12px] font-semibold border transition-colors bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                className="h-9 px-3 rounded-[var(--radius-large)] text-[var(--text-12)] font-[var(--weight-semibold)] border transition-colors bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                 title="Clear prefix"
               >
                 Clear
@@ -233,33 +232,33 @@ export function CreateDronesFromAgentMessageModal(props: {
                 <div
                   key={j.id}
                   data-job-id={j.id}
-                  className="rounded-xl border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3"
+                  className="rounded-[var(--radius-xlarge)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3"
                 >
                   <div className="flex items-start gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="grid grid-cols-1 gap-2">
                         <label className="flex flex-col gap-1">
-                          <span className="text-[10px] font-semibold text-[var(--muted-dim)]">Drone name (dash-case)</span>
+                          <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)]">Drone name (dash-case)</span>
                           <input
                             value={nameRaw}
                             onChange={(e) => props.onUpdateJob(j.id, { name: e.target.value })}
-                            className={`w-full h-9 rounded-lg border bg-[var(--panel-raised)] px-3 text-[13px] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
+                            className={`w-full h-9 rounded-[var(--radius-large)] border bg-[var(--panel-raised)] px-3 text-[var(--text-13)] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
                               invalidName || dupName ? 'border-[var(--red-border)]' : 'border-[var(--border-subtle)]'
                             }`}
                             placeholder="e.g. split-server-app"
                           />
                           {(invalidName || dupName) && (
-                            <span className="text-[10px] text-[var(--red)]">
+                            <span className="text-[var(--text-10)] text-[var(--red)]">
                               {dupName ? 'Duplicate name in list.' : 'Invalid name. Use dash-case with no spaces, max 48 chars.'}
                             </span>
                           )}
                         </label>
                         <label className="flex flex-col gap-1">
-                          <span className="text-[10px] font-semibold text-[var(--muted-dim)]">Title</span>
+                          <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)]">Title</span>
                           <input
                             value={title}
                             onChange={(e) => props.onUpdateJob(j.id, { title: e.target.value })}
-                            className="w-full h-9 rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
+                            className="w-full h-9 rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-raised)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
                             placeholder="One-line title"
                           />
                         </label>
@@ -268,14 +267,14 @@ export function CreateDronesFromAgentMessageModal(props: {
                       {detailsTrimmed && (
                         <div className="mt-2">
                           {!detailsOpen && detailsPreview && (
-                            <div className="text-[11px] leading-[1.6] text-[var(--muted-dim)] whitespace-pre-wrap border border-[var(--border-subtle)] bg-[var(--surface-softest)] rounded-lg px-3 py-2">
+                            <div className="text-[var(--text-11)] leading-[1.6] text-[var(--muted-dim)] whitespace-pre-wrap border border-[var(--border-subtle)] bg-[var(--surface-softest)] rounded-[var(--radius-large)] px-3 py-2">
                               {detailsPreview}
                             </div>
                           )}
                           <button
                             type="button"
                             onClick={() => props.onToggleDetails(j.id)}
-                            className="text-[11px] font-semibold text-[var(--accent)] hover:text-[var(--fg)] transition-colors"
+                            className="text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--accent)] hover:text-[var(--fg)] transition-colors"
                           >
                             {detailsOpen ? 'Hide full details' : 'Show full details'}
                           </button>
@@ -284,13 +283,13 @@ export function CreateDronesFromAgentMessageModal(props: {
                               value={detailsRaw}
                               onChange={(e) => props.onUpdateJob(j.id, { details: e.target.value })}
                               rows={8}
-                              className="mt-2 w-full resize-y text-[11.5px] leading-[1.6] text-[var(--fg-secondary)] whitespace-pre-wrap border border-[var(--border-subtle)] bg-[var(--panel-raised)] rounded-lg px-3 py-2 focus:outline-none"
+                              className="mt-2 w-full resize-y text-[var(--text-11-5)] leading-[1.6] text-[var(--fg-secondary)] whitespace-pre-wrap border border-[var(--border-subtle)] bg-[var(--panel-raised)] rounded-[var(--radius-large)] px-3 py-2 focus:outline-none"
                             />
                           )}
                         </div>
                       )}
                       {err && (
-                        <div className="mt-2 text-[11px] text-[var(--red)] whitespace-pre-wrap" title={err}>
+                        <div className="mt-2 text-[var(--text-11)] text-[var(--red)] whitespace-pre-wrap" title={err}>
                           {err}
                         </div>
                       )}
@@ -299,7 +298,7 @@ export function CreateDronesFromAgentMessageModal(props: {
                       type="button"
                       onClick={() => props.onSpawnJob(j, jobsModal.group, jobsModal.prefix, jobsModal.agentKey)}
                       disabled={spawning || spawned || !name || invalidName || dupName}
-                      className={`flex-shrink-0 h-8 px-3 rounded-lg text-[12px] font-semibold border transition-colors ${
+                      className={`flex-shrink-0 h-8 px-3 rounded-[var(--radius-large)] text-[var(--text-12)] font-[var(--weight-semibold)] border transition-colors ${
                         spawning || spawned || !name || invalidName || dupName
                           ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                           : 'bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'

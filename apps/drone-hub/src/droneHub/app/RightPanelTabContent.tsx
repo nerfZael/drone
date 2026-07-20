@@ -43,8 +43,8 @@ export function RightPanelPaneLoadingFallback({ tab }: { tab: RightPanelTab }) {
   const loadingLabel = label === 'ENV' ? 'environment' : label.toLowerCase();
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex items-start px-2.5 py-2">
-      <div className="w-full rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[12px] text-[var(--muted)]">
-        <div className="text-[11px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+      <div className="w-full rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-12)] text-[var(--muted)]">
+        <div className="text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
           {label}
         </div>
         <div className="mt-1" aria-live="polite">
@@ -67,15 +67,15 @@ export function RightPanelPaneLoadError({
   const label = RIGHT_PANEL_TAB_LABELS[tab] ?? 'Pane';
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex items-start px-2.5 py-2">
-      <div className="w-full rounded-md border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-3 text-[12px] text-[var(--fg)]">
-        <div className="text-[11px] font-semibold tracking-wide uppercase text-[var(--red)]" style={{ fontFamily: 'var(--display)' }}>
+      <div className="w-full rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-3 text-[var(--text-12)] text-[var(--fg)]">
+        <div className="text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--red)]" style={{ fontFamily: 'var(--display)' }}>
           {label}
         </div>
         <div className="mt-1">{message}</div>
         <button
           type="button"
           onClick={onRetry}
-          className="mt-3 rounded-md border border-[var(--red-border)] bg-[var(--red-subtle)] px-2.5 py-1 text-[11px] font-semibold text-[var(--red)] hover:bg-[var(--danger-panel)]"
+          className="mt-3 rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-2.5 py-1 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--red)] hover:bg-[var(--danger-panel)]"
         >
           Retry
         </button>

@@ -24,10 +24,7 @@ export function ChatLoadingState({ message = 'Loading conversation…' }: { mess
           </svg>
           <div className="absolute inset-[14px] rounded-full bg-[var(--accent)] shadow-[0_0_10px_var(--accent-muted)]" />
         </div>
-        <div
-          className="text-[10px] font-semibold uppercase tracking-[0.14em] text-[var(--muted)]"
-          style={{ fontFamily: 'var(--display)' }}
-        >
+        <div className="dh-type-status">
           {message}
         </div>
       </div>

@@ -15,7 +15,6 @@ import {
   IconClock,
   IconColumns,
   IconDevices,
-  IconDrone,
   IconEye,
   IconEyeOff,
   IconFolder,
@@ -79,6 +78,12 @@ import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { useSidebarOptimisticGroups } from './use-sidebar-optimistic-groups';
 import type { MoveDronesToGroupResult } from './use-group-management';
 import type { DroneDeleteMode, SidebarDensityMode, SidebarGroupingMode } from './settings-types';
+import {
+  sidebarChatRowTone,
+  sidebarCountClass,
+  sidebarDensityClasses,
+  sidebarFolderLabelClass,
+} from '../sidebar/presentation';
 import { useSidebarReadModel } from './use-sidebar-read-model';
 import {
   useSidebarInteractions,
@@ -223,6 +228,7 @@ function ReadOnlySidebarGroups({
   onToggleGroupCollapsed: (group: string) => void;
 }) {
   const lastToggleRef = React.useRef<{ groupKey: string; timestamp: number } | null>(null);
+  const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const visibleDroneOrder = React.useMemo(
     () =>
       sidebarGroups.flatMap((group) => {
@@ -252,18 +258,18 @@ function ReadOnlySidebarGroups({
           <section key={`${group.kind}:${group.group}`} className="flex flex-col gap-0.5">
             <button
               type="button"
-              className="relative flex min-h-8 w-full items-center gap-1 rounded-md border border-transparent px-1.5 pr-2 text-left"
+              className={`relative flex w-full items-center gap-1 rounded-[var(--radius-medium)] border border-transparent px-1.5 pr-2 text-left ${densityClasses.folderRow}`}
               onClick={() => {
                 if (groupKey) toggleGroupCollapsed(groupKey);
               }}
               aria-expanded={!collapsed}
               title={group.group}
             >
-              <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted-dim)] opacity-80" />
-              <span className="min-w-0 flex-1 truncate text-[11px] font-medium text-[var(--fg-secondary)]">
+              <IconFolder className={`${densityClasses.icon} flex-shrink-0 text-[var(--muted-dim)] opacity-80`} />
+              <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`}>
                 {group.label}
               </span>
-              <span className="flex-shrink-0 text-[10px] font-mono text-[var(--muted-dim)]">
+              <span className={sidebarCountClass}>
                 {group.items.length}
               </span>
             </button>
@@ -293,9 +299,6 @@ function ReadOnlySidebarGroups({
                           activeChatName === 'default'
                         }
                         activeIndicatorStyle="edge"
-                        leadingIcon={
-                          <IconDrone className="h-3.5 w-3.5 text-[var(--muted-dim)] opacity-72" />
-                        }
                         selectionTone="muted"
                         showSelectionEdge={false}
                         busy={busy && hasOnlyDefaultChat}
@@ -311,7 +314,7 @@ function ReadOnlySidebarGroups({
                         dragging={false}
                       />
                       {showChatRows ? (
-                        <div className="ml-[14px] mr-1 flex flex-col gap-0.5">
+                        <div className={`${densityClasses.chatIndent} flex flex-col gap-0.5`}>
                           {chats.map((chatName) => {
                             const active = selectedDrone === droneId && activeChatName === chatName;
                             const chatBusy =
@@ -320,11 +323,7 @@ function ReadOnlySidebarGroups({
                               <button
                                 key={chatName}
                                 type="button"
-                                className={`relative flex h-[25px] items-center gap-1.5 rounded border px-1.5 text-left text-[10.5px] transition-colors ${
-                                  active
-                                    ? 'border-[var(--border)] bg-[var(--surface-soft)] text-[var(--fg)]'
-                                    : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
-                                }`}
+                                className={`relative flex items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ active })}`}
                                 onClick={() => {
                                   if (droneId) onSelectDroneChat(droneId, chatName);
                                 }}
@@ -363,44 +362,6 @@ function ReadOnlySidebarGroups({
       })}
     </div>
   );
-}
-
-function readOnlyTreeDensityClasses(sidebarDensityMode: SidebarDensityMode): {
-  folderRow: string;
-  folderLabel: string;
-  folderDepthPaddingPx: number;
-  icon: string;
-  chatRow: string;
-  chatIndent: string;
-} {
-  if (sidebarDensityMode === 'compact') {
-    return {
-      folderRow: 'min-h-6',
-      folderLabel: 'text-[10px]',
-      folderDepthPaddingPx: 4,
-      icon: 'h-3 w-3',
-      chatRow: 'h-6 px-1.5 text-[10px]',
-      chatIndent: 'ml-3 mr-1',
-    };
-  }
-  if (sidebarDensityMode === 'comfortable') {
-    return {
-      folderRow: 'min-h-8',
-      folderLabel: 'text-[11px]',
-      folderDepthPaddingPx: 6,
-      icon: 'h-[15px] w-[15px]',
-      chatRow: 'h-7 px-2 text-[11px]',
-      chatIndent: 'ml-[18px] mr-1',
-    };
-  }
-  return {
-    folderRow: 'min-h-7',
-    folderLabel: 'text-[10.5px]',
-    folderDepthPaddingPx: 5,
-    icon: 'h-3.5 w-3.5',
-    chatRow: 'h-[25px] px-1.5 text-[10.5px]',
-    chatIndent: 'ml-[14px] mr-1',
-  };
 }
 
 function staticTreeFolderPath(node: SidebarTreeFolderNode): string {
@@ -494,7 +455,7 @@ function StaticReadOnlySidebarTree({
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onToggleGroupCollapsed: (group: string) => void;
 }) {
-  const densityClasses = readOnlyTreeDensityClasses(sidebarDensityMode);
+  const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const visibleDroneOrder = React.useMemo(
     () => flattenReadOnlyTreeDroneOrder(nodeTree, collapsedGroups),
     [collapsedGroups, nodeTree],
@@ -532,9 +493,6 @@ function StaticReadOnlySidebarTree({
           highlighted={highlightedDroneIds.has(drone.id)}
           active={selectedDrone === drone.id && hasOnlyDefaultChat && activeChatName === 'default'}
           activeIndicatorStyle="edge"
-          leadingIcon={
-            <IconDrone className={`${densityClasses.icon} text-[var(--muted-dim)] opacity-72`} />
-          }
           selectionTone="muted"
           showSelectionEdge={false}
           busy={busy && hasOnlyDefaultChat}
@@ -561,13 +519,7 @@ function StaticReadOnlySidebarTree({
                   key={chatName}
                   type="button"
                   disabled={Boolean(disabledReason)}
-                  className={`relative flex items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${
-                    disabledReason
-                      ? 'cursor-not-allowed border-transparent text-[var(--muted-dim)] opacity-60'
-                      : active
-                        ? 'border-[var(--border)] bg-[var(--surface-soft)] text-[var(--fg)]'
-                        : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
-                  }`}
+                  className={`relative flex items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${sidebarChatRowTone({ active, disabled: Boolean(disabledReason) })}`}
                   onClick={() => {
                     if (!disabledReason) onSelectDroneChat(drone.id, chatName);
                   }}
@@ -610,7 +562,7 @@ function StaticReadOnlySidebarTree({
       <div key={node.id} className="flex flex-col gap-0.5">
         <button
           type="button"
-          className={`relative flex items-center gap-1 rounded-md border border-transparent pr-2 text-left text-[var(--fg-secondary)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] ${densityClasses.folderRow}`}
+          className={`relative flex items-center gap-1 rounded-[var(--radius-medium)] border border-transparent pr-2 text-left hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] ${densityClasses.folderRow}`}
           style={{
             paddingLeft: `${Math.max(0, node.depth) * densityClasses.folderDepthPaddingPx + 4}px`,
           }}
@@ -622,10 +574,10 @@ function StaticReadOnlySidebarTree({
           <IconFolder
             className={`${densityClasses.icon} flex-shrink-0 text-[var(--muted-dim)] opacity-80`}
           />
-          <span className={`min-w-0 flex-1 truncate font-medium ${densityClasses.folderLabel}`}>
+          <span className={`${sidebarFolderLabelClass} ${densityClasses.folderLabel}`}>
             {node.label}
           </span>
-          <span className="flex-shrink-0 text-[10px] font-mono text-[var(--muted-dim)]">
+          <span className={sidebarCountClass}>
             {node.totalDroneCount}
           </span>
         </button>
@@ -826,7 +778,7 @@ function SidebarGroupSection({
       data-drone-sidebar-group-kind={kind}
       data-drone-sidebar-group-name={hoveredGroupName || undefined}
       data-drone-sidebar-repo-path={hoveredRepoPath || undefined}
-      className={`relative rounded-md border bg-[var(--surface-inset)] overflow-hidden transition-colors ${
+      className={`relative rounded-[var(--radius-medium)] border bg-[var(--surface-inset)] overflow-hidden transition-colors ${
         isDropTarget
           ? 'border-[var(--accent-muted)] ring-1 ring-[var(--accent-muted)]'
           : 'border-[var(--border-subtle)]'
@@ -855,10 +807,7 @@ function SidebarGroupSection({
         >
           <IconChevron down={!collapsed} className="flex-shrink-0 text-[var(--muted-dim)]" />
           <IconFolder className="flex-shrink-0 text-[var(--muted-dim)] opacity-50" />
-          <span
-            className="min-w-0 flex-1 truncate text-[11px] font-semibold text-[var(--fg-secondary)] tracking-wide uppercase"
-            style={{ fontFamily: 'var(--display)' }}
-          >
+          <span className={`${sidebarFolderLabelClass} text-[var(--text-11)] font-medium`}>
             {groupLabel}
           </span>
         </button>
@@ -868,7 +817,7 @@ function SidebarGroupSection({
           }`}
         >
           <div
-            className={`absolute inset-0 flex items-center justify-end text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${countVisibleClass}`}
+            className={`absolute inset-0 flex items-center justify-end transition-opacity duration-150 ${sidebarCountClass} ${countVisibleClass}`}
           >
             {actualItems.length} drone{actualItems.length !== 1 ? 's' : ''}
           </div>
@@ -1000,7 +949,7 @@ function SidebarGroupSection({
       ) : showMoveDropZone && !isVirtualGroup ? (
         <div
           ref={setMoveDropNodeRef}
-          className={`px-3 py-2 text-[10px] font-semibold tracking-wide uppercase transition-colors ${
+          className={`px-3 py-2 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
             isDropTarget
               ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
               : 'text-[var(--muted-dim)]'
@@ -1154,7 +1103,7 @@ function SidebarFolderTreeNode({
       >
         <div
           ref={setHeaderNodeRef}
-          className={`group/folder-row relative flex min-h-8 items-center gap-1 rounded-md pr-1 transition-colors ${
+          className={`group/folder-row relative flex min-h-8 items-center gap-1 rounded-[var(--radius-medium)] pr-1 transition-colors ${
             isDropTarget
               ? 'bg-[var(--accent-subtle)] ring-1 ring-[var(--accent-muted)]'
               : isSelected
@@ -1196,13 +1145,10 @@ function SidebarFolderTreeNode({
                     }
                   }}
                   maxLength={64}
-                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] px-1.5 py-0.5 text-[11px] text-[var(--fg)] focus:outline-none"
+                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] px-1.5 py-0.5 text-[var(--text-11)] text-[var(--fg)] focus:outline-none"
                 />
               ) : (
-                <span
-                  className="min-w-0 flex-1 truncate text-[11px] font-medium text-[var(--fg-secondary)]"
-                  title={node.path}
-                >
+                <span className={`${sidebarFolderLabelClass} text-[var(--text-11)]`} title={node.path}>
                   {groupLabel}
                 </span>
               )}
@@ -1210,7 +1156,7 @@ function SidebarFolderTreeNode({
           </button>
           <div className="relative w-[120px] flex-shrink-0">
             <div
-              className={`absolute inset-0 flex items-center justify-end pr-1 text-[10px] font-mono text-[var(--muted-dim)] transition-opacity duration-150 ${countVisibleClass}`}
+              className={`absolute inset-0 flex items-center justify-end pr-1 transition-opacity duration-150 ${sidebarCountClass} ${countVisibleClass}`}
             >
               {node.totalDroneCount}
             </div>
@@ -1343,7 +1289,7 @@ function SidebarFolderTreeNode({
             />
           ))}
           {showCreateInline && folderEditor ? (
-            <div className="flex items-center gap-2 rounded-md border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5">
+            <div className="flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5">
               <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-80" />
               <input
                 ref={folderEditorInputRef}
@@ -1361,12 +1307,12 @@ function SidebarFolderTreeNode({
                 }}
                 maxLength={64}
                 placeholder={folderEditor.parentPath ? 'Subfolder name' : 'Folder name'}
-                className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1 text-[11px] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+                className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1 text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
               />
             </div>
           ) : null}
           {folderEditor?.parentPath === node.path && folderEditor.error ? (
-            <div className="text-[10px] text-[var(--red)]">{folderEditor.error}</div>
+            <div className="text-[var(--text-10)] text-[var(--red)]">{folderEditor.error}</div>
           ) : null}
           {node.ownItems.length > 0 ? (
             <SidebarDroneTreeList
@@ -1380,14 +1326,14 @@ function SidebarFolderTreeNode({
         </div>
       ) : showMoveDropZone ? (
         <div
-          className={`ml-5 rounded-md px-2 py-1 text-[10px] font-semibold uppercase tracking-wide ${isDropTarget ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--muted-dim)]'}`}
+          className={`ml-5 rounded-[var(--radius-medium)] px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide ${isDropTarget ? 'bg-[var(--accent-subtle)] text-[var(--accent)]' : 'text-[var(--muted-dim)]'}`}
           style={{ fontFamily: 'var(--display)' }}
         >
           Drop into {groupLabel}
         </div>
       ) : null}
       {showEditorInline && folderEditor?.error ? (
-        <div className="ml-5 text-[10px] text-[var(--red)]">{folderEditor.error}</div>
+        <div className="ml-5 text-[var(--text-10)] text-[var(--red)]">{folderEditor.error}</div>
       ) : null}
     </div>
   );
@@ -2328,7 +2274,7 @@ export function DroneSidebar({
         data-drone-sidebar-shell="expanded"
         data-sidebar-dock-side={sidebarDockSide}
         data-sidebar-collapsed={sidebarCollapsed ? 'true' : 'false'}
-        className={`bg-[var(--panel-alt)] ${sidebarBorderClass} border-[var(--border)] flex flex-col min-h-0 relative dh-dot-grid flex-shrink-0 overflow-hidden ${sidebarWidthTransitionClass}`}
+        className={`bg-[var(--panel-alt)] ${sidebarBorderClass} border-[var(--border)] flex flex-col min-h-0 relative flex-shrink-0 overflow-hidden ${sidebarWidthTransitionClass}`}
         style={{
           width: sidebarCollapsed
             ? 0
@@ -2359,20 +2305,17 @@ export function DroneSidebar({
           onPointerUp={sidebarDockDragEnabled ? onSidebarDockHeaderPointerUp : undefined}
           onPointerCancel={sidebarDockDragEnabled ? onSidebarDockHeaderPointerCancel : undefined}
         >
-          <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
           <div className="flex w-full items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-2">
-              <div
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[var(--glow-accent)]"
-                title="Drone Hub"
-                aria-label="Drone Hub"
+              <span
+                className="flex-shrink-0 dh-type-sidebar-brand"
               >
-                <IconDrone />
-              </div>
+                Drone Hub
+              </span>
               {selectedDroneIds.length > 1 && (
                 <div className="flex min-w-0 items-center gap-1">
                   <span
-                    className="max-w-full truncate text-[10px] text-[var(--accent)]"
+                    className="max-w-full truncate text-[var(--text-10)] text-[var(--accent)]"
                     title={`${selectedDroneIds.length} drones selected`}
                   >
                     {selectedDroneIds.length} selected
@@ -2507,7 +2450,7 @@ export function DroneSidebar({
             </div>
           )}
           {groupMoveError && (
-            <div className="mx-2 mb-2 p-2 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[11px] text-[var(--red)]">
+            <div className="mx-2 mb-2 p-2 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--text-11)] text-[var(--red)]">
               Group move failed: {groupMoveError}
             </div>
           )}
@@ -2527,7 +2470,7 @@ export function DroneSidebar({
             !dronesError && (
               <div className="px-3 py-10 text-center">
                 <div
-                  className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
+                  className="text-[var(--muted-dim)] text-[var(--text-11)] tracking-wide uppercase"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   {selectedRepoHasNoDrones
@@ -2540,14 +2483,14 @@ export function DroneSidebar({
                 </div>
                 {activeRepoPath ? (
                   <div
-                    className="text-[var(--muted-dim)] text-[10px] mt-2 font-mono truncate"
+                    className="text-[var(--muted-dim)] text-[var(--text-10)] mt-2 font-mono truncate"
                     title={activeRepoPath}
                   >
                     {activeRepoPath}
                   </div>
                 ) : null}
                 {recentFilterHidAllDrones && !selectedRepoHasNoDrones ? (
-                  <div className="mt-2 text-[10px] text-[var(--muted-dim)]">
+                  <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
                     Turn off Recent drones only to show older drones.
                   </div>
                 ) : null}
@@ -2560,13 +2503,13 @@ export function DroneSidebar({
                         <button
                           type="button"
                           onClick={onOpenDraftChatComposer}
-                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[var(--text-11)] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
                           title="Create new drone"
                           aria-label="Create new drone"
                         >
                           <IconPlus className="opacity-80" />
                           <span
-                            className="font-semibold uppercase tracking-wide"
+                            className="font-[var(--weight-semibold)] uppercase tracking-wide"
                             style={{ fontFamily: 'var(--display)' }}
                           >
                             Create new drone
@@ -2575,13 +2518,13 @@ export function DroneSidebar({
                         <button
                           type="button"
                           onClick={onOpenCreateModal}
-                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[var(--text-11)] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
                           title="Create multiple drones"
                           aria-label="Create multiple drones"
                         >
                           <IconPlusDouble className="opacity-80" />
                           <span
-                            className="font-semibold uppercase tracking-wide"
+                            className="font-[var(--weight-semibold)] uppercase tracking-wide"
                             style={{ fontFamily: 'var(--display)' }}
                           >
                             Create multiple drones
@@ -2594,7 +2537,7 @@ export function DroneSidebar({
                         <button
                           type="button"
                           onClick={onOpenPlaybookRuns}
-                          className={`inline-flex h-[30px] w-full items-center gap-2 rounded border px-3 text-[11px] transition-all ${
+                          className={`inline-flex h-[30px] w-full items-center gap-2 rounded border px-3 text-[var(--text-11)] transition-all ${
                             playbookRunsOpen
                               ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                               : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
@@ -2604,7 +2547,7 @@ export function DroneSidebar({
                         >
                           <IconList className="opacity-80" />
                           <span
-                            className="font-semibold uppercase tracking-wide"
+                            className="font-[var(--weight-semibold)] uppercase tracking-wide"
                             style={{ fontFamily: 'var(--display)' }}
                           >
                             Open playbook runs
@@ -2617,9 +2560,9 @@ export function DroneSidebar({
                 {!recentFilterHidAllDrones &&
                 !selectedRepoHasNoDrones &&
                 sidebarCapabilities.createDrones ? (
-                  <div className="mt-4 text-[10px] text-[var(--muted-dim)]">
+                  <div className="mt-4 text-[var(--text-10)] text-[var(--muted-dim)]">
                     Or run{' '}
-                    <code className="rounded border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--code-fg)]">
+                    <code className="rounded border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-1.5 py-0.5 text-[var(--text-10)] text-[var(--code-fg)]">
                       drone create &lt;name&gt;
                     </code>{' '}
                     in your terminal.
@@ -2635,7 +2578,7 @@ export function DroneSidebar({
             !dronesError && (
               <div className="px-3 py-10 text-center">
                 <div
-                  className="text-[var(--muted-dim)] text-[11px] tracking-wide uppercase"
+                  className="text-[var(--muted-dim)] text-[var(--text-11)] tracking-wide uppercase"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   {recentFilterHidRepoDrones
@@ -2643,12 +2586,12 @@ export function DroneSidebar({
                     : 'No drones for selected repo'}
                 </div>
                 {recentFilterHidRepoDrones ? (
-                  <div className="mt-2 text-[10px] text-[var(--muted-dim)]">
+                  <div className="mt-2 text-[var(--text-10)] text-[var(--muted-dim)]">
                     Recent drones only is on.
                   </div>
                 ) : null}
                 <div
-                  className="text-[var(--muted-dim)] text-[10px] mt-2 font-mono truncate"
+                  className="text-[var(--muted-dim)] text-[var(--text-10)] mt-2 font-mono truncate"
                   title={activeRepoPath}
                 >
                   {activeRepoPath}
@@ -2664,8 +2607,7 @@ export function DroneSidebar({
                 <button
                   type="button"
                   onClick={onOpenDraftChatComposer}
-                  className="inline-flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
-                  style={{ fontFamily: 'var(--display)' }}
+                  className="inline-flex h-7 min-w-0 flex-1 items-center gap-2 rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 dh-type-sidebar-action dh-type-sidebar-action--accent transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
                   title="Create drone"
                   aria-label="Create drone"
                 >
@@ -2675,7 +2617,7 @@ export function DroneSidebar({
                 <button
                   type="button"
                   onClick={onOpenCreateModal}
-                  className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
+                  className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
                   title="Create multiple drones"
                   aria-label="Create multiple drones"
                 >
@@ -2731,15 +2673,14 @@ export function DroneSidebar({
                           <button
                             type="button"
                             onClick={() => openFolderCreate(null)}
-                            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
-                            style={{ fontFamily: 'var(--display)' }}
+                            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 dh-type-sidebar-action dh-type-sidebar-action--accent transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
                           >
                             <IconPlus className="opacity-80" />
                             New folder
                           </button>
                           {selectedFolderPath ? (
                             <span
-                              className="min-w-0 truncate text-[10px] font-mono text-[var(--muted-dim)]"
+                              className="min-w-0 truncate text-[var(--text-10)] font-mono text-[var(--muted-dim)]"
                               title={selectedFolderPath}
                             >
                               {selectedFolderPath}
@@ -2749,7 +2690,7 @@ export function DroneSidebar({
                         {folderEditor?.mode === 'create' &&
                         folderEditor.parentPath === null &&
                         folderEditor.anchorPath === null ? (
-                          <div className="mb-1 flex items-center gap-2 rounded-md border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5">
+                          <div className="mb-1 flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 py-1.5">
                             <IconFolder className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-80" />
                             <input
                               ref={folderEditorInputRef}
@@ -2767,7 +2708,7 @@ export function DroneSidebar({
                               }}
                               maxLength={64}
                               placeholder="Folder name"
-                              className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1 text-[11px] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+                              className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1 text-[var(--text-11)] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
                             />
                           </div>
                         ) : null}
@@ -2775,7 +2716,7 @@ export function DroneSidebar({
                         folderEditor.parentPath === null &&
                         folderEditor.anchorPath === null &&
                         folderEditor.error ? (
-                          <div className="mb-1 px-1 text-[10px] text-[var(--red)]">
+                          <div className="mb-1 px-1 text-[var(--text-10)] text-[var(--red)]">
                             {folderEditor.error}
                           </div>
                         ) : null}
@@ -2864,7 +2805,7 @@ export function DroneSidebar({
                     showExternalMoveTargets && (
                       <div
                         ref={setUngroupedDropNodeRef}
-                        className={`rounded-md border border-dashed px-3 py-2 text-[10px] font-semibold tracking-wide uppercase transition-colors ${
+                        className={`rounded-[var(--radius-medium)] border border-dashed px-3 py-2 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-colors ${
                           dragOverUngrouped
                             ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                             : 'border-[var(--border-subtle)] text-[var(--muted-dim)]'
@@ -2881,7 +2822,7 @@ export function DroneSidebar({
                     (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)) && (
                     <div
                       ref={setCreateGroupDropNodeRef}
-                      className={`mt-1 rounded-md border border-dashed px-3 py-2 transition-colors ${
+                      className={`mt-1 rounded-[var(--radius-medium)] border border-dashed px-3 py-2 transition-colors ${
                         dragOverCreateGroup ||
                         (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)
                           ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
@@ -2889,7 +2830,7 @@ export function DroneSidebar({
                       }`}
                     >
                       <div
-                        className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
+                        className="text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
                         style={{ fontFamily: 'var(--display)' }}
                       >
                         {createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0
@@ -2908,13 +2849,13 @@ export function DroneSidebar({
                             disabled={creatingGroupMove}
                             maxLength={64}
                             placeholder="Folder name"
-                            className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1.5 text-[11px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                            className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1.5 text-[var(--text-11)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
                           />
                           <div className="flex items-center gap-2">
                             <button
                               type="submit"
                               disabled={creatingGroupMove}
-                              className={`inline-flex h-7 items-center rounded px-2 text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                              className={`inline-flex h-7 items-center rounded px-2 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                                 creatingGroupMove
                                   ? 'cursor-not-allowed border border-[var(--border-subtle)] text-[var(--muted-dim)]'
                                   : 'border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
@@ -2927,7 +2868,7 @@ export function DroneSidebar({
                               type="button"
                               onClick={closeCreateGroupInline}
                               disabled={creatingGroupMove}
-                              className={`inline-flex h-7 items-center rounded px-2 text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                              className={`inline-flex h-7 items-center rounded px-2 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                                 creatingGroupMove
                                   ? 'cursor-not-allowed border border-[var(--border-subtle)] text-[var(--muted-dim)]'
                                   : 'border border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
@@ -2938,7 +2879,7 @@ export function DroneSidebar({
                             </button>
                           </div>
                           {createGroupInlineError && (
-                            <div className="text-[10px] text-[var(--red)]">
+                            <div className="text-[var(--text-10)] text-[var(--red)]">
                               {createGroupInlineError}
                             </div>
                           )}
@@ -2960,8 +2901,7 @@ export function DroneSidebar({
                 <button
                   type="button"
                   onClick={() => setSidebarReposCollapsed((prev) => !prev)}
-                  className="flex-1 min-w-0 inline-flex items-center gap-2 px-1.5 py-1 rounded text-left text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] transition-all"
-                  style={{ fontFamily: 'var(--display)' }}
+                  className="flex-1 min-w-0 inline-flex items-center gap-2 px-1.5 py-1 rounded text-left dh-type-sidebar-action dh-type-sidebar-action--quiet hover:bg-[var(--hover)] transition-all"
                   title={sidebarReposCollapsed ? 'Expand repos list' : 'Collapse repos list'}
                   aria-label={sidebarReposCollapsed ? 'Expand repos list' : 'Collapse repos list'}
                 >
@@ -2969,7 +2909,7 @@ export function DroneSidebar({
                   <IconFolder className="opacity-60 w-3 h-3" />
                   <span className="truncate">Repos {repos.length > 0 ? repos.length : ''}</span>
                   {activeRepoPath ? (
-                    <span className="ml-auto px-1.5 py-0.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[9px] text-[var(--accent)]">
+                    <span className="ml-auto px-1.5 py-0.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--text-9)] text-[var(--accent)]">
                       Filtered
                     </span>
                   ) : null}
@@ -3169,8 +3109,8 @@ export function DroneSidebar({
                   title="Show drones from all repos"
                 >
                   <div className="flex items-center justify-between gap-2">
-                    <span className="text-[11px] text-[var(--fg-secondary)]">All repos</span>
-                    <span className="text-[10px] font-mono text-[var(--muted-dim)]">
+                    <span className="text-[var(--sidebar-item-size)] text-[var(--sidebar-fg)]">All repos</span>
+                    <span className="dh-type-count">
                       {dronesCount}
                     </span>
                   </div>
@@ -3200,14 +3140,14 @@ export function DroneSidebar({
                       >
                         <div className="flex items-start justify-between gap-2">
                           <div className="min-w-0">
-                            <div className="text-[11px] text-[var(--fg-secondary)] truncate">
+                            <div className="text-[var(--sidebar-item-size)] text-[var(--sidebar-fg)] truncate">
                               {base}
                             </div>
-                            <div className="text-[10px] text-[var(--muted-dim)] truncate font-mono mt-0.5">
+                            <div className="text-[var(--text-9)] text-[var(--chrome-muted)] truncate font-mono mt-0.5">
                               {p}
                             </div>
                           </div>
-                          <span className="text-[10px] font-mono text-[var(--muted-dim)] mt-0.5">
+                          <span className="mt-0.5 dh-type-count">
                             {droneCount}
                           </span>
                         </div>
@@ -3215,12 +3155,12 @@ export function DroneSidebar({
                     );
                   })}
                 {!reposLoading && repos.length === 0 && !reposError && (
-                  <div className="px-2.5 py-3 text-[10px] text-[var(--muted-dim)]">
+                  <div className="px-2.5 py-3 text-[var(--text-10)] text-[var(--muted-dim)]">
                     No repos registered yet.
                   </div>
                 )}
                 {reposError && (
-                  <div className="px-2.5 py-3 text-[10px] text-[var(--red)]">
+                  <div className="px-2.5 py-3 text-[var(--text-10)] text-[var(--red)]">
                     Failed to load repos.
                   </div>
                 )}

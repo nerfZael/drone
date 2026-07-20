@@ -263,7 +263,7 @@ export function CollapsibleMarkdown({
           type="button"
           onClick={() => setCollapsed((v) => !v)}
           aria-expanded={!collapsed}
-          className="mt-2 flex items-center gap-1 text-[11px] font-medium text-[var(--accent)] hover:text-[var(--fg)] transition-colors"
+          className="mt-2 flex items-center gap-1 text-[var(--text-11)] font-medium text-[var(--accent)] hover:text-[var(--fg)] transition-colors"
         >
           <IconChevron down={!collapsed} />
           {collapsed ? 'Show more' : 'Collapse'}

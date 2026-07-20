@@ -238,13 +238,13 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
   if (runRows.length === 0 && !latestSummary) return null;
 
   return (
-    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3">
+    <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-4 py-3">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+          <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Automation
           </div>
-          <div className="text-[13px] text-[var(--fg-secondary)] mt-1">
+          <div className="text-[var(--text-13)] text-[var(--fg-secondary)] mt-1">
             {automationLabel} runs ({runRows.length})
           </div>
         </div>
@@ -252,7 +252,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
           <div className="flex items-center gap-2">
             {headerBadgeLabel ? (
               <span
-                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
+                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[var(--text-9)] tracking-wide uppercase ${
                   headerBadgeTone === 'failed'
                     ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
                     : headerBadgeTone === 'queued'
@@ -267,17 +267,17 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
           </div>
         ) : null}
       </div>
-      {headerError ? <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap">{headerError}</div> : null}
+      {headerError ? <div className="mt-2 text-[var(--text-10)] text-[var(--red)] whitespace-pre-wrap">{headerError}</div> : null}
 
       {promptText ? (
-        <div className="mt-3 rounded border border-[var(--user-border)] bg-[var(--user-dim)] px-3 py-2">
-          <div className="text-[10px] text-[var(--muted-dim)] uppercase tracking-wide mb-1">Prompt</div>
-          <div className="text-[12px] text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{promptDisplay}</div>
+        <div className="mt-3 rounded border border-[var(--user-bubble-border)] bg-[var(--user-bubble)] px-3 py-2 text-[var(--user-bubble-fg)]">
+          <div className="text-[var(--text-10)] text-[var(--muted-dim)] uppercase tracking-wide mb-1">Prompt</div>
+          <div className="text-[var(--text-12)] text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{promptDisplay}</div>
           {promptNeedsTruncate ? (
             <button
               type="button"
               onClick={() => setPromptExpanded((v) => !v)}
-              className="mt-2 text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--fg-secondary)]"
+              className="mt-2 text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--fg-secondary)]"
               style={{ fontFamily: 'var(--display)' }}
             >
               {promptExpanded ? 'Show less' : 'Show more'}
@@ -291,10 +291,10 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
           <table className="w-full min-w-[560px] text-left">
             <thead className="bg-[var(--surface-softest)]">
               <tr>
-                <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Run</th>
-                <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Status</th>
-                <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Updated</th>
-                <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Details</th>
+                <th className="px-3 py-2 text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Run</th>
+                <th className="px-3 py-2 text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Status</th>
+                <th className="px-3 py-2 text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Updated</th>
+                <th className="px-3 py-2 text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Details</th>
               </tr>
             </thead>
             <tbody>
@@ -303,10 +303,10 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
                 return (
                   <React.Fragment key={row.rowKey}>
                     <tr className="border-t border-[var(--border-subtle)]">
-                      <td className="px-3 py-2 text-[12px] text-[var(--fg-secondary)] font-mono">#{row.runIndex}</td>
+                      <td className="px-3 py-2 text-[var(--text-12)] text-[var(--fg-secondary)] font-mono">#{row.runIndex}</td>
                       <td className="px-3 py-2">
                         <span
-                          className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
+                          className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[var(--text-9)] tracking-wide uppercase ${
                             row.status === 'done'
                               ? 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]'
                               : row.status === 'failed'
@@ -317,13 +317,13 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
                           {row.statusLabel}
                         </span>
                         {row.status === 'failed' ? (
-                          <div className="mt-1 text-[10px] text-[var(--red)] max-w-[340px]" title={stripAnsi(row.output)}>
+                          <div className="mt-1 text-[var(--text-10)] text-[var(--red)] max-w-[340px]" title={stripAnsi(row.output)}>
                             {normalizeFailureHint(row.output) || 'Failed.'}
                           </div>
                         ) : null}
                       </td>
                       <td
-                        className="px-3 py-2 text-[11px] text-[var(--muted-dim)]"
+                        className="px-3 py-2 text-[var(--text-11)] text-[var(--muted-dim)]"
                         title={row.atIso ? new Date(row.atIso).toLocaleString() : undefined}
                       >
                         <RelativeTimeText
@@ -336,7 +336,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
                         <button
                           type="button"
                           onClick={() => setExpandedRunKey((prev) => (prev === row.rowKey ? null : row.rowKey))}
-                          className="h-7 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                          className="h-7 px-2 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                           style={{ fontFamily: 'var(--display)' }}
                         >
                           {expanded ? 'Hide' : 'Expand'}
@@ -372,10 +372,10 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
       {latestSummary ? (
         <div className="mt-3 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
           <div className="flex items-center justify-between gap-3">
-            <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Final message response</div>
+            <div className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Final message response</div>
             <div className="flex items-center gap-2">
               <span
-                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
+                className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[var(--text-9)] tracking-wide uppercase ${
                   latestSummary.status === 'done'
                     ? 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]'
                     : latestSummary.status === 'failed'
@@ -387,7 +387,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
               </span>
               <RelativeTimeText
                 at={latestSummary.atIso}
-                className="text-[10px] text-[var(--muted-dim)]"
+                className="text-[var(--text-10)] text-[var(--muted-dim)]"
                 title={new Date(latestSummary.atIso).toLocaleString()}
               />
             </div>

@@ -60,7 +60,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
     <>
       {badgeLabel ? (
         <span
-          className={`rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+          className={`rounded border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${
             isFailed
               ? isStopped
                 ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
@@ -80,7 +80,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           type="button"
           onClick={() => void onCancelQueued?.(item.id)}
           disabled={cancelBusy}
-          className={`inline-flex h-5 items-center rounded border px-1.5 text-[9px] font-semibold uppercase tracking-wide transition-all ${
+          className={`inline-flex h-5 items-center rounded border px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
             cancelBusy
               ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] opacity-100'
               : 'pointer-events-none border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-0 group-hover/pending-turn:pointer-events-auto group-hover/pending-turn:opacity-100 hover:border-[var(--red-border)] hover:text-[var(--red)]'
@@ -107,7 +107,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         {promptText ? (
           <CollapsibleMarkdown
             text={promptText}
-            fadeTo="var(--user-dim)"
+            fadeTo="var(--user-bubble)"
             className="dh-markdown--user"
             onOpenFileReference={onOpenFileReference}
             onOpenLink={onOpenLink}
@@ -134,7 +134,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           <ChatMessageCopyAction text={agentCopyText} />
           {isFailed ? (
             <div
-              className={`whitespace-pre-wrap text-[12.5px] leading-[1.6] ${
+              className={`whitespace-pre-wrap text-[var(--text-12-5)] leading-[1.6] ${
                 isStopped ? 'text-[var(--yellow)]' : 'text-[var(--red)]'
               }`}
             >
@@ -144,10 +144,10 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             <>
               <WorkingElapsedStatus startedAt={item.at} />
               {observability ? (
-                <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-[10.5px] leading-[1.45] text-[var(--yellow)]">
+                <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-[var(--text-10-5)] leading-[1.45] text-[var(--yellow)]">
                   <div>{observability.message}</div>
                   {observability.lastCheckedAt ? (
-                    <div className="mt-0.5 font-mono text-[9px] text-[var(--muted-dim)]">
+                    <div className="mt-0.5 font-mono text-[var(--text-9)] text-[var(--muted-dim)]">
                       Last checked <RelativeTimeText at={observability.lastCheckedAt} />
                     </div>
                   ) : null}
@@ -155,7 +155,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
               ) : null}
               <AgentPlanList plan={item.agentPlan} running />
               {cancelError ? (
-                <div className="mt-2 whitespace-pre-wrap text-[10px] text-[var(--red)]">
+                <div className="mt-2 whitespace-pre-wrap text-[var(--text-10)] text-[var(--red)]">
                   {stripAnsi(cancelError)}
                 </div>
               ) : null}
@@ -163,7 +163,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           )}
         </ChatMessageFrame>
       ) : cancelError ? (
-        <div className="mt-2 whitespace-pre-wrap text-right text-[10px] text-[var(--red)]">
+        <div className="mt-2 whitespace-pre-wrap text-right text-[var(--text-10)] text-[var(--red)]">
           {stripAnsi(cancelError)}
         </div>
       ) : null}

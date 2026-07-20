@@ -60,7 +60,7 @@ export function OpenedDroneFileTabs({
                 if (!fromTabId || fromTabId === tab.tabId) return;
                 onReorderTabs(fromTabId, tab.tabId);
               }}
-              className={`group/tab flex h-8 min-w-[120px] max-w-[220px] items-center gap-1.5 rounded-t-md border px-2 text-[11px] transition-colors ${
+              className={`group/tab flex h-8 min-w-[120px] max-w-[220px] items-center gap-1.5 rounded-t-md border px-2 text-[var(--text-11)] transition-colors ${
                 active
                   ? 'border-[var(--border-subtle)] border-b-[var(--panel-alt)] bg-[var(--panel-alt)] text-[var(--fg-secondary)]'
                   : 'border-transparent bg-transparent text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'

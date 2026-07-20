@@ -260,7 +260,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
       const label = state.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
       return (
         <span
-          className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
+          className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
           style={{ fontFamily: 'var(--display)' }}
           title={String(state.hubMessage ?? label)}
         >
@@ -278,7 +278,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
   if (state.statusChecking) {
     return (
       <span
-        className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--warning-panel)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
+        className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--warning-panel)] px-1.5 py-[1px] text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
         style={{ fontFamily: 'var(--display)' }}
         title={String(state.statusError ?? 'Checking status')}
       >
@@ -291,7 +291,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
     const label = state.hubPhase === 'error' ? 'Error' : 'Offline';
     return (
       <span
-        className="inline-flex items-center rounded-[4px] border border-[var(--red-border)] bg-[var(--danger-panel)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_var(--shadow-color)]"
+        className="inline-flex items-center rounded-[4px] border border-[var(--red-border)] bg-[var(--danger-panel)] px-1.5 py-[1px] text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_var(--shadow-color)]"
         style={{ fontFamily: 'var(--display)' }}
         title={String(state.hubMessage ?? state.statusError ?? label)}
       >
@@ -1922,7 +1922,7 @@ export function DroneCanvasDock({
           </button>
           <div className="flex min-w-0 flex-1 items-center gap-1">
             <label
-              className="inline-flex h-7 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded border border-[var(--border-subtle)] px-2 text-[10px] font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+              className="inline-flex h-7 flex-shrink-0 cursor-pointer items-center gap-1.5 rounded border border-[var(--border-subtle)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
               style={{ fontFamily: 'var(--display)' }}
               title="Show the latest agent reply above canvas nodes."
             >
@@ -1939,12 +1939,12 @@ export function DroneCanvasDock({
             <button
               type="button"
               onClick={resetViewport}
-              className="h-7 rounded border border-[var(--border-subtle)] px-2 text-[10px] font-semibold text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+              className="h-7 rounded border border-[var(--border-subtle)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
               title="Reset canvas view"
             >
               Reset
             </button>
-            <span className="w-[48px] text-right text-[10px] font-mono text-[var(--muted-dim)]" title="Current zoom">
+            <span className="w-[48px] text-right text-[var(--text-10)] font-mono text-[var(--muted-dim)]" title="Current zoom">
               {Math.round(scale * 100)}%
             </span>
           </div>
@@ -1952,7 +1952,7 @@ export function DroneCanvasDock({
         {canvasControlsExpanded ? (
           <div className="px-3 pb-2 flex items-center gap-2 flex-wrap">
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Agent
               </span>
               <UiMenuSelect
@@ -1969,7 +1969,7 @@ export function DroneCanvasDock({
                 type="button"
                 onClick={onOpenCustomAgentModal}
                 disabled={controlsDisabled}
-                className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                   controlsDisabled
                     ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                     : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -1982,7 +1982,7 @@ export function DroneCanvasDock({
             </div>
             {spawnAgentConfig.kind === 'builtin' ? (
               <div className="flex items-center gap-1.5">
-                <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+                <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                   Model
                 </span>
                 <UiMenuSelect
@@ -2008,7 +2008,7 @@ export function DroneCanvasDock({
                   }}
                   disabled={controlsDisabled}
                   placeholder="Default model"
-                  className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
+                  className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-11)] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
                     controlsDisabled
                       ? 'opacity-40 cursor-not-allowed'
                       : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
@@ -2019,7 +2019,7 @@ export function DroneCanvasDock({
                   type="button"
                   onClick={() => onSpawnModelChange('')}
                   disabled={controlsDisabled || !normalizedSpawnModel.trim()}
-                  className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                  className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                     controlsDisabled || !normalizedSpawnModel.trim()
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -2032,7 +2032,7 @@ export function DroneCanvasDock({
               </div>
             ) : null}
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Repo
               </span>
               <UiMenuSelect
@@ -2046,11 +2046,11 @@ export function DroneCanvasDock({
                 menuClassName="max-h-[220px] overflow-y-auto"
                 title={normalizedCreateRepoPath || 'No repo'}
                 triggerLabel={normalizedCreateRepoPath ? repoPathLabel(normalizedCreateRepoPath) : 'No repo'}
-                triggerLabelClassName={normalizedCreateRepoPath ? 'font-mono text-[11px]' : undefined}
+                triggerLabelClassName={normalizedCreateRepoPath ? 'font-mono text-[var(--text-11)]' : undefined}
               />
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
+              <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
                 Group
               </span>
               <input
@@ -2061,7 +2061,7 @@ export function DroneCanvasDock({
                 }}
                 disabled={controlsDisabled}
                 placeholder="Optional group"
-                className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
+                className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-11)] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
                   controlsDisabled
                     ? 'opacity-40 cursor-not-allowed'
                     : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
@@ -2072,7 +2072,7 @@ export function DroneCanvasDock({
                 type="button"
                 onClick={() => onCreateGroupChange('')}
                 disabled={controlsDisabled || !normalizedCreateGroup.trim()}
-                className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+                className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                   controlsDisabled || !normalizedCreateGroup.trim()
                     ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                     : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
@@ -2084,7 +2084,7 @@ export function DroneCanvasDock({
               </button>
             </div>
             <label
-              className={`inline-flex items-center gap-1.5 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
+              className={`inline-flex items-center gap-1.5 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
                 controlsDisabled
                   ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                   : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] cursor-pointer'
@@ -2225,7 +2225,7 @@ export function DroneCanvasDock({
                 onClick={(event) => onNodeClick(node.droneId, event)}
                 onDoubleClick={(event) => onNodeDoubleClick(node.droneId, event)}
                 aria-pressed={selected}
-                className={`group/canvas-node absolute relative overflow-visible rounded-md border text-left px-2.5 shadow-[0_10px_20px_var(--shadow-color)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
+                className={`group/canvas-node absolute relative overflow-visible rounded-[var(--radius-medium)] border text-left px-2.5 shadow-[0_10px_20px_var(--shadow-color)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
                   dragging
                     ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
                     : assignmentHoverTarget
@@ -2260,25 +2260,25 @@ export function DroneCanvasDock({
                 ) : null}
                 {showCanvasLastMessagePreviews && lastAgentSnippet ? (
                   <span
-                    className="pointer-events-none absolute left-0 bottom-full mb-[18px] z-[1] inline-flex max-w-[280px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-[10px] leading-[1.35] text-[var(--muted)] shadow-[0_6px_14px_var(--shadow-color)]"
+                    className="pointer-events-none absolute left-0 bottom-full mb-[18px] z-[1] inline-flex max-w-[280px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-[var(--text-10)] leading-[1.35] text-[var(--muted)] shadow-[0_6px_14px_var(--shadow-color)]"
                     title={lastAgentSnippet}
                   >
                     <span className="line-clamp-2 break-words whitespace-pre-wrap">{lastAgentSnippet}</span>
                   </span>
                 ) : null}
                 {draftNode ? (
-                  <span className="pointer-events-none absolute -top-2 left-2 z-[2] inline-flex items-center rounded-[4px] border border-[var(--user-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
+                  <span className="pointer-events-none absolute -top-2 left-2 z-[2] inline-flex items-center rounded-[4px] border border-[var(--user-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted)]">
                     Draft
                   </span>
                 ) : null}
                 {repoLabel ? (
-                  <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]">
+                  <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[var(--text-9)] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]">
                     {repoLabel}
                   </span>
                 ) : null}
                 {repoBranch ? (
                   <span
-                    className="pointer-events-none absolute right-2 top-full mt-[1px] inline-flex max-w-[180px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]"
+                    className="pointer-events-none absolute right-2 top-full mt-[1px] inline-flex max-w-[180px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[var(--text-9)] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]"
                     title={repoBranch}
                   >
                     {repoBranch}
@@ -2321,24 +2321,24 @@ export function DroneCanvasDock({
                           cancelInlineRename();
                         }
                       }}
-                      className="h-8 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[12.5px] font-semibold text-[var(--fg-secondary)] focus:outline-none focus:border-[var(--accent-muted)]"
+                      className="h-8 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-12-5)] font-[var(--weight-semibold)] text-[var(--fg-secondary)] focus:outline-none focus:border-[var(--accent-muted)]"
                     />
                   ) : assignmentHoverTarget ? (
                     <span className="block">
-                      <span className="block truncate text-[12.5px] font-semibold text-[var(--fg-secondary)]">
+                      <span className="block truncate text-[var(--text-12-5)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
                         Release to choose action
                       </span>
-                      <span className="block truncate text-[10px] text-[var(--muted-dim)]">
+                      <span className="block truncate text-[var(--text-10)] text-[var(--muted-dim)]">
                         {assignmentHoverTargetCount} drone{assignmentHoverTargetCount === 1 ? '' : 's'} dropped into this chat
                       </span>
                     </span>
                   ) : (
                     <span className="block">
-                      <span className="block truncate text-[12.5px] font-semibold text-[var(--fg-secondary)]">
+                      <span className="block truncate text-[var(--text-12-5)] font-[var(--weight-semibold)] text-[var(--fg-secondary)]">
                         {chatDisplay?.primaryLabel ?? node.label}
                       </span>
                       {!draftNode && chatDisplay?.secondaryLabel ? (
-                        <span className="block truncate text-[10px] text-[var(--muted-dim)]">
+                        <span className="block truncate text-[var(--text-10)] text-[var(--muted-dim)]">
                           {chatDisplay.secondaryLabel}
                         </span>
                       ) : null}
@@ -2393,26 +2393,26 @@ export function DroneCanvasDock({
 
         {nodes.length === 0 ? (
           <div className="absolute inset-0 grid place-items-center px-5 text-center pointer-events-none">
-            <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-overlay-soft)] px-4 py-3 max-w-[380px]">
-              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
+            <div className="rounded-[var(--radius-large)] border border-[var(--border-subtle)] bg-[var(--panel-overlay-soft)] px-4 py-3 max-w-[380px]">
+              <div className="text-[var(--text-11)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                 Drone Canvas
               </div>
-              <div className="mt-1 text-[12px] text-[var(--muted)]">
+              <div className="mt-1 text-[var(--text-12)] text-[var(--muted)]">
                 Drag one or more chats from the sidebar and drop them here.
               </div>
-              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
+              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
                 Double-click to create an untitled draft card.
               </div>
-              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
+              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
                 Ctrl-click toggles selection. Left drag draws a selection box.
               </div>
-              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
+              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
                 Esc clears selection. Delete removes selected cards. Shift+Delete deletes selected chats.
               </div>
-              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
+              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
                 Ctrl/Cmd+A selects all nodes.
               </div>
-              <div className="mt-1 text-[11px] text-[var(--muted-dim)]">
+              <div className="mt-1 text-[var(--text-11)] text-[var(--muted-dim)]">
                 Right-click drag pans. Mouse wheel zooms.
               </div>
             </div>

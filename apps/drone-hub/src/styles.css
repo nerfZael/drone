@@ -15,6 +15,7 @@
   /* ── Base surfaces ── */
   --bg: #0c0f14;
   --fg: #e5e9f0;
+  --fg-strong: #e5e9f0;
   --fg-secondary: #c7cdda;
   --muted: #a2aabc;
   --muted-dim: #858ea3;
@@ -22,9 +23,22 @@
   --panel: #11161e;
   --panel-alt: #171d27;
   --panel-raised: #1c2330;
+  --workspace: var(--panel);
 
   --border: #3b4557;
   --border-subtle: #293241;
+  --chrome-muted: var(--muted-dim);
+  --sidebar-fg: var(--fg-secondary);
+  --sidebar-fg-active: var(--fg);
+  --sidebar-subitem-fg: var(--muted);
+  --sidebar-heading-fg: var(--fg-secondary);
+  --sidebar-action-fg: var(--muted);
+  --sidebar-drone-compact-size: var(--text-10-5);
+  --sidebar-drone-size: var(--text-11-5);
+  --sidebar-drone-comfortable-size: var(--text-12);
+  --sidebar-item-compact-size: var(--text-11);
+  --sidebar-item-size: var(--text-12);
+  --sidebar-item-comfortable-size: var(--text-12-5);
 
   /* ── Accent: soft violet ── */
   --accent: #b19cff;
@@ -63,6 +77,7 @@
   --surface-inset-faint: rgba(0, 0, 0, .09);
   --surface-inset: rgba(0, 0, 0, .14);
   --surface-inset-strong: rgba(0, 0, 0, .24);
+  --settings-section-bg: var(--surface-inset);
   --scrim: rgba(3, 6, 12, .74);
   --scrim-soft: rgba(3, 6, 12, .55);
   --panel-overlay: rgba(17, 22, 30, .96);
@@ -73,11 +88,6 @@
   --selected: rgba(177, 156, 255, .10);
   --focus-ring: rgba(177, 156, 255, .82);
   --shadow-color: rgba(0, 0, 0, .48);
-  --texture-dot: rgba(255, 255, 255, .035);
-  --texture-grid: rgba(255, 255, 255, .02);
-  --texture-scanline: rgba(0, 0, 0, .035);
-  --launch-accent-glow: rgba(177, 156, 255, .10);
-  --launch-user-glow: rgba(170, 182, 200, .045);
   --canvas-dot: rgba(141, 161, 197, .18);
   --canvas-dot-rgb: 141, 161, 197;
   --canvas-related: rgba(123, 188, 255, .92);
@@ -85,11 +95,40 @@
   --canvas-related-subtle: rgba(123, 188, 255, .16);
   --canvas-assigned: rgba(255, 193, 90, .92);
   --canvas-assigned-muted: rgba(255, 193, 90, .74);
+  --assistant-bubble: var(--accent-subtle);
+  --assistant-bubble-border: var(--accent-border);
+  --assistant-bubble-fade: var(--accent-subtle);
+  --assistant-message-fg: var(--fg-secondary);
+  --user-bubble: var(--user-dim);
+  --user-bubble-border: var(--user-border);
+  --user-bubble-fg: var(--fg-secondary);
 
   /* ── Typography ── */
   --display: 'Chakra Petch', system-ui, sans-serif;
   --sans: 'IBM Plex Sans', system-ui, -apple-system, sans-serif;
   --code: 'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --body-size: 13px;
+  --body-line-height: 1.55;
+  --text-8: 8px;
+  --text-9: 9px;
+  --text-10: 10px;
+  --text-10-5: 10.5px;
+  --text-11: 11px;
+  --text-11-5: 11.5px;
+  --text-12: 12px;
+  --text-12-5: 12.5px;
+  --text-13: 13px;
+  --text-14: 14px;
+  --chat-text-size: 13px;
+  --chat-prose-max: 72ch;
+  --weight-semibold: 500;
+  --weight-bold: 600;
+  --weight-strong: 600;
+  --control-height: 36px;
+  --control-height-compact: 32px;
+  --radius-medium: 6px;
+  --radius-large: 8px;
+  --radius-xlarge: 12px;
 
   /* ── Glow ── */
   --glow-accent: 0 0 20px rgba(177, 156, 255, .12), 0 0 60px rgba(177, 156, 255, .04);
@@ -117,14 +156,22 @@
 :root[data-theme='catppuccin-mocha'] {
   --bg: #1e1e2e;
   --fg: #cdd6f4;
+  --fg-strong: #f5e0dc;
   --fg-secondary: #bac2de;
-  --muted: #a6adc8;
-  --muted-dim: #9399b2;
-  --panel: #1e1e2e;
+  --muted: #bac2de;
+  --muted-dim: #a6adc8;
+  --panel: #181825;
   --panel-alt: #181825;
   --panel-raised: #313244;
-  --border: #585b70;
-  --border-subtle: #45475a;
+  --workspace: #1e1e2e;
+  --border: #45475a;
+  --border-subtle: #313244;
+  --chrome-muted: #9399b2;
+  --sidebar-fg: #a6adc8;
+  --sidebar-fg-active: #bac2de;
+  --sidebar-subitem-fg: #9399b2;
+  --sidebar-heading-fg: #a6adc8;
+  --sidebar-action-fg: #9399b2;
   --accent: #cba6f7;
   --accent-muted: #b4befe;
   --accent-subtle: rgba(203, 166, 247, .14);
@@ -153,23 +200,19 @@
   --surface-soft: rgba(205, 214, 244, .045);
   --surface-strong: rgba(205, 214, 244, .075);
   --surface-inset-faint: rgba(17, 17, 27, .10);
-  --surface-inset: rgba(17, 17, 27, .18);
-  --surface-inset-strong: rgba(17, 17, 27, .30);
+  --surface-inset: rgba(205, 214, 244, .022);
+  --surface-inset-strong: #313244;
+  --settings-section-bg: transparent;
   --scrim: rgba(17, 17, 27, .78);
   --scrim-soft: rgba(17, 17, 27, .54);
   --panel-overlay: rgba(24, 24, 37, .96);
   --panel-overlay-soft: rgba(24, 24, 37, .90);
-  --danger-panel: rgba(46, 26, 38, .96);
-  --warning-panel: rgba(43, 38, 35, .96);
+  --danger-panel: #313244;
+  --warning-panel: #313244;
   --hover: rgba(205, 214, 244, .07);
   --selected: rgba(203, 166, 247, .07);
   --focus-ring: rgba(203, 166, 247, .86);
-  --shadow-color: rgba(17, 17, 27, .55);
-  --texture-dot: rgba(205, 214, 244, .045);
-  --texture-grid: rgba(205, 214, 244, .025);
-  --texture-scanline: rgba(17, 17, 27, .045);
-  --launch-accent-glow: rgba(203, 166, 247, .12);
-  --launch-user-glow: rgba(137, 180, 250, .055);
+  --shadow-color: rgba(17, 17, 27, .34);
   --canvas-dot: rgba(147, 153, 178, .18);
   --canvas-dot-rgb: 147, 153, 178;
   --canvas-related: rgba(137, 180, 250, .92);
@@ -177,11 +220,18 @@
   --canvas-related-subtle: rgba(137, 180, 250, .16);
   --canvas-assigned: rgba(249, 226, 175, .92);
   --canvas-assigned-muted: rgba(249, 226, 175, .74);
-  --glow-accent: 0 0 20px rgba(203, 166, 247, .13), 0 0 60px rgba(203, 166, 247, .05);
-  --glow-accent-strong: 0 0 20px rgba(203, 166, 247, .22), 0 0 80px rgba(203, 166, 247, .09);
-  --glow-user: 0 0 16px rgba(137, 180, 250, .10), 0 0 48px rgba(137, 180, 250, .05);
-  --glow-green: 0 0 14px rgba(166, 227, 161, .22);
-  --glow-yellow: 0 0 18px rgba(249, 226, 175, .24);
+  --glow-accent: none;
+  --glow-accent-strong: none;
+  --glow-user: none;
+  --glow-green: none;
+  --glow-yellow: none;
+  --assistant-bubble: transparent;
+  --assistant-bubble-border: transparent;
+  --assistant-bubble-fade: var(--bg);
+  --assistant-message-fg: var(--fg);
+  --user-bubble: #45475a;
+  --user-bubble-border: #585b70;
+  --user-bubble-fg: #f5e0dc;
   --link: #cba6f7;
   --link-hover: #f5c2e7;
   --link-strong: #f5e0dc;
@@ -261,7 +311,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--fg);
-  font: 13px/1.55 var(--sans);
+  font: var(--body-size)/var(--body-line-height) var(--sans);
   font-weight: 400;
   letter-spacing: 0;
   -webkit-font-smoothing: antialiased;
@@ -278,64 +328,14 @@ body {
 
 code, pre {
   font-family: var(--code);
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   tab-size: 4;
   letter-spacing: 0;
 }
 
-/* ──────────────────────────────────────────────────────────
-   Background textures
-   ────────────────────────────────────────────────────────── */
-
-/* Dot-grid pattern for sidebar */
-.dh-dot-grid {
-  background-image:
-    radial-gradient(circle, var(--texture-dot) 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-
-/* Noise texture overlay */
-.dh-noise::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  opacity: .025;
-  pointer-events: none;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-size: 128px 128px;
-}
-
-/* Scanline overlay for terminal areas */
-.dh-scanlines::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    var(--texture-scanline) 2px,
-    var(--texture-scanline) 4px
-  );
-  pointer-events: none;
-  z-index: 1;
-}
-
 /* No-selection home: quiet launch surface, not a dashboard. */
 .dh-launch-state {
-  background:
-    radial-gradient(circle at 18% 18%, var(--launch-accent-glow), transparent 30%),
-    radial-gradient(circle at 84% 76%, var(--launch-user-glow), transparent 26%),
-    var(--panel);
-}
-
-.dh-launch-grid {
-  opacity: .45;
-  background-image:
-    linear-gradient(var(--texture-grid) 1px, transparent 1px),
-    linear-gradient(90deg, var(--texture-grid) 1px, transparent 1px);
-  background-size: 48px 48px;
-  mask-image: radial-gradient(circle at 46% 46%, black, transparent 76%);
+  background: var(--workspace);
 }
 
 :where(button, [role='button'], a, input, textarea, select):focus-visible {
@@ -533,8 +533,8 @@ code, pre {
   border-radius: 999px;
   padding: 3px 10px 3px 8px;
   font-family: var(--display);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--text-10);
+  font-weight: var(--weight-semibold);
   letter-spacing: .06em;
   text-transform: uppercase;
   border: 1px solid;
@@ -585,9 +585,8 @@ code, pre {
   transition: all .15s ease;
 }
 .dh-selection-card.is-active {
-  background: linear-gradient(135deg, var(--accent-subtle) 0%, var(--selected) 100%);
+  background: var(--selected);
   border-color: var(--accent-border);
-  box-shadow: var(--glow-accent);
 }
 .dh-selection-card:not(.is-active):hover {
   background: var(--surface-soft);
@@ -600,7 +599,7 @@ code, pre {
 }
 .dh-runs-table thead th {
   font-family: var(--display);
-  background: linear-gradient(180deg, var(--surface-strong) 0%, var(--surface-softest) 100%);
+  background: var(--panel-raised);
 }
 .dh-runs-table tbody tr {
   transition: background .12s ease;
@@ -661,18 +660,105 @@ code, pre {
 
 .dh-display {
   font-family: var(--display);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.02em;
   text-transform: uppercase;
 }
 
 .dh-label {
   font-family: var(--sans);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--text-10);
+  font-weight: var(--weight-semibold);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--muted-dim);
+}
+
+/* Semantic type roles. Palette themes may change their colors, but never their
+   scale, weight, casing, or spacing. */
+.dh-type-title {
+  font-family: var(--display);
+  font-size: var(--text-13);
+  font-weight: var(--weight-semibold);
+  letter-spacing: -0.01em;
+  color: var(--fg-strong);
+}
+
+.dh-type-meta,
+.dh-type-status {
+  font-family: var(--sans);
+  font-size: var(--text-10);
+  font-weight: 400;
+  letter-spacing: 0;
+  color: var(--chrome-muted);
+}
+
+.dh-type-section-label {
+  font-family: var(--sans);
+  font-size: var(--text-10);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--muted-dim);
+}
+
+.dh-type-sidebar-brand,
+.dh-type-sidebar-heading,
+.dh-type-sidebar-item,
+.dh-type-sidebar-item-active,
+.dh-type-sidebar-action,
+.dh-type-sidebar-subitem {
+  font-family: var(--sans);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.dh-type-sidebar-brand {
+  font-size: var(--text-12);
+  font-weight: 500;
+  color: var(--sidebar-heading-fg);
+}
+
+.dh-type-sidebar-heading {
+  font-weight: 400;
+  color: var(--sidebar-heading-fg);
+}
+
+.dh-type-sidebar-item,
+.dh-type-sidebar-item-active,
+.dh-type-sidebar-subitem {
+  font-weight: 400;
+}
+
+.dh-type-sidebar-item { color: var(--sidebar-fg); }
+.dh-type-sidebar-item-active { color: var(--sidebar-fg-active); }
+.dh-type-sidebar-subitem { color: var(--sidebar-subitem-fg); }
+
+.dh-type-sidebar-action {
+  font-size: var(--text-10);
+  font-weight: 500;
+  color: var(--sidebar-action-fg);
+}
+
+.dh-type-sidebar-action--accent:hover { color: var(--accent); }
+.dh-type-sidebar-action--quiet:hover { color: var(--muted); }
+
+.dh-type-header-action {
+  font-family: var(--sans);
+  font-size: var(--text-10);
+  font-weight: 500;
+  letter-spacing: 0;
+  color: var(--chrome-muted);
+}
+
+.dh-type-header-action:hover { color: var(--fg-secondary); }
+.dh-type-header-action[data-unavailable='true'] { color: var(--muted-dim); }
+
+.dh-type-count {
+  font-family: var(--sans);
+  font-size: var(--text-9);
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+  color: var(--chrome-muted);
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -682,7 +768,7 @@ code, pre {
 /* Accent bar (used as section dividers) */
 .dh-accent-bar {
   height: 1px;
-  background: linear-gradient(90deg, var(--accent) 0%, transparent 100%);
+  background: var(--accent);
   opacity: .3;
 }
 
@@ -714,18 +800,17 @@ code, pre {
    ────────────────────────────────────────────────────────── */
 
 .dh-markdown {
-  font: 13px/1.65 var(--sans);
+  font: var(--chat-text-size)/1.65 var(--sans);
   color: var(--fg);
   word-break: break-word;
 }
 .dh-markdown--transcript {
-  --dh-prose-max: 72ch;
   width: 100%;
   font-size: .9375rem;
   line-height: 1.68;
 }
 .dh-markdown--transcript > * {
-  max-width: min(100%, var(--dh-prose-max));
+  max-width: min(100%, var(--chat-prose-max));
 }
 .dh-markdown--transcript > .dh-markdown-block--wide {
   width: 100%;
@@ -736,17 +821,17 @@ code, pre {
   max-width: none;
   margin-left: -1.5rem;
 }
-.dh-markdown--agent { color: var(--fg-secondary); }
+.dh-markdown--agent { color: var(--assistant-message-fg); }
 .dh-markdown--muted { color: var(--fg-secondary); }
 .dh-markdown--error { color: var(--red); }
 .dh-markdown--user {
-  color: var(--fg-secondary);
+  color: var(--user-bubble-fg);
   font-size: .9375rem;
 }
 .dh-markdown--user code {
   background: var(--user-subtle);
   border-color: var(--border-subtle);
-  color: var(--fg-secondary);
+  color: var(--user-bubble-fg);
 }
 
 .dh-markdown > :first-child { margin-top: 0; }
@@ -756,7 +841,7 @@ code, pre {
 .dh-markdown p + p { margin-top: 1rem; }
 .dh-markdown strong,
 .dh-markdown b {
-  font-weight: 700;
+  font-weight: var(--weight-strong);
 }
 .dh-markdown--muted strong,
 .dh-markdown--muted b {
@@ -774,7 +859,7 @@ code, pre {
 .dh-markdown h6 {
   margin: .95rem 0 .45rem;
   font-family: var(--display);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   color: var(--fg);
   letter-spacing: 0.01em;
   line-height: 1.35;
@@ -905,7 +990,7 @@ code, pre {
 }
 .dh-markdown li::marker { color: var(--accent); }
 .dh-markdown ol > li::marker {
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;
 }
 .dh-markdown li > p { margin: .2rem 0; }
@@ -942,8 +1027,8 @@ code, pre {
   background: var(--surface-soft);
   color: var(--fg);
   font-family: var(--display);
-  font-size: 10px;
-  font-weight: 600;
+  font-size: var(--text-10);
+  font-weight: var(--weight-semibold);
   letter-spacing: .05em;
   text-transform: uppercase;
 }
@@ -976,7 +1061,7 @@ code, pre {
 
 .dh-markdown code {
   font-family: var(--code);
-  font-size: 12px;
+  font-size: var(--text-12);
   background: var(--code-bg);
   border: 1px solid var(--code-border);
   padding: .15rem .42rem;
@@ -986,7 +1071,7 @@ code, pre {
 
 .dh-markdown pre {
   font-family: var(--code);
-  font-size: 12.5px;
+  font-size: var(--text-12-5);
   line-height: 1.55;
   background: var(--surface-inset-strong);
   border: 1px solid var(--border-subtle);
@@ -1040,7 +1125,7 @@ code, pre {
 .dh-markdown-table-label {
   color: var(--muted-dim);
   font-family: var(--display);
-  font-size: 10px;
+  font-size: var(--text-10);
   letter-spacing: .06em;
   text-transform: uppercase;
 }
@@ -1097,7 +1182,7 @@ code, pre {
   width: max-content;
   min-width: 100%;
   table-layout: auto;
-  font-size: 12px;
+  font-size: var(--text-12);
   margin: 0;
 }
 
@@ -1148,9 +1233,7 @@ code, pre {
   padding: 1rem;
   border: 1px solid var(--accent-border);
   border-radius: 14px;
-  background:
-    linear-gradient(180deg, var(--accent-subtle) 0%, var(--panel-raised) 180px),
-    var(--panel-raised);
+  background: var(--panel-raised);
   box-shadow: 0 24px 80px var(--shadow-color);
 }
 
@@ -1170,7 +1253,7 @@ code, pre {
 .dh-markdown-table-dialog-title {
   color: var(--fg);
   font-family: var(--display);
-  font-size: 12px;
+  font-size: var(--text-12);
   letter-spacing: .06em;
   text-transform: uppercase;
 }
@@ -1178,7 +1261,7 @@ code, pre {
 .dh-markdown-table-dialog-subtitle {
   margin-top: .18rem;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--text-11);
 }
 
 .dh-markdown-table-dialog-close {
@@ -1216,9 +1299,9 @@ code, pre {
 }
 .dh-markdown thead th {
   color: var(--muted);
-  font-weight: 600;
+  font-weight: var(--weight-semibold);
   font-family: var(--display);
-  font-size: 10px;
+  font-size: var(--text-10);
   letter-spacing: .05em;
   text-transform: uppercase;
   background: var(--surface-softest);
@@ -1275,28 +1358,13 @@ select:disabled optgroup {
   transition: outline-color .2s ease, outline-offset .2s ease;
 }
 
-/* Gradient border effect for cards */
+/* Quiet active border treatment for interactive cards. */
 .dh-gradient-border {
   position: relative;
 }
-.dh-gradient-border::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(135deg, var(--accent-muted), transparent 50%);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
-  opacity: 0;
-  transition: opacity .2s;
-}
-.dh-gradient-border:hover::before,
-.dh-gradient-border.active::before {
-  opacity: 1;
+.dh-gradient-border:hover,
+.dh-gradient-border.active {
+  border-color: var(--accent-muted);
 }
 
 /* ──────────────────────────────────────────────────────────
@@ -1326,8 +1394,8 @@ select:disabled optgroup {
   --dv-separator-border: var(--border-subtle);
   --dv-tab-divider-color: var(--border-subtle);
   --dv-tabs-and-actions-container-height: 28px;
-  --dv-tabs-and-actions-container-font-size: 10px;
-  --dv-tab-font-size: 10px;
+  --dv-tabs-and-actions-container-font-size: var(--text-10);
+  --dv-tab-font-size: var(--text-10);
   --dv-sash-color: transparent;
   --dv-active-sash-color: var(--user-subtle);
   --dv-drag-over-background-color: var(--user-subtle);
@@ -1386,8 +1454,8 @@ select:disabled optgroup {
 
 .dh-dockable-workspace--compact-headers .dh-dockview {
   --dv-tabs-and-actions-container-height: 20px;
-  --dv-tabs-and-actions-container-font-size: 9px;
-  --dv-tab-font-size: 9px;
+  --dv-tabs-and-actions-container-font-size: var(--text-9);
+  --dv-tab-font-size: var(--text-9);
 }
 
 .dh-dockable-workspace--compact-headers .dv-tabs-and-actions-container {
@@ -1470,7 +1538,7 @@ select:disabled optgroup {
 .dh-changes-dock .rdv-wrapper .diff .diff-gutter .dh-diff-gutter-sign {
   width: 1ch;
   text-align: center;
-  font-weight: 700;
+  font-weight: var(--weight-bold);
   opacity: 0.95;
 }
 

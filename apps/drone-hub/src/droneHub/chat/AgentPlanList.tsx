@@ -31,12 +31,11 @@ export function AgentPlanList({
         {running ? (
           <div className="flex items-baseline gap-1.5">
             <span
-              className="text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-dim)]"
-              style={{ fontFamily: 'var(--display)' }}
+              className="text-[var(--text-10)] font-medium text-[var(--muted)]"
             >
               Plan
             </span>
-            <span className="font-mono text-[9px] tabular-nums text-[var(--muted-dim)]">
+            <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--muted-dim)]">
               ({progressLabel})
             </span>
           </div>
@@ -44,8 +43,7 @@ export function AgentPlanList({
           <button
             type="button"
             onClick={() => setPlanExpanded((value) => !value)}
-            className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.14em] text-[var(--muted-dim)] transition-colors hover:text-[var(--accent)] focus-visible:text-[var(--accent)] focus-visible:outline-none"
-            style={{ fontFamily: 'var(--display)' }}
+            className="flex items-center gap-1 text-[var(--text-10)] font-medium text-[var(--muted)] transition-colors hover:text-[var(--accent)] focus-visible:text-[var(--accent)] focus-visible:outline-none"
             aria-expanded={planExpanded}
           >
             <IconChevron down={planExpanded} />
@@ -66,7 +64,7 @@ export function AgentPlanList({
               return (
                 <li
                   key={item.id || `${index}:${item.text}`}
-                  className="grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2 text-[11px] leading-[1.45]"
+                  className="grid grid-cols-[16px_minmax(0,1fr)] items-start gap-2 text-[var(--text-11)] leading-[1.45]"
                 >
                   <span className="mt-[1px] flex h-4 w-4 items-center justify-center" aria-hidden="true">
                     {done ? (
@@ -103,8 +101,7 @@ export function AgentPlanList({
             <button
               type="button"
               onClick={() => setStepsExpanded((value) => !value)}
-              className="mt-2 text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)] transition-colors hover:text-[var(--accent)] focus-visible:text-[var(--accent)] focus-visible:outline-none"
-              style={{ fontFamily: 'var(--display)' }}
+              className="mt-2 text-[var(--text-10)] font-medium text-[var(--muted)] transition-colors hover:text-[var(--accent)] focus-visible:text-[var(--accent)] focus-visible:outline-none"
               aria-expanded={stepsExpanded}
             >
               {stepsExpanded ? 'Show fewer steps' : `Show ${plan.items.length - DEFAULT_VISIBLE_ITEMS} more`}

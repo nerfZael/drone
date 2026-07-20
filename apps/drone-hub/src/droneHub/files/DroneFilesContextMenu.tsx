@@ -100,7 +100,7 @@ export function DroneFilesContextMenu({
   }, [actionMode]);
 
   const itemClassName =
-    'flex h-7 w-full items-center rounded-sm px-2.5 text-left text-[12px] text-[var(--fg-secondary)] hover:bg-[var(--accent-subtle)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-40';
+    'flex h-7 w-full items-center rounded-sm px-2.5 text-left text-[var(--text-12)] text-[var(--fg-secondary)] hover:bg-[var(--accent-subtle)] hover:text-[var(--fg)] disabled:cursor-not-allowed disabled:opacity-40';
   const entrySelected = menu.entry != null && selectedCount > 0;
 
   return (
@@ -108,7 +108,7 @@ export function DroneFilesContextMenu({
       ref={menuRef}
       role="menu"
       aria-label="File explorer actions"
-      className="fixed z-[80] max-h-[calc(100vh-8px)] w-[220px] overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--panel)] p-1 shadow-[0_10px_30px_var(--shadow-color)]"
+      className="fixed z-[80] max-h-[calc(100vh-8px)] w-[220px] overflow-y-auto rounded-[var(--radius-medium)] border border-[var(--border)] bg-[var(--panel)] p-1 shadow-[0_10px_30px_var(--shadow-color)]"
       style={{ left: menu.x, top: menu.y }}
       onContextMenu={(event) => event.preventDefault()}
     >
@@ -120,7 +120,7 @@ export function DroneFilesContextMenu({
             onSubmitAction();
           }}
         >
-          <label className="mb-1.5 block text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]">
+          <label className="mb-1.5 block text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)]">
             {actionLabel(actionMode)}
           </label>
           <input
@@ -129,7 +129,7 @@ export function DroneFilesContextMenu({
             disabled={actionLoading}
             onChange={(event) => onActionInputChange(event.currentTarget.value)}
             autoFocus
-            className="h-7 w-full rounded-sm border border-[var(--accent-muted)] bg-[var(--panel-alt)] px-2 text-[12px] text-[var(--fg)] outline-none disabled:opacity-60"
+            className="h-7 w-full rounded-sm border border-[var(--accent-muted)] bg-[var(--panel-alt)] px-2 text-[var(--text-12)] text-[var(--fg)] outline-none disabled:opacity-60"
             placeholder={actionPlaceholder(actionMode)}
           />
           <div className="mt-2 flex justify-end gap-1.5">
@@ -137,14 +137,14 @@ export function DroneFilesContextMenu({
               type="button"
               disabled={actionLoading}
               onClick={onClose}
-              className="h-7 rounded-sm px-2 text-[11px] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
+              className="h-7 rounded-sm px-2 text-[var(--text-11)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] disabled:opacity-40"
             >
               Cancel
             </button>
             <button
               type="submit"
               disabled={actionLoading || !actionInput.trim()}
-              className="h-7 rounded-sm bg-[var(--accent-subtle)] px-2.5 text-[11px] font-semibold text-[var(--accent)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40"
+              className="h-7 rounded-sm bg-[var(--accent-subtle)] px-2.5 text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--accent)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40"
             >
               {actionLoading ? 'Working…' : actionMode === 'go-to-path' ? 'Go' : actionLabel(actionMode)}
             </button>

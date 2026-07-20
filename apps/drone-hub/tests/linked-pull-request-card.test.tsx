@@ -147,7 +147,7 @@ describe('linked pull request messages', () => {
     expect(html).not.toContain('Open on GitHub');
     expect(html).not.toContain('Merge requires confirmation');
     expect(html).toContain('border-l-2');
-    expect(html).toContain('rounded-md');
+    expect(html).toContain('rounded-[var(--radius-medium)]');
     expect(html).toContain('w-fit');
     expect(html).toContain('max-w-full');
     expect(html).not.toContain('hover:border-l-');
