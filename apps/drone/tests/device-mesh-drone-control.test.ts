@@ -13,6 +13,7 @@ describe('device mesh drone summaries', () => {
         runtime: 'container',
         group: 'Review',
         repoPath: '/work/repo',
+        cwd: '/work/repo/subdir',
         fleetParentId: 'drone_parent',
         chats: ['default', 'review'],
         busyChats: ['review'],
@@ -23,6 +24,8 @@ describe('device mesh drone summaries', () => {
     ).toMatchObject({
       id: 'drone_child',
       repoPath: '/work/repo',
+      cwd: '/work/repo/subdir',
+      repoAttached: true,
       fleetParentId: 'drone_parent',
       group: 'Review',
       chats: ['default', 'review'],
@@ -600,6 +603,90 @@ describe('device mesh drone summaries', () => {
           pullNumber: true,
         }),
       ).rejects.toThrow('pullNumber must be a positive integer');
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('returns chunked text and media file previews', async () => {
+    const originalFetch = globalThis.fetch;
+    const chunkRequests: string[] = [];
+    const metadataRequests: string[] = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = new URL(String(input));
+      const filePath = url.searchParams.get('path');
+      if (url.pathname.endsWith('/fs/file')) {
+        metadataRequests.push(String(url.searchParams.get('metadata') ?? ''));
+        const body = filePath?.endsWith('.md')
+          ? {
+              ok: true,
+              path: '/work/repo/README.md',
+              kind: 'text',
+              mime: 'text/markdown',
+              content: '# Preview',
+              size: 9,
+              mtimeMs: 100,
+            }
+          : {
+              ok: true,
+              path: '/work/repo/demo.mp4',
+              kind: 'video',
+              mime: 'video/mp4',
+              size: 6,
+              mtimeMs: 200,
+            };
+        return Response.json(body);
+      }
+      if (url.pathname.endsWith('/fs/chunk')) {
+        chunkRequests.push(`${url.searchParams.get('offset')}:${url.searchParams.get('limit')}`);
+        return Response.json({
+          ok: true,
+          kind: 'binary-chunk',
+          mime: 'video/mp4',
+          size: 6,
+          offset: 0,
+          nextOffset: 6,
+          eof: true,
+          dataBase64: Buffer.from([1, 2, 3, 4, 5, 6]).toString('base64'),
+        });
+      }
+      return Response.json({ error: 'not found' }, { status: 404 });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      const textResult: any = await capability.invoke('file.preview', {
+        droneId: 'one',
+        path: '/work/repo/README.md',
+      });
+      const decodedText = JSON.parse(
+        Buffer.from(textResult.contentChunk.dataBase64, 'base64').toString('utf8'),
+      );
+      expect(decodedText).toMatchObject({
+        kind: 'text',
+        mime: 'text/markdown',
+        content: '# Preview',
+      });
+
+      await expect(
+        capability.invoke('file.preview', {
+          droneId: 'one',
+          path: '/work/repo/demo.mp4',
+        }),
+      ).resolves.toMatchObject({
+        preview: { kind: 'video', mime: 'video/mp4', size: 6 },
+        mediaChunk: {
+          encoding: 'base64-binary',
+          offset: 0,
+          bytes: 6,
+          totalBytes: 6,
+          done: true,
+        },
+      });
+      expect(chunkRequests).toEqual(['0:131072']);
+      expect(metadataRequests).toEqual(['', '1']);
     } finally {
       globalThis.fetch = originalFetch;
     }

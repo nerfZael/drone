@@ -1,6 +1,8 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Crypto from 'expo-crypto';
+import { Directory, File, Paths } from 'expo-file-system';
 import React from 'react';
+import { fromByteArray } from 'base64-js';
 import type { DroneControlOperation } from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
 import { loadLocalAssistantSettings } from '../local-assistant/local-assistant-settings';
@@ -14,8 +16,40 @@ import {
   createLegacyPhoneDroneRecord,
   type LocalDroneRecord,
 } from './local-drone-records';
+import {
+  inferMobilePreviewMime,
+  MOBILE_MEDIA_PREVIEW_MAX_BYTES,
+  MOBILE_TEXT_PREVIEW_MAX_BYTES,
+} from './file-preview-model';
 
 const LOCAL_DRONES_KEY = 'droneHub.nativeDrones.v1';
+const LOCAL_PREVIEW_CHUNK_BYTES = 128 * 1024;
+
+function localArtifactPathParts(raw: unknown): string[] {
+  const path = String(raw ?? '')
+    .trim()
+    .replace(/\\/g, '/')
+    .replace(/^\.\//, '');
+  if (!path || path.startsWith('/') || path.split('/').some((part) => part === '..')) {
+    throw new Error('Phone artifact previews require a relative file path');
+  }
+  return path.split('/').filter((part) => part && part !== '.');
+}
+
+function localJsonChunk(value: unknown, offsetRaw: unknown) {
+  const content = new TextEncoder().encode(JSON.stringify(value));
+  const requested = Number(offsetRaw);
+  const offset = Number.isSafeInteger(requested) && requested > 0 ? requested : 0;
+  const chunk = content.slice(offset, offset + LOCAL_PREVIEW_CHUNK_BYTES);
+  return {
+    encoding: 'base64-json-utf8',
+    offset,
+    bytes: chunk.length,
+    totalBytes: content.length,
+    done: offset + chunk.length >= content.length,
+    dataBase64: fromByteArray(chunk),
+  };
+}
 
 function promptImages(raw: unknown): LocalAssistantPromptImage[] {
   if (!Array.isArray(raw)) return [];
@@ -218,6 +252,50 @@ export function useLocalDroneControl() {
           dronesRef.current.map((candidate) => (candidate.id === drone.id ? nextDrone : candidate)),
         );
         return { ok: true, chatName, chats: Object.keys(nextDrone.chats) };
+      }
+      if (operation === 'file.preview') {
+        const { thread } = getThread();
+        const parts = localArtifactPathParts(payload.path);
+        const root = new Directory(
+          Paths.document,
+          'drone-hub-native-artifacts-v1',
+          encodeURIComponent(thread.id),
+        );
+        const file = new File(root, ...parts);
+        if (!file.exists) throw new Error(`Artifact file not found: ${parts.join('/')}`);
+        const mime = inferMobilePreviewMime(parts.join('/'));
+        const mediaKind = mime.startsWith('image/')
+          ? 'image'
+          : mime.startsWith('video/')
+            ? 'video'
+            : null;
+        const fileSize = Number(file.size);
+        const size = Number.isFinite(fileSize) ? Math.max(0, Math.floor(fileSize)) : 0;
+        const maxBytes = mediaKind ? MOBILE_MEDIA_PREVIEW_MAX_BYTES : MOBILE_TEXT_PREVIEW_MAX_BYTES;
+        if (size > maxBytes) {
+          throw new Error(
+            `${mediaKind ? 'Media' : 'File'} is too large to preview on mobile (${size} bytes, max ${maxBytes})`,
+          );
+        }
+        const bytes = await file.bytes();
+        const kind = mediaKind ?? (bytes.includes(0) ? 'binary' : 'text');
+        const preview = {
+          path: parts.join('/'),
+          kind,
+          mime: kind === 'text' && mime === 'text/plain' ? 'text/plain' : mime,
+          size,
+          mtimeMs: Number.isFinite(Number(file.modificationTime))
+            ? Number(file.modificationTime)
+            : null,
+          ...(kind === 'text' ? { content: new TextDecoder().decode(bytes) } : {}),
+        };
+        if (kind !== 'image' && kind !== 'video') {
+          return { contentChunk: localJsonChunk(preview, payload.contentOffset) };
+        }
+        return {
+          preview,
+          mediaDataBase64: fromByteArray(bytes),
+        };
       }
       if (operation === 'chat.read') {
         const { thread } = getThread();
