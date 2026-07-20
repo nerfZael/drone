@@ -33,13 +33,22 @@ export type MeshInvitation = {
     expiresAt: string;
   };
 };
+export type MeshInvitationStatus = {
+  invitationId: string;
+  endpoint: string;
+  expiresAt: string;
+  claimed: boolean;
+};
 
 export function useDeviceMesh(requestJson: RequestJson) {
   const [status, setStatus] = React.useState<MeshStatus | null>(null);
   const [invitation, setInvitation] = React.useState<MeshInvitation | null>(null);
+  const [invitationBusy, setInvitationBusy] = React.useState(false);
+  const [invitationError, setInvitationError] = React.useState<string | null>(null);
   const [loading, setLoading] = React.useState(true);
   const [busyId, setBusyId] = React.useState<string | null>(null);
   const [error, setError] = React.useState<string | null>(null);
+  const invitationRequest = React.useRef<Promise<void> | null>(null);
 
   const load = React.useCallback(async () => {
     setLoading(true);
@@ -81,21 +90,50 @@ export function useDeviceMesh(requestJson: RequestJson) {
     [load],
   );
 
-  return {
-    status,
-    invitation,
-    loading,
-    busyId,
-    error,
-    load,
-    createInvitation: () =>
-      action('invite', async () => {
+  const createInvitation = React.useCallback(async () => {
+    if (invitationRequest.current) return await invitationRequest.current;
+    const request = (async () => {
+      setInvitationBusy(true);
+      try {
         setInvitation(
           await requestJson<MeshInvitation>('/api/device-mesh/invitations', {
             method: 'POST',
           }),
         );
-      }),
+        setInvitationError(null);
+      } catch (nextError: any) {
+        setInvitationError(nextError?.message ?? String(nextError));
+      } finally {
+        setInvitationBusy(false);
+      }
+    })();
+    invitationRequest.current = request;
+    try {
+      await request;
+    } finally {
+      if (invitationRequest.current === request) invitationRequest.current = null;
+    }
+  }, [requestJson]);
+
+  const readInvitationStatus = React.useCallback(
+    (invitationId: string) =>
+      requestJson<{ ok: true } & MeshInvitationStatus>(
+        `/api/device-mesh/invitations/${encodeURIComponent(invitationId)}`,
+      ),
+    [requestJson],
+  );
+
+  return {
+    status,
+    invitation,
+    invitationBusy,
+    invitationError,
+    loading,
+    busyId,
+    error,
+    load,
+    createInvitation,
+    readInvitationStatus,
     join: (payload: string) =>
       action('join', async () => {
         const started = await requestJson<{ joinId: string }>('/api/device-mesh/joins', {

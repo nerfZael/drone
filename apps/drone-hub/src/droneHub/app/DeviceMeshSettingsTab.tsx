@@ -1,6 +1,11 @@
 import React from 'react';
 import { IconSpinner } from './icons';
 import { CrossDeviceAssistantPolicyPanel } from './CrossDeviceAssistantPolicyPanel';
+import {
+  deviceMeshInvitationCheckDelay,
+  deviceMeshInvitationNeedsRotation,
+  INVITATION_STATUS_POLL_MS,
+} from './device-mesh-invitation';
 import { DeviceMeshIngressPanel, type DeviceMeshIngressStatus } from './DeviceMeshIngressPanel';
 import { ProviderCredentialTransferPanel } from './ProviderCredentialTransferPanel';
 import { deviceEditorSourceKey } from './device-editor-state';
@@ -224,10 +229,89 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
   >('network');
   const [pendingSelections, setPendingSelections] = React.useState<Record<string, Set<string>>>({});
   const [pendingAdmins, setPendingAdmins] = React.useState<Record<string, boolean>>({});
+  const [invitationRefreshTick, setInvitationRefreshTick] = React.useState(0);
+  const invitationAttemptAt = React.useRef(0);
   const handleIngressStatus = React.useCallback(
     (status: DeviceMeshIngressStatus | null) => setIngressStatus(status),
     [],
   );
+  const advertisedEndpoint = mesh.status
+    ? (mesh.status.devices.find((device) => device.id === mesh.status?.selfDeviceId)
+        ?.endpoints[0] ?? '')
+    : (ingressStatus?.publicEndpoint ?? '');
+  const visibleMeshError = mesh.error ?? mesh.invitationError;
+
+  React.useEffect(() => {
+    if (
+      activeSection !== 'network' ||
+      !ingressStatus?.running ||
+      !advertisedEndpoint ||
+      mesh.invitationBusy
+    )
+      return;
+
+    let cancelled = false;
+    let timer: number | null = null;
+    const schedule = (delay: number) => {
+      timer = window.setTimeout(() => {
+        if (!cancelled && document.visibilityState === 'visible')
+          setInvitationRefreshTick((value) => value + 1);
+      }, delay);
+    };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') setInvitationRefreshTick((value) => value + 1);
+    };
+    document.addEventListener('visibilitychange', onVisibilityChange);
+
+    if (document.visibilityState === 'visible') {
+      const requestRotation = () => {
+        const sinceAttempt = Date.now() - invitationAttemptAt.current;
+        if (sinceAttempt < INVITATION_STATUS_POLL_MS) {
+          schedule(INVITATION_STATUS_POLL_MS - sinceAttempt);
+          return;
+        }
+        invitationAttemptAt.current = Date.now();
+        void mesh.createInvitation();
+      };
+      const rotate = (status: Awaited<ReturnType<typeof mesh.readInvitationStatus>> | null) => {
+        if (!deviceMeshInvitationNeedsRotation(mesh.invitation, status, advertisedEndpoint)) {
+          schedule(deviceMeshInvitationCheckDelay(mesh.invitation!.expiresAt));
+          return;
+        }
+        requestRotation();
+      };
+
+      if (deviceMeshInvitationNeedsRotation(mesh.invitation, null, advertisedEndpoint)) {
+        rotate(null);
+      } else {
+        void mesh
+          .readInvitationStatus(mesh.invitation!.invitationId)
+          .then((status) => {
+            if (!cancelled) rotate(status);
+          })
+          .catch((nextError: any) => {
+            if (cancelled) return;
+            if (Number(nextError?.status) === 404) requestRotation();
+            else schedule(INVITATION_STATUS_POLL_MS);
+          });
+      }
+    }
+
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+    };
+  }, [
+    activeSection,
+    advertisedEndpoint,
+    ingressStatus?.running,
+    invitationRefreshTick,
+    mesh.createInvitation,
+    mesh.invitation,
+    mesh.invitationBusy,
+    mesh.readInvitationStatus,
+  ]);
 
   if (mesh.loading && !mesh.status) {
     return (
@@ -276,9 +360,9 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
         ))}
       </nav>
 
-      {mesh.error ? (
+      {visibleMeshError ? (
         <div className="border-l-2 border-[var(--red)] px-3 py-1 text-[12px] text-[var(--red)]">
-          {mesh.error}
+          {visibleMeshError}
         </div>
       ) : null}
 
@@ -304,21 +388,13 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
             </div>
             <div className="grid gap-3 border-t border-[var(--border-subtle)] py-4">
               <DeviceMeshIngressPanel requestJson={requestJson} onStatus={handleIngressStatus} />
-              <button
-                type="button"
-                disabled={
-                  mesh.busyId === 'invite' ||
-                  !ingressStatus?.running ||
-                  !ingressStatus.publicEndpoint
-                }
-                onClick={() => void mesh.createInvitation()}
-                className="h-9 justify-self-start rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--fg)] hover:bg-[var(--accent-soft)] disabled:opacity-50"
-              >
-                {mesh.busyId === 'invite' ? 'Creating…' : 'Create pairing QR'}
-              </button>
-              {!ingressStatus?.publicEndpoint ? (
+              {!advertisedEndpoint ? (
                 <span className="text-[10px] text-[var(--muted)]">
-                  Configure the secure ingress before creating an invitation.
+                  Configure the secure ingress before a pairing code can be prepared.
+                </span>
+              ) : !mesh.invitation ? (
+                <span className="flex items-center gap-2 text-[10px] text-[var(--muted)]">
+                  <IconSpinner className="h-3.5 w-3.5" /> Preparing a secure pairing code…
                 </span>
               ) : null}
             </div>
@@ -330,12 +406,17 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                 />
                 <div>
                   <div className="text-[13px] font-semibold text-[var(--fg)]">
-                    Scan or copy to another Hub
+                    Scan or copy to another device
+                    {mesh.invitationBusy ? (
+                      <span className="ml-2 text-[10px] font-normal text-[var(--muted)]">
+                        Refreshing…
+                      </span>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-[12px] text-[var(--muted)]">
                     Known devices reconnect after proving their existing key. New devices still
-                    require approval below. This code expires at{' '}
-                    {new Date(mesh.invitation.expiresAt).toLocaleTimeString()}.
+                    require approval below. This code refreshes automatically and currently expires
+                    at {new Date(mesh.invitation.expiresAt).toLocaleTimeString()}.
                   </p>
                   <textarea
                     readOnly

@@ -250,6 +250,10 @@ export class DeviceMeshHttp {
         await this.invite(request, response);
         return true;
       }
+      if (method === 'GET' && parts.length === 4 && parts[2] === 'invitations') {
+        await this.invitationStatus(response, parts[3]);
+        return true;
+      }
       if (method === 'POST' && url.pathname === '/api/device-mesh/joins') {
         await this.join(request, response);
         return true;
@@ -337,6 +341,25 @@ export class DeviceMeshHttp {
       payload,
       qrSvg: await QRCode.toString(JSON.stringify(payload), { type: 'svg', margin: 1 }),
       expiresAt,
+    });
+  }
+
+  private async invitationStatus(
+    response: http.ServerResponse,
+    invitationId: string,
+  ): Promise<void> {
+    const state = await this.store.read();
+    const invitation = state.invitations[invitationId];
+    if (!invitation) {
+      json(response, 404, { ok: false, error: 'pairing invitation not found' });
+      return;
+    }
+    json(response, 200, {
+      ok: true,
+      invitationId: invitation.id,
+      endpoint: invitation.endpoint,
+      expiresAt: invitation.expiresAt,
+      claimed: invitation.claimedAt !== null,
     });
   }
 

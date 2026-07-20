@@ -185,6 +185,63 @@ describe('desktop device pairing', () => {
     ).toEqual([]);
   });
 
+  test('reports when a pairing invitation has been claimed', async () => {
+    const inviter = await startHub();
+    const joining = await startHub();
+    const joiningStatus = await adminJson(joining, '/api/device-mesh');
+    await adminJson(joining, `/api/device-mesh/devices/${joiningStatus.selfDeviceId}`, {
+      method: 'PUT',
+      body: JSON.stringify({ name: 'Invitation status joining Hub' }),
+    });
+    const invitation = await adminJson(inviter, '/api/device-mesh/invitations', {
+      method: 'POST',
+    });
+
+    const publicStatus = await fetch(
+      `${inviter.ingressUrl}/api/device-mesh/invitations/${encodeURIComponent(invitation.invitationId)}`,
+      { headers: { authorization: `Bearer ${inviter.token}` } },
+    );
+    expect(publicStatus.status).toBe(404);
+
+    expect(
+      await adminJson(
+        inviter,
+        `/api/device-mesh/invitations/${encodeURIComponent(invitation.invitationId)}`,
+      ),
+    ).toMatchObject({
+      invitationId: invitation.invitationId,
+      endpoint: invitation.payload.endpoint,
+      expiresAt: invitation.expiresAt,
+      claimed: false,
+    });
+
+    const join = await adminJson(joining, '/api/device-mesh/joins', {
+      method: 'POST',
+      body: JSON.stringify({ payload: JSON.stringify(invitation.payload) }),
+    });
+    const claimed = await waitFor(async () => {
+      const status = await adminJson(
+        inviter,
+        `/api/device-mesh/invitations/${encodeURIComponent(invitation.invitationId)}`,
+      );
+      return status.claimed ? status : null;
+    });
+    expect(claimed.claimed).toBe(true);
+
+    const pending = await waitFor(async () => {
+      const status = await adminJson(inviter, '/api/device-mesh');
+      return status.pending[0] ?? null;
+    });
+    await adminJson(inviter, `/api/device-mesh/pending/${pending.id}/approve`, {
+      method: 'POST',
+      body: JSON.stringify({ administrator: false, grants: [] }),
+    });
+    await waitFor(async () => {
+      const status = await adminJson(joining, `/api/device-mesh/joins/${join.joinId}`);
+      return status.status === 'approved' ? status : null;
+    });
+  });
+
   test('recognizes a signed existing device and preserves its permissions without approval', async () => {
     const inviter = await startHub();
     const joining = await startHub();
