@@ -423,6 +423,42 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       }
     },
   },
+  {
+    version: 7,
+    name: 'remove retired agent copilot state',
+    migrate(connection) {
+      const chatRows = connection
+        .prepare('SELECT drone_id, chat_name, metadata_json FROM canonical_chats')
+        .all() as Array<{ drone_id: string; chat_name: string; metadata_json: string }>;
+      const updateChat = connection.prepare(
+        'UPDATE canonical_chats SET metadata_json = ? WHERE drone_id = ? AND chat_name = ?',
+      );
+      for (const row of chatRows) {
+        const normalized = metadata(parseJson(row.metadata_json));
+        const serialized = stableJson(normalized);
+        if (serialized === row.metadata_json) continue;
+        updateChat.run(serialized, row.drone_id, row.chat_name);
+      }
+
+      const archivedRows = connection
+        .prepare('SELECT drone_id, chat_name, chat_json FROM canonical_archived_chats')
+        .all() as Array<{ drone_id: string; chat_name: string; chat_json: string }>;
+      const updateArchived = connection.prepare(
+        'UPDATE canonical_archived_chats SET chat_json = ?, source_hash = ? WHERE drone_id = ? AND chat_name = ?',
+      );
+      for (const row of archivedRows) {
+        const normalized = normalizeStoredChatEntry(parseJson(row.chat_json));
+        const serialized = stableJson(normalized);
+        if (serialized === row.chat_json) continue;
+        updateArchived.run(
+          serialized,
+          chatEntrySourceHash(normalized),
+          row.drone_id,
+          row.chat_name,
+        );
+      }
+    },
+  },
 ];
 
 type ChatRow = {
@@ -515,7 +551,7 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
   };
 }
 
-function stripRetiredChatFollowupMetadata(raw: unknown): Record<string, any> {
+function stripRetiredChatMetadata(raw: unknown): Record<string, any> {
   const value = raw && typeof raw === 'object' && !Array.isArray(raw)
     ? { ...(raw as Record<string, any>) }
     : {};
@@ -523,6 +559,7 @@ function stripRetiredChatFollowupMetadata(raw: unknown): Record<string, any> {
   delete value.agentMessageAutoContinueEnabledAt;
   delete value.agentSuggestionEnabled;
   delete value.agentSuggestionEnabledAt;
+  delete value.agentCopilotHandledSourceMessageIds;
   return value;
 }
 
@@ -535,7 +572,7 @@ function stripRetiredPendingPromptMetadata(raw: unknown): unknown {
 }
 
 function normalizeStoredChatEntry(raw: unknown): Record<string, any> {
-  const value = stripRetiredChatFollowupMetadata(raw);
+  const value = stripRetiredChatMetadata(raw);
   if (Array.isArray(value.turns)) value.turns = value.turns.map(normalizeTurn);
   if (Array.isArray(value.pendingPrompts)) {
     value.pendingPrompts = value.pendingPrompts.map(stripRetiredPendingPromptMetadata);
@@ -561,7 +598,7 @@ function turnId(turn: StoredTranscriptTurn): string {
 }
 
 function metadata(chatEntry: any): any {
-  const value = stripRetiredChatFollowupMetadata(chatEntry);
+  const value = stripRetiredChatMetadata(chatEntry);
   delete value.turns;
   delete value.pendingPrompts;
   return value;
@@ -624,7 +661,7 @@ function safeMetadataField(raw: unknown): string | null {
 }
 
 function applyMetadataPatch(currentRaw: unknown, patch?: ChatMetadataPatch): { metadata: Record<string, unknown>; changed: boolean; fields: string[] } {
-  const current = stripRetiredChatFollowupMetadata(currentRaw);
+  const current = stripRetiredChatMetadata(currentRaw);
   const fields = new Set<string>();
   for (const [rawField, value] of Object.entries(patch?.setIfMissing ?? {})) {
     const field = safeMetadataField(rawField);

@@ -32,7 +32,6 @@ export type ChatReconciliationExecutorDependencies = {
   parseCodexJobTranscript: any;
   parsePiJobTranscript: any;
   parseStructuredAgentJobTranscript: any;
-  processPendingAgentCopilotTurns: any;
   projectCanonicalChatToRegistry: any;
   pruneCompletedPendingPrompts: any;
   readChatFromStore: any;
@@ -82,7 +81,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     parseCodexJobTranscript,
     parsePiJobTranscript,
     parseStructuredAgentJobTranscript,
-    processPendingAgentCopilotTurns,
     projectCanonicalChatToRegistry,
     pruneCompletedPendingPrompts,
     readChatFromStore,
@@ -148,13 +146,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     const pendingList: any[] = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
     if (pendingList.length === 0) {
       clearScheduledReconcileRetryByKey(droneChatMapKey(droneId, chatName));
-      void processPendingAgentCopilotTurns({ droneId, chatName }).catch((error: any) => {
-        hubLog('warn', 'agent copilot scan failed after reconcile', {
-          droneId,
-          chatName,
-          error: String(error?.message ?? error ?? 'unknown error'),
-        });
-      });
       return;
     }
 
@@ -903,14 +894,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     } else {
       clearScheduledReconcileRetryByKey(droneChatMapKey(droneId, chatName));
     }
-
-    void processPendingAgentCopilotTurns({ droneId, chatName }).catch((error: any) => {
-      hubLog('warn', 'agent copilot scan failed after reconcile', {
-        droneId,
-        chatName,
-        error: String(error?.message ?? error ?? 'unknown error'),
-      });
-    });
   }
 
   return { reconcileChatFromDaemon };

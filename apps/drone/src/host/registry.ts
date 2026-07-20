@@ -576,6 +576,7 @@ function stripRetiredFeatureState(input: DroneRegistry): DroneRegistry {
           delete chat.agentMessageAutoContinueEnabledAt;
           delete chat.agentSuggestionEnabled;
           delete chat.agentSuggestionEnabledAt;
+          delete chat.agentCopilotHandledSourceMessageIds;
           for (const prompt of Array.isArray(chat.pendingPrompts) ? chat.pendingPrompts : []) {
             if (!prompt || typeof prompt !== 'object') continue;
             delete prompt.automation;

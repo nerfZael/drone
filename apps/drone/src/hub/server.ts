@@ -143,7 +143,6 @@ import {
 } from './transcript-store';
 import { requireWhiteboardStore, type WhiteboardDocument } from './whiteboard-store';
 import { renderWhiteboardPng } from './whiteboard-export';
-import { extractAgentCopilotFromAgentMessage } from './agent-copilot-parser';
 import { cloneChatEntryForDroneClone, maybeBootstrapPromptFromTranscript } from './chat-clone';
 import {
   formatTranscriptJobFailure,
@@ -2673,8 +2672,6 @@ const githubPullRequestListCache = new Map<
   }
 >();
 
-const AGENT_COPILOT_HANDLED_CAP = 500;
-
 function attachReviewMetadataToPullEntries<T extends { path: string; originalPath: string | null }>(
   entries: T[],
 ): Array<T & { reviewKey: string; reviewToken: string }> {
@@ -3426,7 +3423,6 @@ const {
 } = dockerSnapshotRuntime;
 
 promptRuntime = createChatPromptRuntime({
-  AGENT_COPILOT_HANDLED_CAP,
   NON_REPO_HOME_CWD,
   PROMPT_SKILL_SYNC_WARNINGS,
   UPGRADE_DAEMON_READY_TIMEOUT_MS,
@@ -3463,13 +3459,11 @@ promptRuntime = createChatPromptRuntime({
   dvmStart,
   dvmStop,
   ensureChatEntry,
-  ensureChatEntryCopiedFromChat,
   ensureClaudeSessionId,
   ensureContainerDroneDaemonSession,
   ensureCursorChatId,
   ensureHubChatSessionRunning,
   ensureOpenCodeSessionId,
-  extractAgentCopilotFromAgentMessage,
   failStaleDockerSnapshotsForChat,
   formatTranscriptJobFailure,
   getChatEntry,
@@ -3503,12 +3497,10 @@ promptRuntime = createChatPromptRuntime({
   nowIso,
   openCodeSessionTitle,
   parseBlipJobTranscript,
-  parseChatNameForMutation,
   parseCodexJobTranscript,
   parsePiJobTranscript,
   parseSeedAgent,
   parseStructuredAgentJobTranscript,
-  patchChatMetadataInStore,
   promptNativeChat: (input: any) => nativeChatPromptHandler(input),
   stopNativeChat: (nativeChatId: string) => nativeChatStopHandler(nativeChatId),
   nativeChatIsBusy: (nativeChatId: string) => nativeChatIsBusyHandler(nativeChatId),
@@ -3542,7 +3534,6 @@ promptRuntime = createChatPromptRuntime({
   sleepMs,
   stalePendingPromptState,
   startupPromptToPendingPrompt,
-  stripAnsiFromCliOutput,
   syncMcpServersForDrone,
   syncRepoAgentsInstructionsForDrone,
   syncSetService,
@@ -3563,7 +3554,6 @@ const {
   chatHasActivePendingPromptsForSummary,
   chatHasReconcilablePendingPrompts,
   chatReconciliationQueue,
-  clearAgentFollowupState,
   createOrEnqueuePromptUnified,
   daemonPromptEventMonitor,
   dequeueProvisioning,
@@ -4267,7 +4257,6 @@ export async function startDroneHubApiServer(opts: {
   allowedOrigins?: string[];
 }) {
   chatReconciliationQueue.clearRetries();
-  clearAgentFollowupState();
   loadHubEnv();
   await logHubLlmStartupSnapshot();
   const host = opts.host ?? '127.0.0.1';
@@ -6230,7 +6219,6 @@ export async function startDroneHubApiServer(opts: {
       chatReconciliationQueue.clearRetries();
       daemonPromptEventMonitor.close();
       chatSessionRuntime.close();
-      clearAgentFollowupState();
     },
   };
 }

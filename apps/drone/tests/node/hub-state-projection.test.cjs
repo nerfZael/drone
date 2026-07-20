@@ -60,6 +60,7 @@ function seedRegistry() {
             createdAt: '2026-01-01T00:00:00.000Z',
             agentMessageAutoContinueEnabled: true,
             agentSuggestionEnabled: true,
+            agentCopilotHandledSourceMessageIds: ['alpha:turn-1'],
             turns: [{
               id: 'legacy-follow-up-turn',
               at: '2026-01-01T00:00:00.000Z',
@@ -112,6 +113,7 @@ test('projection backfills once, then canonical columns and tombstones win', asy
   assert.equal(first.settings.agentSuggestion, undefined);
   assert.equal(first.drones.alpha.chats.default.agentMessageAutoContinueEnabled, undefined);
   assert.equal(first.drones.alpha.chats.default.agentSuggestionEnabled, undefined);
+  assert.equal(first.drones.alpha.chats.default.agentCopilotHandledSourceMessageIds, undefined);
   assert.equal(first.drones.alpha.chats.default.turns[0].agentMessageAutoContinue, undefined);
   assert.equal(first.drones.alpha.chats.default.turns[0].agentSuggestion, undefined);
 

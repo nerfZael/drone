@@ -1406,52 +1406,37 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     chatName: string;
     runtime: DroneRuntime;
     cwd?: string | null;
-    promptId?: string | null;
   }): Promise<string> {
     const { chat } = await getChatEntry({ droneId: opts.droneId, chatName: opts.chatName });
     const existing =
       typeof (chat as any).chatId === 'string' ? String((chat as any).chatId).trim() : '';
     if (existing) return existing;
-    let id = '';
-    try {
-      const r =
-        opts.runtime === 'host'
-          ? await runHostCommand('bash', ['-lc', 'agent create-chat'], {
-              cwd: String(opts.cwd ?? '').trim() || undefined,
-              timeoutMs: defaultSeedBootstrapTimeoutMs(),
-            })
-          : await dvmExec(
-              opts.containerName,
-              'bash',
+    const r =
+      opts.runtime === 'host'
+        ? await runHostCommand('bash', ['-lc', 'agent create-chat'], {
+            cwd: String(opts.cwd ?? '').trim() || undefined,
+            timeoutMs: defaultSeedBootstrapTimeoutMs(),
+          })
+        : await dvmExec(
+            opts.containerName,
+            'bash',
+            [
+              '-lc',
               [
-                '-lc',
-                [
-                  ...buildContainerManagedEnvLines({ runtime: 'container', cwd: opts.cwd ?? null }),
-                  'agent create-chat',
-                ].join('\n'),
-              ],
-              {
-                timeoutMs: defaultSeedBootstrapTimeoutMs(),
-              },
-            );
-      if (r.code !== 0)
-        throw new Error((r.stderr || r.stdout || 'agent create-chat failed').trim());
-      id = parseUuid(`${r.stdout}\n${r.stderr}`) ?? '';
-      if (!id)
-        throw new Error(
-          `failed to parse chatId from agent create-chat output: ${r.stdout || r.stderr || '(empty)'}`,
-        );
-    } catch (error: any) {
-      const promptId = String(opts.promptId ?? '').trim();
-      if (!promptId.startsWith('agent-copilot-')) throw error;
-      id = crypto.randomUUID();
-      hubLog('warn', 'cursor chat id creation failed; using generated chat id', {
-        droneId: opts.droneId,
-        chatName: opts.chatName,
-        promptId,
-        runtime: opts.runtime,
-        error: String(error?.message ?? error ?? 'unknown error'),
-      });
+                ...buildContainerManagedEnvLines({ runtime: 'container', cwd: opts.cwd ?? null }),
+                'agent create-chat',
+              ].join('\n'),
+            ],
+            {
+              timeoutMs: defaultSeedBootstrapTimeoutMs(),
+            },
+          );
+    if (r.code !== 0) throw new Error((r.stderr || r.stdout || 'agent create-chat failed').trim());
+    const id = parseUuid(`${r.stdout}\n${r.stderr}`) ?? '';
+    if (!id) {
+      throw new Error(
+        `failed to parse chatId from agent create-chat output: ${r.stdout || r.stderr || '(empty)'}`,
+      );
     }
     const patched = await patchChatMetadataInStore({
       droneId: normalizeDroneIdentity(opts.droneId),

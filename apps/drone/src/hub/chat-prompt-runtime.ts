@@ -1,9 +1,7 @@
 import crypto from 'node:crypto';
 import path from 'node:path';
 
-import { AgentFollowupCoordinator } from './agent-followup-coordinator';
 import type { AgentPlan } from './agent-plan';
-import type { AgentCopilotRequest } from './agent-copilot-parser';
 import type { ChatImageAttachment, ChatImageAttachmentRef } from './chat-attachments';
 import type {
   AgentPermissionMode,
@@ -20,10 +18,8 @@ import {
   PendingPromptPump,
 } from './pending-prompt-pump';
 import type { PendingPrompt } from './drone-pending-prompts';
-type TranscriptTurn = any;
 
 type ChatPromptRuntimeDependencyName =
-  | 'AGENT_COPILOT_HANDLED_CAP'
   | 'NON_REPO_HOME_CWD'
   | 'PROMPT_SKILL_SYNC_WARNINGS'
   | 'UPGRADE_DAEMON_READY_TIMEOUT_MS'
@@ -60,13 +56,11 @@ type ChatPromptRuntimeDependencyName =
   | 'dvmStart'
   | 'dvmStop'
   | 'ensureChatEntry'
-  | 'ensureChatEntryCopiedFromChat'
   | 'ensureClaudeSessionId'
   | 'ensureContainerDroneDaemonSession'
   | 'ensureCursorChatId'
   | 'ensureHubChatSessionRunning'
   | 'ensureOpenCodeSessionId'
-  | 'extractAgentCopilotFromAgentMessage'
   | 'failStaleDockerSnapshotsForChat'
   | 'formatTranscriptJobFailure'
   | 'getChatEntry'
@@ -99,12 +93,10 @@ type ChatPromptRuntimeDependencyName =
   | 'nowIso'
   | 'openCodeSessionTitle'
   | 'parseBlipJobTranscript'
-  | 'parseChatNameForMutation'
   | 'parseCodexJobTranscript'
   | 'parsePiJobTranscript'
   | 'parseSeedAgent'
   | 'parseStructuredAgentJobTranscript'
-  | 'patchChatMetadataInStore'
   | 'promptNativeChat'
   | 'stopNativeChat'
   | 'projectCanonicalChatToRegistry'
@@ -134,7 +126,6 @@ type ChatPromptRuntimeDependencyName =
   | 'sleepMs'
   | 'stalePendingPromptState'
   | 'startupPromptToPendingPrompt'
-  | 'stripAnsiFromCliOutput'
   | 'syncMcpServersForDrone'
   | 'syncRepoAgentsInstructionsForDrone'
   | 'syncSetService'
@@ -156,7 +147,6 @@ export type ChatPromptRuntimeDependencies = {
 
 export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   const {
-    AGENT_COPILOT_HANDLED_CAP,
     NON_REPO_HOME_CWD,
     PROMPT_SKILL_SYNC_WARNINGS,
     UPGRADE_DAEMON_READY_TIMEOUT_MS,
@@ -193,13 +183,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     dvmStart,
     dvmStop,
     ensureChatEntry,
-    ensureChatEntryCopiedFromChat,
     ensureClaudeSessionId,
     ensureContainerDroneDaemonSession,
     ensureCursorChatId,
     ensureHubChatSessionRunning,
     ensureOpenCodeSessionId,
-    extractAgentCopilotFromAgentMessage,
     failStaleDockerSnapshotsForChat,
     formatTranscriptJobFailure,
     getChatEntry,
@@ -232,12 +220,10 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     nowIso,
     openCodeSessionTitle,
     parseBlipJobTranscript,
-    parseChatNameForMutation,
     parseCodexJobTranscript,
     parsePiJobTranscript,
     parseSeedAgent,
     parseStructuredAgentJobTranscript,
-    patchChatMetadataInStore,
     promptNativeChat,
     stopNativeChat,
     nativeChatIsBusy,
@@ -270,7 +256,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     sleepMs,
     stalePendingPromptState,
     startupPromptToPendingPrompt,
-    stripAnsiFromCliOutput,
     syncMcpServersForDrone,
     syncRepoAgentsInstructionsForDrone,
     syncSetService,
@@ -283,8 +268,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     withLockedDroneContainer,
     withTimeout,
   } = deps;
-
-  const agentFollowupCoordinator = new AgentFollowupCoordinator();
 
   async function enqueueTranscriptPrompt(opts: {
     id?: string;
@@ -488,7 +471,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           chatName: normalizedChat,
           runtime,
           cwd,
-          promptId,
         });
         const modelArg = chatModel ? ` --model ${bashQuote(chatModel)}` : '';
         const script = [
@@ -1585,339 +1567,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     return false;
   }
 
-  function chatHasTranscriptTurn(
-    regAny: any,
-    opts: { droneId: string; chatName: string; promptId: string },
-  ): boolean {
-    const stored = readChatFromStore({ droneId: opts.droneId, chatName: opts.chatName });
-    const turns =
-      stored.available && stored.chat
-        ? stored.chat.turns
-        : Array.isArray(regAny?.drones?.[opts.droneId]?.chats?.[opts.chatName]?.turns)
-          ? regAny.drones[opts.droneId].chats[opts.chatName].turns
-          : [];
-    return turns.some((t: any) => String(t?.id ?? '').trim() === opts.promptId);
-  }
-
-  function getTranscriptTurnByPromptId(opts: {
-    droneId: string;
-    chatName: string;
-    promptId: string;
-  }): TranscriptTurn | null {
-    const stored = readChatFromStore({ droneId: opts.droneId, chatName: opts.chatName });
-    const turns =
-      stored.available && stored.chat && Array.isArray(stored.chat.turns) ? stored.chat.turns : [];
-    return (turns.find((turn: any) => String(turn?.id ?? '').trim() === opts.promptId) ??
-      null) as TranscriptTurn | null;
-  }
-
-  function getTranscriptTurnByPromptIdFromRegistry(
-    regAny: any,
-    opts: { droneId: string; chatName: string; promptId: string },
-  ): TranscriptTurn | null {
-    const turns = Array.isArray(regAny?.drones?.[opts.droneId]?.chats?.[opts.chatName]?.turns)
-      ? regAny.drones[opts.droneId].chats[opts.chatName].turns
-      : [];
-    return (turns.find((t: any) => String(t?.id ?? '').trim() === opts.promptId) ??
-      null) as TranscriptTurn | null;
-  }
-
-  function buildAgentCopilotSourceMessageId(opts: {
-    droneId: string;
-    chatName: string;
-    turn: TranscriptTurn | null | undefined;
-    turnIndex: number;
-  }): string {
-    const droneId = normalizeDroneIdentity(opts.droneId);
-    const chatName = normalizeChatName(opts.chatName);
-    const turnId = String(opts.turn?.id ?? '').trim();
-    if (droneId && turnId) return `${droneId}:${turnId}`;
-    const at = String(opts.turn?.completedAt ?? opts.turn?.promptAt ?? opts.turn?.at ?? '').trim();
-    if (!droneId || !chatName || !at) return '';
-    return `${droneId}:${chatName}:${opts.turnIndex}:${at}`;
-  }
-
-  function readHandledAgentCopilotSourceMessageIds(chatEntry: any): string[] {
-    return Array.from(
-      new Set(
-        (Array.isArray(chatEntry?.agentCopilotHandledSourceMessageIds)
-          ? chatEntry.agentCopilotHandledSourceMessageIds
-          : []
-        )
-          .map((item: any) => String(item ?? '').trim())
-          .filter(Boolean),
-      ),
-    );
-  }
-
-  function hasHandledAgentCopilotSourceMessage(
-    chatEntry: any,
-    sourceMessageIdRaw: string,
-  ): boolean {
-    const sourceMessageId = String(sourceMessageIdRaw ?? '').trim();
-    if (!sourceMessageId) return false;
-    return readHandledAgentCopilotSourceMessageIds(chatEntry).includes(sourceMessageId);
-  }
-
-  async function markAgentCopilotSourceMessageHandled(opts: {
-    droneId: string;
-    chatName: string;
-    sourceMessageId: string;
-  }): Promise<void> {
-    const sourceMessageId = String(opts.sourceMessageId ?? '').trim();
-    if (!sourceMessageId) return;
-    const droneId = normalizeDroneIdentity(opts.droneId);
-    const chatName = normalizeChatName(opts.chatName);
-    const stored = readChatFromStore({ droneId, chatName });
-    if (!stored.available || !stored.chat) return;
-    const handledIds = readHandledAgentCopilotSourceMessageIds(stored.chat);
-    if (handledIds.includes(sourceMessageId)) return;
-    handledIds.push(sourceMessageId);
-    await patchChatMetadataInStore({
-      droneId,
-      chatName,
-      patch: {
-        set: {
-          agentCopilotHandledSourceMessageIds:
-            handledIds.length > AGENT_COPILOT_HANDLED_CAP
-              ? handledIds.slice(-AGENT_COPILOT_HANDLED_CAP)
-              : handledIds,
-        },
-      },
-    });
-    await projectCanonicalChatToRegistry(droneId, chatName);
-  }
-
-  function buildAgentCopilotResponsePrompt(nameRaw: string, responseRaw: string): string {
-    const name = String(nameRaw ?? '').trim();
-    const response = String(responseRaw ?? '').trim();
-    return `This is what copilot '${name}' responded with:\n${response}`;
-  }
-
-  function buildAgentCopilotErrorPrompt(errorRaw: string, nameRaw?: string): string {
-    const error = String(errorRaw ?? '').trim() || 'Unknown error.';
-    const name = String(nameRaw ?? '').trim();
-    if (!name) return `Agent copilot error: ${error}`;
-    return `Copilot '${name}' failed: ${error}`;
-  }
-
-  function buildAgentCopilotPromptId(opts: {
-    sourceMessageId: string;
-    stage: 'copilot' | 'source-result' | 'source-error' | 'source-parse-error';
-  }): string {
-    const sourceMessageId = String(opts.sourceMessageId ?? '').trim();
-    const digest = crypto.createHash('sha1').update(sourceMessageId).digest('hex').slice(0, 24);
-    return `agent-copilot-${opts.stage}-${digest}`;
-  }
-
-  function getPendingPromptByIdFromRegistry(
-    regAny: any,
-    opts: { droneId: string; chatName: string; promptId: string },
-  ): PendingPrompt | null {
-    const pending = Array.isArray(
-      regAny?.drones?.[opts.droneId]?.chats?.[opts.chatName]?.pendingPrompts,
-    )
-      ? regAny.drones[opts.droneId].chats[opts.chatName].pendingPrompts
-      : [];
-    return (pending.find((item: any) => String(item?.id ?? '').trim() === opts.promptId) ??
-      null) as PendingPrompt | null;
-  }
-
-  async function ensureAgentCopilotPromptCompleted(opts: {
-    droneId: string;
-    chatName: string;
-    promptId: string;
-    prompt: string;
-  }): Promise<TranscriptTurn> {
-    const existingTurn = getTranscriptTurnByPromptId(opts);
-    if (existingTurn) return existingTurn;
-
-    const existingPending =
-      (await readPendingPrompts({ droneId: opts.droneId, chatName: opts.chatName })).find(
-        (pending: any) => pending.id === opts.promptId,
-      ) ?? null;
-    if (!existingPending || existingPending.state === 'failed') {
-      const enqueued = await createOrEnqueuePromptUnified({
-        id: opts.promptId,
-        droneId: opts.droneId,
-        chatName: opts.chatName,
-        prompt: opts.prompt,
-      });
-      if (enqueued.kind === 'error') throw new Error(enqueued.error);
-    }
-
-    await waitForPromptCompletion({
-      droneId: opts.droneId,
-      chatName: opts.chatName,
-      promptId: opts.promptId,
-      timeoutMs: 30 * 60_000,
-    });
-
-    const turn = getTranscriptTurnByPromptId(opts);
-    if (turn) return turn;
-    const pending =
-      (await readPendingPrompts({ droneId: opts.droneId, chatName: opts.chatName })).find(
-        (item: any) => item.id === opts.promptId,
-      ) ?? null;
-    if (pending?.state === 'failed') {
-      throw new Error(
-        String(pending.error ?? `prompt ${opts.promptId} failed`).trim() ||
-          `prompt ${opts.promptId} failed`,
-      );
-    }
-    throw new Error(`Timed out waiting for prompt ${opts.promptId} completion`);
-  }
-
-  async function ensureAgentCopilotSourcePromptCompleted(opts: {
-    droneId: string;
-    chatName: string;
-    promptId: string;
-    prompt: string;
-  }): Promise<void> {
-    await ensureAgentCopilotPromptCompleted(opts);
-  }
-
-  async function processAgentCopilotRequest(opts: {
-    sourceDroneId: string;
-    sourceChatName: string;
-    sourceMessageId: string;
-    copilot: AgentCopilotRequest | null;
-    parseError: string | null;
-  }): Promise<void> {
-    if (opts.parseError) {
-      const parseErrorPromptId = buildAgentCopilotPromptId({
-        sourceMessageId: opts.sourceMessageId,
-        stage: 'source-parse-error',
-      });
-      await ensureAgentCopilotSourcePromptCompleted({
-        droneId: opts.sourceDroneId,
-        chatName: opts.sourceChatName,
-        promptId: parseErrorPromptId,
-        prompt: buildAgentCopilotErrorPrompt(opts.parseError),
-      });
-      await markAgentCopilotSourceMessageHandled({
-        droneId: opts.sourceDroneId,
-        chatName: opts.sourceChatName,
-        sourceMessageId: opts.sourceMessageId,
-      });
-      return;
-    }
-
-    if (!opts.copilot) return;
-
-    const copilotChatName = parseChatNameForMutation(opts.copilot.name, 'agent copilot name');
-    const copilotPromptId = buildAgentCopilotPromptId({
-      sourceMessageId: opts.sourceMessageId,
-      stage: 'copilot',
-    });
-    const sourceResultPromptId = buildAgentCopilotPromptId({
-      sourceMessageId: opts.sourceMessageId,
-      stage: 'source-result',
-    });
-
-    await ensureChatEntryCopiedFromChat({
-      droneId: opts.sourceDroneId,
-      chatName: copilotChatName,
-      copyFromChatName: opts.sourceChatName,
-    });
-    const responseTurn = await ensureAgentCopilotPromptCompleted({
-      droneId: opts.sourceDroneId,
-      chatName: copilotChatName,
-      promptId: copilotPromptId,
-      prompt: opts.copilot.message,
-    });
-
-    const followupPrompt = responseTurn.ok
-      ? buildAgentCopilotResponsePrompt(
-          copilotChatName,
-          stripAnsiFromCliOutput(String(responseTurn.output ?? '')),
-        )
-      : buildAgentCopilotErrorPrompt(
-          String(responseTurn.error ?? 'Copilot failed.'),
-          copilotChatName,
-        );
-    await ensureAgentCopilotSourcePromptCompleted({
-      droneId: opts.sourceDroneId,
-      chatName: opts.sourceChatName,
-      promptId: sourceResultPromptId,
-      prompt: followupPrompt,
-    });
-
-    await markAgentCopilotSourceMessageHandled({
-      droneId: opts.sourceDroneId,
-      chatName: opts.sourceChatName,
-      sourceMessageId: opts.sourceMessageId,
-    });
-  }
-
-  async function processPendingAgentCopilotTurns(opts: {
-    droneId: string;
-    chatName: string;
-  }): Promise<void> {
-    const droneId = normalizeDroneIdentity(opts.droneId);
-    const chatName = normalizeChatName(opts.chatName);
-    if (!droneId || !chatName) return;
-
-    const stored = readChatFromStore({ droneId, chatName });
-    const chatEntry = stored.available ? stored.chat : null;
-    if (!chatEntry) return;
-    const turns: TranscriptTurn[] = Array.isArray(chatEntry?.turns) ? chatEntry.turns : [];
-
-    for (let turnIndex = 0; turnIndex < turns.length; turnIndex += 1) {
-      const turn = turns[turnIndex] ?? null;
-      if (!turn?.ok || turn?.inheritedFromClone === true) continue;
-      const sourceMessageId = buildAgentCopilotSourceMessageId({
-        droneId,
-        chatName,
-        turn,
-        turnIndex,
-      });
-      if (!sourceMessageId) continue;
-      if (hasHandledAgentCopilotSourceMessage(chatEntry, sourceMessageId)) continue;
-
-      const extracted = extractAgentCopilotFromAgentMessage(
-        stripAnsiFromCliOutput(String(turn.output ?? '')),
-      );
-      if (!extracted.copilot && !extracted.error) continue;
-      if (!agentFollowupCoordinator.startCopilot(sourceMessageId)) continue;
-
-      void processAgentCopilotRequest({
-        sourceDroneId: droneId,
-        sourceChatName: chatName,
-        sourceMessageId,
-        copilot: extracted.copilot,
-        parseError: extracted.error,
-      })
-        .catch(async (error: any) => {
-          try {
-            const sourceErrorPromptId = buildAgentCopilotPromptId({
-              sourceMessageId,
-              stage: 'source-error',
-            });
-            await ensureAgentCopilotSourcePromptCompleted({
-              droneId,
-              chatName,
-              promptId: sourceErrorPromptId,
-              prompt: buildAgentCopilotErrorPrompt(
-                String(error?.message ?? error ?? 'Unknown error.'),
-                extracted.copilot?.name,
-              ),
-            });
-            await markAgentCopilotSourceMessageHandled({
-              droneId,
-              chatName,
-              sourceMessageId,
-            });
-          } catch {
-            // Leave the source message unhandled so a later reconcile can retry.
-          }
-        })
-        .finally(() => {
-          agentFollowupCoordinator.finishCopilot(sourceMessageId);
-        });
-    }
-  }
-
   function pendingPromptPumpConcurrencyLimit(): number {
     const raw = String(process.env.DRONE_HUB_PENDING_PROMPT_PUMP_CONCURRENCY ?? '').trim();
     const n = raw ? Number(raw) : NaN;
@@ -2330,7 +1979,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     parseCodexJobTranscript,
     parsePiJobTranscript,
     parseStructuredAgentJobTranscript,
-    processPendingAgentCopilotTurns,
     projectCanonicalChatToRegistry,
     pruneCompletedPendingPrompts,
     readChatFromStore,
@@ -2348,32 +1996,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     STOPPED_BY_USER_ERROR,
   });
   const { reconcileChatFromDaemon } = chatReconciliationExecutor;
-
-  async function waitForPromptCompletion(opts: {
-    droneId: string;
-    chatName: string;
-    promptId: string;
-    timeoutMs: number;
-  }): Promise<void> {
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < opts.timeoutMs) {
-      await reconcileChatFromDaemon({ droneId: opts.droneId, chatName: opts.chatName }).catch(
-        () => {},
-      );
-      const pending = await readPendingPrompts({
-        droneId: opts.droneId,
-        chatName: opts.chatName,
-      }).catch(() => []);
-      const target = pending.find((item: any) => item.id === opts.promptId) ?? null;
-      if (target?.state === 'failed') {
-        throw new Error(target.error || `prompt ${opts.promptId} failed`);
-      }
-      const regAny: any = await loadRegistry();
-      if (chatHasTranscriptTurn(regAny, opts)) return;
-      await sleepMs(250);
-    }
-    throw new Error(`timed out waiting for prompt ${opts.promptId} completion`);
-  }
 
   async function waitForNativePromptCompletion(nativeChatId: string, timeoutMs: number): Promise<void> {
     const deadline = Date.now() + timeoutMs;
@@ -2822,7 +2444,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatHasActivePendingPromptsForSummary,
     chatHasReconcilablePendingPrompts,
     chatReconciliationQueue,
-    clearAgentFollowupState: () => agentFollowupCoordinator.clear(),
     createOrEnqueuePromptUnified,
     daemonPromptEventMonitor,
     dequeueProvisioning,

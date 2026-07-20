@@ -104,7 +104,7 @@ describe('canonical chat and transcript repository', () => {
       requireHubDatabase().read((connection) =>
         connection.prepare("SELECT COUNT(*) AS count FROM hub_schema_migrations WHERE scope = 'chats'").get().count,
       ),
-      6,
+      7,
     );
   });
 
@@ -128,6 +128,7 @@ describe('canonical chat and transcript repository', () => {
         agentMessageAutoContinueEnabledAt: '2026-01-01T00:00:00.000Z',
         agentSuggestionEnabled: true,
         agentSuggestionEnabledAt: '2026-01-01T00:00:00.000Z',
+        agentCopilotHandledSourceMessageIds: ['drone-1:turn-1'],
       },
     });
 
@@ -136,6 +137,7 @@ describe('canonical chat and transcript repository', () => {
     assert.equal(chat.agentMessageAutoContinueEnabledAt, undefined);
     assert.equal(chat.agentSuggestionEnabled, undefined);
     assert.equal(chat.agentSuggestionEnabledAt, undefined);
+    assert.equal(chat.agentCopilotHandledSourceMessageIds, undefined);
     assert.equal(chat.turns[0].agentMessageAutoContinue, undefined);
     assert.equal(chat.turns[0].agentSuggestion, undefined);
     assert.equal(chat.turns[0].automation, undefined);
