@@ -10,7 +10,7 @@ import {
   View,
 } from 'react-native';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
-import FileQuestion from 'lucide-react-native/icons/file-question';
+import FileQuestion from 'lucide-react-native/icons/file-question-mark';
 import RotateCcw from 'lucide-react-native/icons/rotate-ccw';
 import { useEvent } from 'expo';
 import { SafeAreaView } from 'react-native-safe-area-context';
