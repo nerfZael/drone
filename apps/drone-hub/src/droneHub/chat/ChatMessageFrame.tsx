@@ -44,7 +44,11 @@ export function ChatMessageFrame({
       {at ? (
         <RelativeTimeText
           at={at}
-          className={`pointer-events-none absolute bottom-full z-10 mb-1 whitespace-nowrap font-mono text-[var(--text-9)] leading-none text-[var(--muted-dim)] opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 ${user ? 'right-0' : 'left-0'}`}
+          className={`pointer-events-none absolute z-10 whitespace-nowrap font-mono text-[var(--text-9)] leading-none opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 ${
+            user
+              ? 'bottom-full right-0 mb-1 text-[var(--chat-user-message-time)]'
+              : 'left-0 top-full mt-1 text-[var(--chat-message-time)]'
+          }`}
           title={new Date(at).toLocaleString()}
         />
       ) : null}

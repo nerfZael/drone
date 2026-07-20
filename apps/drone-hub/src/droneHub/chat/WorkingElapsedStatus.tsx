@@ -1,8 +1,11 @@
 import React from 'react';
 
+import { RelativeTimeText } from './RelativeTimeText';
+
 type AgentRunSummaryLineProps = {
   active: boolean;
   durationMs: number;
+  at?: string;
   detail?: React.ReactNode;
   trailing?: React.ReactNode;
   expanded?: boolean;
@@ -22,6 +25,7 @@ export function formatWorkingDuration(durationMs: number): string {
 export function AgentRunSummaryLine({
   active,
   durationMs,
+  at,
   detail,
   trailing,
   expanded,
@@ -37,6 +41,13 @@ export function AgentRunSummaryLine({
         {label}
       </span>
       {detail ? <span className="text-xs text-[var(--muted-dim)]">{detail}</span> : null}
+      {at ? (
+        <RelativeTimeText
+          at={at}
+          className="ml-auto font-mono text-[var(--text-9)] leading-none text-[var(--chat-message-time)] opacity-0 transition-opacity group-hover/turn:opacity-100 group-focus-within/turn:opacity-100"
+          title={new Date(at).toLocaleString()}
+        />
+      ) : null}
       {trailing ? <span className="text-[var(--muted-dim)]">{trailing}</span> : null}
     </>
   );

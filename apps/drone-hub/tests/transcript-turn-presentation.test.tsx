@@ -32,5 +32,9 @@ describe('completed external transcript presentation', () => {
     expect(html).toContain('max-w-[min(85%,var(--chat-prose-max))]');
     expect(html).toContain('group-hover/message:opacity-100');
     expect(html).toContain('group-focus-within/message:opacity-100');
+    expect(html).toContain('bottom-full right-0 mb-1 text-[var(--chat-user-message-time)]');
+    expect(html).toContain('group-hover/turn:opacity-100');
+    expect(html).toContain('group-focus-within/turn:opacity-100');
+    expect(html).not.toContain('left-0 top-full mt-1 text-[var(--chat-message-time)]');
   });
 });

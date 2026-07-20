@@ -2,8 +2,18 @@ import React from 'react';
 
 const CHAT_VOICE_SAMPLE_RATE_HZ = 16_000;
 const CHAT_VOICE_CHANNELS = 1;
+const CHAT_VOICE_BYTES_PER_SECOND = CHAT_VOICE_SAMPLE_RATE_HZ * CHAT_VOICE_CHANNELS * 2;
 
 export type ChatVoiceRecordingStatus = 'idle' | 'starting' | 'recording' | 'paused' | 'transcribing';
+
+export function formatChatVoiceDuration(durationMillis: number): string {
+  const totalSeconds = Number.isFinite(durationMillis)
+    ? Math.max(0, Math.floor(durationMillis / 1000))
+    : 0;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
 
 type ChatVoiceCapture = {
   stream: MediaStream;
@@ -93,10 +103,12 @@ export async function transcribeChatVoiceWav(wav: ArrayBuffer): Promise<string> 
 
 export function useChatVoiceRecorder({ onError }: { onError: (message: string) => void }) {
   const [status, setStatus] = React.useState<ChatVoiceRecordingStatus>('idle');
+  const [durationMillis, setDurationMillis] = React.useState(0);
   const statusRef = React.useRef<ChatVoiceRecordingStatus>('idle');
   const captureRef = React.useRef<ChatVoiceCapture | null>(null);
   const startIdRef = React.useRef(0);
   const stopPromiseRef = React.useRef<Promise<string> | null>(null);
+  const lastDurationUpdateAtRef = React.useRef(0);
   const mountedRef = React.useRef(false);
 
   const setStatusValue = React.useCallback((next: ChatVoiceRecordingStatus) => {
@@ -140,6 +152,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
     stopPromiseRef.current = null;
     stopCapture(captureRef.current);
     captureRef.current = null;
+    setDurationMillis(0);
     setStatusValue('idle');
   }, [setStatusValue, stopCapture]);
 
@@ -158,6 +171,8 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
 
     const startId = startIdRef.current + 1;
     startIdRef.current = startId;
+    lastDurationUpdateAtRef.current = 0;
+    setDurationMillis(0);
     setStatusValue('starting');
     onError('');
     let pendingStream: MediaStream | null = null;
@@ -188,6 +203,11 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
         const frame = floatToPcm16(event.inputBuffer.getChannelData(0), event.inputBuffer.sampleRate);
         capture.chunks.push(frame.slice(0));
         capture.totalBytes += frame.byteLength;
+        const now = Date.now();
+        if (mountedRef.current && now - lastDurationUpdateAtRef.current >= 200) {
+          lastDurationUpdateAtRef.current = now;
+          setDurationMillis((capture.totalBytes / CHAT_VOICE_BYTES_PER_SECOND) * 1000);
+        }
       };
       if (startIdRef.current !== startId) {
         stopCapture(capture);
@@ -233,6 +253,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
     }
 
     captureRef.current = null;
+    setDurationMillis((capture.totalBytes / CHAT_VOICE_BYTES_PER_SECOND) * 1000);
     stopCapture(capture);
     setStatusValue('transcribing');
     onError('');
@@ -262,6 +283,7 @@ export function useChatVoiceRecorder({ onError }: { onError: (message: string) =
 
   return {
     status,
+    durationMillis,
     startRecording,
     toggleRecordingPause,
     discardRecording,

@@ -46,14 +46,13 @@ export function ChatComposerMenu({
         title={label}
         aria-haspopup="menu"
         aria-expanded={open}
-        className={`inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-medium)] border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
+        className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border transition-opacity ${
           open
             ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-            : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+            : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] hover:opacity-70'
         }`}
-        style={{ fontFamily: 'var(--display)' }}
       >
-        Chat
+        <span className="sr-only">{label}</span>
         <svg width="14" height="14" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true">
           <circle cx="4" cy="8" r="1.25" />
           <circle cx="8" cy="8" r="1.25" />

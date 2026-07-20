@@ -2,7 +2,6 @@ import React from 'react';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary } from '../types';
 import { compareDronesByNewestFirst } from './helpers';
-import { buildSidebarDroneTree } from './sidebar-drone-tree';
 import { buildSidebarFolderTree, flattenSidebarFolderTree } from './sidebar-folder-tree';
 import { orderSidebarGroups } from './sidebar-group-order';
 import { isSameOrDescendantSidebarGroupPath } from './sidebar-group-paths';
@@ -124,26 +123,22 @@ export function useSidebarReadModel({
     return out;
   }, [flatSidebarFolderNodes, isRepoGroupingMode, renderSidebarGroups, repoScopedGroupPathsByRepoGroup]);
 
-  const flatSidebarDrones = React.useMemo(() => {
+  const sidebarDronesWithDraft = React.useMemo(() => {
     const items = optimisticSidebarDronesFilteredByRepo.slice().sort(compareDronesByNewestFirst);
     return draftSidebarPlaceholderDrone ? [draftSidebarPlaceholderDrone, ...items] : items;
   }, [draftSidebarPlaceholderDrone, optimisticSidebarDronesFilteredByRepo]);
 
-  const flatSidebarTree = React.useMemo(() => buildSidebarDroneTree(flatSidebarDrones), [flatSidebarDrones]);
-
   const sidebarDroneById = React.useMemo(() => {
     const out: Record<string, DroneSummary> = {};
-    for (const drone of flatSidebarDrones) {
+    for (const drone of sidebarDronesWithDraft) {
       const droneId = String(drone?.id ?? '').trim();
       if (!droneId) continue;
       out[droneId] = drone;
     }
     return out;
-  }, [flatSidebarDrones]);
+  }, [sidebarDronesWithDraft]);
 
   return {
-    flatSidebarDrones,
-    flatSidebarTree,
     renderSidebarGroups,
     sidebarDroneById,
     sidebarFolderTree,

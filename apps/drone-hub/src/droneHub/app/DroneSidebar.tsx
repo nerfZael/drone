@@ -12,23 +12,29 @@ import {
   IconAutoMinimize,
   IconChatThread,
   IconChevron,
+  IconChevronLeft,
+  IconChevronRight,
   IconClock,
   IconColumns,
-  IconDevices,
+  IconDrone,
   IconEye,
   IconEyeOff,
   IconFolder,
+  IconFolderGit,
   IconList,
+  IconMessageCircle,
   IconMore,
+  IconNetwork,
   IconPencil,
   IconPlus,
+  IconPlusOutline,
   IconPlusDouble,
   IconSettings,
+  IconSettingsOutline,
   IconSidebarCollapse,
   IconSidebarExpand,
   IconSpinner,
   IconTrash,
-  IconTreeView,
   SkeletonLine,
 } from './icons';
 import { SidebarDroneTreeList, type SidebarDroneTreeListSharedProps } from './SidebarDroneTreeList';
@@ -85,6 +91,7 @@ import {
   sidebarFolderLabelClass,
 } from '../sidebar/presentation';
 import { useSidebarReadModel } from './use-sidebar-read-model';
+import { buildSidebarRepositoryNavigationItems } from './sidebar-repository-navigation';
 import {
   useSidebarInteractions,
   type ChatEditorState,
@@ -1419,7 +1426,6 @@ export type DroneSidebarProps = {
   onOpenReposModal: () => void;
   capabilities?: Partial<DroneSidebarCapabilities>;
   sidebarGroupingModeOverride?: SidebarGroupingMode;
-  viewModeOverride?: 'grouped' | 'flat';
   fillContainer?: boolean;
   readOnlyMode?: DroneSidebarReadOnlyMode;
   headerAccessory?: React.ReactNode;
@@ -1452,8 +1458,6 @@ export function DroneSidebar({
   renamingGroups,
   sidebarHasUngroupedGroup,
   repos,
-  reposLoading,
-  reposError,
   dronesCount,
   droneCountByRepoPath,
   uiDroneName,
@@ -1484,7 +1488,6 @@ export function DroneSidebar({
   onOpenReposModal,
   capabilities,
   sidebarGroupingModeOverride,
-  viewModeOverride,
   fillContainer,
   readOnlyMode = 'read-only',
   headerAccessory,
@@ -1500,7 +1503,6 @@ export function DroneSidebar({
     selectedDroneIds,
     settingsActiveTab,
     appView,
-    viewMode,
     sidebarGroupingMode,
     sidebarDensityMode,
     activeRepoPath,
@@ -1508,7 +1510,6 @@ export function DroneSidebar({
     selectedChat,
     selectedGroupMultiChat,
     playbookRunsOpen,
-    sidebarReposCollapsed,
     sidebarAutoMinimize,
     showRecentDronesOnly,
     autoDelete,
@@ -1522,7 +1523,6 @@ export function DroneSidebar({
     showHiddenSidebarGroups,
     setSettingsActiveTab,
     setAppView,
-    setViewMode,
     setSidebarGroupingMode,
     setSidebarDensityMode,
     setSidebarDockSide,
@@ -1537,7 +1537,6 @@ export function DroneSidebar({
     setSelectedDrone,
     setSelectedDroneIds,
     setSelectedChat,
-    setSidebarReposCollapsed,
     setSidebarAutoMinimize,
     setShowRecentDronesOnly,
     setActiveRepoPath,
@@ -1545,15 +1544,20 @@ export function DroneSidebar({
     setSidebarCollapsed,
   } = useDroneSidebarUiState();
   const activeDrag = useDroneHubActiveDrag();
-  const headerActionsMenuRef = React.useRef<HTMLDivElement | null>(null);
   const footerOptionsMenuRef = React.useRef<HTMLDivElement | null>(null);
   const collapseTimerRef = React.useRef<number | null>(null);
   const expandTimerRef = React.useRef<number | null>(null);
   const sidebarDndIdleTimerRef = React.useRef<number | null>(null);
   const lastAutoCollapsedAtRef = React.useRef<number>(0);
   const sidebarDockDragStartXRef = React.useRef<number | null>(null);
-  const [headerActionsMenuOpen, setHeaderActionsMenuOpen] = React.useState(false);
   const [footerOptionsMenuOpen, setFooterOptionsMenuOpen] = React.useState(false);
+  const [repositoryOverviewOpen, setRepositoryOverviewOpen] = React.useState(
+    () => !String(activeRepoPath ?? '').trim(),
+  );
+  const [activeSidebarRepoId, setActiveSidebarRepoId] = React.useState<string | null>(() => {
+    const repoPath = String(activeRepoPath ?? '').trim();
+    return repoPath ? `repo:${repoPath}` : null;
+  });
   const [sidebarInteractionDndEnabled, setSidebarInteractionDndEnabled] = React.useState(false);
   const sidebarDndEnabled =
     sidebarCapabilities.dragAndDrop && (sidebarInteractionDndEnabled || Boolean(activeDrag));
@@ -1565,9 +1569,14 @@ export function DroneSidebar({
     () => new Set(hiddenSidebarGroups),
     [hiddenSidebarGroups],
   );
-  const effectiveSidebarGroupingMode = sidebarGroupingModeOverride ?? sidebarGroupingMode;
-  const effectiveViewMode = viewModeOverride ?? viewMode;
+  const effectiveSidebarGroupingMode = sidebarCapabilities.headerActions
+    ? 'groups'
+    : (sidebarGroupingModeOverride ?? sidebarGroupingMode);
   const isRepoGroupingMode = effectiveSidebarGroupingMode === 'repos';
+  React.useEffect(() => {
+    if (!sidebarCapabilities.headerActions || sidebarGroupingMode === 'groups') return;
+    setSidebarGroupingMode('groups');
+  }, [setSidebarGroupingMode, sidebarCapabilities.headerActions, sidebarGroupingMode]);
   const repoScopedGroupPathsByRepoGroup = React.useMemo(
     () => groupSidebarRepoScopedGroupsByRepoGroup(sidebarRepoScopedGroupByPath),
     [sidebarRepoScopedGroupByPath],
@@ -1698,7 +1707,6 @@ export function DroneSidebar({
   const {
     renderSidebarGroups,
     sidebarFolderTree,
-    flatSidebarTree,
     sidebarDroneById,
     visibleSidebarFolderPathSet,
   } = useSidebarReadModel({
@@ -1876,7 +1884,6 @@ export function DroneSidebar({
     },
     [clearCollapseTimer, clearExpandTimer],
   );
-  useDropdownDismiss(headerActionsMenuRef, headerActionsMenuOpen, setHeaderActionsMenuOpen);
   useDropdownDismiss(footerOptionsMenuRef, footerOptionsMenuOpen, setFooterOptionsMenuOpen);
 
   React.useEffect(() => {
@@ -2020,6 +2027,77 @@ export function DroneSidebar({
     disabled: !sidebarDndEnabled || isRepoGroupingMode,
   });
   const devicesSettingsActive = appView === 'settings' && settingsActiveTab === 'devices';
+  const settingsTabActive = appView === 'settings' && settingsActiveTab !== 'devices';
+  const summarizeSidebarFleet = React.useCallback((drones: readonly DroneSummary[]) => {
+    let working = 0;
+    let unread = 0;
+    for (const drone of drones) {
+      const chats = drone.chats.length > 0 ? drone.chats : ['default'];
+      const droneWorking =
+        Boolean(drone.busy) ||
+        (drone.busyChats?.length ?? 0) > 0 ||
+        chats.some((chatName) => busyChatNodeIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName))) ||
+        drone.hubPhase === 'creating' ||
+        drone.hubPhase === 'starting' ||
+        drone.hubPhase === 'seeding' ||
+        Boolean(deletingDrones[drone.id]);
+      const droneUnread =
+        (drone.unreadChats?.length ?? 0) > 0 ||
+        chats.some((chatName) =>
+          Boolean(unreadAgentMessageByChatNodeId[sidebarChatSidebarNodeId(drone.id, chatName)]),
+        );
+      if (droneWorking) working += 1;
+      if (droneUnread) unread += 1;
+    }
+    return { working, unread };
+  }, [
+    busyChatNodeIdSet,
+    deletingDrones,
+    unreadAgentMessageByChatNodeId,
+  ]);
+  const sidebarFleetStatus = React.useMemo(
+    () => summarizeSidebarFleet(sidebarDrones),
+    [sidebarDrones, summarizeSidebarFleet],
+  );
+  const repositoryNavigationItems = React.useMemo(() => {
+    return buildSidebarRepositoryNavigationItems({
+      repos,
+      drones: sidebarDrones,
+      summarize: summarizeSidebarFleet,
+    });
+  }, [repos, sidebarDrones, summarizeSidebarFleet]);
+  const selectedDroneRepoPath = React.useMemo(
+    () => String(sidebarDrones.find((drone) => drone.id === selectedDrone)?.repoPath ?? '').trim(),
+    [selectedDrone, sidebarDrones],
+  );
+  const activeRepositoryNavigationItem = React.useMemo(
+    () => repositoryNavigationItems.find((item) => item.id === activeSidebarRepoId) ?? null,
+    [activeSidebarRepoId, repositoryNavigationItems],
+  );
+  const ungroupedRepositoryTree = React.useMemo(
+    () => buildSidebarDroneTree(sidebarDrones.filter((drone) => !String(drone.repoPath ?? '').trim())),
+    [sidebarDrones],
+  );
+  const openRepositoryOverview = React.useCallback(() => {
+    setRepositoryOverviewOpen(true);
+    setActiveSidebarRepoId(null);
+    setActiveRepoPath('');
+  }, [setActiveRepoPath]);
+  const openRepositoryNavigationItem = React.useCallback(
+    (item: (typeof repositoryNavigationItems)[number]) => {
+      setRepositoryOverviewOpen(false);
+      setActiveSidebarRepoId(item.id);
+      setActiveRepoPath(item.repoPath);
+    },
+    [setActiveRepoPath],
+  );
+  React.useEffect(() => {
+    if (
+      !activeSidebarRepoId ||
+      repositoryNavigationItems.some((item) => item.id === activeSidebarRepoId)
+    ) return;
+    openRepositoryOverview();
+  }, [activeSidebarRepoId, openRepositoryOverview, repositoryNavigationItems]);
   const sharedDroneTreeListProps = React.useMemo<SidebarDroneTreeListSharedProps>(
     () => ({
       droneById: sidebarDroneById,
@@ -2229,10 +2307,6 @@ export function DroneSidebar({
   const sidebarHeaderTitle = `Drag header to dock sidebar left or right.`;
   const sidebarDirectionalIconClass = sidebarDockSide === 'right' ? 'rotate-180' : '';
   const sidebarDockPreviewSide = sidebarDockDragPreviewSide ?? sidebarDockSide;
-  const canChangeSidebarGroupingMode = sidebarCapabilities.actions && !sidebarGroupingModeOverride;
-  const canChangeSidebarViewMode = !viewModeOverride;
-  const hasSidebarLayoutOptions =
-    canChangeSidebarGroupingMode || canChangeSidebarViewMode || sidebarCapabilities.collapseControl;
   const activeRepoDroneCount = activeRepoPath
     ? (droneCountByRepoPath.get(activeRepoPath) ?? 0)
     : dronesCount;
@@ -2274,7 +2348,7 @@ export function DroneSidebar({
         data-drone-sidebar-shell="expanded"
         data-sidebar-dock-side={sidebarDockSide}
         data-sidebar-collapsed={sidebarCollapsed ? 'true' : 'false'}
-        className={`bg-[var(--panel-alt)] ${sidebarBorderClass} border-[var(--border)] flex flex-col min-h-0 relative flex-shrink-0 overflow-hidden ${sidebarWidthTransitionClass}`}
+        className={`bg-[var(--sidebar-bg)] [font-family:var(--sidebar-font)] ${sidebarBorderClass} border-[var(--border)] flex flex-col min-h-0 relative flex-shrink-0 overflow-hidden ${sidebarWidthTransitionClass}`}
         style={{
           width: sidebarCollapsed
             ? 0
@@ -2294,7 +2368,7 @@ export function DroneSidebar({
         onWheel={sidebarCapabilities.sidebarOptions ? onSidebarWheel : undefined}
       >
         <div
-          className={`flex h-[52px] flex-shrink-0 items-center px-3 border-b border-[var(--border)] relative select-none ${
+          className={`flex h-[3.25rem] flex-shrink-0 items-center px-3.5 border-b border-[var(--border)] relative select-none ${
             sidebarDockDragEnabled
               ? `touch-none ${sidebarDockDragActive ? 'cursor-grabbing' : 'cursor-grab'}`
               : ''
@@ -2306,135 +2380,170 @@ export function DroneSidebar({
           onPointerCancel={sidebarDockDragEnabled ? onSidebarDockHeaderPointerCancel : undefined}
         >
           <div className="flex w-full items-center justify-between gap-2">
-            <div className="flex min-w-0 flex-1 items-center gap-2">
-              <span
-                className="flex-shrink-0 dh-type-sidebar-brand"
-              >
-                Drone Hub
-              </span>
-              {selectedDroneIds.length > 1 && (
-                <div className="flex min-w-0 items-center gap-1">
-                  <span
-                    className="max-w-full truncate text-[var(--text-10)] text-[var(--accent)]"
-                    title={`${selectedDroneIds.length} drones selected`}
-                  >
-                    {selectedDroneIds.length} selected
-                  </span>
-                  <button
-                    type="button"
-                    onClick={() => onRenameDrones(selectedDroneIds)}
-                    disabled={renameSelectedDronesDisabled}
-                    className={`inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border transition-all ${
-                      renameSelectedDronesDisabled
-                        ? 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
-                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                    }`}
-                    title={
-                      selectedDronesActionBusy
-                        ? 'Selected drones are busy'
-                        : `Rename ${selectedDroneIds.length} selected drones`
-                    }
-                    aria-label={`Rename ${selectedDroneIds.length} selected drones`}
-                  >
-                    {selectedDronesRenaming ? (
-                      <IconSpinner className="opacity-80" />
-                    ) : (
-                      <IconPencil className="opacity-80" />
-                    )}
-                  </button>
-                </div>
-              )}
-            </div>
+            <span className="min-w-0 flex-1 truncate dh-type-sidebar-brand">DRONE HUB</span>
             {headerAccessory ? (
               <div className="flex items-center gap-1 flex-shrink-0">{headerAccessory}</div>
             ) : null}
-            {sidebarCapabilities.headerActions ? (
-              <div className="flex items-center gap-1 flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setSettingsActiveTab('devices');
-                    setAppView('settings');
-                  }}
-                  className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                    devicesSettingsActive
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                  }`}
-                  title="Open device settings"
-                  aria-label="Open device settings"
-                >
-                  <IconDevices className="opacity-80" />
-                </button>
-                <div ref={headerActionsMenuRef} className="relative">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setFooterOptionsMenuOpen(false);
-                      setHeaderActionsMenuOpen((prev) => !prev);
-                    }}
-                    className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
-                      headerActionsMenuOpen
-                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-                    }`}
-                    title="More sidebar actions"
-                    aria-label="More sidebar actions"
-                    aria-haspopup="menu"
-                    aria-expanded={headerActionsMenuOpen}
-                  >
-                    <IconMore className="opacity-85" />
-                  </button>
-                  {headerActionsMenuOpen ? (
-                    <div
-                      className={`absolute right-0 mt-2 w-[220px] z-50 ${dropdownPanelBaseClass}`}
-                      role="menu"
-                    >
-                      <div className="py-1">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHeaderActionsMenuOpen(false);
-                            onOpenPlaybookRuns();
-                          }}
-                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                          role="menuitem"
-                        >
-                          <span>Playbook runs</span>
-                          <IconList
-                            className={
-                              playbookRunsOpen ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
-                            }
-                          />
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => {
-                            setHeaderActionsMenuOpen(false);
-                            setAppView((prev) => (prev === 'settings' ? 'workspace' : 'settings'));
-                          }}
-                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                          role="menuitem"
-                        >
-                          <span>
-                            {appView === 'settings' ? 'Back to workspace' : 'Open settings'}
-                          </span>
-                          <IconSettings
-                            className={
-                              appView === 'settings'
-                                ? 'opacity-80 text-[var(--accent)]'
-                                : 'opacity-65'
-                            }
-                          />
-                        </button>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            ) : null}
           </div>
         </div>
+
+        {sidebarCapabilities.headerActions ? (
+          <>
+            <div
+              className="grid min-h-14 flex-shrink-0 grid-cols-3 border-b border-[var(--border)] bg-[var(--sidebar-section-bg)]"
+              role="tablist"
+              aria-label="Drone Hub sections"
+            >
+              {[
+                {
+                  id: 'drones',
+                  label: 'Drones',
+                  active: appView === 'workspace',
+                  Icon: IconDrone,
+                  onClick: () => setAppView('workspace'),
+                },
+                {
+                  id: 'devices',
+                  label: 'Devices',
+                  active: devicesSettingsActive,
+                  Icon: IconNetwork,
+                  onClick: () => {
+                    setSettingsActiveTab('devices');
+                    setAppView('settings');
+                  },
+                },
+                {
+                  id: 'settings',
+                  label: 'Settings',
+                  active: settingsTabActive,
+                  Icon: IconSettingsOutline,
+                  onClick: () => {
+                    if (settingsActiveTab === 'devices') setSettingsActiveTab('general');
+                    setAppView('settings');
+                  },
+                },
+              ].map(({ id, label, active: tabActive, Icon, onClick }) => (
+                <button
+                  key={id}
+                  type="button"
+                  role="tab"
+                  aria-selected={tabActive}
+                  onClick={onClick}
+                  className={`relative flex min-w-0 flex-col items-center justify-center gap-[3px] px-0.5 text-[.625rem] font-bold tracking-[.00625rem] transition-colors ${
+                    tabActive
+                      ? 'bg-[var(--selected)] text-[var(--accent-muted)]'
+                      : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]'
+                  }`}
+                >
+                  <Icon className={`h-[1.125rem] w-[1.125rem] ${tabActive ? 'text-[var(--accent)] [stroke-width:2.3]' : '[stroke-width:1.9]'}`} />
+                  <span className="truncate">{label}</span>
+                  {tabActive ? (
+                    <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-t-sm bg-[var(--accent)]" />
+                  ) : null}
+                </button>
+              ))}
+            </div>
+            <div
+              role="button"
+              tabIndex={0}
+              aria-label="Show repositories"
+              onClick={openRepositoryOverview}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                openRepositoryOverview();
+              }}
+              className="flex min-h-[3.125rem] flex-shrink-0 cursor-pointer items-center justify-between gap-2.5 border-b border-[var(--border)] bg-[var(--sidebar-section-bg)] px-3.5 transition-colors hover:bg-[var(--hover)]"
+            >
+              <span className="min-w-0 flex-1 truncate text-[.625rem] font-extrabold text-[var(--muted)]">
+                {dronesCount} {dronesCount === 1 ? 'drone' : 'drones'} · {repositoryNavigationItems.length}{' '}
+                {repositoryNavigationItems.length === 1 ? 'repository' : 'repositories'}
+              </span>
+              <div className="flex flex-shrink-0 items-center gap-2.5">
+                {sidebarFleetStatus.working > 0 ? (
+                  <span className="inline-flex items-center gap-1 font-mono text-[.5625rem] text-[var(--yellow)]" title={`${sidebarFleetStatus.working} working`}>
+                    <IconSpinner className="h-3 w-3 animate-spin" />
+                    {sidebarFleetStatus.working}
+                  </span>
+                ) : null}
+                {sidebarFleetStatus.unread > 0 ? (
+                  <span className="inline-flex items-center gap-1 font-mono text-[.5625rem] text-[var(--green)]" title={`${sidebarFleetStatus.unread} with unread chats`}>
+                    <IconMessageCircle className="h-3 w-3 [stroke-width:2.2]" />
+                    {sidebarFleetStatus.unread}
+                  </span>
+                ) : null}
+                {selectedDroneIds.length > 1 ? (
+                  <button
+                    type="button"
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onRenameDrones(selectedDroneIds);
+                    }}
+                    disabled={renameSelectedDronesDisabled}
+                    className="inline-flex h-7 items-center gap-1 rounded border border-[var(--border)] bg-[var(--panel-raised)] px-2 text-[.625rem] font-bold text-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-50"
+                    title={selectedDronesActionBusy ? 'Selected drones are busy' : `Rename ${selectedDroneIds.length} selected drones`}
+                  >
+                    {selectedDronesRenaming ? <IconSpinner className="h-3 w-3" /> : <IconPencil className="h-3 w-3" />}
+                    {selectedDroneIds.length}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    onOpenDraftChatComposer();
+                  }}
+                  disabled={!sidebarCapabilities.createDrones}
+                  className="inline-flex h-9 w-9 items-center justify-center rounded-[.375rem] border border-[var(--border)] bg-[var(--panel-raised)] text-[var(--accent)] transition-colors hover:bg-[var(--selected)] disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Create new drone"
+                  aria-label="Create new drone"
+                >
+                  <IconPlusOutline className="h-[1.1875rem] w-[1.1875rem]" />
+                </button>
+              </div>
+            </div>
+            {!repositoryOverviewOpen && activeRepositoryNavigationItem ? (
+              <button
+                type="button"
+                onClick={openRepositoryOverview}
+                className="flex min-h-14 w-full flex-shrink-0 items-center gap-2 border-b border-[var(--border)] px-2.5 text-left transition-colors hover:bg-[var(--hover)]"
+                title="Back to repositories"
+                aria-label="Back to repositories"
+              >
+                <span className="relative inline-flex h-5 w-5 flex-shrink-0 items-center justify-end text-[var(--accent)]">
+                  <IconFolderGit className="h-4 w-4" />
+                  <span className="absolute -left-0.5 top-1 inline-flex h-2.5 w-2.5 items-center justify-center rounded-full bg-[var(--sidebar-bg)]">
+                    <IconChevronLeft className="h-2.5 w-2.5" />
+                  </span>
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[.8125rem] font-extrabold text-[var(--fg)]">
+                    {activeRepositoryNavigationItem.label}
+                  </span>
+                  {activeRepositoryNavigationItem.repoPath ? (
+                    <span className="mt-px block truncate font-mono text-[.5rem] text-[var(--muted)]">
+                      {activeRepositoryNavigationItem.repoPath}
+                    </span>
+                  ) : null}
+                </span>
+                <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem]">
+                  {activeRepositoryNavigationItem.stateSummary.working > 0 ? (
+                    <span className="inline-flex items-center gap-1 text-[var(--yellow)]">
+                      <IconSpinner className="h-3 w-3" />
+                      {activeRepositoryNavigationItem.stateSummary.working}
+                    </span>
+                  ) : null}
+                  {activeRepositoryNavigationItem.stateSummary.unread > 0 ? (
+                    <span className="inline-flex items-center gap-1 text-[var(--green)]">
+                      <IconMessageCircle className="h-3 w-3 [stroke-width:2.2]" />
+                      {activeRepositoryNavigationItem.stateSummary.unread}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            ) : null}
+          </>
+        ) : null}
 
         <div
           className="flex-1 min-h-0 overflow-y-auto px-2 py-1.5"
@@ -2496,6 +2605,7 @@ export function DroneSidebar({
                 ) : null}
                 {!recentFilterHidAllDrones &&
                 !selectedRepoHasNoDrones &&
+                !sidebarCapabilities.headerActions &&
                 (sidebarCapabilities.createDrones || sidebarCapabilities.headerActions) ? (
                   <div className="mx-auto mt-4 flex max-w-[240px] flex-col gap-2">
                     {sidebarCapabilities.createDrones ? (
@@ -2559,6 +2669,7 @@ export function DroneSidebar({
                 ) : null}
                 {!recentFilterHidAllDrones &&
                 !selectedRepoHasNoDrones &&
+                !sidebarCapabilities.headerActions &&
                 sidebarCapabilities.createDrones ? (
                   <div className="mt-4 text-[var(--text-10)] text-[var(--muted-dim)]">
                     Or run{' '}
@@ -2599,6 +2710,7 @@ export function DroneSidebar({
               </div>
             )}
           {sidebarCapabilities.createDrones &&
+            !sidebarCapabilities.headerActions &&
             (dronesLoading ||
               sidebarDrones.length > 0 ||
               Boolean(visibleDraftSidebarPlaceholder) ||
@@ -2626,7 +2738,56 @@ export function DroneSidebar({
               </div>
             )}
           <div className={`flex flex-col gap-0.5 ${sidebarListSelectClass}`}>
-            {useReadOnlySidebarBranch && readOnlyMode === 'static-tree' ? (
+            {sidebarCapabilities.headerActions && repositoryOverviewOpen ? (
+              <div className="flex flex-col pb-6">
+                {repositoryNavigationItems.map((item) => {
+                  const containsSelectedDrone = Boolean(selectedDrone) && item.repoPath === selectedDroneRepoPath;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => openRepositoryNavigationItem(item)}
+                      className={`flex min-h-14 w-full items-center gap-2 rounded-[.25rem] border-b border-[var(--surface-soft)] px-2 text-left transition-colors ${
+                        containsSelectedDrone
+                          ? 'bg-[var(--selected)]'
+                          : 'hover:bg-[var(--hover)]'
+                      }`}
+                      title={item.repoPath || item.label}
+                      aria-label={`Open ${item.label} repository`}
+                    >
+                      <IconFolderGit className="h-[.9375rem] w-[.9375rem] flex-shrink-0 text-[var(--accent)]" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-[.75rem] font-extrabold text-[var(--fg)]">
+                          {item.label}
+                        </span>
+                        {item.repoPath ? (
+                          <span className="mt-px block truncate font-mono text-[.5rem] text-[var(--muted)]">
+                            {item.repoPath}
+                          </span>
+                        ) : null}
+                      </span>
+                      <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem]">
+                        {item.stateSummary.working > 0 ? (
+                          <span className="inline-flex items-center gap-1 text-[var(--yellow)]">
+                            <IconSpinner className="h-3 w-3" />
+                            {item.stateSummary.working}
+                          </span>
+                        ) : null}
+                        {item.stateSummary.unread > 0 ? (
+                          <span className="inline-flex items-center gap-1 text-[var(--green)]">
+                            <IconMessageCircle className="h-3 w-3 [stroke-width:2.2]" />
+                            {item.stateSummary.unread}
+                          </span>
+                        ) : null}
+                      </span>
+                      <IconChevronRight className="h-[.9375rem] w-[.9375rem] flex-shrink-0 text-[var(--muted)]" />
+                    </button>
+                  );
+                })}
+              </div>
+            ) : sidebarCapabilities.headerActions && activeSidebarRepoId === 'repo:ungrouped' ? (
+              <SidebarDroneTreeList {...sharedDroneTreeListProps} tree={ungroupedRepositoryTree} />
+            ) : useReadOnlySidebarBranch && readOnlyMode === 'static-tree' ? (
               <StaticReadOnlySidebarTree
                 nodeTree={staticReadOnlyNodeTree}
                 sidebarDensityMode={sidebarDensityMode}
@@ -2661,32 +2822,12 @@ export function DroneSidebar({
                 onSelectDroneChat={onSelectDroneChat}
                 onToggleGroupCollapsed={onToggleGroupCollapsed}
               />
-            ) : effectiveViewMode === 'flat' ? (
-              <SidebarDroneTreeList {...sharedDroneTreeListProps} tree={flatSidebarTree} />
             ) : (
               <>
                 <div className="flex flex-col gap-1.5">
                   <>
                     {sidebarCapabilities.actions && !isRepoGroupingMode ? (
                       <>
-                        <div className="mb-1 flex items-center gap-2 px-1">
-                          <button
-                            type="button"
-                            onClick={() => openFolderCreate(null)}
-                            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 dh-type-sidebar-action dh-type-sidebar-action--accent transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
-                          >
-                            <IconPlus className="opacity-80" />
-                            New folder
-                          </button>
-                          {selectedFolderPath ? (
-                            <span
-                              className="min-w-0 truncate text-[var(--text-10)] font-mono text-[var(--muted-dim)]"
-                              title={selectedFolderPath}
-                            >
-                              {selectedFolderPath}
-                            </span>
-                          ) : null}
-                        </div>
                         {folderEditor?.mode === 'create' &&
                         folderEditor.parentPath === null &&
                         folderEditor.anchorPath === null ? (
@@ -2900,19 +3041,13 @@ export function DroneSidebar({
               {sidebarCapabilities.repoFooter ? (
                 <button
                   type="button"
-                  onClick={() => setSidebarReposCollapsed((prev) => !prev)}
+                  onClick={openRepositoryOverview}
                   className="flex-1 min-w-0 inline-flex items-center gap-2 px-1.5 py-1 rounded text-left dh-type-sidebar-action dh-type-sidebar-action--quiet hover:bg-[var(--hover)] transition-all"
-                  title={sidebarReposCollapsed ? 'Expand repos list' : 'Collapse repos list'}
-                  aria-label={sidebarReposCollapsed ? 'Expand repos list' : 'Collapse repos list'}
+                  title="Show repositories"
+                  aria-label="Show repositories"
                 >
-                  <IconChevron down={!sidebarReposCollapsed} className="opacity-70" />
-                  <IconFolder className="opacity-60 w-3 h-3" />
-                  <span className="truncate">Repos {repos.length > 0 ? repos.length : ''}</span>
-                  {activeRepoPath ? (
-                    <span className="ml-auto px-1.5 py-0.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--text-9)] text-[var(--accent)]">
-                      Filtered
-                    </span>
-                  ) : null}
+                  <IconFolderGit className="h-3 w-3 text-[var(--accent)] opacity-80" />
+                  <span className="truncate">Repositories {repositoryNavigationItems.length || ''}</span>
                 </button>
               ) : null}
               <div
@@ -2923,7 +3058,6 @@ export function DroneSidebar({
                   <button
                     type="button"
                     onClick={() => {
-                      setHeaderActionsMenuOpen(false);
                       setFooterOptionsMenuOpen((prev) => !prev);
                     }}
                     className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
@@ -2966,48 +3100,6 @@ export function DroneSidebar({
                     role="menu"
                   >
                     <div className="py-1">
-                      {canChangeSidebarGroupingMode ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setSidebarGroupingMode((prev) =>
-                              prev === 'groups' ? 'repos' : 'groups',
-                            )
-                          }
-                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                          role="menuitem"
-                        >
-                          <span>
-                            {isRepoGroupingMode ? 'Show real groups' : 'Show repos as groups'}
-                          </span>
-                          <IconFolder
-                            className={
-                              !isRepoGroupingMode ? 'opacity-80 text-[var(--accent)]' : 'opacity-65'
-                            }
-                          />
-                        </button>
-                      ) : null}
-                      {canChangeSidebarViewMode ? (
-                        <button
-                          type="button"
-                          onClick={() =>
-                            setViewMode((prev) => (prev === 'grouped' ? 'flat' : 'grouped'))
-                          }
-                          className={`${dropdownMenuItemBaseClass} flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]`}
-                          role="menuitem"
-                        >
-                          <span>
-                            {viewMode === 'grouped'
-                              ? 'Switch to flat list'
-                              : 'Switch to grouped folders'}
-                          </span>
-                          {viewMode === 'flat' ? (
-                            <IconList className="opacity-80 text-[var(--accent)]" />
-                          ) : (
-                            <IconTreeView className="opacity-65" />
-                          )}
-                        </button>
-                      ) : null}
                       {sidebarCapabilities.collapseControl ? (
                         <button
                           type="button"
@@ -3024,7 +3116,7 @@ export function DroneSidebar({
                           />
                         </button>
                       ) : null}
-                      {hasSidebarLayoutOptions ? (
+                      {sidebarCapabilities.collapseControl ? (
                         <div className="my-1 border-t border-[var(--border-subtle)]" />
                       ) : null}
                       <button
@@ -3096,76 +3188,6 @@ export function DroneSidebar({
                 ) : null}
               </div>
             </div>
-            {sidebarCapabilities.repoFooter && !sidebarReposCollapsed && (
-              <div className="max-h-[190px] overflow-y-auto px-2 pb-2 flex flex-col gap-0.5">
-                <button
-                  type="button"
-                  onClick={() => setActiveRepoPath('')}
-                  className={`w-full text-left px-2.5 py-2 rounded border transition-all ${
-                    !activeRepoPath
-                      ? 'bg-[var(--selected)] border-[var(--accent-muted)]'
-                      : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
-                  }`}
-                  title="Show drones from all repos"
-                >
-                  <div className="flex items-center justify-between gap-2">
-                    <span className="text-[var(--sidebar-item-size)] text-[var(--sidebar-fg)]">All repos</span>
-                    <span className="dh-type-count">
-                      {dronesCount}
-                    </span>
-                  </div>
-                </button>
-                {repos
-                  .slice()
-                  .sort((a, b) => a.path.localeCompare(b.path))
-                  .map((r) => {
-                    const p = String(r.path ?? '').trim();
-                    if (!p) return null;
-                    const selected = p === activeRepoPath;
-                    const base = r.github
-                      ? `${r.github.owner}/${r.github.repo}`
-                      : p.split(/[\\/]/).filter(Boolean).pop() || p;
-                    const droneCount = droneCountByRepoPath.get(p) ?? 0;
-                    return (
-                      <button
-                        key={p}
-                        type="button"
-                        onClick={() => setActiveRepoPath((prev) => (prev === p ? '' : p))}
-                        className={`w-full text-left px-2.5 py-2 rounded border transition-all ${
-                          selected
-                            ? 'bg-[var(--selected)] border-[var(--accent-muted)] shadow-[var(--glow-accent)]'
-                            : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
-                        }`}
-                        title={p}
-                      >
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <div className="text-[var(--sidebar-item-size)] text-[var(--sidebar-fg)] truncate">
-                              {base}
-                            </div>
-                            <div className="text-[var(--text-9)] text-[var(--chrome-muted)] truncate font-mono mt-0.5">
-                              {p}
-                            </div>
-                          </div>
-                          <span className="mt-0.5 dh-type-count">
-                            {droneCount}
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  })}
-                {!reposLoading && repos.length === 0 && !reposError && (
-                  <div className="px-2.5 py-3 text-[var(--text-10)] text-[var(--muted-dim)]">
-                    No repos registered yet.
-                  </div>
-                )}
-                {reposError && (
-                  <div className="px-2.5 py-3 text-[var(--text-10)] text-[var(--red)]">
-                    Failed to load repos.
-                  </div>
-                )}
-              </div>
-            )}
           </div>
         ) : null}
       </aside>
@@ -3260,7 +3282,7 @@ export function DroneSidebar({
             disabled={!collapsedRailInteractive}
             tabIndex={collapsedRailInteractive ? 0 : -1}
           >
-            <IconDevices className="opacity-80" />
+            <IconNetwork className="opacity-80" />
           </SidebarIconButton>
         ) : null}
       </div>

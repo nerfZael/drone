@@ -12,6 +12,7 @@ describe('drone hub ui store migration', () => {
       {
         sidebarGroupingMode: 'repos',
         sidebarDockSide: 'right',
+        viewMode: 'flat',
         assistantThreadSidebarDockSide: 'right',
         autoDelete: true,
         showCanvasLastMessagePreviews: true,
@@ -35,6 +36,7 @@ describe('drone hub ui store migration', () => {
       showCanvasLastMessagePreviews: true,
       seenModelIds: ['gpt-5.4', 'o3'],
     });
+    expect((migrated as any).viewMode).toBeUndefined();
     expect((migrated as any).assistantThreadSidebarDockSide).toBeUndefined();
     expect(Array.isArray(migrated.automations)).toBe(true);
     expect((migrated.automations ?? [])[0]).toMatchObject({

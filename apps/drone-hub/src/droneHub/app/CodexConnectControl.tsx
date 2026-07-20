@@ -218,8 +218,8 @@ export function CodexConnectControl({
 
 export function CodexConnectComposerNotice({ resetKey }: { resetKey: string }) {
   return (
-    <div className="px-5">
-      <div className="mx-auto max-w-[1170px]">
+    <div className="px-[.5625rem]">
+      <div className="mx-auto max-w-[73.125rem]">
         <CodexConnectControl key={resetKey} compact />
       </div>
     </div>

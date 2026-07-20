@@ -43,12 +43,24 @@ export { ChatComposerMenu, type ChatComposerMenuAction } from './ChatComposerMen
 export {
   ChatComposerControls,
   type ChatComposerButtonControl,
+  type ChatComposerChoicePickerControl,
   type ChatComposerControl,
   type ChatComposerControlsConfig,
+  type ChatComposerModelPickerControl,
   type ChatComposerSegmentedControl,
   type ChatComposerSelectControl,
   type ChatComposerTextControl,
 } from './ChatComposerControls';
+export {
+  ChatComposerChoicePicker,
+  type ChatComposerChoicePickerConfig,
+  type ChatComposerChoicePickerOption,
+} from './ChatComposerChoicePicker';
+export {
+  ChatComposerModelPicker,
+  type ChatComposerModelChoice,
+  type ChatComposerModelPickerConfig,
+} from './ChatComposerModelPicker';
 export {
   ChatComposerContext,
   type ChatComposerContextConfig,

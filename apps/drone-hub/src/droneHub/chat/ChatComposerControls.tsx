@@ -2,6 +2,14 @@ import React from 'react';
 
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
 import { ChatComposerMenu, type ChatComposerMenuAction } from './ChatComposerMenu';
+import {
+  ChatComposerModelPicker,
+  type ChatComposerModelPickerConfig,
+} from './ChatComposerModelPicker';
+import {
+  ChatComposerChoicePicker,
+  type ChatComposerChoicePickerConfig,
+} from './ChatComposerChoicePicker';
 
 export type ChatComposerSelectControl = {
   kind: 'select';
@@ -50,11 +58,21 @@ export type ChatComposerSegmentedControl = {
   disabled?: boolean;
 };
 
+export type ChatComposerModelPickerControl = ChatComposerModelPickerConfig & {
+  kind: 'model-picker';
+};
+
+export type ChatComposerChoicePickerControl = ChatComposerChoicePickerConfig & {
+  kind: 'choice-picker';
+};
+
 export type ChatComposerControl =
   | ChatComposerSelectControl
   | ChatComposerTextControl
   | ChatComposerButtonControl
-  | ChatComposerSegmentedControl;
+  | ChatComposerSegmentedControl
+  | ChatComposerChoicePickerControl
+  | ChatComposerModelPickerControl;
 
 export type ChatComposerControlsConfig = {
   controls: ChatComposerControl[];
@@ -64,9 +82,9 @@ export type ChatComposerControlsConfig = {
 };
 
 function controlWidthClass(width: 'narrow' | 'medium' | 'wide' | undefined): string {
-  if (width === 'narrow') return 'w-[88px]';
-  if (width === 'wide') return 'min-w-[140px] max-w-[200px]';
-  return 'min-w-[112px] max-w-[180px]';
+  if (width === 'narrow') return 'w-[5.5rem]';
+  if (width === 'wide') return 'min-w-[8.75rem] max-w-[12.5rem]';
+  return 'min-w-[7rem] max-w-[11.25rem]';
 }
 
 function RefreshIcon({ active }: { active: boolean }) {
@@ -112,9 +130,15 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
   return (
     <div
       data-onboarding-id={config.onboardingId}
-      className="flex min-w-0 flex-shrink-0 flex-wrap items-center gap-1.5"
+      className="flex min-w-0 flex-shrink-0 flex-wrap items-center gap-[.4375rem]"
     >
       {config.controls.map((control) => {
+        if (control.kind === 'choice-picker') {
+          return <ChatComposerChoicePicker key={control.id} config={control} />;
+        }
+        if (control.kind === 'model-picker') {
+          return <ChatComposerModelPicker key={control.id} config={control} />;
+        }
         if (control.kind === 'select') {
           return (
             <UiMenuSelect
@@ -124,7 +148,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
               onValueChange={control.onValueChange}
               entries={control.entries}
               disabled={control.disabled}
-              triggerClassName={`h-[var(--control-height)] justify-between px-2 text-[var(--text-10)] uppercase tracking-wide ${controlWidthClass(control.width)}`}
+              triggerClassName={`!h-8 justify-between !border-transparent !bg-transparent px-2 text-[.6875rem] !font-extrabold normal-case tracking-normal !text-[var(--chat-composer-model-fg)] hover:!opacity-70 ${controlWidthClass(control.width)}`}
               title={control.title}
               triggerLabel={control.label}
               chevron={() => (
@@ -134,13 +158,13 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
                   viewBox="0 0 16 16"
                   fill="currentColor"
                   aria-hidden="true"
-                  className="text-[var(--muted-dim)] opacity-60"
+                  className="text-[var(--accent)] opacity-80"
                 >
                   <path d="M4.427 6.573a.25.25 0 0 1 .177-.073h6.792a.25.25 0 0 1 .177.427l-3.396 3.396a.25.25 0 0 1-.354 0L4.427 6.927a.25.25 0 0 1 0-.354Z" />
                 </svg>
               )}
-              panelClassName="bottom-full mb-1.5 w-[260px]"
-              menuClassName="max-h-[240px] overflow-y-auto"
+              panelClassName="bottom-full mb-1.5 w-[16.25rem]"
+              menuClassName="max-h-[15rem] overflow-y-auto"
               header={control.title}
               searchable={control.searchable}
               searchPlaceholder={control.searchPlaceholder}
@@ -160,10 +184,10 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
               }}
               disabled={control.disabled}
               placeholder={control.placeholder}
-              className={`h-[var(--control-height)] rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[var(--text-10)] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none ${controlWidthClass(control.width)} ${
+              className={`h-8 rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] px-2 text-[.6875rem] font-extrabold text-[var(--chat-composer-control-fg)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${controlWidthClass(control.width)} ${
                 control.disabled
                   ? 'cursor-not-allowed opacity-40'
-                  : 'hover:border-[var(--border)] hover:text-[var(--fg-secondary)]'
+                  : 'hover:opacity-70'
               }`}
               title={control.title}
               aria-label={control.title}
@@ -174,7 +198,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
           return (
             <div
               key={control.id}
-              className="grid h-[var(--control-height)] flex-shrink-0 grid-flow-col overflow-hidden rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)]"
+              className="grid h-8 flex-shrink-0 grid-flow-col overflow-hidden rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)]"
               role="group"
               aria-label={control.label}
             >
@@ -186,12 +210,11 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
                   onClick={() => control.onValueChange(option.value)}
                   aria-pressed={control.value === option.value}
                   title={option.title}
-                  className={`min-w-[42px] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide disabled:opacity-40 ${
+                  className={`min-w-[2.625rem] px-2 text-[.625rem] font-extrabold uppercase tracking-wide disabled:opacity-40 ${
                     control.value === option.value
                       ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'text-[var(--muted)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
+                      : 'text-[var(--chat-composer-control-fg)] hover:opacity-70'
                   }`}
-                  style={{ fontFamily: 'var(--display)' }}
                 >
                   {option.label}
                 </button>
@@ -209,14 +232,13 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
             aria-label={control.title}
             title={control.title}
             onClick={control.onSelect}
-            className={`inline-flex h-[var(--control-height)] flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
-              iconOnly ? 'w-[var(--control-height)]' : 'px-2'
+            className={`inline-flex h-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[.625rem] font-extrabold uppercase tracking-wide transition-opacity disabled:cursor-not-allowed disabled:opacity-40 ${
+              iconOnly ? 'w-8' : 'px-2'
             } ${
               control.active
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                : 'text-[var(--chat-composer-control-fg)] hover:opacity-70'
             }`}
-            style={{ fontFamily: 'var(--display)' }}
           >
             {control.icon === 'refresh' ? <RefreshIcon active={Boolean(control.active)} /> : null}
             {control.icon === 'star' ? <StarIcon selected={Boolean(control.active)} /> : null}

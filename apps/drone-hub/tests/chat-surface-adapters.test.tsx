@@ -19,6 +19,7 @@ import {
   ToolRunActivity,
   formatAssistantRunDuration,
 } from '../src/droneHub/assistant/AssistantTranscript';
+import { buildNativeAgentComposerControls } from '../src/droneHub/assistant/native-agent-composer-controls';
 
 const TRANSCRIPT_ITEMS = [
   { key: 'message', kind: 'message' as const, content: <div>Visible message</div> },
@@ -103,8 +104,8 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('data-agent-type="external"');
     expect(html).toContain('data-tool-activity="hidden"');
     expect(html).toContain('accept="image/*"');
-    expect(html).toContain('>Stop<');
-    expect(html).not.toContain('>Send<');
+    expect(html).toContain('aria-label="Stop"');
+    expect(html).not.toContain('aria-label="Send"');
   });
 
   test('native agents use files, queue while running, and expose tool activity', () => {
@@ -120,7 +121,7 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('data-tool-activity="visible"');
     expect(html).not.toContain('accept="image/*"');
     expect(html).toContain('>Stop<');
-    expect(html).toContain('>Send<');
+    expect(html).toContain('aria-label="Send"');
   });
 
   test('capabilities can be extended without adding agent checks to the surface', () => {
@@ -198,6 +199,8 @@ describe('agent chat surface adapters', () => {
           promptError={null}
           sending={false}
           waiting={false}
+          draftValue="Open controls"
+          onDraftValueChange={() => {}}
           composerControls={{
             controls: [
               {
@@ -222,6 +225,56 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('Thread files');
   });
 
+  test('the shared mobile-style model picker combines model and reasoning in one trigger', () => {
+    const html = renderToStaticMarkup(
+      <ChatSurface adapter={adaptNativeAgentChatSurface()}>
+        <ChatSurfaceComposer
+          resetKey="combined-model-picker"
+          droneName="Test agent"
+          promptError={null}
+          sending={false}
+          waiting={false}
+          draftValue="Open controls"
+          onDraftValueChange={() => {}}
+          composerControls={{
+            controls: [
+              {
+                kind: 'choice-picker',
+                id: 'delivery',
+                value: 'queue',
+                title: 'Choose message delivery',
+                sectionTitle: 'Delivery',
+                options: [
+                  { value: 'queue', label: 'Queue' },
+                  { value: 'asap', label: 'ASAP' },
+                ],
+                onValueChange: () => {},
+              },
+              {
+                kind: 'model-picker',
+                id: 'model',
+                currentProvider: 'codex',
+                currentModel: 'gpt-5',
+                currentThinkingLevel: 'medium',
+                options: [
+                  { provider: 'codex', id: 'gpt-5', name: 'GPT-5', thinkingLevel: 'medium' },
+                ],
+                onSelect: () => {},
+              },
+            ],
+          }}
+          onSend={async () => true}
+        />
+      </ChatSurface>,
+    );
+
+    expect(html).toContain('aria-label="Choose model and reasoning"');
+    expect(html).toContain('aria-label="Choose message delivery"');
+    expect(html).toContain('Queue');
+    expect(html).toContain('5 Medium');
+    expect(html).not.toContain('Built-in agent model');
+  });
+
   test('the shared composer exposes the same automation controls for both agent types', () => {
     for (const adapter of [adaptExternalAgentChatSurface(), adaptNativeAgentChatSurface()]) {
       const html = renderToStaticMarkup(
@@ -232,6 +285,8 @@ describe('agent chat surface adapters', () => {
             promptError={null}
             sending={false}
             waiting={false}
+            draftValue="Open controls"
+            onDraftValueChange={() => {}}
             automationActions={[
               {
                 id: 'automation-review',
@@ -248,6 +303,86 @@ describe('agent chat surface adapters', () => {
       expect(html).toContain('Repeat');
       expect(html).toContain('Automations');
     }
+  });
+
+  test('the empty composer collapses to add, message, and microphone controls', () => {
+    const html = renderToStaticMarkup(
+      <ChatSurface adapter={adaptExternalAgentChatSurface()}>
+        <ChatSurfaceComposer
+          resetKey="collapsed-composer"
+          droneName="Test agent"
+          promptError={null}
+          sending={false}
+          waiting={false}
+          composerControls={{
+            controls: [
+              {
+                kind: 'select',
+                id: 'model',
+                value: 'model-a',
+                label: 'Model A',
+                title: 'Choose model',
+                entries: [{ value: 'model-a', label: 'Model A' }],
+                onValueChange: () => {},
+              },
+            ],
+          }}
+          onSend={async () => true}
+        />
+      </ChatSurface>,
+    );
+
+    expect(html).toContain('data-chat-composer-expanded="false"');
+    expect(html).toContain('data-chat-composer-collapsed-action="true"');
+    expect(html).toContain('aria-label="Attach images"');
+    expect(html).toContain('aria-label="Record voice message"');
+    expect(html).not.toContain('Model A');
+    expect(html).not.toContain('aria-label="Send"');
+  });
+
+  test('native delivery precedes one cross-provider model picker', () => {
+    const updates: Array<Record<string, unknown>> = [];
+    const config = buildNativeAgentComposerControls({
+      thread: {
+        provider: 'codex',
+        model: 'gpt-5',
+        thinkingLevel: 'medium',
+        promptDeliveryMode: 'queue',
+      } as any,
+      models: [
+        { provider: 'codex', id: 'gpt-5', name: 'GPT-5', reasoning: true, thinkingLevel: 'medium' },
+        { provider: 'openai', id: 'o3', name: 'o3', reasoning: true, thinkingLevel: 'high' },
+      ],
+      defaultModel: undefined,
+      busy: false,
+      onUpdate: (patch) => updates.push(patch),
+      onSetDefault: () => {},
+    });
+
+    expect(config.controls.map((control) => control.id)).toEqual([
+      'native-delivery',
+      'native-model',
+      'native-default-model',
+    ]);
+    const modelControl = config.controls.find((control) => control.id === 'native-model');
+    const deliveryControl = config.controls.find((control) => control.id === 'native-delivery');
+    expect(deliveryControl?.kind).toBe('choice-picker');
+    if (deliveryControl?.kind !== 'choice-picker') throw new Error('Expected delivery picker');
+    deliveryControl.onValueChange('asap');
+    expect(updates.at(-1)).toEqual({ promptDeliveryMode: 'asap' });
+    expect(modelControl?.kind).toBe('model-picker');
+    if (modelControl?.kind !== 'model-picker') throw new Error('Expected native model picker');
+    expect(modelControl.options.map((option) => `${option.provider}:${option.id}`)).toContain('openai:o3');
+    modelControl.onSelect(
+      { provider: 'openai', id: 'o3', name: 'o3', thinkingLevel: 'high' },
+      'model',
+    );
+    expect(updates.at(-1)).toEqual({ provider: 'openai', model: 'o3', thinkingLevel: 'high' });
+    modelControl.onSelect(
+      { provider: 'openai', id: 'o3', name: 'o3', thinkingLevel: 'medium' },
+      'reasoning',
+    );
+    expect(updates.at(-1)).toEqual({ thinkingLevel: 'medium' });
   });
 
   test('the shared message body renders the same markdown and images for either controller', () => {

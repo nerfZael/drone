@@ -200,7 +200,18 @@ export function buildSidebarNodeTree<TDrone extends SidebarTreeDrone>({
   const resolvedSidebarFolderTree =
     sidebarFolderTree ??
     buildSidebarFolderTree(sidebarGroups, sidebarGroupOrder, sidebarGroupCreatedAtByName);
-  for (const folder of resolvedSidebarFolderTree) collectFolderNodes(folder, SIDEBAR_ROOT_PARENT_ID, nodesById, folderNodeByPath, childIdsByParentDraft);
+  for (const folder of resolvedSidebarFolderTree) {
+    // Ungrouped is a root scope, not a navigable folder. Its drones are appended
+    // directly below the active repository (or the standalone root) below.
+    if (folder.kind === 'group' && isUngroupedGroupName(folder.path)) continue;
+    collectFolderNodes(
+      folder,
+      SIDEBAR_ROOT_PARENT_ID,
+      nodesById,
+      folderNodeByPath,
+      childIdsByParentDraft,
+    );
+  }
 
   const rootUngrouped = sidebarGroups.find((group) => group.kind === 'group' && isUngroupedGroupName(group.group));
   const rootItems = orderSidebarEntries(

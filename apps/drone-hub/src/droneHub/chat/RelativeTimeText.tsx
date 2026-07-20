@@ -1,5 +1,5 @@
 import React from 'react';
-import { timeAgo } from '../../domain';
+import { compactTimeAgo, timeAgo } from '../../domain';
 import { getRelativeTimeUpdateDelayMs } from './relative-time-schedule';
 
 type RelativeTimeListener = {
@@ -99,11 +99,13 @@ export function RelativeTimeText({
   className,
   title,
   fallback = '—',
+  compact = false,
 }: {
   at: string | null | undefined;
   className?: string;
   title?: string;
   fallback?: string;
+  compact?: boolean;
 }) {
   const normalizedAt = String(at ?? '').trim();
   const atMs = normalizedAt ? new Date(normalizedAt).getTime() : NaN;
@@ -114,7 +116,7 @@ export function RelativeTimeText({
   const nowMs = React.useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   return (
     <span className={className} title={title}>
-      {normalizedAt ? timeAgo(normalizedAt, nowMs) : fallback}
+      {normalizedAt ? (compact ? compactTimeAgo(normalizedAt, nowMs) : timeAgo(normalizedAt, nowMs)) : fallback}
     </span>
   );
 }

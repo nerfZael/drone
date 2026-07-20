@@ -23,7 +23,6 @@ export const SIDEBAR_VISIBLE_MULTI_CHAT_GROUP = '__sidebar-visible-drones__';
 
 type UseSidebarViewModelArgs = {
   selectedDroneIds: string[];
-  viewMode: 'grouped' | 'flat';
   sidebarGroupingMode: 'groups' | 'repos';
   collapsedGroups: Record<string, boolean>;
   deletingGroups: Record<string, boolean>;
@@ -58,7 +57,6 @@ function compareGroupNamesByNewestFirst(
 
 export function useSidebarViewModel({
   selectedDroneIds,
-  viewMode,
   sidebarGroupingMode,
   collapsedGroups,
   deletingGroups,
@@ -252,27 +250,19 @@ export function useSidebarViewModel({
     return sidebarDronesFilteredByRepoBase.filter((drone) => visibleSidebarDroneIdSet.has(drone.id));
   }, [showHiddenSidebarGroups, sidebarDronesFilteredByRepoBase, visibleSidebarDroneIdSet]);
 
-  const orderedDroneIds = React.useMemo(() => {
-    if (viewMode === 'flat') {
-      return sidebarDronesFilteredByRepo
-        .slice()
-        .sort(compareDronesByNewestFirst)
-        .map((d) => d.id);
-    }
-    return sidebarGroups.flatMap((g) => g.items.map((d) => d.id));
-  }, [sidebarDronesFilteredByRepo, sidebarGroups, viewMode]);
+  const orderedDroneIds = React.useMemo(
+    () => sidebarGroups.flatMap((group) => group.items.map((drone) => drone.id)),
+    [sidebarGroups],
+  );
 
   const sidebarVisibleDrones = React.useMemo(() => {
-    if (viewMode === 'flat') {
-      return sidebarDronesFilteredByRepo.slice().sort(compareDronesByNewestFirst);
-    }
     const visible: DroneSummary[] = [];
     for (const group of sidebarGroups) {
       if (collapsedGroups[group.group]) continue;
       visible.push(...group.items);
     }
     return visible;
-  }, [collapsedGroups, sidebarDronesFilteredByRepo, sidebarGroups, viewMode]);
+  }, [collapsedGroups, sidebarGroups]);
 
   const sidebarHasUngroupedGroup = React.useMemo(
     () => allSidebarGroups.some((g) => isUngroupedGroupName(g.label)),

@@ -42,7 +42,6 @@ type NameSuggestToast = null | {
   voiceLevel?: number;
   voiceActive?: boolean;
 };
-type ViewMode = 'grouped' | 'flat';
 type SidebarGroupingMode = 'groups' | 'repos';
 export type SidebarDockSide = 'left' | 'right';
 type OutputView = 'screen' | 'log';
@@ -84,7 +83,6 @@ type DroneHubUiState = {
   sidebarDensityMode: SidebarDensityMode;
   sidebarDockSide: SidebarDockSide;
   appView: AppView;
-  viewMode: ViewMode;
   collapsedGroups: Record<string, boolean>;
   sidebarGroupOrder: string[];
   sidebarRepoScopedGroupByPath: Record<string, string>;
@@ -149,7 +147,6 @@ type DroneHubUiState = {
   setSidebarDensityMode: (next: Updater<SidebarDensityMode>) => void;
   setSidebarDockSide: (next: Updater<SidebarDockSide>) => void;
   setAppView: (next: Updater<AppView>) => void;
-  setViewMode: (next: Updater<ViewMode>) => void;
   setCollapsedGroups: (next: Updater<Record<string, boolean>>) => void;
   setSidebarGroupOrder: (next: Updater<string[]>) => void;
   setSidebarRepoScopedGroupByPath: (next: Updater<Record<string, string>>) => void;
@@ -311,7 +308,6 @@ type DroneHubUiPersistedState = Pick<
   | 'sidebarDensityMode'
   | 'sidebarDockSide'
   | 'appView'
-  | 'viewMode'
   | 'collapsedGroups'
   | 'sidebarGroupOrder'
   | 'sidebarRepoScopedGroupByPath'
@@ -347,8 +343,13 @@ export function migrateDroneHubUiPersistedState(
   _version?: number,
 ): Partial<DroneHubUiPersistedState> {
   if (!persistedState || typeof persistedState !== 'object' || Array.isArray(persistedState)) return {};
-  const { fsExplorerView: _ignoredFsExplorerView, ...persisted } = persistedState as Partial<DroneHubUiPersistedState> & {
+  const {
+    fsExplorerView: _ignoredFsExplorerView,
+    viewMode: _ignoredViewMode,
+    ...persisted
+  } = persistedState as Partial<DroneHubUiPersistedState> & {
     fsExplorerView?: unknown;
+    viewMode?: unknown;
   };
   const migrated = { ...persisted };
   if (Object.prototype.hasOwnProperty.call(migrated, 'themeId')) {
@@ -424,10 +425,6 @@ function normalizeOrderedStringMap(value: unknown): Record<string, string[]> {
 
 function normalizeAppView(value: unknown): AppView {
   return value === 'settings' ? 'settings' : 'workspace';
-}
-
-function normalizeViewMode(value: unknown): ViewMode {
-  return value === 'flat' ? 'flat' : 'grouped';
 }
 
 function normalizeSidebarGroupingMode(value: unknown): SidebarGroupingMode {
@@ -637,7 +634,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       sidebarDensityMode: 'default',
       sidebarDockSide: 'left',
       appView: 'workspace',
-      viewMode: 'grouped',
       collapsedGroups: {},
       sidebarGroupOrder: [],
       sidebarRepoScopedGroupByPath: {},
@@ -712,7 +708,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setSidebarDockSide: (next) =>
         set((s) => ({ sidebarDockSide: normalizeSidebarDockSide(resolveNext(s.sidebarDockSide, next)) })),
       setAppView: (next) => set((s) => ({ appView: resolveNext(s.appView, next) })),
-      setViewMode: (next) => set((s) => ({ viewMode: resolveNext(s.viewMode, next) })),
       setCollapsedGroups: (next) => set((s) => ({ collapsedGroups: resolveNext(s.collapsedGroups, next) })),
       setSidebarGroupOrder: (next) =>
         set((s) => ({ sidebarGroupOrder: normalizeSidebarGroupOrder(resolveNext(s.sidebarGroupOrder, next)) })),
@@ -992,7 +987,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         sidebarDensityMode: state.sidebarDensityMode,
         sidebarDockSide: state.sidebarDockSide,
         appView: state.appView,
-        viewMode: state.viewMode,
         collapsedGroups: state.collapsedGroups,
         sidebarGroupOrder: state.sidebarGroupOrder,
         sidebarRepoScopedGroupByPath: state.sidebarRepoScopedGroupByPath,
@@ -1026,8 +1020,12 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         const persisted = (persistedState as Partial<DroneHubUiPersistedState>) ?? {};
         const {
           fsExplorerView: _ignoredFsExplorerView,
+          viewMode: _ignoredViewMode,
           ...persistedRest
-        } = persisted as Partial<DroneHubUiPersistedState & { fsExplorerView?: unknown }>;
+        } = persisted as Partial<DroneHubUiPersistedState> & {
+          fsExplorerView?: unknown;
+          viewMode?: unknown;
+        };
         const migratedShortcutBindings = migrateLegacyShortcutBindings(persisted.shortcutBindings);
         return {
           ...currentState,
@@ -1071,7 +1069,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             persisted.sidebarDensityMode ?? currentState.sidebarDensityMode,
           ),
           sidebarDockSide: normalizeSidebarDockSide(persisted.sidebarDockSide ?? currentState.sidebarDockSide),
-          viewMode: normalizeViewMode(persisted.viewMode ?? currentState.viewMode),
           collapsedGroups: normalizeCollapsedGroups(persisted.collapsedGroups ?? currentState.collapsedGroups),
           sidebarGroupOrder: normalizeSidebarGroupOrder(
             persisted.sidebarGroupOrder ?? currentState.sidebarGroupOrder,
@@ -1145,7 +1142,6 @@ export function useDroneHubAppModelUiState() {
       playbookRunsSelectedRepoPath: s.playbookRunsSelectedRepoPath,
       chatHeaderRepoPath: s.chatHeaderRepoPath,
       appView: s.appView,
-      viewMode: s.viewMode,
       sidebarGroupingMode: s.sidebarGroupingMode,
       sidebarDensityMode: s.sidebarDensityMode,
       sidebarDockSide: s.sidebarDockSide,
@@ -1255,7 +1251,6 @@ export function useDroneSidebarUiState() {
       draftChat: s.draftChat,
       settingsActiveTab: s.settingsActiveTab,
       appView: s.appView,
-      viewMode: s.viewMode,
       activeRepoPath: s.activeRepoPath,
       homeOpen: s.homeOpen,
       selectedDrone: s.selectedDrone,
@@ -1278,7 +1273,6 @@ export function useDroneSidebarUiState() {
       autoDelete: s.autoDelete,
       setSettingsActiveTab: s.setSettingsActiveTab,
       setAppView: s.setAppView,
-      setViewMode: s.setViewMode,
       setSidebarReposCollapsed: s.setSidebarReposCollapsed,
       setSidebarAutoMinimize: s.setSidebarAutoMinimize,
       setShowRecentDronesOnly: s.setShowRecentDronesOnly,

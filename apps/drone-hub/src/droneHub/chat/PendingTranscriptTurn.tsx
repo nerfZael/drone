@@ -13,7 +13,7 @@ import { WorkingElapsedStatus } from './WorkingElapsedStatus';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
-  showRoleIcons = true,
+  showRoleIcons = false,
   onCancelQueued,
   onOpenFileReference,
   onOpenLink,

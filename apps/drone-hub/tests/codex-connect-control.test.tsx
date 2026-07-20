@@ -18,9 +18,8 @@ describe('Codex connection notice', () => {
   test('uses the same inner width and horizontal padding as the chat composer', () => {
     const html = renderToStaticMarkup(<CodexConnectComposerNotice resetKey="drone:chat" />);
 
-    expect(html).toContain('class="px-5"');
-    expect(html).toContain('mx-auto max-w-[1170px]');
+    expect(html).toContain('class="px-[.5625rem]"');
+    expect(html).toContain('mx-auto max-w-[73.125rem]');
     expect(html).not.toContain('mx-3 rounded');
   });
 });
-

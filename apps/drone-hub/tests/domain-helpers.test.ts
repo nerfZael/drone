@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  compactTimeAgo,
   extractNumberedItemBlocks,
   isUngroupedGroupName,
   isValidDroneNameDashCase,
@@ -143,6 +144,13 @@ describe('drone hub domain helpers', () => {
     expect(timeAgo('2026-02-10T11:59:30.000Z', now)).toBe('30s ago');
     expect(timeAgo('2026-02-10T11:00:00.000Z', now)).toBe('1h ago');
     expect(timeAgo('2026-02-08T12:00:00.000Z', now)).toBe('2d ago');
+  });
+
+  test('formats compact relative time like the mobile app', () => {
+    const now = new Date('2026-02-10T12:00:00.000Z').getTime();
+    expect(compactTimeAgo('2026-02-10T09:00:00.000Z', now)).toBe('3h');
+    expect(compactTimeAgo('2026-01-20T12:00:00.000Z', now)).toBe('3w');
+    expect(compactTimeAgo('2025-02-10T12:00:00.000Z', now)).toBe('1y');
   });
 
   test('strips ansi sequences from streamed output', () => {

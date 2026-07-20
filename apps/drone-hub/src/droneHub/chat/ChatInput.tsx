@@ -33,7 +33,11 @@ import {
   textByteLength,
   type DraftChatAttachment,
 } from './chat-input-attachments';
-import { mergeDraftWithVoiceTranscript, useChatVoiceRecorder } from './use-chat-voice-recorder';
+import {
+  formatChatVoiceDuration,
+  mergeDraftWithVoiceTranscript,
+  useChatVoiceRecorder,
+} from './use-chat-voice-recorder';
 
 const CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX = 36;
 const CHAT_INPUT_TEXTAREA_MAX_HEIGHT_PX = 160;
@@ -140,6 +144,8 @@ export function ChatInput({
   const [automationRunsDraft, setAutomationRunsDraft] = React.useState('');
   const [draftAutomationEnabled, setDraftAutomationEnabled] = React.useState(false);
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
+  const [composerFocused, setComposerFocused] = React.useState(false);
+  const [compactVoiceRecording, setCompactVoiceRecording] = React.useState(false);
   const [draftAutomationRunsDraft, setDraftAutomationRunsDraft] = React.useState(String(AUTOMATION_RUNS_DEFAULT));
   const [draftAutomationSleepAmountDraft, setDraftAutomationSleepAmountDraft] =
     React.useState(String(AUTOMATION_SLEEP_AMOUNT_DEFAULT));
@@ -206,6 +212,7 @@ export function ChatInput({
 
   const {
     status: voiceRecordingStatus,
+    durationMillis: voiceRecordingDurationMillis,
     startRecording: startVoiceRecording,
     toggleRecordingPause: toggleVoiceRecordingPause,
     discardRecording: discardVoiceRecording,
@@ -235,6 +242,8 @@ export function ChatInput({
     setSelectedAutomationActionId('');
     setAutomationRunsDraft('');
     setDraftAutomationEnabled(false);
+    setComposerFocused(false);
+    setCompactVoiceRecording(false);
     setDraftAutomationRunsDraft(String(AUTOMATION_RUNS_DEFAULT));
     setDraftAutomationSleepAmountDraft(String(AUTOMATION_SLEEP_AMOUNT_DEFAULT));
     setDraftAutomationSleepUnit(AUTOMATION_SLEEP_UNIT_DEFAULT);
@@ -298,11 +307,37 @@ export function ChatInput({
   const draftAutomationActive = draftAutomationEnabled && supportsDraftAutomation;
   const voiceRecordingActive = voiceRecordingStatus !== 'idle';
   const voiceRecordingCanPauseOrStop = voiceRecordingStatus === 'recording' || voiceRecordingStatus === 'paused';
-  const voiceRecordButtonDisabled = composerLocked || sending || showStopAction || voiceActionInFlight;
+  const voiceRecordButtonDisabled =
+    composerLocked ||
+    sending ||
+    (showStopAction && !allowSendWhileWaiting) ||
+    voiceActionInFlight;
   const voicePauseButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const voiceStopButtonDisabled = !voiceRecordingCanPauseOrStop || voiceActionInFlight;
   const trimmed = draft.trim();
   const sendDisabled = sending || composerLocked || voiceActionInFlight || (trimmed.length === 0 && attachments.length === 0 && !voiceRecordingActive);
+  const composerExpanded =
+    composerFocused ||
+    trimmed.length > 0 ||
+    attachments.length > 0 ||
+    Boolean(composerContext) ||
+    Boolean(promptError || attachmentError) ||
+    sending ||
+    waiting ||
+    (voiceRecordingActive && !compactVoiceRecording) ||
+    draftAutomationActive ||
+    automationPanelOpen;
+  const voiceRecordingLabel =
+    voiceRecordingStatus === 'starting'
+      ? 'Starting…'
+      : voiceRecordingStatus === 'recording'
+        ? 'Recording'
+        : voiceRecordingStatus === 'paused'
+          ? 'Paused'
+          : voiceRecordingStatus === 'transcribing'
+            ? 'Transcribing…'
+            : '';
+  const voiceRecordingDuration = formatChatVoiceDuration(voiceRecordingDurationMillis);
 
   React.useEffect(() => {
     if (supportsDraftAutomation || !draftAutomationEnabled) return;
@@ -325,10 +360,26 @@ export function ChatInput({
     void discardVoiceRecording();
   }, [composerLocked, discardVoiceRecording, showStopAction, voiceRecordingActive]);
 
+  React.useEffect(() => {
+    if (voiceRecordingActive) return;
+    setCompactVoiceRecording(false);
+  }, [voiceRecordingActive]);
+
   function openPicker() {
     if (!attachmentsOn) return;
     if (attachmentControlsLocked) return;
     fileInputRef.current?.click();
+  }
+
+  async function beginVoiceRecordingFromComposer(compact: boolean) {
+    if (compact) {
+      setComposerFocused(false);
+      setCompactVoiceRecording(true);
+    } else {
+      setCompactVoiceRecording(false);
+    }
+    const started = await startVoiceRecording();
+    if (!started) setCompactVoiceRecording(false);
   }
 
   function removeAttachment(id: string) {
@@ -657,7 +708,7 @@ export function ChatInput({
   return (
     <div
       data-onboarding-id="chat.input"
-      className="flex-shrink-0 px-5 pt-2 pb-5 bg-transparent"
+      className="flex-shrink-0 bg-[var(--chat-background)] px-[.5625rem] pb-[.5625rem] pt-[.375rem] [font-family:var(--chat-composer-font)]"
       onDragEnter={(e) => {
         if (!attachmentsOn) return;
         if (attachmentControlsLocked) return;
@@ -680,7 +731,7 @@ export function ChatInput({
         addFiles(e.dataTransfer?.files ?? null, { source: 'file' });
       }}
     >
-      <div className="max-w-[1170px] mx-auto">
+      <div className="mx-auto max-w-[73.125rem]">
         {(promptError || attachmentError) && (
           <div className="mb-2 text-[var(--text-11)] text-[var(--red)] px-1" title={promptError || attachmentError || undefined}>
             {promptError || attachmentError}
@@ -688,9 +739,23 @@ export function ChatInput({
         )}
         <div
           ref={automationPanelRef}
-          className={`relative rounded-[var(--radius-large)] border bg-[var(--panel-raised)] shadow-[0_8px_24px_var(--shadow-color)] ${
-            dragActive ? 'border-[var(--accent)]' : 'border-[var(--border)]'
-          }`}
+          data-chat-composer-expanded={composerExpanded ? 'true' : 'false'}
+          onFocusCapture={(event) => {
+            const target = event.target;
+            if (
+              target instanceof Element &&
+              target.closest('[data-chat-composer-collapsed-action="true"]')
+            ) return;
+            setComposerFocused(true);
+          }}
+          onBlurCapture={(event) => {
+            const nextTarget = event.relatedTarget;
+            if (nextTarget instanceof Node && event.currentTarget.contains(nextTarget)) return;
+            setComposerFocused(false);
+          }}
+          className={`relative min-h-[3.25rem] overflow-visible rounded-[var(--chat-composer-radius)] border bg-[var(--chat-composer-surface)] shadow-[var(--chat-composer-shadow)] transition-colors ${
+            dragActive ? 'border-[var(--accent)]' : 'border-[var(--chat-composer-border)]'
+          } ${composerExpanded ? 'border-[var(--chat-composer-focus-border)]' : ''}`}
         >
           <ChatComposerContext config={composerContext} />
           {attachmentsOn && attachments.length > 0 && (
@@ -698,7 +763,6 @@ export function ChatInput({
               <div className="flex items-center justify-between gap-2">
                 <div
                   className="text-[var(--text-10)] text-[var(--muted-dim)] tracking-wide uppercase"
-                  style={{ fontFamily: 'var(--display)' }}
                 >
                   {attachments.length} attachment{attachments.length === 1 ? '' : 's'} attached
                   {imageAttachmentCount > 0 ? ` • ${imageAttachmentCount} image${imageAttachmentCount === 1 ? '' : 's'}` : ''}
@@ -714,7 +778,6 @@ export function ChatInput({
                       ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
-                  style={{ fontFamily: 'var(--display)' }}
                   title={attachmentMode === 'files' ? 'Attach more files' : 'Attach more images'}
                 >
                   Add
@@ -730,10 +793,9 @@ export function ChatInput({
                         className="w-14 h-14 object-cover rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)]"
                       />
                     ) : (
-                      <div className="w-[180px] min-h-[56px] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5">
+                      <div className="min-h-[3.5rem] w-[11.25rem] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5">
                         <div
                           className="text-[var(--text-9)] uppercase tracking-wide text-[var(--muted-dim)]"
-                          style={{ fontFamily: 'var(--display)' }}
                         >
                           {a.kind === 'text' ? 'Text attachment' : 'File attachment'}
                         </div>
@@ -761,170 +823,242 @@ export function ChatInput({
             </div>
           )}
 
-          <div className="flex flex-wrap items-end gap-2 p-3 sm:flex-nowrap">
-            {attachmentsOn && (
+          {attachmentsOn ? (
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept={attachmentMode === 'images' ? 'image/*' : undefined}
+              multiple
+              className="hidden"
+              onChange={(event) => {
+                addFiles(event.currentTarget.files, { source: 'file' });
+                event.currentTarget.value = '';
+              }}
+              disabled={attachmentControlsLocked}
+            />
+          ) : null}
+
+          <div className={`relative flex items-center ${composerExpanded ? 'px-4' : 'min-h-[3.125rem] px-[.5625rem]'}`}>
+            {!composerExpanded && compactVoiceRecording && voiceRecordingActive ? (
               <>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept={attachmentMode === 'images' ? 'image/*' : undefined}
-                  multiple
-                  className="hidden"
-                  onChange={(e) => {
-                    addFiles(e.currentTarget.files, { source: 'file' });
-                    // allow re-selecting same file
-                    e.currentTarget.value = '';
-                  }}
-                  disabled={attachmentControlsLocked}
-                />
                 <button
                   type="button"
-                  onClick={() => openPicker()}
-                  disabled={attachmentControlsLocked}
-                  className={`inline-flex items-center justify-center w-[44px] h-[44px] rounded-[var(--radius-medium)] border transition-all ${
-                    attachmentControlsLocked
-                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
-                  }`}
-                  title={attachmentMode === 'files' ? 'Attach files (paste or drag and drop also works)' : 'Attach images (paste or drag and drop also works)'}
-                  aria-label={attachmentMode === 'files' ? 'Attach files' : 'Attach images'}
-                >
-                  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M6.5 5.5h3" />
-                    <path d="M8 4v3" />
-                    <rect x="2.5" y="2.5" width="11" height="11" rx="2" />
-                  </svg>
-                </button>
-              </>
-            )}
-            {voiceRecordingStatus === 'idle' ? (
-              <button
-                type="button"
-                onClick={() => void startVoiceRecording()}
-                disabled={voiceRecordButtonDisabled}
-                className={`inline-flex h-[44px] w-[44px] flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] border transition-all ${
-                  voiceRecordButtonDisabled
-                    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
-                }`}
-                title="Record voice message"
-                aria-label="Record voice message"
-              >
-                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                  <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
-                  <path d="M5 11a7 7 0 0 0 14 0" />
-                  <path d="M12 18v3" />
-                  <path d="M8 21h8" />
-                </svg>
-              </button>
-            ) : (
-              <div className="flex h-[44px] flex-shrink-0 items-center gap-1">
-                <button
-                  type="button"
+                  data-chat-composer-collapsed-action="true"
+                  onMouseDown={(event) => event.preventDefault()}
                   onClick={() => void discardVoiceRecording()}
                   disabled={voiceRecordingStatus === 'transcribing' || voiceActionInFlight}
-                  className={`inline-flex h-[var(--control-height)] w-[var(--control-height)] items-center justify-center rounded-[var(--radius-medium)] border transition-all ${
-                    voiceRecordingStatus === 'transcribing' || voiceActionInFlight
-                      ? 'opacity-40 cursor-not-allowed border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
-                      : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
-                  }`}
+                  className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
                   title="Discard recording"
                   aria-label="Discard recording"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
                     <path d="M6 6l12 12" />
                     <path d="M18 6L6 18" />
                   </svg>
                 </button>
-                <button
-                  type="button"
-                  onClick={() => toggleVoiceRecordingPause()}
-                  disabled={voicePauseButtonDisabled}
-                  className={`inline-flex h-[var(--control-height)] w-[var(--control-height)] items-center justify-center rounded-[var(--radius-medium)] border transition-all ${
-                    voicePauseButtonDisabled
-                      ? 'opacity-40 cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
-                      : voiceRecordingStatus === 'paused'
-                        ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
-                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
-                  }`}
-                  title={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
-                  aria-label={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
-                >
-                  {voiceRecordingStatus === 'paused' ? (
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M8 5v14l11-7Z" />
+                <div className="flex min-w-0 flex-1 items-center gap-[.4375rem] px-3 text-[.625rem] font-extrabold tracking-[.015625rem]">
+                  <span
+                    className={`h-[.4375rem] w-[.4375rem] flex-shrink-0 rounded-full ${
+                      voiceRecordingStatus === 'paused'
+                        ? 'bg-[var(--yellow)]'
+                        : voiceRecordingStatus === 'transcribing'
+                          ? 'bg-[var(--accent)]'
+                          : 'bg-[var(--red)]'
+                    }`}
+                    aria-hidden="true"
+                  />
+                  <span className="truncate text-[var(--accent)]" aria-live="polite">{voiceRecordingLabel}</span>
+                  <span className="flex-shrink-0 font-mono text-[.6875rem] font-extrabold tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
+                    {voiceRecordingDuration}
+                  </span>
+                </div>
+                <div className="flex flex-shrink-0 items-center gap-[.4375rem]">
+                  <button
+                    type="button"
+                    data-chat-composer-collapsed-action="true"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => toggleVoiceRecordingPause()}
+                    disabled={voicePauseButtonDisabled}
+                    className={`inline-flex h-[2.125rem] w-[2.125rem] items-center justify-center rounded-[var(--chat-composer-control-radius)] border transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40 ${
+                      voiceRecordingStatus === 'paused'
+                        ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                        : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)]'
+                    }`}
+                    title={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
+                    aria-label={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
+                  >
+                    {voiceRecordingStatus === 'paused' ? (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M8 5v14l11-7Z" />
+                      </svg>
+                    ) : (
+                      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                        <path d="M9 5v14" />
+                        <path d="M15 5v14" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    data-chat-composer-collapsed-action="true"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={() => void stopVoiceRecordingAndFillDraft()}
+                    disabled={voiceStopButtonDisabled}
+                    className="inline-flex h-[2.125rem] w-[2.125rem] items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                    title="Stop recording and transcribe"
+                    aria-label="Stop recording and transcribe"
+                  >
+                    <svg width="13" height="13" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <rect x="7" y="7" width="10" height="10" rx="1" />
                     </svg>
-                  ) : (
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                      <path d="M9 5v14" />
-                      <path d="M15 5v14" />
-                    </svg>
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void stopVoiceRecordingAndFillDraft()}
-                  disabled={voiceStopButtonDisabled}
-                  className={`inline-flex h-[var(--control-height)] w-[var(--control-height)] items-center justify-center rounded-[var(--radius-medium)] border transition-all ${
-                    voiceStopButtonDisabled
-                      ? 'opacity-40 cursor-not-allowed border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]'
-                      : 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:bg-[var(--green-subtle)]'
-                  }`}
-                  title="Stop recording and transcribe"
-                  aria-label="Stop recording and transcribe"
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M7 7h10v10H7Z" />
-                  </svg>
-                </button>
-              </div>
-            )}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+            {!composerExpanded && attachmentsOn ? (
+              <button
+                type="button"
+                data-chat-composer-collapsed-action="true"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={openPicker}
+                disabled={attachmentControlsLocked}
+                className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--chat-composer-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                title={attachmentMode === 'files' ? 'Attach files' : 'Attach images'}
+                aria-label={attachmentMode === 'files' ? 'Attach files' : 'Attach images'}
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M12 5v14" />
+                  <path d="M5 12h14" />
+                </svg>
+              </button>
+            ) : null}
             <textarea
               ref={textareaRef}
               data-chat-input-focus-id={focusTargetId || undefined}
               value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onPaste={(e) => {
+              onChange={(event) => setDraft(event.target.value)}
+              onPaste={(event) => {
                 const files = attachmentMode === 'files'
-                  ? filesFromClipboardData(e.clipboardData)
-                  : imageFilesFromClipboardData(e.clipboardData);
+                  ? filesFromClipboardData(event.clipboardData)
+                  : imageFilesFromClipboardData(event.clipboardData);
                 if (attachmentsOn && !attachmentControlsLocked && files.length > 0) {
-                  e.preventDefault();
+                  event.preventDefault();
                   addFiles(files, { source: 'paste' });
                   return;
                 }
-                const pastedText = String(e.clipboardData?.getData('text/plain') ?? '');
+                const pastedText = String(event.clipboardData?.getData('text/plain') ?? '');
                 if (
                   attachmentsOn &&
                   !attachmentControlsLocked &&
                   pastedText.length >= CHAT_INPUT_PASTE_TEXT_AS_ATTACHMENT_MIN_CHARS
                 ) {
-                  e.preventDefault();
+                  event.preventDefault();
                   addPastedTextAttachment(pastedText);
                 }
               }}
-              onKeyDown={(e) => {
-                if ((e.nativeEvent as any)?.isComposing) return;
-                if (e.key === 'Escape') {
-                  e.currentTarget.blur();
+              onKeyDown={(event) => {
+                if ((event.nativeEvent as any)?.isComposing) return;
+                if (event.key === 'Escape') {
+                  event.currentTarget.blur();
                   return;
                 }
-                const modifierKey = e.ctrlKey || e.metaKey;
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault();
+                const modifierKey = event.ctrlKey || event.metaKey;
+                if (event.key === 'Enter' && !event.shiftKey) {
+                  event.preventDefault();
                   sendNow({ trigger: 'keyboard', modifierKey });
                 }
               }}
               rows={1}
               placeholder="Message..."
-              className="min-w-[180px] flex-1 resize-none rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-13)] leading-[1.35] text-[var(--fg)] placeholder:text-[var(--text-11)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--user-muted)] transition-colors"
-              style={{ minHeight: CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX }}
-              disabled={composerLocked}
+              className={`min-w-[11.25rem] max-h-[8.25rem] flex-1 resize-none border-0 bg-transparent text-[var(--chat-text-size)] leading-[1.25rem] text-[var(--chat-composer-fg)] caret-[var(--accent)] placeholder:text-[var(--chat-composer-placeholder)] focus:outline-none ${
+                composerExpanded ? 'min-h-[2.75rem] px-0 pb-0 pt-3' : 'min-h-[3.125rem] px-[.6875rem] pb-[.6875rem] pt-[.9375rem]'
+              }`}
+              disabled={composerLocked || voiceRecordingActive}
               autoFocus={Boolean(autoFocus)}
               aria-label={`Message ${droneName}`}
             />
-            <ChatComposerControls config={composerControls} />
-            {supportsDraftAutomation && (
+            {!composerExpanded ? (
+              <button
+                type="button"
+                data-chat-composer-collapsed-action="true"
+                onMouseDown={(event) => event.preventDefault()}
+                onClick={() => {
+                  textareaRef.current?.blur();
+                  void beginVoiceRecordingFromComposer(true);
+                }}
+                disabled={voiceRecordButtonDisabled}
+                className="inline-flex h-[2.125rem] w-[2.125rem] flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] text-[var(--chat-composer-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                title="Record voice message"
+                aria-label="Record voice message"
+              >
+                <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+                  <path d="M5 11a7 7 0 0 0 14 0" />
+                  <path d="M12 18v3" />
+                </svg>
+              </button>
+            ) : null}
+              </>
+            )}
+          </div>
+
+          {voiceRecordingActive && composerExpanded ? (
+            <div className="flex items-center gap-[.4375rem] px-3 pb-2 pt-[.3125rem] text-[.625rem] font-extrabold tracking-[.015625rem]">
+              <span
+                className={`h-[.4375rem] w-[.4375rem] rounded-full ${
+                  voiceRecordingStatus === 'paused'
+                    ? 'bg-[var(--yellow)]'
+                    : voiceRecordingStatus === 'transcribing'
+                      ? 'bg-[var(--accent)]'
+                      : 'bg-[var(--red)]'
+                }`}
+                aria-hidden="true"
+              />
+              <span className="text-[var(--accent)]" aria-live="polite">{voiceRecordingLabel}</span>
+              <span className="font-mono text-[.6875rem] font-extrabold tabular-nums tracking-normal text-[var(--chat-composer-fg)]" aria-label={`${voiceRecordingDuration} elapsed`}>
+                {voiceRecordingDuration}
+              </span>
+            </div>
+          ) : null}
+
+          {composerExpanded ? (
+            <div className="flex min-h-[2.9375rem] flex-wrap items-center gap-[.4375rem] px-[.5625rem] pb-[.5625rem]">
+              {voiceRecordingActive ? (
+                <button
+                  type="button"
+                  onClick={() => void discardVoiceRecording()}
+                  disabled={voiceRecordingStatus === 'transcribing' || voiceActionInFlight}
+                  className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Discard recording"
+                  aria-label="Discard recording"
+                >
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                    <path d="M6 6l12 12" />
+                    <path d="M18 6L6 18" />
+                  </svg>
+                </button>
+              ) : attachmentsOn ? (
+                <button
+                  type="button"
+                  onClick={openPicker}
+                  disabled={attachmentControlsLocked}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                  title={attachmentMode === 'files' ? 'Attach files' : 'Attach images'}
+                  aria-label={attachmentMode === 'files' ? 'Attach files' : 'Attach images'}
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                    <path d="M12 5v14" />
+                    <path d="M5 12h14" />
+                  </svg>
+                </button>
+              ) : null}
+
+              <div className="min-w-2 flex-1" />
+
+              {!voiceRecordingActive ? <ChatComposerControls config={composerControls} /> : null}
+
+              {!voiceRecordingActive && supportsDraftAutomation ? (
               <button
                 type="button"
                 onClick={() => {
@@ -936,32 +1070,30 @@ export function ChatInput({
                   });
                 }}
                 disabled={Boolean(disabled)}
-                className={`inline-flex items-center gap-1.5 h-[var(--control-height)] px-3 rounded-[var(--radius-medium)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
+                className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--chat-composer-control-radius)] border px-3 text-[.625rem] font-extrabold tracking-wide uppercase transition-opacity ${
                   Boolean(disabled)
-                    ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
+                    ? 'cursor-not-allowed border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] opacity-40'
                     : draftAutomationActive
-                      ? 'bg-[var(--surface-strong)] border-[var(--accent-muted)] text-[var(--accent)]'
-                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                      ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                      : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] hover:opacity-70'
                 }`}
-                style={{ fontFamily: 'var(--display)' }}
                 title="Send this draft as a repeating automation"
               >
                 Repeat
                 <span className="text-[var(--text-9)] text-[var(--muted-dim)]">{draftAutomationActive ? 'On' : 'Off'}</span>
               </button>
-            )}
-            {availableAutomationActions.length > 0 && (
+              ) : null}
+              {!voiceRecordingActive && availableAutomationActions.length > 0 ? (
               <div className="relative flex-shrink-0">
                 <button
                   type="button"
                   onClick={() => setAutomationPanelOpen((open) => !open)}
                   disabled={Boolean(disabled)}
-                  className={`inline-flex items-center gap-1.5 h-[var(--control-height)] px-3 rounded-[var(--radius-medium)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
+                  className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--chat-composer-control-radius)] border px-3 text-[.625rem] font-extrabold tracking-wide uppercase transition-opacity ${
                     Boolean(disabled)
-                      ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                      ? 'cursor-not-allowed border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] opacity-40'
+                      : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] hover:opacity-70'
                   }`}
-                  style={{ fontFamily: 'var(--display)' }}
                   title={automationMenuLabel}
                 >
                   {automationMenuLabel}
@@ -977,37 +1109,94 @@ export function ChatInput({
                   </svg>
                 </button>
               </div>
-            )}
-            {onPublish ? (
+              ) : null}
+              {!voiceRecordingActive && onPublish ? (
               <button
                 type="button"
                 onClick={() => {
                   void onPublish();
                 }}
                 disabled={Boolean(disabled) || publishing}
-                className={`inline-flex h-[var(--control-height)] items-center justify-center rounded-[var(--radius-medium)] border px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
+                className={`inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border px-3 text-[.625rem] font-extrabold uppercase tracking-wide transition-opacity ${
                   Boolean(disabled) || publishing
-                    ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--panel-raised)] text-[var(--muted)] opacity-40'
-                    : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                    ? 'cursor-not-allowed border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] opacity-40'
+                    : 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:opacity-70'
                 }`}
-                style={{ fontFamily: 'var(--display)' }}
                 title="Publish this draft and send queued messages"
               >
                 {publishing ? 'Publishing...' : 'Publish'}
               </button>
-            ) : null}
-            {showSeparateStopAction ? (
+              ) : null}
+
+              {voiceRecordingActive ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => toggleVoiceRecordingPause()}
+                    disabled={voicePauseButtonDisabled}
+                    className={`inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40 ${
+                      voiceRecordingStatus === 'paused'
+                        ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                        : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)]'
+                    }`}
+                    title={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
+                    aria-label={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
+                  >
+                    {voiceRecordingStatus === 'paused' ? (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinejoin="round" aria-hidden="true">
+                        <path d="M8 5v14l11-7Z" />
+                      </svg>
+                    ) : (
+                      <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                        <path d="M9 5v14" />
+                        <path d="M15 5v14" />
+                      </svg>
+                    )}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => void stopVoiceRecordingAndFillDraft()}
+                    disabled={voiceStopButtonDisabled}
+                    className="inline-flex h-[2.375rem] w-[2.375rem] items-center justify-center rounded-[.5rem] border border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                    title="Stop recording and transcribe"
+                    aria-label="Stop recording and transcribe"
+                  >
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                      <rect x="7" y="7" width="10" height="10" rx="1" />
+                    </svg>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => {
+                    textareaRef.current?.blur();
+                    void beginVoiceRecordingFromComposer(false);
+                  }}
+                  disabled={voiceRecordButtonDisabled}
+                  className="inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+                  title="Record voice message"
+                  aria-label="Record voice message"
+                >
+                  <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+                    <path d="M5 11a7 7 0 0 0 14 0" />
+                    <path d="M12 18v3" />
+                  </svg>
+                </button>
+              )}
+
+              {showSeparateStopAction ? (
               <button
                 type="button"
                 onClick={() => void onStop?.()}
                 disabled={stopping}
-                className="inline-flex h-[var(--control-height)] items-center justify-center rounded-[var(--radius-medium)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)] hover:bg-[var(--red-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
-                style={{ fontFamily: 'var(--display)' }}
+                className="inline-flex h-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 text-[.625rem] font-extrabold uppercase tracking-wide text-[var(--red)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-50"
               >
                 {stopping ? 'Stopping...' : 'Stop'}
               </button>
-            ) : null}
-            <button
+              ) : null}
+              <button
               type="button"
               onClick={() => {
                 if (showStopAction && !showSeparateStopAction) {
@@ -1017,28 +1206,37 @@ export function ChatInput({
                 sendNow({ trigger: 'button', modifierKey: false });
               }}
               disabled={showStopAction && !showSeparateStopAction ? stopping : sendDisabled}
-              className={`inline-flex items-center justify-center h-[var(--control-height)] min-w-[80px] px-4 rounded-[var(--radius-medium)] text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-[var(--chat-composer-control-radius)] border transition-opacity hover:opacity-70 ${
                 showStopAction && !showSeparateStopAction
                   ? stopping
                     ? 'opacity-50 cursor-not-allowed bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)]'
                     : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
                   : sendDisabled
-                    ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                    : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
+                    ? 'cursor-not-allowed border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] opacity-40'
+                    : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)]'
               }`}
-              style={{ fontFamily: 'var(--display)' }}
               title={showStopAction && !showSeparateStopAction ? 'Stop response' : 'Send'}
+              aria-label={sendButtonLabel}
             >
-              {sendButtonLabel}
-            </button>
-          </div>
+                {showStopAction && !showSeparateStopAction ? (
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+                    <rect x="7" y="7" width="10" height="10" rx="1" />
+                  </svg>
+                ) : (
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                    <path d="M12 19V5" />
+                    <path d="m5 12 7-7 7 7" />
+                  </svg>
+                )}
+              </button>
+            </div>
+          ) : null}
           {draftAutomationActive && (
             <div className="px-3 pb-3">
               <div className="rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--surface-soft)] p-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div
                     className="text-[var(--text-9)] uppercase tracking-[0.08em] text-[var(--accent)]"
-                    style={{ fontFamily: 'var(--display)' }}
                   >
                     Repeat This Message
                   </div>
@@ -1117,7 +1315,6 @@ export function ChatInput({
           {hasModeHint && (
             <div
               className="px-4 pb-2 text-[var(--text-10)] text-[var(--muted-dim)] tracking-wide uppercase"
-              style={{ fontFamily: 'var(--display)' }}
             >
               {modeHint}
             </div>

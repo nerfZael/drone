@@ -1,5 +1,10 @@
 import { describe, expect, test } from 'bun:test';
-import { floatToPcm16, mergeDraftWithVoiceTranscript, pcm16ToWav } from '../src/droneHub/chat/use-chat-voice-recorder';
+import {
+  floatToPcm16,
+  formatChatVoiceDuration,
+  mergeDraftWithVoiceTranscript,
+  pcm16ToWav,
+} from '../src/droneHub/chat/use-chat-voice-recorder';
 
 function readAscii(view: DataView, offset: number, length: number): string {
   let output = '';
@@ -29,5 +34,10 @@ describe('chat voice recorder helpers', () => {
     expect(view.getUint16(22, true)).toBe(1);
     expect(view.getUint32(24, true)).toBe(16_000);
     expect(view.getUint32(40, true)).toBe(pcm.byteLength);
+  });
+
+  test('formats recording duration like the mobile composer', () => {
+    expect(formatChatVoiceDuration(0)).toBe('0:00');
+    expect(formatChatVoiceDuration(65_900)).toBe('1:05');
   });
 });

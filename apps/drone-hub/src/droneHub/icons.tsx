@@ -42,6 +42,14 @@ export function IconChat({ className, size = 14 }: IconProps) {
   );
 }
 
+export function IconMessageCircle({ className, size = 14 }: IconProps) {
+  return (
+    <svg className={className} width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z" />
+    </svg>
+  );
+}
+
 export function IconChevron({ down, className, size = 12 }: IconProps & { down?: boolean }) {
   return (
     <svg

@@ -951,7 +951,12 @@ function AppDrawerView({
             </View>
             {showDrones ? (
               <>
-                <View style={styles.sidebarToolbar}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Show repositories"
+                  onPress={() => setActiveRepoId(null)}
+                  style={({ pressed }) => [styles.sidebarToolbar, pressed && styles.pressed]}
+                >
                   {dronesLoading ? (
                     <View style={styles.loadingSummary}>
                       <ActivityIndicator color={colors.accent} size="small" />
@@ -979,7 +984,10 @@ function AppDrawerView({
                       accessibilityLabel="Create new drone"
                       accessibilityState={{ disabled: !onCreateDrone }}
                       disabled={!onCreateDrone}
-                      onPress={onCreateDrone}
+                      onPress={(event) => {
+                        event.stopPropagation();
+                        onCreateDrone?.();
+                      }}
                       style={({ pressed }) => [
                         styles.create,
                         !onCreateDrone && styles.createDisabled,
@@ -989,7 +997,7 @@ function AppDrawerView({
                       <Plus color={colors.accent} size={19} strokeWidth={2.2} />
                     </Pressable>
                   </View>
-                </View>
+                </Pressable>
                 {activeRepo ? (
                   <Pressable
                     accessibilityRole="button"
@@ -1200,6 +1208,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
     backgroundColor: colors.panel,
+    cursor: 'pointer',
   },
   sidebarToolbarText: {
     flex: 1,
@@ -1222,7 +1231,7 @@ const styles = StyleSheet.create({
     height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: 18,
+    borderRadius: 6,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panelRaised,

@@ -57,7 +57,7 @@ describe('desktop themes', () => {
     });
   });
 
-  test('maps Catppuccin desktop surfaces to the mobile visual roles without changing typography or density', () => {
+  test('maps Catppuccin desktop surfaces and sidebar presentation to the mobile visual roles', () => {
     const css = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
     const catppuccinStart = css.indexOf(":root[data-theme='catppuccin-mocha']");
     const catppuccinEnd = css.indexOf('/* Excalidraw owns', catppuccinStart);
@@ -71,6 +71,37 @@ describe('desktop themes', () => {
     expect(catppuccinCss).toContain('--muted: #bac2de');
     expect(catppuccinCss).toContain('--user-bubble: #45475a');
     expect(catppuccinCss).toContain('--user-bubble-border: #585b70');
+    expect(catppuccinCss).toContain('--chat-background: #1e1e2e');
+    expect(catppuccinCss).toContain('--chat-user-message-time: #bac2de');
+    expect(catppuccinCss).toContain('--chat-composer-border: #7f849c');
+    expect(catppuccinCss).toContain('--chat-composer-focus-border: rgba(203, 166, 247, .42)');
+    expect(catppuccinCss).toContain('--chat-composer-surface: #313244');
+    expect(catppuccinCss).toContain('--chat-composer-fg: #cdd6f4');
+    expect(catppuccinCss).toContain('--chat-composer-placeholder: #bac2de');
+    expect(catppuccinCss).toContain('--chat-composer-control-bg: #45475a');
+    expect(catppuccinCss).toContain('--chat-composer-control-border: #7f849c');
+    expect(catppuccinCss).toContain('--chat-composer-control-fg: #cdd6f4');
+    expect(catppuccinCss).toContain('--chat-composer-model-fg: #bac2de');
+    expect(catppuccinCss).toContain('--chat-composer-font: system-ui, -apple-system, sans-serif');
+    expect(catppuccinCss).toContain('--chat-composer-radius: .4375rem');
+    expect(catppuccinCss).toContain('--chat-composer-control-radius: .3125rem');
+    expect(catppuccinCss).toContain('--chat-composer-shadow: 0 .3125rem .75rem rgba(17, 17, 27, .22)');
+    expect(catppuccinCss).toContain('--chat-composer-input: #313244');
+    expect(catppuccinCss).toContain('--sidebar-bg: #1e1e2e');
+    expect(catppuccinCss).toContain('--sidebar-section-bg: #181825');
+    expect(catppuccinCss).toContain('--sidebar-brand-fg: #f5e0dc');
+    expect(catppuccinCss).toContain('--sidebar-brand-size: .9375rem');
+    expect(catppuccinCss).toContain('--sidebar-brand-weight: 800');
+    expect(catppuccinCss).toContain('--sidebar-drone-fg: #cdd6f4');
+    expect(catppuccinCss).toContain('--sidebar-drone-active-fg: #cba6f7');
+    expect(catppuccinCss).toContain('--sidebar-drone-size: .75rem');
+    expect(catppuccinCss).toContain('--sidebar-drone-weight: 800');
+    expect(catppuccinCss).toContain('--sidebar-row-selected-bg: #313244');
+    expect(catppuccinCss).toContain('--sidebar-meta-fg: #a6adc8');
+    expect(catppuccinCss).toContain('--code-bg: #313244');
+    expect(catppuccinCss).toContain('--code-fg: #b4befe');
+    expect(catppuccinCss).toContain('--code-block-bg: #11111b');
+    expect(catppuccinCss).toContain('--code-block-fg: #cdd6f4');
     expect(catppuccinCss).toContain('--glow-accent: none');
     const catppuccinTokenNames = Array.from(catppuccinCss.matchAll(/(--[a-z0-9-]+)\s*:/g), (match) => match[1]);
     const presentationTokenPrefixes = [
@@ -79,7 +110,6 @@ describe('desktop themes', () => {
       '--weight-',
       '--control-height',
       '--radius-',
-      '--sidebar-drone-',
       '--sidebar-item-',
     ];
     const presentationTokenNames = new Set([

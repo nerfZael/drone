@@ -201,7 +201,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     settingsPlaybookFocusId,
     chatHeaderRepoPath,
     appView,
-    viewMode,
     sidebarGroupingMode,
     showRecentDronesOnly,
     collapsedGroups,
@@ -415,7 +414,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     sidebarHasUngroupedGroup,
   } = useSidebarViewModel({
     selectedDroneIds,
-    viewMode,
     sidebarGroupingMode,
     collapsedGroups,
     deletingGroups,

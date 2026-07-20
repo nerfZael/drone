@@ -121,7 +121,7 @@ describe('buildSidebarNodeTree', () => {
     ];
 
     const tree = buildSidebarNodeTree({
-      sidebarFolderTree: [],
+      sidebarFolderTree: buildSidebarFolderTree(sidebarGroups, []),
       sidebarGroups,
       sidebarGroupOrder: [],
       sidebarDroneOrderByGroup: {},
@@ -135,6 +135,7 @@ describe('buildSidebarNodeTree', () => {
       sidebarDroneNodeId('older-b'),
       sidebarDroneNodeId('older-a'),
     ]);
+    expect(tree.nodesById[sidebarFolderNodeId('Ungrouped')]).toBeUndefined();
   });
 
   test('renders repo-scoped empty folders under the owning repo root', () => {

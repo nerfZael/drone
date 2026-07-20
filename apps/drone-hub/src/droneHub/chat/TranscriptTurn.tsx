@@ -95,7 +95,7 @@ export const TranscriptTurn = React.memo(
     linkedPullRequestContext,
     droneId,
     droneHomePath,
-    showRoleIcons = true,
+    showRoleIcons = false,
     actionsEnabled = true,
     dockerSnapshotsEnabled = false,
   }: {
@@ -137,7 +137,7 @@ export const TranscriptTurn = React.memo(
     const dockerSnapshotBusy = dockerSnapshot?.status === 'creating' || dockerSnapshot?.status === 'restoring';
     const canRollbackDockerSnapshot = Boolean(item.ok && dockerSnapshot?.id && dockerSnapshot.status === 'ready' && onRollbackDockerSnapshot);
     return (
-      <div className="animate-fade-in">
+      <div className="group/turn animate-fade-in">
         <ChatMessageFrame
           role="user"
           at={promptIso}
@@ -160,12 +160,16 @@ export const TranscriptTurn = React.memo(
         </ChatMessageFrame>
 
         {completedRunDurationMs !== null ? (
-          <AgentRunSummaryLine active={false} durationMs={completedRunDurationMs} />
+          <AgentRunSummaryLine
+            active={false}
+            durationMs={completedRunDurationMs}
+            at={agentIso}
+          />
         ) : null}
 
         <ChatMessageFrame
           role="assistant"
-          at={agentIso}
+          at={completedRunDurationMs === null ? agentIso : undefined}
           error={!item.ok}
           showRoleIcon={showRoleIcons}
           showRoleLabel={showRoleIcons}
@@ -301,6 +305,6 @@ export const TranscriptTurn = React.memo(
     (a.item.dockerSnapshot?.readyAt ?? '') === (b.item.dockerSnapshot?.readyAt ?? '') &&
     (a.item.dockerSnapshot?.restoredAt ?? '') === (b.item.dockerSnapshot?.restoredAt ?? '') &&
     (a.item.dockerSnapshot?.error ?? '') === (b.item.dockerSnapshot?.error ?? '') &&
-    (a.showRoleIcons ?? true) === (b.showRoleIcons ?? true) &&
+    (a.showRoleIcons ?? false) === (b.showRoleIcons ?? false) &&
     (a.actionsEnabled ?? true) === (b.actionsEnabled ?? true),
 );

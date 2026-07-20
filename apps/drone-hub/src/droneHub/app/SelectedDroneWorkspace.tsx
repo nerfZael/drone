@@ -196,9 +196,7 @@ type SelectedDroneWorkspaceProps = {
   dockerSnapshotAfterAgentMessageEnabled: boolean;
   setDockerSnapshotAfterAgentMessageEnabled: (enabled: boolean) => Promise<void>;
   setChatInfoError: React.Dispatch<React.SetStateAction<string | null>>;
-  modelMenuEntries: UiMenuSelectEntry[];
   modelDisabled: boolean;
-  modelLabel: string;
   manualChatModelInput: string;
   setManualChatModelInput: React.Dispatch<React.SetStateAction<string>>;
   applyManualChatModel: () => void;
@@ -322,9 +320,7 @@ export function SelectedDroneWorkspace({
   dockerSnapshotAfterAgentMessageEnabled,
   setDockerSnapshotAfterAgentMessageEnabled,
   setChatInfoError,
-  modelMenuEntries,
   modelDisabled,
-  modelLabel,
   manualChatModelInput,
   setManualChatModelInput,
   applyManualChatModel,
@@ -1221,41 +1217,35 @@ export function SelectedDroneWorkspace({
     hasChats && modelControlEnabled
       ? {
           onboardingId: 'chat.composer.model',
-          controls:
-            availableChatModels.length > 0
+          controls: [
+            {
+              kind: 'model-picker',
+              id: 'external-model',
+              currentProvider: 'external',
+              currentModel: currentModel ?? '',
+              options: [
+                { provider: 'external', id: '', name: 'Default model' },
+                ...availableChatModels.map((model) => ({
+                  provider: 'external',
+                  id: model.id,
+                  name: model.label,
+                })),
+              ],
+              title: 'Choose model',
+              disabled: modelDisabled,
+              showReasoning: false,
+              searchable: true,
+              searchPlaceholder: 'Search models',
+              onSelect: (choice) => {
+                void setChatModel(choice.id || null).catch((err: any) =>
+                  setChatInfoError(err?.message ?? String(err)),
+                );
+              },
+            },
+            ...(availableChatModels.length === 0
               ? [
                   {
-                    kind: 'select',
-                    id: 'external-model',
-                    value: currentModel ?? '',
-                    label: modelLabel,
-                    title: 'Choose model for this chat',
-                    entries: modelMenuEntries,
-                    disabled: modelDisabled,
-                    searchable: true,
-                    searchPlaceholder: 'Search models',
-                    onValueChange: (next) => {
-                      void setChatModel(next || null).catch((err: any) =>
-                        setChatInfoError(err?.message ?? String(err)),
-                      );
-                    },
-                  },
-                  {
-                    kind: 'button',
-                    id: 'external-model-refresh',
-                    label: 'Refresh',
-                    title: chatModelsError
-                      ? `Refresh model list: ${chatModelsError}`
-                      : 'Refresh model list from the agent CLI',
-                    disabled: modelDisabled || loadingChatModels,
-                    active: loadingChatModels,
-                    icon: 'refresh',
-                    onSelect: () => setChatModelsRefreshNonce((nonce) => nonce + 1),
-                  },
-                ]
-              : [
-                  {
-                    kind: 'text',
+                    kind: 'text' as const,
                     id: 'external-model-manual',
                     value: manualChatModelInput,
                     placeholder: 'Model id',
@@ -1265,26 +1255,28 @@ export function SelectedDroneWorkspace({
                     onSubmit: applyManualChatModel,
                   },
                   {
-                    kind: 'button',
+                    kind: 'button' as const,
                     id: 'external-model-apply',
                     label: 'Set',
                     title: 'Use this model for the chat',
                     disabled: modelDisabled,
                     onSelect: applyManualChatModel,
                   },
-                  {
-                    kind: 'button',
-                    id: 'external-model-refresh',
-                    label: 'Refresh',
-                    title: chatModelsError
-                      ? `Refresh model list: ${chatModelsError}`
-                      : 'Refresh model list from the agent CLI',
-                    disabled: modelDisabled || loadingChatModels,
-                    active: loadingChatModels,
-                    icon: 'refresh',
-                    onSelect: () => setChatModelsRefreshNonce((nonce) => nonce + 1),
-                  },
-                ],
+                ]
+              : []),
+            {
+              kind: 'button',
+              id: 'external-model-refresh',
+              label: 'Refresh',
+              title: chatModelsError
+                ? `Refresh model list: ${chatModelsError}`
+                : 'Refresh model list from the agent CLI',
+              disabled: modelDisabled || loadingChatModels,
+              active: loadingChatModels,
+              icon: 'refresh',
+              onSelect: () => setChatModelsRefreshNonce((nonce) => nonce + 1),
+            },
+          ],
         }
       : undefined;
 
@@ -1435,7 +1427,7 @@ export function SelectedDroneWorkspace({
     <>
       {/* Header - spans full workspace width */}
       <DroneWorkspaceHeaderFrame selectedHeader>
-        <div className="flex h-[52px] items-center px-4">
+        <div className="flex h-full items-center px-4">
           <div className="flex w-full items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
               {sidebarCollapsed && (
