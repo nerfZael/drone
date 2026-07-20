@@ -48,7 +48,6 @@ import {
   addMobileDroneToStateSummary,
   EMPTY_MOBILE_DRONE_STATE_SUMMARY,
   mobileDroneDisplayState,
-  summarizeMobileDrones,
   type MobileDroneDisplayState,
   type MobileDroneStateSummary,
 } from '../drones/drone-state-summary';
@@ -88,7 +87,7 @@ export type AppDrawerProps = {
   devicePickerItems?: DrawerDevicePickerItem[];
   activeDeviceId?: string;
   onClose(): void;
-  onCreateDrone?(): void;
+  onCreateDrone?(repoPath: string): void;
   onRetryDrones?(): void;
   onSelectDroneChat?(droneId: string, chatName: string): void;
   onSelectDevice?(deviceId: string): void;
@@ -845,7 +844,6 @@ function AppDrawerView({
     () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
     [droneSidebarOrder, drones],
   );
-  const fleetStatus = React.useMemo(() => summarizeMobileDrones(drones), [drones]);
   const repoStateSummaries = React.useMemo(
     () =>
       new Map(
@@ -951,83 +949,52 @@ function AppDrawerView({
             </View>
             {showDrones ? (
               <>
-                <Pressable
-                  accessibilityRole="button"
-                  accessibilityLabel="Show repositories"
-                  onPress={() => setActiveRepoId(null)}
-                  style={({ pressed }) => [styles.sidebarToolbar, pressed && styles.pressed]}
-                >
-                  {dronesLoading ? (
-                    <View style={styles.loadingSummary}>
-                      <ActivityIndicator color={colors.accent} size="small" />
-                      <Text style={styles.loadingSummaryText}>Loading drones…</Text>
-                    </View>
-                  ) : !dronesReachable ? (
-                    <Text numberOfLines={1} style={styles.sidebarToolbarText}>
-                      Device unavailable
-                    </Text>
-                  ) : dronesError ? (
-                    <Text numberOfLines={1} style={styles.sidebarToolbarText}>
-                      Could not load drones
-                    </Text>
-                  ) : (
-                    <Text numberOfLines={1} style={styles.sidebarToolbarText}>
-                      {drones.length} {drones.length === 1 ? 'drone' : 'drones'} ·{' '}
-                      {droneGroups.length}{' '}
-                      {droneGroups.length === 1 ? 'repository' : 'repositories'}
-                    </Text>
-                  )}
-                  <View style={styles.sidebarToolbarActions}>
-                    <DroneStateCounts summary={fleetStatus} />
+                {activeRepo ? (
+                  <View style={styles.repoNavigationHead}>
                     <Pressable
                       accessibilityRole="button"
-                      accessibilityLabel="Create new drone"
+                      accessibilityLabel="Back to repositories"
+                      onPress={() => setActiveRepoId(null)}
+                      style={({ pressed }) => [styles.repoNavigationBack, pressed && styles.pressed]}
+                    >
+                      <View style={styles.groupIcon}>
+                        <FolderGit2 color={colors.mutedDim} size={16} strokeWidth={1.9} />
+                        <View style={styles.groupChevron}>
+                          <ChevronLeft color={colors.mutedDim} size={10} strokeWidth={2.3} />
+                        </View>
+                      </View>
+                      <View style={styles.repoCopy}>
+                        <Text numberOfLines={1} style={styles.repoNavigationTitle}>
+                          {activeRepo.label}
+                        </Text>
+                        {activeRepo.repoPath ? (
+                          <Text numberOfLines={1} style={styles.repoPath}>
+                            {activeRepo.repoPath}
+                          </Text>
+                        ) : null}
+                      </View>
+                      <DroneStateCounts
+                        summary={
+                          repoStateSummaries.get(activeRepo.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY
+                        }
+                        compact
+                      />
+                    </Pressable>
+                    <Pressable
+                      accessibilityRole="button"
+                      accessibilityLabel={`Create drone in ${activeRepo.label}`}
                       accessibilityState={{ disabled: !onCreateDrone }}
                       disabled={!onCreateDrone}
-                      onPress={(event) => {
-                        event.stopPropagation();
-                        onCreateDrone?.();
-                      }}
+                      onPress={() => onCreateDrone?.(activeRepo.repoPath)}
                       style={({ pressed }) => [
-                        styles.create,
-                        !onCreateDrone && styles.createDisabled,
+                        styles.repoCreate,
+                        !onCreateDrone && styles.repoCreateDisabled,
                         pressed && styles.pressed,
                       ]}
                     >
-                      <Plus color={colors.accent} size={19} strokeWidth={2.2} />
+                      <Plus color={colors.accent} size={18} strokeWidth={2.2} />
                     </Pressable>
                   </View>
-                </Pressable>
-                {activeRepo ? (
-                  <Pressable
-                    accessibilityRole="button"
-                    accessibilityLabel="Back to repositories"
-                    onPress={() => setActiveRepoId(null)}
-                    style={({ pressed }) => [styles.repoNavigationHead, pressed && styles.pressed]}
-                  >
-                    <View style={styles.groupIcon}>
-                      <FolderGit2 color={colors.mutedDim} size={16} strokeWidth={1.9} />
-                      <View style={styles.groupChevron}>
-                        <ChevronLeft color={colors.mutedDim} size={10} strokeWidth={2.3} />
-                      </View>
-                    </View>
-                    <View style={styles.repoCopy}>
-                      <Text numberOfLines={1} style={styles.repoNavigationTitle}>
-                        {activeRepo.label}
-                      </Text>
-                      {activeRepo.repoPath ? (
-                        <Text numberOfLines={1} style={styles.repoPath}>
-                          {activeRepo.repoPath}
-                        </Text>
-                      ) : null}
-                    </View>
-                    <DroneStateCounts
-                      summary={
-                        repoStateSummaries.get(activeRepo.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY
-                      }
-                      compact
-                    />
-                  </Pressable>
                 ) : null}
                 <ScrollView style={styles.scroll} contentContainerStyle={styles.droneList}>
                   {activeRepo
@@ -1199,45 +1166,6 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 2,
     backgroundColor: colors.accent,
   },
-  sidebarToolbar: {
-    minHeight: 50,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 10,
-    paddingHorizontal: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.borderSubtle,
-    backgroundColor: colors.panel,
-    cursor: 'pointer',
-  },
-  sidebarToolbarText: {
-    flex: 1,
-    minWidth: 0,
-    color: colors.secondary,
-    fontSize: 10,
-    fontWeight: '500',
-  },
-  sidebarToolbarActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  loadingSummary: {
-    flex: 1,
-    minWidth: 0,
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-  },
-  loadingSummaryText: { color: colors.secondary, fontSize: 10, fontWeight: '500' },
-  create: {
-    width: 36,
-    height: 36,
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderRadius: 6,
-    borderWidth: 1,
-    borderColor: 'transparent',
-    backgroundColor: 'transparent',
-  },
-  createDisabled: { opacity: 0.42 },
   scroll: { flex: 1 },
   activeText: { color: colors.text, fontWeight: '600' },
   empty: { color: colors.muted, fontSize: 12, lineHeight: 18, padding: 12 },
@@ -1321,11 +1249,29 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingHorizontal: 10,
+    paddingHorizontal: 8,
     borderBottomWidth: 1,
     borderBottomColor: colors.borderSubtle,
   },
+  repoNavigationBack: {
+    minHeight: 56,
+    flex: 1,
+    minWidth: 0,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 2,
+  },
   repoNavigationTitle: { color: colors.text, fontSize: 13, fontWeight: '600' },
+  repoCreate: {
+    width: 36,
+    height: 36,
+    flexShrink: 0,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 6,
+  },
+  repoCreateDisabled: { opacity: 0.42 },
   fleetStates: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   fleetStatesCompact: { flexShrink: 0, gap: 6 },
   fleetState: { flexDirection: 'row', alignItems: 'center', gap: 4 },

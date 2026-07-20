@@ -36,6 +36,7 @@ describe('AgentPlanList', () => {
     const html = renderToStaticMarkup(
       <AgentPlanList
         className="plan-last"
+        headerActions={<button type="button">Message action</button>}
         plan={{
           source: 'cursor',
           updatedAt: '2026-07-11T12:00:00.000Z',
@@ -49,7 +50,8 @@ describe('AgentPlanList', () => {
 
     expect(html).toContain('Show plan');
     expect(html).toContain('(1/10)');
-    expect(html).not.toContain('justify-between');
+    expect(html).toContain('justify-between');
+    expect(html).toContain('Message action');
     expect(html).toContain('plan-last');
     expect(html).toContain('aria-expanded="false"');
     expect(html).toContain('1/10');

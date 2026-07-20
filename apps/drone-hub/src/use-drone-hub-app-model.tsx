@@ -1620,14 +1620,13 @@ export function useDroneHubAppModel(): DroneHubAppModel {
         } catch {
           // Ignore localStorage failures; the panel will fall back to main.
         }
-        setRightPanelOpen(true);
         requestRightPanelTab('whiteboard');
         window.dispatchEvent(new CustomEvent(WHITEBOARD_OPEN_EVENT, { detail: { whiteboardId } }));
         return;
       }
       if (action.type === 'close_whiteboard') {
         if (rightPanelTab === 'whiteboard' || rightPanelBottomTab === 'whiteboard') {
-          setRightPanelOpen(false);
+          requestRightPanelTab('files');
         }
         return;
       }
@@ -1660,7 +1659,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       closed = true;
       source.close();
     };
-  }, [expandGroupsForDroneIds, reloadUiPreferences, requestRightPanelTab, rightPanelBottomTab, rightPanelTab, selectDroneChat, setRightPanelOpen]);
+  }, [expandGroupsForDroneIds, reloadUiPreferences, requestRightPanelTab, rightPanelBottomTab, rightPanelTab, selectDroneChat]);
   React.useEffect(
     () => () => {
       if (typeof window === 'undefined') return;
@@ -1875,9 +1874,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openDroneEditor,
     pullRepoChanges,
     pushRepoChanges,
-    repoTransferPeers,
-    pullRepoChangesFromDrone,
-    applyRepoChangesToDrone,
     reseedRepo,
   } = useWorkspaceActions({
     autoDelete,
@@ -3314,7 +3310,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rightPanelTab,
     rightPanelSplit,
     rightPanelBottomTab,
-    setRightPanelOpen,
     requestRightPanelTab,
     setSidebarCollapsed,
     shortcutBindings,
@@ -4129,9 +4124,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     openingEditor,
     pullRepoChanges,
     pushRepoChanges,
-    repoTransferPeers,
-    pullRepoChangesFromDrone,
-    applyRepoChangesToDrone,
     openDroneDropActionModal,
     repoOp,
     headerOverflowRef,

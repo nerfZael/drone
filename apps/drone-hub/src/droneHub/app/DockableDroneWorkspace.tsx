@@ -14,7 +14,6 @@ import { profileStorageKey } from '../../profile-storage';
 import { RIGHT_PANEL_TAB_LABELS, type RightPanelTab } from './app-config';
 import { useMobileViewport } from './use-mobile-viewport';
 
-export type WorkspaceLayoutScope = 'global' | 'drone' | 'chat';
 export type WorkspacePaneHeaderMode = 'normal' | 'compact';
 type WorkspacePaneKey = 'single' | 'top' | 'bottom';
 type PreviewHostState = {
@@ -25,13 +24,10 @@ type PreviewHostState = {
 
 type DockableDroneWorkspaceProps = {
   currentDrone: DroneSummary;
-  activeChatName: string;
-  layoutScope: WorkspaceLayoutScope;
   paneHeaderMode: WorkspacePaneHeaderMode;
   toolPaneOpen: boolean;
   activeToolTab: RightPanelTab;
   openRequestNonce: number;
-  resetLayoutNonce: number;
   chatContent: React.ReactNode;
   renderToolPane: (tab: RightPanelTab, paneKey: WorkspacePaneKey) => React.ReactNode;
   previewTab: RightPanelTab;
@@ -48,10 +44,8 @@ const DEFAULT_NEW_TOOL_PANEL_WIDTH = 720;
 const DEFAULT_NEW_TOOL_PANEL_HEIGHT = 320;
 const NEW_TOOL_PANEL_MIN_WIDTH = 360;
 const NEW_TOOL_PANEL_MAX_WIDTH = 1200;
-export const WORKSPACE_LAYOUT_SCOPES: WorkspaceLayoutScope[] = ['global', 'drone', 'chat'];
-const LAYOUT_SCOPE_STORAGE_KEY = profileStorageKey('droneHub.workspaceLayoutScope');
 const PANE_HEADER_MODE_STORAGE_KEY = profileStorageKey('droneHub.workspacePaneHeaderMode');
-const LAYOUT_STORAGE_PREFIX = profileStorageKey('droneHub.workspaceLayout');
+const LAYOUT_STORAGE_KEY = profileStorageKey('droneHub.workspaceLayout.global');
 const PREVIEW_HOST_SELECTOR = '[data-dockview-preview-host="1"]';
 
 function previewHostStatesEqual(a: PreviewHostState, b: PreviewHostState): boolean {
@@ -118,17 +112,6 @@ function rebalanceGridGroupWidths(api: DockviewApi): void {
   }
 }
 
-export function readWorkspaceLayoutScope(): WorkspaceLayoutScope {
-  if (typeof localStorage === 'undefined') return 'global';
-  const raw = localStorage.getItem(LAYOUT_SCOPE_STORAGE_KEY);
-  return raw === 'drone' || raw === 'chat' || raw === 'global' ? raw : 'global';
-}
-
-export function writeWorkspaceLayoutScope(scope: WorkspaceLayoutScope): void {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(LAYOUT_SCOPE_STORAGE_KEY, scope);
-}
-
 export function readWorkspacePaneHeaderMode(): WorkspacePaneHeaderMode {
   if (typeof localStorage === 'undefined') return 'normal';
   return localStorage.getItem(PANE_HEADER_MODE_STORAGE_KEY) === 'compact' ? 'compact' : 'normal';
@@ -139,16 +122,10 @@ export function writeWorkspacePaneHeaderMode(mode: WorkspacePaneHeaderMode): voi
   localStorage.setItem(PANE_HEADER_MODE_STORAGE_KEY, mode);
 }
 
-function layoutStorageKey(scope: WorkspaceLayoutScope, droneId: string, chatName: string): string {
-  if (scope === 'chat') return `${LAYOUT_STORAGE_PREFIX}.chat.${encodeURIComponent(droneId)}.${encodeURIComponent(chatName || 'default')}`;
-  if (scope === 'drone') return `${LAYOUT_STORAGE_PREFIX}.drone.${encodeURIComponent(droneId)}`;
-  return `${LAYOUT_STORAGE_PREFIX}.global`;
-}
-
-function readStoredLayout(storageKey: string): SerializedDockview | null {
+function readStoredLayout(): SerializedDockview | null {
   if (typeof localStorage === 'undefined') return null;
   try {
-    const parsed = JSON.parse(localStorage.getItem(storageKey) ?? 'null');
+    const parsed = JSON.parse(localStorage.getItem(LAYOUT_STORAGE_KEY) ?? 'null');
     return parsed && typeof parsed === 'object' && 'grid' in parsed && 'panels' in parsed
       ? (parsed as SerializedDockview)
       : null;
@@ -157,14 +134,9 @@ function readStoredLayout(storageKey: string): SerializedDockview | null {
   }
 }
 
-function writeStoredLayout(storageKey: string, layout: SerializedDockview): void {
+function writeStoredLayout(layout: SerializedDockview): void {
   if (typeof localStorage === 'undefined') return;
-  localStorage.setItem(storageKey, JSON.stringify(layout));
-}
-
-function removeStoredLayout(storageKey: string): void {
-  if (typeof localStorage === 'undefined') return;
-  localStorage.removeItem(storageKey);
+  localStorage.setItem(LAYOUT_STORAGE_KEY, JSON.stringify(layout));
 }
 
 function ensurePanel(api: DockviewApi, tab: RightPanelTab, paneKey: WorkspacePaneKey, referencePanel: string = CHAT_PANEL_ID): boolean {
@@ -293,13 +265,10 @@ const DockableDroneWorkspaceContext = React.createContext<{
 
 export function DockableDroneWorkspace({
   currentDrone,
-  activeChatName,
-  layoutScope,
   paneHeaderMode,
   toolPaneOpen,
   activeToolTab,
   openRequestNonce,
-  resetLayoutNonce,
   chatContent,
   renderToolPane,
   previewTab,
@@ -315,7 +284,6 @@ export function DockableDroneWorkspace({
   const lastAppliedOpenRequestRef = React.useRef<number>(-1);
   const lastAppliedToolTabRef = React.useRef<RightPanelTab | null>(null);
   const lastAppliedOpenStateRef = React.useRef<boolean | null>(null);
-  const lastLoadedKeyRef = React.useRef<string>('');
   const [previewHostVersion, setPreviewHostVersion] = React.useState(0);
   const [workspacePanelCount, setWorkspacePanelCount] = React.useState(1);
   const lastReportedPreviewHostRef = React.useRef<PreviewHostState | null>(null);
@@ -338,10 +306,6 @@ export function DockableDroneWorkspace({
     setWorkspacePanelCount(Math.max(1, api?.totalPanels ?? 1));
     onVisibleToolTabsChange?.(api ? visibleToolTabs(api) : []);
   }, [onVisibleToolTabsChange]);
-  const storageKey = React.useMemo(
-    () => layoutStorageKey(layoutScope, currentDrone.id, activeChatName),
-    [activeChatName, currentDrone.id, layoutScope],
-  );
   const contextValue = React.useMemo(
     () => ({
       chatContent,
@@ -368,11 +332,11 @@ export function DockableDroneWorkspace({
     const api = apiRef.current;
     if (!api || suppressSaveRef.current) return;
     try {
-      writeStoredLayout(storageKey, api.toJSON());
+      writeStoredLayout(api.toJSON());
     } catch {
       // Ignore layout persistence failures; the active workspace can keep running.
     }
-  }, [storageKey]);
+  }, []);
 
   const rebalanceWorkspaceGridGroups = React.useCallback((afterRebalance?: () => void) => {
     const api = apiRef.current;
@@ -400,14 +364,13 @@ export function DockableDroneWorkspace({
     if (!api) return;
     suppressSaveRef.current = true;
     try {
-      const stored = readStoredLayout(storageKey);
+      const stored = readStoredLayout();
       if (stored && toolPaneOpen) {
         api.fromJSON(stored, { reuseExistingPanels: true });
         ensureChatPanel(api);
       } else {
         createDefaultLayout(api, activeToolTab, toolPaneOpen);
       }
-      lastLoadedKeyRef.current = storageKey;
       lastAppliedOpenRequestRef.current = openRequestNonce;
       lastAppliedToolTabRef.current = activeToolTab;
       lastAppliedOpenStateRef.current = toolPaneOpen;
@@ -418,7 +381,7 @@ export function DockableDroneWorkspace({
       updateWorkspacePanelState();
       persistCurrentLayout();
     }
-  }, [activeToolTab, openRequestNonce, persistCurrentLayout, storageKey, toolPaneOpen, updateWorkspacePanelState]);
+  }, [activeToolTab, openRequestNonce, persistCurrentLayout, toolPaneOpen, updateWorkspacePanelState]);
 
   const handleReady = React.useCallback(
     (event: DockviewReadyEvent) => {
@@ -472,24 +435,6 @@ export function DockableDroneWorkspace({
     if (event.button !== 0) return;
     onBeforeWorkspaceMouseDown?.();
   }, [onBeforeWorkspaceMouseDown]);
-
-  React.useEffect(() => {
-    if (!apiRef.current) return;
-    if (lastLoadedKeyRef.current === storageKey) return;
-    loadLayout();
-  }, [loadLayout, storageKey]);
-
-  React.useEffect(() => {
-    const api = apiRef.current;
-    if (!api) return;
-    if (resetLayoutNonce <= 0) return;
-    removeStoredLayout(storageKey);
-    suppressSaveRef.current = true;
-    createDefaultLayout(api, activeToolTab, toolPaneOpen);
-    suppressSaveRef.current = false;
-    updateWorkspacePanelState();
-    persistCurrentLayout();
-  }, [activeToolTab, persistCurrentLayout, resetLayoutNonce, storageKey, toolPaneOpen, updateWorkspacePanelState]);
 
   React.useEffect(() => {
     const api = apiRef.current;
@@ -571,7 +516,6 @@ export function DockableDroneWorkspace({
     mobileActivePanel,
     previewHostVersion,
     reportPreviewHostChange,
-    storageKey,
     toolPaneOpen,
   ]);
 

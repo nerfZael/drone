@@ -7,7 +7,6 @@ export type ShortcutActionId =
   | 'toggleVoiceClipboardRecording'
   | 'markSelectedDronesUnread'
   | 'toggleSidebarCollapsed'
-  | 'toggleRightPanelOpen'
   | 'toggleRightPanelWidth'
   | 'openHoveredGroupMultiChat'
   | 'openPullRequestsTab'
@@ -76,11 +75,6 @@ export const SHORTCUT_DEFINITIONS: ShortcutDefinition[] = [
     description: 'Toggles the left drone sidebar between minimized and expanded.',
   },
   {
-    id: 'toggleRightPanelOpen',
-    label: 'Toggle workspace panes',
-    description: 'Shows or hides workspace tool pane controls.',
-  },
-  {
     id: 'toggleRightPanelWidth',
     label: 'Focus workspace pane',
     description: 'Reopens or focuses the active workspace tool pane.',
@@ -131,7 +125,6 @@ const DEFAULT_SHORTCUT_BINDINGS: ShortcutBindingMap = {
   toggleVoiceClipboardRecording: { key: '`', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   markSelectedDronesUnread: { key: 'z', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleSidebarCollapsed: { key: 'a', mod: false, ctrl: false, meta: false, alt: false, shift: false },
-  toggleRightPanelOpen: { key: 'd', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   toggleRightPanelWidth: { key: 's', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openHoveredGroupMultiChat: { key: 'g', mod: false, ctrl: false, meta: false, alt: false, shift: false },
   openPullRequestsTab: { key: 'r', mod: false, ctrl: false, meta: false, alt: false, shift: false },
@@ -201,7 +194,6 @@ export function cloneDefaultShortcutBindings(): ShortcutBindingMap {
     toggleVoiceClipboardRecording: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleVoiceClipboardRecording),
     markSelectedDronesUnread: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.markSelectedDronesUnread),
     toggleSidebarCollapsed: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleSidebarCollapsed),
-    toggleRightPanelOpen: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelOpen),
     toggleRightPanelWidth: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.toggleRightPanelWidth),
     openHoveredGroupMultiChat: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openHoveredGroupMultiChat),
     openPullRequestsTab: cloneShortcutBinding(DEFAULT_SHORTCUT_BINDINGS.openPullRequestsTab),

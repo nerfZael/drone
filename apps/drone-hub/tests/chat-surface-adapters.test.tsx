@@ -212,7 +212,6 @@ describe('agent chat surface adapters', () => {
               {
                 kind: 'label',
                 id: 'agent',
-                label: 'Agent',
                 value: 'Codex',
               },
               {
@@ -233,7 +232,7 @@ describe('agent chat surface adapters', () => {
     );
 
     expect(html).toContain('Model A');
-    expect(html).toContain('aria-label="Agent: Codex"');
+    expect(html).toContain('aria-label="Codex"');
     expect(html).toContain('Chat options');
     expect(html).not.toContain('Thread files');
   });
@@ -449,6 +448,7 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('Drone tasks');
     expect(html).toContain('Follow up');
     expect(html).toContain('screenshot.png');
+    expect(html).toContain('aria-label="Hide inline media"');
     expect(html).toContain('Pull request');
     expect(html).toContain('#609');
     expect(html).not.toContain('&quot;type&quot;:&quot;drone-hub-task&quot;');

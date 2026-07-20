@@ -110,7 +110,6 @@ type DroneHubUiState = {
   clearingDroneError: boolean;
   headerOverflowOpen: boolean;
   outputView: OutputView;
-  transcriptInlineImages: boolean;
   showCanvasLastMessagePreviews: boolean;
   automations: AutomationConfig[];
   transcriptInlineImageOverrides: Record<string, boolean>;
@@ -174,7 +173,6 @@ type DroneHubUiState = {
   setClearingDroneError: (next: Updater<boolean>) => void;
   setHeaderOverflowOpen: (next: Updater<boolean>) => void;
   setOutputView: (next: Updater<OutputView>) => void;
-  setTranscriptInlineImages: (next: Updater<boolean>) => void;
   setShowCanvasLastMessagePreviews: (next: Updater<boolean>) => void;
   setAutomations: (next: Updater<AutomationConfig[]>) => void;
   addAutomation: (seed?: Partial<AutomationConfig>) => string;
@@ -323,7 +321,6 @@ type DroneHubUiPersistedState = Pick<
   | 'groupMultiChatColumnWidth'
   | 'groupMultiChatStatusSort'
   | 'outputView'
-  | 'transcriptInlineImages'
   | 'showCanvasLastMessagePreviews'
   | 'automations'
   | 'spawnContextByRepoKey'
@@ -345,10 +342,12 @@ export function migrateDroneHubUiPersistedState(
   if (!persistedState || typeof persistedState !== 'object' || Array.isArray(persistedState)) return {};
   const {
     fsExplorerView: _ignoredFsExplorerView,
+    transcriptInlineImages: _ignoredTranscriptInlineImages,
     viewMode: _ignoredViewMode,
     ...persisted
   } = persistedState as Partial<DroneHubUiPersistedState> & {
     fsExplorerView?: unknown;
+    transcriptInlineImages?: unknown;
     viewMode?: unknown;
   };
   const migrated = { ...persisted };
@@ -661,7 +660,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       clearingDroneError: false,
       headerOverflowOpen: false,
       outputView: 'screen',
-      transcriptInlineImages: true,
       showCanvasLastMessagePreviews: false,
       automations: [],
       transcriptInlineImageOverrides: {},
@@ -781,8 +779,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setClearingDroneError: (next) => set((s) => ({ clearingDroneError: resolveNext(s.clearingDroneError, next) })),
       setHeaderOverflowOpen: (next) => set((s) => ({ headerOverflowOpen: resolveNext(s.headerOverflowOpen, next) })),
       setOutputView: (next) => set((s) => ({ outputView: resolveNext(s.outputView, next) })),
-      setTranscriptInlineImages: (next) =>
-        set((s) => ({ transcriptInlineImages: resolveNext(s.transcriptInlineImages, next) })),
       setShowCanvasLastMessagePreviews: (next) =>
         set((s) => ({ showCanvasLastMessagePreviews: resolveNext(s.showCanvasLastMessagePreviews, next) })),
       setAutomations: (next) =>
@@ -969,7 +965,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: profileStorageKey('droneHub.ui'),
-      version: 14,
+      version: 15,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState, version) => migrateDroneHubUiPersistedState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({
@@ -1002,7 +998,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         groupMultiChatColumnWidth: state.groupMultiChatColumnWidth,
         groupMultiChatStatusSort: state.groupMultiChatStatusSort,
         outputView: state.outputView,
-        transcriptInlineImages: state.transcriptInlineImages,
         showCanvasLastMessagePreviews: state.showCanvasLastMessagePreviews,
         automations: state.automations,
         spawnContextByRepoKey: state.spawnContextByRepoKey,
@@ -1020,10 +1015,12 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         const persisted = (persistedState as Partial<DroneHubUiPersistedState>) ?? {};
         const {
           fsExplorerView: _ignoredFsExplorerView,
+          transcriptInlineImages: _ignoredTranscriptInlineImages,
           viewMode: _ignoredViewMode,
           ...persistedRest
         } = persisted as Partial<DroneHubUiPersistedState> & {
           fsExplorerView?: unknown;
+          transcriptInlineImages?: unknown;
           viewMode?: unknown;
         };
         const migratedShortcutBindings = migrateLegacyShortcutBindings(persisted.shortcutBindings);
@@ -1098,9 +1095,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             persisted.groupMultiChatStatusSort ?? currentState.groupMultiChatStatusSort,
           ),
           outputView: normalizeOutputView(persisted.outputView ?? currentState.outputView),
-          transcriptInlineImages: normalizeBoolean(
-            persisted.transcriptInlineImages ?? currentState.transcriptInlineImages,
-          ),
           showCanvasLastMessagePreviews: normalizeBoolean(
             persisted.showCanvasLastMessagePreviews ?? currentState.showCanvasLastMessagePreviews,
           ),

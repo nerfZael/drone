@@ -1659,9 +1659,9 @@ export function DronesScreen({
         onClose={() => onDrawerOpenChange(false)}
         onCreateDrone={
           targetSupportsDrones && meshRouteAvailable
-            ? () => {
+            ? (repoPath) => {
                 onDrawerOpenChange(false);
-                void openNewDroneScreen();
+                void openNewDroneScreen({ repoPath });
               }
             : undefined
         }

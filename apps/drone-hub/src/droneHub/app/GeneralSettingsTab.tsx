@@ -29,8 +29,6 @@ type GeneralSettingsTabProps = {
   filesystem: UseFilesystemSettingsResult;
   agentMessageAutoContinue: UseAgentMessageAutoContinueSettingsResult;
   agentSuggestion: UseAgentSuggestionSettingsResult;
-  transcriptInlineImages: boolean;
-  setTranscriptInlineImages: (value: boolean) => void;
   onReplayOnboarding: () => void;
   onResetOnboarding: () => void;
 };
@@ -41,8 +39,6 @@ export function GeneralSettingsTab({
   filesystem,
   agentMessageAutoContinue,
   agentSuggestion,
-  transcriptInlineImages,
-  setTranscriptInlineImages,
   onReplayOnboarding,
   onResetOnboarding,
 }: GeneralSettingsTabProps) {
@@ -1013,41 +1009,6 @@ export function GeneralSettingsTab({
                 </div>
               </>
             )}
-          </div>
-
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
-            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-              Transcript
-            </div>
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
-              Show linked image and video previews inline inside agent messages by default.
-            </div>
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setTranscriptInlineImages(true)}
-                className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                  transcriptInlineImages
-                    ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                Inline on (default)
-              </button>
-              <button
-                type="button"
-                onClick={() => setTranscriptInlineImages(false)}
-                className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                  !transcriptInlineImages
-                    ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                }`}
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                Inline off
-              </button>
-            </div>
           </div>
 
           <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">

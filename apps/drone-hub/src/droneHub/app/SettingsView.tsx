@@ -70,8 +70,6 @@ export function SettingsView({
   onReplayOnboarding,
   onResetOnboarding,
 }: SettingsViewProps) {
-  const transcriptInlineImages = useDroneHubUiStore((s) => s.transcriptInlineImages);
-  const setTranscriptInlineImages = useDroneHubUiStore((s) => s.setTranscriptInlineImages);
   const settingsScrollRef = React.useRef<HTMLDivElement>(null);
   const github = useGithubSettings(requestJson);
   const agentMessageAutoContinue = useAgentMessageAutoContinueSettings(requestJson);
@@ -188,8 +186,6 @@ export function SettingsView({
           filesystem={filesystem}
           agentMessageAutoContinue={agentMessageAutoContinue}
           agentSuggestion={agentSuggestion}
-          transcriptInlineImages={transcriptInlineImages}
-          setTranscriptInlineImages={setTranscriptInlineImages}
           onReplayOnboarding={onReplayOnboarding}
           onResetOnboarding={onResetOnboarding}
         />

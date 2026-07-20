@@ -10,7 +10,6 @@ import type { MarkdownFileReference } from './MarkdownMessage';
 import type { DroneHubTask } from './drone-hub-task-parser';
 import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { IconAlert, IconCheck, IconSnapshot, IconSpinner } from './icons';
-import { AgentPlanList } from './AgentPlanList';
 import { ChatMessageFrame } from './ChatMessageFrame';
 import { AgentRunSummaryLine } from './WorkingElapsedStatus';
 
@@ -145,8 +144,8 @@ export const TranscriptTurn = React.memo(
           at={promptIso}
           showRoleIcon={showRoleIcons}
           showRoleLabel={showRoleIcons}
+          hoverActions={<ChatMessageCopyAction text={promptText} position="hover-rail" />}
         >
-          <ChatMessageCopyAction text={promptText} />
           <ChatMessageBody
             role="user"
             text={promptText}
@@ -214,9 +213,7 @@ export const TranscriptTurn = React.memo(
             droneHomePath={droneHomePath}
             onOpenFileReference={onOpenFileReference}
             onOpenLink={onOpenLink}
-            afterContent={
-              <AgentPlanList plan={item.agentPlan} className="mb-8" />
-            }
+            plan={item.agentPlan}
             actionEnd={
               actionsEnabled && item.ok && dockerSnapshot &&
               (dockerSnapshotBusy || dockerSnapshot.status === 'failed' || onRollbackDockerSnapshot) ? (

@@ -52,17 +52,6 @@ export const GUIDED_ONBOARDING_STEPS: GuidedOnboardingStep[] = [
     ),
   },
   {
-    id: 'rightPanel.toggle',
-    version: 1,
-    selector: '[data-onboarding-id="rightPanel.toggle"]',
-    title: 'Right panel',
-    body: (
-      <div className="space-y-2">
-        <div>Toggle the right panel for terminal, files, browser preview, links, and changes.</div>
-      </div>
-    ),
-  },
-  {
     id: 'rightPanel.tab.changes',
     version: 1,
     selector: '[data-onboarding-id="rightPanel.tab.changes"]',
@@ -96,4 +85,3 @@ export const GUIDED_ONBOARDING_STEPS: GuidedOnboardingStep[] = [
     ),
   },
 ];
-

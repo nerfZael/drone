@@ -102,8 +102,8 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         showRoleIcon={showRoleIcons}
         showRoleLabel={showRoleIcons}
         headerEnd={pendingHeader}
+        hoverActions={<ChatMessageCopyAction text={userCopyText} position="hover-rail" />}
       >
-        <ChatMessageCopyAction text={userCopyText} />
         {promptText ? (
           <CollapsibleMarkdown
             text={promptText}

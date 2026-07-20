@@ -8,10 +8,12 @@ export function AgentPlanList({
   plan,
   running = false,
   className = '',
+  headerActions,
 }: {
   plan?: AgentPlan;
   running?: boolean;
   className?: string;
+  headerActions?: React.ReactNode;
 }) {
   const [planExpanded, setPlanExpanded] = React.useState(running);
   const [stepsExpanded, setStepsExpanded] = React.useState(false);
@@ -27,32 +29,35 @@ export function AgentPlanList({
       className={`mt-2.5 border-t border-[var(--border-subtle)] pt-2.5 ${className}`}
       aria-label="Plan"
     >
-      <div className={`${showPlanItems ? 'mb-2' : ''} flex items-center gap-2`}>
-        {running ? (
-          <div className="flex items-baseline gap-1.5">
-            <span
-              className="text-[var(--text-10)] font-medium text-[var(--muted)]"
+      <div className={`${showPlanItems ? 'mb-2' : ''} flex min-h-7 items-center justify-between gap-3`}>
+        <div className="min-w-0">
+          {running ? (
+            <div className="flex items-baseline gap-1.5">
+              <span
+                className="text-[var(--text-10)] font-medium text-[var(--muted)]"
+              >
+                Plan
+              </span>
+              <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--muted-dim)]">
+                ({progressLabel})
+              </span>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => setPlanExpanded((value) => !value)}
+              className="flex items-center gap-1 text-[var(--text-10)] font-medium text-[var(--muted)] transition-colors hover:text-[var(--accent)] focus-visible:text-[var(--accent)] focus-visible:outline-none"
+              aria-expanded={planExpanded}
             >
-              Plan
-            </span>
-            <span className="font-mono text-[var(--text-9)] tabular-nums text-[var(--muted-dim)]">
-              ({progressLabel})
-            </span>
-          </div>
-        ) : (
-          <button
-            type="button"
-            onClick={() => setPlanExpanded((value) => !value)}
-            className="flex items-center gap-1 text-[var(--text-10)] font-medium text-[var(--muted)] transition-colors hover:text-[var(--accent)] focus-visible:text-[var(--accent)] focus-visible:outline-none"
-            aria-expanded={planExpanded}
-          >
-            <IconChevron down={planExpanded} />
-            <span>{planExpanded ? 'Hide plan' : 'Show plan'}</span>
-            <span className="font-mono font-normal tabular-nums tracking-normal text-[var(--muted-dim)]">
-              ({progressLabel})
-            </span>
-          </button>
-        )}
+              <IconChevron down={planExpanded} />
+              <span>{planExpanded ? 'Hide plan' : 'Show plan'}</span>
+              <span className="font-mono font-normal tabular-nums tracking-normal text-[var(--muted-dim)]">
+                ({progressLabel})
+              </span>
+            </button>
+          )}
+        </div>
+        {headerActions ? <div className="flex shrink-0 items-center gap-1">{headerActions}</div> : null}
       </div>
       {showPlanItems ? (
         <>

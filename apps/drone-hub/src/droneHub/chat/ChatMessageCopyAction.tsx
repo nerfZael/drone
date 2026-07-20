@@ -8,7 +8,7 @@ export function ChatMessageCopyAction({
   position = 'top',
 }: {
   text: string;
-  position?: 'top' | 'bottom' | 'inline';
+  position?: 'top' | 'bottom' | 'inline' | 'hover-rail';
 }) {
   const [copiedValue, setCopiedValue] = React.useState<string | null>(null);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -26,7 +26,7 @@ export function ChatMessageCopyAction({
   return (
     <div
       className={
-        position === 'inline'
+        position === 'inline' || position === 'hover-rail'
           ? 'relative z-20'
           : `absolute right-2 z-20 ${position === 'top' ? 'top-2' : 'bottom-2'}`
       }
@@ -35,7 +35,9 @@ export function ChatMessageCopyAction({
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none absolute right-8 top-0 rounded border border-[var(--user-border)] bg-[var(--scrim-soft)] px-2 py-1 text-[var(--text-9)] uppercase tracking-wide text-[var(--fg-secondary)]"
+          className={`pointer-events-none absolute rounded border border-[var(--user-border)] bg-[var(--scrim-soft)] px-2 py-1 text-[var(--text-9)] uppercase tracking-wide text-[var(--fg-secondary)] ${
+            position === 'hover-rail' ? 'bottom-full right-0 mb-1' : 'right-8 top-0'
+          }`}
           style={{ fontFamily: 'var(--display)' }}
         >
           Copied
@@ -54,7 +56,11 @@ export function ChatMessageCopyAction({
             }, 1200);
           });
         }}
-        className="pointer-events-none inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] focus-visible:pointer-events-auto focus-visible:opacity-100"
+        className={`inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] transition-opacity hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] focus-visible:pointer-events-auto focus-visible:opacity-100 ${
+          position === 'hover-rail'
+            ? 'pointer-events-auto opacity-100'
+            : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
+        }`}
         title="Copy message"
         aria-label="Copy message"
       >

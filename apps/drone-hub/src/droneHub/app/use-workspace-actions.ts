@@ -6,7 +6,7 @@ import {
   reconcileDirtyDroneApplyModal,
   type DirtyDroneApplyModalState,
 } from './dirty-drone-apply';
-import { compareDronesByNewestFirst, droneHomePath, isHostRuntimeDrone } from './helpers';
+import { droneHomePath, isHostRuntimeDrone } from './helpers';
 import { normalizeRepoTransferProbeStatus, type RepoTransferProbeStatus } from './repo-transfer-probe-status';
 
 export type { RepoTransferProbeStatus } from './repo-transfer-probe-status';
@@ -21,12 +21,6 @@ type LaunchHint =
   | null;
 
 type RepoOpState = null | { kind: 'pull' | 'push' | 'reseed' | 'pull-from-drone' | 'push-to-drone' };
-
-export type RepoTransferPeer = {
-  id: string;
-  name: string;
-  group: string | null;
-};
 
 export type RepoTransferActionResult = {
   ok: boolean;
@@ -62,29 +56,6 @@ function repoActionDroneLabel(currentDrone: DroneSummary | null): string {
 
 function peerDroneLabel(drone: Pick<DroneSummary, 'name'> | null | undefined, fallback = 'drone'): string {
   return String(drone?.name ?? '').trim() || fallback;
-}
-
-export function listRepoTransferPeers(currentDrone: DroneSummary | null, drones: DroneSummary[]): RepoTransferPeer[] {
-  const currentDroneId = String(currentDrone?.id ?? '').trim();
-  const currentRepoPath = String(currentDrone?.repoPath ?? '').trim();
-  if (!currentDroneId || !currentRepoPath || String(currentDrone?.runtime ?? '').trim().toLowerCase() === 'host') return [];
-
-  return (Array.isArray(drones) ? drones : [])
-    .filter((drone) => {
-      const droneId = String(drone?.id ?? '').trim();
-      if (!droneId || droneId === currentDroneId) return false;
-      if (String(drone?.runtime ?? '').trim().toLowerCase() === 'host') return false;
-      const repoPath = String(drone?.repoPath ?? '').trim();
-      if (!repoPath || repoPath !== currentRepoPath) return false;
-      return Boolean(drone?.repoAttached ?? repoPath);
-    })
-    .slice()
-    .sort(compareDronesByNewestFirst)
-    .map((drone) => ({
-      id: String(drone.id ?? '').trim(),
-      name: String(drone.name ?? '').trim() || String(drone.id ?? '').trim(),
-      group: typeof drone.group === 'string' && drone.group.trim() ? drone.group.trim() : null,
-    }));
 }
 
 function formatRepoPushSuccessMessage(data: any, currentDrone: DroneSummary | null): { title: string; message: string } {
@@ -203,8 +174,6 @@ export function useWorkspaceActions({
   const [repoOpError, setRepoOpError] = React.useState<string | null>(null);
   const [repoOpErrorMeta, setRepoOpErrorMeta] = React.useState<RepoOpErrorMeta | null>(null);
   const [dirtyDroneApplyModal, setDirtyDroneApplyModal] = React.useState<DirtyDroneApplyModalState | null>(null);
-  const repoTransferPeers = React.useMemo(() => listRepoTransferPeers(currentDrone, drones), [currentDrone, drones]);
-
   const shouldConfirmDelete = React.useCallback((): boolean => !autoDelete, [autoDelete]);
 
   const githubUrlForRepo = React.useCallback((repo: RepoSummary): string | null => {
@@ -596,24 +565,6 @@ export function useWorkspaceActions({
     [clearRepoOperationError, drones, postJson, setRepoOperationError, showTransientToast],
   );
 
-  const pullRepoChangesFromDrone = React.useCallback(
-    async (sourceDroneId: string) => {
-      const targetDroneId = String(currentDrone?.id ?? '').trim();
-      if (!targetDroneId) return { ok: false, error: 'Missing target drone.', meta: null };
-      return await transferRepoChangesFromDrone(sourceDroneId, targetDroneId, 'pull-from-drone');
-    },
-    [currentDrone, transferRepoChangesFromDrone],
-  );
-
-  const applyRepoChangesToDrone = React.useCallback(
-    async (targetDroneId: string) => {
-      const sourceDroneId = String(currentDrone?.id ?? '').trim();
-      if (!sourceDroneId) return { ok: false, error: 'Missing source drone.', meta: null };
-      return await transferRepoChangesFromDrone(sourceDroneId, targetDroneId, 'push-to-drone');
-    },
-    [currentDrone, transferRepoChangesFromDrone],
-  );
-
   const probeRepoChangesFromDrone = React.useCallback(
     async (sourceDroneIdRaw: string, targetDroneIdRaw: string): Promise<RepoTransferProbeStatus> => {
       const sourceDroneId = String(sourceDroneIdRaw ?? '').trim();
@@ -688,9 +639,6 @@ export function useWorkspaceActions({
     openDroneEditor,
     pullRepoChanges,
     pushRepoChanges,
-    repoTransferPeers,
-    pullRepoChangesFromDrone,
-    applyRepoChangesToDrone,
     probeRepoChangesFromDrone,
     syncRepoChangesIntoDrone,
     reseedRepo,

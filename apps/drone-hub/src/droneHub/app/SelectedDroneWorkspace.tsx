@@ -31,15 +31,11 @@ import type {
   PendingPrompt,
   TranscriptItem,
 } from '../types';
-import { IconAutoMinimize, IconChat, IconChevron, IconSidebarExpand, IconTune } from './icons';
+import { IconChat, IconChevron, IconSidebarExpand } from './icons';
 import {
   DockableDroneWorkspace,
-  WORKSPACE_LAYOUT_SCOPES,
-  readWorkspaceLayoutScope,
   readWorkspacePaneHeaderMode,
-  writeWorkspaceLayoutScope,
   writeWorkspacePaneHeaderMode,
-  type WorkspaceLayoutScope,
   type WorkspacePaneHeaderMode,
 } from './DockableDroneWorkspace';
 import { DroneWorkspaceHeaderFrame } from './DroneWorkspaceHeaderFrame';
@@ -72,7 +68,6 @@ import {
   type TranscriptTimelineBlock,
 } from './prompt-loop-groups';
 import { resolveRunningPromptLoopIdentity } from './prompt-loop-running-identity';
-import type { RepoTransferActionResult, RepoTransferPeer } from './use-workspace-actions';
 import {
   formatBytes,
 } from './selected-drone-workspace-utils';
@@ -155,6 +150,45 @@ function HeaderDropdownPortal({
   );
 }
 
+function HeaderMenuToggleRow({
+  label,
+  value,
+  checked,
+  disabled = false,
+  title,
+  onToggle,
+}: {
+  label: string;
+  value: string;
+  checked: boolean;
+  disabled?: boolean;
+  title?: string;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      role="menuitemcheckbox"
+      aria-checked={checked}
+      disabled={disabled}
+      onClick={onToggle}
+      title={title}
+      className={cn(
+        dropdownMenuItemBaseClass,
+        'flex items-center justify-between gap-4 text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:cursor-not-allowed disabled:opacity-40',
+      )}
+    >
+      <span>{label}</span>
+      <span className="inline-flex flex-shrink-0 items-center gap-2">
+        <span className={checked ? 'text-[var(--accent)]' : 'text-[var(--muted)]'}>{value}</span>
+        <span className={`relative inline-flex h-3.5 w-6 rounded-full ${checked ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'}`}>
+          <span className={`absolute top-px h-3 w-3 rounded-full bg-white transition-transform ${checked ? 'translate-x-[11px]' : 'translate-x-px'}`} />
+        </span>
+      </span>
+    </button>
+  );
+}
+
 type SelectedDroneWorkspaceProps = {
   currentDrone: DroneSummary;
   deleteMode: DroneDeleteMode;
@@ -209,9 +243,6 @@ type SelectedDroneWorkspaceProps = {
   openingEditor: { editor: 'code' | 'cursor' } | null;
   pullRepoChanges: () => Promise<void>;
   pushRepoChanges: () => Promise<void>;
-  repoTransferPeers: RepoTransferPeer[];
-  pullRepoChangesFromDrone: (sourceDroneId: string) => Promise<RepoTransferActionResult>;
-  applyRepoChangesToDrone: (targetDroneId: string) => Promise<RepoTransferActionResult>;
   onRequestDropActions: (targetDroneId: string, sourceDroneIds: string[]) => { ok: boolean; error?: string | null };
   repoOp: { kind: 'pull' | 'push' | 'reseed' | 'pull-from-drone' | 'push-to-drone' } | null;
   headerOverflowRef: React.RefObject<HTMLDivElement | null>;
@@ -219,10 +250,7 @@ type SelectedDroneWorkspaceProps = {
   terminalMenuRef: React.RefObject<HTMLDivElement | null>;
   terminalLabel: string;
   terminalOptions: Array<{ id: string; label: string }>;
-  rightPanelOpen: boolean;
-  setRightPanelOpen: React.Dispatch<React.SetStateAction<boolean>>;
   requestRightPanelTab: (tab: RightPanelTab) => void;
-  rightPanelSplit: boolean;
   rightPanelTabs: RightPanelTab[];
   rightPanelTab: RightPanelTab;
   setRightPanelTab: React.Dispatch<React.SetStateAction<RightPanelTab>>;
@@ -318,7 +346,6 @@ export function SelectedDroneWorkspace({
   setChatModelsRefreshNonce,
   loadingChatModels,
   chatModelsError,
-  chatModelsDiscoveredAt,
   chatModelsSource,
   currentDroneRepoAttached,
   currentDroneRepoPath,
@@ -328,9 +355,6 @@ export function SelectedDroneWorkspace({
   openingEditor,
   pullRepoChanges,
   pushRepoChanges,
-  repoTransferPeers,
-  pullRepoChangesFromDrone,
-  applyRepoChangesToDrone,
   onRequestDropActions,
   repoOp,
   headerOverflowRef,
@@ -338,8 +362,6 @@ export function SelectedDroneWorkspace({
   terminalMenuRef,
   terminalLabel,
   terminalOptions,
-  rightPanelOpen,
-  setRightPanelOpen,
   requestRightPanelTab,
   rightPanelTabs,
   rightPanelTab,
@@ -516,16 +538,16 @@ export function SelectedDroneWorkspace({
         : 'Docker size unavailable';
   const repoSyncBusyLabel =
     repoOp?.kind === 'pull'
-      ? 'Applying...'
+      ? 'Applying'
       : repoOp?.kind === 'push'
-        ? 'Pulling host...'
+        ? 'Pulling host'
         : repoOp?.kind === 'pull-from-drone'
-          ? 'Pulling drone...'
+          ? 'Pulling drone'
           : repoOp?.kind === 'push-to-drone'
-            ? 'Applying to drone...'
+            ? 'Applying to drone'
             : repoOp?.kind === 'reseed'
-              ? 'Reseeding...'
-              : 'Sync...';
+              ? 'Reseeding'
+              : 'Sync';
   const syncDisabled =
     isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal) || Boolean(repoOp);
   const {
@@ -949,34 +971,8 @@ export function SelectedDroneWorkspace({
     transcripts,
     visiblePendingPromptsWithStartup.length,
   ]);
-  const [workspaceLayoutResetNonce, setWorkspaceLayoutResetNonce] = React.useState(0);
-  const [workspaceLayoutScope, setWorkspaceLayoutScopeState] = React.useState<WorkspaceLayoutScope>(() => readWorkspaceLayoutScope());
   const [workspacePaneHeaderMode, setWorkspacePaneHeaderModeState] = React.useState<WorkspacePaneHeaderMode>(() => readWorkspacePaneHeaderMode());
-  const [droneControlsExpanded, setDroneControlsExpanded] = React.useState(false);
-  React.useEffect(() => {
-    if (
-      !droneControlsExpanded ||
-      !modelControlEnabled ||
-      availableChatModels.length > 0 ||
-      loadingChatModels ||
-      chatModelsError ||
-      chatModelsDiscoveredAt
-    ) {
-      return;
-    }
-    setChatModelsRefreshNonce((nonce) => nonce + 1);
-  }, [
-    activeChatName,
-    availableChatModels.length,
-    chatModelsDiscoveredAt,
-    chatModelsError,
-    currentAgentKey,
-    currentDrone.id,
-    droneControlsExpanded,
-    loadingChatModels,
-    modelControlEnabled,
-    setChatModelsRefreshNonce,
-  ]);
+  const [droneControlsMenuOpen, setDroneControlsMenuOpen] = React.useState(false);
 
   const openPullRequestsTab = React.useCallback(() => {
     requestRightPanelTab('prs');
@@ -1159,28 +1155,13 @@ export function SelectedDroneWorkspace({
     [requestRightPanelTab],
   );
 
-  const resetWorkspaceLayout = React.useCallback(() => {
-    setWorkspaceLayoutResetNonce((nonce) => nonce + 1);
-  }, []);
-  const setWorkspaceLayoutScope = React.useCallback((next: WorkspaceLayoutScope) => {
-    setWorkspaceLayoutScopeState(next);
-    writeWorkspaceLayoutScope(next);
-  }, []);
   const setWorkspacePaneHeaderMode = React.useCallback((next: WorkspacePaneHeaderMode) => {
     setWorkspacePaneHeaderModeState(next);
     writeWorkspacePaneHeaderMode(next);
   }, []);
-  const toggleDroneControlsExpanded = React.useCallback(() => {
-    setDroneControlsExpanded((expanded) => {
-      const next = !expanded;
-      if (!next) {
-        setTerminalMenuOpen(false);
-        setHeaderOverflowOpen(false);
-        setSyncMenuOpen(false);
-      }
-      return next;
-    });
-  }, [setHeaderOverflowOpen, setTerminalMenuOpen]);
+  React.useEffect(() => {
+    if (!headerOverflowOpen) setDroneControlsMenuOpen(false);
+  }, [headerOverflowOpen]);
 
   const externalComposerControls: ChatComposerControlsConfig | undefined =
     hasChats && modelControlEnabled
@@ -1190,7 +1171,6 @@ export function SelectedDroneWorkspace({
             {
               kind: 'label',
               id: 'external-agent',
-              label: 'Agent',
               value: agentLabel,
               title: `Agent: ${agentLabel}`,
             },
@@ -1414,7 +1394,7 @@ export function SelectedDroneWorkspace({
   return (
     <>
       {/* Header - spans full workspace width */}
-      <DroneWorkspaceHeaderFrame selectedHeader expanded={droneControlsExpanded}>
+      <DroneWorkspaceHeaderFrame selectedHeader>
         <div className="flex h-[3.25rem] items-center px-4">
           <div className="flex w-full items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
@@ -1547,271 +1527,8 @@ export function SelectedDroneWorkspace({
       {/* Tier 2: Toolbar */}
         <div
           data-drone-header-toolbar="true"
-          className={
-            droneControlsExpanded
-              ? 'px-5 pb-2.5 flex items-center justify-end gap-2 flex-wrap'
-              : 'absolute right-5 top-1/2 flex max-w-[calc(100%-22rem)] -translate-y-1/2 flex-wrap items-center justify-end gap-2'
-          }
+          className="absolute right-5 top-1/2 flex max-w-[calc(100%-22rem)] -translate-y-1/2 flex-wrap items-center justify-end gap-2"
         >
-          {droneControlsExpanded ? (
-            <>
-              {hasChats && chatUiMode === 'transcript' ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Access
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={agentPermissionMode === 'read-only'}
-                    onClick={() => {
-                      if (!readOnlySupported) return;
-                      const nextMode: AgentPermissionMode = agentPermissionMode === 'read-only' ? 'full-access' : 'read-only';
-                      void setChatAgentPermissionMode(nextMode).catch((err: any) =>
-                        setChatInfoError(err?.message ?? String(err)),
-                      );
-                    }}
-                    disabled={loadingChatInfo || !readOnlySupported}
-                    className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                      loadingChatInfo || !readOnlySupported
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : agentPermissionMode === 'read-only'
-                          ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title={
-                      readOnlySupported
-                        ? 'Run the next prompt with read-only agent permissions.'
-                        : 'Read-only mode is currently available for Codex and Blip chats.'
-                    }
-                  >
-                    <span
-                      className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                        agentPermissionMode === 'read-only' ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
-                          agentPermissionMode === 'read-only' ? 'translate-x-[11px]' : 'translate-x-[1px]'
-                        }`}
-                      />
-                    </span>
-                    {agentPermissionMode === 'read-only' ? 'Read only' : 'Full'}
-                  </button>
-                </div>
-              ) : null}
-              {!hostRuntime ? (
-                <span
-                  className="inline-flex items-center h-[28px] px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
-                  style={{ fontFamily: 'var(--display)' }}
-                  title={dockerSizeTitle}
-                >
-                  {dockerSizeLabel}
-                </span>
-              ) : null}
-              {hasChats && chatUiMode === 'transcript' ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Snapshots
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={dockerSnapshotAfterAgentMessageEnabled}
-                    onClick={() => {
-                      if (!dockerSnapshotSupported) return;
-                      void setDockerSnapshotAfterAgentMessageEnabled(!dockerSnapshotAfterAgentMessageEnabled).catch((err: any) =>
-                        setChatInfoError(err?.message ?? String(err)),
-                      );
-                    }}
-                    disabled={loadingChatInfo || !dockerSnapshotSupported}
-                    className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                      loadingChatInfo || !dockerSnapshotSupported
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : dockerSnapshotAfterAgentMessageEnabled
-                          ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title={
-                      dockerSnapshotSupported
-                        ? 'Commit a Docker image snapshot after each new agent message in this chat.'
-                        : 'Snapshots require a container drone created with Persist volume off.'
-                    }
-                  >
-                    <span
-                      className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                        dockerSnapshotAfterAgentMessageEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
-                          dockerSnapshotAfterAgentMessageEnabled ? 'translate-x-[11px]' : 'translate-x-[1px]'
-                        }`}
-                      />
-                    </span>
-                    {dockerSnapshotAfterAgentMessageEnabled ? 'On' : 'Off'}
-                  </button>
-                </div>
-              ) : null}
-              {hasChats && chatUiMode === 'transcript' ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Auto-continue
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={agentMessageAutoContinueEnabled}
-                    onClick={() => {
-                      void setAgentMessageAutoContinueEnabled(!agentMessageAutoContinueEnabled).catch((err: any) =>
-                        setChatInfoError(err?.message ?? String(err)),
-                      );
-                    }}
-                    disabled={loadingChatInfo}
-                    className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                      loadingChatInfo
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : agentMessageAutoContinueEnabled
-                          ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Monitor agent messages in this chat and auto-send the configured continue prompt when the agent appears to have stopped mid-task."
-                  >
-                    <span
-                      className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                        agentMessageAutoContinueEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
-                          agentMessageAutoContinueEnabled ? 'translate-x-[11px]' : 'translate-x-[1px]'
-                        }`}
-                      />
-                    </span>
-                    {agentMessageAutoContinueEnabled ? 'On' : 'Off'}
-                  </button>
-                </div>
-              ) : null}
-              {hasChats && chatUiMode === 'transcript' ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Agent suggestion
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={agentSuggestionEnabled}
-                    onClick={() => {
-                      void setAgentSuggestionEnabled(!agentSuggestionEnabled).catch((err: any) =>
-                        setChatInfoError(err?.message ?? String(err)),
-                      );
-                    }}
-                    disabled={loadingChatInfo}
-                    className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                      loadingChatInfo
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : agentSuggestionEnabled
-                          ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Suggest a likely next user reply for new agent messages in this transcript chat."
-                  >
-                    <span
-                      className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                        agentSuggestionEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
-                          agentSuggestionEnabled ? 'translate-x-[11px]' : 'translate-x-[1px]'
-                        }`}
-                      />
-                    </span>
-                    {agentSuggestionEnabled ? 'On' : 'Off'}
-                  </button>
-                </div>
-              ) : null}
-              {/* View mode */}
-              {chatUiMode === 'cli' ? (
-                <button
-                  onClick={() => setOutputView(outputView === 'screen' ? 'log' : 'screen')}
-                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]"
-                  style={{ fontFamily: 'var(--display)' }}
-                  title={outputView === 'screen' ? 'Click for raw log view' : 'Click for screen capture view'}
-                >
-                  {outputView === 'screen' ? 'Screen' : 'Log'}
-                </button>
-              ) : null}
-              {/* Separator */}
-              <div className="w-px h-4 bg-[var(--border-subtle)]" />
-              <div
-                className="inline-flex items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-                style={{ fontFamily: 'var(--display)' }}
-                title={`Open chat: ${activeChatName}`}
-              >
-                Chat
-                <span className="font-mono normal-case tracking-normal text-[var(--text-11)] text-[var(--fg-secondary)]">{activeChatName}</span>
-                {selectedChatIsDraft ? (
-                  <span className="rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[var(--text-8)] text-[var(--accent)]">Draft</span>
-                ) : null}
-              </div>
-              <div className="inline-flex items-center gap-1.5">
-                <div
-                  className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-0.5"
-                  style={{ fontFamily: 'var(--display)' }}
-                  title="Choose where this workspace layout is saved."
-                >
-                  {WORKSPACE_LAYOUT_SCOPES.map((scope) => (
-                    <button
-                      key={scope}
-                      type="button"
-                      onClick={() => setWorkspaceLayoutScope(scope)}
-                      className={`h-5 rounded px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide border transition-all ${
-                        workspaceLayoutScope === scope
-                          ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                          : 'border-transparent text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]'
-                      }`}
-                      title={`Save this workspace layout for ${scope === 'global' ? 'all drones' : scope === 'drone' ? 'this drone' : 'this chat'}.`}
-                    >
-                      {scope}
-                    </button>
-                  ))}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setWorkspacePaneHeaderMode(workspacePaneHeaderMode === 'compact' ? 'normal' : 'compact')}
-                  aria-pressed={workspacePaneHeaderMode === 'compact'}
-                  className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
-                    workspacePaneHeaderMode === 'compact'
-                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
-                  }`}
-                  title={workspacePaneHeaderMode === 'compact' ? 'Use normal pane headers' : 'Use compact pane headers'}
-                  aria-label={workspacePaneHeaderMode === 'compact' ? 'Use normal pane headers' : 'Use compact pane headers'}
-                >
-                  <IconAutoMinimize className="h-3.5 w-3.5" />
-                </button>
-              </div>
-            </>
-          ) : null}
-          <button
-            type="button"
-            onClick={toggleDroneControlsExpanded}
-            className={`inline-flex h-7 w-7 items-center justify-center rounded border transition-all focus-visible:border-[var(--accent-muted)] focus-visible:outline-none ${
-              droneControlsExpanded
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--toolbar-control-border)] bg-[var(--toolbar-control-bg)] text-[var(--muted-dim)] hover:border-[var(--toolbar-control-hover-border)] hover:bg-[var(--hover)] hover:text-[var(--muted)]'
-            }`}
-            title={droneControlsExpanded ? 'Hide drone controls' : 'Show drone controls'}
-            aria-label={droneControlsExpanded ? 'Hide drone controls' : 'Show drone controls'}
-            aria-expanded={droneControlsExpanded}
-          >
-            <IconTune className="h-3.5 w-3.5" />
-          </button>
           {currentDroneRepoAttached && (
             <div ref={syncMenuRef} className="relative">
               <HeaderActionButton
@@ -1821,17 +1538,17 @@ export function SelectedDroneWorkspace({
                   setSyncMenuOpen((open) => !open);
                 }}
                 disabled={syncDisabled}
-                title="Sync this drone repo with the host or another drone"
+                title="Sync this drone repo with the host"
                 aria-haspopup="menu"
                 aria-expanded={syncMenuOpen}
+                className="dh-type-header-action--emphasis"
               >
                 <span>{hostRuntime ? 'Sync (host)' : repoSyncBusyLabel}</span>
-                <IconChevron down={!syncMenuOpen} className="text-[var(--muted-dim)] opacity-60" />
+                <IconChevron down={!syncMenuOpen} className="opacity-75" />
               </HeaderActionButton>
               {syncMenuOpen && !syncDisabled ? (
-                <HeaderDropdownPortal open={syncMenuOpen} anchorRef={syncMenuRef} width={280}>
+                <HeaderDropdownPortal open={syncMenuOpen} anchorRef={syncMenuRef} width={220}>
                   <div className="py-1">
-                    <div className="px-3 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">Host</div>
                     <button
                       type="button"
                       onClick={() => {
@@ -1842,7 +1559,7 @@ export function SelectedDroneWorkspace({
                       role="menuitem"
                       title={hostRuntime ? 'Host runtime uses the host repository directly; this action is a no-op.' : 'Apply this drone repo into the host repo'}
                     >
-                      {hostRuntime ? 'Apply to host (noop)' : 'Apply to host'}
+                      Apply to host
                     </button>
                     <button
                       type="button"
@@ -1854,51 +1571,8 @@ export function SelectedDroneWorkspace({
                       role="menuitem"
                       title={hostRuntime ? 'Host runtime uses the host repository directly; this action is a no-op.' : 'Pull the current host branch into this drone repo'}
                     >
-                      {hostRuntime ? 'Pull from host (noop)' : 'Pull from host'}
+                      Pull from host
                     </button>
-                    <div className="my-1 border-t border-[var(--border-subtle)]" />
-                    <div className="px-3 py-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]">Peer Drones</div>
-                    {repoTransferPeers.length > 0 ? (
-                      <>
-                        <div className="px-3 py-1 text-[var(--text-10)] text-[var(--muted)]">Apply current drone into:</div>
-                        {repoTransferPeers.map((peer) => (
-                          <button
-                            key={`apply-${peer.id}`}
-                            type="button"
-                            onClick={() => {
-                              setSyncMenuOpen(false);
-                              void applyRepoChangesToDrone(peer.id);
-                            }}
-                            className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]')}
-                            role="menuitem"
-                            title={`Apply "${currentDroneLabel}" into "${peer.name}"`}
-                          >
-                            Apply to {peer.name}
-                            {peer.group ? <span className="ml-1 text-[var(--muted-dim)]">[{peer.group}]</span> : null}
-                          </button>
-                        ))}
-                        <div className="my-1 border-t border-[var(--border-subtle)]" />
-                        <div className="px-3 py-1 text-[var(--text-10)] text-[var(--muted)]">Pull another drone into current:</div>
-                        {repoTransferPeers.map((peer) => (
-                          <button
-                            key={`pull-${peer.id}`}
-                            type="button"
-                            onClick={() => {
-                              setSyncMenuOpen(false);
-                              void pullRepoChangesFromDrone(peer.id);
-                            }}
-                            className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)]')}
-                            role="menuitem"
-                            title={`Pull "${peer.name}" into "${currentDroneLabel}"`}
-                          >
-                            Pull from {peer.name}
-                            {peer.group ? <span className="ml-1 text-[var(--muted-dim)]">[{peer.group}]</span> : null}
-                          </button>
-                        ))}
-                      </>
-                    ) : (
-                      <div className="px-3 py-2 text-[var(--text-11)] text-[var(--muted)]">No peer drones on the same repo are available.</div>
-                    )}
                   </div>
                 </HeaderDropdownPortal>
               ) : null}
@@ -1910,9 +1584,10 @@ export function SelectedDroneWorkspace({
               type="button"
               onClick={() => {
                 setTerminalMenuOpen(false);
+                setDroneControlsMenuOpen(false);
                 setHeaderOverflowOpen((v) => !v);
               }}
-              className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
+              className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--header-control-fg)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)] transition-all"
               title="More actions"
               aria-label="More actions"
               aria-haspopup="menu"
@@ -1925,8 +1600,8 @@ export function SelectedDroneWorkspace({
               </svg>
             </button>
             {headerOverflowOpen && (
-              <HeaderDropdownPortal open={headerOverflowOpen} anchorRef={headerOverflowRef} width={220}>
-                <div className="py-1">
+              <HeaderDropdownPortal open={headerOverflowOpen} anchorRef={headerOverflowRef} width={280}>
+                <div className="max-h-[calc(100dvh-5rem)] overflow-y-auto py-1">
                   <button
                     type="button"
                     onClick={() => {
@@ -2039,7 +1714,10 @@ export function SelectedDroneWorkspace({
                   <div ref={terminalMenuRef as React.RefObject<HTMLDivElement>} className="relative">
                     <button
                       type="button"
-                      onClick={() => setTerminalMenuOpen((v) => !v)}
+                      onClick={() => {
+                        setDroneControlsMenuOpen(false);
+                        setTerminalMenuOpen((v) => !v);
+                      }}
                       className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] flex items-center justify-between')}
                       role="menuitem"
                     >
@@ -2071,84 +1749,161 @@ export function SelectedDroneWorkspace({
                       </div>
                     )}
                   </div>
+                  <div className="my-1 border-t border-[var(--border-subtle)]" />
+                  <div className="relative">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setTerminalMenuOpen(false);
+                        setDroneControlsMenuOpen((open) => !open);
+                      }}
+                      className={cn(dropdownMenuItemBaseClass, 'flex items-center justify-between text-[var(--fg-secondary)] hover:bg-[var(--hover)]')}
+                      role="menuitem"
+                      aria-haspopup="menu"
+                      aria-expanded={droneControlsMenuOpen}
+                    >
+                      <span>Drone controls</span>
+                      <IconChevron down={!droneControlsMenuOpen} className="text-[var(--muted-dim)] opacity-60" />
+                    </button>
+                    {droneControlsMenuOpen ? (
+                      <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-inset-faint)]" role="group" aria-label="Drone controls">
+                        {hasChats && chatUiMode === 'transcript' ? (
+                          <HeaderMenuToggleRow
+                            label="Access"
+                            value={agentPermissionMode === 'read-only' ? 'Read only' : 'Full'}
+                            checked={agentPermissionMode === 'read-only'}
+                            disabled={loadingChatInfo || !readOnlySupported}
+                            title={
+                              readOnlySupported
+                                ? 'Run the next prompt with read-only agent permissions.'
+                                : 'Read-only mode is currently available for Codex and Blip chats.'
+                            }
+                            onToggle={() => {
+                              if (!readOnlySupported) return;
+                              const nextMode: AgentPermissionMode = agentPermissionMode === 'read-only' ? 'full-access' : 'read-only';
+                              void setChatAgentPermissionMode(nextMode).catch((err: any) =>
+                                setChatInfoError(err?.message ?? String(err)),
+                              );
+                            }}
+                          />
+                        ) : null}
+                        {!hostRuntime ? (
+                          <div className="flex items-center justify-between gap-4 px-3 py-1.5 text-[var(--text-11)] text-[var(--muted)]" title={dockerSizeTitle}>
+                            <span>Docker usage</span>
+                            <span className="truncate text-right font-mono text-[var(--muted-dim)]">{dockerSizeLabel.replace(/^Docker used\s*/i, '')}</span>
+                          </div>
+                        ) : null}
+                        {hasChats && chatUiMode === 'transcript' ? (
+                          <>
+                            <HeaderMenuToggleRow
+                              label="Snapshots"
+                              value={dockerSnapshotAfterAgentMessageEnabled ? 'On' : 'Off'}
+                              checked={dockerSnapshotAfterAgentMessageEnabled}
+                              disabled={loadingChatInfo || !dockerSnapshotSupported}
+                              title={
+                                dockerSnapshotSupported
+                                  ? 'Commit a Docker image snapshot after each new agent message in this chat.'
+                                  : 'Snapshots require a container drone created with Persist volume off.'
+                              }
+                              onToggle={() => {
+                                if (!dockerSnapshotSupported) return;
+                                void setDockerSnapshotAfterAgentMessageEnabled(!dockerSnapshotAfterAgentMessageEnabled).catch((err: any) =>
+                                  setChatInfoError(err?.message ?? String(err)),
+                                );
+                              }}
+                            />
+                            <HeaderMenuToggleRow
+                              label="Auto-continue"
+                              value={agentMessageAutoContinueEnabled ? 'On' : 'Off'}
+                              checked={agentMessageAutoContinueEnabled}
+                              disabled={loadingChatInfo}
+                              title="Monitor agent messages and continue automatically when the agent appears to stop mid-task."
+                              onToggle={() => {
+                                void setAgentMessageAutoContinueEnabled(!agentMessageAutoContinueEnabled).catch((err: any) =>
+                                  setChatInfoError(err?.message ?? String(err)),
+                                );
+                              }}
+                            />
+                            <HeaderMenuToggleRow
+                              label="Agent suggestion"
+                              value={agentSuggestionEnabled ? 'On' : 'Off'}
+                              checked={agentSuggestionEnabled}
+                              disabled={loadingChatInfo}
+                              title="Suggest a likely next user reply for new agent messages in this transcript chat."
+                              onToggle={() => {
+                                void setAgentSuggestionEnabled(!agentSuggestionEnabled).catch((err: any) =>
+                                  setChatInfoError(err?.message ?? String(err)),
+                                );
+                              }}
+                            />
+                          </>
+                        ) : null}
+                        {chatUiMode === 'cli' ? (
+                          <HeaderMenuToggleRow
+                            label="Output view"
+                            value={outputView === 'screen' ? 'Screen' : 'Log'}
+                            checked={outputView === 'screen'}
+                            title={outputView === 'screen' ? 'Switch to raw log view.' : 'Switch to screen capture view.'}
+                            onToggle={() => setOutputView(outputView === 'screen' ? 'log' : 'screen')}
+                          />
+                        ) : null}
+                        <div className="flex items-center justify-between gap-4 px-3 py-1.5 text-[var(--text-11)]">
+                          <span className="text-[var(--muted)]">Chat</span>
+                          <span className="min-w-0 truncate font-mono text-[var(--fg-secondary)]">
+                            {activeChatName}{selectedChatIsDraft ? ' · Draft' : ''}
+                          </span>
+                        </div>
+                        <HeaderMenuToggleRow
+                          label="Pane headers"
+                          value={workspacePaneHeaderMode === 'compact' ? 'Compact' : 'Normal'}
+                          checked={workspacePaneHeaderMode === 'compact'}
+                          title={workspacePaneHeaderMode === 'compact' ? 'Use normal pane headers.' : 'Use compact pane headers.'}
+                          onToggle={() => setWorkspacePaneHeaderMode(workspacePaneHeaderMode === 'compact' ? 'normal' : 'compact')}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
                 </div>
               </HeaderDropdownPortal>
             )}
           </div>
           {/* Workspace pane controls */}
-          {rightPanelOpen && (
-            <>
-              <div className="w-px h-4 bg-[var(--border-subtle)] ml-1" />
-              <div className="flex items-center gap-0.5">
-                {rightPanelTabs.map((tab) => {
-                  const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
-                  return (
-                    <button
-                      key={tab}
-                      type="button"
-                      onClick={() => openWorkspacePane(tab)}
-                      data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
-                      className="inline-flex items-center rounded border border-transparent px-2 py-1 text-[var(--text-10)] font-medium text-[var(--chrome-muted)] transition-all hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-                      title={
-                        tab === 'prs' && prCount > 0
-                          ? `Open ${rightPanelTabLabels[tab]} pane (${prCount} open)`
-                          : `Open ${rightPanelTabLabels[tab]} pane`
-                      }
-                    >
-                      <span>{rightPanelTabLabels[tab]}</span>
-                      {tab === 'prs' && prCount > 0 ? (
-                        <span className="ml-1 inline-flex min-w-[14px] items-center justify-center rounded-full border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-1 text-[var(--text-9)] leading-3 text-[var(--accent)]">
-                          {prCount > 99 ? '99+' : prCount}
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-          {rightPanelOpen && (
-            <button
-              type="button"
-              onClick={resetWorkspaceLayout}
-              className={`inline-flex items-center h-7 px-2 rounded border text-[var(--text-10)] font-medium transition-all ${
-                'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--chrome-muted)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
-              }`}
-              title={`Reset the saved ${workspaceLayoutScope} workspace layout`}
-              aria-label="Reset workspace layout"
-            >
-              Reset layout
-            </button>
-          )}
-          <button
-            type="button"
-            onClick={() => setRightPanelOpen((v) => !v)}
-            data-onboarding-id="rightPanel.toggle"
-            className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ml-1 ${
-              rightPanelOpen
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-            }`}
-            title={rightPanelOpen ? 'Keep existing panes and stop opening tool panes automatically' : 'Open workspace panes'}
-            aria-label="Toggle workspace panes"
-          >
-            <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-              <rect x="2" y="2" width="12" height="12" rx="2" />
-              <line x1="10" y1="2" x2="10" y2="14" />
-            </svg>
-          </button>
+          <div className="w-px h-4 bg-[var(--border-subtle)] ml-1" />
+          <div className="flex items-center gap-0.5">
+            {rightPanelTabs.map((tab) => {
+              const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
+              return (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => openWorkspacePane(tab)}
+                  data-onboarding-id={tab === 'changes' ? 'rightPanel.tab.changes' : undefined}
+                  className="inline-flex items-center rounded border border-transparent px-2 py-1 text-[var(--text-10)] font-medium text-[var(--chrome-muted)] transition-all hover:border-[var(--border-subtle)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                  title={
+                    tab === 'prs' && prCount > 0
+                      ? `Open ${rightPanelTabLabels[tab]} pane (${prCount} open)`
+                      : `Open ${rightPanelTabLabels[tab]} pane`
+                  }
+                >
+                  <span>{rightPanelTabLabels[tab]}</span>
+                  {tab === 'prs' && prCount > 0 ? (
+                    <span className="ml-1 inline-flex min-w-[14px] items-center justify-center rounded-full border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-1 text-[var(--text-9)] leading-3 text-[var(--accent)]">
+                      {prCount > 99 ? '99+' : prCount}
+                    </span>
+                  ) : null}
+                </button>
+              );
+            })}
+          </div>
         </div>
       </DroneWorkspaceHeaderFrame>
 
       <DockableDroneWorkspace
         currentDrone={currentDrone}
-        activeChatName={activeChatName}
-        layoutScope={workspaceLayoutScope}
         paneHeaderMode={workspacePaneHeaderMode}
-        toolPaneOpen={rightPanelOpen}
+        toolPaneOpen
         activeToolTab={rightPanelTab}
         openRequestNonce={rightPanelOpenRequestSeq}
-        resetLayoutNonce={workspaceLayoutResetNonce}
         renderToolPane={(tab, paneKey) => renderRightPanelTabContent(currentDrone, tab, paneKey)}
         previewTab="preview"
         onActiveToolTabChange={setRightPanelTab}

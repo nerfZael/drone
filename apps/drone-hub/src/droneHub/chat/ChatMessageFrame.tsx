@@ -12,6 +12,7 @@ export function ChatMessageFrame({
   showRoleLabel = true,
   plainAssistant = false,
   headerEnd,
+  hoverActions,
   children,
   className = '',
 }: {
@@ -23,6 +24,7 @@ export function ChatMessageFrame({
   showRoleLabel?: boolean;
   plainAssistant?: boolean;
   headerEnd?: React.ReactNode;
+  hoverActions?: React.ReactNode;
   children: React.ReactNode;
   className?: string;
 }) {
@@ -41,14 +43,21 @@ export function ChatMessageFrame({
           : 'rounded-[var(--radius-large)] rounded-tl-sm border border-[var(--assistant-bubble-border)] bg-[var(--assistant-bubble)] px-4 py-3';
   const bubble = (
     <div className={`group/message relative ${showRoleIcon ? (user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'min-w-0 flex-1') : user ? 'max-w-[min(85%,var(--chat-prose-max))]' : 'w-full'} min-w-[120px]`}>
-      {at ? (
+      {user && (at || hoverActions) ? (
+        <div className="pointer-events-none absolute bottom-full right-0 z-10 mb-1 flex min-h-7 items-center justify-end gap-1.5 opacity-0 transition-opacity group-hover/message:pointer-events-auto group-hover/message:opacity-100 group-focus-within/message:pointer-events-auto group-focus-within/message:opacity-100">
+          {at ? (
+            <RelativeTimeText
+              at={at}
+              className="pointer-events-none whitespace-nowrap font-mono text-[var(--text-9)] leading-none text-[var(--chat-user-message-time)]"
+              title={new Date(at).toLocaleString()}
+            />
+          ) : null}
+          {hoverActions}
+        </div>
+      ) : at ? (
         <RelativeTimeText
           at={at}
-          className={`pointer-events-none absolute z-10 whitespace-nowrap font-mono text-[var(--text-9)] leading-none opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100 ${
-            user
-              ? 'bottom-full right-0 mb-1 text-[var(--chat-user-message-time)]'
-              : 'left-0 top-full mt-1 text-[var(--chat-message-time)]'
-          }`}
+          className="pointer-events-none absolute left-0 top-full z-10 mt-1 whitespace-nowrap font-mono text-[var(--text-9)] leading-none text-[var(--chat-message-time)] opacity-0 transition-opacity group-hover/message:opacity-100 group-focus-within/message:opacity-100"
           title={new Date(at).toLocaleString()}
         />
       ) : null}

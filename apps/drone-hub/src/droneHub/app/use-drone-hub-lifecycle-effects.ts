@@ -62,7 +62,6 @@ type UseDroneHubLifecycleEffectsArgs = {
   rightPanelTab: RightPanelTab;
   rightPanelSplit: boolean;
   rightPanelBottomTab: RightPanelTab;
-  setRightPanelOpen: Setter<boolean>;
   requestRightPanelTab: (tab: RightPanelTab) => void;
   setSidebarCollapsed: Setter<boolean>;
   shortcutBindings: ShortcutBindingMap;
@@ -130,7 +129,6 @@ export function useDroneHubLifecycleEffects({
   rightPanelTab,
   rightPanelSplit,
   rightPanelBottomTab,
-  setRightPanelOpen,
   requestRightPanelTab,
   setSidebarCollapsed,
   shortcutBindings,
@@ -303,10 +301,6 @@ export function useDroneHubLifecycleEffects({
         setSidebarCollapsed((prev) => !prev);
         return true;
       },
-      toggleRightPanelOpen: () => {
-        setRightPanelOpen((prev) => !prev);
-        return true;
-      },
       toggleRightPanelWidth: () => {
         requestRightPanelTab(rightPanelTab);
         return true;
@@ -441,7 +435,6 @@ export function useDroneHubLifecycleEffects({
     rightPanelSplit,
     rightPanelTab,
     requestRightPanelTab,
-    setRightPanelOpen,
     setSidebarCollapsed,
     shortcutBindings,
     onDeleteSelectedDroneFromInputShortcut,

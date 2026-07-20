@@ -51,7 +51,7 @@ export type ChatComposerButtonControl = {
 export type ChatComposerLabelControl = {
   kind: 'label';
   id: string;
-  label: string;
+  label?: string;
   value: string;
   title?: string;
 };
@@ -143,16 +143,19 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
     >
       {config.controls.map((control) => {
         if (control.kind === 'label') {
+          const accessibleLabel = control.label ? `${control.label}: ${control.value}` : control.value;
           return (
             <div
               key={control.id}
               className="inline-flex h-8 flex-shrink-0 items-center gap-1.5 px-1 text-[.625rem]"
-              title={control.title ?? `${control.label}: ${control.value}`}
-              aria-label={`${control.label}: ${control.value}`}
+              title={control.title ?? accessibleLabel}
+              aria-label={accessibleLabel}
             >
-              <span className="font-medium uppercase tracking-wide text-[var(--chat-composer-placeholder)]">
-                {control.label}
-              </span>
+              {control.label ? (
+                <span className="font-medium uppercase tracking-wide text-[var(--chat-composer-placeholder)]">
+                  {control.label}
+                </span>
+              ) : null}
               <span className="font-medium text-[var(--chat-composer-model-fg)]">{control.value}</span>
             </div>
           );

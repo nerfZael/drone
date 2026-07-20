@@ -1,7 +1,9 @@
 import React from 'react';
 
 import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
+import type { AgentPlan } from '../types';
 import { VideoPreview } from '../media/VideoPreview';
+import { AgentPlanList } from './AgentPlanList';
 import { ChatMessageCopyAction } from './ChatMessageCopyAction';
 import { DroneHubTaskList } from './DroneHubTaskList';
 import { LinkedPullRequestCards, type LinkedPullRequestContext } from './LinkedPullRequestCards';
@@ -42,7 +44,7 @@ export type AgentMessageExtrasProps = {
   droneHomePath?: string;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
-  afterContent?: React.ReactNode;
+  plan?: AgentPlan;
   actionEnd?: React.ReactNode;
 };
 
@@ -60,10 +62,9 @@ export function AgentMessageExtras({
   droneHomePath,
   onOpenFileReference,
   onOpenLink,
-  afterContent,
+  plan,
   actionEnd,
 }: AgentMessageExtrasProps) {
-  const inlineMediaEnabled = useDroneHubUiStore((state) => state.transcriptInlineImages);
   const inlineMediaOverride = useDroneHubUiStore(
     (state) => state.transcriptInlineImageOverrides[messageId],
   );
@@ -75,10 +76,10 @@ export function AgentMessageExtras({
     [droneHomePath, droneId, text],
   );
   const [failedMediaById, setFailedMediaById] = React.useState<Record<string, true>>({});
-  const inlineMediaVisible =
-    typeof inlineMediaOverride === 'boolean' ? inlineMediaOverride : inlineMediaEnabled;
+  const inlineMediaVisible = inlineMediaOverride !== false;
   const showInlineMedia = inlineMedia.length > 0 && inlineMediaVisible;
   const inlineMediaToggleLabel = showInlineMedia ? 'Hide inline media' : 'Show inline media';
+  const hasPlan = Boolean(plan?.items.length);
 
   const openInlineMediaTarget = React.useCallback(
     (media: InlineAgentMedia) => {
@@ -97,6 +98,46 @@ export function AgentMessageExtras({
   React.useEffect(() => {
     setFailedMediaById({});
   }, [messageId]);
+
+  const messageActions = (
+    <>
+      <ChatMessageCopyAction text={text} position="inline" />
+      {inlineMedia.length > 0 ? (
+        <button
+          type="button"
+          onClick={() => setInlineMediaOverride(messageId, !inlineMediaVisible)}
+          className={`inline-flex h-7 w-7 items-center justify-center rounded border opacity-100 transition-opacity ${
+            showInlineMedia
+              ? 'border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] text-[var(--accent)]'
+              : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)]'
+          } hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)]`}
+          title={inlineMediaToggleLabel}
+          aria-label={inlineMediaToggleLabel}
+        >
+          <IconImage className="h-3.5 w-3.5 opacity-90" />
+        </button>
+      ) : null}
+      {actionsEnabled && onCreateJobs && text.trim() ? (
+        <button
+          type="button"
+          onClick={() => onCreateJobs(text)}
+          disabled={parsingJobs}
+          className={`inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] transition-opacity hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] ${
+            parsingJobs ? 'cursor-wait opacity-100' : 'opacity-0 group-hover:opacity-100'
+          }`}
+          title="Create jobs from this agent message"
+          aria-label="Create jobs from this agent message"
+        >
+          {parsingJobs ? (
+            <IconSpinner className="h-3.5 w-3.5 text-[var(--accent)]" />
+          ) : (
+            <IconJobs className="h-3.5 w-3.5 opacity-90" />
+          )}
+        </button>
+      ) : null}
+      {actionEnd}
+    </>
+  );
 
   return (
     <>
@@ -178,45 +219,13 @@ export function AgentMessageExtras({
         onOpenLink={onOpenLink}
         className={linkedCardsClassName}
       />
-      {afterContent}
+      <AgentPlanList plan={plan} headerActions={hasPlan ? messageActions : undefined} />
 
-      <div className="absolute bottom-2 right-2 flex items-center gap-1">
-        <ChatMessageCopyAction text={text} position="inline" />
-        {inlineMedia.length > 0 ? (
-          <button
-            type="button"
-            onClick={() => setInlineMediaOverride(messageId, !inlineMediaVisible)}
-            className={`inline-flex h-7 w-7 items-center justify-center rounded border opacity-100 transition-opacity ${
-              showInlineMedia
-                ? 'border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)]'
-            } hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)]`}
-            title={`${inlineMediaToggleLabel}${inlineMediaEnabled ? ' (global default on)' : ''}`}
-            aria-label={inlineMediaToggleLabel}
-          >
-            <IconImage className="h-3.5 w-3.5 opacity-90" />
-          </button>
-        ) : null}
-        {actionsEnabled && onCreateJobs && text.trim() ? (
-          <button
-            type="button"
-            onClick={() => onCreateJobs(text)}
-            disabled={parsingJobs}
-            className={`inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] transition-opacity hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] ${
-              parsingJobs ? 'cursor-wait opacity-100' : 'opacity-0 group-hover:opacity-100'
-            }`}
-            title="Create jobs from this agent message"
-            aria-label="Create jobs from this agent message"
-          >
-            {parsingJobs ? (
-              <IconSpinner className="h-3.5 w-3.5 text-[var(--accent)]" />
-            ) : (
-              <IconJobs className="h-3.5 w-3.5 opacity-90" />
-            )}
-          </button>
-        ) : null}
-        {actionEnd}
-      </div>
+      {!hasPlan ? (
+        <div className="absolute bottom-2 right-2 flex items-center gap-1">
+          {messageActions}
+        </div>
+      ) : null}
     </>
   );
 }
