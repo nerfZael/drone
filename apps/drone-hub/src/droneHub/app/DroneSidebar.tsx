@@ -90,6 +90,7 @@ import { useSidebarOptimisticGroups } from './use-sidebar-optimistic-groups';
 import type { MoveDronesToGroupResult } from './use-group-management';
 import type { DroneDeleteMode, SidebarDensityMode, SidebarGroupingMode } from './settings-types';
 import {
+  sidebarChatLabelClass,
   sidebarChatRowTone,
   sidebarChatStateClass,
   sidebarCountClass,
@@ -348,7 +349,7 @@ function ReadOnlySidebarGroups({
                                 {active ? (
                                   <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
                                 ) : null}
-                                <span className="min-w-0 flex-1 truncate font-mono">
+                                <span className={sidebarChatLabelClass}>
                                   {chatName}
                                 </span>
                                 <span
@@ -543,7 +544,7 @@ function StaticReadOnlySidebarTree({
                   {active ? (
                     <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
                   ) : null}
-                  <span className="min-w-0 flex-1 truncate font-mono">{chatName}</span>
+                  <span className={sidebarChatLabelClass}>{chatName}</span>
                   <span
                     className={`${sidebarChatStateClass} ${chatStateToneClass}`}
                     title={chatStateLabel}

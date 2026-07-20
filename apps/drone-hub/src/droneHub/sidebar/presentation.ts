@@ -6,7 +6,6 @@ export type SidebarDensityClasses = {
   emptyHint: string;
   chatRow: string;
   chatDeleteWidth: string;
-  chatPlaceholderWidth: string;
   chatIndent: string;
   chatBlockIndent: string;
   childIndent: string;
@@ -31,7 +30,6 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
       'flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--border)] bg-[var(--surface-softest)] px-2 py-1 text-[9.5px] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
     chatRow: 'h-6 px-1.5 text-[var(--text-10)]',
     chatDeleteWidth: 'w-6',
-    chatPlaceholderWidth: 'w-6',
     chatIndent: 'ml-3 mr-1',
     chatBlockIndent: 'ml-3 mr-1',
     childIndent: 'ml-4',
@@ -54,7 +52,6 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
       'flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--border)] bg-[var(--surface-softest)] px-2 py-1.5 text-[var(--text-10)] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
     chatRow: 'h-[25px] px-1.5 text-[var(--text-10-5)]',
     chatDeleteWidth: 'w-6',
-    chatPlaceholderWidth: 'w-6',
     chatIndent: 'ml-[14px] mr-1',
     chatBlockIndent: 'ml-[14px] mr-1',
     childIndent: 'ml-5',
@@ -77,7 +74,6 @@ const SIDEBAR_DENSITY_CLASSES: Record<SidebarDensityMode, SidebarDensityClasses>
       'flex items-center gap-2 rounded-[var(--radius-medium)] border border-dashed border-[var(--border)] bg-[var(--surface-softest)] px-2.5 py-2 text-[var(--text-10-5)] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
     chatRow: 'h-7 px-2 text-[var(--text-11)]',
     chatDeleteWidth: 'w-7',
-    chatPlaceholderWidth: 'w-7',
     chatIndent: 'ml-[18px] mr-1',
     chatBlockIndent: 'ml-[18px] mr-1',
     childIndent: 'ml-6',
@@ -123,7 +119,10 @@ export const sidebarFolderLabelClass =
 export const sidebarCountClass = 'flex-shrink-0 dh-type-count';
 
 export const sidebarChatStateClass =
-  'grid w-[4.75rem] flex-shrink-0 grid-cols-[.75rem_minmax(0,1fr)] items-center gap-1 font-mono text-[.5625rem] font-medium leading-none';
+  'inline-flex w-[4.75rem] flex-shrink-0 items-center justify-end gap-1 font-mono text-[.5625rem] font-medium leading-none';
+
+export const sidebarChatLabelClass =
+  'min-w-0 flex-1 truncate [font-family:var(--sidebar-font)] font-normal';
 
 export function sidebarItemTypeClass(active: boolean): string {
   return cn(active ? 'dh-type-sidebar-item-active' : 'dh-type-sidebar-item');

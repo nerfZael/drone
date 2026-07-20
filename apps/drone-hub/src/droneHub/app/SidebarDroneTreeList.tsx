@@ -38,6 +38,7 @@ import type { SidebarDroneTree } from './sidebar-drone-tree';
 import type { DroneDeleteMode, SidebarDensityMode } from './settings-types';
 import type { ChatEditorState } from './use-sidebar-interactions';
 import {
+  sidebarChatLabelClass,
   sidebarChatRowTone,
   sidebarChatStateClass,
   sidebarDensityClasses,
@@ -492,7 +493,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
         }`}
         title={`${uiDroneName(drone.name)} / ${chatName}`}
       >
-        <span className="min-w-0 flex-1 truncate font-mono">
+        <span className={sidebarChatLabelClass}>
           {chatName}
         </span>
         {draft ? (
@@ -501,14 +502,14 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
           </span>
         ) : null}
         <span
-          className={`${sidebarChatStateClass} ${chatStateToneClass}`}
+          className={`${sidebarChatStateClass} ${chatStateToneClass} ${actionsEnabled && (canRename || canDelete) ? 'transition-opacity group-hover/chat-row:opacity-0' : ''}`}
           title={chatStateLabel}
         >
           <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
           {chatStateLabel}
         </span>
       </button>
-      <div className="flex items-center gap-1">
+      <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1">
         {actionsEnabled && canRename ? (
           <button
             type="button"
@@ -545,9 +546,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
           >
             {deleting ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
           </button>
-        ) : actionsEnabled && canRename ? null : (
-          <span className={`${densityClasses.chatPlaceholderWidth} flex-shrink-0`} />
-        )}
+        ) : null}
       </div>
     </div>
   );

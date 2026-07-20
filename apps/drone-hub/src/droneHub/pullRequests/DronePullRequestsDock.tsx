@@ -1,5 +1,10 @@
 import React from 'react';
+import {
+  pullRequestCloseConfirmation,
+  pullRequestMergeConfirmation,
+} from '@drone/assistant-chat';
 import { requestJson } from '../http';
+import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import type {
   RepoPullRequestClosePayload,
@@ -101,6 +106,7 @@ export function DronePullRequestsDock({
   onRevealFileInFiles: (repoRelativePath: string) => void;
   onOpenFileInEditor: (repoRelativePath: string) => void;
 }) {
+  const confirm = useAppConfirmDialog();
   const [refreshNonce, setRefreshNonce] = React.useState(0);
   const [activePullRequestNumber, setActivePullRequestNumber] = React.useState<number | null>(() => selectedPullRequestForDrone(droneId));
   const [listData, setListData] = React.useState<Extract<RepoPullRequestsPayload, { ok: true }> | null>(null);
@@ -276,9 +282,17 @@ export function DronePullRequestsDock({
       const forceReason = forceMergeReason(pr);
       if (bulkAction) return;
       if (busyByPullNumber[pullNumber]) return;
-      const verb = forceReason ? 'Force merge' : 'Merge';
-      const why = forceReason ? ` (${forceReason})` : '';
-      if (!window.confirm(`${verb} PR #${pullNumber} into ${pr.baseRefName || 'base'} using "${mergeMethod}"?${why}`)) return;
+      if (
+        !(await confirm(
+          pullRequestMergeConfirmation({
+            pullNumber,
+            baseRefName: pr.baseRefName,
+            method: mergeMethod,
+            forceReason,
+          }),
+        ))
+      )
+        return;
 
       setActionError(null);
       setActionNotice(null);
@@ -297,7 +311,7 @@ export function DronePullRequestsDock({
         });
       }
     },
-    [bulkAction, busyByPullNumber, mergeMethod, requestMergePullRequest],
+    [bulkAction, busyByPullNumber, confirm, mergeMethod, requestMergePullRequest],
   );
 
   const closePullRequest = React.useCallback(
@@ -306,7 +320,7 @@ export function DronePullRequestsDock({
       if (!Number.isFinite(pullNumber) || pullNumber <= 0) return;
       if (bulkAction) return;
       if (busyByPullNumber[pullNumber]) return;
-      if (!window.confirm(`Close PR #${pullNumber} without merging?`)) return;
+      if (!(await confirm(pullRequestCloseConfirmation({ pullNumber })))) return;
 
       setActionError(null);
       setActionNotice(null);
@@ -325,7 +339,7 @@ export function DronePullRequestsDock({
         });
       }
     },
-    [bulkAction, busyByPullNumber, requestClosePullRequest],
+    [bulkAction, busyByPullNumber, confirm, requestClosePullRequest],
   );
 
   const mergeAllPullRequests = React.useCallback(async () => {
@@ -342,7 +356,14 @@ export function DronePullRequestsDock({
       blockedMergeCount > 0
         ? ` (${blockedMergeCount} blocked will be skipped${blockedConflictCount > 0 || blockedPolicyCount > 0 ? `: ${blockedConflictCount} conflicts, ${blockedPolicyCount} policy` : ''})`
         : '';
-    if (!window.confirm(`Merge ${queue.length} mergeable open PRs using "${mergeMethod}"?${skipLabel}`)) return;
+    if (
+      !(await confirm({
+        title: `Merge ${queue.length} pull request${queue.length === 1 ? '' : 's'}?`,
+        message: `Merge ${queue.length} mergeable open pull request${queue.length === 1 ? '' : 's'} using ${mergeMethod === 'merge' ? 'merge commits' : mergeMethod === 'squash' ? 'squash merging' : 'rebasing'}${skipLabel}.`,
+        confirmLabel: `Merge ${queue.length}`,
+      }))
+    )
+      return;
 
     setActionError(null);
     setActionNotice(null);
@@ -387,7 +408,7 @@ export function DronePullRequestsDock({
         : '';
     setActionNotice(`Merged ${successCount} of ${queue.length} pull requests.${skipped}`);
     setActionError(`Bulk merge finished with ${failures.length} failure(s): ${failures.slice(0, 3).join(' | ')}`);
-  }, [anyBusy, blockedConflictCount, blockedMergeCount, blockedPolicyCount, mergeMethod, mergeablePullRequests, requestMergePullRequest]);
+  }, [anyBusy, blockedConflictCount, blockedMergeCount, blockedPolicyCount, confirm, mergeMethod, mergeablePullRequests, requestMergePullRequest]);
 
   const closeAllPullRequests = React.useCallback(async () => {
     if (anyBusy) return;
@@ -396,7 +417,15 @@ export function DronePullRequestsDock({
       .filter((n) => Number.isFinite(n) && n > 0)
       .map((n) => Math.floor(n));
     if (queue.length === 0) return;
-    if (!window.confirm(`Close all ${queue.length} open PRs without merging?`)) return;
+    if (
+      !(await confirm({
+        title: `Close ${queue.length} pull request${queue.length === 1 ? '' : 's'}?`,
+        message: `This closes ${queue.length === 1 ? 'the open pull request' : `all ${queue.length} open pull requests`} without merging ${queue.length === 1 ? 'it' : 'them'}.`,
+        confirmLabel: `Close ${queue.length}`,
+        destructive: true,
+      }))
+    )
+      return;
 
     setActionError(null);
     setActionNotice(null);
@@ -433,7 +462,7 @@ export function DronePullRequestsDock({
     }
     setActionNotice(`Closed ${successCount} of ${queue.length} pull requests.`);
     setActionError(`Bulk close finished with ${failures.length} failure(s): ${failures.slice(0, 3).join(' | ')}`);
-  }, [anyBusy, pullRequests, requestClosePullRequest]);
+  }, [anyBusy, confirm, pullRequests, requestClosePullRequest]);
 
   const bulkActionLabel = React.useMemo(() => {
     if (!bulkAction) return null;

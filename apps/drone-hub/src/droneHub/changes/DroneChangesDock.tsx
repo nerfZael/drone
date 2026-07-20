@@ -1,5 +1,10 @@
 import React from 'react';
+import {
+  pullRequestCloseConfirmation,
+  pullRequestMergeConfirmation,
+} from '@drone/assistant-chat';
 import { requestJson } from '../http';
+import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import { IconChevron, IconFolder, iconForFilePath } from '../icons';
 import { IconEye, IconEyeOff, IconPencil } from '../app/icons';
 import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
@@ -283,6 +288,7 @@ export function DroneChangesDock({
   onRevealFileInFiles: (repoRelativePath: string) => void;
   onOpenFileInEditor: (repoRelativePath: string) => void;
 }) {
+  const confirm = useAppConfirmDialog();
   const [refreshNonce, setRefreshNonce] = React.useState(0);
   const [changes, setChanges] = React.useState<Extract<RepoChangesPayload, { ok: true }> | null>(null);
   const [changesLoading, setChangesLoading] = React.useState(false);
@@ -2217,7 +2223,16 @@ export function DroneChangesDock({
   const mergeActivePullRequest = React.useCallback(async () => {
     if (!activePullRequestNumber || pullRequestActionBusy || activePullRequestIsFinalState) return;
     const mergeMethod = readPullRequestMergeMethod();
-    if (!window.confirm(`Merge PR #${activePullRequestNumber} using "${mergeMethod}"?`)) return;
+    if (
+      !(await confirm(
+        pullRequestMergeConfirmation({
+          pullNumber: activePullRequestNumber,
+          baseRefName: activePullRequestChanges?.pullRequest.baseRefName,
+          method: mergeMethod,
+        }),
+      ))
+    )
+      return;
     setPullRequestActionError(null);
     setPullRequestActionNotice(null);
     setPullRequestActionBusy('merge');
@@ -2247,11 +2262,11 @@ export function DroneChangesDock({
     } finally {
       if (mountedRef.current) setPullRequestActionBusy(null);
     }
-  }, [activePullRequestIsFinalState, activePullRequestNumber, droneId, pullRequestActionBusy, repoPath]);
+  }, [activePullRequestChanges?.pullRequest.baseRefName, activePullRequestIsFinalState, activePullRequestNumber, confirm, droneId, pullRequestActionBusy, repoPath]);
 
   const closeActivePullRequest = React.useCallback(async () => {
     if (!activePullRequestNumber || pullRequestActionBusy || activePullRequestIsFinalState) return;
-    if (!window.confirm(`Close PR #${activePullRequestNumber} without merging?`)) return;
+    if (!(await confirm(pullRequestCloseConfirmation({ pullNumber: activePullRequestNumber })))) return;
     setPullRequestActionError(null);
     setPullRequestActionNotice(null);
     setPullRequestActionBusy('close');
@@ -2284,7 +2299,7 @@ export function DroneChangesDock({
     } finally {
       if (mountedRef.current) setPullRequestActionBusy(null);
     }
-  }, [activePullRequestIsFinalState, activePullRequestNumber, droneId, pullRequestActionBusy, repoPath]);
+  }, [activePullRequestIsFinalState, activePullRequestNumber, confirm, droneId, pullRequestActionBusy, repoPath]);
 
   const openEntryInEditor = React.useCallback(
     (entry: RepoChangeEntry | null) => {

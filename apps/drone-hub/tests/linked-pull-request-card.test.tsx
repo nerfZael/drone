@@ -121,6 +121,28 @@ describe('linked pull request messages', () => {
     expect(html).toContain('role="alert"');
   });
 
+  test('renders loading status as a quiet borderless spinner', () => {
+    const html = renderToStaticMarkup(
+      <LinkedPullRequestCards
+        text="PR created: https://github.com/nerfZael/drone/pull/596"
+        context={{
+          droneId: 'drone-a',
+          repoPath: '/work/repo',
+          repoAttached: true,
+          disabled: false,
+          openPullRequestsData: null,
+          openPullRequestsLoading: true,
+          openPullRequestsError: null,
+        }}
+      />,
+    );
+
+    expect(html).toContain('aria-label="Loading pull request status"');
+    expect(html).toContain('animate-spin');
+    expect(html).not.toContain('>Loading status<');
+    expect(html).not.toContain('rounded border px-1.5');
+  });
+
   test('renders live title, checks, branches, and actions from the existing open-PR summary', () => {
     const html = renderToStaticMarkup(
       <LinkedPullRequestCards
@@ -158,10 +180,41 @@ describe('linked pull request messages', () => {
     expect(html).toContain('Close');
     expect(html).toContain('ml-auto flex shrink-0');
     expect(html).toContain('border-[var(--red-border)] bg-[var(--red-subtle)]');
-    expect(html.indexOf('Checks pending')).toBeLessThan(html.indexOf('Add resilient workspace file and folder transfers'));
     expect(html.indexOf('Add resilient workspace file and folder transfers')).toBeLessThan(html.indexOf('Close'));
     expect(html.indexOf('Close')).toBeLessThan(html.indexOf('Force merge'));
+    expect(html.indexOf('Force merge')).toBeLessThan(html.indexOf('Checks pending'));
+    expect(html).toContain('aria-label="Pull request status details"');
+    expect(html).toContain('h-1 w-1 flex-shrink-0 rounded-full bg-current');
     expect(html.match(/href=/g)).toHaveLength(1);
+  });
+
+  test('hides secondary status details after a pull request is merged', () => {
+    const mergedPullRequest = {
+      ...openPayload.pullRequests[0]!,
+      state: 'merged',
+      checksState: 'success' as const,
+      reviewState: 'approved' as const,
+    };
+    const html = renderToStaticMarkup(
+      <LinkedPullRequestCards
+        text="PR created: https://github.com/nerfZael/drone/pull/596"
+        context={{
+          droneId: 'drone-a',
+          repoPath: '/work/repo',
+          repoAttached: true,
+          disabled: false,
+          openPullRequestsData: { ...openPayload, state: 'all', pullRequests: [mergedPullRequest] },
+          openPullRequestsLoading: false,
+          openPullRequestsError: null,
+        }}
+      />,
+    );
+
+    expect(html).toContain('>merged</span>');
+    expect(html).not.toContain('Checks passed');
+    expect(html).not.toContain('Approved');
+    expect(html).not.toContain('aria-label="Pull request status details"');
+    expect(html).not.toContain('aria-label="Pull request actions"');
   });
 
   test('shares one all-state status request across linked cards', async () => {

@@ -1,5 +1,10 @@
 import React from 'react';
+import {
+  pullRequestCloseConfirmation,
+  pullRequestMergeConfirmation,
+} from '@drone/assistant-chat';
 import { requestJson } from '../http';
+import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 import type {
   RepoPullRequestClosePayload,
   RepoPullRequestMergePayload,
@@ -285,6 +290,7 @@ export function HeaderPullRequestShortcuts({
   disabled: boolean;
   onOpenPullRequestsTab: () => void;
 }) {
+  const confirm = useAppConfirmDialog();
   const {
     pullRequestsData,
     loading,
@@ -314,7 +320,16 @@ export function HeaderPullRequestShortcuts({
     if (!Number.isFinite(prNumber) || prNumber <= 0) return;
     if (busyAction) return;
     const method = readPullRequestMergeMethod();
-    if (!window.confirm(`Merge PR #${prNumber} using "${method}"?`)) return;
+    if (
+      !(await confirm(
+        pullRequestMergeConfirmation({
+          pullNumber: prNumber,
+          baseRefName: firstPr.baseRefName,
+          method,
+        }),
+      ))
+    )
+      return;
     setBusyAction({ kind: 'merge', prNumber });
     setActionError(null);
     try {
@@ -332,14 +347,14 @@ export function HeaderPullRequestShortcuts({
     } finally {
       setBusyAction(null);
     }
-  }, [busyAction, droneId, firstPr, repoCacheKey]);
+  }, [busyAction, confirm, droneId, firstPr, repoCacheKey]);
 
   const onQuickClose = React.useCallback(async () => {
     if (!firstPr) return;
     const prNumber = Number(firstPr.number);
     if (!Number.isFinite(prNumber) || prNumber <= 0) return;
     if (busyAction) return;
-    if (!window.confirm(`Close PR #${prNumber} without merging?`)) return;
+    if (!(await confirm(pullRequestCloseConfirmation({ pullNumber: prNumber })))) return;
     setBusyAction({ kind: 'close', prNumber });
     setActionError(null);
     try {
@@ -353,7 +368,7 @@ export function HeaderPullRequestShortcuts({
     } finally {
       setBusyAction(null);
     }
-  }, [busyAction, droneId, firstPr, repoCacheKey]);
+  }, [busyAction, confirm, droneId, firstPr, repoCacheKey]);
 
   if (!repoAttached || disabled || !repoCacheKey) return null;
 

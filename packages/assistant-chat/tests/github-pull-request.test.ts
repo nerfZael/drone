@@ -6,6 +6,8 @@ import {
   githubPullRequestMergeBlockedReason,
   githubPullRequestStatusBadges,
   parseGithubPullRequestHref,
+  pullRequestCloseConfirmation,
+  pullRequestMergeConfirmation,
   type GithubPullRequestSummary,
 } from '../src';
 
@@ -65,5 +67,27 @@ describe('shared GitHub pull request model', () => {
     expect(
       githubPullRequestMergeBlockedReason({ ...pullRequest, hasMergeConflicts: true }),
     ).toBe('merge conflicts detected');
+  });
+
+  test('shares merge and close confirmation copy across clients', () => {
+    expect(
+      pullRequestMergeConfirmation({
+        pullNumber: 596,
+        baseRefName: 'main',
+        method: 'squash',
+        forceReason: 'checks are still pending',
+      }),
+    ).toEqual({
+      title: 'Force merge PR #596?',
+      message: 'Checks are still pending. Merge into main using squash merging.',
+      confirmLabel: 'Force merge',
+      destructive: true,
+    });
+    expect(pullRequestCloseConfirmation({ pullNumber: 596 })).toEqual({
+      title: 'Close PR #596?',
+      message: 'This closes the pull request without merging it.',
+      confirmLabel: 'Close pull request',
+      destructive: true,
+    });
   });
 });

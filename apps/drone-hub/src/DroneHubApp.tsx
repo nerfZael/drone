@@ -9,6 +9,7 @@ import { useMobileViewport } from './droneHub/app/use-mobile-viewport';
 import { useDroneHubUiStore } from './droneHub/app/use-drone-hub-ui-store';
 import { useDroneHubAppModel } from './use-drone-hub-app-model';
 import { applyDesktopTheme } from './theme';
+import { AppConfirmDialogProvider } from './ui/AppConfirmDialog';
 
 export default function DroneHubApp() {
   const { sidebarProps, overlaysProps, workspaceContentProps } = useDroneHubAppModel();
@@ -36,23 +37,25 @@ export default function DroneHubApp() {
   const sidebar = <DroneSidebar {...sidebarProps} />;
   const workspace = <DroneHubWorkspaceContent {...workspaceContentProps} />;
   return (
-    <DroneHubDndProvider>
-      <div data-drone-app-shell="true" className="flex h-screen overflow-hidden fixed inset-0">
-        {sidebarDockSide === 'right' ? (
-          <>
-            {workspace}
-            {sidebar}
-          </>
-        ) : (
-          <>
-            {sidebar}
-            {workspace}
-          </>
-        )}
-        <DroneHubOverlays {...overlaysProps} />
-        <GuidedOnboarding />
-        <FrontendUpdatePrompt />
-      </div>
-    </DroneHubDndProvider>
+    <AppConfirmDialogProvider>
+      <DroneHubDndProvider>
+        <div data-drone-app-shell="true" className="flex h-screen overflow-hidden fixed inset-0">
+          {sidebarDockSide === 'right' ? (
+            <>
+              {workspace}
+              {sidebar}
+            </>
+          ) : (
+            <>
+              {sidebar}
+              {workspace}
+            </>
+          )}
+          <DroneHubOverlays {...overlaysProps} />
+          <GuidedOnboarding />
+          <FrontendUpdatePrompt />
+        </div>
+      </DroneHubDndProvider>
+    </AppConfirmDialogProvider>
   );
 }

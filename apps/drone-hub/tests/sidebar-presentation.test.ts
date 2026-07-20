@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   sidebarChatRowTone,
+  sidebarChatLabelClass,
   sidebarChatStateClass,
   sidebarDensityClasses,
   sidebarFolderLabelClass,
@@ -30,8 +31,12 @@ describe('sidebar presentation', () => {
     expect(active).toContain('border-transparent');
     expect(sidebarChatRowTone({})).toContain('sidebar-subitem-fg');
     expect(sidebarChatRowTone({ disabled: true })).toContain('cursor-not-allowed');
-    expect(sidebarChatStateClass).toContain('grid-cols-[.75rem_minmax(0,1fr)]');
+    expect(sidebarChatStateClass).toContain('justify-end');
+    expect(sidebarChatStateClass).toContain('inline-flex');
     expect(sidebarChatStateClass).toContain('w-[4.75rem]');
     expect(sidebarChatStateClass).toContain('leading-none');
+    expect(sidebarChatLabelClass).toContain('[font-family:var(--sidebar-font)]');
+    expect(sidebarChatLabelClass).toContain('font-normal');
+    expect(sidebarChatLabelClass).not.toContain('font-mono');
   });
 });

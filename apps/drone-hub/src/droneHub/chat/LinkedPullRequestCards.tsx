@@ -1,5 +1,9 @@
 import React from 'react';
-import { githubPullRequestMatchesRepo } from '@drone/assistant-chat';
+import {
+  githubPullRequestMatchesRepo,
+  pullRequestCloseConfirmation,
+  pullRequestMergeConfirmation,
+} from '@drone/assistant-chat';
 import { invalidateHeaderRepoPullRequestSummaryCache } from '../app/HeaderPullRequestShortcuts';
 import { requestJson } from '../http';
 import {
@@ -18,6 +22,7 @@ import { extractGithubPullRequestLinks, type GithubPullRequestLink } from './git
 import { IconSpinner } from './icons';
 import { invalidateLinkedPullRequestCache, useLinkedPullRequests } from './linked-pull-request-resource';
 import { readPullRequestMergeMethod } from '../pullRequests/pull-request-preferences';
+import { useAppConfirmDialog } from '../../ui/AppConfirmDialog';
 
 export type LinkedPullRequestContext = {
   droneId: string;
@@ -57,6 +62,7 @@ function LinkedPullRequestCard({
   onActionEnd: () => void;
   onOpenLink?: (href: string) => boolean;
 }) {
+  const confirm = useAppConfirmDialog();
   const [busyAction, setBusyAction] = React.useState<'merge' | 'close' | null>(null);
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [actionNotice, setActionNotice] = React.useState<string | null>(null);
@@ -80,9 +86,17 @@ function LinkedPullRequestCard({
   const mergePullRequest = React.useCallback(async () => {
     if (!pullRequest || !canManage || blockedReason || busyAction || anyActionBusy) return;
     const method = readPullRequestMergeMethod();
-    const verb = forceReason ? 'Force merge' : 'Merge';
-    const forceLabel = forceReason ? ` Checks currently report: ${forceReason}.` : '';
-    if (!window.confirm(`${verb} PR #${pullRequest.number} into ${pullRequest.baseRefName || 'base'} using "${method}"?${forceLabel}`)) return;
+    if (
+      !(await confirm(
+        pullRequestMergeConfirmation({
+          pullNumber: pullRequest.number,
+          baseRefName: pullRequest.baseRefName,
+          method,
+          forceReason,
+        }),
+      ))
+    )
+      return;
     if (!onActionBegin()) return;
     setBusyAction('merge');
     setActionError(null);
@@ -108,11 +122,11 @@ function LinkedPullRequestCard({
     } finally {
       finishAction();
     }
-  }, [anyActionBusy, blockedReason, busyAction, canManage, context.droneId, context.repoPath, finishAction, forceReason, onActionBegin, pullRequest]);
+  }, [anyActionBusy, blockedReason, busyAction, canManage, confirm, context.droneId, context.repoPath, finishAction, forceReason, onActionBegin, pullRequest]);
 
   const closePullRequest = React.useCallback(async () => {
     if (!pullRequest || !canManage || busyAction || anyActionBusy) return;
-    if (!window.confirm(`Close PR #${pullRequest.number} without merging?`)) return;
+    if (!(await confirm(pullRequestCloseConfirmation({ pullNumber: pullRequest.number })))) return;
     if (!onActionBegin()) return;
     setBusyAction('close');
     setActionError(null);
@@ -134,7 +148,7 @@ function LinkedPullRequestCard({
     } finally {
       finishAction();
     }
-  }, [anyActionBusy, busyAction, canManage, context.droneId, context.repoPath, finishAction, onActionBegin, pullRequest]);
+  }, [anyActionBusy, busyAction, canManage, confirm, context.droneId, context.repoPath, finishAction, onActionBegin, pullRequest]);
 
   const statusLabel = pullRequest
     ? state || 'Unknown'
@@ -155,19 +169,28 @@ function LinkedPullRequestCard({
             Pull request
           </span>
           <span className="font-mono text-[var(--text-10)] text-[var(--accent)]">#{link.pullNumber}</span>
-          <span
-            aria-live="polite"
-            className={`inline-flex items-center gap-1 rounded border px-1.5 py-[1px] text-[var(--text-9)] capitalize ${
-              pullRequest
-                ? pullRequestStateClassName(pullRequest.state)
-                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]'
-            }`}
-            title={loadError ?? statusLabel}
-          >
-            {loading ? <IconSpinner className="h-2.5 w-2.5" /> : null}
-            {statusLabel}
-          </span>
-          {pullRequest && !actionNotice ? <PullRequestStatusBadgeStrip pullRequest={pullRequest} compact /> : null}
+          {loading ? (
+            <span
+              role="status"
+              aria-label="Loading pull request status"
+              title="Loading pull request status"
+              className="inline-flex h-4 w-4 items-center justify-center text-[var(--muted)]"
+            >
+              <IconSpinner className="h-3 w-3" />
+            </span>
+          ) : (
+            <span
+              aria-live="polite"
+              className={`inline-flex items-center gap-1 rounded border px-1.5 py-[1px] text-[var(--text-9)] capitalize ${
+                pullRequest
+                  ? pullRequestStateClassName(pullRequest.state)
+                  : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]'
+              }`}
+              title={loadError ?? statusLabel}
+            >
+              {statusLabel}
+            </span>
+          )}
         </div>
 
         <div className="mt-1.5 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1.5">
@@ -227,6 +250,11 @@ function LinkedPullRequestCard({
               <span aria-hidden="true" className="text-[var(--border)]">·</span>
               <span>by {pullRequest.authorLogin}</span>
             </>
+          ) : null}
+          {pullRequest && isOpen && !actionNotice ? (
+            <span className="ml-auto inline-flex flex-shrink-0" aria-label="Pull request status details">
+              <PullRequestStatusBadgeStrip pullRequest={pullRequest} compact appearance="plain" />
+            </span>
           ) : null}
         </div>
         {footerMessage ? (

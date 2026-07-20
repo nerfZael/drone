@@ -74,10 +74,12 @@ export function PullRequestStatusBadgeStrip({
   pullRequest,
   limit,
   compact = false,
+  appearance = 'badge',
 }: {
   pullRequest: RepoPullRequestSummary;
   limit?: number;
   compact?: boolean;
+  appearance?: 'badge' | 'plain';
 }) {
   const allBadges = githubPullRequestStatusBadges(pullRequest);
   const badges = typeof limit === 'number' ? allBadges.slice(0, Math.max(1, Math.floor(limit))) : allBadges;
@@ -87,11 +89,26 @@ export function PullRequestStatusBadgeStrip({
       {badges.map((badge) => (
         <span
           key={`pr-badge-${pullRequest.number}-${badge.key}`}
-          className={`inline-flex items-center rounded border py-[1px] ${
-            compact ? 'px-1 text-[var(--text-9)] leading-none' : 'px-1.5 text-[var(--text-10)]'
-          } ${pullRequestBadgeClassNames[badge.tone]}`}
+          className={
+            appearance === 'plain'
+              ? `inline-flex items-center gap-1 whitespace-nowrap text-[var(--text-9)] leading-none ${
+                  badge.tone === 'danger'
+                    ? 'text-[var(--red)]'
+                    : badge.tone === 'success'
+                      ? 'text-[var(--green)]'
+                      : 'text-[var(--yellow)]'
+                }`
+              : `inline-flex items-center rounded border py-[1px] ${
+                  compact
+                    ? 'px-1 text-[var(--text-9)] leading-none'
+                    : 'px-1.5 text-[var(--text-10)]'
+                } ${pullRequestBadgeClassNames[badge.tone]}`
+          }
           title={badge.label}
         >
+          {appearance === 'plain' ? (
+            <span aria-hidden="true" className="h-1 w-1 flex-shrink-0 rounded-full bg-current opacity-80" />
+          ) : null}
           {badge.label}
         </span>
       ))}

@@ -70,4 +70,20 @@ describe('shared pull request UI behavior', () => {
     expect(limitedHtml).toContain('Checks passed');
     expect(limitedHtml).not.toContain('Approved');
   });
+
+  test('can render quiet inline status metadata without badge chrome', () => {
+    const html = renderToStaticMarkup(
+      <PullRequestStatusBadgeStrip
+        pullRequest={{ ...pullRequest, hasMergeConflicts: true }}
+        compact
+        appearance="plain"
+      />,
+    );
+
+    expect(html).toContain('Checks passed');
+    expect(html).toContain('Merge conflict');
+    expect(html).toContain('rounded-full bg-current');
+    expect(html).not.toContain('rounded border');
+    expect(html).not.toContain('bg-[var(--green-subtle)]');
+  });
 });

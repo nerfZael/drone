@@ -45,6 +45,7 @@ import type { DroneDeleteMode, SidebarDensityMode } from './settings-types';
 import type { MoveDronesToGroupResult } from './use-group-management';
 import type { SidebarGroup } from './use-sidebar-view-model';
 import {
+  sidebarChatLabelClass,
   sidebarChatRowTone,
   sidebarChatStateClass,
   sidebarCountClass,
@@ -486,14 +487,14 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
           {active ? (
             <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
           ) : null}
-          <span className="min-w-0 flex-1 truncate font-mono">{chatName}</span>
+          <span className={sidebarChatLabelClass}>{chatName}</span>
           {draft ? (
             <span className="flex-shrink-0 rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
               Draft
             </span>
           ) : null}
           <span
-            className={`${sidebarChatStateClass} ${chatStateToneClass}`}
+            className={`${sidebarChatStateClass} ${chatStateToneClass} ${actionsEnabled && chatName !== 'default' ? 'transition-opacity group-hover/chat-row:opacity-0' : ''}`}
             title={chatStateLabel}
           >
             <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
@@ -501,7 +502,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
           </span>
         </button>
         {actionsEnabled && chatName !== 'default' ? (
-          <>
+          <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center gap-1">
             <button
               type="button"
               onClick={(event) => {
@@ -531,10 +532,8 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
             >
               {deletingChats[`${drone.id}:${chatName}`] ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
             </button>
-          </>
-        ) : (
-          <span className={`${densityClasses.chatPlaceholderWidth} flex-shrink-0`} />
-        )}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -552,7 +551,6 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
     setSelectedSidebarNodeId,
     onSelectDroneChat,
     shouldSuppressClick,
-    actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const chatNodeId = createCanvasChatNodeId(drone.id, chatName);
@@ -579,7 +577,7 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
           title={`${uiDroneName(drone.name)} / ${chatName}`}
         >
           {active ? <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" /> : null}
-          <span className="min-w-0 flex-1 truncate font-mono">{chatName}</span>
+          <span className={sidebarChatLabelClass}>{chatName}</span>
           <span
             className={`${sidebarChatStateClass} ${chatStateToneClass}`}
             title={chatStateLabel}
@@ -588,11 +586,6 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
             {chatStateLabel}
           </span>
         </button>
-        {actionsEnabled && chatName !== 'default' ? (
-          <span className={`${densityClasses.chatPlaceholderWidth} flex-shrink-0`} />
-        ) : (
-          <span className={`${densityClasses.chatPlaceholderWidth} flex-shrink-0`} />
-        )}
       </div>
     </div>
   );

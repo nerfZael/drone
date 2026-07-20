@@ -15,6 +15,8 @@ import {
   githubPullRequestMatchesRepo,
   githubPullRequestMergeBlockedReason,
   githubPullRequestStatusBadges,
+  pullRequestCloseConfirmation,
+  pullRequestMergeConfirmation,
   type GithubPullRequestLink,
 } from '@drone/assistant-chat';
 import { colors, radii } from '../theme';
@@ -76,6 +78,15 @@ function LinkedPullRequestRow({
       : sameRepo === false
         ? 'External repository'
         : 'Status unavailable';
+  const confirmationCopy =
+    confirmation === 'close'
+      ? pullRequestCloseConfirmation({ pullNumber: pullRequest?.number ?? link.pullNumber })
+      : pullRequestMergeConfirmation({
+          pullNumber: pullRequest?.number ?? link.pullNumber,
+          baseRefName: pullRequest?.baseRefName,
+          method: 'merge',
+          forceReason,
+        });
 
   React.useEffect(() => {
     setActionError(null);
@@ -164,7 +175,7 @@ function LinkedPullRequestRow({
         ) : null}
         {pullRequest?.authorLogin ? <Text style={styles.author}>by {pullRequest.authorLogin}</Text> : null}
       </View>
-      {pullRequest || showActions ? (
+      {isOpen ? (
         <View style={styles.statusActionsRow}>
           {pullRequest ? (
             <View style={styles.badges}>
@@ -259,22 +270,10 @@ function LinkedPullRequestRow({
       ) : null}
       <ConfirmDialog
         visible={confirmation != null}
-        title={
-          confirmation === 'close'
-            ? `Close PR #${pullRequest?.number ?? link.pullNumber}?`
-            : forceReason
-              ? `Force merge PR #${pullRequest?.number ?? link.pullNumber}?`
-              : `Merge PR #${pullRequest?.number ?? link.pullNumber}?`
-        }
-        message={
-          confirmation === 'close'
-            ? 'This closes the pull request without merging it.'
-            : `${forceReason ? `${forceReason[0]?.toUpperCase()}${forceReason.slice(1)}. ` : ''}Merge into ${pullRequest?.baseRefName || 'the base branch'} using a merge commit?`
-        }
-        confirmLabel={
-          confirmation === 'close' ? 'Close pull request' : forceReason ? 'Force merge' : 'Merge'
-        }
-        destructive={confirmation === 'close' || Boolean(forceReason)}
+        title={confirmationCopy.title}
+        message={confirmationCopy.message}
+        confirmLabel={confirmationCopy.confirmLabel}
+        destructive={confirmationCopy.destructive}
         busy={confirmationBusy}
         onCancel={() => setConfirmation(null)}
         onConfirm={confirmAction}
