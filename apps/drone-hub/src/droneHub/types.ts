@@ -4,20 +4,6 @@ export type DroneSummary = {
   id: string;
   name: string;
   group: string | null;
-  kind?: 'standard' | 'playbook-run';
-  visibility?: 'visible' | 'hidden';
-  playbook?: {
-    id: string;
-    label: string;
-    messageCount: number;
-    chatName?: string;
-    artifacts?: string[];
-    actions?: Array<{
-      id: string;
-      label: string;
-      messages: string[];
-    }>;
-  } | null;
   createdAt: string;
   lastActivityAt?: string | null;
   lastMessageAt?: string | null;
@@ -549,7 +535,6 @@ export type TranscriptItem = {
   model?: string;
   reasoning?: string;
   attachments?: ChatImageAttachmentRef[];
-  automation?: ChatPromptAutomationMeta;
   inheritedFromClone?: boolean;
   session: string;
   logPath: string;
@@ -557,21 +542,6 @@ export type TranscriptItem = {
   error?: string;
   output: string;
   agentPlan?: AgentPlan;
-  agentMessageAutoContinue?: {
-    status?: 'pending' | 'classified' | 'failed';
-    bucket?: 'user-turn' | 'continue';
-    source?: 'llm' | 'agent-copilot-json' | 'heuristic';
-    classifiedAt?: string;
-    continuedAt?: string;
-    error?: string;
-    updatedAt?: string;
-  };
-  agentSuggestion?: {
-    usedDirectAt?: string;
-    suggestionHash?: string;
-    policyFingerprint?: string;
-    updatedAt?: string;
-  };
   dockerSnapshot?: {
     id: string;
     status: 'creating' | 'ready' | 'failed' | 'restoring';
@@ -591,21 +561,6 @@ export type ChatImageAttachmentRef = {
   path?: string;
   relativePath?: string;
   previewDataUrl?: string;
-};
-
-export type ChatPromptAutomationMeta = {
-  kind: 'prompt-loop';
-  stage?: 'run' | 'final-message';
-  jobKey?: string;
-  automationId?: string;
-  automationLabel?: string;
-  runIndex?: number;
-  runsTotal?: number;
-  sleepBetweenRunsSeconds?: number;
-  stopPhrase?: string;
-  stopPhraseCaseSensitive?: boolean;
-  stopMatchedRunIndex?: number;
-  promptPreview?: string;
 };
 
 export type JobSpec = {
@@ -628,8 +583,6 @@ export type PendingPrompt = {
     size: number;
     dataBase64: string;
   }>;
-  automation?: ChatPromptAutomationMeta;
-  blockedByAutomation?: boolean;
   // `queued` is a local-only UI state used when a drone is still provisioning.
   state: 'queued' | 'sending' | 'sent' | 'failed';
   error?: string;
@@ -654,69 +607,3 @@ export type AgentPlan = {
 };
 
 export type CustomAgentProfile = { id: string; label: string; command: string };
-
-export type PlaybookMessageDefinition = {
-  id: string;
-  name: string | null;
-  prompt: string;
-};
-
-export type PlaybookDefinition = {
-  id: string;
-  label: string;
-  agent: ChatAgentConfig;
-  model?: string | null;
-  messages: PlaybookMessageDefinition[];
-  artifacts: string[];
-  actions: Array<{
-    id: string;
-    label: string;
-    messages: string[];
-  }>;
-  createdAt: string;
-  updatedAt?: string;
-};
-
-export type PlaybookRunSummary = {
-  id: string;
-  droneId: string;
-  droneName: string;
-  playbookId: string;
-  playbookLabel: string;
-  chatName: string;
-  repoPath: string;
-  runtime: 'container' | 'host';
-  visibility: 'visible' | 'hidden';
-  kind: 'playbook-run';
-  status: 'starting' | 'running' | 'completed' | 'failed';
-  createdAt: string;
-  updatedAt: string;
-  lastMessage: string;
-  artifacts: string[];
-  actions: Array<{
-    id: string;
-    label: string;
-    messages: string[];
-  }>;
-  pendingCount: number;
-  failedCount: number;
-  runsCompleted: number;
-  statusError: string | null;
-};
-
-export type PlaybookRunQueueSummary = {
-  id: string;
-  playbookId: string;
-  playbookLabel: string;
-  repoPath: string;
-  requestedCount: number;
-  launchedCount: number;
-  inFlightCount: number;
-  remainingCount: number;
-  serializeFirstMessageGroup: boolean;
-  pullHostBranchBeforeCreate: boolean;
-  createdAt: string;
-  updatedAt: string;
-  state: 'queued' | 'waiting' | 'launching' | 'error';
-  error?: string;
-};

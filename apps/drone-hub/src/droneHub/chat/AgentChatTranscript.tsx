@@ -11,7 +11,6 @@ export type AgentChatTranscriptItemKind =
   | 'tool'
   | 'pending'
   | 'approval'
-  | 'automation'
   | 'status'
   | 'sentinel';
 

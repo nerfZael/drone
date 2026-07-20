@@ -79,7 +79,7 @@ test('canonical active drone read model assembles summaries without writes or co
   assert.equal(readCanonicalDroneLifecycleModel().drones['drone-a'].chats, undefined);
 });
 
-test('canonical active drone read model bounds history while retaining active playbook gate turns', async () => {
+test('canonical active drone read model bounds history', async () => {
   useTempDataDir();
   const lifecycle = await getDroneLifecycleRepository();
   await lifecycle.upsert('real', 'drone-a', {
@@ -87,12 +87,6 @@ test('canonical active drone read model bounds history while retaining active pl
     name: 'alpha',
     runtime: 'container',
     createdAt: '2026-07-10T10:00:00.000Z',
-    playbookQueueGate: {
-      queueItemId: 'queue-1',
-      playbookId: 'playbook-1',
-      chatName: 'default',
-      initialPromptIds: ['turn-0'],
-    },
   });
   await upsertChatInStore({
     droneId: 'drone-a',
@@ -114,8 +108,7 @@ test('canonical active drone read model bounds history while retaining active pl
   }
 
   const turns = readCanonicalActiveDroneModel().drones['drone-a'].chats.default.turns;
-  assert.equal(turns.length, 61);
-  assert.equal(turns[0].id, 'turn-0');
-  assert.equal(turns.some((turn) => turn.id === 'turn-1'), false);
+  assert.equal(turns.length, 60);
+  assert.equal(turns[0].id, 'turn-5');
   assert.equal(turns.at(-1).id, 'turn-64');
 });

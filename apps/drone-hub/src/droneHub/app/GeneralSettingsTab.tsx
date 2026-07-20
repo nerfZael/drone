@@ -1,8 +1,6 @@
 import React from 'react';
 import { UiMenuSelect } from '../../ui/menuSelect';
 import { bytesToMaxMiB, bytesToMinMiB, bytesToNearestMiB, miBToBytes } from './filesystem-size-utils';
-import type { UseAgentMessageAutoContinueSettingsResult } from './use-agent-message-auto-continue-settings';
-import type { UseAgentSuggestionSettingsResult } from './use-agent-suggestion-settings';
 import type { UseFilesystemSettingsResult } from './use-filesystem-settings';
 import type { UseGithubSettingsResult } from './use-github-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
@@ -27,8 +25,6 @@ type GeneralSettingsTabProps = {
   github: UseGithubSettingsResult;
   llm: UseLlmSettingsResult;
   filesystem: UseFilesystemSettingsResult;
-  agentMessageAutoContinue: UseAgentMessageAutoContinueSettingsResult;
-  agentSuggestion: UseAgentSuggestionSettingsResult;
   transcriptInlineImages: boolean;
   setTranscriptInlineImages: (value: boolean) => void;
   onReplayOnboarding: () => void;
@@ -39,8 +35,6 @@ export function GeneralSettingsTab({
   github,
   llm,
   filesystem,
-  agentMessageAutoContinue,
-  agentSuggestion,
   transcriptInlineImages,
   setTranscriptInlineImages,
   onReplayOnboarding,
@@ -94,31 +88,6 @@ export function GeneralSettingsTab({
     setUploadMaxMiBDraft,
     saveFilesystemSettings,
   } = filesystem;
-  const {
-    agentMessageAutoContinueSettings,
-    agentMessageAutoContinueSettingsLoading,
-    agentMessageAutoContinueSettingsError,
-    agentMessageAutoContinueSettingsNotice,
-    autoContinuePromptDraft,
-    autoContinueEnabledByDefaultDraft,
-    savingAgentMessageAutoContinueSettings,
-    setAutoContinuePromptDraft,
-    setAutoContinueEnabledByDefaultDraft,
-    saveAgentMessageAutoContinueSettings,
-  } = agentMessageAutoContinue;
-  const {
-    agentSuggestionSettings,
-    agentSuggestionSettingsLoading,
-    agentSuggestionSettingsError,
-    agentSuggestionSettingsNotice,
-    agentSuggestionPolicyDraft,
-    agentSuggestionEnabledByDefaultDraft,
-    savingAgentSuggestionSettings,
-    setAgentSuggestionPolicyDraft,
-    setAgentSuggestionEnabledByDefaultDraft,
-    saveAgentSuggestionSettings,
-  } = agentSuggestion;
-
   const currentUploadMaxBytes = filesystemSettings?.filesystem.uploadMaxBytes ?? null;
   const currentDefaultModel = llmDefaultModelSettings?.defaultModel;
   const llmProviderDefaultsDirty =
@@ -139,21 +108,6 @@ export function GeneralSettingsTab({
     filesystemSettings != null ? bytesToMaxMiB(filesystemSettings.filesystem.maxUploadMaxBytes, filesystemMinMiB) : 8192;
   const filesystemDefaultMiB =
     filesystemSettings != null ? bytesToNearestMiB(filesystemSettings.filesystem.defaultUploadMaxBytes) : 2048;
-  const currentAutoContinuePrompt = agentMessageAutoContinueSettings?.agentMessageAutoContinue.prompt ?? 'continue';
-  const currentAutoContinueEnabledByDefault =
-    agentMessageAutoContinueSettings?.agentMessageAutoContinue.enabledByDefault ?? false;
-  const autoContinuePromptMaxChars = agentMessageAutoContinueSettings?.agentMessageAutoContinue.maxPromptChars ?? 200;
-  const autoContinuePromptDirty = autoContinuePromptDraft !== currentAutoContinuePrompt;
-  const autoContinueEnabledByDefaultDirty =
-    autoContinueEnabledByDefaultDraft !== currentAutoContinueEnabledByDefault;
-  const autoContinueSettingsDirty = autoContinuePromptDirty || autoContinueEnabledByDefaultDirty;
-  const currentAgentSuggestionPolicy = agentSuggestionSettings?.agentSuggestion.policyMarkdown ?? '';
-  const currentAgentSuggestionEnabledByDefault = agentSuggestionSettings?.agentSuggestion.enabledByDefault ?? false;
-  const agentSuggestionPolicyMaxChars = agentSuggestionSettings?.agentSuggestion.maxPolicyChars ?? 20_000;
-  const agentSuggestionPolicyDirty = agentSuggestionPolicyDraft !== currentAgentSuggestionPolicy;
-  const agentSuggestionEnabledByDefaultDirty =
-    agentSuggestionEnabledByDefaultDraft !== currentAgentSuggestionEnabledByDefault;
-  const agentSuggestionSettingsDirty = agentSuggestionPolicyDirty || agentSuggestionEnabledByDefaultDirty;
   const githubStatus = github.githubSettings?.github ?? null;
   const githubAuthLabel =
     githubStatus?.authSource === 'environment'
@@ -774,246 +728,6 @@ export function GeneralSettingsTab({
               })}
             </div>
           </section>
-
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
-            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-              Auto-continue
-            </div>
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
-              Configure the user message Hub sends when a chat-level auto-continue toggle decides an agent stopped mid-task. The default is <span className="text-[var(--fg-secondary)] font-mono">continue</span>.
-            </div>
-            {agentMessageAutoContinueSettingsError && (
-              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
-                {agentMessageAutoContinueSettingsError}
-              </div>
-            )}
-            {agentMessageAutoContinueSettingsNotice && (
-              <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
-                {agentMessageAutoContinueSettingsNotice}
-              </div>
-            )}
-            {agentMessageAutoContinueSettingsLoading && !agentMessageAutoContinueSettings ? (
-              <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading auto-continue settings…</div>
-            ) : (
-              <>
-                <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
-                  Current prompt:{' '}
-                  <span className="text-[var(--fg-secondary)] font-mono">
-                    {JSON.stringify(currentAutoContinuePrompt)}
-                  </span>{' '}
-                  ({agentMessageAutoContinueSettings?.agentMessageAutoContinue.promptSource === 'settings' ? 'from settings' : 'default'})
-                </div>
-                <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
-                  New chats default:{' '}
-                  <span className="text-[var(--fg-secondary)]">
-                    {currentAutoContinueEnabledByDefault ? 'On' : 'Off'}
-                  </span>{' '}
-                  ({agentMessageAutoContinueSettings?.agentMessageAutoContinue.enabledByDefaultSource === 'settings' ? 'from settings' : 'default'})
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">
-                    Enable for new chats by default
-                  </span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setAutoContinueEnabledByDefaultDraft(true)}
-                      disabled={agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
-                      className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                        autoContinueEnabledByDefaultDraft
-                          ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                      } ${agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings ? 'opacity-40 cursor-not-allowed' : ''}`}
-                      style={{ fontFamily: 'var(--display)' }}
-                    >
-                      Default on
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAutoContinueEnabledByDefaultDraft(false)}
-                      disabled={agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
-                      className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                        !autoContinueEnabledByDefaultDraft
-                          ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                      } ${agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings ? 'opacity-40 cursor-not-allowed' : ''}`}
-                      style={{ fontFamily: 'var(--display)' }}
-                    >
-                      Default off
-                    </button>
-                  </div>
-                </div>
-                <label className="flex flex-col gap-1">
-                  <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Auto-reply prompt</span>
-                  <input
-                    value={autoContinuePromptDraft}
-                    onChange={(e) => setAutoContinuePromptDraft(e.target.value)}
-                    maxLength={autoContinuePromptMaxChars}
-                    className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
-                    placeholder="continue"
-                    disabled={agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
-                  />
-                </label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAutoContinuePromptDraft(
-                        agentMessageAutoContinueSettings?.agentMessageAutoContinue.defaultPrompt ?? 'continue',
-                      );
-                      setAutoContinueEnabledByDefaultDraft(
-                        agentMessageAutoContinueSettings?.agentMessageAutoContinue.defaultEnabledByDefault ?? false,
-                      );
-                    }}
-                    disabled={agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
-                    className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                      agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    Use default
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void saveAgentMessageAutoContinueSettings()}
-                    disabled={!autoContinueSettingsDirty || agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
-                    className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                      !autoContinueSettingsDirty || agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    {savingAgentMessageAutoContinueSettings ? 'Saving…' : 'Save auto-continue settings'}
-                  </button>
-                </div>
-                <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
-                  Max length: {autoContinuePromptMaxChars} characters.
-                </div>
-              </>
-            )}
-          </div>
-
-          <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
-            <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
-              Agent suggestion
-            </div>
-            <div className="text-[var(--text-11)] text-[var(--muted-dim)] leading-relaxed">
-              Suggest a likely next user reply for each new agent message. The policy stays editable so you can tune it over time.
-            </div>
-            {agentSuggestionSettingsError && (
-              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--red)]">
-                {agentSuggestionSettingsError}
-              </div>
-            )}
-            {agentSuggestionSettingsNotice && (
-              <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[var(--text-12)] text-[var(--green)]">
-                {agentSuggestionSettingsNotice}
-              </div>
-            )}
-            {agentSuggestionSettingsLoading && !agentSuggestionSettings ? (
-              <div className="text-[var(--text-12)] text-[var(--muted-dim)]">Loading assistant suggestion settings…</div>
-            ) : (
-              <>
-                <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
-                  New chats default:{' '}
-                  <span className="text-[var(--fg-secondary)]">
-                    {currentAgentSuggestionEnabledByDefault ? 'On' : 'Off'}
-                  </span>{' '}
-                  ({agentSuggestionSettings?.agentSuggestion.enabledByDefaultSource === 'settings' ? 'from settings' : 'default'})
-                </div>
-                <div className="text-[var(--text-11)] text-[var(--muted-dim)]">
-                  Current policy source:{' '}
-                  <span className="text-[var(--fg-secondary)]">
-                    {agentSuggestionSettings?.agentSuggestion.policyMarkdownSource === 'settings' ? 'settings' : 'default'}
-                  </span>
-                </div>
-                <div className="flex flex-col gap-1">
-                  <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">
-                    Enable for new chats by default
-                  </span>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setAgentSuggestionEnabledByDefaultDraft(true)}
-                      disabled={agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
-                      className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                        agentSuggestionEnabledByDefaultDraft
-                          ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                      } ${agentSuggestionSettingsLoading || savingAgentSuggestionSettings ? 'opacity-40 cursor-not-allowed' : ''}`}
-                      style={{ fontFamily: 'var(--display)' }}
-                    >
-                      Default on
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setAgentSuggestionEnabledByDefaultDraft(false)}
-                      disabled={agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
-                      className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                        !agentSuggestionEnabledByDefaultDraft
-                          ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                      } ${agentSuggestionSettingsLoading || savingAgentSuggestionSettings ? 'opacity-40 cursor-not-allowed' : ''}`}
-                      style={{ fontFamily: 'var(--display)' }}
-                    >
-                      Default off
-                    </button>
-                  </div>
-                </div>
-                <label className="flex flex-col gap-1">
-                  <span className="text-[var(--text-10)] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-[var(--weight-semibold)]">Policy markdown</span>
-                  <textarea
-                    value={agentSuggestionPolicyDraft}
-                    onChange={(e) => setAgentSuggestionPolicyDraft(e.target.value)}
-                    maxLength={agentSuggestionPolicyMaxChars}
-                    rows={12}
-                    className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-[var(--text-12)] leading-relaxed text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono resize-y"
-                    placeholder="# Agent Suggestion Policy"
-                    disabled={agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
-                  />
-                </label>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setAgentSuggestionPolicyDraft(agentSuggestionSettings?.agentSuggestion.defaultPolicyMarkdown ?? '');
-                      setAgentSuggestionEnabledByDefaultDraft(
-                        agentSuggestionSettings?.agentSuggestion.defaultEnabledByDefault ?? false,
-                      );
-                    }}
-                    disabled={agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
-                    className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                      agentSuggestionSettingsLoading || savingAgentSuggestionSettings
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    Use default
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void saveAgentSuggestionSettings()}
-                    disabled={!agentSuggestionSettingsDirty || agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
-                    className={`h-9 px-3 rounded text-[var(--text-11)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                      !agentSuggestionSettingsDirty || agentSuggestionSettingsLoading || savingAgentSuggestionSettings
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    {savingAgentSuggestionSettings ? 'Saving…' : 'Save assistant suggestion settings'}
-                  </button>
-                </div>
-                <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
-                  Max length: {agentSuggestionPolicyMaxChars.toLocaleString()} characters.
-                </div>
-              </>
-            )}
-          </div>
 
           <div className="rounded border border-[var(--border-subtle)] bg-[var(--settings-section-bg)] px-3 py-3 flex flex-col gap-3">
             <div className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>

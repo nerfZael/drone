@@ -109,33 +109,6 @@ export async function updateDroneFleetMetadata(opts: {
   });
 }
 
-export async function setDronePresentationMetadata(opts: {
-  droneId: string;
-  state?: 'real' | 'pending';
-  visibility?: 'hidden' | 'visible' | null;
-  kind?: string | null;
-  playbook?: Record<string, any> | null;
-  dependencies?: DroneMetadataCommandDependencies;
-}): Promise<CanonicalDroneLifecycleRecord> {
-  return await commitDroneMetadataPatch({
-    droneId: opts.droneId,
-    state: opts.state,
-    eventType: 'drone.presentation.changed',
-    payload: { fields: ['visibility', 'kind', 'playbook'] },
-    dependencies: opts.dependencies,
-    transform: (lifecycle) => {
-      const next = { ...lifecycle };
-      if (opts.visibility === null) delete next.visibility;
-      else if (opts.visibility !== undefined) next.visibility = opts.visibility;
-      if (opts.kind === null) delete next.kind;
-      else if (opts.kind !== undefined) next.kind = opts.kind;
-      if (opts.playbook === null) delete next.playbook;
-      else if (opts.playbook !== undefined) next.playbook = opts.playbook;
-      return next;
-    },
-  });
-}
-
 export async function renameDroneDisplayName(opts: {
   droneId: string;
   state?: 'real' | 'pending';

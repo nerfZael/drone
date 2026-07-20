@@ -58,12 +58,12 @@ test('opens with the production binding and applies a scoped normalized schema',
   assert.ok(store);
   const database = requireHubDatabase();
   const migration = database.read((connection) =>
-    connection.prepare("SELECT scope, version, name FROM hub_schema_migrations WHERE scope='catalog'").get(),
+    connection.prepare("SELECT scope, version, name FROM hub_schema_migrations WHERE scope='catalog' ORDER BY version DESC LIMIT 1").get(),
   );
   assert.deepEqual(migration, {
     scope: 'catalog',
-    version: 1,
-    name: 'canonical configuration catalogs',
+    version: 3,
+    name: 'remove retired playbook catalog',
   });
   const tables = database.read((connection) =>
     connection.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name LIKE 'catalog_%' ORDER BY name").all(),
@@ -73,7 +73,6 @@ test('opens with the production binding and applies a scoped normalized schema',
     'catalog_groups',
     'catalog_mcp_servers',
     'catalog_mcp_tokens',
-    'catalog_playbooks',
     'catalog_repositories',
     'catalog_skills',
   ]);
@@ -151,14 +150,6 @@ test('group tombstones prevent resurrection while repository backfill remains in
   assert.equal(await store.backfillRepositories([{ path: '/later', addedAt: at, remoteUrl: 'legacy-later' }]), true);
   assert.equal(store.listRepositories().some((record) => record.path === '/later'), true);
 
-  const playbook = {
-    id: 'playbook', label: 'Legacy', agent: { kind: 'builtin', id: 'cursor' }, messages: ['one'],
-    artifacts: [], actions: [], createdAt: at, updatedAt: at,
-  };
-  assert.equal(await store.backfillPlaybooks([playbook]), true);
-  await store.putPlaybook({ ...playbook, label: 'Canonical' });
-  assert.equal(await store.backfillPlaybooks([{ ...playbook, label: 'Stale' }]), false);
-  assert.equal(store.listPlaybooks()[0].label, 'Canonical');
 });
 
 test('skill and MCP server modules backfill once then stop rewriting registry state', async () => {

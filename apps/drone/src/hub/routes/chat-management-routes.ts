@@ -1,6 +1,5 @@
 import crypto from 'node:crypto';
 
-import type { ChatImageAttachment } from '../chat-attachments';
 import {
   chatConfigBodySchema,
   chatCreateBodySchema,
@@ -8,16 +7,65 @@ import {
   chatRenameBodySchema,
 } from '../chat-route-schemas';
 import type { AgentPermissionMode, ChatAgentConfig } from '../chat-types';
-import { describeHubError } from '../domain-errors';
-import { parseBoolParam } from '../hub-format';
 import { readJsonBody, sendJson as json } from '../hub-http';
-import type { PendingPromptState } from '../pendingPromptEnqueue';
-import type { PromptAutomationService } from '../prompt-automation-service';
 import { parseRequestSchema } from '../request-schema';
-import type { ChatAutomationRouteDependencies } from './chat-automation-routes';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './legacy-route';
 
-export type PromptAutomationRouteService = PromptAutomationService;
+type ChatManagementRouteDependencyName =
+  | 'archiveChatById'
+  | 'buildNewChatEntry'
+  | 'cloneNativeChatSession'
+  | 'collectDockerSnapshotImageRefsFromChatEntry'
+  | 'createChatInStore'
+  | 'createRequestTimer'
+  | 'deleteActiveChatFromStore'
+  | 'deleteNativeChatSession'
+  | 'dockerSnapshotAfterAgentMessageEnabledForChat'
+  | 'enqueuePendingPromptPump'
+  | 'ensureChatEntry'
+  | 'getChatEntry'
+  | 'hubChatSessionName'
+  | 'importDroneChatsFromRegistry'
+  | 'importResolvedChatToStore'
+  | 'importResolvedDroneChatsToStore'
+  | 'inferChatAgent'
+  | 'isDraftChatEntry'
+  | 'listChatReadStatesFromStore'
+  | 'listChatsFromStore'
+  | 'logSlowHubRequest'
+  | 'markChatReadInStore'
+  | 'markChatUnreadInStore'
+  | 'migrateInMemoryChatStateForRename'
+  | 'nativeChatHasHistory'
+  | 'normalizeAgentPermissionMode'
+  | 'normalizeBuiltinAgentId'
+  | 'normalizeChatName'
+  | 'normalizeChatReasoning'
+  | 'normalizePendingStartupPrompts'
+  | 'nowIso'
+  | 'parseAgentPermissionModeForUpdate'
+  | 'parseChatModelForUpdate'
+  | 'parseChatNameForMutation'
+  | 'parseDraftFlag'
+  | 'projectCanonicalChatToRegistry'
+  | 'projectCanonicalChatsToRegistry'
+  | 'readChatFromStore'
+  | 'readChatReadStateFromStore'
+  | 'removeDockerSnapshotImagesBestEffort'
+  | 'renameNativeChatSession'
+  | 'renameChatInStore'
+  | 'resolveChatTmuxCommand'
+  | 'resolveDroneDaemonClientForEntry'
+  | 'resolveDroneFromRegistryRef'
+  | 'resolveDroneOrPendingForReadRef'
+  | 'resolveDroneOrRespond'
+  | 'resolveEffectiveDeleteActionSettings'
+  | 'setChatAgentConfig'
+  | 'stopSingleDroneChatActivity'
+  | 'updateChatInStore';
+
+export type ChatManagementRouteDependencies =
+  LegacyRouteDependencyContract<ChatManagementRouteDependencyName>;
 
 export function resolveReadStateChatEntry(input: {
   droneId: string;
@@ -40,34 +88,20 @@ export function resolveReadStateChatEntry(input: {
 }
 
 export function createChatManagementRouteHandler(
-  deps: ChatAutomationRouteDependencies,
+  deps: ChatManagementRouteDependencies,
 ): LegacyRouteHandler {
   const {
     archiveChatById,
-    attachmentOnlyPromptLabel,
-    autoRenameGeneratedChatFromFirstPrompt,
     buildNewChatEntry,
-    cancelQueuedPendingPrompt,
-    chatSnapshotResponseBody,
-    claimChatAutoRenameFromFirstPrompt,
     cloneNativeChatSession,
     collectDockerSnapshotImageRefsFromChatEntry,
     createChatInStore,
-    createOrEnqueuePromptUnified,
     createRequestTimer,
-    defaultDaemonReadyTimeoutMs,
     deleteActiveChatFromStore,
     deleteNativeChatSession,
-    discoverAndRememberModelsForBuiltinAgent,
     dockerSnapshotAfterAgentMessageEnabledForChat,
-    droneRuntime,
-    droneTerminalOutput,
-    droneTerminalPrompt,
-    dvmExec,
-    dvmSessionRead,
     enqueuePendingPromptPump,
     ensureChatEntry,
-    ensureHubChatSessionRunning,
     getChatEntry,
     hubChatSessionName,
     importDroneChatsFromRegistry,
@@ -75,27 +109,18 @@ export function createChatManagementRouteHandler(
     importResolvedDroneChatsToStore,
     inferChatAgent,
     isDraftChatEntry,
-    isSafePromptId,
-    isStaleDockerExecErrorMessage,
-    jsonWithEtag,
-    jsonWithKnownEtag,
     listChatReadStatesFromStore,
     listChatsFromStore,
     logSlowHubRequest,
     markChatReadInStore,
     markChatUnreadInStore,
-    markTranscriptTurnAgentSuggestionUsedDirect,
     migrateInMemoryChatStateForRename,
     nativeChatHasHistory,
     normalizeAgentPermissionMode,
     normalizeBuiltinAgentId,
-    normalizeChatImageAttachments,
-    normalizeChatModel,
     normalizeChatName,
     normalizeChatReasoning,
-    normalizeDroneIdentity,
     normalizePendingStartupPrompts,
-    normalizeSubmittedAtIso,
     nowIso,
     parseAgentPermissionModeForUpdate,
     parseChatModelForUpdate,
@@ -103,12 +128,8 @@ export function createChatManagementRouteHandler(
     parseDraftFlag,
     projectCanonicalChatToRegistry,
     projectCanonicalChatsToRegistry,
-    promptAutomation,
-    pushPendingPrompt,
-    pushPendingStartupPrompt,
     readChatFromStore,
     readChatReadStateFromStore,
-    readChatSnapshot,
     removeDockerSnapshotImagesBestEffort,
     renameNativeChatSession,
     renameChatInStore,
@@ -117,18 +138,10 @@ export function createChatManagementRouteHandler(
     resolveDroneFromRegistryRef,
     resolveDroneOrPendingForReadRef,
     resolveDroneOrRespond,
-    resolveEffectiveAgentMessageAutoContinueSettings,
-    resolveEffectiveAgentSuggestionSettings,
     resolveEffectiveDeleteActionSettings,
-    restoreDockerSnapshotForTranscriptTurn,
     setChatAgentConfig,
-    shouldAutoRenameChatOnPrompt,
-    stopChatResponse,
     stopSingleDroneChatActivity,
-    stopTranscriptPendingPrompts,
     updateChatInStore,
-    waitForDroneDaemonReady,
-    withLockedDroneContainer,
   } = deps;
 
   const sameChatAgent = (current: ChatAgentConfig, next: ChatAgentConfig): boolean => {
@@ -216,12 +229,6 @@ export function createChatManagementRouteHandler(
         ).trim();
         const copyFrom = copyFromRaw ? normalizeChatName(copyFromRaw) : '';
         const createAsDraft = parseDraftFlag(body?.draft ?? body?.isDraft);
-        const autoContinueEnabledByDefault = (
-          await resolveEffectiveAgentMessageAutoContinueSettings()
-        ).enabledByDefault;
-        const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings())
-          .enabledByDefault;
-
         try {
           const droneEntry = resolved.drone;
           await importDroneChatsFromRegistry({ droneId, chats: droneEntry?.chats });
@@ -229,8 +236,6 @@ export function createChatManagementRouteHandler(
           const defaultEntry = buildNewChatEntry({
             droneEntry,
             createdAt,
-            autoContinueEnabledByDefault,
-            agentSuggestionEnabledByDefault,
           });
           const created = await createChatInStore({
             droneId,
@@ -241,8 +246,6 @@ export function createChatManagementRouteHandler(
                 droneEntry,
                 createdAt,
                 ...(source ? { sourceChatEntry: source } : {}),
-                autoContinueEnabledByDefault,
-                agentSuggestionEnabledByDefault,
               });
               if (createAsDraft) entry.draft = true;
               return entry;
@@ -516,11 +519,6 @@ export function createChatManagementRouteHandler(
         const deleteSettings = await resolveEffectiveDeleteActionSettings();
 
         try {
-          const autoContinueEnabledByDefault = (
-            await resolveEffectiveAgentMessageAutoContinueSettings()
-          ).enabledByDefault;
-          const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings())
-            .enabledByDefault;
           const chatWasDraft = isDraftChatEntry(resolved.drone?.chats?.[chatName]);
           await stopSingleDroneChatActivity({
             droneId,
@@ -561,8 +559,6 @@ export function createChatManagementRouteHandler(
               chatEntry: buildNewChatEntry({
                 droneEntry: resolved.drone,
                 createdAt: nowIso(),
-                autoContinueEnabledByDefault,
-                agentSuggestionEnabledByDefault,
               }),
             },
           });
@@ -772,9 +768,6 @@ export function createChatManagementRouteHandler(
             agentPermissionMode: normalizeAgentPermissionMode(
               (chatEntry as any).agentPermissionMode,
             ),
-            agentMessageAutoContinueEnabled:
-              (chatEntry as any).agentMessageAutoContinueEnabled === true,
-            agentSuggestionEnabled: (chatEntry as any).agentSuggestionEnabled === true,
             dockerSnapshotAfterAgentMessageEnabled: dockerSnapshotAfterAgentMessageEnabledForChat(
               resolved.drone,
               chatEntry,
@@ -923,16 +916,6 @@ export function createChatManagementRouteHandler(
           typeof body === 'object' &&
           Object.prototype.hasOwnProperty.call(body, 'agentPermissionMode'),
         );
-        const hasAutoContinueField = Boolean(
-          body &&
-          typeof body === 'object' &&
-          Object.prototype.hasOwnProperty.call(body, 'agentMessageAutoContinueEnabled'),
-        );
-        const hasAgentSuggestionField = Boolean(
-          body &&
-          typeof body === 'object' &&
-          Object.prototype.hasOwnProperty.call(body, 'agentSuggestionEnabled'),
-        );
         const hasDockerSnapshotField = Boolean(
           body &&
           typeof body === 'object' &&
@@ -940,8 +923,6 @@ export function createChatManagementRouteHandler(
         );
         let model: string | null = null;
         let agentPermissionMode: AgentPermissionMode = 'full-access';
-        let agentMessageAutoContinueEnabled = false;
-        let agentSuggestionEnabled = false;
         let dockerSnapshotAfterAgentMessageEnabled = false;
         if (hasModelField) {
           try {
@@ -964,26 +945,6 @@ export function createChatManagementRouteHandler(
             json(res, 400, { ok: false, error: e?.message ?? String(e) });
             return;
           }
-        }
-        if (hasAutoContinueField) {
-          if (
-            body?.agentMessageAutoContinueEnabled !== true &&
-            body?.agentMessageAutoContinueEnabled !== false
-          ) {
-            json(res, 400, {
-              ok: false,
-              error: 'agentMessageAutoContinueEnabled must be a boolean',
-            });
-            return;
-          }
-          agentMessageAutoContinueEnabled = body.agentMessageAutoContinueEnabled === true;
-        }
-        if (hasAgentSuggestionField) {
-          if (body?.agentSuggestionEnabled !== true && body?.agentSuggestionEnabled !== false) {
-            json(res, 400, { ok: false, error: 'agentSuggestionEnabled must be a boolean' });
-            return;
-          }
-          agentSuggestionEnabled = body.agentSuggestionEnabled === true;
         }
         if (hasDockerSnapshotField) {
           if (
@@ -1012,10 +973,6 @@ export function createChatManagementRouteHandler(
               model,
               setAgentPermissionMode: hasAgentPermissionModeField,
               agentPermissionMode,
-              setAgentMessageAutoContinueEnabled: hasAutoContinueField,
-              agentMessageAutoContinueEnabled,
-              setAgentSuggestionEnabled: hasAgentSuggestionField,
-              agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
             });
@@ -1046,10 +1003,6 @@ export function createChatManagementRouteHandler(
               model,
               setAgentPermissionMode: hasAgentPermissionModeField,
               agentPermissionMode,
-              setAgentMessageAutoContinueEnabled: hasAutoContinueField,
-              agentMessageAutoContinueEnabled,
-              setAgentSuggestionEnabled: hasAgentSuggestionField,
-              agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
             });
@@ -1062,8 +1015,6 @@ export function createChatManagementRouteHandler(
               agent,
               ...(hasModelField ? { model } : {}),
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
-              ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
-              ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
             });
             return;
@@ -1090,10 +1041,6 @@ export function createChatManagementRouteHandler(
               model,
               setAgentPermissionMode: hasAgentPermissionModeField,
               agentPermissionMode,
-              setAgentMessageAutoContinueEnabled: hasAutoContinueField,
-              agentMessageAutoContinueEnabled,
-              setAgentSuggestionEnabled: hasAgentSuggestionField,
-              agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
             });
@@ -1106,8 +1053,6 @@ export function createChatManagementRouteHandler(
               agent,
               ...(hasModelField ? { model } : {}),
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
-              ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
-              ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
             });
             return;
@@ -1120,10 +1065,6 @@ export function createChatManagementRouteHandler(
               model,
               setAgentPermissionMode: hasAgentPermissionModeField,
               agentPermissionMode,
-              setAgentMessageAutoContinueEnabled: hasAutoContinueField,
-              agentMessageAutoContinueEnabled,
-              setAgentSuggestionEnabled: hasAgentSuggestionField,
-              agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
             });
@@ -1134,8 +1075,6 @@ export function createChatManagementRouteHandler(
               chat: chatName,
               model,
               ...(hasAgentPermissionModeField ? { agentPermissionMode } : {}),
-              ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
-              ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
             });
             return;
@@ -1146,10 +1085,6 @@ export function createChatManagementRouteHandler(
               chatName,
               setAgentPermissionMode: true,
               agentPermissionMode,
-              setAgentMessageAutoContinueEnabled: hasAutoContinueField,
-              agentMessageAutoContinueEnabled,
-              setAgentSuggestionEnabled: hasAgentSuggestionField,
-              agentSuggestionEnabled,
               setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
               dockerSnapshotAfterAgentMessageEnabled,
             });
@@ -1159,53 +1094,6 @@ export function createChatManagementRouteHandler(
               name: droneName,
               chat: chatName,
               agentPermissionMode,
-              ...(hasAutoContinueField ? { agentMessageAutoContinueEnabled } : {}),
-              ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
-              ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
-            });
-            return;
-          }
-          if (hasAutoContinueField) {
-            await setChatAgentConfig({
-              droneId,
-              chatName,
-              setAgentPermissionMode: hasAgentPermissionModeField,
-              agentPermissionMode,
-              setAgentMessageAutoContinueEnabled: true,
-              agentMessageAutoContinueEnabled,
-              setAgentSuggestionEnabled: hasAgentSuggestionField,
-              agentSuggestionEnabled,
-              setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
-              dockerSnapshotAfterAgentMessageEnabled,
-            });
-            json(res, 200, {
-              ok: true,
-              id: droneId,
-              name: droneName,
-              chat: chatName,
-              agentMessageAutoContinueEnabled,
-              ...(hasAgentSuggestionField ? { agentSuggestionEnabled } : {}),
-              ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
-            });
-            return;
-          }
-          if (hasAgentSuggestionField) {
-            await setChatAgentConfig({
-              droneId,
-              chatName,
-              setAgentPermissionMode: hasAgentPermissionModeField,
-              agentPermissionMode,
-              setAgentSuggestionEnabled: true,
-              agentSuggestionEnabled,
-              setDockerSnapshotAfterAgentMessageEnabled: hasDockerSnapshotField,
-              dockerSnapshotAfterAgentMessageEnabled,
-            });
-            json(res, 200, {
-              ok: true,
-              id: droneId,
-              name: droneName,
-              chat: chatName,
-              agentSuggestionEnabled,
               ...(hasDockerSnapshotField ? { dockerSnapshotAfterAgentMessageEnabled } : {}),
             });
             return;
@@ -1230,7 +1118,7 @@ export function createChatManagementRouteHandler(
           }
           json(res, 400, {
             ok: false,
-            error: `invalid request (expected agent native|cursor|codex|claude|opencode|pi|blip|custom, model, agentPermissionMode, agentMessageAutoContinueEnabled, agentSuggestionEnabled, dockerSnapshotAfterAgentMessageEnabled)`,
+            error: `invalid request (expected agent native|cursor|codex|claude|opencode|pi|blip|custom, model, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled)`,
           });
           return;
         } catch (e: any) {

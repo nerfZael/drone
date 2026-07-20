@@ -34,8 +34,8 @@ Each aggregate has one canonical owner:
 - `host/prompt-queue-repository.ts`: prompt enqueue, claim, retry, cancellation, and lease recovery
 - `host/assistant-store.ts`: assistant preferences, threads, messages, prompts, and subscriptions
 - `host/hub-settings-repository.ts`: provider secrets and all Hub/UI/voice/agent/backup settings, one row per key
-- `host/catalog-store.ts`: groups, repositories, skills, MCP servers and tokens, and playbooks
-- `host/fleet-workflow-store.ts`: sync sets and durable playbook work (the filename is retained for database migration compatibility)
+- `host/catalog-store.ts`: groups, repositories, skills, and MCP servers and tokens
+- `host/fleet-workflow-store.ts`: sync sets (the filename is retained for database migration compatibility)
 - `host/hub-outbox.ts`: post-commit notifications and background effects
 
 Cross-domain group rename/delete is coordinated by `hub/group-orchestration.ts`, which
@@ -69,7 +69,7 @@ recurring workers must not use it for bounded reads.
 
 - `hub/canonical-drone-read-model.ts` builds the active/pending Drone Hub summary with a
   fixed set of targeted SQL queries. It reads only active lifecycle rows, chat metadata,
-  the latest 60 turns per chat (plus active queue-gate turns), and the bounded prompt
+  the latest 60 turns per chat and the bounded prompt
   data required by the UI. The model is read-only and may be shared briefly across
   simultaneous summary, status, SSE, and assistant-idle
   consumers.

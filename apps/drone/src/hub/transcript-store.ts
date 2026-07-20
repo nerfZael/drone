@@ -24,10 +24,7 @@ export type StoredTranscriptTurn = {
   model?: string;
   reasoning?: string;
   attachments?: unknown;
-  automation?: unknown;
   inheritedFromClone?: boolean;
-  agentMessageAutoContinue?: unknown;
-  agentSuggestion?: unknown;
   dockerSnapshot?: unknown;
   agentPlan?: AgentPlan;
 };
@@ -40,8 +37,6 @@ export type StoredPendingPrompt = {
   messageId?: string;
   cwd?: string | null;
   attachments?: unknown;
-  automation?: unknown;
-  blockedByAutomation?: boolean;
   state: string;
   error?: string;
   observability?: unknown;
@@ -372,6 +367,62 @@ export const CHAT_STORE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       }
     },
   },
+  {
+    version: 6,
+    name: 'remove retired chat automation state',
+    migrate(connection) {
+      const chatRows = connection
+        .prepare('SELECT drone_id, chat_name, metadata_json FROM canonical_chats')
+        .all() as Array<{ drone_id: string; chat_name: string; metadata_json: string }>;
+      const updateChat = connection.prepare(
+        'UPDATE canonical_chats SET metadata_json = ? WHERE drone_id = ? AND chat_name = ?',
+      );
+      for (const row of chatRows) {
+        const normalized = metadata(parseJson(row.metadata_json));
+        const serialized = stableJson(normalized);
+        if (serialized === row.metadata_json) continue;
+        updateChat.run(serialized, row.drone_id, row.chat_name);
+      }
+
+      const changedTranscripts = new Map<string, { droneId: string; chatName: string }>();
+      const turnRows = connection
+        .prepare('SELECT drone_id, chat_name, turn_id, turn_json FROM canonical_chat_turns')
+        .all() as Array<{ drone_id: string; chat_name: string; turn_id: string; turn_json: string }>;
+      const updateTurn = connection.prepare(
+        'UPDATE canonical_chat_turns SET turn_json = ? WHERE drone_id = ? AND chat_name = ? AND turn_id = ?',
+      );
+      for (const row of turnRows) {
+        const serialized = stableJson(normalizeTurn(parseJson(row.turn_json)));
+        if (serialized === row.turn_json) continue;
+        updateTurn.run(serialized, row.drone_id, row.chat_name, row.turn_id);
+        changedTranscripts.set(`${row.drone_id}\u0000${row.chat_name}`, {
+          droneId: row.drone_id,
+          chatName: row.chat_name,
+        });
+      }
+      for (const { droneId, chatName } of changedTranscripts.values()) {
+        refreshTranscriptMetadata(connection, droneId, chatName);
+      }
+
+      const archivedRows = connection
+        .prepare('SELECT drone_id, chat_name, chat_json FROM canonical_archived_chats')
+        .all() as Array<{ drone_id: string; chat_name: string; chat_json: string }>;
+      const updateArchived = connection.prepare(
+        'UPDATE canonical_archived_chats SET chat_json = ?, source_hash = ? WHERE drone_id = ? AND chat_name = ?',
+      );
+      for (const row of archivedRows) {
+        const normalized = normalizeStoredChatEntry(parseJson(row.chat_json));
+        const serialized = stableJson(normalized);
+        if (serialized === row.chat_json) continue;
+        updateArchived.run(
+          serialized,
+          chatEntrySourceHash(normalized),
+          row.drone_id,
+          row.chat_name,
+        );
+      }
+    },
+  },
 ];
 
 type ChatRow = {
@@ -458,15 +509,38 @@ function normalizeTurn(raw: any): StoredTranscriptTurn {
     ...(typeof raw?.model === 'string' && raw.model.trim() ? { model: raw.model.trim() } : {}),
     ...(typeof raw?.reasoning === 'string' && raw.reasoning.trim() ? { reasoning: raw.reasoning.trim() } : {}),
     ...(Array.isArray(raw?.attachments) ? { attachments: raw.attachments } : {}),
-    ...(raw?.automation && typeof raw.automation === 'object' ? { automation: raw.automation } : {}),
     ...(raw?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
-    ...(raw?.agentMessageAutoContinue && typeof raw.agentMessageAutoContinue === 'object'
-      ? { agentMessageAutoContinue: raw.agentMessageAutoContinue }
-      : {}),
-    ...(raw?.agentSuggestion && typeof raw.agentSuggestion === 'object' ? { agentSuggestion: raw.agentSuggestion } : {}),
     ...(raw?.dockerSnapshot && typeof raw.dockerSnapshot === 'object' ? { dockerSnapshot: raw.dockerSnapshot } : {}),
     ...(raw?.agentPlan && typeof raw.agentPlan === 'object' ? { agentPlan: raw.agentPlan } : {}),
   };
+}
+
+function stripRetiredChatFollowupMetadata(raw: unknown): Record<string, any> {
+  const value = raw && typeof raw === 'object' && !Array.isArray(raw)
+    ? { ...(raw as Record<string, any>) }
+    : {};
+  delete value.agentMessageAutoContinueEnabled;
+  delete value.agentMessageAutoContinueEnabledAt;
+  delete value.agentSuggestionEnabled;
+  delete value.agentSuggestionEnabledAt;
+  return value;
+}
+
+function stripRetiredPendingPromptMetadata(raw: unknown): unknown {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return raw;
+  const value = { ...(raw as Record<string, any>) };
+  delete value.automation;
+  delete value.blockedByAutomation;
+  return value;
+}
+
+function normalizeStoredChatEntry(raw: unknown): Record<string, any> {
+  const value = stripRetiredChatFollowupMetadata(raw);
+  if (Array.isArray(value.turns)) value.turns = value.turns.map(normalizeTurn);
+  if (Array.isArray(value.pendingPrompts)) {
+    value.pendingPrompts = value.pendingPrompts.map(stripRetiredPendingPromptMetadata);
+  }
+  return value;
 }
 
 function sortedTurns(turns: Iterable<StoredTranscriptTurn>): StoredTranscriptTurn[] {
@@ -487,7 +561,7 @@ function turnId(turn: StoredTranscriptTurn): string {
 }
 
 function metadata(chatEntry: any): any {
-  const value = chatEntry && typeof chatEntry === 'object' ? { ...chatEntry } : {};
+  const value = stripRetiredChatFollowupMetadata(chatEntry);
   delete value.turns;
   delete value.pendingPrompts;
   return value;
@@ -507,7 +581,7 @@ function archivedChatValue(raw: unknown): {
   archiveRetention: string;
 } | null {
   if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return null;
-  const value = { ...(raw as Record<string, any>) };
+  const value = normalizeStoredChatEntry(raw);
   const archivedAtRaw = String(value.archivedAt ?? '').trim();
   const archivedAt = Number.isFinite(Date.parse(archivedAtRaw)) ? archivedAtRaw : new Date().toISOString();
   const archiveRetentionRaw = String(value.archiveRetention ?? '').trim();
@@ -534,7 +608,7 @@ function archivedChatRecord(row: ArchivedChatRow | undefined): ArchivedChatRecor
   return {
     droneId: row.drone_id,
     chatName: row.chat_name,
-    chat: parseJson(row.chat_json),
+    chat: normalizeStoredChatEntry(parseJson(row.chat_json)),
     archivedAt: row.archived_at,
     deleteAt: row.delete_at,
     archiveRetention: row.archive_retention,
@@ -550,9 +624,7 @@ function safeMetadataField(raw: unknown): string | null {
 }
 
 function applyMetadataPatch(currentRaw: unknown, patch?: ChatMetadataPatch): { metadata: Record<string, unknown>; changed: boolean; fields: string[] } {
-  const current = currentRaw && typeof currentRaw === 'object' && !Array.isArray(currentRaw)
-    ? { ...(currentRaw as Record<string, unknown>) }
-    : {};
+  const current = stripRetiredChatFollowupMetadata(currentRaw);
   const fields = new Set<string>();
   for (const [rawField, value] of Object.entries(patch?.setIfMissing ?? {})) {
     const field = safeMetadataField(rawField);
@@ -1510,7 +1582,7 @@ export class ChatTranscriptRepository {
     return this.database.read((connection) => {
       const row = this.chatRow(connection, opts.droneId, opts.chatName);
       if (!row) return { available: true, chat: null, sourceHash: '' };
-      const base = parseJson(row.metadata_json);
+      const base = metadata(parseJson(row.metadata_json));
       return {
         available: true,
         chat: {
@@ -1551,7 +1623,7 @@ export class ChatTranscriptRepository {
       const countRow = connection.prepare(`SELECT COUNT(*) AS count FROM canonical_chat_turns
         WHERE drone_id = ? AND chat_name = ?`).get(opts.droneId, opts.chatName) as { count: number };
       const pendingVersion = opts.includePending ? this.pendingVersion(connection, opts.droneId, opts.chatName) : '';
-      const parsed = parseJson(row.metadata_json);
+      const parsed = metadata(parseJson(row.metadata_json));
       return {
         available: true,
         chat: parsed && typeof parsed === 'object' ? parsed : {},
@@ -1655,7 +1727,7 @@ export class ChatTranscriptRepository {
   private projectChatWithConnection(connection: HubDatabaseConnection, droneId: string, chatName: string): any | null {
     const row = this.chatRow(connection, droneId, chatName);
     if (!row) return null;
-    const base = parseJson(row.metadata_json);
+    const base = metadata(parseJson(row.metadata_json));
     let pendingPrompts: any[] = [];
     const hasPrompts = connection.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'prompts'").get();
     if (hasPrompts) {

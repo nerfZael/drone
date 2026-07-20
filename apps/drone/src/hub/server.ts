@@ -12,7 +12,6 @@ import { WebSocket } from 'ws';
 import { BaseConfigManager } from 'dvm';
 
 import { ensureContainerDroneDaemonSession } from '../host/container-daemon';
-import { getFleetWorkflowStore } from '../host/fleet-workflow-store';
 import {
   HubOutboxDispatcher,
   HubOutboxDispatchLoop,
@@ -32,7 +31,6 @@ import {
 } from '../host/profile-manager';
 import {
   loadRegistry,
-  loadRegistryCompatibilityBase,
   updateRegistry as updateHostRegistry,
 } from '../host/registry';
 import { getCatalogStore } from '../host/catalog-store';
@@ -94,8 +92,6 @@ import { suggestDroneNameFromMessage } from './jobs-from-message';
 import { buildAutoRenamedChatCandidate, isGeneratedChatName } from './chat-auto-rename';
 import type { AgentPermissionMode, BuiltinAgentId, ChatAgentConfig } from './chat-types';
 import { createDeviceMeshService } from './device-mesh';
-import { PromptAutomationBroadcaster } from './prompt-automation-broadcaster';
-import { PromptAutomationService } from './prompt-automation-service';
 import {
   canonicalRepositoriesMap,
   ensureCanonicalGroup,
@@ -110,7 +106,6 @@ import {
   deleteCanonicalGroupArtifacts,
   renameCanonicalGroupOrchestration,
 } from './group-orchestration';
-import { classifyAgentMessageAutoContinue } from './agent-message-auto-continue';
 import { resolveTranscriptPromptAt } from './transcript-order';
 import {
   applyChatReconciliationInStore,
@@ -278,7 +273,7 @@ import { NativeChatLifecycle } from './assistant/native-chat-lifecycle';
 import { buildNativeModelCatalog } from './assistant/native-model-catalog';
 import { registerNativeChatRoutes } from './routes/native-chat-routes';
 import { registerCatalogRoutes } from './routes/catalog-routes';
-import { createChatAutomationRouteHandler } from './routes/chat-automation-routes';
+import { createChatRouteHandler } from './routes/chat-routes';
 import { createDroneLifecycleRouteHandler } from './routes/drone-lifecycle-routes';
 import { createDroneProvisioningRouteHandler } from './routes/drone-provisioning-routes';
 import { createEditorRouteHandler } from './routes/editor-routes';
@@ -287,7 +282,6 @@ import { registerFleetRoutes } from './routes/fleet-routes';
 import { registerGroupRoutes } from './routes/group-routes';
 import { registerMessageRoutes } from './routes/message-routes';
 import { registerOperationalRoutes } from './routes/operational-routes';
-import { registerPlaybookRoutes } from './routes/playbook-routes';
 import { createRepositoryRouteHandler } from './routes/repository-operation-routes';
 import { registerRepositoryRoutes } from './routes/repository-routes';
 import { registerSettingsRoutes } from './routes/settings-routes';
@@ -350,8 +344,6 @@ import {
   collectProviderApiKeyDiagnostics,
   FILESYSTEM_UPLOAD_MAX_BYTES_MAX,
   FILESYSTEM_UPLOAD_MAX_BYTES_MIN,
-  normalizeAgentMessageAutoContinuePrompt,
-  normalizeAgentSuggestionPolicyMarkdown,
   UiPreferencesSettingsConflictError,
   UiPreferencesSettingsValidationError,
   hubLog,
@@ -363,10 +355,6 @@ import {
   parseLlmProvider,
   providerDisplayName,
   providerKeySettingsResponse,
-  resolveAgentMessageAutoContinueSettingsResponse,
-  resolveAgentSuggestionSettingsResponse,
-  resolveEffectiveAgentMessageAutoContinueSettings,
-  resolveEffectiveAgentSuggestionSettings,
   resolveDeleteActionSettingsResponse,
   resolveEffectiveFilesystemSettings,
   resolveEffectiveDeleteActionSettings,
@@ -381,8 +369,6 @@ import {
   startCodexLogin,
   upsertStoredDeleteActionSettings,
   upsertStoredFilesystemSettings,
-  upsertStoredAgentMessageAutoContinueSettings,
-  upsertStoredAgentSuggestionSettings,
   upsertStoredLlmProvider,
   upsertStoredProviderApiKey,
   upsertStoredUiPreferencesSettings,
@@ -464,7 +450,6 @@ import {
   renameDroneDisplayName,
   setDroneEnvironmentMetadata,
   setDroneGroupMetadata,
-  setDronePresentationMetadata,
   updateDroneFleetMetadata,
 } from './drone-metadata-commands';
 import { createPendingDroneStateHelpers, type PendingPhase } from './drone-pending-state';
@@ -473,7 +458,11 @@ import { createDroneProvisioningController } from './drone-provisioning';
 import { createDockerSnapshotRuntime } from './docker-snapshot-runtime';
 import { createDroneLifecycleRuntime } from './drone-lifecycle-runtime';
 import { createFilesystemRuntime } from './filesystem-runtime';
-import { createPlaybookRuntime } from './playbook-runtime';
+import {
+  isDraftChatEntry,
+  isDraftDroneEntry,
+  summarizeDroneActivity,
+} from './drone-summary-helpers';
 import { summarizeAssistantChatIdle } from './assistant';
 import { saveAssistantArtifactUploads, validateAssistantPromptImages } from './assistant-artifacts';
 
@@ -483,7 +472,6 @@ const requireForHub = createRequire(__filename);
 
 let notifyDroneRegistryWrite: (() => void) | null = null;
 let notifyDroneChatWrite: ((droneId: string, chatName: string) => void) | null = null;
-let notifyPromptAutomationLaneChange: ((droneId: string, chatName: string) => void) | null = null;
 
 async function updateRegistry<T>(
   mutator: (reg: any) => T | Promise<T>,
@@ -2356,21 +2344,6 @@ function parseAgentPermissionModeForUpdate(raw: unknown): AgentPermissionMode {
   throw new Error('agentPermissionMode must be full-access or read-only');
 }
 
-type PromptAutomationMeta = {
-  kind: 'prompt-loop';
-  stage?: 'run' | 'final-message';
-  jobKey?: string;
-  automationId?: string;
-  automationLabel?: string;
-  runIndex?: number;
-  runsTotal?: number;
-  sleepBetweenRunsSeconds?: number;
-  stopPhrase?: string;
-  stopPhraseCaseSensitive?: boolean;
-  stopMatchedRunIndex?: number;
-  promptPreview?: string;
-};
-
 type DiscoveredModelOption = {
   id: string;
   label: string;
@@ -2392,23 +2365,7 @@ type TranscriptTurn = {
   promptAt?: string;
   completedAt?: string;
   attachments?: ChatImageAttachmentRef[];
-  automation?: PromptAutomationMeta;
   inheritedFromClone?: boolean;
-  agentMessageAutoContinue?: {
-    status?: 'pending' | 'classified' | 'failed';
-    bucket?: 'user-turn' | 'continue';
-    source?: 'llm' | 'agent-copilot-json' | 'heuristic';
-    classifiedAt?: string;
-    continuedAt?: string;
-    error?: string;
-    updatedAt?: string;
-  };
-  agentSuggestion?: {
-    usedDirectAt?: string;
-    suggestionHash?: string;
-    policyFingerprint?: string;
-    updatedAt?: string;
-  };
   dockerSnapshot?: {
     id: string;
     status: 'creating' | 'ready' | 'failed' | 'restoring';
@@ -2597,62 +2554,9 @@ const {
   startupPromptToPendingPrompt,
 } = createPendingDroneStateHelpers({ normalizeChatName, nowIso });
 
-const {
-  workflowStoreOrCompatibility,
-  runPlaybookRunQueueCycle,
-  startPlaybookRunQueueScheduler,
-  closePlaybookRuntime,
-  normalizeDroneEntryKind,
-  normalizeDroneEntryVisibility,
-  playbookMetaFromEntry,
-  normalizePlaybookLabel,
-  normalizePlaybookMessages,
-  normalizePlaybookArtifacts,
-  normalizePlaybookActions,
-  normalizePlaybookAgent,
-  normalizePlaybookDefinitions,
-  catalogPlaybookRecord,
-  listCanonicalPlaybookDefinitions,
-  summarizeDroneActivity,
-  isDraftDroneEntry,
-  isDraftChatEntry,
-  summarizePlaybookRunEntry,
-  PLAYBOOK_RUN_QUEUE_BATCH_MIN,
-  PLAYBOOK_RUN_QUEUE_BATCH_MAX,
-  readPlaybookRunQueueItems,
-  writePlaybookRunQueueItems,
-  enqueueCanonicalPlaybookQueueItem,
-  normalizePlaybookRunQueueGate,
-  summarizePlaybookRunQueueItems,
-  makeDroneIdentity,
-  startPlaybookRunLaunch,
-} = createPlaybookRuntime({
-  allocateUntitledDisplayName,
-  commitDroneMetadataPatch,
-  deriveCanonicalCreatedDroneEnvironmentConfig,
-  fileExists,
-  getCatalogStore,
-  getFleetWorkflowStore,
-  gitPullHostBranchBeforeCreate,
-  hubLog,
-  loadRegistry,
-  loadRegistryCompatibilityBase,
-  normalizeChatModel,
-  normalizeChatName,
-  normalizePendingStartupPrompts,
-  nowIso,
-  parseSeedAgent,
-  readCanonicalActiveDroneModel,
-  resolveDroneCliPath,
-  startupPromptToPendingPrompt,
-  updateRegistry,
-  upsertCanonicalDroneLifecycle,
-  busyChatNamesForDrone: (...args: any[]) => promptRuntime.busyChatNamesForDrone(...args),
-  enqueueProvisioning: (...args: any[]) => promptRuntime.enqueueProvisioning(...args),
-  pendingPromptsFromChatEntry: (...args: any[]) =>
-    promptRuntime.pendingPromptsFromChatEntry(...args),
-  transcriptTurnIdsFromEntry: (...args: any[]) => promptRuntime.transcriptTurnIdsFromEntry(...args),
-});
+function makeDroneIdentity(): string {
+  return crypto.randomUUID();
+}
 
 const CHAT_NAME_MAX_LEN = 64;
 
@@ -2671,61 +2575,6 @@ function chatNameExists(droneEntry: any, chatNameRaw: unknown): boolean {
   if (!chatName) return false;
   const chats = droneEntry?.chats && typeof droneEntry.chats === 'object' ? droneEntry.chats : null;
   return Boolean(chats?.[chatName]);
-}
-
-function normalizePromptAutomationRuns(raw: unknown): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return PROMPT_AUTOMATION_RUNS_DEFAULT;
-  return Math.max(PROMPT_AUTOMATION_RUNS_MIN, Math.min(PROMPT_AUTOMATION_RUNS_MAX, Math.round(n)));
-}
-
-function normalizePromptAutomationSleepBetweenRunsSeconds(raw: unknown): number {
-  const n = Number(raw);
-  if (!Number.isFinite(n)) return PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_DEFAULT;
-  return Math.max(
-    PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_MIN,
-    Math.min(PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_MAX, Math.round(n)),
-  );
-}
-
-function normalizePromptAutomationSleepBetweenRunsSecondsFromBody(raw: unknown): number {
-  const body = raw && typeof raw === 'object' ? (raw as any) : {};
-  const directSecondsRaw = Number(body?.sleepBetweenRunsSeconds);
-  if (Number.isFinite(directSecondsRaw)) {
-    return normalizePromptAutomationSleepBetweenRunsSeconds(directSecondsRaw);
-  }
-
-  const amountRaw = Number(body?.sleepAmount);
-  if (!Number.isFinite(amountRaw)) return PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_DEFAULT;
-  const amount = Math.max(0, Math.round(amountRaw));
-  const unitRaw = String(body?.sleepUnit ?? '')
-    .trim()
-    .toLowerCase();
-  const multiplier =
-    unitRaw === 'days'
-      ? 24 * 60 * 60
-      : unitRaw === 'hours'
-        ? 60 * 60
-        : unitRaw === 'minutes'
-          ? 60
-          : 1;
-  return normalizePromptAutomationSleepBetweenRunsSeconds(amount * multiplier);
-}
-
-function normalizePromptAutomationStopPhrase(raw: unknown): string {
-  return String(raw ?? '')
-    .trim()
-    .slice(0, PROMPT_AUTOMATION_STOP_PHRASE_MAX_CHARS);
-}
-
-function normalizePromptAutomationStopPhraseCaseSensitive(raw: unknown): boolean {
-  return raw === true;
-}
-
-function normalizePromptAutomationOnFailurePrompt(raw: unknown): string {
-  return String(raw ?? '')
-    .slice(0, PROMPT_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS)
-    .trim();
 }
 
 function normalizeBuiltinAgentId(raw: any): BuiltinAgentId | null {
@@ -2824,18 +2673,6 @@ const githubPullRequestListCache = new Map<
   }
 >();
 
-const PROMPT_AUTOMATION_RUNS_MIN = 1;
-const PROMPT_AUTOMATION_RUNS_MAX = 20;
-const PROMPT_AUTOMATION_RUNS_DEFAULT = 5;
-const PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_MIN = 0;
-const PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_MAX = 10 * 365 * 24 * 60 * 60;
-const PROMPT_AUTOMATION_SLEEP_BETWEEN_RUNS_SECONDS_DEFAULT = 0;
-const PROMPT_AUTOMATION_STOP_PHRASE_MAX_CHARS = 320;
-const PROMPT_AUTOMATION_WAIT_POLL_MS = 120;
-const PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS = 30 * 60_000;
-const PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS = 30 * 60_000;
-const PROMPT_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS = 8_000;
-const PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS = 120;
 const AGENT_COPILOT_HANDLED_CAP = 500;
 
 function attachReviewMetadataToPullEntries<T extends { path: string; originalPath: string | null }>(
@@ -2850,8 +2687,6 @@ function attachReviewMetadataToPullEntries<T extends { path: string; originalPat
     };
   });
 }
-const PROMPT_AUTOMATION_COMPLETION_STALL_RECOVERY_GRACE_MS = 15_000;
-
 function clearGithubPullRequestListCache(repoRootRaw: string): void {
   const repoRoot = String(repoRootRaw ?? '').trim();
   if (!repoRoot) return;
@@ -3440,8 +3275,6 @@ async function cliSupportsModelFlag(opts: {
 let dockerSnapshotRuntime: any;
 
 const chatSessionRuntime = createChatSessionRuntime({
-  appendPromptAutomationHistoryRows: (...args: any[]) =>
-    promptRuntime.appendPromptAutomationHistoryRows(...args),
   applyChatReconciliationInStore,
   assertChatAgentSupportedForDrone,
   bashQuote,
@@ -3463,7 +3296,6 @@ const chatSessionRuntime = createChatSessionRuntime({
     promptRuntime.ensureDaemonPromptEventSubscription(...args),
   failStaleDockerSnapshotsForChat: (...args: any[]) =>
     dockerSnapshotRuntime.failStaleDockerSnapshotsForChat(...args),
-  getPromptAutomationLane: (...args: any[]) => promptRuntime.getPromptAutomationLane(...args),
   hubChatSessionName,
   hubLog,
   importChatFromRegistry,
@@ -3474,12 +3306,8 @@ const chatSessionRuntime = createChatSessionRuntime({
   loadRegistry,
   migrateInMemoryChatStateForRename: (...args: any[]) =>
     promptRuntime.migrateInMemoryChatStateForRename(...args),
-  normalizeAgentMessageAutoContinueTurnState: (...args: any[]) =>
-    promptRuntime.normalizeAgentMessageAutoContinueTurnState(...args),
   normalizeAgentPermissionMode,
   normalizeAgentPlan,
-  normalizeAgentSuggestionTurnState: (...args: any[]) =>
-    promptRuntime.normalizeAgentSuggestionTurnState(...args),
   normalizeBuiltinAgentId,
   normalizeChatImageAttachmentRefs: (...args: any[]) =>
     promptRuntime.normalizeChatImageAttachmentRefs(...args),
@@ -3491,8 +3319,6 @@ const chatSessionRuntime = createChatSessionRuntime({
     dockerSnapshotRuntime.normalizeDockerSnapshot(...args),
   normalizeDroneIdentity,
   normalizePendingStartupPrompts,
-  normalizePromptAutomationMeta: (...args: any[]) =>
-    promptRuntime.normalizePromptAutomationMeta(...args),
   nowIso,
   parseChatNameForMutation,
   patchChatMetadataInStore,
@@ -3509,8 +3335,6 @@ const chatSessionRuntime = createChatSessionRuntime({
   resolveCanonicalDroneOrPendingForReadRef,
   resolveContainerTerminalShellCommand,
   resolveDroneOrPendingForReadRef,
-  resolveEffectiveAgentMessageAutoContinueSettings,
-  resolveEffectiveAgentSuggestionSettings,
   resolveHubAgentCommand,
   resolveNameSuggestionLlmSettings,
   runHostCommand,
@@ -3565,7 +3389,6 @@ dockerSnapshotRuntime = createDockerSnapshotRuntime({
   droneRuntime,
   droneStatus,
   enqueuePendingPromptPump: (...args: any[]) => promptRuntime.enqueuePendingPromptPump(...args),
-  getPromptAutomationLane: (...args: any[]) => promptRuntime.getPromptAutomationLane(...args),
   hubLog,
   inferChatAgent,
   loadRegistry,
@@ -3574,7 +3397,6 @@ dockerSnapshotRuntime = createDockerSnapshotRuntime({
   normalizeDroneIdentity,
   nowIso,
   projectCanonicalChatToRegistry,
-  promptAutomationLaneBusy: (...args: any[]) => promptRuntime.promptAutomationLaneBusy(...args),
   readChatFromStore,
   resolveHostPort,
   rollbackTranscriptToTurnInStore,
@@ -3606,12 +3428,6 @@ const {
 promptRuntime = createChatPromptRuntime({
   AGENT_COPILOT_HANDLED_CAP,
   NON_REPO_HOME_CWD,
-  PROMPT_AUTOMATION_COMPLETION_STALL_RECOVERY_GRACE_MS,
-  PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS,
-  PROMPT_AUTOMATION_STOP_PHRASE_MAX_CHARS,
-  PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS,
-  PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
-  PROMPT_AUTOMATION_WAIT_POLL_MS,
   PROMPT_SKILL_SYNC_WARNINGS,
   UPGRADE_DAEMON_READY_TIMEOUT_MS,
   applyChatReconciliationInStore,
@@ -3625,7 +3441,6 @@ promptRuntime = createChatPromptRuntime({
   chatAttachmentsStorageRootForDrone,
   chatHasActiveDockerSnapshot,
   chatNameExists,
-  classifyAgentMessageAutoContinue,
   cliSupportsModelFlag,
   cloneChatEntryForDroneClone,
   codexImageAttachmentFlags,
@@ -3678,20 +3493,13 @@ promptRuntime = createChatPromptRuntime({
   normalizeChatReasoning,
   normalizeContainerPath,
   normalizeDroneCwdForRuntime,
-  normalizeDroneEntryKind,
-  normalizeDroneEntryVisibility,
   normalizeDroneIdentity,
   normalizePendingPromptState,
   normalizePendingPromptText,
   normalizePendingStartupPrompts,
-  normalizePlaybookRunQueueGate,
-  normalizePromptAutomationSleepBetweenRunsSeconds,
-  normalizePromptAutomationStopPhrase,
   normalizeSubmittedAtIso,
   notifyDroneChatWrite: (droneId: string, chatName: string) =>
     notifyDroneChatWrite?.(droneId, chatName),
-  notifyPromptAutomationLaneChange: (droneId: string, chatName: string) =>
-    notifyPromptAutomationLaneChange?.(droneId, chatName),
   nowIso,
   openCodeSessionTitle,
   parseBlipJobTranscript,
@@ -3701,7 +3509,6 @@ promptRuntime = createChatPromptRuntime({
   parseSeedAgent,
   parseStructuredAgentJobTranscript,
   patchChatMetadataInStore,
-  playbookMetaFromEntry,
   promptNativeChat: (input: any) => nativeChatPromptHandler(input),
   stopNativeChat: (nativeChatId: string) => nativeChatStopHandler(nativeChatId),
   nativeChatIsBusy: (nativeChatId: string) => nativeChatIsBusyHandler(nativeChatId),
@@ -3720,8 +3527,6 @@ promptRuntime = createChatPromptRuntime({
   resolveDroneCliPath,
   resolveDroneDaemonClientForEntry,
   resolveDroneEnvironmentConfig,
-  resolveEffectiveAgentMessageAutoContinueSettings,
-  resolveEffectiveAgentSuggestionSettings,
   resolveEffectiveLlmProvider,
   resolveEffectiveProviderApiKeySettings,
   resolveHostPort,
@@ -3752,8 +3557,6 @@ promptRuntime = createChatPromptRuntime({
 });
 
 const {
-  activePromptAutomationPendingPromptIds,
-  appendPromptAutomationHistoryRows,
   attachmentOnlyPromptLabel,
   busyChatNamesForDrone,
   cancelQueuedPendingPrompt,
@@ -3769,29 +3572,19 @@ const {
   enqueueProvisioningForAllPending,
   enqueueReconcile,
   ensureDaemonPromptEventSubscription,
-  getPromptAutomationLane,
   isSafePromptId,
   looksLikeContainerAlreadyRunningError,
   looksLikeContainerNotRunningError,
   looksLikeMissingContainerError,
   looksLikeRepoUnavailableError,
-  markTranscriptTurnAgentSuggestionUsedDirect,
   migrateInMemoryChatStateForRename,
-  normalizeAgentMessageAutoContinueTurnState,
-  normalizeAgentSuggestionTurnState,
   normalizeChatImageAttachmentRefs,
-  normalizePromptAutomationMeta,
   pendingPromptsFromChatEntry,
-  promptAutomationJobKey,
-  promptAutomationJobResponse,
-  promptAutomationLaneBusy,
-  promptAutomationManager,
   pruneCompletedPendingPrompts,
   pushPendingPrompt,
   pushPendingStartupPrompt,
   readPendingPrompts,
   readPendingStartupPrompts,
-  recoverStalledPromptAutomationLane,
   resumePendingPromptChats,
   runDroneLifecycleAction,
   stopAllDroneChatActivity,
@@ -3800,10 +3593,6 @@ const {
   stopTranscriptPendingPrompts,
   transcriptTurnIdsFromEntry,
 } = promptRuntime;
-
-export async function resetPromptAutomationStateForTests(): Promise<void> {
-  await promptRuntime.resetPromptAutomationStateForTests();
-}
 
 function resolveDroneCliPath(): string {
   // Prefer built CLI when available. In source/dev mode, fall back to src/cli.ts.
@@ -4191,8 +3980,6 @@ const {
   readChatFromStore,
   removeDockerSnapshotImagesBestEffort,
   removeDroneRuntimeArtifacts,
-  resolveEffectiveAgentMessageAutoContinueSettings,
-  resolveEffectiveAgentSuggestionSettings,
   restoreArchivedChatInStore,
   revokeMcpAccessTokensForDrone,
   updateRegistry,
@@ -4600,7 +4387,6 @@ export async function startDroneHubApiServer(opts: {
   }
 
   startArchiveCleanupScheduler();
-  startPlaybookRunQueueScheduler();
   startRegistryBackupScheduler();
 
   const wss = createTerminalWebSocketServer({
@@ -5314,10 +5100,7 @@ export async function startDroneHubApiServer(opts: {
       id: normalizeDroneIdentity(p?.id) || null,
       name: String(p?.name ?? ''),
       group: typeof p?.group === 'string' && p.group.trim() ? p.group.trim() : null,
-      kind: normalizeDroneEntryKind(p?.kind),
-      visibility: normalizeDroneEntryVisibility(p?.visibility),
       draft: isDraftDroneEntry(p),
-      playbook: playbookMetaFromEntry(p?.playbook),
       createdAt: String(p?.createdAt ?? nowIso()),
       lastActivityAt: activity.lastActivityAt,
       lastMessageAt: activity.lastMessageAt,
@@ -5419,9 +5202,6 @@ export async function startDroneHubApiServer(opts: {
       id: normalizeDroneIdentity(d?.id) || null,
       name: d.name,
       group: d.group ?? null,
-      kind: normalizeDroneEntryKind(d?.kind),
-      visibility: normalizeDroneEntryVisibility(d?.visibility),
-      playbook: playbookMetaFromEntry(d?.playbook),
       createdAt: d.createdAt,
       lastActivityAt: activity.lastActivityAt,
       lastMessageAt: activity.lastMessageAt,
@@ -5526,44 +5306,6 @@ export async function startDroneHubApiServer(opts: {
   const stopDroneChatBroadcasterIfIdle = () => droneChatBroadcaster.stopIfIdle();
   const stopDroneRegistryBroadcasterIfIdle = () => droneRegistryBroadcaster.stopIfIdle();
 
-  const promptAutomationBroadcaster = new PromptAutomationBroadcaster({
-    key: promptAutomationJobKey,
-    normalizeDroneId: normalizeDroneIdentity,
-    normalizeChatName,
-    nowIso,
-    writeSseEvent: writeHubSseEvent,
-    async buildStatusPayload(meta) {
-      let lane = getPromptAutomationLane(meta.droneId, meta.chatName);
-      await recoverStalledPromptAutomationLane(lane);
-      lane = getPromptAutomationLane(meta.droneId, meta.chatName);
-      return {
-        ok: true,
-        automation: 'prompt-loop',
-        id: meta.droneId,
-        name: meta.name || meta.droneId,
-        chat: meta.chatName,
-        job: promptAutomationJobResponse(lane),
-      };
-    },
-  });
-  const promptAutomationService = new PromptAutomationService({
-    manager: promptAutomationManager,
-    events: promptAutomationBroadcaster,
-    normalizeDroneId: normalizeDroneIdentity,
-    normalizeChatName,
-    normalizeOnFailurePrompt: normalizePromptAutomationOnFailurePrompt,
-    normalizeRuns: normalizePromptAutomationRuns,
-    normalizeSleepBetweenRunsSecondsFromBody:
-      normalizePromptAutomationSleepBetweenRunsSecondsFromBody,
-    normalizeStopPhrase: normalizePromptAutomationStopPhrase,
-    normalizeStopPhraseCaseSensitive: normalizePromptAutomationStopPhraseCaseSensitive,
-    ensureChatEntry,
-    getChatEntry,
-    inferChatAgent,
-    recoverStalledLane: recoverStalledPromptAutomationLane,
-    activePendingPromptIds: activePromptAutomationPendingPromptIds,
-  });
-
   const notifyCanonicalDroneRegistryWrite = () => {
     canonicalActiveModelCache = null;
     invalidateDroneSummaryRegistryCache();
@@ -5591,11 +5333,6 @@ export async function startDroneHubApiServer(opts: {
     });
   };
   notifyDroneChatWrite = notifyCanonicalPromptQueueChatWrite;
-  const notifyCanonicalPromptAutomationLaneChange = (droneId: string, chatName: string) => {
-    promptAutomationBroadcaster.notify(droneId, chatName);
-  };
-  notifyPromptAutomationLaneChange = notifyCanonicalPromptAutomationLaneChange;
-
   let containerMcpServer: http.Server | null = null;
   let containerMcpActualPort =
     Number.isFinite(containerMcpPort) && containerMcpPort > 0 ? Math.floor(containerMcpPort) : 0;
@@ -5674,12 +5411,6 @@ export async function startDroneHubApiServer(opts: {
     resolveRegistryBackupStatusResponse,
     upsertStoredRegistryBackupSettings,
     createRegistryBackup,
-    resolveAgentMessageAutoContinueSettingsResponse,
-    normalizeAgentMessageAutoContinuePrompt,
-    upsertStoredAgentMessageAutoContinueSettings,
-    resolveAgentSuggestionSettingsResponse,
-    normalizeAgentSuggestionPolicyMarkdown,
-    upsertStoredAgentSuggestionSettings,
     defaultAgentsPayload,
     normalizeAgentsMarkdown,
     upsertCanonicalDefaultAgentsConfig,
@@ -5717,7 +5448,6 @@ export async function startDroneHubApiServer(opts: {
   registerMessageRoutes(apiRouter, {
     resolveEffectiveLlmProvider,
     resolveEffectiveProviderApiKeySettings,
-    resolveEffectiveAgentSuggestionSettings,
     resolveNameSuggestionLlmSettings,
     logProviderApiKeyResolution,
     llmProviderEnvLogMeta,
@@ -5792,38 +5522,6 @@ export async function startDroneHubApiServer(opts: {
     normalizeRepoAgentsMode,
     normalizeAgentsMarkdown,
     updateCanonicalRepositoryAgents,
-  });
-
-  registerPlaybookRoutes(apiRouter, {
-    listCanonicalPlaybookDefinitions,
-    normalizePlaybookLabel,
-    normalizePlaybookAgent,
-    parseChatModelForUpdate,
-    normalizePlaybookMessages,
-    normalizePlaybookArtifacts,
-    normalizePlaybookActions,
-    nowIso,
-    getCatalogStore,
-    catalogPlaybookRecord,
-    updateRegistry,
-    normalizePlaybookDefinitions,
-    parsePullHostBranchBeforeCreate,
-    PLAYBOOK_RUN_QUEUE_BATCH_MIN,
-    PLAYBOOK_RUN_QUEUE_BATCH_MAX,
-    startPlaybookRunLaunch,
-    formatPullHostBranchBeforeCreateError,
-    enqueueCanonicalPlaybookQueueItem,
-    runPlaybookRunQueueCycle,
-    loadRegistry,
-    normalizeDroneIdentity,
-    playbookMetaFromEntry,
-    normalizeDroneEntryKind,
-    summarizePlaybookRunEntry,
-    normalizeDroneRuntime,
-    summarizePlaybookRunQueueItems,
-    workflowStoreOrCompatibility,
-    readPlaybookRunQueueItems,
-    writePlaybookRunQueueItems,
   });
 
   registerGroupRoutes(apiRouter, {
@@ -6041,8 +5739,7 @@ export async function startDroneHubApiServer(opts: {
     withReadonlyDroneContainer,
   });
 
-  const handleChatAutomationRoute = createChatAutomationRouteHandler({
-    promptAutomation: promptAutomationService,
+  const handleChatRoute = createChatRouteHandler({
     archiveChatById,
     attachmentOnlyPromptLabel,
     autoRenameGeneratedChatFromFirstPrompt,
@@ -6093,7 +5790,6 @@ export async function startDroneHubApiServer(opts: {
     logSlowHubRequest,
     markChatReadInStore,
     markChatUnreadInStore,
-    markTranscriptTurnAgentSuggestionUsedDirect,
     migrateInMemoryChatStateForRename,
     nativeChatHasHistory: async (nativeChatId: string) => {
       if (await assistantService.nativeThreadHasHistory(nativeChatId)) return true;
@@ -6137,15 +5833,12 @@ export async function startDroneHubApiServer(opts: {
     resolveDroneFromRegistryRef,
     resolveDroneOrPendingForReadRef,
     resolveDroneOrRespond,
-    resolveEffectiveAgentMessageAutoContinueSettings,
-    resolveEffectiveAgentSuggestionSettings,
     resolveEffectiveDeleteActionSettings,
     restoreDockerSnapshotForTranscriptTurn,
     setChatAgentConfig,
     shouldAutoRenameChatOnPrompt,
     stopChatResponse,
     stopSingleDroneChatActivity,
-    stopTranscriptPendingPrompts,
     updateChatInStore,
     waitForDroneDaemonReady,
     withLockedDroneContainer,
@@ -6301,7 +5994,7 @@ export async function startDroneHubApiServer(opts: {
 
       if (await handleEditorRoute({ req, res, url: u, method, parts })) return;
 
-      if (await handleChatAutomationRoute({ req, res, url: u, method, parts })) return;
+      if (await handleChatRoute({ req, res, url: u, method, parts })) return;
 
       if (pathname.startsWith('/api/')) {
         hubLog('warn', 'api route not found', {
@@ -6440,10 +6133,6 @@ export async function startDroneHubApiServer(opts: {
       if (notifyDroneRegistryWrite === notifyCanonicalDroneRegistryWrite) {
         notifyDroneRegistryWrite = null;
       }
-      if (notifyPromptAutomationLaneChange === notifyCanonicalPromptAutomationLaneChange) {
-        notifyPromptAutomationLaneChange = null;
-      }
-      promptAutomationBroadcaster.close();
       if (activeDroneHubMcpProjectionConfig?.signingSecret === mcpToken) {
         activeDroneHubMcpProjectionConfig = null;
       }
@@ -6513,7 +6202,6 @@ export async function startDroneHubApiServer(opts: {
       await waitWithTimeout(serverClose, 3_000);
       await waitWithTimeout(containerMcpServerClose, 3_000);
       stopArchiveCleanupScheduler();
-      closePlaybookRuntime();
       if (droneStatusRefreshTimer) {
         try {
           clearInterval(droneStatusRefreshTimer);

@@ -2,7 +2,6 @@ import React from 'react';
 import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, GroupSummary, RepoSummary } from '../types';
 import { compareDronesByNewestFirst } from './helpers';
-import { isHiddenDrone } from './helpers';
 import { fetchJson, usePoll } from './hooks';
 
 type Updater<T> = T | ((prev: T) => T);
@@ -95,34 +94,11 @@ function sameChatReadStates(
   });
 }
 
-function samePlaybook(left: DroneSummary['playbook'], right: DroneSummary['playbook']): boolean {
-  if (!left && !right) return true;
-  if (!left || !right) return false;
-  if (left.id !== right.id) return false;
-  if (left.label !== right.label) return false;
-  if (left.messageCount !== right.messageCount) return false;
-  if (!sameOptionalText(left.chatName, right.chatName)) return false;
-  if (!sameStringArray(left.artifacts, right.artifacts)) return false;
-  const leftActions = Array.isArray(left.actions) ? left.actions : [];
-  const rightActions = Array.isArray(right.actions) ? right.actions : [];
-  if (leftActions.length !== rightActions.length) return false;
-  for (let i = 0; i < leftActions.length; i++) {
-    const a = leftActions[i];
-    const b = rightActions[i];
-    if (!a || !b) return false;
-    if (a.id !== b.id || a.label !== b.label) return false;
-    if (!sameStringArray(a.messages, b.messages)) return false;
-  }
-  return true;
-}
-
 function sameDroneSummary(left: DroneSummary, right: DroneSummary): boolean {
   return (
     left.id === right.id &&
     left.name === right.name &&
     sameOptionalText(left.group, right.group) &&
-    sameOptionalText(left.kind, right.kind) &&
-    sameOptionalText(left.visibility, right.visibility) &&
     left.createdAt === right.createdAt &&
     sameOptionalText(left.lastActivityAt, right.lastActivityAt) &&
     sameOptionalText(left.lastMessageAt, right.lastMessageAt) &&
@@ -146,8 +122,7 @@ function sameDroneSummary(left: DroneSummary, right: DroneSummary): boolean {
     sameStringArray(left.busyChats, right.busyChats) &&
     sameOptionalText(left.hubPhase, right.hubPhase) &&
     sameOptionalText(left.hubMessage, right.hubMessage) &&
-    left.busy === right.busy &&
-    samePlaybook(left.playbook, right.playbook)
+    left.busy === right.busy
   );
 }
 
@@ -486,10 +461,7 @@ export function useDroneHubRegistryData({
     return out;
   }, [dronesFilteredByRepo]);
 
-  const sidebarDronesBase = React.useMemo(
-    () => drones.filter((drone) => !isHiddenDrone(drone)),
-    [drones],
-  );
+  const sidebarDronesBase = drones;
 
   const sidebarDronesFilteredByRepoBase = React.useMemo(() => {
     const targetRepo = String(activeRepoPath ?? '').trim();

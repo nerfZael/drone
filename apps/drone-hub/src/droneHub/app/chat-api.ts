@@ -8,7 +8,6 @@ export type SendDroneChatPromptResponse = {
   accepted: true;
   promptId: string;
   pendingState?: PendingPrompt['state'];
-  blockedByAutomation?: boolean;
   autoRenameChat?: boolean;
 };
 
@@ -77,56 +76,6 @@ function sameAttachments(leftRaw: TranscriptItem['attachments'], rightRaw: Trans
   return true;
 }
 
-function sameAutomation(left: TranscriptItem['automation'], right: TranscriptItem['automation']): boolean {
-  if (!left && !right) return true;
-  if (!left || !right) return false;
-  return (
-    left.kind === right.kind &&
-    sameOptionalText(left.stage, right.stage) &&
-    sameOptionalText(left.jobKey, right.jobKey) &&
-    sameOptionalText(left.automationId, right.automationId) &&
-    sameOptionalText(left.automationLabel, right.automationLabel) &&
-    left.runIndex === right.runIndex &&
-    left.runsTotal === right.runsTotal &&
-    left.sleepBetweenRunsSeconds === right.sleepBetweenRunsSeconds &&
-    sameOptionalText(left.stopPhrase, right.stopPhrase) &&
-    left.stopPhraseCaseSensitive === right.stopPhraseCaseSensitive &&
-    left.stopMatchedRunIndex === right.stopMatchedRunIndex &&
-    sameOptionalText(left.promptPreview, right.promptPreview)
-  );
-}
-
-function sameAgentMessageAutoContinue(
-  left: TranscriptItem['agentMessageAutoContinue'],
-  right: TranscriptItem['agentMessageAutoContinue'],
-): boolean {
-  if (!left && !right) return true;
-  if (!left || !right) return false;
-  return (
-    sameOptionalText(left.status, right.status) &&
-    sameOptionalText(left.bucket, right.bucket) &&
-    sameOptionalText(left.source, right.source) &&
-    sameOptionalText(left.classifiedAt, right.classifiedAt) &&
-    sameOptionalText(left.continuedAt, right.continuedAt) &&
-    sameOptionalText(left.error, right.error) &&
-    sameOptionalText(left.updatedAt, right.updatedAt)
-  );
-}
-
-function sameAgentSuggestion(
-  left: TranscriptItem['agentSuggestion'],
-  right: TranscriptItem['agentSuggestion'],
-): boolean {
-  if (!left && !right) return true;
-  if (!left || !right) return false;
-  return (
-    sameOptionalText(left.usedDirectAt, right.usedDirectAt) &&
-    sameOptionalText(left.suggestionHash, right.suggestionHash) &&
-    sameOptionalText(left.policyFingerprint, right.policyFingerprint) &&
-    sameOptionalText(left.updatedAt, right.updatedAt)
-  );
-}
-
 function sameDockerSnapshot(
   left: TranscriptItem['dockerSnapshot'],
   right: TranscriptItem['dockerSnapshot'],
@@ -167,9 +116,6 @@ export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem):
     sameOptionalText(left.error, right.error) &&
     left.output === right.output &&
     sameAttachments(left.attachments, right.attachments) &&
-    sameAutomation(left.automation, right.automation) &&
-    sameAgentMessageAutoContinue(left.agentMessageAutoContinue, right.agentMessageAutoContinue) &&
-    sameAgentSuggestion(left.agentSuggestion, right.agentSuggestion) &&
     sameAgentPlan(left.agentPlan, right.agentPlan) &&
     sameDockerSnapshot(left.dockerSnapshot, right.dockerSnapshot)
   );

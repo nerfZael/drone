@@ -112,35 +112,6 @@ export type EffectiveFilesystemSettings = {
   uploadMaxBytes: number;
   uploadMaxBytesSource: FilesystemSettingsSource;
 };
-export type AgentMessageAutoContinueSettingsSource = 'settings' | 'default';
-export type EffectiveAgentMessageAutoContinueSettings = {
-  prompt: string;
-  promptSource: AgentMessageAutoContinueSettingsSource;
-  enabledByDefault: boolean;
-  enabledByDefaultSource: AgentMessageAutoContinueSettingsSource;
-  updatedAt: string | null;
-};
-export type AgentSuggestionSettingsSource = 'settings' | 'default';
-export type EffectiveAgentSuggestionSettings = {
-  policyMarkdown: string;
-  policyMarkdownSource: AgentSuggestionSettingsSource;
-  enabledByDefault: boolean;
-  enabledByDefaultSource: AgentSuggestionSettingsSource;
-  updatedAt: string | null;
-  policyFingerprint: string;
-};
-export type UiAutomationSleepUnit = 'seconds' | 'minutes' | 'hours' | 'days';
-export type UiAutomationConfig = {
-  id: string;
-  label: string;
-  prompt: string;
-  onFailurePrompt: string;
-  runs: number;
-  sleepAmount: number;
-  sleepUnit: UiAutomationSleepUnit;
-  stopPhrase: string;
-  stopPhraseCaseSensitive: boolean;
-};
 export type UiPreferencesSettings = {
   sidebarGroupingMode: SidebarGroupingMode;
   sidebarDensityMode: 'compact' | 'default' | 'comfortable';
@@ -150,7 +121,6 @@ export type UiPreferencesSettings = {
   sidebarChatOrderByDrone: Record<string, string[]>;
   hiddenSidebarGroups: string[];
   autoDelete: boolean;
-  automations: UiAutomationConfig[];
   spawnAgentKey: string;
   spawnModel: string;
   repoBranchSource: 'host' | 'remote';
@@ -175,59 +145,6 @@ const DEFAULT_PULL_HOST_BRANCH_BEFORE_CREATE = true;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_MIN = 1 * 1024 * 1024;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_MAX = 8 * 1024 * 1024 * 1024;
 export const FILESYSTEM_UPLOAD_MAX_BYTES_DEFAULT = 2 * 1024 * 1024 * 1024;
-export const AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_DEFAULT = 'continue';
-export const AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_MAX_CHARS = 200;
-export const AGENT_SUGGESTION_ENABLED_BY_DEFAULT = false;
-export const AGENT_SUGGESTION_POLICY_MAX_CHARS = 20_000;
-export const AGENT_SUGGESTION_POLICY_DEFAULT = `# Assistant Suggestion Policy
-
-Suggest the most likely next user reply in this developer chat after an assistant message.
-
-## Core Style
-- Prefer short, direct replies.
-- Default to moving the work forward.
-- It is valid to return no suggestion when silence is more useful than a reply.
-- Prefer concrete code-backed follow-ups over abstract discussion.
-- Prefer simple solutions over extra abstraction.
-- Match existing naming and UX patterns unless there is a clear reason not to.
-
-## Likely Reply Types
-- Approve the next step when the assistant's recommendation looks sound.
-- Ask for explanation when naming, architecture, or behavior feels unclear.
-- Push back when the solution seems overcomplicated or introduces hidden behavior.
-- Ask for review when implementation likely needs a regression pass.
-- Ask for commit only when the work sounds stable enough to checkpoint.
-
-## Tone
-- Be pragmatic and concise.
-- It is fine to use terse messages like:
-  - \`Ok, do it\`
-  - \`Continue\`
-  - \`review\`
-  - \`commit\`
-- When asking for explanation, keep it in simple technical terms.
-
-## Preferences
-- Surface regressions, UX inconsistency, naming drift, unnecessary complexity, and hidden behavior.
-- Defer non-essential work rather than expanding scope.
-- If the assistant is clearly still mid-task, the likely response is usually a short continuation.
-- If the assistant introduced a questionable abstraction or naming choice, the likely response is usually a challenge or clarification question.
-- If the agent turn is complete and the only plausible reply is a low-value acknowledgement like \`ok\`, \`sounds good\`, or \`thanks\`, return no suggestion.
-- If the agent already reported that an action is completed, do not suggest repeating that same action.
-- Example: if the agent says it already committed or merged the work, return no suggestion instead of \`commit\`.
-- If you are uncertain and would rather have the user decide what to say next, return no suggestion instead of guessing.
-`;
-const UI_AUTOMATION_RUNS_MIN = 1;
-const UI_AUTOMATION_RUNS_MAX = 20;
-const UI_AUTOMATION_RUNS_DEFAULT = 5;
-const UI_AUTOMATION_SLEEP_AMOUNT_MIN = 0;
-const UI_AUTOMATION_SLEEP_AMOUNT_MAX = 1_000_000;
-const UI_AUTOMATION_SLEEP_AMOUNT_DEFAULT = 0;
-const UI_AUTOMATION_STOP_PHRASE_MAX_CHARS = 320;
-const UI_AUTOMATION_LABEL_MAX_CHARS = 72;
-const UI_AUTOMATION_PROMPT_MAX_CHARS = 8_000;
-const UI_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS = 8_000;
-const UI_AUTOMATION_MAX_ITEMS = 40;
 
 export function parseLlmProvider(raw: unknown): LlmProviderId | null {
   const s = String(raw ?? '')
@@ -296,27 +213,6 @@ export function parseFilesystemUploadMaxBytes(raw: unknown): number | null {
   return i;
 }
 
-export function normalizeAgentMessageAutoContinuePrompt(raw: unknown): string {
-  const text = typeof raw === 'string' ? raw.trim() : '';
-  if (!text) return '';
-  return text.length > AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_MAX_CHARS
-    ? text.slice(0, AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_MAX_CHARS).trim()
-    : text;
-}
-
-export function normalizeAgentSuggestionPolicyMarkdown(raw: unknown): string {
-  const text = typeof raw === 'string' ? raw.trim() : '';
-  if (!text) return '';
-  return text.length > AGENT_SUGGESTION_POLICY_MAX_CHARS
-    ? text.slice(0, AGENT_SUGGESTION_POLICY_MAX_CHARS).trim()
-    : text;
-}
-
-export function agentSuggestionPolicyFingerprint(policyMarkdownRaw: unknown): string {
-  const policyMarkdown = normalizeAgentSuggestionPolicyMarkdown(policyMarkdownRaw) || AGENT_SUGGESTION_POLICY_DEFAULT;
-  return crypto.createHash('sha256').update(policyMarkdown, 'utf8').digest('hex').slice(0, 12);
-}
-
 function normalizeApiKey(raw: unknown): string {
   return typeof raw === 'string' ? raw.trim() : '';
 }
@@ -366,73 +262,6 @@ function normalizeOrderedStringMap(value: unknown): Record<string, string[]> {
   return out;
 }
 
-function createUiAutomationId(): string {
-  return crypto.randomUUID();
-}
-
-function normalizeUiAutomationLabel(value: unknown): string {
-  return String(value ?? '').replace(/\s+/g, ' ').trim().slice(0, UI_AUTOMATION_LABEL_MAX_CHARS);
-}
-
-function normalizeUiAutomationPrompt(value: unknown): string {
-  return String(value ?? '').slice(0, UI_AUTOMATION_PROMPT_MAX_CHARS);
-}
-
-function normalizeUiAutomationOnFailurePrompt(value: unknown): string {
-  return String(value ?? '').slice(0, UI_AUTOMATION_ON_FAILURE_PROMPT_MAX_CHARS);
-}
-
-function normalizeUiAutomationRuns(value: unknown): number {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return UI_AUTOMATION_RUNS_DEFAULT;
-  return Math.max(UI_AUTOMATION_RUNS_MIN, Math.min(UI_AUTOMATION_RUNS_MAX, Math.round(n)));
-}
-
-function normalizeUiAutomationSleepAmount(value: unknown): number {
-  const n = Number(value);
-  if (!Number.isFinite(n)) return UI_AUTOMATION_SLEEP_AMOUNT_DEFAULT;
-  return Math.max(UI_AUTOMATION_SLEEP_AMOUNT_MIN, Math.min(UI_AUTOMATION_SLEEP_AMOUNT_MAX, Math.round(n)));
-}
-
-function normalizeUiAutomationSleepUnit(value: unknown): UiAutomationSleepUnit {
-  const s = String(value ?? '').trim().toLowerCase();
-  if (s === 'minutes' || s === 'hours' || s === 'days') return s;
-  return 'seconds';
-}
-
-function normalizeUiAutomationStopPhrase(value: unknown): string {
-  return String(value ?? '').trim().slice(0, UI_AUTOMATION_STOP_PHRASE_MAX_CHARS);
-}
-
-function normalizeUiAutomationStopPhraseCaseSensitive(value: unknown): boolean {
-  return value === true;
-}
-
-function normalizeUiAutomationConfigs(value: unknown): UiAutomationConfig[] {
-  const list = Array.isArray(value) ? value : [];
-  const out: UiAutomationConfig[] = [];
-  const seen = new Set<string>();
-  for (const item of list) {
-    const raw = item && typeof item === 'object' && !Array.isArray(item) ? (item as Record<string, unknown>) : {};
-    const id = String(raw.id ?? '').trim() || createUiAutomationId();
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    out.push({
-      id,
-      label: normalizeUiAutomationLabel(raw.label),
-      prompt: normalizeUiAutomationPrompt(raw.prompt),
-      onFailurePrompt: normalizeUiAutomationOnFailurePrompt(raw.onFailurePrompt),
-      runs: normalizeUiAutomationRuns(raw.runs),
-      sleepAmount: normalizeUiAutomationSleepAmount(raw.sleepAmount),
-      sleepUnit: normalizeUiAutomationSleepUnit(raw.sleepUnit),
-      stopPhrase: normalizeUiAutomationStopPhrase(raw.stopPhrase),
-      stopPhraseCaseSensitive: normalizeUiAutomationStopPhraseCaseSensitive(raw.stopPhraseCaseSensitive),
-    });
-    if (out.length >= UI_AUTOMATION_MAX_ITEMS) break;
-  }
-  return out;
-}
-
 function normalizeUiPreferenceText(value: unknown, maxChars: number): string {
   return String(value ?? '').trim().slice(0, maxChars);
 }
@@ -448,7 +277,6 @@ function sanitizeUiPreferencesSettings(value: unknown): UiPreferencesSettings {
     sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
     hiddenSidebarGroups: normalizeOrderedStringList(raw.hiddenSidebarGroups),
     autoDelete: raw.autoDelete === true,
-    automations: normalizeUiAutomationConfigs(raw.automations),
     spawnAgentKey: normalizeUiPreferenceText(raw.spawnAgentKey, 200) || DEFAULT_SPAWN_AGENT_KEY,
     spawnModel: normalizeUiPreferenceText(raw.spawnModel, 200),
     repoBranchSource: parseRepoBranchSource(raw.repoBranchSource) ?? DEFAULT_REPO_BRANCH_SOURCE,
@@ -473,8 +301,6 @@ const SETTING_KEYS = {
   llmProvider: 'llm.provider',
   deleteAction: 'delete-action',
   filesystem: 'filesystem',
-  agentMessageAutoContinue: 'agent-message-auto-continue',
-  agentSuggestion: 'agent-suggestion',
 } as const;
 
 type LegacySetting<T> = { value: T; updatedAt: string | null };
@@ -984,214 +810,6 @@ export async function resolveFilesystemSettingsResponse(): Promise<{
     },
   };
 }
-
-async function getStoredAgentMessageAutoContinueSettings(): Promise<{
-  prompt: string | null;
-  enabledByDefault: boolean | null;
-  updatedAt: string | null;
-}> {
-  const record = await getCanonicalSetting<{
-    prompt?: string;
-    enabledByDefault?: boolean;
-  } | null>(SETTING_KEYS.agentMessageAutoContinue, (reg) => {
-    const raw = reg.settings?.agentMessageAutoContinue;
-    if (raw === undefined) return null;
-    const prompt = normalizeAgentMessageAutoContinuePrompt(raw.prompt);
-    return {
-      value: {
-        ...(prompt ? { prompt } : {}),
-        ...(typeof raw.enabledByDefault === 'boolean' ? { enabledByDefault: raw.enabledByDefault } : {}),
-      },
-      updatedAt: legacyUpdatedAt(raw),
-    };
-  });
-  const prompt = normalizeAgentMessageAutoContinuePrompt(record?.value?.prompt);
-  const enabledByDefault =
-    record?.value?.enabledByDefault === true
-      ? true
-      : record?.value?.enabledByDefault === false
-        ? false
-        : null;
-  return {
-    prompt: prompt || null,
-    enabledByDefault,
-    updatedAt: record?.value ? record.updatedAt : null,
-  };
-}
-
-export async function upsertStoredAgentMessageAutoContinueSettings(opts: {
-  prompt?: string | null;
-  enabledByDefault?: boolean | null;
-}): Promise<void> {
-  const nextPrompt =
-    opts.prompt === undefined ? undefined : normalizeAgentMessageAutoContinuePrompt(opts.prompt);
-  const enabledByDefault = opts.enabledByDefault === true;
-  await getStoredAgentMessageAutoContinueSettings();
-  await (await getHubSettingsRepository()).update<{
-    prompt?: string;
-    enabledByDefault?: boolean;
-  } | null>(SETTING_KEYS.agentMessageAutoContinue, (current) => {
-    const prompt = nextPrompt === undefined
-      ? normalizeAgentMessageAutoContinuePrompt(current?.value?.prompt)
-      : nextPrompt;
-    const effectiveEnabledByDefault =
-      opts.enabledByDefault === undefined ? current?.value?.enabledByDefault === true : enabledByDefault;
-    if ((!prompt || prompt === AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_DEFAULT) && !effectiveEnabledByDefault) {
-      return null;
-    }
-    return {
-      ...(prompt && prompt !== AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_DEFAULT ? { prompt } : {}),
-      ...(effectiveEnabledByDefault ? { enabledByDefault: true } : {}),
-    };
-  });
-}
-
-export async function resolveEffectiveAgentMessageAutoContinueSettings(): Promise<EffectiveAgentMessageAutoContinueSettings> {
-  const stored = await getStoredAgentMessageAutoContinueSettings();
-  return {
-    prompt: stored.prompt ?? AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_DEFAULT,
-    promptSource: stored.prompt ? 'settings' : 'default',
-    enabledByDefault: stored.enabledByDefault === true,
-    enabledByDefaultSource: stored.enabledByDefault === null ? 'default' : 'settings',
-    updatedAt: stored.prompt || stored.enabledByDefault !== null ? stored.updatedAt : null,
-  };
-}
-
-export async function resolveAgentMessageAutoContinueSettingsResponse(): Promise<{
-  ok: true;
-  agentMessageAutoContinue: {
-    prompt: string;
-    promptSource: AgentMessageAutoContinueSettingsSource;
-    enabledByDefault: boolean;
-    enabledByDefaultSource: AgentMessageAutoContinueSettingsSource;
-    updatedAt: string | null;
-    defaultPrompt: string;
-    defaultEnabledByDefault: boolean;
-    maxPromptChars: number;
-  };
-}> {
-  const settings = await resolveEffectiveAgentMessageAutoContinueSettings();
-  return {
-    ok: true,
-    agentMessageAutoContinue: {
-      prompt: settings.prompt,
-      promptSource: settings.promptSource,
-      enabledByDefault: settings.enabledByDefault,
-      enabledByDefaultSource: settings.enabledByDefaultSource,
-      updatedAt: settings.updatedAt,
-      defaultPrompt: AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_DEFAULT,
-      defaultEnabledByDefault: false,
-      maxPromptChars: AGENT_MESSAGE_AUTO_CONTINUE_PROMPT_MAX_CHARS,
-    },
-  };
-}
-
-async function getStoredAgentSuggestionSettings(): Promise<{
-  policyMarkdown: string | null;
-  enabledByDefault: boolean | null;
-  updatedAt: string | null;
-}> {
-  const record = await getCanonicalSetting<{
-    policyMarkdown?: string;
-    enabledByDefault?: boolean;
-  } | null>(SETTING_KEYS.agentSuggestion, (reg) => {
-    const raw = reg.settings?.agentSuggestion;
-    if (raw === undefined) return null;
-    const policyMarkdown = normalizeAgentSuggestionPolicyMarkdown(raw.policyMarkdown);
-    return {
-      value: {
-        ...(policyMarkdown ? { policyMarkdown } : {}),
-        ...(typeof raw.enabledByDefault === 'boolean' ? { enabledByDefault: raw.enabledByDefault } : {}),
-      },
-      updatedAt: legacyUpdatedAt(raw),
-    };
-  });
-  const policyMarkdown = normalizeAgentSuggestionPolicyMarkdown(record?.value?.policyMarkdown);
-  const enabledByDefault =
-    record?.value?.enabledByDefault === true
-      ? true
-      : record?.value?.enabledByDefault === false
-        ? false
-        : null;
-  return {
-    policyMarkdown: policyMarkdown || null,
-    enabledByDefault,
-    updatedAt: record?.value ? record.updatedAt : null,
-  };
-}
-
-export async function upsertStoredAgentSuggestionSettings(opts: {
-  policyMarkdown?: string | null;
-  enabledByDefault?: boolean | null;
-}): Promise<void> {
-  const nextPolicyMarkdown =
-    opts.policyMarkdown === undefined ? undefined : normalizeAgentSuggestionPolicyMarkdown(opts.policyMarkdown);
-  const enabledByDefault = opts.enabledByDefault === true;
-  await getStoredAgentSuggestionSettings();
-  await (await getHubSettingsRepository()).update<{
-    policyMarkdown?: string;
-    enabledByDefault?: boolean;
-  } | null>(SETTING_KEYS.agentSuggestion, (current) => {
-    const policyMarkdown =
-      nextPolicyMarkdown === undefined
-        ? normalizeAgentSuggestionPolicyMarkdown(current?.value?.policyMarkdown)
-        : nextPolicyMarkdown;
-    const effectiveEnabledByDefault =
-      opts.enabledByDefault === undefined ? current?.value?.enabledByDefault === true : enabledByDefault;
-    if ((!policyMarkdown || policyMarkdown === AGENT_SUGGESTION_POLICY_DEFAULT) && !effectiveEnabledByDefault) {
-      return null;
-    }
-    return {
-      ...(policyMarkdown && policyMarkdown !== AGENT_SUGGESTION_POLICY_DEFAULT ? { policyMarkdown } : {}),
-      ...(effectiveEnabledByDefault ? { enabledByDefault: true } : {}),
-    };
-  });
-}
-
-export async function resolveEffectiveAgentSuggestionSettings(): Promise<EffectiveAgentSuggestionSettings> {
-  const stored = await getStoredAgentSuggestionSettings();
-  const policyMarkdown = stored.policyMarkdown ?? AGENT_SUGGESTION_POLICY_DEFAULT;
-  return {
-    policyMarkdown,
-    policyMarkdownSource: stored.policyMarkdown ? 'settings' : 'default',
-    enabledByDefault: stored.enabledByDefault === true,
-    enabledByDefaultSource: stored.enabledByDefault === null ? 'default' : 'settings',
-    updatedAt: stored.policyMarkdown || stored.enabledByDefault !== null ? stored.updatedAt : null,
-    policyFingerprint: agentSuggestionPolicyFingerprint(policyMarkdown),
-  };
-}
-
-export async function resolveAgentSuggestionSettingsResponse(): Promise<{
-  ok: true;
-  agentSuggestion: {
-    policyMarkdown: string;
-    policyMarkdownSource: AgentSuggestionSettingsSource;
-    enabledByDefault: boolean;
-    enabledByDefaultSource: AgentSuggestionSettingsSource;
-    updatedAt: string | null;
-    defaultPolicyMarkdown: string;
-    defaultEnabledByDefault: boolean;
-    maxPolicyChars: number;
-    policyFingerprint: string;
-  };
-}> {
-  const settings = await resolveEffectiveAgentSuggestionSettings();
-  return {
-    ok: true,
-    agentSuggestion: {
-      policyMarkdown: settings.policyMarkdown,
-      policyMarkdownSource: settings.policyMarkdownSource,
-      enabledByDefault: settings.enabledByDefault,
-      enabledByDefaultSource: settings.enabledByDefaultSource,
-      updatedAt: settings.updatedAt,
-      defaultPolicyMarkdown: AGENT_SUGGESTION_POLICY_DEFAULT,
-      defaultEnabledByDefault: AGENT_SUGGESTION_ENABLED_BY_DEFAULT,
-      maxPolicyChars: AGENT_SUGGESTION_POLICY_MAX_CHARS,
-      policyFingerprint: settings.policyFingerprint,
-    },
-  };
-}
-
 
 const UI_PREFERENCES_SETTING_KEY = 'ui-preferences';
 

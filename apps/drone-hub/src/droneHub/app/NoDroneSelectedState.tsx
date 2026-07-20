@@ -1,5 +1,5 @@
 import React from 'react';
-import { IconDrone, IconList, IconPlus, IconPlusDouble } from './icons';
+import { IconDrone, IconPlus, IconPlusDouble } from './icons';
 
 export type NoDroneSelectedStateProps = {
   dronesLoading: boolean;
@@ -7,7 +7,6 @@ export type NoDroneSelectedStateProps = {
   dronesError: string | null | undefined;
   onOpenDraftChatComposer: () => void;
   onOpenCreateModal: () => void;
-  onOpenPlaybookRuns: () => void;
 };
 
 export function NoDroneSelectedState({
@@ -16,7 +15,6 @@ export function NoDroneSelectedState({
   dronesError,
   onOpenDraftChatComposer,
   onOpenCreateModal,
-  onOpenPlaybookRuns,
 }: NoDroneSelectedStateProps) {
   const hasDrones = sidebarDroneCount > 0;
   const title = hasDrones ? 'Choose where to work' : 'Start with a drone';
@@ -67,13 +65,6 @@ export function NoDroneSelectedState({
             title="Create multiple"
             description="Prepare several workspaces in one pass."
             onClick={onOpenCreateModal}
-          />
-          <LaunchAction
-            icon={<IconList className="h-4 w-4" />}
-            eyebrow="Automate"
-            title="Open playbook runs"
-            description="Review and continue repeatable workflows."
-            onClick={onOpenPlaybookRuns}
           />
         </div>
 

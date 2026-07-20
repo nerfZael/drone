@@ -1386,7 +1386,6 @@ export type DroneSidebarProps = {
   draftSidebarPlaceholder: DraftSidebarPlaceholder | null;
   onOpenDraftChatComposer: (opts?: { repoPath?: string | null; group?: string | null }) => void;
   onOpenCreateModal: () => void;
-  onOpenPlaybookRuns: () => void;
   onSelectDroneCard: (droneId: string, opts?: DroneSelectionClickOptions) => void;
   onSelectDroneChat: (droneId: string, chatName: string) => void;
   onDeleteDroneChat: (
@@ -1470,7 +1469,6 @@ export function DroneSidebar({
   draftSidebarPlaceholder,
   onOpenDraftChatComposer,
   onOpenCreateModal,
-  onOpenPlaybookRuns,
   onSelectDroneCard,
   onSelectDroneChat,
   onDeleteDroneChat,
@@ -1514,7 +1512,7 @@ export function DroneSidebar({
     selectedDrone,
     selectedChat,
     selectedGroupMultiChat,
-    playbookRunsOpen,
+    sidebarReposCollapsed,
     sidebarAutoMinimize,
     showRecentDronesOnly,
     autoDelete,
@@ -2640,29 +2638,6 @@ export function DroneSidebar({
                         </button>
                       </>
                     ) : null}
-                    {sidebarCapabilities.headerActions ? (
-                      <>
-                        <button
-                          type="button"
-                          onClick={onOpenPlaybookRuns}
-                          className={`inline-flex h-[30px] w-full items-center gap-2 rounded border px-3 text-[var(--text-11)] transition-all ${
-                            playbookRunsOpen
-                              ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                              : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
-                          }`}
-                          title="Open playbook runs"
-                          aria-label="Open playbook runs"
-                        >
-                          <IconList className="opacity-80" />
-                          <span
-                            className="font-[var(--weight-semibold)] uppercase tracking-wide"
-                            style={{ fontFamily: 'var(--display)' }}
-                          >
-                            Open playbook runs
-                          </span>
-                        </button>
-                      </>
-                    ) : null}
                   </div>
                 ) : null}
                 {!recentFilterHidAllDrones &&
@@ -3268,25 +3243,6 @@ export function DroneSidebar({
             tabIndex={collapsedRailInteractive ? 0 : -1}
           >
             <IconPlusDouble className="opacity-80" />
-          </SidebarIconButton>
-        ) : null}
-        {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? (
-          <SidebarIconButton
-            onClick={() => {
-              setSidebarCollapsed(false);
-              onOpenPlaybookRuns();
-            }}
-            className={`border ${
-              playbookRunsOpen
-                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
-            }`}
-            title="Open playbook runs"
-            ariaLabel="Open playbook runs"
-            disabled={!collapsedRailInteractive}
-            tabIndex={collapsedRailInteractive ? 0 : -1}
-          >
-            <IconList className="opacity-80" />
           </SidebarIconButton>
         ) : null}
         {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? (

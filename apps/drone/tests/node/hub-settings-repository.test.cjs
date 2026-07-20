@@ -4,7 +4,7 @@ const os = require('node:os');
 const path = require('node:path');
 const { afterEach, describe, test } = require('node:test');
 
-const { resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
+const { getHubDatabase, resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const {
   getHubSettingsRepository,
   HubSettingVersionConflictError,
@@ -16,10 +16,8 @@ const { saveRegistry, updateRegistry } = require('../../dist/host/registry.js');
 const {
   resolveUiPreferencesSettingsResponse,
   clearStoredProviderApiKey,
-  resolveAgentSuggestionSettingsResponse,
   resolveDeleteActionSettingsResponse,
   resolveEffectiveProviderApiKeySettings,
-  upsertStoredAgentSuggestionSettings,
   upsertStoredDeleteActionSettings,
   upsertStoredProviderApiKey,
   UiPreferencesSettingsConflictError,
@@ -58,6 +56,37 @@ afterEach(async () => {
 });
 
 describe('HubSettingsRepository', () => {
+  test('removes retired follow-up settings during migration', async () => {
+    useTempDroneDataDir('retired-followup-settings');
+    const database = getHubDatabase();
+    await database.writeTransaction('seed legacy canonical settings', (connection) => {
+      connection.exec(`
+        CREATE TABLE hub_canonical_settings (
+          setting_key TEXT NOT NULL PRIMARY KEY,
+          value_json TEXT NOT NULL,
+          updated_at TEXT,
+          version INTEGER NOT NULL CHECK (version > 0)
+        );
+      `);
+      connection.prepare(`
+        INSERT INTO hub_schema_migrations (scope, version, name, applied_at)
+        VALUES ('settings', 1, 'canonical hub settings', ?)
+      `).run(new Date().toISOString());
+      const insert = connection.prepare(`
+        INSERT INTO hub_canonical_settings (setting_key, value_json, updated_at, version)
+        VALUES (?, '{}', NULL, 1)
+      `);
+      insert.run('agent-message-auto-continue');
+      insert.run('agent-suggestion');
+      insert.run('remaining-setting');
+    });
+
+    const repository = await getHubSettingsRepository();
+    assert.equal(repository.get('agent-message-auto-continue'), null);
+    assert.equal(repository.get('agent-suggestion'), null);
+    assert.deepEqual(repository.get('remaining-setting').value, {});
+  });
+
   test('performs concurrent read-modify-write updates without losing either change', async () => {
     useTempDroneDataDir('concurrent-update');
     const repository = await getHubSettingsRepository();
@@ -166,24 +195,6 @@ describe('remaining canonical Hub settings', () => {
     assert.equal((await getHubSettingsRepository()).get('api-key.openai').version, 2);
   });
 
-  test('merges concurrent partial updates to a composite setting without losing either field', async () => {
-    useTempDroneDataDir('composite-concurrency');
-    await upsertStoredAgentSuggestionSettings({
-      policyMarkdown: '# Initial policy',
-      enabledByDefault: false,
-    });
-
-    await Promise.all([
-      upsertStoredAgentSuggestionSettings({ enabledByDefault: true }),
-      upsertStoredAgentSuggestionSettings({ policyMarkdown: '# Concurrent policy' }),
-    ]);
-
-    const resolved = await resolveAgentSuggestionSettingsResponse();
-    assert.equal(resolved.agentSuggestion.policyMarkdown, '# Concurrent policy');
-    assert.equal(resolved.agentSuggestion.enabledByDefault, true);
-    assert.equal((await getHubSettingsRepository()).get('agent-suggestion').version, 3);
-  });
-
   test('preserves partial-update API behavior while importing legacy composite values', async () => {
     useTempDroneDataDir('delete-action-api');
     await saveRegistry({ version: 2, drones: {}, pending: {}, archived: {}, settings: {
@@ -237,7 +248,6 @@ describe('canonical UI preferences settings', () => {
     assert.equal(resolved.uiPreferences.sidebarGroupingMode, 'groups');
     assert.deepEqual(resolved.uiPreferences.sidebarGroupOrder, []);
     assert.equal(resolved.uiPreferences.autoDelete, false);
-    assert.deepEqual(resolved.uiPreferences.automations, []);
     assert.equal(resolved.uiPreferences.spawnAgentKey, 'builtin:cursor');
     assert.equal(resolved.uiPreferences.spawnModel, '');
     assert.equal(resolved.uiPreferences.repoBranchSource, 'host');
@@ -301,19 +311,6 @@ describe('canonical UI preferences settings', () => {
       repoBranchSource: 'remote',
       repoCreateRemoteBranch: 'origin/feature/voice',
       pullHostBranchBeforeCreate: false,
-      automations: [
-        {
-          id: 'automation-a',
-          label: '  Nightly build  ',
-          prompt: 'ship it',
-          runs: 999,
-          sleepAmount: 5,
-          sleepUnit: 'hours',
-          stopPhrase: 'done',
-          stopPhraseCaseSensitive: true,
-        },
-        { id: 'automation-a', label: 'duplicate id should be dropped' },
-      ],
     });
 
     const resolved = await resolveUiPreferencesSettingsResponse();
@@ -333,9 +330,6 @@ describe('canonical UI preferences settings', () => {
     assert.equal(resolved.uiPreferences.repoBranchSource, 'remote');
     assert.equal(resolved.uiPreferences.repoCreateRemoteBranch, 'origin/feature/voice');
     assert.equal(resolved.uiPreferences.pullHostBranchBeforeCreate, false);
-    assert.equal(resolved.uiPreferences.automations.length, 1);
-    assert.equal(resolved.uiPreferences.automations[0].label, 'Nightly build');
-    assert.equal(resolved.uiPreferences.automations[0].runs, 20);
     assert.equal(readRegistryJsonFromSqlite(), registryBefore);
   });
 

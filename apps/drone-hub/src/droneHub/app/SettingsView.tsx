@@ -1,12 +1,10 @@
 import React from 'react';
 import { AgentsSettingsSection } from './AgentsSettingsSection';
-import { AutomationSettingsSection } from './AutomationSettingsSection';
 import { ArchiveSettingsTab } from './ArchiveSettingsTab';
 import { BackupsSettingsTab } from './BackupsSettingsTab';
 import { GeneralSettingsTab } from './GeneralSettingsTab';
 import { DeviceMeshSettingsTab } from './DeviceMeshSettingsTab';
 import { McpServersSection } from './McpServersSection';
-import { PlaybookSettingsSection } from './PlaybookSettingsSection';
 import { ProfilesSettingsTab } from './ProfilesSettingsTab';
 import { ShortcutSettingsSection } from './ShortcutSettingsSection';
 import { SkillLibrarySection } from './SkillLibrarySection';
@@ -15,8 +13,6 @@ import { SystemLogsSettingsTab } from './SystemLogsSettingsTab';
 import { TrashBehaviorSettingsTab } from './TrashBehaviorSettingsTab';
 import { SETTINGS_TABS, type SettingsTabId } from './settings-tabs';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
-import { useAgentMessageAutoContinueSettings } from './use-agent-message-auto-continue-settings';
-import { useAgentSuggestionSettings } from './use-agent-suggestion-settings';
 import { useAgentsSettings } from './use-agents-settings';
 import type { UseDeleteActionSettingsResult } from './use-delete-action-settings';
 import { useFilesystemSettings } from './use-filesystem-settings';
@@ -39,10 +35,8 @@ type SettingsViewProps = {
   hubLogsTailLines: number;
   hubLogsMaxBytes: number;
   activeTab: SettingsTabId;
-  focusedPlaybookId: string | null;
   onBackToWorkspace: () => void;
   onSelectTab: (tabId: SettingsTabId) => void;
-  onFocusedPlaybookHandled: () => void;
   onReplayOnboarding: () => void;
   onResetOnboarding: () => void;
 };
@@ -63,10 +57,8 @@ export function SettingsView({
   hubLogsTailLines,
   hubLogsMaxBytes,
   activeTab,
-  focusedPlaybookId,
   onBackToWorkspace,
   onSelectTab,
-  onFocusedPlaybookHandled,
   onReplayOnboarding,
   onResetOnboarding,
 }: SettingsViewProps) {
@@ -74,8 +66,6 @@ export function SettingsView({
   const setTranscriptInlineImages = useDroneHubUiStore((s) => s.setTranscriptInlineImages);
   const settingsScrollRef = React.useRef<HTMLDivElement>(null);
   const github = useGithubSettings(requestJson);
-  const agentMessageAutoContinue = useAgentMessageAutoContinueSettings(requestJson);
-  const agentSuggestion = useAgentSuggestionSettings(requestJson);
   const agents = useAgentsSettings(requestJson);
   const skillLibrary = useSkillLibrary(requestJson);
   const mcpServers = useMcpServers(requestJson);
@@ -88,8 +78,6 @@ export function SettingsView({
     hubLogsState.hubLogsLoading ||
     github.githubSettingsLoading ||
     llm.llmSettingsLoading ||
-    agentMessageAutoContinue.agentMessageAutoContinueSettingsLoading ||
-    agentSuggestion.agentSuggestionSettingsLoading ||
     deleteAction.deleteSettingsLoading ||
     filesystem.filesystemSettingsLoading ||
     syncSets.syncSetsLoading ||
@@ -104,8 +92,6 @@ export function SettingsView({
     llm.savingGroqSettings ||
     llm.clearingGroqSettings ||
     llm.savingLlmProvider ||
-    agentMessageAutoContinue.savingAgentMessageAutoContinueSettings ||
-    agentSuggestion.savingAgentSuggestionSettings ||
     agents.agentsSettingsLoading ||
     agents.savingAgentsSettings ||
     skillLibrary.skillsLoading ||
@@ -162,8 +148,6 @@ export function SettingsView({
       if (!ok) return;
     }
     void llm.loadLlmSettings();
-    void agentMessageAutoContinue.loadAgentMessageAutoContinueSettings();
-    void agentSuggestion.loadAgentSuggestionSettings();
     void github.loadGithubSettings();
     void deleteAction.loadDeleteSettings();
     void filesystem.loadFilesystemSettings();
@@ -177,7 +161,7 @@ export function SettingsView({
     void skillLibrary.loadSkills();
     void skillLibrary.loadSkillSources();
     void mcpServers.loadMcpServers();
-  }, [agentMessageAutoContinue, agentSuggestion, agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, filesystem, github, hubLogsState, llm, mcpServers, profile, skillLibrary, syncSets]);
+  }, [agents, agentsDraftDirty, backups.loadBackupSettings, deleteAction, filesystem, github, hubLogsState, llm, mcpServers, profile, skillLibrary, syncSets]);
 
   const renderActiveTab = () => {
     if (activeTab === 'general') {
@@ -186,8 +170,6 @@ export function SettingsView({
           github={github}
           llm={llm}
           filesystem={filesystem}
-          agentMessageAutoContinue={agentMessageAutoContinue}
-          agentSuggestion={agentSuggestion}
           transcriptInlineImages={transcriptInlineImages}
           setTranscriptInlineImages={setTranscriptInlineImages}
           onReplayOnboarding={onReplayOnboarding}
@@ -202,10 +184,6 @@ export function SettingsView({
     if (activeTab === 'trash') return <TrashBehaviorSettingsTab deleteAction={deleteAction} />;
     if (activeTab === 'archive') return <ArchiveSettingsTab deleteAction={deleteAction} />;
     if (activeTab === 'shortcuts') return <ShortcutSettingsSection />;
-    if (activeTab === 'automations') return <AutomationSettingsSection />;
-    if (activeTab === 'playbooks') {
-      return <PlaybookSettingsSection focusedPlaybookId={focusedPlaybookId} onFocusedPlaybookHandled={onFocusedPlaybookHandled} />;
-    }
     if (activeTab === 'skills') return <SkillLibrarySection skillLibrary={skillLibrary} />;
     if (activeTab === 'mcp') return <McpServersSection mcp={mcpServers} />;
     if (activeTab === 'agents') return <AgentsSettingsSection agents={agents} />;
@@ -226,7 +204,7 @@ export function SettingsView({
                   Settings
                 </div>
                 <div className="text-[var(--text-12)] text-[var(--muted)] mt-1 leading-relaxed">
-                  Split by area so archive controls, shortcuts, automations, and the skill library each have room.
+                  Split by area so archive controls, shortcuts, and the skill library each have room.
                 </div>
               </div>
 

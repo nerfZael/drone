@@ -2,7 +2,6 @@ import crypto from 'node:crypto';
 import path from 'node:path';
 
 import { AgentFollowupCoordinator } from './agent-followup-coordinator';
-import type { AgentMessageAutoContinueClassification } from './agent-message-auto-continue';
 import type { AgentPlan } from './agent-plan';
 import type { AgentCopilotRequest } from './agent-copilot-parser';
 import type { ChatImageAttachment, ChatImageAttachmentRef } from './chat-attachments';
@@ -10,7 +9,6 @@ import type {
   AgentPermissionMode,
   BuiltinAgentId,
   ChatAgentConfig,
-  PromptAutomationStopMode,
 } from './chat-types';
 import { ChatReconciliationQueue } from './chat-reconciliation-queue';
 import { createChatReconciliationExecutor } from './chat-reconciliation-executor';
@@ -22,24 +20,11 @@ import {
   PendingPromptPump,
 } from './pending-prompt-pump';
 import type { PendingPrompt } from './drone-pending-prompts';
-import {
-  PromptAutomationManager,
-  type PromptAutomationJobState,
-  type PromptAutomationLaneState,
-} from './prompt-automation-manager';
-
-type PromptAutomationMeta = any;
 type TranscriptTurn = any;
 
 type ChatPromptRuntimeDependencyName =
   | 'AGENT_COPILOT_HANDLED_CAP'
   | 'NON_REPO_HOME_CWD'
-  | 'PROMPT_AUTOMATION_COMPLETION_STALL_RECOVERY_GRACE_MS'
-  | 'PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS'
-  | 'PROMPT_AUTOMATION_STOP_PHRASE_MAX_CHARS'
-  | 'PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS'
-  | 'PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS'
-  | 'PROMPT_AUTOMATION_WAIT_POLL_MS'
   | 'PROMPT_SKILL_SYNC_WARNINGS'
   | 'UPGRADE_DAEMON_READY_TIMEOUT_MS'
   | 'applyChatReconciliationInStore'
@@ -53,7 +38,6 @@ type ChatPromptRuntimeDependencyName =
   | 'chatAttachmentsStorageRootForDrone'
   | 'chatHasActiveDockerSnapshot'
   | 'chatNameExists'
-  | 'classifyAgentMessageAutoContinue'
   | 'cliSupportsModelFlag'
   | 'cloneChatEntryForDroneClone'
   | 'codexImageAttachmentFlags'
@@ -106,18 +90,12 @@ type ChatPromptRuntimeDependencyName =
   | 'normalizeChatReasoning'
   | 'normalizeContainerPath'
   | 'normalizeDroneCwdForRuntime'
-  | 'normalizeDroneEntryKind'
-  | 'normalizeDroneEntryVisibility'
   | 'normalizeDroneIdentity'
   | 'normalizePendingPromptState'
   | 'normalizePendingPromptText'
   | 'normalizePendingStartupPrompts'
-  | 'normalizePlaybookRunQueueGate'
-  | 'normalizePromptAutomationSleepBetweenRunsSeconds'
-  | 'normalizePromptAutomationStopPhrase'
   | 'normalizeSubmittedAtIso'
   | 'notifyDroneChatWrite'
-  | 'notifyPromptAutomationLaneChange'
   | 'nowIso'
   | 'openCodeSessionTitle'
   | 'parseBlipJobTranscript'
@@ -127,7 +105,6 @@ type ChatPromptRuntimeDependencyName =
   | 'parseSeedAgent'
   | 'parseStructuredAgentJobTranscript'
   | 'patchChatMetadataInStore'
-  | 'playbookMetaFromEntry'
   | 'promptNativeChat'
   | 'stopNativeChat'
   | 'projectCanonicalChatToRegistry'
@@ -142,8 +119,6 @@ type ChatPromptRuntimeDependencyName =
   | 'resolveDroneCliPath'
   | 'resolveDroneDaemonClientForEntry'
   | 'resolveDroneEnvironmentConfig'
-  | 'resolveEffectiveAgentMessageAutoContinueSettings'
-  | 'resolveEffectiveAgentSuggestionSettings'
   | 'resolveEffectiveLlmProvider'
   | 'resolveEffectiveProviderApiKeySettings'
   | 'resolveHostPort'
@@ -183,12 +158,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   const {
     AGENT_COPILOT_HANDLED_CAP,
     NON_REPO_HOME_CWD,
-    PROMPT_AUTOMATION_COMPLETION_STALL_RECOVERY_GRACE_MS,
-    PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS,
-    PROMPT_AUTOMATION_STOP_PHRASE_MAX_CHARS,
-    PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS,
-    PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
-    PROMPT_AUTOMATION_WAIT_POLL_MS,
     PROMPT_SKILL_SYNC_WARNINGS,
     UPGRADE_DAEMON_READY_TIMEOUT_MS,
     applyChatReconciliationInStore,
@@ -202,7 +171,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatAttachmentsStorageRootForDrone,
     chatHasActiveDockerSnapshot,
     chatNameExists,
-    classifyAgentMessageAutoContinue,
     cliSupportsModelFlag,
     cloneChatEntryForDroneClone,
     codexImageAttachmentFlags,
@@ -255,18 +223,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     normalizeChatReasoning,
     normalizeContainerPath,
     normalizeDroneCwdForRuntime,
-    normalizeDroneEntryKind,
-    normalizeDroneEntryVisibility,
     normalizeDroneIdentity,
     normalizePendingPromptState,
     normalizePendingPromptText,
     normalizePendingStartupPrompts,
-    normalizePlaybookRunQueueGate,
-    normalizePromptAutomationSleepBetweenRunsSeconds,
-    normalizePromptAutomationStopPhrase,
     normalizeSubmittedAtIso,
     notifyDroneChatWrite,
-    notifyPromptAutomationLaneChange,
     nowIso,
     openCodeSessionTitle,
     parseBlipJobTranscript,
@@ -276,7 +238,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     parseSeedAgent,
     parseStructuredAgentJobTranscript,
     patchChatMetadataInStore,
-    playbookMetaFromEntry,
     promptNativeChat,
     stopNativeChat,
     nativeChatIsBusy,
@@ -294,8 +255,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     resolveDroneCliPath,
     resolveDroneDaemonClientForEntry,
     resolveDroneEnvironmentConfig,
-    resolveEffectiveAgentMessageAutoContinueSettings,
-    resolveEffectiveAgentSuggestionSettings,
     resolveEffectiveLlmProvider,
     resolveEffectiveProviderApiKeySettings,
     resolveHostPort,
@@ -944,57 +903,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     return attachments.length === 1 ? '[attachment]' : `[${attachments.length} attachments]`;
   }
 
-  function normalizePromptAutomationMeta(raw: unknown): PromptAutomationMeta | undefined {
-    if (!raw || typeof raw !== 'object') return undefined;
-    const kind = String((raw as any).kind ?? '')
-      .trim()
-      .toLowerCase();
-    if (kind !== 'prompt-loop') return undefined;
-    const stageRaw = String((raw as any).stage ?? '')
-      .trim()
-      .toLowerCase();
-    const stage =
-      stageRaw === 'final-message' ? 'final-message' : stageRaw === 'run' ? 'run' : undefined;
-    const jobKeyRaw = String((raw as any).jobKey ?? '').trim();
-    const automationIdRaw = String((raw as any).automationId ?? '').trim();
-    const automationLabelRaw = String((raw as any).automationLabel ?? '').trim();
-    const runIndexRaw = Number((raw as any).runIndex);
-    const runsTotalRaw = Number((raw as any).runsTotal);
-    const sleepBetweenRunsSecondsRaw = Number((raw as any).sleepBetweenRunsSeconds);
-    const stopPhraseRaw = String((raw as any).stopPhrase ?? '').trim();
-    const stopPhraseCaseSensitive = (raw as any)?.stopPhraseCaseSensitive === true;
-    const stopMatchedRunIndexRaw = Number((raw as any).stopMatchedRunIndex);
-    const promptPreviewRaw = String((raw as any).promptPreview ?? '').trim();
-    const runIndex =
-      Number.isFinite(runIndexRaw) && runIndexRaw > 0 ? Math.floor(runIndexRaw) : undefined;
-    const runsTotal =
-      Number.isFinite(runsTotalRaw) && runsTotalRaw > 0 ? Math.floor(runsTotalRaw) : undefined;
-    const sleepBetweenRunsSeconds =
-      Number.isFinite(sleepBetweenRunsSecondsRaw) && sleepBetweenRunsSecondsRaw >= 0
-        ? Math.floor(sleepBetweenRunsSecondsRaw)
-        : undefined;
-    const stopMatchedRunIndex =
-      Number.isFinite(stopMatchedRunIndexRaw) && stopMatchedRunIndexRaw > 0
-        ? Math.floor(stopMatchedRunIndexRaw)
-        : undefined;
-    return {
-      kind: 'prompt-loop',
-      ...(stage ? { stage } : {}),
-      ...(jobKeyRaw ? { jobKey: jobKeyRaw } : {}),
-      ...(automationIdRaw ? { automationId: automationIdRaw } : {}),
-      ...(automationLabelRaw ? { automationLabel: automationLabelRaw.slice(0, 120) } : {}),
-      ...(typeof runIndex === 'number' ? { runIndex } : {}),
-      ...(typeof runsTotal === 'number' ? { runsTotal } : {}),
-      ...(typeof sleepBetweenRunsSeconds === 'number' ? { sleepBetweenRunsSeconds } : {}),
-      ...(stopPhraseRaw
-        ? { stopPhrase: stopPhraseRaw.slice(0, PROMPT_AUTOMATION_STOP_PHRASE_MAX_CHARS) }
-        : {}),
-      ...(stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
-      ...(typeof stopMatchedRunIndex === 'number' ? { stopMatchedRunIndex } : {}),
-      ...(promptPreviewRaw ? { promptPreview: promptPreviewRaw.slice(0, 600) } : {}),
-    };
-  }
-
   const {
     cancelQueuedPendingPrompt,
     claimQueuedPendingPromptForSending,
@@ -1015,7 +923,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     normalizePendingPromptState,
     normalizePendingPromptText,
     normalizePendingStartupPrompts,
-    normalizePromptAutomationMeta,
     nowIso,
     onPendingPromptChanged: ({ droneId, chatName }: any) =>
       notifyDroneChatWrite?.(droneId, chatName),
@@ -1101,7 +1008,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatName: string;
     droneEntry: any;
     promptIds?: string[] | null;
-    includeAutomation?: boolean;
   }): Promise<StopChatResponseResult> {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const chatName = normalizeChatName(opts.chatName);
@@ -1122,11 +1028,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         : [],
     );
     const filterByPromptIds = explicitPromptIds.size > 0;
-    const includeAutomation = opts.includeAutomation === true;
     const cancelable = pending.filter((item: any) => {
       if (!item?.id) return false;
       if (filterByPromptIds) return explicitPromptIds.has(item.id);
-      if (!includeAutomation && item.automation) return false;
       return item.state === 'queued' || item.state === 'sending' || item.state === 'sent';
     });
     if (cancelable.length === 0) {
@@ -1190,32 +1094,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       stoppedPromptIds,
       clearedPromptIds,
     };
-  }
-
-  async function activePromptAutomationPendingPromptIds(opts: {
-    droneId: string;
-    chatName: string;
-    jobKey?: string | null;
-  }): Promise<string[]> {
-    const droneId = normalizeDroneIdentity(opts.droneId);
-    const chatName = normalizeChatName(opts.chatName);
-    const jobKey = String(opts.jobKey ?? '').trim();
-    if (!droneId || !chatName || !jobKey) return [];
-    const pending = await readPendingPrompts({ droneId, chatName }).catch(() => []);
-    return pending
-      .filter((item: any) => {
-        const id = String(item?.id ?? '').trim();
-        if (!id) return false;
-        const state = String(item?.state ?? '').trim();
-        if (state !== 'queued' && state !== 'sending' && state !== 'sent') return false;
-        const automation = (item as any)?.automation ?? null;
-        if (String(automation?.kind ?? '') !== 'prompt-loop') return false;
-        if (String(automation?.stage ?? '') !== 'run') return false;
-        if (String(automation?.jobKey ?? '').trim() !== jobKey) return false;
-        return true;
-      })
-      .map((item: any) => String(item?.id ?? '').trim())
-      .filter(Boolean);
   }
 
   type DroneChatStopReason = 'archive' | 'delete' | 'stop' | 'restart';
@@ -1549,9 +1427,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const promptIds = new Set(plan.promptIds);
     const sessionNames = new Set(plan.sessionNames);
 
-    for (const chatName of plan.builtinChatNames) {
-      stopPromptAutomationJob({ droneId, chatName, stopMode: 'all', clearQueued: true });
-    }
     for (const chatName of plan.chatNames) {
       clearInMemoryChatStateForDelete({ droneId, chatName });
     }
@@ -1585,7 +1460,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     if (!droneId || !chatName || !opts.droneEntry || typeof opts.droneEntry !== 'object') return;
     if (!chatNameExists(opts.droneEntry, chatName)) return;
 
-    stopPromptAutomationJob({ droneId, chatName, stopMode: 'all', clearQueued: true });
     try {
       await stopChatResponse({ droneId, chatName, droneEntry: opts.droneEntry });
     } catch (e: any) {
@@ -1693,177 +1567,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     return await stopCliChatResponse(opts);
   }
 
-  const promptAutomationManager = new PromptAutomationManager({
-    normalizeDroneId: normalizeDroneIdentity,
-    normalizeChatName,
-    nowIso,
-    runJob: runPromptAutomationJob,
-    onLaneChanged(droneId, chatName) {
-      notifyPromptAutomationLaneChange?.(droneId, chatName);
-    },
-    onLaneIdle: enqueuePendingPromptPump,
-  });
-
-  const notifyPromptAutomationChatChanged = (droneId: string, chatName: string): void =>
-    promptAutomationManager.notifyChatChanged(droneId, chatName);
-  const promptAutomationJobKey = (droneId: string, chatName: string): string =>
-    promptAutomationManager.key(droneId, chatName);
-  const getPromptAutomationLane = (droneId: string, chatName: string) =>
-    promptAutomationManager.get(droneId, chatName);
-  const promptAutomationLaneBusy = (
-    lane: PromptAutomationLaneState | null | undefined,
-    opts?: { includeQueued?: boolean },
-  ): boolean => promptAutomationManager.isBusy(lane, opts);
-  const anyBusyPromptAutomationLaneForDrone = (droneId: string): boolean =>
-    promptAutomationManager.anyBusyForDrone(droneId);
-  const promptAutomationJobResponse = (lane: PromptAutomationLaneState | null) =>
-    promptAutomationManager.response(lane);
-
-  function appendPromptAutomationHistoryRows(
-    list: PendingPrompt[],
-    lane: PromptAutomationLaneState | null,
-  ): PendingPrompt[] {
-    const job = lane?.runningJob ?? lane?.lastJob ?? null;
-    if (!job) return list;
-    let out = list;
-    const existingRunIndexes = new Set<number>();
-    for (const item of out) {
-      const automation = normalizePromptAutomationMeta((item as any)?.automation);
-      if (
-        automation &&
-        String(automation.kind ?? '') === 'prompt-loop' &&
-        String(automation.stage ?? '') === 'run' &&
-        String(automation.jobKey ?? '') === job.executionKey &&
-        typeof automation.runIndex === 'number'
-      ) {
-        existingRunIndexes.add(automation.runIndex);
-      }
-    }
-    const updatedAt = String(job.updatedAt ?? nowIso());
-    const safeJobId = job.executionKey.replace(/[^A-Za-z0-9._-]+/g, '-').slice(-48) || 'automation';
-    for (let runIndex = 1; runIndex <= job.runsCompleted; runIndex += 1) {
-      if (existingRunIndexes.has(runIndex)) continue;
-      out = [
-        ...out,
-        {
-          id: `${safeJobId}-run-${runIndex}`,
-          at: updatedAt,
-          prompt: job.prompt,
-          automation: {
-            kind: 'prompt-loop',
-            stage: 'run',
-            jobKey: job.executionKey,
-            automationId: job.automationId,
-            automationLabel: job.automationLabel,
-            runIndex,
-            runsTotal: job.runsTotal,
-            sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
-            ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
-            ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
-            promptPreview: previewPromptAutomationPrompt(job.prompt),
-          },
-          state: 'sent',
-          updatedAt,
-        },
-      ];
-    }
-
-    if (!job.onFailurePrompt || job.runsCompleted <= 0) return out.slice(-50);
-    const id = String(job.lastPromptId ?? '').trim();
-    if (!id || out.some((item) => item.id === id)) return out.slice(-50);
-    const finalRow: PendingPrompt = {
-      id,
-      at: updatedAt,
-      prompt: job.onFailurePrompt,
-      automation: {
-        kind: 'prompt-loop',
-        stage: 'final-message',
-        jobKey: job.executionKey,
-        automationId: job.automationId,
-        automationLabel: job.automationLabel,
-        runsTotal: job.runsTotal,
-        sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
-        ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
-        ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
-        ...(typeof job.finishedEarlyRunIndex === 'number'
-          ? { stopMatchedRunIndex: job.finishedEarlyRunIndex }
-          : {}),
-        promptPreview: previewPromptAutomationPrompt(job.onFailurePrompt),
-      },
-      state: 'sent',
-      updatedAt,
-    };
-    return [...out, finalRow].slice(-50);
-  }
-
-  function parsePromptAutomationIsoMs(raw: string | null | undefined): number {
-    const ms = Date.parse(String(raw ?? '').trim());
-    return Number.isFinite(ms) ? ms : 0;
-  }
-
-  function readPromptAutomationFinalMessageSnapshot(
-    regAny: any,
-    job: PromptAutomationJobState,
-  ): {
-    hasFinalTranscriptTurn: boolean;
-    pendingFinalState: string;
-    pendingFinalUpdatedAt: string | null;
-  } {
-    const turns = Array.isArray(regAny?.drones?.[job.droneId]?.chats?.[job.chatName]?.turns)
-      ? regAny.drones[job.droneId].chats[job.chatName].turns
-      : [];
-    const pending = Array.isArray(
-      regAny?.drones?.[job.droneId]?.chats?.[job.chatName]?.pendingPrompts,
-    )
-      ? regAny.drones[job.droneId].chats[job.chatName].pendingPrompts
-      : [];
-    const jobKey = String(job.executionKey ?? '').trim();
-    const hasFinalTranscriptTurn = turns.some((turn: any) => {
-      const automation = normalizePromptAutomationMeta((turn as any)?.automation);
-      if (!automation) return false;
-      return (
-        String(automation.kind ?? '').trim() === 'prompt-loop' &&
-        String(automation.stage ?? '').trim() === 'final-message' &&
-        String(automation.jobKey ?? '').trim() === jobKey
-      );
-    });
-    const pendingFinal = pending.find((item: any) => {
-      const automation = normalizePromptAutomationMeta((item as any)?.automation);
-      if (!automation) return false;
-      return (
-        String(automation.kind ?? '').trim() === 'prompt-loop' &&
-        String(automation.stage ?? '').trim() === 'final-message' &&
-        String(automation.jobKey ?? '').trim() === jobKey
-      );
-    });
-    return {
-      hasFinalTranscriptTurn,
-      pendingFinalState: String((pendingFinal as any)?.state ?? '')
-        .trim()
-        .toLowerCase(),
-      pendingFinalUpdatedAt:
-        typeof (pendingFinal as any)?.updatedAt === 'string'
-          ? String((pendingFinal as any).updatedAt).trim() || null
-          : typeof (pendingFinal as any)?.at === 'string'
-            ? String((pendingFinal as any).at).trim() || null
-            : null,
-    };
-  }
-
-  function previewPromptAutomationPrompt(raw: string, maxLen: number = 280): string {
-    const text = String(raw ?? '')
-      .replace(/\s+/g, ' ')
-      .trim();
-    if (!text) return '';
-    if (text.length <= maxLen) return text;
-    return `${text.slice(0, maxLen - 1).trimEnd()}...`;
-  }
-
   function chatHasActivePendingPrompts(
     entry: any,
-    opts?: {
-      ignoreQueuedBlockedByAutomation?: boolean;
-    },
   ): boolean {
     const pending = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
     if (pending.length === 0) return false;
@@ -1872,13 +1577,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     for (const p of pending) {
       const state = String(p?.state ?? '').trim();
       if (state === 'failed') continue;
-      if (
-        opts?.ignoreQueuedBlockedByAutomation &&
-        state === 'queued' &&
-        Boolean((p as any)?.blockedByAutomation)
-      ) {
-        continue;
-      }
       const id = String(p?.id ?? '').trim();
       if (!id) continue;
       if (doneIds.has(id)) continue;
@@ -1899,101 +1597,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           ? regAny.drones[opts.droneId].chats[opts.chatName].turns
           : [];
     return turns.some((t: any) => String(t?.id ?? '').trim() === opts.promptId);
-  }
-
-  async function waitForPromptAutomationChatIdle(opts: {
-    droneId: string;
-    chatName: string;
-    timeoutMs: number;
-    signal: AbortSignal;
-  }): Promise<void> {
-    const timeoutMs = Math.max(
-      5_000,
-      Math.floor(opts.timeoutMs || PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS),
-    );
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
-      if (opts.signal.aborted) throw new Error('automation stopped');
-      const regAny: any = await loadRegistry();
-      const entry = regAny?.drones?.[opts.droneId]?.chats?.[opts.chatName] ?? null;
-      if (!entry) return;
-      if (!chatHasActivePendingPrompts(entry, { ignoreQueuedBlockedByAutomation: true })) return;
-      await reconcileChatFromDaemon({ droneId: opts.droneId, chatName: opts.chatName }).catch(
-        () => {},
-      );
-      await sleepMs(PROMPT_AUTOMATION_WAIT_POLL_MS);
-    }
-    throw new Error('timed out waiting for chat to become idle');
-  }
-
-  async function waitForPromptAutomationPromptCompletion(opts: {
-    droneId: string;
-    chatName: string;
-    promptId: string;
-    timeoutMs: number;
-    signal: AbortSignal;
-    requireTranscript?: boolean;
-  }): Promise<void> {
-    const timeoutMs = Math.max(
-      10_000,
-      Math.floor(opts.timeoutMs || PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS),
-    );
-    const requireTranscript = opts.requireTranscript !== false;
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < timeoutMs) {
-      if (opts.signal.aborted) throw new Error('automation stopped');
-      await reconcileChatFromDaemon({ droneId: opts.droneId, chatName: opts.chatName }).catch(
-        () => {},
-      );
-      const pending = await readPendingPrompts({
-        droneId: opts.droneId,
-        chatName: opts.chatName,
-      }).catch(() => []);
-      const target = pending.find((p: any) => p.id === opts.promptId) ?? null;
-      if (target) {
-        if (target.state === 'failed')
-          throw new Error(target.error || `prompt ${opts.promptId} failed`);
-        if (target.state === 'sent') {
-          if (!requireTranscript) return;
-          const regAny: any = await loadRegistry();
-          if (chatHasTranscriptTurn(regAny, opts)) return;
-        }
-      } else {
-        const regAny: any = await loadRegistry();
-        if (!requireTranscript || chatHasTranscriptTurn(regAny, opts)) return;
-      }
-      await sleepMs(PROMPT_AUTOMATION_WAIT_POLL_MS);
-    }
-    throw new Error(`timed out waiting for prompt ${opts.promptId} completion`);
-  }
-
-  async function waitForPromptAutomationInterRunSleep(opts: {
-    sleepBetweenRunsSeconds: number;
-    signal: AbortSignal;
-  }): Promise<void> {
-    const sleepSeconds = normalizePromptAutomationSleepBetweenRunsSeconds(
-      opts.sleepBetweenRunsSeconds,
-    );
-    if (sleepSeconds <= 0) return;
-    let remainingMs = sleepSeconds * 1000;
-    while (remainingMs > 0) {
-      if (opts.signal.aborted) throw new Error('automation stopped');
-      const chunkMs = Math.min(PROMPT_AUTOMATION_INTER_RUN_SLEEP_CHUNK_MS, remainingMs);
-      await sleepMs(chunkMs);
-      remainingMs -= chunkMs;
-    }
-  }
-
-  async function readPromptAutomationTurnOutput(opts: {
-    droneId: string;
-    chatName: string;
-    promptId: string;
-  }): Promise<string> {
-    const found = getTranscriptTurnByPromptId(opts);
-    if (!found) return '';
-    const output = String(found?.output ?? '');
-    const error = String(found?.error ?? '');
-    return [output, error].filter(Boolean).join('\n');
   }
 
   function getTranscriptTurnByPromptId(opts: {
@@ -2017,269 +1620,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       : [];
     return (turns.find((t: any) => String(t?.id ?? '').trim() === opts.promptId) ??
       null) as TranscriptTurn | null;
-  }
-
-  function chatAgentMessageAutoContinueEnabled(chatEntry: any): boolean {
-    return chatEntry?.agentMessageAutoContinueEnabled === true;
-  }
-
-  function buildAgentMessageAutoContinueSourceMessageId(opts: {
-    droneId: string;
-    chatName: string;
-    turn: TranscriptTurn | null | undefined;
-  }): string {
-    const droneId = normalizeDroneIdentity(opts.droneId);
-    const chatName = normalizeChatName(opts.chatName);
-    const turnId = String(opts.turn?.id ?? '').trim();
-    if (droneId && turnId) return `${droneId}:${turnId}`;
-    const at = String(opts.turn?.completedAt ?? opts.turn?.promptAt ?? opts.turn?.at ?? '').trim();
-    if (!droneId || !chatName || !at) return '';
-    return `${droneId}:${chatName}:${at}`;
-  }
-
-  function buildAgentMessageAutoContinueChatLockId(opts: {
-    droneId: string;
-    chatName: string;
-  }): string {
-    const droneId = normalizeDroneIdentity(opts.droneId);
-    const chatName = normalizeChatName(opts.chatName);
-    if (!droneId || !chatName) return '';
-    return `${droneId}:${chatName}`;
-  }
-
-  function normalizeAgentMessageAutoContinueTurnState(
-    raw: TranscriptTurn['agentMessageAutoContinue'] | undefined,
-  ): NonNullable<TranscriptTurn['agentMessageAutoContinue']> | null {
-    if (!raw || typeof raw !== 'object') return null;
-    const status = String(raw.status ?? '').trim();
-    if (status !== 'pending' && status !== 'classified' && status !== 'failed') return null;
-    const bucketRaw = String(raw.bucket ?? '').trim();
-    const sourceRaw = String(raw.source ?? '').trim();
-    const classifiedAt = String(raw.classifiedAt ?? '').trim();
-    const continuedAt = String(raw.continuedAt ?? '').trim();
-    const error = String(raw.error ?? '').trim();
-    const updatedAt = String(raw.updatedAt ?? '').trim();
-    return {
-      status,
-      ...(bucketRaw === 'user-turn' || bucketRaw === 'continue' ? { bucket: bucketRaw } : {}),
-      ...(sourceRaw === 'llm' || sourceRaw === 'agent-copilot-json' || sourceRaw === 'heuristic'
-        ? { source: sourceRaw }
-        : {}),
-      ...(classifiedAt ? { classifiedAt } : {}),
-      ...(continuedAt ? { continuedAt } : {}),
-      ...(error ? { error } : {}),
-      ...(updatedAt ? { updatedAt } : {}),
-    };
-  }
-
-  function normalizeAgentSuggestionTurnState(
-    raw: TranscriptTurn['agentSuggestion'] | undefined,
-  ): NonNullable<TranscriptTurn['agentSuggestion']> | null {
-    if (!raw || typeof raw !== 'object') return null;
-    const usedDirectAt = String(raw.usedDirectAt ?? '').trim();
-    const suggestionHash = String(raw.suggestionHash ?? '').trim();
-    const policyFingerprint = String(raw.policyFingerprint ?? '').trim();
-    const updatedAt = String(raw.updatedAt ?? '').trim();
-    if (!usedDirectAt && !suggestionHash && !policyFingerprint && !updatedAt) return null;
-    return {
-      ...(usedDirectAt ? { usedDirectAt } : {}),
-      ...(suggestionHash ? { suggestionHash } : {}),
-      ...(policyFingerprint ? { policyFingerprint } : {}),
-      ...(updatedAt ? { updatedAt } : {}),
-    };
-  }
-
-  function turnNeedsAgentMessageAutoContinueProcessing(
-    turn: TranscriptTurn | null | undefined,
-    enabledAtMs: number,
-  ): boolean {
-    if (!turn?.ok || turn?.inheritedFromClone === true) return false;
-    if (!String(turn?.id ?? '').trim()) return false;
-    const turnIso = String(turn?.completedAt ?? turn?.at ?? '').trim();
-    const turnMs = turnIso ? new Date(turnIso).getTime() : Number.NaN;
-    if (!Number.isFinite(turnMs) || turnMs < enabledAtMs) return false;
-    const state = normalizeAgentMessageAutoContinueTurnState(turn.agentMessageAutoContinue);
-    return !state || state.status === 'pending';
-  }
-
-  async function markTranscriptTurnAgentMessageAutoContinuePending(opts: {
-    droneId: string;
-    chatName: string;
-    promptId: string;
-  }): Promise<void> {
-    const updatedAt = nowIso();
-    await updateTranscriptTurnById({
-      droneId: opts.droneId,
-      chatName: opts.chatName,
-      promptId: opts.promptId,
-      update: (turn: any) => ({
-        ...turn,
-        agentMessageAutoContinue: {
-          status: 'pending',
-          updatedAt,
-        },
-      }),
-    });
-  }
-
-  async function markTranscriptTurnAgentMessageAutoContinueResult(opts: {
-    droneId: string;
-    chatName: string;
-    promptId: string;
-    classification: AgentMessageAutoContinueClassification;
-    continuedAt?: string | null;
-  }): Promise<void> {
-    const updatedAt = nowIso();
-    await updateTranscriptTurnById({
-      droneId: opts.droneId,
-      chatName: opts.chatName,
-      promptId: opts.promptId,
-      update: (turn: any) => ({
-        ...turn,
-        agentMessageAutoContinue: {
-          status: 'classified',
-          bucket: opts.classification.bucket,
-          source: opts.classification.source,
-          classifiedAt: updatedAt,
-          ...(opts.continuedAt ? { continuedAt: opts.continuedAt } : {}),
-          updatedAt,
-        },
-      }),
-    });
-  }
-
-  async function markTranscriptTurnAgentMessageAutoContinueFailed(opts: {
-    droneId: string;
-    chatName: string;
-    promptId: string;
-    error: string;
-  }): Promise<void> {
-    const updatedAt = nowIso();
-    await updateTranscriptTurnById({
-      droneId: opts.droneId,
-      chatName: opts.chatName,
-      promptId: opts.promptId,
-      update: (turn: any) => ({
-        ...turn,
-        agentMessageAutoContinue: {
-          status: 'failed',
-          error: opts.error,
-          updatedAt,
-        },
-      }),
-    });
-  }
-
-  async function markTranscriptTurnAgentSuggestionUsedDirect(opts: {
-    droneId: string;
-    chatName: string;
-    promptId: string;
-    suggestionHash: string;
-    policyFingerprint: string;
-  }): Promise<void> {
-    const updatedAt = nowIso();
-    await updateTranscriptTurnById({
-      droneId: opts.droneId,
-      chatName: opts.chatName,
-      promptId: opts.promptId,
-      update: (turn: any) => ({
-        ...turn,
-        agentSuggestion: {
-          usedDirectAt: updatedAt,
-          suggestionHash: String(opts.suggestionHash ?? '').trim(),
-          policyFingerprint: String(opts.policyFingerprint ?? '').trim(),
-          updatedAt,
-        },
-      }),
-    });
-  }
-
-  async function processPendingAgentMessageAutoContinueTurns(opts: {
-    droneId: string;
-    chatName: string;
-  }): Promise<void> {
-    const droneId = normalizeDroneIdentity(opts.droneId);
-    const chatName = normalizeChatName(opts.chatName);
-    if (!droneId || !chatName) return;
-    const chatLockId = buildAgentMessageAutoContinueChatLockId({ droneId, chatName });
-    if (!chatLockId || agentFollowupCoordinator.isAutoContinueChatActive(chatLockId)) return;
-
-    const stored = readChatFromStore({ droneId, chatName });
-    const chatEntry = stored.available ? stored.chat : null;
-    if (!chatEntry || !chatAgentMessageAutoContinueEnabled(chatEntry)) return;
-    const turns: TranscriptTurn[] = Array.isArray(chatEntry?.turns) ? chatEntry.turns : [];
-    if (turns.length === 0) return;
-    const enabledAtIso = String(chatEntry?.agentMessageAutoContinueEnabledAt ?? '').trim();
-    const enabledAtMs = enabledAtIso ? new Date(enabledAtIso).getTime() : Number.NaN;
-    if (!Number.isFinite(enabledAtMs)) return;
-
-    const llmProvider = await resolveEffectiveLlmProvider();
-    const providerSettings = await resolveEffectiveProviderApiKeySettings(llmProvider.provider);
-    const autoContinueSettings = await resolveEffectiveAgentMessageAutoContinueSettings();
-
-    for (let turnIndex = 0; turnIndex < turns.length; turnIndex += 1) {
-      const turn = turns[turnIndex] ?? null;
-      if (!turnNeedsAgentMessageAutoContinueProcessing(turn, enabledAtMs)) continue;
-      const promptId = String(turn?.id ?? '').trim();
-      if (!promptId) continue;
-      const sourceMessageId = buildAgentMessageAutoContinueSourceMessageId({
-        droneId,
-        chatName,
-        turn,
-      });
-      if (!agentFollowupCoordinator.startAutoContinue(sourceMessageId, chatLockId)) continue;
-      await markTranscriptTurnAgentMessageAutoContinuePending({
-        droneId,
-        chatName,
-        promptId,
-      });
-
-      void (async () => {
-        try {
-          const output = stripAnsiFromCliOutput(String(turn?.output ?? ''));
-          const classification = await classifyAgentMessageAutoContinue(output, {
-            provider: llmProvider.provider,
-            apiKey: providerSettings.apiKey ?? undefined,
-          });
-
-          await markTranscriptTurnAgentMessageAutoContinueResult({
-            droneId,
-            chatName,
-            promptId,
-            classification,
-          });
-
-          let continuedAt: string | null = null;
-          if (classification.bucket === 'continue') {
-            const enqueued = await createOrEnqueuePromptUnified({
-              droneId,
-              chatName,
-              prompt: autoContinueSettings.prompt,
-            });
-            if (enqueued.kind === 'error') throw new Error(enqueued.error);
-            continuedAt = nowIso();
-          }
-
-          await markTranscriptTurnAgentMessageAutoContinueResult({
-            droneId,
-            chatName,
-            promptId,
-            classification,
-            ...(continuedAt ? { continuedAt } : {}),
-          });
-        } catch (error: any) {
-          await markTranscriptTurnAgentMessageAutoContinueFailed({
-            droneId,
-            chatName,
-            promptId,
-            error: String(error?.message ?? error ?? 'Unknown error.'),
-          });
-        } finally {
-          agentFollowupCoordinator.finishAutoContinue(sourceMessageId, chatLockId);
-        }
-      })();
-      return;
-    }
   }
 
   function buildAgentCopilotSourceMessageId(opts: {
@@ -2406,12 +1746,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       if (enqueued.kind === 'error') throw new Error(enqueued.error);
     }
 
-    await waitForPromptAutomationPromptCompletion({
+    await waitForPromptCompletion({
       droneId: opts.droneId,
       chatName: opts.chatName,
       promptId: opts.promptId,
-      timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
-      signal: new AbortController().signal,
+      timeoutMs: 30 * 60_000,
     });
 
     const turn = getTranscriptTurnByPromptId(opts);
@@ -2579,423 +1918,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     }
   }
 
-  function promptAutomationOutputContainsStopPhrase(opts: {
-    output: string;
-    stopPhrase: string;
-    caseSensitive: boolean;
-  }): boolean {
-    const phrase = normalizePromptAutomationStopPhrase(opts.stopPhrase);
-    if (!phrase) return false;
-    const output = String(opts.output ?? '');
-    if (!output) return false;
-    const normalizedOutput = stripAnsiFromCliOutput(output);
-    if (opts.caseSensitive) return output.includes(phrase) || normalizedOutput.includes(phrase);
-    const lowerPhrase = phrase.toLowerCase();
-    return (
-      output.toLowerCase().includes(lowerPhrase) ||
-      normalizedOutput.toLowerCase().includes(lowerPhrase)
-    );
-  }
-
-  async function preservePromptAutomationPendingHistory(opts: {
-    droneId: string;
-    chatName: string;
-    promptId: string;
-    prompt: string;
-    automation: PromptAutomationMeta;
-  }): Promise<void> {
-    const now = nowIso();
-    await pushPendingPrompt({
-      droneId: opts.droneId,
-      chatName: opts.chatName,
-      pending: {
-        id: opts.promptId,
-        at: now,
-        prompt: opts.prompt,
-        automation: normalizePromptAutomationMeta(opts.automation),
-        state: 'sent',
-        updatedAt: now,
-      },
-    }).catch(() => {});
-  }
-
-  async function sendPromptAutomationFinalMessage(
-    job: PromptAutomationJobState,
-    opts?: { ignoreAbortSignal?: boolean },
-  ): Promise<void> {
-    const finalPrompt = String(job.onFailurePrompt ?? '').trim();
-    if (!finalPrompt) return;
-    const ignoreAbortSignal = opts?.ignoreAbortSignal === true;
-    const signal = ignoreAbortSignal ? null : job.abortController?.signal;
-    if (!ignoreAbortSignal && signal?.aborted) return;
-    const automation: PromptAutomationMeta = {
-      kind: 'prompt-loop',
-      stage: 'final-message',
-      jobKey: job.executionKey,
-      automationId: job.automationId,
-      automationLabel: job.automationLabel,
-      runsTotal: job.runsTotal,
-      sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
-      ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
-      ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
-      ...(typeof job.finishedEarlyRunIndex === 'number'
-        ? { stopMatchedRunIndex: job.finishedEarlyRunIndex }
-        : {}),
-      promptPreview: previewPromptAutomationPrompt(finalPrompt),
-    };
-    const enqueued = await createOrEnqueuePromptUnified({
-      droneId: job.droneId,
-      chatName: job.chatName,
-      prompt: finalPrompt,
-      automation,
-    });
-    if (enqueued.kind === 'error') throw new Error(enqueued.error);
-    job.lastPromptId = enqueued.id;
-    job.updatedAt = nowIso();
-    const nativeChatId = await nativeAutomationChatId(job.droneId, job.chatName);
-    if (nativeChatId) {
-      await waitForNativeAutomationCompletion(
-        nativeChatId,
-        PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
-        signal ?? new AbortController().signal,
-      );
-    } else {
-      await waitForPromptAutomationPromptCompletion({
-        droneId: job.droneId,
-        chatName: job.chatName,
-        promptId: enqueued.id,
-        timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
-        signal: signal ?? new AbortController().signal,
-        requireTranscript: false,
-      });
-      await preservePromptAutomationPendingHistory({
-        droneId: job.droneId,
-        chatName: job.chatName,
-        promptId: enqueued.id,
-        prompt: finalPrompt,
-        automation,
-      });
-    }
-    job.updatedAt = nowIso();
-  }
-
-  async function nativeAutomationChatId(
-    droneId: string,
-    chatName: string,
-  ): Promise<string> {
-    const { d, chat } = await getChatEntry({ droneId, chatName });
-    return inferChatAgent(chat, d).kind === 'native' ? String(chat?.id ?? '').trim() : '';
-  }
-
-  async function waitForNativeAutomationCompletion(
-    nativeChatId: string,
-    timeoutMs: number,
-    signal: AbortSignal,
-  ): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    do {
-      if (signal.aborted) throw new Error('automation stopped');
-      if (!(await nativeChatIsBusy(nativeChatId))) {
-        const error = await nativeChatError(nativeChatId);
-        if (error) throw new Error(error);
-        return;
-      }
-      await sleepMs(250);
-    } while (Date.now() < deadline);
-    throw new Error('Timed out waiting for the Built-in agent to finish');
-  }
-
-  async function runPromptAutomationJob(job: PromptAutomationJobState): Promise<void> {
-    let lastRunError = '';
-    let hadRunFailure = false;
-    try {
-      for (let runIdx = 0; runIdx < job.runsTotal; runIdx++) {
-        const signal = job.abortController?.signal;
-        if (signal?.aborted) throw new Error('automation stopped');
-        try {
-          await waitForPromptAutomationChatIdle({
-            droneId: job.droneId,
-            chatName: job.chatName,
-            timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_IDLE_TIMEOUT_MS,
-            signal: signal ?? new AbortController().signal,
-          });
-
-          const automation: PromptAutomationMeta = {
-            kind: 'prompt-loop',
-            stage: 'run',
-            jobKey: job.executionKey,
-            automationId: job.automationId,
-            automationLabel: job.automationLabel,
-            runIndex: runIdx + 1,
-            runsTotal: job.runsTotal,
-            sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
-            ...(job.stopPhrase ? { stopPhrase: job.stopPhrase } : {}),
-            ...(job.stopPhraseCaseSensitive ? { stopPhraseCaseSensitive: true } : {}),
-            promptPreview: previewPromptAutomationPrompt(job.prompt),
-          };
-          const enqueued = await createOrEnqueuePromptUnified({
-            droneId: job.droneId,
-            chatName: job.chatName,
-            prompt: job.prompt,
-            automation,
-          });
-          if (enqueued.kind === 'error') throw new Error(enqueued.error);
-          job.lastPromptId = enqueued.id;
-          job.updatedAt = nowIso();
-          notifyPromptAutomationChatChanged(job.droneId, job.chatName);
-          const nativeChatId = await nativeAutomationChatId(job.droneId, job.chatName);
-          if (nativeChatId) {
-            await waitForNativeAutomationCompletion(
-              nativeChatId,
-              PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
-              signal ?? new AbortController().signal,
-            );
-          } else {
-            await waitForPromptAutomationPromptCompletion({
-              droneId: job.droneId,
-              chatName: job.chatName,
-              promptId: enqueued.id,
-              timeoutMs: PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
-              signal: signal ?? new AbortController().signal,
-            });
-            await preservePromptAutomationPendingHistory({
-              droneId: job.droneId,
-              chatName: job.chatName,
-              promptId: enqueued.id,
-              prompt: job.prompt,
-              automation,
-            });
-          }
-          job.runsCompleted += 1;
-          job.updatedAt = nowIso();
-          notifyPromptAutomationChatChanged(job.droneId, job.chatName);
-
-          if (job.stopPhrase) {
-            let output = '';
-            try {
-              output = nativeChatId
-                ? await nativeChatLatestAssistantText(nativeChatId)
-                : await readPromptAutomationTurnOutput({
-                    droneId: job.droneId,
-                    chatName: job.chatName,
-                    promptId: enqueued.id,
-                  });
-            } catch {
-              output = '';
-            }
-            if (
-              promptAutomationOutputContainsStopPhrase({
-                output,
-                stopPhrase: job.stopPhrase,
-                caseSensitive: job.stopPhraseCaseSensitive,
-              })
-            ) {
-              job.finishedEarly = true;
-              job.finishedEarlyReason = 'stop-phrase';
-              job.finishedEarlyRunIndex = job.runsCompleted;
-              job.runsTotal = job.runsCompleted;
-              job.updatedAt = nowIso();
-              notifyPromptAutomationChatChanged(job.droneId, job.chatName);
-              break;
-            }
-          }
-        } catch (e: any) {
-          const msg = String(e?.message ?? e ?? '').trim();
-          if (job.abortController?.signal.aborted || /automation stopped/i.test(msg)) throw e;
-          hadRunFailure = true;
-          lastRunError = msg || 'automation run failed';
-          job.updatedAt = nowIso();
-          notifyPromptAutomationChatChanged(job.droneId, job.chatName);
-        }
-
-        if (job.finishedEarly) break;
-        if (runIdx < job.runsTotal - 1 && job.sleepBetweenRunsSeconds > 0) {
-          const waitSignal = job.abortController?.signal ?? new AbortController().signal;
-          await waitForPromptAutomationInterRunSleep({
-            sleepBetweenRunsSeconds: job.sleepBetweenRunsSeconds,
-            signal: waitSignal,
-          });
-          job.updatedAt = nowIso();
-          notifyPromptAutomationChatChanged(job.droneId, job.chatName);
-        }
-      }
-
-      if (job.runsCompleted > 0 && job.onFailurePrompt) {
-        try {
-          await sendPromptAutomationFinalMessage(job);
-        } catch (followupError: any) {
-          const followupMsg =
-            String(followupError?.message ?? followupError ?? '').trim() ||
-            'failed sending final message';
-          hubLog('warn', 'prompt automation final message failed', {
-            droneId: job.droneId,
-            chatName: job.chatName,
-            automationId: job.automationId,
-            jobKey: job.executionKey,
-            error: followupMsg,
-          });
-          if (!hadRunFailure) {
-            hadRunFailure = true;
-            lastRunError = `final message failed: ${followupMsg}`;
-          } else {
-            lastRunError = lastRunError
-              ? `${lastRunError}; final message failed: ${followupMsg}`
-              : `final message failed: ${followupMsg}`;
-          }
-        }
-      }
-
-      if (hadRunFailure) {
-        job.status = 'failed';
-        job.error = lastRunError || 'automation failed';
-      } else {
-        job.status = 'completed';
-        job.error = null;
-      }
-      job.updatedAt = nowIso();
-      notifyPromptAutomationChatChanged(job.droneId, job.chatName);
-    } catch (e: any) {
-      const msg = String(e?.message ?? e ?? '').trim();
-      if (job.abortController?.signal.aborted || /automation stopped/i.test(msg)) {
-        const stopMode = job.stopMode === 'runs-only' ? 'runs-only' : 'all';
-        if (stopMode === 'runs-only') {
-          let finalMessageError = '';
-          if (job.runsCompleted > 0 && job.onFailurePrompt) {
-            try {
-              await sendPromptAutomationFinalMessage(job, { ignoreAbortSignal: true });
-            } catch (followupError: any) {
-              finalMessageError =
-                String(followupError?.message ?? followupError ?? '').trim() ||
-                'final message failed';
-            }
-          }
-          job.finishedEarly = true;
-          if (!job.finishedEarlyReason) job.finishedEarlyReason = 'manual-stop-runs-only';
-          if (job.runsCompleted > 0) job.finishedEarlyRunIndex = job.runsCompleted;
-          if (finalMessageError) {
-            job.status = 'failed';
-            job.error = `final message failed: ${finalMessageError}`;
-          } else {
-            job.status = 'stopped';
-            job.error = null;
-          }
-          job.updatedAt = nowIso();
-          notifyPromptAutomationChatChanged(job.droneId, job.chatName);
-          return;
-        }
-        job.status = 'stopped';
-        job.error = null;
-        job.updatedAt = nowIso();
-        notifyPromptAutomationChatChanged(job.droneId, job.chatName);
-        return;
-      }
-      job.status = 'failed';
-      job.error = msg || 'automation failed';
-      job.updatedAt = nowIso();
-      notifyPromptAutomationChatChanged(job.droneId, job.chatName);
-    } finally {
-      job.stopMode = null;
-      job.abortController = null;
-      job.task = null;
-    }
-  }
-
-  function finalizePromptAutomationLaneJob(
-    lane: PromptAutomationLaneState,
-    job: PromptAutomationJobState,
-  ): void {
-    promptAutomationManager.finalize(lane, job);
-  }
-
-  async function recoverStalledPromptAutomationLane(
-    lane: PromptAutomationLaneState | null | undefined,
-  ): Promise<void> {
-    if (!lane || !lane.runningJob) return;
-    const job = lane.runningJob;
-    if (job.status !== 'running') return;
-    if (job.runsTotal <= 0 || job.runsCompleted < job.runsTotal) return;
-
-    const updatedMs = parsePromptAutomationIsoMs(job.updatedAt || job.startedAt);
-    if (!updatedMs) return;
-    const ageMs = Date.now() - updatedMs;
-    if (ageMs < PROMPT_AUTOMATION_COMPLETION_STALL_RECOVERY_GRACE_MS) return;
-
-    const finalPrompt = String(job.onFailurePrompt ?? '').trim();
-    if (!finalPrompt) {
-      job.status = 'completed';
-      job.error = null;
-      job.updatedAt = nowIso();
-      finalizePromptAutomationLaneJob(lane, job);
-      return;
-    }
-
-    const regAny: any = await loadRegistry().catch(() => null);
-    if (!regAny || typeof regAny !== 'object') return;
-    const finalSnapshot = readPromptAutomationFinalMessageSnapshot(regAny, job);
-
-    if (finalSnapshot.hasFinalTranscriptTurn) {
-      job.status = 'completed';
-      job.error = null;
-      job.updatedAt = nowIso();
-      finalizePromptAutomationLaneJob(lane, job);
-      return;
-    }
-
-    if (finalSnapshot.pendingFinalState === 'failed') {
-      job.status = 'failed';
-      job.error = 'final message failed';
-      job.updatedAt = nowIso();
-      finalizePromptAutomationLaneJob(lane, job);
-      return;
-    }
-
-    if (!finalSnapshot.pendingFinalState) {
-      job.status = 'failed';
-      job.error = 'final message was not enqueued after automation runs completed';
-      job.updatedAt = nowIso();
-      finalizePromptAutomationLaneJob(lane, job);
-      return;
-    }
-
-    if (finalSnapshot.pendingFinalState === 'queued') {
-      const queuedUpdatedMs = parsePromptAutomationIsoMs(finalSnapshot.pendingFinalUpdatedAt);
-      const queuedAgeMs = queuedUpdatedMs > 0 ? Date.now() - queuedUpdatedMs : 0;
-      const queuedStaleAfterMs = Math.max(defaultPromptEnqueueTimeoutMs() * 2, 5 * 60_000);
-      if (queuedUpdatedMs > 0 && queuedAgeMs >= queuedStaleAfterMs) {
-        job.status = 'failed';
-        job.error = 'final message remained queued for too long';
-        job.updatedAt = nowIso();
-        finalizePromptAutomationLaneJob(lane, job);
-      }
-      return;
-    }
-
-    const staleFinalState = stalePendingPromptState({
-      state: finalSnapshot.pendingFinalState,
-      updatedAt: finalSnapshot.pendingFinalUpdatedAt,
-      at: finalSnapshot.pendingFinalUpdatedAt,
-      enqueueTimeoutMs: defaultPromptEnqueueTimeoutMs(),
-    });
-    if (staleFinalState === 'sending' || staleFinalState === 'sent') {
-      job.status = 'failed';
-      job.error = 'final message stalled before transcript reconciliation';
-      job.updatedAt = nowIso();
-      finalizePromptAutomationLaneJob(lane, job);
-    }
-  }
-
-  function stopPromptAutomationJob(opts: {
-    droneId: string;
-    chatName: string;
-    stopMode?: PromptAutomationStopMode;
-    clearQueued?: boolean;
-  }): PromptAutomationLaneState | null {
-    return promptAutomationManager.stop(opts);
-  }
-
-  // Hub-side pump for `pendingPrompts` entries that are persisted but not yet enqueued
-  // into the drone daemon (state: 'queued'). This is used to preserve session continuity
-  // for agents where the continuation/session id is only known after the first turn.
   function pendingPromptPumpConcurrencyLimit(): number {
     const raw = String(process.env.DRONE_HUB_PENDING_PROMPT_PUMP_CONCURRENCY ?? '').trim();
     const n = raw ? Number(raw) : NaN;
@@ -3048,7 +1970,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       const id = String(p?.id ?? '').trim();
       const prompt = String(p?.prompt ?? '');
       const cwd = typeof p?.cwd === 'string' ? String(p.cwd) : null;
-      const blockedByAutomation = Boolean((p as any)?.blockedByAutomation);
       if (!id || !prompt.trim()) {
         // Mark invalid entries as failed so they don't block forever.
         await updatePendingPrompt({
@@ -3060,13 +1981,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         continue;
       }
 
-      if (blockedByAutomation) {
-        const lane = getPromptAutomationLane(droneId, chatName);
-        if (promptAutomationLaneBusy(lane, { includeQueued: true })) {
-          // Held intentionally behind automation lane completion.
-          return;
-        }
-      }
 
       const sessionKnown = hasKnownBuiltinTranscriptSession(entry, agent.id);
       const prior = pendingList
@@ -3096,8 +2010,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             attachmentRefs: normalizeChatImageAttachmentRefs(p?.attachments),
             cwd,
             waitForDaemonMs: undefined,
-            skipManagedRepoSync:
-              String((p as any)?.automation?.kind ?? '').trim() === 'prompt-loop',
           });
         } catch (e: any) {
           const errorText = e?.message ?? String(e);
@@ -3139,8 +2051,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
             attachmentRefs: normalizeChatImageAttachmentRefs(p?.attachments),
             cwd,
             waitForDaemonMs: undefined,
-            skipManagedRepoSync:
-              String((p as any)?.automation?.kind ?? '').trim() === 'prompt-loop',
           }),
           enqueueTimeoutMs,
           `queued prompt enqueue failed for ${droneId}/${chatName}`,
@@ -3156,10 +2066,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           if (agent.kind === 'native') {
             const nativeChatId = String((chat as any)?.id ?? '').trim();
             if (!nativeChatId) throw new Error('native chat has no stable identity');
-            await waitForNativeAutomationCompletion(
+            await waitForNativePromptCompletion(
               nativeChatId,
-              PROMPT_AUTOMATION_WAIT_FOR_PROMPT_TIMEOUT_MS,
-              new AbortController().signal,
+              30 * 60_000,
             );
           }
           await updatePendingPrompt({ droneId, chatName, id, patch: { state: 'sent' } });
@@ -3221,8 +2130,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     run: pumpQueuedPendingPromptsForChat,
   });
 
-  async function resetPromptAutomationStateForTests(): Promise<void> {
-    await promptAutomationManager.reset();
+  async function resetPromptRuntimeStateForTests(): Promise<void> {
     await pendingPromptPump.reset();
     resetTranscriptStoreForTests();
   }
@@ -3250,7 +2158,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const key = droneChatMapKey(opts.droneId, opts.chatName);
     if (!key) return;
 
-    promptAutomationManager.delete(opts.droneId, opts.chatName);
 
     chatReconciliationQueue.delete(opts.droneId, opts.chatName);
 
@@ -3266,7 +2173,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     const toKey = droneChatMapKey(opts.droneId, opts.toChatName);
     if (!fromKey || !toKey || fromKey === toKey) return;
 
-    promptAutomationManager.migrate(opts.droneId, opts.fromChatName, opts.toChatName);
 
     chatReconciliationQueue.migrate(opts.droneId, opts.fromChatName, opts.toChatName);
 
@@ -3326,11 +2232,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       })
       .filter((p: { id: string }) => p.id);
     if (chatHasActivePendingPromptsForSummary(entry)) reasons.push('active-pending-prompt');
-    if (
-      promptAutomationLaneBusy(getPromptAutomationLane(droneId, chatName), { includeQueued: true })
-    ) {
-      reasons.push('prompt-automation');
-    }
     if (chatHasActiveDockerSnapshot(entry)) reasons.push('docker-snapshot');
     return { chatName, reasons, pendingPrompts };
   }
@@ -3424,14 +2325,12 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     normalizeChatName,
     normalizeChatReasoning,
     normalizeDroneIdentity,
-    normalizePromptAutomationMeta,
     nowIso,
     parseBlipJobTranscript,
     parseCodexJobTranscript,
     parsePiJobTranscript,
     parseStructuredAgentJobTranscript,
     processPendingAgentCopilotTurns,
-    processPendingAgentMessageAutoContinueTurns,
     projectCanonicalChatToRegistry,
     pruneCompletedPendingPrompts,
     readChatFromStore,
@@ -3450,19 +2349,57 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
   });
   const { reconcileChatFromDaemon } = chatReconciliationExecutor;
 
+  async function waitForPromptCompletion(opts: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    timeoutMs: number;
+  }): Promise<void> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < opts.timeoutMs) {
+      await reconcileChatFromDaemon({ droneId: opts.droneId, chatName: opts.chatName }).catch(
+        () => {},
+      );
+      const pending = await readPendingPrompts({
+        droneId: opts.droneId,
+        chatName: opts.chatName,
+      }).catch(() => []);
+      const target = pending.find((item: any) => item.id === opts.promptId) ?? null;
+      if (target?.state === 'failed') {
+        throw new Error(target.error || `prompt ${opts.promptId} failed`);
+      }
+      const regAny: any = await loadRegistry();
+      if (chatHasTranscriptTurn(regAny, opts)) return;
+      await sleepMs(250);
+    }
+    throw new Error(`timed out waiting for prompt ${opts.promptId} completion`);
+  }
+
+  async function waitForNativePromptCompletion(nativeChatId: string, timeoutMs: number): Promise<void> {
+    const deadline = Date.now() + timeoutMs;
+    do {
+      if (!(await nativeChatIsBusy(nativeChatId))) {
+        const error = await nativeChatError(nativeChatId);
+        if (error) throw new Error(error);
+        return;
+      }
+      await sleepMs(250);
+    } while (Date.now() < deadline);
+    throw new Error('Timed out waiting for the Built-in agent to finish');
+  }
+
   async function enqueuePrompt(opts: {
     id?: string;
     droneId: string;
     chatName: string;
     prompt: string;
     attachments?: ChatImageAttachment[];
-    automation?: PromptAutomationMeta | null;
     cwd?: string | null;
     submittedAt?: string | null;
     waitForDaemonMs?: number;
     deliveryMode?: 'background' | 'immediate';
     mark?: (name: string) => void;
-  }): Promise<{ id: string; pendingState: PendingPromptState; blockedByAutomation: boolean }> {
+  }): Promise<{ id: string; pendingState: PendingPromptState }> {
     const preferredIdRaw = typeof opts.id === 'string' ? opts.id.trim() : '';
     if (preferredIdRaw && !isSafePromptId(preferredIdRaw)) {
       throw new Error('invalid promptId');
@@ -3485,9 +2422,8 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       chatName,
       droneEntry: d,
       chatEntry: { ...chat, pendingPrompts: canonicalPendingPrompts },
-      automation: opts.automation,
     });
-    const { defer, blockedByAutomation } = disposition;
+    const { defer } = disposition;
     opts.mark?.('disposition');
 
     const cwd = normalizeDroneCwdForRuntime(d, typeof opts.cwd === 'string' ? opts.cwd : null);
@@ -3511,8 +2447,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         ...(configuredModel ? { model: configuredModel } : {}),
         cwd: opts.cwd ?? null,
         ...(attachmentsForPending.length > 0 ? { attachments: attachmentsForPending } : {}),
-        ...(opts.automation ? { automation: normalizePromptAutomationMeta(opts.automation) } : {}),
-        ...(blockedByAutomation ? { blockedByAutomation: true } : {}),
         state: defer || opts.deliveryMode === 'background' ? 'queued' : 'sending',
         updatedAt: at,
       },
@@ -3557,7 +2491,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       // Persisted as queued; the background pump will claim it when the chat is deliverable.
       enqueuePendingPromptPump(droneId, chatName);
       opts.mark?.('queuePump');
-      return { id, pendingState: 'queued', blockedByAutomation };
+      return { id, pendingState: 'queued' };
     }
 
     try {
@@ -3578,10 +2512,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           attachments: rawAttachments,
           cwd: opts.cwd ?? null,
           waitForDaemonMs: opts.waitForDaemonMs,
-          skipManagedRepoSync: Boolean(
-            opts.automation &&
-            String((opts.automation as any)?.kind ?? '').trim() === 'prompt-loop',
-          ),
           mark: opts.mark,
         }),
         enqueueTimeoutMs,
@@ -3645,12 +2575,11 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
 
     // Best-effort: if there are any deferred follow-ups, try to enqueue now.
     enqueuePendingPromptPump(droneId, chatName);
-    return { id, pendingState: 'sending', blockedByAutomation };
+    return { id, pendingState: 'sending' };
   }
 
   type PromptEnqueueDisposition = {
     defer: boolean;
-    blockedByAutomation: boolean;
     hasPriorActive: boolean;
     hasPriorQueued: boolean;
     waitingForSession: boolean;
@@ -3661,7 +2590,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatName: string;
     droneEntry: any;
     chatEntry: any;
-    automation?: PromptAutomationMeta | null;
   }): PromptEnqueueDisposition {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const chatName = normalizeChatName(opts.chatName);
@@ -3677,25 +2605,15 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       : [];
     const sessionKnown =
       agent.kind !== 'builtin' ? true : hasKnownBuiltinTranscriptSession(opts.chatEntry, agent.id);
-    const automationLane = getPromptAutomationLane(droneId, chatName);
-    const automationLaneBusy = promptAutomationLaneBusy(automationLane, { includeQueued: true });
-    const isAutomationPrompt = Boolean(
-      opts.automation && String((opts.automation as any)?.kind ?? '').trim() === 'prompt-loop',
-    );
-    const blockedByAutomation = automationLaneBusy && !isAutomationPrompt;
-    const hasPriorActive = !isAutomationPrompt
-      ? hasActivePriorPendingPrompt({
-          priorPendingPrompts: priorPending
-            .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
-            .filter((p: any) => p.id),
-          transcriptDoneIds,
-        })
-      : false;
-    const hasPriorQueued = priorPending.some((p: any) => {
-      if (String(p?.state ?? '') !== 'queued') return false;
-      if (isAutomationPrompt) return !Boolean((p as any)?.blockedByAutomation);
-      return true;
+    const hasPriorActive = hasActivePriorPendingPrompt({
+      priorPendingPrompts: priorPending
+        .map((p: any) => ({ id: String(p?.id ?? '').trim(), state: String(p?.state ?? '') }))
+        .filter((p: any) => p.id),
+      transcriptDoneIds,
     });
+    const hasPriorQueued = priorPending.some(
+      (p: any) => String(p?.state ?? '') === 'queued',
+    );
     const waitingForSession =
       agent.kind === 'builtin'
         ? shouldDeferQueuedTranscriptPrompt({
@@ -3708,8 +2626,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           })
         : false;
     return {
-      defer: blockedByAutomation || hasPriorActive || hasPriorQueued || waitingForSession,
-      blockedByAutomation,
+      defer: hasPriorActive || hasPriorQueued || waitingForSession,
       hasPriorActive,
       hasPriorQueued,
       waitingForSession,
@@ -3729,7 +2646,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     chatName: string;
     prompt: string;
     attachments?: ChatImageAttachment[];
-    automation?: PromptAutomationMeta | null;
     cwd?: string | null;
     submittedAt?: string | null;
     mark?: (name: string) => void;
@@ -3738,7 +2654,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         kind: 'enqueued';
         id: string;
         pendingState: PendingPromptState;
-        blockedByAutomation: boolean;
       }
     | { kind: 'error'; status: number; error: string }
   > {
@@ -3755,9 +2670,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     if (!droneId) return { kind: 'error', status: 400, error: 'missing drone id' };
     if (!prompt) return { kind: 'error', status: 400, error: 'missing prompt' };
 
-    const isAutomationPrompt = Boolean(
-      opts.automation && String((opts.automation as any)?.kind ?? '').trim() === 'prompt-loop',
-    );
     let regSnap: any = await loadRegistry();
     opts.mark?.('loadRegistry');
     if (regSnap?.drones?.[droneId]) {
@@ -3799,7 +2711,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           kind: 'enqueued',
           id: fallbackId,
           pendingState: 'sending',
-          blockedByAutomation: false,
         };
       }
       const r = await enqueuePrompt({
@@ -3808,17 +2719,15 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         chatName,
         prompt,
         attachments,
-        automation: opts.automation,
         cwd: opts.cwd ?? null,
         submittedAt: opts.submittedAt ?? null,
-        deliveryMode: isAutomationPrompt ? 'immediate' : 'background',
+        deliveryMode: 'background',
         mark: opts.mark,
       });
       return {
         kind: 'enqueued',
         id: r.id,
         pendingState: r.pendingState,
-        blockedByAutomation: r.blockedByAutomation,
       };
     }
 
@@ -3853,17 +2762,15 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
           chatName,
           prompt,
           attachments,
-          automation: opts.automation ?? null,
           cwd: opts.cwd ?? null,
           submittedAt: opts.submittedAt ?? null,
-          deliveryMode: isAutomationPrompt ? 'immediate' : 'background',
+          deliveryMode: 'background',
           mark: opts.mark,
         });
         return {
           kind: 'enqueued',
           id: r.id,
           pendingState: r.pendingState,
-          blockedByAutomation: r.blockedByAutomation,
         };
       }
       if (queuedStatus !== 'queued') {
@@ -3873,7 +2780,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
         kind: 'enqueued',
         id: fallbackId,
         pendingState: 'queued',
-        blockedByAutomation: false,
       };
     }
     return { kind: 'error', status: 404, error: `unknown drone: ${droneId}` };
@@ -3895,15 +2801,9 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       normalizeChatModel,
       normalizeChatReasoning,
       normalizeChatName,
-      normalizeDroneEntryKind,
-      normalizeDroneEntryVisibility,
-      normalizePlaybookRunQueueGate,
       normalizePendingStartupPrompts,
       nowIso,
       parseSeedAgent,
-      playbookMetaFromEntry,
-      resolveAgentSuggestionEnabledByDefault: async () =>
-        (await resolveEffectiveAgentSuggestionSettings()).enabledByDefault,
       resolveDroneCliPath,
       resolvePendingDroneDisplayName,
       runNodeCli,
@@ -3916,8 +2816,6 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     });
 
   return {
-    activePromptAutomationPendingPromptIds,
-    appendPromptAutomationHistoryRows,
     attachmentOnlyPromptLabel,
     busyChatNamesForDrone,
     cancelQueuedPendingPrompt,
@@ -3933,30 +2831,20 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
     enqueueProvisioningForAllPending,
     enqueueReconcile,
     ensureDaemonPromptEventSubscription,
-    getPromptAutomationLane,
     isSafePromptId,
     looksLikeContainerAlreadyRunningError,
     looksLikeContainerNotRunningError,
     looksLikeMissingContainerError,
     looksLikeRepoUnavailableError,
-    markTranscriptTurnAgentSuggestionUsedDirect,
     migrateInMemoryChatStateForRename,
-    normalizeAgentMessageAutoContinueTurnState,
-    normalizeAgentSuggestionTurnState,
     normalizeChatImageAttachmentRefs,
-    normalizePromptAutomationMeta,
     pendingPromptsFromChatEntry,
-    promptAutomationJobKey,
-    promptAutomationJobResponse,
-    promptAutomationLaneBusy,
-    promptAutomationManager,
     pruneCompletedPendingPrompts,
     pushPendingPrompt,
     pushPendingStartupPrompt,
     readPendingPrompts,
     readPendingStartupPrompts,
-    recoverStalledPromptAutomationLane,
-    resetPromptAutomationStateForTests,
+    resetPromptRuntimeStateForTests,
     resumePendingPromptChats,
     runDroneLifecycleAction,
     stopAllDroneChatActivity,

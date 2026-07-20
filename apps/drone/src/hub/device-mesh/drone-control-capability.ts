@@ -68,8 +68,6 @@ function compactPendingPrompts(value: unknown): any[] {
       ? String(prompt.state)
       : 'queued',
     ...(prompt?.error ? { error: truncateUtf8(prompt.error, errorLimit) } : {}),
-    ...(prompt?.automation ? { automation: true } : {}),
-    ...(prompt?.blockedByAutomation ? { blockedByAutomation: true } : {}),
     imageCount: Array.isArray(prompt?.attachments) ? prompt.attachments.length : 0,
     updatedAt: String(prompt?.updatedAt ?? ''),
   }));

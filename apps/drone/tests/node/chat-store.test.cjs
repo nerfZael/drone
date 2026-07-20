@@ -104,8 +104,64 @@ describe('canonical chat and transcript repository', () => {
       requireHubDatabase().read((connection) =>
         connection.prepare("SELECT COUNT(*) AS count FROM hub_schema_migrations WHERE scope = 'chats'").get().count,
       ),
-      5,
+      6,
     );
+  });
+
+  test('drops retired follow-up metadata while importing and reading chats', async () => {
+    tempDataDir('retired-followup-metadata');
+    await upsertChatInStore({
+      droneId: 'drone-1',
+      chatName: 'default',
+      chatEntry: {
+        ...legacyChat('legacy follow-up state', [{
+          id: 'turn-1',
+          at: '2026-01-01T00:01:00.000Z',
+          prompt: 'continue',
+          ok: true,
+          output: 'done',
+          agentMessageAutoContinue: { status: 'classified' },
+          agentSuggestion: { usedDirectAt: '2026-01-01T00:02:00.000Z' },
+          automation: { kind: 'prompt-loop', stage: 'run' },
+        }]),
+        agentMessageAutoContinueEnabled: true,
+        agentMessageAutoContinueEnabledAt: '2026-01-01T00:00:00.000Z',
+        agentSuggestionEnabled: true,
+        agentSuggestionEnabledAt: '2026-01-01T00:00:00.000Z',
+      },
+    });
+
+    const chat = readChatFromStore({ droneId: 'drone-1', chatName: 'default' }).chat;
+    assert.equal(chat.agentMessageAutoContinueEnabled, undefined);
+    assert.equal(chat.agentMessageAutoContinueEnabledAt, undefined);
+    assert.equal(chat.agentSuggestionEnabled, undefined);
+    assert.equal(chat.agentSuggestionEnabledAt, undefined);
+    assert.equal(chat.turns[0].agentMessageAutoContinue, undefined);
+    assert.equal(chat.turns[0].agentSuggestion, undefined);
+    assert.equal(chat.turns[0].automation, undefined);
+
+    await importArchivedChatsFromRegistry({
+      droneId: 'drone-1',
+      archivedChats: {
+        archived: {
+          ...legacyChat('archived legacy state'),
+          archivedAt: '2026-01-01T00:00:00.000Z',
+          deleteAt: '2026-01-02T00:00:00.000Z',
+          archiveRetention: '1d',
+          pendingPrompts: [{
+            id: 'queued',
+            at: '2026-01-01T00:03:00.000Z',
+            prompt: 'later',
+            state: 'queued',
+            automation: { kind: 'prompt-loop', stage: 'run' },
+            blockedByAutomation: true,
+          }],
+        },
+      },
+    });
+    const archived = listArchivedChatsFromStore({ droneId: 'drone-1' }).archivedChats[0].chat;
+    assert.equal(archived.pendingPrompts[0].automation, undefined);
+    assert.equal(archived.pendingPrompts[0].blockedByAutomation, undefined);
   });
 
   test('shares monotonic unread cursors without letting stale devices clear newer replies', async () => {
@@ -530,11 +586,11 @@ describe('canonical chat and transcript repository', () => {
     await Promise.all([
       updateTranscriptTurnInStore({
         droneId: 'drone-1', chatName: 'default', turnId: 'two',
-        update: (turn) => ({ ...turn, agentSuggestion: { usedDirectAt: '2026-01-01T00:04:00.000Z' } }),
+        update: (turn) => ({ ...turn, reasoning: 'high' }),
       }),
       updateTranscriptTurnInStore({
         droneId: 'drone-1', chatName: 'default', turnId: 'one',
-        update: (turn) => ({ ...turn, agentMessageAutoContinue: { status: 'classified', updatedAt: '2026-01-01T00:04:00.000Z' } }),
+        update: (turn) => ({ ...turn, model: 'test-model' }),
       }),
     ]);
     const afterOne = requireHubDatabase().read((connection) => connection.prepare(

@@ -36,7 +36,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     draftSidebarPlaceholder,
     openDraftChatComposer,
     openCreateModal,
-    openPlaybookRuns,
     selectDroneCard,
     selectDroneChat,
     createDroneChat,
@@ -92,7 +91,6 @@ export function useDroneHubSidebarProps(args: any): DroneSidebarProps {
     draftSidebarPlaceholder,
     onOpenDraftChatComposer: openDraftChatComposer,
     onOpenCreateModal: openCreateModal,
-    onOpenPlaybookRuns: openPlaybookRuns,
     onSelectDroneCard: selectDroneCard,
     onSelectDroneChat: (droneId, chatName) => {
       selectDroneChat(droneId, chatName);
@@ -465,8 +463,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     draftChat,
     activeRepoPath,
     settingsActiveTab,
-    settingsPlaybookFocusId,
-    playbookRunsOpen,
     createRuntime,
     createAsDraft,
     createPersistVolume,
@@ -500,7 +496,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     setDraftCreateParentDroneId,
     setDraftAutoRenaming,
     startDraftPrompt,
-    startDraftAutomation,
     queueDraftPromptDuringCreate,
     enqueueQueuedPrompt,
     removeQueuedPrompt,
@@ -509,7 +504,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     registeredRepoPaths,
     registryGroupNames,
     setActiveRepoPath,
-    setSettingsPlaybookFocusId,
     selectedGroupMultiChatData,
     groupBroadcastPromptError,
     groupBroadcastSending,
@@ -532,8 +526,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     unreadAgentMessageByChatNodeId,
     openDraftChatComposer,
     openCreateModal,
-    openPlaybookRuns,
-    openPlaybookRunArtifact,
     currentDrone,
     deleteMode,
     currentDroneLabel,
@@ -562,10 +554,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     setChatModel,
     agentPermissionMode,
     setChatAgentPermissionMode,
-    agentMessageAutoContinueEnabled,
-    setAgentMessageAutoContinueEnabled,
-    agentSuggestionEnabled,
-    setAgentSuggestionEnabled,
     dockerSnapshotAfterAgentMessageEnabled,
     setDockerSnapshotAfterAgentMessageEnabled,
     setChatInfoError,
@@ -608,9 +596,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     visiblePendingPromptsWithStartup,
     transcriptMessageId,
     parsingJobsByTurn,
-    latestAgentSuggestionTarget,
-    latestAgentSuggestionState,
-    requestAgentSuggestionForMessage,
     chatEndRef,
     outputScrollRef,
     updatePinned,
@@ -635,7 +620,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
     rightPanelOpenRequestSeq,
     renderRightPanelTabContent,
     renderPersistentPreviewContent,
-    setPlaybookRunsOpen,
   } = args;
 
   return {
@@ -670,10 +654,8 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
       hubLogsTailLines,
       hubLogsMaxBytes,
       activeTab: settingsActiveTab,
-      focusedPlaybookId: settingsPlaybookFocusId,
       onBackToWorkspace: () => setAppView('workspace'),
       onSelectTab: (tabId) => setSettingsActiveTab(tabId),
-      onFocusedPlaybookHandled: () => setSettingsPlaybookFocusId(null),
       onReplayOnboarding: () => {
         setAppView('workspace');
         onReplayOnboarding();
@@ -723,36 +705,12 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
             setDraftAutoRenaming(false);
           },
           onStartDraftPrompt: startDraftPrompt,
-          onStartDraftAutomation: startDraftAutomation,
           onQueueDraftPromptDuringCreate: queueDraftPromptDuringCreate,
           onEnqueueQueuedPrompt: enqueueQueuedPrompt,
           onDraftCreateGroupChange: setDraftCreateGroup,
           onDraftCreateNameChange: setDraftCreateName,
           onSetDraftCreateError: setDraftCreateError,
           onCreateEmptyDrone: () => createDroneFromDraft({ createMode: 'without-chat' }),
-        }
-      : null,
-    playbookRunsWorkspaceProps: playbookRunsOpen
-      ? {
-          initialRepoPath: activeRepoPath,
-          registeredRepoPaths,
-          pullHostBranchBeforeCreate,
-          onClose: () => setPlaybookRunsOpen(false),
-          onOpenPlaybookSettings: (playbookId) => {
-            setSettingsActiveTab('playbooks');
-            setSettingsPlaybookFocusId(playbookId);
-            setAppView('settings');
-          },
-          onDeleteRunDrone: (droneId) => {
-            deleteDrone(droneId);
-          },
-          deletingDrones,
-          optimisticallyDeletedDrones,
-          onOpenRun: (droneId, chatName) => {
-            setPlaybookRunsOpen(false);
-            selectDroneChat(droneId, chatName);
-          },
-          onOpenArtifact: openPlaybookRunArtifact,
         }
       : null,
     groupMultiChatWorkspaceProps: selectedGroupMultiChatData
@@ -776,7 +734,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
       dronesError,
       onOpenDraftChatComposer: openDraftChatComposer,
       onOpenCreateModal: openCreateModal,
-      onOpenPlaybookRuns: openPlaybookRuns,
     },
     renderPersistentPreviewContent,
     selectedDroneWorkspaceProps: currentDrone
@@ -809,10 +766,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           setChatModel,
           agentPermissionMode,
           setChatAgentPermissionMode,
-          agentMessageAutoContinueEnabled,
-          setAgentMessageAutoContinueEnabled,
-          agentSuggestionEnabled,
-          setAgentSuggestionEnabled,
           dockerSnapshotAfterAgentMessageEnabled,
           setDockerSnapshotAfterAgentMessageEnabled,
           setChatInfoError,
@@ -858,9 +811,6 @@ export function useDroneHubWorkspaceContentProps(args: any): DroneHubWorkspaceCo
           parsingJobsByTurn,
           parseJobsFromAgentMessage,
           spawnDroneHubTaskFromAgentMessage,
-          latestAgentSuggestionTarget,
-          latestAgentSuggestionState,
-          requestAgentSuggestionForMessage,
           chatEndRef,
           outputScrollRef,
           updatePinned,

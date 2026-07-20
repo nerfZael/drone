@@ -71,6 +71,22 @@ describeSocketSuite('routed Hub APIs', () => {
     expect(systemPrompt.response.status).toBe(200);
   });
 
+  test('does not expose retired playbook, automation, or follow-up routes', async () => {
+    const requests: Array<[string, RequestInit | undefined]> = [
+      ['/api/playbooks', undefined],
+      ['/api/playbook-runs', undefined],
+      ['/api/settings/agent-message-auto-continue', undefined],
+      ['/api/settings/agent-suggestion', undefined],
+      ['/api/agent-suggestion/from-message', jsonRequest('POST', { message: 'done' })],
+      ['/api/drones/missing/chats/default/automations', undefined],
+    ];
+
+    for (const [route, init] of requests) {
+      const result = await apiFetch(route, init);
+      expect(result.response.status).toBe(404);
+    }
+  });
+
   test('routes whiteboard CRUD and reports malformed JSON consistently', async () => {
     const malformed = await apiFetch('/api/whiteboards', {
       method: 'POST',

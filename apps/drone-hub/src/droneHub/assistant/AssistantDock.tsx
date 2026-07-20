@@ -9,8 +9,6 @@ import {
   EmptyState,
   useAgentChatSurfaceAdapter,
   type AgentChatTranscriptItem,
-  type ChatDraftAutomationPayload,
-  type ChatInputAutomationAction,
   type ChatComposerMenuAction,
   type ChatComposerContextConfig,
   type ChatSendPayload,
@@ -254,22 +252,13 @@ export type AssistantMessageFeatures = {
   onOpenLink: (href: string) => boolean;
 };
 
-export type AssistantAutomationFeatures = {
-  actions: ChatInputAutomationAction[];
-  transcriptItems: AgentChatTranscriptItem[];
-  modeHint: string;
-  onSend: (payload: ChatDraftAutomationPayload) => Promise<boolean>;
-};
-
 export function AssistantDock({
   nativeChat,
   messageFeatures,
-  automationFeatures,
   onHistoryChange,
 }: {
   nativeChat: NativeChatBinding;
   messageFeatures: AssistantMessageFeatures;
-  automationFeatures: AssistantAutomationFeatures;
   onHistoryChange?: (hasHistory: boolean) => void;
 }) {
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
@@ -1692,7 +1681,6 @@ export function AssistantDock({
       ),
     });
   }
-  nativeTranscriptItems.push(...automationFeatures.transcriptItems);
   const transcriptError = error ?? blipSession.runError ?? blipSession.historyError;
   if (transcriptError) {
     nativeTranscriptItems.push({
@@ -1858,7 +1846,6 @@ export function AssistantDock({
                 showThinking ||
                 activePendingApprovals.length > 0 ||
                 visibleQueuedPrompts.length > 0 ||
-                automationFeatures.transcriptItems.length > 0 ||
                 error ||
                 blipSession.runError ||
                 blipSession.historyError,
@@ -1885,20 +1872,17 @@ export function AssistantDock({
               waiting={running}
               disabled={!activeThread}
               modeHint={
-                automationFeatures.modeHint ||
-                (running
+                running
                   ? promptDeliveryMode === 'asap'
                     ? 'Sends at the next turn'
                     : 'Queues after the current run'
-                  : '')
+                  : ''
               }
               composerContext={nativeComposerContext}
               composerControls={nativeComposerControls}
-              automationActions={automationFeatures.actions}
               onStop={() => stop()}
               stopping={assistantStopBusy}
               onSend={async (payload) => await sendPrompt(payload)}
-              onSendAutomation={automationFeatures.onSend}
             />
           </div>
         )}

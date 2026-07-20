@@ -13,7 +13,6 @@ import type { ResolvedOrPendingDrone } from './drone-lifecycle-service';
 type TranscriptTurn = any;
 
 export type ChatSessionRuntimeDependencies = {
-  appendPromptAutomationHistoryRows: any;
   applyChatReconciliationInStore: any;
   assertChatAgentSupportedForDrone: any;
   bashQuote: any;
@@ -31,7 +30,6 @@ export type ChatSessionRuntimeDependencies = {
   enqueueReconcile: any;
   ensureDaemonPromptEventSubscription: any;
   failStaleDockerSnapshotsForChat: any;
-  getPromptAutomationLane: any;
   hubChatSessionName: any;
   hubLog: any;
   importChatFromRegistry: any;
@@ -41,10 +39,8 @@ export type ChatSessionRuntimeDependencies = {
   listChatsFromStore: any;
   loadRegistry: any;
   migrateInMemoryChatStateForRename: any;
-  normalizeAgentMessageAutoContinueTurnState: any;
   normalizeAgentPermissionMode: any;
   normalizeAgentPlan: any;
-  normalizeAgentSuggestionTurnState: any;
   normalizeBuiltinAgentId: any;
   normalizeChatImageAttachmentRefs: any;
   normalizeChatModel: any;
@@ -54,7 +50,6 @@ export type ChatSessionRuntimeDependencies = {
   normalizeDockerSnapshot: any;
   normalizeDroneIdentity: any;
   normalizePendingStartupPrompts: any;
-  normalizePromptAutomationMeta: any;
   nowIso: any;
   parseChatNameForMutation: any;
   patchChatMetadataInStore: any;
@@ -70,8 +65,6 @@ export type ChatSessionRuntimeDependencies = {
   resolveCanonicalDroneOrPendingForReadRef: any;
   resolveContainerTerminalShellCommand: any;
   resolveDroneOrPendingForReadRef: any;
-  resolveEffectiveAgentMessageAutoContinueSettings: any;
-  resolveEffectiveAgentSuggestionSettings: any;
   resolveHubAgentCommand: any;
   resolveNameSuggestionLlmSettings: any;
   runHostCommand: any;
@@ -88,7 +81,6 @@ export type ChatSessionRuntimeDependencies = {
 
 export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDependencies) {
   const {
-    appendPromptAutomationHistoryRows,
     applyChatReconciliationInStore,
     assertChatAgentSupportedForDrone,
     bashQuote,
@@ -106,7 +98,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     enqueueReconcile,
     ensureDaemonPromptEventSubscription,
     failStaleDockerSnapshotsForChat,
-    getPromptAutomationLane,
     hubChatSessionName,
     hubLog,
     importChatFromRegistry,
@@ -116,10 +107,8 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     listChatsFromStore,
     loadRegistry,
     migrateInMemoryChatStateForRename,
-    normalizeAgentMessageAutoContinueTurnState,
     normalizeAgentPermissionMode,
     normalizeAgentPlan,
-    normalizeAgentSuggestionTurnState,
     normalizeBuiltinAgentId,
     normalizeChatImageAttachmentRefs,
     normalizeChatModel,
@@ -129,7 +118,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     normalizeDockerSnapshot,
     normalizeDroneIdentity,
     normalizePendingStartupPrompts,
-    normalizePromptAutomationMeta,
     nowIso,
     parseChatNameForMutation,
     patchChatMetadataInStore,
@@ -145,8 +133,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     resolveCanonicalDroneOrPendingForReadRef,
     resolveContainerTerminalShellCommand,
     resolveDroneOrPendingForReadRef,
-    resolveEffectiveAgentMessageAutoContinueSettings,
-    resolveEffectiveAgentSuggestionSettings,
     resolveHubAgentCommand,
     resolveNameSuggestionLlmSettings,
     runHostCommand,
@@ -165,8 +151,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     droneEntry: any;
     createdAt: string;
     sourceChatEntry?: any;
-    autoContinueEnabledByDefault: boolean;
-    agentSuggestionEnabledByDefault?: boolean;
   }) {
     const agent = opts.sourceChatEntry
       ? inferChatAgent(opts.sourceChatEntry, opts.droneEntry)
@@ -189,14 +173,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         ? { nativeProvider: String(opts.sourceChatEntry.nativeProvider).trim() }
         : {}),
     };
-    if (opts.autoContinueEnabledByDefault && agent.kind === 'builtin') {
-      entry.agentMessageAutoContinueEnabled = true;
-      entry.agentMessageAutoContinueEnabledAt = opts.createdAt;
-    }
-    if (opts.agentSuggestionEnabledByDefault && agent.kind === 'builtin') {
-      entry.agentSuggestionEnabled = true;
-      entry.agentSuggestionEnabledAt = opts.createdAt;
-    }
     return entry;
   }
 
@@ -292,10 +268,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
   }
 
   async function ensureChatEntry(opts: { droneId: string; chatName: string }): Promise<void> {
-    const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings())
-      .enabledByDefault;
-    const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings())
-      .enabledByDefault;
     const reg: any = await loadRegistry();
     const droneId = normalizeDroneIdentity(opts.droneId);
     const d = droneId ? reg?.drones?.[droneId] : null;
@@ -309,8 +281,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         chatEntry: buildNewChatEntry({
           droneEntry: d,
           createdAt: new Date().toISOString(),
-          autoContinueEnabledByDefault,
-          agentSuggestionEnabledByDefault,
         }),
       });
       return;
@@ -326,8 +296,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
         drone.chats[opts.chatName] = buildNewChatEntry({
           droneEntry: drone,
           createdAt: new Date().toISOString(),
-          autoContinueEnabledByDefault,
-          agentSuggestionEnabledByDefault,
         }) as any;
         registry.drones = registry.drones ?? {};
         registry.drones[droneId] = drone;
@@ -340,10 +308,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     chatName: string;
     copyFromChatName: string;
   }): Promise<void> {
-    const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings())
-      .enabledByDefault;
-    const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings())
-      .enabledByDefault;
     if (!(globalThis as any).Bun) {
       const registry: any = await loadRegistry();
       const droneId = normalizeDroneIdentity(opts.droneId);
@@ -371,8 +335,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
           droneEntry: drone,
           createdAt,
           ...(source ? { sourceChatEntry: source } : {}),
-          autoContinueEnabledByDefault,
-          agentSuggestionEnabledByDefault,
         }),
       });
       return;
@@ -397,8 +359,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
           d.chats.default = buildNewChatEntry({
             droneEntry: d,
             createdAt,
-            autoContinueEnabledByDefault,
-            agentSuggestionEnabledByDefault,
           });
         } else {
           throw new Error(`unknown chat: ${copyFromChatName}`);
@@ -407,8 +367,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       let entry: any = buildNewChatEntry({
         droneEntry: d,
         createdAt,
-        autoContinueEnabledByDefault,
-        agentSuggestionEnabledByDefault,
       });
       if (copyFromChatName) {
         const source = d.chats?.[copyFromChatName];
@@ -417,8 +375,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
           droneEntry: d,
           createdAt,
           sourceChatEntry: source,
-          autoContinueEnabledByDefault,
-          agentSuggestionEnabledByDefault,
         });
       }
       d.chats[chatName] = entry;
@@ -821,10 +777,7 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     droneId: string;
     chatName: string;
   }): Promise<PendingPrompt[]> {
-    return appendPromptAutomationHistoryRows(
-      (await readPendingPrompts({ droneId: opts.droneId, chatName: opts.chatName })).slice(-50),
-      getPromptAutomationLane(opts.droneId, opts.chatName),
-    );
+    return (await readPendingPrompts({ droneId: opts.droneId, chatName: opts.chatName })).slice(-50);
   }
 
   function formatTranscriptRow(turnIndex: number, turn: any): any {
@@ -842,11 +795,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const model = normalizeChatModel((turn as any)?.model);
     const reasoning = normalizeChatReasoning((turn as any)?.reasoning);
     const attachments = normalizeChatImageAttachmentRefs((turn as any)?.attachments);
-    const automation = normalizePromptAutomationMeta((turn as any)?.automation);
-    const agentMessageAutoContinue = normalizeAgentMessageAutoContinueTurnState(
-      (turn as any)?.agentMessageAutoContinue,
-    );
-    const agentSuggestion = normalizeAgentSuggestionTurnState((turn as any)?.agentSuggestion);
     const dockerSnapshot = normalizeDockerSnapshot((turn as any)?.dockerSnapshot);
     const agentPlanRaw = (turn as any)?.agentPlan;
     const agentPlanSource = String(agentPlanRaw?.source ?? '').trim();
@@ -870,9 +818,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       ...(model ? { model } : {}),
       ...(reasoning ? { reasoning } : {}),
       ...(attachments.length > 0 ? { attachments } : {}),
-      ...(automation ? { automation } : {}),
-      ...(agentMessageAutoContinue ? { agentMessageAutoContinue } : {}),
-      ...(agentSuggestion ? { agentSuggestion } : {}),
       ...(agentPlan ? { agentPlan } : {}),
       ...(dockerSnapshot
         ? {
@@ -1148,9 +1093,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     const indexes = opts.includeTranscript
       ? parseTurnSelection(opts.selection, version.turnCount, opts.tailRaw)
       : [];
-    const automationLane = opts.includePending
-      ? getPromptAutomationLane(resolved.id, opts.chatName)
-      : null;
     const responseEtag = `"sha256-${stableResponseFingerprint({
       droneId: resolved.id,
       droneName,
@@ -1163,7 +1105,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       transcriptVersion: version.transcriptVersion,
       transcriptSourceHash: version.transcriptSourceHash,
       pendingVersion: version.pendingVersion,
-      automationLane,
     })}"`;
     const requestedEtags = String(opts.ifNoneMatch ?? '')
       .split(',')
@@ -1196,12 +1137,9 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     opts.mark?.('rows');
     const transcripts = rows.turns.map((item: any) => formatTranscriptRow(item.index, item.turn));
     const pending = opts.includePending
-      ? appendPromptAutomationHistoryRows(
-          pruneCompletedPendingPrompts(rows.pending as PendingPrompt[], rows.pendingTurns, {
-            keepRecentlyCompleted: true,
-          }),
-          automationLane,
-        )
+      ? pruneCompletedPendingPrompts(rows.pending as PendingPrompt[], rows.pendingTurns, {
+          keepRecentlyCompleted: true,
+        })
       : [];
     opts.mark?.('format');
     const maintenanceEntry = { ...version.chat, pendingPrompts: pending };
@@ -1276,10 +1214,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
     reasoning?: string | null;
     setAgentPermissionMode?: boolean;
     agentPermissionMode?: AgentPermissionMode;
-    setAgentMessageAutoContinueEnabled?: boolean;
-    agentMessageAutoContinueEnabled?: boolean;
-    setAgentSuggestionEnabled?: boolean;
-    agentSuggestionEnabled?: boolean;
     setDockerSnapshotAfterAgentMessageEnabled?: boolean;
     dockerSnapshotAfterAgentMessageEnabled?: boolean;
     setBlipClonesEnabled?: boolean;
@@ -1296,28 +1230,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
       update: (current: any) => {
         const cur = { ...current };
         const effectiveAgent = opts.agent ?? inferChatAgent(cur, d);
-        if (
-          opts.setAgentMessageAutoContinueEnabled &&
-          opts.agentMessageAutoContinueEnabled &&
-          effectiveAgent.kind !== 'builtin'
-        ) {
-          const error: Error & { statusCode?: number } = new Error(
-            'agentMessageAutoContinueEnabled is only supported for builtin transcript chats',
-          );
-          error.statusCode = 400;
-          throw error;
-        }
-        if (
-          opts.setAgentSuggestionEnabled &&
-          opts.agentSuggestionEnabled &&
-          effectiveAgent.kind !== 'builtin'
-        ) {
-          const error: Error & { statusCode?: number } = new Error(
-            'agentSuggestionEnabled is only supported for builtin transcript chats',
-          );
-          error.statusCode = 400;
-          throw error;
-        }
         if (
           opts.setDockerSnapshotAfterAgentMessageEnabled &&
           opts.dockerSnapshotAfterAgentMessageEnabled
@@ -1383,34 +1295,6 @@ export function createChatSessionRuntime(dependencies: ChatSessionRuntimeDepende
           if (mode === 'read-only') assertReadOnlySupportedForAgent(effectiveAgent);
           if (mode === 'read-only') cur.agentPermissionMode = 'read-only';
           else delete cur.agentPermissionMode;
-        }
-        if (opts.setAgentMessageAutoContinueEnabled) {
-          if (opts.agentMessageAutoContinueEnabled) {
-            cur.agentMessageAutoContinueEnabled = true;
-            if (
-              typeof cur.agentMessageAutoContinueEnabledAt !== 'string' ||
-              !String(cur.agentMessageAutoContinueEnabledAt).trim()
-            ) {
-              cur.agentMessageAutoContinueEnabledAt = nowIso();
-            }
-          } else {
-            delete cur.agentMessageAutoContinueEnabled;
-            delete cur.agentMessageAutoContinueEnabledAt;
-          }
-        }
-        if (opts.setAgentSuggestionEnabled) {
-          if (opts.agentSuggestionEnabled) {
-            cur.agentSuggestionEnabled = true;
-            if (
-              typeof cur.agentSuggestionEnabledAt !== 'string' ||
-              !String(cur.agentSuggestionEnabledAt).trim()
-            ) {
-              cur.agentSuggestionEnabledAt = nowIso();
-            }
-          } else {
-            delete cur.agentSuggestionEnabled;
-            delete cur.agentSuggestionEnabledAt;
-          }
         }
         if (opts.setDockerSnapshotAfterAgentMessageEnabled) {
           if (opts.dockerSnapshotAfterAgentMessageEnabled) {

@@ -1,4 +1,4 @@
-export type SettingsTabId = 'general' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'automations' | 'playbooks' | 'skills' | 'mcp' | 'agents' | 'system';
+export type SettingsTabId = 'general' | 'devices' | 'sync' | 'backups' | 'profiles' | 'trash' | 'archive' | 'shortcuts' | 'skills' | 'mcp' | 'agents' | 'system';
 
 export const SETTINGS_TABS: Array<{
   id: SettingsTabId;
@@ -53,18 +53,6 @@ export const SETTINGS_TABS: Array<{
     label: 'Shortcuts',
     title: 'Keyboard shortcuts',
     description: 'Bind keys for the commands you use most often in Drone Hub.',
-  },
-  {
-    id: 'automations',
-    label: 'Automations',
-    title: 'Automation jobs',
-    description: 'Manage reusable prompt loops that can be launched from chat.',
-  },
-  {
-    id: 'playbooks',
-    label: 'Playbooks',
-    title: 'Playbook runs',
-    description: 'Manage reusable repo-scoped message sequences and follow-up action buttons.',
   },
   {
     id: 'skills',

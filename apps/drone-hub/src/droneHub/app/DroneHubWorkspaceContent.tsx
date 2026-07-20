@@ -3,7 +3,6 @@ import { NoDroneSelectedState } from './NoDroneSelectedState';
 import { SettingsView } from './SettingsView';
 import { DraftChatWorkspace, type DraftChatWorkspace as DraftChatWorkspaceComponent } from './DraftChatWorkspace';
 import type { GroupMultiChatWorkspace as GroupMultiChatWorkspaceComponent } from './GroupMultiChatWorkspace';
-import type { PlaybookRunsWorkspace as PlaybookRunsWorkspaceComponent } from './PlaybookRunsWorkspace';
 import { SelectedDroneWorkspace, type SelectedDroneWorkspace as SelectedDroneWorkspaceComponent } from './SelectedDroneWorkspace';
 import type { SetupWelcomeView as SetupWelcomeViewComponent } from './SetupWelcomeView';
 import type { AppView } from './app-types';
@@ -11,11 +10,6 @@ import type { AppView } from './app-types';
 const SetupWelcomeView = React.lazy(async () => {
   const module = await import('./SetupWelcomeView');
   return { default: module.SetupWelcomeView };
-});
-
-const PlaybookRunsWorkspace = React.lazy(async () => {
-  const module = await import('./PlaybookRunsWorkspace');
-  return { default: module.PlaybookRunsWorkspace };
 });
 
 const GroupMultiChatWorkspace = React.lazy(async () => {
@@ -28,7 +22,6 @@ export type DroneHubWorkspaceContentProps = {
   setupWelcomeProps: React.ComponentProps<typeof SetupWelcomeViewComponent> | null;
   settingsViewProps: React.ComponentProps<typeof SettingsView>;
   draftChatWorkspaceProps: React.ComponentProps<typeof DraftChatWorkspaceComponent> | null;
-  playbookRunsWorkspaceProps: React.ComponentProps<typeof PlaybookRunsWorkspaceComponent> | null;
   groupMultiChatWorkspaceProps: React.ComponentProps<typeof GroupMultiChatWorkspaceComponent> | null;
   noDroneSelectedStateProps: React.ComponentProps<typeof NoDroneSelectedState>;
   selectedDroneWorkspaceProps: React.ComponentProps<typeof SelectedDroneWorkspaceComponent> | null;
@@ -58,7 +51,6 @@ export function DroneHubWorkspaceContent({
   setupWelcomeProps,
   settingsViewProps,
   draftChatWorkspaceProps,
-  playbookRunsWorkspaceProps,
   groupMultiChatWorkspaceProps,
   noDroneSelectedStateProps,
   selectedDroneWorkspaceProps,
@@ -80,8 +72,6 @@ export function DroneHubWorkspaceContent({
       <SettingsView {...settingsViewProps} />
     ) : draftChatWorkspaceProps ? (
       <DraftChatWorkspace {...draftChatWorkspaceProps} />
-    ) : playbookRunsWorkspaceProps ? (
-      <PlaybookRunsWorkspace {...playbookRunsWorkspaceProps} />
     ) : groupMultiChatWorkspaceProps ? (
       <GroupMultiChatWorkspace {...groupMultiChatWorkspaceProps} />
     ) : selectedDroneWorkspaceProps ? (
