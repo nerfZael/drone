@@ -1,6 +1,6 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import { ChatInput, type ChatImageAttachmentPayload, type ChatInputAutomationAction, type ChatSendContext, type ChatSendPayload, EmptyState, PendingTranscriptTurn } from '../chat';
+import { ChatInput, type ChatImageAttachmentPayload, type ChatSendContext, type ChatSendPayload, EmptyState, PendingTranscriptTurn } from '../chat';
 import { draftChatInputResetKey, droneChatQueueKey } from './helpers';
 import { IconChat } from './icons';
 import type { UiMenuSelectEntry } from '../../ui/menuSelect';
@@ -10,18 +10,11 @@ import type { QueuedPrompt } from './use-queued-prompts-state';
 import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 import type { RepoRemoteBranchOption } from '../types';
 import {
-  AUTOMATION_RUNS_MAX,
-  AUTOMATION_RUNS_MIN,
-  automationSleepSecondsFromConfig,
-  formatAutomationSleepInterval,
-} from './automation-config';
-import {
   filterSpawnAgentMenuEntriesForRuntime,
   runtimeSupportsCustomAgents,
   type CreateRuntime,
   type RepoBranchSourceMode,
 } from './drone-create-runtime';
-import type { DraftAutomationStartInput } from './use-drone-creation-actions';
 import { SegmentedToolbarToggle } from './SegmentedToolbarToggle';
 import { visibleDraftQueuedPrompts as resolveVisibleDraftQueuedPrompts } from './draft-chat-queue';
 import { SpawnContextToolbar } from './SpawnContextToolbar';
@@ -58,7 +51,6 @@ type DraftChatWorkspaceProps = {
   queuedPromptsByDroneChat: Record<string, QueuedPrompt[]>;
   onCancel: () => void;
   onStartDraftPrompt: (payload: ChatSendPayload, opts?: { keepComposerOpen?: boolean }) => Promise<boolean>;
-  onStartDraftAutomation: (automation: DraftAutomationStartInput) => Promise<boolean>;
   onQueueDraftPromptDuringCreate: (payload: ChatSendPayload) => boolean;
   onCreateEmptyDrone: () => Promise<boolean>;
   onEnqueueQueuedPrompt: (
@@ -103,7 +95,6 @@ export function DraftChatWorkspace({
   queuedPromptsByDroneChat,
   onCancel,
   onStartDraftPrompt,
-  onStartDraftAutomation,
   onQueueDraftPromptDuringCreate,
   onCreateEmptyDrone,
   onEnqueueQueuedPrompt,
@@ -113,13 +104,11 @@ export function DraftChatWorkspace({
 }: DraftChatWorkspaceProps) {
   const {
     pullHostBranchBeforeCreate,
-    automations,
     setPullHostBranchBeforeCreate,
     setCustomAgentModalOpen,
   } = useDroneHubUiStore(
     useShallow((s) => ({
       pullHostBranchBeforeCreate: s.pullHostBranchBeforeCreate,
-      automations: s.automations,
       setPullHostBranchBeforeCreate: s.setPullHostBranchBeforeCreate,
       setCustomAgentModalOpen: s.setCustomAgentModalOpen,
     })),
@@ -163,72 +152,6 @@ export function DraftChatWorkspace({
     ],
     [],
   );
-  const draftAutomationActions = React.useMemo<ChatInputAutomationAction[]>(() => {
-    const supportsDraftAutomation = spawnAgentConfig.kind !== 'custom';
-    const actions: ChatInputAutomationAction[] = [];
-    for (const [idx, automation] of (Array.isArray(automations) ? automations : []).entries()) {
-      const automationId = String(automation?.id ?? '').trim();
-      if (!automationId) continue;
-      const automationLabel = String(automation?.label ?? '').trim() || `Automation ${idx + 1}`;
-      const prompt = String(automation?.prompt ?? '').trim();
-      const onFailurePrompt = String(automation?.onFailurePrompt ?? '').trim();
-      const runsRaw = Number(automation?.runs);
-      const runs = Number.isFinite(runsRaw)
-        ? Math.max(AUTOMATION_RUNS_MIN, Math.min(AUTOMATION_RUNS_MAX, Math.round(runsRaw)))
-        : AUTOMATION_RUNS_MIN;
-      const sleepBetweenRunsSeconds = automationSleepSecondsFromConfig(automation);
-      const sleepBetweenRunsLabel = formatAutomationSleepInterval(automation);
-      const stopPhrase = String(automation?.stopPhrase ?? '').trim();
-      const stopPhraseCaseSensitive = Boolean(automation?.stopPhraseCaseSensitive);
-      const title = !supportsDraftAutomation
-        ? 'Automations require a builtin transcript agent.'
-        : !prompt
-          ? `Set a prompt for "${automationLabel}" in Settings > Automation first.`
-          : `Create a new drone and run "${automationLabel}" for ${runs} ${
-              runs === 1 ? 'run' : 'runs'
-            }${sleepBetweenRunsSeconds > 0 ? ` (${sleepBetweenRunsLabel.toLowerCase()} between runs)` : ''}.`;
-      actions.push({
-        id: `draft-automation:${automationId}`,
-        label: `Run ${automationLabel}`,
-        onSelect: () => {
-          void onStartDraftAutomation({
-            automationId,
-            automationLabel,
-            prompt,
-            onFailurePrompt,
-            runs,
-            sleepBetweenRunsSeconds,
-            stopPhrase,
-            stopPhraseCaseSensitive,
-          });
-        },
-        onSelectWithRuns: (selectedRuns) => {
-          const normalizedRuns = Math.max(
-            AUTOMATION_RUNS_MIN,
-            Math.min(AUTOMATION_RUNS_MAX, Math.round(Number(selectedRuns) || runs)),
-          );
-          void onStartDraftAutomation({
-            automationId,
-            automationLabel,
-            prompt,
-            onFailurePrompt,
-            runs: normalizedRuns,
-            sleepBetweenRunsSeconds,
-            stopPhrase,
-            stopPhraseCaseSensitive,
-          });
-        },
-        title,
-        disabled: controlsLocked || !supportsDraftAutomation || !prompt || !createWithChat,
-        defaultRuns: runs,
-        minRuns: AUTOMATION_RUNS_MIN,
-        maxRuns: AUTOMATION_RUNS_MAX,
-        sleepBetweenRunsLabel,
-        statusText: `${runs} ${runs === 1 ? 'run' : 'runs'}`,
-      });
-    }
-    return actions;
-  }, [automations, controlsLocked, createWithChat, onStartDraftAutomation, spawnAgentConfig.kind]);
   const queuedDraftPrompts = draftChat.droneId ? queuedPromptsByDroneChat[droneChatQueueKey(draftChat.droneId, 'default')] ?? [] : [];
   const visibleQueuedDraftPrompts = React.useMemo(
     () =>
@@ -553,7 +476,6 @@ export function DraftChatWorkspace({
           waiting={false}
           autoFocus={!draftCreating && !draftAutoRenaming && !draftChat.prompt && visibleQueuedDraftPrompts.length === 0}
           attachmentsEnabled
-          automationActions={draftAutomationActions}
           onSend={async (payload: ChatSendPayload, context: ChatSendContext) => {
             if (!draftChat.prompt) {
               return await onStartDraftPrompt(payload, {

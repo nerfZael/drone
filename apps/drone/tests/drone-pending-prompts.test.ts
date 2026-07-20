@@ -17,7 +17,6 @@ const pendingPromptStore = createDronePendingPromptStore({
   normalizePendingPromptState: pendingStateHelpers.normalizePendingPromptState,
   normalizePendingPromptText: pendingStateHelpers.normalizePendingPromptText,
   normalizePendingStartupPrompts: pendingStateHelpers.normalizePendingStartupPrompts,
-  normalizePromptAutomationMeta: () => undefined,
   nowIso: () => '2026-03-26T10:00:00.000Z',
   startupPromptToPendingPrompt: pendingStateHelpers.startupPromptToPendingPrompt,
 });

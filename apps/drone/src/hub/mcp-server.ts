@@ -506,7 +506,6 @@ function normalizeUiPreferences(value: unknown) {
     sidebarChatOrderByDrone: normalizeOrderedStringMap(raw.sidebarChatOrderByDrone),
     hiddenSidebarGroups: normalizeOrderedStringList(raw.hiddenSidebarGroups),
     autoDelete: raw.autoDelete === true,
-    automations: Array.isArray(raw.automations) ? raw.automations : [],
     spawnAgentKey: cleanString(raw.spawnAgentKey, 'builtin:cursor'),
     spawnModel: cleanString(raw.spawnModel),
     repoBranchSource: normalizeRepoBranchSource(raw.repoBranchSource, 'host'),

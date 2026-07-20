@@ -21,7 +21,6 @@ export type AssistantDroneSummary = {
 export type AssistantMessageDroneResult = {
   promptId: string;
   pendingState?: string | null;
-  blockedByAutomation?: boolean;
 };
 
 export type AssistantCreateDroneResult = {

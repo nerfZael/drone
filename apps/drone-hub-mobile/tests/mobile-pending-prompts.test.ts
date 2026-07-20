@@ -71,13 +71,12 @@ describe('mobile drone pending prompts', () => {
     ).toEqual([failed]);
   });
 
-  test('keeps server order and only makes manual queued prompts cancelable', () => {
+  test('keeps server order and makes queued prompts cancelable', () => {
     expect(
       mobileDronePendingPrompts(
         [
           { id: 'active', prompt: 'Review', state: 'sent' },
           { id: 'queued', prompt: 'Make a PR', state: 'queued' },
-          { id: 'automation', prompt: 'Loop', state: 'queued', automation: true },
         ],
         [],
       ),
@@ -97,14 +96,6 @@ describe('mobile drone pending prompts', () => {
         error: null,
         imageCount: 0,
         cancelable: true,
-      },
-      {
-        id: 'automation',
-        prompt: 'Loop',
-        status: 'queued',
-        error: null,
-        imageCount: 0,
-        cancelable: false,
       },
     ]);
   });

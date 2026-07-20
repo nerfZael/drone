@@ -24,8 +24,6 @@ export type PendingPrompt = {
   messageId?: string;
   cwd?: string | null;
   attachments?: ChatImageAttachmentRef[];
-  automation?: any;
-  blockedByAutomation?: boolean;
   state: PendingPromptState;
   error?: string;
   observability?: {
@@ -59,7 +57,6 @@ export function createDronePendingPromptStore(deps: {
   normalizePendingPromptState: (raw: unknown) => PendingPromptState;
   normalizePendingPromptText: (raw: unknown) => string;
   normalizePendingStartupPrompts: (raw: unknown, chatNameFilter?: string) => PendingStartupPrompt[];
-  normalizePromptAutomationMeta: (raw: unknown) => any;
   nowIso: () => string;
   onPendingPromptChanged?: (change: { droneId: string; chatName: string }) => void;
   startupPromptToPendingPrompt: (prompt: PendingStartupPrompt) => PendingPrompt;
@@ -137,8 +134,6 @@ export function createDronePendingPromptStore(deps: {
           ...(typeof p?.messageId === 'string' && String(p.messageId).trim() ? { messageId: String(p.messageId).trim() } : {}),
           cwd: typeof p?.cwd === 'string' ? String(p.cwd) : p?.cwd === null ? null : undefined,
           attachments: deps.normalizeChatImageAttachmentRefs(p?.attachments),
-          automation: deps.normalizePromptAutomationMeta((p as any)?.automation),
-          blockedByAutomation: Boolean((p as any)?.blockedByAutomation),
           state:
             p?.state === 'sent' || p?.state === 'failed' || p?.state === 'sending' || p?.state === 'queued'
               ? (p.state as PendingPromptState)
@@ -153,35 +148,7 @@ export function createDronePendingPromptStore(deps: {
       entry?.turns,
       { keepRecentlyCompleted: opts?.keepRecentlyCompleted === true },
     );
-    if (opts?.keepRecentlyCompleted !== true) return pending;
-
-    const seen = new Set(pending.map((item) => item.id));
-    const nowMs = Date.now();
-    const turns = Array.isArray(entry?.turns) ? entry.turns : [];
-    for (const turn of turns) {
-      const id = String((turn as any)?.id ?? '').trim();
-      if (!id || seen.has(id)) continue;
-      const automation = deps.normalizePromptAutomationMeta((turn as any)?.automation);
-      if (!automation) continue;
-      const completedMs = Math.max(
-        parseRecentPendingPromptIsoMs((turn as any)?.completedAt),
-        parseRecentPendingPromptIsoMs((turn as any)?.promptAt),
-        parseRecentPendingPromptIsoMs((turn as any)?.at),
-      );
-      if (!completedMs || nowMs - completedMs > RECENT_COMPLETED_PENDING_PROMPT_GRACE_MS) continue;
-      const prompt = deps.normalizePendingPromptText((turn as any)?.prompt);
-      if (!prompt.trim()) continue;
-      pending.push({
-        id,
-        at: String((turn as any)?.promptAt ?? (turn as any)?.at ?? deps.nowIso()),
-        prompt,
-        automation,
-        state: 'sent',
-        updatedAt: String((turn as any)?.completedAt ?? (turn as any)?.at ?? deps.nowIso()),
-      });
-      seen.add(id);
-    }
-    return pending.slice(-60);
+    return pending;
   }
 
   function normalizeObservability(raw: unknown): PendingPrompt['observability'] | undefined {

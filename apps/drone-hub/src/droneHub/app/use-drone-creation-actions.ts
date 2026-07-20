@@ -38,17 +38,6 @@ export type CloneDroneResult = {
   droneName?: string;
 };
 
-export type DraftAutomationStartInput = {
-  automationId: string;
-  automationLabel?: string;
-  prompt: string;
-  onFailurePrompt?: string;
-  runs?: number;
-  sleepBetweenRunsSeconds?: number;
-  stopPhrase?: string;
-  stopPhraseCaseSensitive?: boolean;
-};
-
 export type StartDraftPromptOptions = {
   keepComposerOpen?: boolean;
 };
@@ -144,28 +133,6 @@ type UseDroneCreationActionsArgs = {
   preferredSelectedDroneRef: React.MutableRefObject<string | null>;
   preferredSelectedDroneHoldUntilRef: React.MutableRefObject<number>;
 };
-
-const DRAFT_AUTOMATION_START_MAX_ATTEMPTS = 8;
-
-function draftAutomationStartRetryDelayMs(attempt: number): number {
-  const step = Math.max(1, attempt + 1);
-  return Math.min(2000, 300 * step);
-}
-
-function shouldRetryDraftAutomationStart(error: unknown): boolean {
-  const status = Number((error as any)?.status ?? 0);
-  const message = String((error as any)?.message ?? error ?? '').trim().toLowerCase();
-  if (status === 409 && /requires a builtin/i.test(message)) return false;
-  if (status === 404 && (/unknown drone|unknown chat/.test(message) || !message)) return true;
-  if (status === 409 && /still starting|starting|seeding|busy/.test(message)) return true;
-  return false;
-}
-
-async function waitMs(ms: number): Promise<void> {
-  await new Promise<void>((resolve) => {
-    window.setTimeout(resolve, ms);
-  });
-}
 
 export function useDroneCreationActions({
   drones,
@@ -669,7 +636,6 @@ export function useDroneCreationActions({
       createMode?: 'with-chat' | 'without-chat';
       autoRename?: boolean;
       autoRenamePrompt?: string;
-      automationStart?: DraftAutomationStartInput;
       keepDraftComposerOpen?: boolean;
     }): Promise<boolean> => {
       const latestDraftChat = draftChatRef.current;
@@ -684,21 +650,6 @@ export function useDroneCreationActions({
         (queuedPrompt) => normalizeChatImageAttachmentPayloads(queuedPrompt.attachmentPayloads).length > 0,
       );
       const shouldSeedPromptViaCreate = !createWithoutChat && !hasDraftAttachments && prompt.length > 0;
-      const automationStartRaw = opts?.automationStart ?? null;
-      const automationId = String(automationStartRaw?.automationId ?? '').trim();
-      const automationLabel = String(automationStartRaw?.automationLabel ?? '').trim() || automationId || 'Automation';
-      const automationPrompt = String(automationStartRaw?.prompt ?? '').trim();
-      const automationOnFailurePrompt = String(automationStartRaw?.onFailurePrompt ?? '').trim();
-      const automationRunsRaw = Number(automationStartRaw?.runs);
-      const automationRuns = Number.isFinite(automationRunsRaw)
-        ? Math.max(1, Math.round(automationRunsRaw))
-        : 1;
-      const automationSleepRaw = Number(automationStartRaw?.sleepBetweenRunsSeconds);
-      const automationSleepBetweenRunsSeconds = Number.isFinite(automationSleepRaw)
-        ? Math.max(0, Math.round(automationSleepRaw))
-        : 0;
-      const automationStopPhrase = String(automationStartRaw?.stopPhrase ?? '').trim();
-      const automationStopPhraseCaseSensitive = Boolean(automationStartRaw?.stopPhraseCaseSensitive);
       const nameRaw = String(opts?.name ?? draftCreateName ?? '');
       const name = nameRaw.trim();
       const autoRename = shouldAutoRenameDraftDrone({
@@ -720,20 +671,12 @@ export function useDroneCreationActions({
       });
       const remoteBranch = String(repoCreateRemoteBranch ?? '').trim();
       const effectiveRepoBranchSource: RepoBranchSourceMode = createRuntime === 'host' ? 'host' : repoBranchSource;
-      if (!createWithoutChat && !prompt && !automationPrompt && !hasDraftAttachments) {
-        setDraftCreateError('Send a first message or run an automation before creating a drone.');
-        return false;
-      }
-      if (!createWithoutChat && !prompt && automationPrompt && !automationId) {
-        setDraftCreateError('Automation id is required.');
+      if (!createWithoutChat && !prompt && !hasDraftAttachments) {
+        setDraftCreateError('Send a first message before creating a drone.');
         return false;
       }
       if (createAsDraft && (hasDraftAttachments || hasQueuedDraftAttachments)) {
         setDraftCreateError('Draft drones cannot queue attachments until they are published.');
-        return false;
-      }
-      if (createAsDraft && automationPrompt) {
-        setDraftCreateError('Draft drones cannot start automations until they are published.');
         return false;
       }
       if (name && (name.length > 80 || /[\r\n]/.test(name))) {
@@ -760,10 +703,6 @@ export function useDroneCreationActions({
         !(seedAgent?.kind === 'builtin' && (seedAgent.id === 'codex' || seedAgent.id === 'blip'))
       ) {
         setDraftCreateError('Read-only mode is currently supported for Codex and Blip chats only.');
-        return false;
-      }
-      if (automationPrompt && automationId && seedAgent?.kind === 'custom') {
-        setDraftCreateError('Automations require Built-in or a transcript agent.');
         return false;
       }
       beginDraftCreate();
@@ -883,42 +822,6 @@ export function useDroneCreationActions({
               },
             };
           });
-
-          if (!createWithoutChat && automationPrompt && automationId) {
-            const startBody = {
-              automationId,
-              automationLabel,
-              prompt: automationPrompt,
-              onFailurePrompt: automationOnFailurePrompt,
-              runs: automationRuns,
-              sleepBetweenRunsSeconds: automationSleepBetweenRunsSeconds,
-              stopPhrase: automationStopPhrase,
-              stopPhraseCaseSensitive: automationStopPhraseCaseSensitive,
-            };
-            let lastError: unknown = null;
-            for (let attempt = 0; attempt < DRAFT_AUTOMATION_START_MAX_ATTEMPTS; attempt += 1) {
-              try {
-                await requestJson(
-                  `/api/drones/${encodeURIComponent(droneId)}/chats/${encodeURIComponent('default')}/automations/start`,
-                  {
-                    method: 'POST',
-                    headers: { 'content-type': 'application/json' },
-                    body: JSON.stringify(startBody),
-                  },
-                );
-                lastError = null;
-                break;
-              } catch (e: any) {
-                lastError = e;
-                if (attempt >= DRAFT_AUTOMATION_START_MAX_ATTEMPTS - 1 || !shouldRetryDraftAutomationStart(e)) break;
-                await waitMs(draftAutomationStartRetryDelayMs(attempt));
-              }
-            }
-            if (lastError) {
-              const automationErr = String((lastError as any)?.message ?? lastError ?? 'failed to start automation').trim();
-              postCreateError = `Drone created, but failed to start automation: ${automationErr}`;
-            }
-          }
 
           if (hasDraftAttachments) {
             enqueueQueuedPrompt(droneId, 'default', prompt, draftAttachments);
@@ -1117,87 +1020,6 @@ export function useDroneCreationActions({
     ],
   );
 
-  const startDraftAutomation = React.useCallback(
-    async (automation: DraftAutomationStartInput): Promise<boolean> => {
-      const automationId = String(automation?.automationId ?? '').trim();
-      const prompt = String(automation?.prompt ?? '').trim();
-      const automationLabel = String(automation?.automationLabel ?? '').trim() || automationId || 'Automation';
-      const runsRaw = Number(automation?.runs);
-      const runs = Number.isFinite(runsRaw) ? Math.max(1, Math.round(runsRaw)) : 1;
-      const onFailurePrompt = String(automation?.onFailurePrompt ?? '').trim();
-      const sleepRaw = Number(automation?.sleepBetweenRunsSeconds);
-      const sleepBetweenRunsSeconds = Number.isFinite(sleepRaw) ? Math.max(0, Math.round(sleepRaw)) : 0;
-      const stopPhrase = String(automation?.stopPhrase ?? '').trim();
-      const stopPhraseCaseSensitive = Boolean(automation?.stopPhraseCaseSensitive);
-      if (!automationId) {
-        setDraftCreateError('Automation id is required.');
-        return false;
-      }
-      if (!prompt) {
-        setDraftCreateError(`Set a prompt for "${automationLabel}" in Settings > Automation first.`);
-        return false;
-      }
-
-      const nextDraftChat: DraftChatState = {
-        droneId: '',
-        droneName: '',
-        focusKey: draftChat?.focusKey,
-        queuedPrompts: [],
-        prompt: {
-          id: `draft-automation-${makeId()}`,
-          at: new Date().toISOString(),
-          prompt: `Run ${automationLabel} (${runs} ${runs === 1 ? 'run' : 'runs'})`,
-          automation: {
-            kind: 'prompt-loop',
-            stage: 'run',
-            automationId,
-            automationLabel,
-            runsTotal: runs,
-            promptPreview: prompt.slice(0, 160),
-          },
-          state: 'sending',
-        },
-      };
-      setDraftChatState(nextDraftChat);
-      setDraftCreateError(null);
-      setDraftCreateName('');
-      setDraftSuggestedName('');
-      setDraftNameSuggesting(false);
-      setDraftNameSuggestionError(null);
-      setDraftAutoRenaming(false);
-      setDraftCreateOpen(false);
-
-      return await createDroneFromDraft({
-        prompt: '',
-        autoRename: !draftCreateName.trim(),
-        autoRenamePrompt: prompt,
-        automationStart: {
-          automationId,
-          automationLabel,
-          prompt,
-          onFailurePrompt,
-          runs,
-          sleepBetweenRunsSeconds,
-          stopPhrase,
-          stopPhraseCaseSensitive,
-        },
-      });
-    },
-    [
-      createDroneFromDraft,
-      draftCreateName,
-      draftChat?.focusKey,
-      setDraftAutoRenaming,
-      setDraftChatState,
-      setDraftCreateError,
-      setDraftCreateName,
-      setDraftCreateOpen,
-      setDraftNameSuggestionError,
-      setDraftNameSuggesting,
-      setDraftSuggestedName,
-    ],
-  );
-
   return {
     cloneDrone,
     cloneDroneWithoutSelection,
@@ -1205,6 +1027,5 @@ export function useDroneCreationActions({
     createDroneFromDraft,
     queueDraftPromptDuringCreate,
     startDraftPrompt,
-    startDraftAutomation,
   };
 }

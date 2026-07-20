@@ -14,7 +14,6 @@
     "restart": "bun run build && bun run drone hub stop && bun run drone hub start",
     "test": "turbo run test",
     "test:coverage": "turbo run test:coverage",
-    "test:auto-continue-eval": "bun run --filter drone test:auto-continue-eval",
     "lint": "turbo run lint",
     "format": "turbo run format",
     "smoke": "node scripts/smoke/smoke-all.cjs && node scripts/smoke/smoke-docker-all.cjs",

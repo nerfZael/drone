@@ -42,14 +42,6 @@ export function shouldReadChatRuntimeForHubPhase(hubPhase: string | null | undef
   return hubPhase !== 'creating' && hubPhase !== 'starting' && hubPhase !== 'seeding';
 }
 
-export function isHiddenDrone(drone: Pick<DroneSummary, 'visibility'> | null | undefined): boolean {
-  return String(drone?.visibility ?? '').trim().toLowerCase() === 'hidden';
-}
-
-export function isPlaybookRunDrone(drone: Pick<DroneSummary, 'kind'> | null | undefined): boolean {
-  return String(drone?.kind ?? '').trim().toLowerCase() === 'playbook-run';
-}
-
 export function parseConflictFilesFromMessage(message: string): string[] {
   const text = String(message ?? '');
   const out = new Set<string>();

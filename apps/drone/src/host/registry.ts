@@ -17,8 +17,6 @@ import {
   writeRegistryToSqlite,
 } from './sqlite-registry-store';
 
-type DroneRegistryDroneKind = 'standard' | 'playbook-run';
-type DroneRegistryDroneVisibility = 'visible' | 'hidden';
 type DroneRegistryBuiltinAgentId = 'cursor' | 'codex' | 'claude' | 'opencode' | 'pi' | 'blip';
 type DroneRegistryChatAgentConfig =
   | { kind: 'builtin'; id: DroneRegistryBuiltinAgentId }
@@ -27,74 +25,12 @@ type DroneRegistryChatAgentConfig =
 const REGISTRY_HOURLY_SNAPSHOT_INTERVAL_MS = 60 * 60 * 1000;
 const REGISTRY_EMPTY_FLEET_GUARD_MIN_PREVIOUS = 10;
 
-type DroneRegistryPlaybookMeta = {
-  id: string;
-  label: string;
-  messageCount: number;
-  chatName?: string;
-  artifacts?: string[];
-  actions?: Array<{
-    id: string;
-    label: string;
-    messages: string[];
-  }>;
-};
-
-type DroneRegistryPlaybookRunQueueGate = {
-  queueItemId: string;
-  playbookId: string;
-  chatName: string;
-  initialPromptIds: string[];
-  releasedAt?: string;
-};
-
-type DroneRegistryPlaybookRunQueueItem = {
-  id: string;
-  playbookId: string;
-  playbookLabel: string;
-  repoPath: string;
-  requestedCount: number;
-  launchedCount: number;
-  inFlightCount: number;
-  serializeFirstMessageGroup: boolean;
-  pullHostBranchBeforeCreate: boolean;
-  createdAt: string;
-  updatedAt: string;
-  error?: string;
-};
-
-type DroneRegistryPlaybookMessage = {
-  id: string;
-  name?: string;
-  prompt: string;
-};
-
-type DroneRegistryPlaybookEntry = {
-  id: string;
-  label: string;
-  agent: DroneRegistryChatAgentConfig;
-  model?: string;
-  messages: DroneRegistryPlaybookMessage[];
-  artifacts?: string[];
-  actions?: Array<{
-    id: string;
-    label: string;
-    messages: string[];
-  }>;
-  createdAt: string;
-  updatedAt?: string;
-};
-
 type DroneRegistryChatEntry = {
   createdAt: string;
   chatId?: string;
   model?: string;
   agent?: DroneRegistryChatAgentConfig;
   agentPermissionMode?: 'full-access' | 'read-only';
-  agentMessageAutoContinueEnabled?: boolean;
-  agentMessageAutoContinueEnabledAt?: string;
-  agentSuggestionEnabled?: boolean;
-  agentSuggestionEnabledAt?: string;
   codexThreadId?: string;
   claudeSessionId?: string;
   openCodeSessionId?: string;
@@ -111,21 +47,6 @@ type DroneRegistryChatEntry = {
     error?: string;
     promptAt?: string;
     completedAt?: string;
-    agentMessageAutoContinue?: {
-      status?: 'pending' | 'classified' | 'failed';
-      bucket?: 'user-turn' | 'continue';
-      source?: 'llm' | 'agent-copilot-json' | 'heuristic';
-      classifiedAt?: string;
-      continuedAt?: string;
-      error?: string;
-      updatedAt?: string;
-    };
-    agentSuggestion?: {
-      usedDirectAt?: string;
-      suggestionHash?: string;
-      policyFingerprint?: string;
-      updatedAt?: string;
-    };
   }>;
   pendingPrompts?: Array<{
     id: string;
@@ -195,16 +116,6 @@ type DroneRegistryV1 = {
       dailyRetentionDays?: number;
       updatedAt?: string;
     };
-    agentMessageAutoContinue?: {
-      prompt?: string;
-      enabledByDefault?: boolean;
-      updatedAt?: string;
-    };
-    agentSuggestion?: {
-      policyMarkdown?: string;
-      enabledByDefault?: boolean;
-      updatedAt?: string;
-    };
     agents?: {
       content?: string;
       updatedAt?: string;
@@ -223,17 +134,6 @@ type DroneRegistryV1 = {
       repoBranchSource?: 'host' | 'remote';
       repoCreateRemoteBranch?: string;
       pullHostBranchBeforeCreate?: boolean;
-      automations?: Array<{
-        id?: string;
-        label?: string;
-        prompt?: string;
-        onFailurePrompt?: string;
-        runs?: number;
-        sleepAmount?: number;
-        sleepUnit?: 'seconds' | 'minutes' | 'hours' | 'days';
-        stopPhrase?: string;
-        stopPhraseCaseSensitive?: boolean;
-      }>;
       updatedAt?: string;
     };
     nonRepoEnvironment?: {
@@ -257,7 +157,6 @@ type DroneRegistryV1 = {
    */
   mcpServers?: Record<string, unknown>;
   mcpTokens?: Record<string, unknown>;
-  playbooks?: Record<string, DroneRegistryPlaybookEntry>;
   /**
    * Host-side list of repositories the user has "registered" with `drone repo`.
    * This is stored in the same registry file so the Hub UI can render it.
@@ -313,9 +212,6 @@ type DroneRegistryV1 = {
       id?: string;
       name: string;
       group?: string;
-      kind?: DroneRegistryDroneKind;
-      visibility?: DroneRegistryDroneVisibility;
-      playbook?: DroneRegistryPlaybookMeta;
       runtime?: DroneRuntime;
       repoPath: string;
       repoSeedSource?: 'host' | 'remote';
@@ -348,7 +244,6 @@ type DroneRegistryV1 = {
         disabledRepoKeys?: string[];
         updatedAt?: string;
       };
-      playbookQueueGate?: DroneRegistryPlaybookRunQueueGate;
     }
   >;
   archived?: Record<
@@ -388,9 +283,6 @@ type DroneRegistryV1 = {
        * This is host-side metadata (stored in the host drone registry file).
        */
       group?: string;
-      kind?: DroneRegistryDroneKind;
-      visibility?: DroneRegistryDroneVisibility;
-      playbook?: DroneRegistryPlaybookMeta;
       /**
        * Optional default working directory inside the container.
        * Used when starting processes (agent/run/proc-start) if the caller does not provide --cwd.
@@ -423,7 +315,6 @@ type DroneRegistryV1 = {
         disabledRepoKeys?: string[];
         updatedAt?: string;
       };
-      playbookQueueGate?: DroneRegistryPlaybookRunQueueGate;
     }
   >;
 };
@@ -437,13 +328,9 @@ export type DroneRegistry = {
   skills?: Record<string, unknown>;
   mcpServers?: Record<string, unknown>;
   mcpTokens?: Record<string, unknown>;
-  playbooks?: Record<string, DroneRegistryPlaybookEntry>;
   repos?: DroneRegistryV1['repos'];
   groups?: DroneRegistryV1['groups'];
   archived?: Record<string, DroneRegistryArchivedEntry>;
-  playbookRunQueue?: {
-    items?: DroneRegistryPlaybookRunQueueItem[];
-  };
   /**
    * Hub-side, short-lived entries for drones that are being provisioned.
    *
@@ -481,43 +368,6 @@ function normalizeRegistryBuiltinAgentId(raw: unknown): DroneRegistryBuiltinAgen
   if (id === 'open-code' || id === 'open_code') return 'opencode';
   if (id === 'pi-agent' || id === 'pi_agent') return 'pi';
   return null;
-}
-
-function normalizeRegistryPlaybookAgent(raw: unknown): DroneRegistryChatAgentConfig {
-  if (raw && typeof raw === 'object') {
-    if ((raw as any).kind === 'builtin') {
-      const id = normalizeRegistryBuiltinAgentId((raw as any).id);
-      if (id) return { kind: 'builtin', id };
-    }
-    if ((raw as any).kind === 'custom') {
-      const id = String((raw as any).id ?? '').trim();
-      const label = String((raw as any).label ?? '').trim();
-      const command = String((raw as any).command ?? '').trim();
-      if (id && label && command) return { kind: 'custom', id, label, command };
-    }
-  }
-  return { kind: 'builtin', id: 'cursor' };
-}
-
-function normalizeRegistryPlaybookModel(raw: unknown, agent: DroneRegistryChatAgentConfig): string | undefined {
-  if (agent.kind !== 'builtin') return undefined;
-  const model = String(raw ?? '').trim();
-  if (!model) return undefined;
-  if (model.length > 160) return undefined;
-  if (/[\r\n\t]/.test(model)) return undefined;
-  return model;
-}
-
-function normalizeRegistryActionMessages(raw: unknown): string[] {
-  const list = Array.isArray(raw) ? raw : [];
-  return list
-    .map((item: unknown) => {
-      if (item && typeof item === 'object' && !Array.isArray(item)) {
-        return String((item as any).prompt ?? (item as any).message ?? '');
-      }
-      return String(item ?? '');
-    })
-    .filter((item: string) => item.trim());
 }
 
 export function registryHasDisplayName(
@@ -682,7 +532,6 @@ function hasMeaningfulRegistryData(reg: DroneRegistry): boolean {
   if (countRecordEntries(reg.skills) > 0) return true;
   if (countRecordEntries(reg.mcpServers) > 0) return true;
   if (countRecordEntries(reg.mcpTokens) > 0) return true;
-  if (countRecordEntries(reg.playbooks) > 0) return true;
   if (countRecordEntries(reg.repos) > 0) return true;
   if (countRecordEntries(reg.groups) > 0) return true;
   if (countRecordEntries(reg.settings) > 0) return true;
@@ -703,66 +552,50 @@ function registryFleetCounts(reg: Pick<DroneRegistry, 'drones' | 'pending' | 'ar
   return { drones, pending, archived, total: drones + pending + archived };
 }
 
-function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
-  input.playbooks = input.playbooks ?? {};
-  for (const [key, entryAny] of Object.entries(input.playbooks ?? {})) {
-    const entry = entryAny as any;
-    if (!entry || typeof entry !== 'object') continue;
-    const id = typeof entry.id === 'string' && entry.id.trim() ? entry.id.trim() : String(key);
-    const label = typeof entry.label === 'string' ? entry.label.trim() : '';
-    const agent = normalizeRegistryPlaybookAgent(entry.agent);
-    const model = normalizeRegistryPlaybookModel(entry.model, agent);
-    const messages = Array.isArray(entry.messages)
-      ? entry.messages
-          .map((item: unknown, index: number) => {
-            if (item && typeof item === 'object' && !Array.isArray(item)) {
-              const prompt = String((item as any).prompt ?? '');
-              if (!prompt.trim()) return null;
-              return {
-                id: String((item as any).id ?? '').trim() || `message-${index + 1}`,
-                ...(typeof (item as any).name === 'string' && String((item as any).name).trim()
-                  ? { name: String((item as any).name).trim() }
-                  : {}),
-                prompt,
-              };
-            }
-            const prompt = String(item ?? '');
-            if (!prompt.trim()) return null;
-            return {
-              id: `message-${index + 1}`,
-              prompt,
-            };
-          })
-          .filter(Boolean)
-      : [];
-    const artifacts = Array.isArray(entry.artifacts)
-      ? entry.artifacts.map((item: unknown) => String(item ?? '').trim()).filter((item: string) => item)
-      : [];
-    const actions = Array.isArray(entry.actions)
-      ? entry.actions
-          .map((item: unknown) => {
-            const action = item as any;
-            const id = String(action?.id ?? '').trim();
-            const label = typeof action?.label === 'string' ? action.label.trim() : '';
-            const messages = normalizeRegistryActionMessages(action?.messages);
-            if (!id || !label || messages.length === 0) return null;
-            return { id, label, messages };
-          })
-          .filter(Boolean)
-      : [];
-    (input.playbooks as any)[key] = {
-      id,
-      label,
-      agent,
-      ...(model ? { model } : {}),
-      messages: messages.slice(0, 40),
-      artifacts: artifacts.slice(0, 60),
-      actions: actions.slice(0, 20),
-      createdAt: typeof entry.createdAt === 'string' && entry.createdAt.trim() ? entry.createdAt : new Date().toISOString(),
-      updatedAt: typeof entry.updatedAt === 'string' && entry.updatedAt.trim() ? entry.updatedAt : undefined,
-    };
-  }
+function stripRetiredFeatureState(input: DroneRegistry): DroneRegistry {
+  delete (input as any).playbooks;
+  delete (input as any).playbookRunQueue;
   delete (input as any).playbookFindings;
+  const settings = input.settings as Record<string, unknown> | undefined;
+  if (settings) {
+    delete settings.agentMessageAutoContinue;
+    delete settings.agentSuggestion;
+    const uiPreferences = settings.uiPreferences as Record<string, unknown> | undefined;
+    if (uiPreferences) delete uiPreferences.automations;
+  }
+  for (const bucket of [input.drones, input.pending, input.archived]) {
+    for (const drone of Object.values(bucket ?? {}) as any[]) {
+      delete drone.kind;
+      delete drone.visibility;
+      delete drone.playbook;
+      delete drone.playbookQueueGate;
+      for (const chats of [drone?.chats, drone?.archivedChats]) {
+        for (const chat of Object.values(chats ?? {}) as any[]) {
+          if (!chat || typeof chat !== 'object') continue;
+          delete chat.agentMessageAutoContinueEnabled;
+          delete chat.agentMessageAutoContinueEnabledAt;
+          delete chat.agentSuggestionEnabled;
+          delete chat.agentSuggestionEnabledAt;
+          delete chat.agentCopilotHandledSourceMessageIds;
+          for (const prompt of Array.isArray(chat.pendingPrompts) ? chat.pendingPrompts : []) {
+            if (!prompt || typeof prompt !== 'object') continue;
+            delete prompt.automation;
+            delete prompt.blockedByAutomation;
+          }
+          for (const turn of Array.isArray(chat.turns) ? chat.turns : []) {
+            if (!turn || typeof turn !== 'object') continue;
+            delete turn.agentMessageAutoContinue;
+            delete turn.agentSuggestion;
+            delete turn.automation;
+          }
+        }
+      }
+    }
+  }
+  return input;
+}
+
+function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
   for (const [key, entryAny] of Object.entries(input.drones ?? {})) {
     const entry = entryAny as any;
     if (!entry || typeof entry !== 'object') continue;
@@ -778,37 +611,6 @@ function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
           ? `drone-${entry.id}`
           : 'drone-unknown';
     entry.containerName = containerName;
-    entry.kind = entry.kind === 'playbook-run' ? 'playbook-run' : 'standard';
-    entry.visibility = entry.visibility === 'hidden' ? 'hidden' : 'visible';
-    if (entry.playbook && typeof entry.playbook === 'object') {
-      const playbookId = typeof entry.playbook.id === 'string' ? entry.playbook.id.trim() : '';
-      const playbookLabel = typeof entry.playbook.label === 'string' ? entry.playbook.label.trim() : '';
-      const messageCountRaw = Number(entry.playbook.messageCount);
-      entry.playbook = playbookId
-        ? {
-            id: playbookId,
-            label: playbookLabel || playbookId,
-            messageCount: Number.isFinite(messageCountRaw) && messageCountRaw > 0 ? Math.floor(messageCountRaw) : 1,
-            chatName:
-              typeof entry.playbook.chatName === 'string' && entry.playbook.chatName.trim()
-                ? entry.playbook.chatName.trim()
-                : undefined,
-            artifacts: Array.isArray(entry.playbook.artifacts)
-              ? entry.playbook.artifacts.map((item: any) => String(item ?? '').trim()).filter(Boolean)
-              : undefined,
-	            actions: Array.isArray(entry.playbook.actions)
-	              ? entry.playbook.actions
-	                  .filter((item: any) => item && typeof item === 'object')
-	                  .map((item: any) => ({
-	                    id: String(item.id ?? '').trim(),
-	                    label: String(item.label ?? '').trim(),
-	                    messages: normalizeRegistryActionMessages(item.messages),
-	                  }))
-	                  .filter((item: any) => item.id && item.label && item.messages.length > 0)
-	              : undefined,
-          }
-        : undefined;
-    }
     (input.drones as any)[key] = entry;
   }
   for (const [key, entryAny] of Object.entries(input.pending ?? {})) {
@@ -826,37 +628,6 @@ function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
           ? `drone-${entry.id}`
           : undefined;
     if (containerName) entry.containerName = containerName;
-    entry.kind = entry.kind === 'playbook-run' ? 'playbook-run' : 'standard';
-    entry.visibility = entry.visibility === 'hidden' ? 'hidden' : 'visible';
-    if (entry.playbook && typeof entry.playbook === 'object') {
-      const playbookId = typeof entry.playbook.id === 'string' ? entry.playbook.id.trim() : '';
-      const playbookLabel = typeof entry.playbook.label === 'string' ? entry.playbook.label.trim() : '';
-      const messageCountRaw = Number(entry.playbook.messageCount);
-      entry.playbook = playbookId
-        ? {
-            id: playbookId,
-            label: playbookLabel || playbookId,
-            messageCount: Number.isFinite(messageCountRaw) && messageCountRaw > 0 ? Math.floor(messageCountRaw) : 1,
-            chatName:
-              typeof entry.playbook.chatName === 'string' && entry.playbook.chatName.trim()
-                ? entry.playbook.chatName.trim()
-                : undefined,
-            artifacts: Array.isArray(entry.playbook.artifacts)
-              ? entry.playbook.artifacts.map((item: any) => String(item ?? '').trim()).filter(Boolean)
-              : undefined,
-	            actions: Array.isArray(entry.playbook.actions)
-	              ? entry.playbook.actions
-	                  .filter((item: any) => item && typeof item === 'object')
-	                  .map((item: any) => ({
-	                    id: String(item.id ?? '').trim(),
-	                    label: String(item.label ?? '').trim(),
-	                    messages: normalizeRegistryActionMessages(item.messages),
-	                  }))
-	                  .filter((item: any) => item.id && item.label && item.messages.length > 0)
-	              : undefined,
-          }
-        : undefined;
-    }
     (input.pending as any)[key] = entry;
   }
   for (const [key, entryAny] of Object.entries(input.archived ?? {})) {
@@ -874,40 +645,9 @@ function normalizeV2Registry(input: DroneRegistry): DroneRegistry {
           ? `drone-${entry.id}`
           : 'drone-unknown';
     entry.containerName = containerName;
-    entry.kind = entry.kind === 'playbook-run' ? 'playbook-run' : 'standard';
-    entry.visibility = entry.visibility === 'hidden' ? 'hidden' : 'visible';
-    if (entry.playbook && typeof entry.playbook === 'object') {
-      const playbookId = typeof entry.playbook.id === 'string' ? entry.playbook.id.trim() : '';
-      const playbookLabel = typeof entry.playbook.label === 'string' ? entry.playbook.label.trim() : '';
-      const messageCountRaw = Number(entry.playbook.messageCount);
-      entry.playbook = playbookId
-        ? {
-            id: playbookId,
-            label: playbookLabel || playbookId,
-            messageCount: Number.isFinite(messageCountRaw) && messageCountRaw > 0 ? Math.floor(messageCountRaw) : 1,
-            chatName:
-              typeof entry.playbook.chatName === 'string' && entry.playbook.chatName.trim()
-                ? entry.playbook.chatName.trim()
-                : undefined,
-            artifacts: Array.isArray(entry.playbook.artifacts)
-              ? entry.playbook.artifacts.map((item: any) => String(item ?? '').trim()).filter(Boolean)
-              : undefined,
-	            actions: Array.isArray(entry.playbook.actions)
-	              ? entry.playbook.actions
-	                  .filter((item: any) => item && typeof item === 'object')
-	                  .map((item: any) => ({
-	                    id: String(item.id ?? '').trim(),
-	                    label: String(item.label ?? '').trim(),
-	                    messages: normalizeRegistryActionMessages(item.messages),
-	                  }))
-	                  .filter((item: any) => item.id && item.label && item.messages.length > 0)
-	              : undefined,
-          }
-        : undefined;
-    }
     (input.archived as any)[key] = entry;
   }
-  return input;
+  return stripRetiredFeatureState(input);
 }
 
 function migrateV1ToV2(v1: DroneRegistryV1): DroneRegistry {
@@ -917,7 +657,6 @@ function migrateV1ToV2(v1: DroneRegistryV1): DroneRegistry {
     skills: v1.skills,
     mcpServers: (v1 as any).mcpServers,
     mcpTokens: (v1 as any).mcpTokens,
-    playbooks: {},
     repos: v1.repos,
     groups: v1.groups,
     archived: {},
@@ -968,7 +707,7 @@ function migrateV1ToV2(v1: DroneRegistryV1): DroneRegistry {
     (out.archived as any)[id] = { ...entry, id, name, containerName, runtime: normalizeDroneRuntime(entry.runtime) };
   }
 
-  return out;
+  return stripRetiredFeatureState(out);
 }
 
 function parseRegistry(raw: string): DroneRegistry | null {

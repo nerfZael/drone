@@ -10,14 +10,27 @@ export type LegacyResidualState = Record<string, any> & { version: 2 };
 
 const CANONICAL_TOP_LEVEL = new Set([
   'drones', 'pending', 'archived', 'skills', 'mcpServers', 'mcpTokens',
-  'playbooks', 'repos', 'groups', 'playbookRunQueue',
+  'repos', 'groups',
 ]);
+const RETIRED_TOP_LEVEL = new Set(['playbooks', 'playbookRunQueue', 'playbookFindings']);
 const CANONICAL_SETTINGS = new Set([
   'openai', 'gemini', 'groq', 'exa', 'llm', 'deleteAction', 'filesystem',
-  'agentMessageAutoContinue', 'agentSuggestion',
   'uiPreferences', 'backups', 'agents',
   'nonRepoEnvironment', 'syncSets',
 ]);
+const RETIRED_SETTINGS = new Set(['agentMessageAutoContinue', 'agentSuggestion']);
+
+function stripRetiredSettings(settingsRaw: unknown): Record<string, any> {
+  const settings = Object.fromEntries(
+    Object.entries(objectRecord(settingsRaw)).filter(([key]) => !RETIRED_SETTINGS.has(key)),
+  );
+  const uiPreferences = objectRecord(settings.uiPreferences);
+  if (Object.keys(uiPreferences).length > 0) {
+    delete uiPreferences.automations;
+    settings.uiPreferences = uiPreferences;
+  }
+  return settings;
+}
 
 export class CanonicalRegistryMutationError extends Error {
   readonly paths: string[];
@@ -59,11 +72,11 @@ export function stripCanonicalOwnedRegistryState(registry: DroneRegistry | Recor
   const source = objectRecord(clone(registry));
   const residual: Record<string, any> = { version: 2 };
   for (const [key, value] of Object.entries(source)) {
-    if (key === 'version' || key === 'settings' || key === 'fleet' || CANONICAL_TOP_LEVEL.has(key)) continue;
+    if (key === 'version' || key === 'settings' || key === 'fleet' || CANONICAL_TOP_LEVEL.has(key) || RETIRED_TOP_LEVEL.has(key)) continue;
     residual[key] = value;
   }
   const settings = Object.fromEntries(
-    Object.entries(objectRecord(source.settings)).filter(([key]) => !CANONICAL_SETTINGS.has(key)),
+    Object.entries(stripRetiredSettings(source.settings)).filter(([key]) => !CANONICAL_SETTINGS.has(key)),
   );
   if (Object.keys(settings).length > 0) residual.settings = settings;
   return residual as LegacyResidualState;
@@ -77,35 +90,78 @@ export function mergeRegistryResidualState(
   const base = objectRecord(clone(canonicalBase));
   const residual = objectRecord(clone(residualRaw));
   for (const key of Object.keys(base)) {
-    if (key === 'version' || key === 'settings' || CANONICAL_TOP_LEVEL.has(key)) continue;
+    if (key === 'version' || key === 'settings' || CANONICAL_TOP_LEVEL.has(key) || RETIRED_TOP_LEVEL.has(key)) continue;
     delete base[key];
   }
   for (const [key, value] of Object.entries(residual)) {
-    if (key === 'version' || key === 'settings' || key === 'fleet') continue;
+    if (key === 'version' || key === 'settings' || key === 'fleet' || RETIRED_TOP_LEVEL.has(key)) continue;
     base[key] = value;
   }
   const canonicalSettings = Object.fromEntries(
     Object.entries(objectRecord(base.settings)).filter(([key]) => CANONICAL_SETTINGS.has(key)),
   );
-  base.settings = { ...canonicalSettings, ...objectRecord(residual.settings) };
+  base.settings = { ...canonicalSettings, ...stripRetiredSettings(residual.settings) };
   base.version = 2;
   return base as DroneRegistry;
 }
 
-const MIGRATIONS: readonly HubDatabaseMigration[] = [{
-  version: 1,
-  name: 'legacy residual compatibility state',
-  migrate(connection) {
-    connection.exec(`
-      CREATE TABLE legacy_residual_state (
-        id TEXT NOT NULL PRIMARY KEY CHECK (id = 'current'),
-        state_json TEXT NOT NULL,
-        version INTEGER NOT NULL CHECK (version > 0),
-        updated_at TEXT NOT NULL
-      );
-    `);
+const MIGRATIONS: readonly HubDatabaseMigration[] = [
+  {
+    version: 1,
+    name: 'legacy residual compatibility state',
+    migrate(connection) {
+      connection.exec(`
+        CREATE TABLE legacy_residual_state (
+          id TEXT NOT NULL PRIMARY KEY CHECK (id = 'current'),
+          state_json TEXT NOT NULL,
+          version INTEGER NOT NULL CHECK (version > 0),
+          updated_at TEXT NOT NULL
+        );
+      `);
+    },
   },
-}];
+  {
+    version: 2,
+    name: 'remove retired chat follow-up settings',
+    migrate(connection) {
+      const row = connection.prepare(
+        "SELECT state_json FROM legacy_residual_state WHERE id = 'current'",
+      ).get() as { state_json: string } | undefined;
+      if (!row) return;
+      const state = JSON.parse(row.state_json);
+      if (!state || typeof state !== 'object' || Array.isArray(state)) return;
+      const settings = stripRetiredSettings((state as any).settings);
+      if (Object.keys(settings).length > 0) (state as any).settings = settings;
+      else delete (state as any).settings;
+      connection.prepare(`
+        UPDATE legacy_residual_state
+        SET state_json = ?, version = version + 1, updated_at = ?
+        WHERE id = 'current'
+      `).run(JSON.stringify(state), new Date().toISOString());
+    },
+  },
+  {
+    version: 3,
+    name: 'remove retired playbook and message automation state',
+    migrate(connection) {
+      const row = connection.prepare(
+        "SELECT state_json FROM legacy_residual_state WHERE id = 'current'",
+      ).get() as { state_json: string } | undefined;
+      if (!row) return;
+      const state = JSON.parse(row.state_json);
+      if (!state || typeof state !== 'object' || Array.isArray(state)) return;
+      for (const key of RETIRED_TOP_LEVEL) delete (state as any)[key];
+      const settings = stripRetiredSettings((state as any).settings);
+      if (Object.keys(settings).length > 0) (state as any).settings = settings;
+      else delete (state as any).settings;
+      connection.prepare(`
+        UPDATE legacy_residual_state
+        SET state_json = ?, version = version + 1, updated_at = ?
+        WHERE id = 'current'
+      `).run(JSON.stringify(state), new Date().toISOString());
+    },
+  },
+];
 
 type ResidualRow = { state_json: string; version: number; updated_at: string };
 

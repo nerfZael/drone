@@ -49,6 +49,17 @@ const MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    name: 'remove retired playbook workflow',
+    migrate(connection) {
+      connection.exec(`
+        DROP INDEX IF EXISTS workflow_playbook_queue_dispatch;
+        DROP TABLE IF EXISTS workflow_playbook_queue;
+      `);
+      connection.prepare("DELETE FROM workflow_backfills WHERE domain = 'playbook-queue'").run();
+    },
+  },
 ];
 
 export type WorkflowSyncSet = {
@@ -60,18 +71,6 @@ export type WorkflowSyncSet = {
   applyToHost: boolean;
   createdAt: string;
   updatedAt: string;
-  [key: string]: unknown;
-};
-export type WorkflowQueueItem = {
-  id: string;
-  playbookId: string;
-  repoPath: string;
-  requestedCount: number;
-  launchedCount: number;
-  inFlightCount: number;
-  createdAt: string;
-  updatedAt: string;
-  state?: 'queued' | 'running' | 'completed' | 'cancelled' | 'failed';
   [key: string]: unknown;
 };
 function json(value: unknown): string {
@@ -90,15 +89,6 @@ export class FleetWorkflowStore {
     database.read((connection) =>
       applyHubDatabaseMigrations(connection, MIGRATIONS, 'fleet-workflows'),
     );
-    await database.writeTransaction('recover interrupted playbook queue', (connection) => {
-      connection
-        .prepare(
-          `UPDATE workflow_playbook_queue SET state='queued',in_flight_count=0,
-        payload_json=json_set(payload_json,'$.inFlightCount',0,'$.state','queued'),
-        updated_at=?,version=version+1 WHERE state='running'`,
-        )
-        .run(new Date().toISOString());
-    });
     return new FleetWorkflowStore(database);
   }
 
@@ -219,179 +209,6 @@ export class FleetWorkflowStore {
     });
   }
 
-  listQueue<T extends WorkflowQueueItem>(includeTerminal = false): T[] {
-    return this.database.read((c) => {
-      const rows = c
-        .prepare(
-          `SELECT payload_json,state FROM workflow_playbook_queue WHERE deleted_at IS NULL ${includeTerminal ? '' : "AND state IN ('queued','running')"} ORDER BY created_at,id`,
-        )
-        .all() as any[];
-      return rows.map((r) => ({ ...parse<T>(r.payload_json), state: r.state }));
-    });
-  }
-  isQueueBackfilled(): boolean {
-    return this.database.read((connection) => this.backfilled(connection, 'playbook-queue'));
-  }
-  backfillQueue<T extends WorkflowQueueItem>(records: T[]): Promise<boolean> {
-    return this.database.writeTransaction('backfill playbook queue', (c) => {
-      if (this.backfilled(c, 'playbook-queue')) return false;
-      const s = c.prepare(
-        `INSERT OR IGNORE INTO workflow_playbook_queue(id,playbook_id,repo_path,state,requested_count,launched_count,in_flight_count,payload_json,created_at,updated_at)VALUES(?,?,?,?,?,?,?,?,?,?)`,
-      );
-      for (const r of records)
-        s.run(
-          r.id,
-          r.playbookId,
-          r.repoPath,
-          this.queueState(r),
-          r.requestedCount,
-          r.launchedCount,
-          r.inFlightCount,
-          json(r),
-          r.createdAt,
-          r.updatedAt,
-        );
-      this.finishBackfill(c, 'playbook-queue');
-      return true;
-    });
-  }
-  enqueue<T extends WorkflowQueueItem>(item: T): Promise<T> {
-    return this.database.writeTransaction('enqueue playbook run', (c) => {
-      const state = this.queueState(item);
-      const info = c
-        .prepare(
-          `INSERT OR IGNORE INTO workflow_playbook_queue(id,playbook_id,repo_path,state,requested_count,launched_count,in_flight_count,payload_json,created_at,updated_at)VALUES(?,?,?,?,?,?,?,?,?,?)`,
-        )
-        .run(
-          item.id,
-          item.playbookId,
-          item.repoPath,
-          state,
-          item.requestedCount,
-          item.launchedCount,
-          item.inFlightCount,
-          json({ ...item, state }),
-          item.createdAt,
-          item.updatedAt,
-        );
-      const row = c
-        .prepare('SELECT payload_json,state FROM workflow_playbook_queue WHERE id=?')
-        .get(item.id) as any;
-      if (!row) throw new Error('failed to enqueue playbook run');
-      if (Number(info.changes ?? 0) === 1)
-        appendHubOutboxEvent(c, {
-          topic: 'fleet.workflows',
-          eventType: 'playbook-run.queued',
-          aggregateType: 'playbook-run-queue',
-          aggregateId: item.id,
-          payload: { id: item.id, playbookId: item.playbookId },
-        });
-      return { ...parse<T>(row.payload_json), state: row.state };
-    });
-  }
-  updateQueue<T extends WorkflowQueueItem>(
-    id: string,
-    transform: (current: T) => T,
-  ): Promise<T | null> {
-    return this.database.writeTransaction('update playbook queue', (c) => {
-      const row = c
-        .prepare(
-          'SELECT payload_json FROM workflow_playbook_queue WHERE id=? AND deleted_at IS NULL',
-        )
-        .get(id) as any;
-      if (!row) return null;
-      const next = transform(parse<T>(row.payload_json));
-      const state = this.queueState(next);
-      c.prepare(
-        `UPDATE workflow_playbook_queue SET state=?,requested_count=?,launched_count=?,in_flight_count=?,payload_json=?,updated_at=?,version=version+1 WHERE id=?`,
-      ).run(
-        state,
-        next.requestedCount,
-        next.launchedCount,
-        next.inFlightCount,
-        json({ ...next, state }),
-        next.updatedAt,
-        id,
-      );
-      appendHubOutboxEvent(c, {
-        topic: 'fleet.workflows',
-        eventType: `playbook-run.${state}`,
-        aggregateType: 'playbook-run-queue',
-        aggregateId: id,
-        payload: { id, state },
-      });
-      return { ...next, state };
-    });
-  }
-  cancelQueue(id: string, at = new Date().toISOString()): Promise<boolean> {
-    return this.database.writeTransaction('cancel playbook queue', (c) => {
-      const row = c
-        .prepare(
-          'SELECT payload_json FROM workflow_playbook_queue WHERE id=? AND deleted_at IS NULL',
-        )
-        .get(id) as any;
-      if (!row) return false;
-      const current = parse<any>(row.payload_json);
-      const next = {
-        ...current,
-        requestedCount: Math.min(
-          current.requestedCount,
-          current.launchedCount + current.inFlightCount,
-        ),
-        updatedAt: at,
-      };
-      c.prepare(
-        `UPDATE workflow_playbook_queue SET state='cancelled',requested_count=?,payload_json=?,updated_at=?,version=version+1 WHERE id=?`,
-      ).run(next.requestedCount, json(next), at, id);
-      appendHubOutboxEvent(c, {
-        topic: 'fleet.workflows',
-        eventType: 'playbook-run.cancelled',
-        aggregateType: 'playbook-run-queue',
-        aggregateId: id,
-        payload: { id },
-      });
-      return true;
-    });
-  }
-  clearQueue(
-    filter: { playbookId?: string; repoPath?: string },
-    at = new Date().toISOString(),
-  ): Promise<number> {
-    return this.database.writeTransaction('clear playbook queue', (c) => {
-      const rows = c
-        .prepare(
-          `SELECT id FROM workflow_playbook_queue WHERE deleted_at IS NULL AND state IN ('queued','running') AND (?='' OR playbook_id=?) AND (?='' OR repo_path=?)`,
-        )
-        .all(
-          filter.playbookId ?? '',
-          filter.playbookId ?? '',
-          filter.repoPath ?? '',
-          filter.repoPath ?? '',
-        ) as any[];
-      for (const r of rows) {
-        c.prepare(
-          `UPDATE workflow_playbook_queue SET state='cancelled',updated_at=?,version=version+1 WHERE id=?`,
-        ).run(at, r.id);
-        appendHubOutboxEvent(c, {
-          topic: 'fleet.workflows',
-          eventType: 'playbook-run.cancelled',
-          aggregateType: 'playbook-run-queue',
-          aggregateId: r.id,
-          payload: { id: r.id },
-        });
-      }
-      return rows.length;
-    });
-  }
-
-  private queueState(
-    r: WorkflowQueueItem,
-  ): 'queued' | 'running' | 'completed' | 'cancelled' | 'failed' {
-    if (r.state === 'cancelled' || r.state === 'failed') return r.state;
-    if ((r as any).error) return 'failed';
-    if (r.inFlightCount > 0) return 'running';
-    return r.launchedCount >= r.requestedCount ? 'completed' : 'queued';
-  }
   private backfilled(c: HubDatabaseConnection, d: string) {
     return Boolean(c.prepare('SELECT 1 FROM workflow_backfills WHERE domain=?').get(d));
   }

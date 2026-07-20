@@ -50,16 +50,6 @@ export const chatConfigBodySchema = z
     model: z.unknown().optional(),
     chatModel: z.unknown().optional(),
     agentPermissionMode: z.unknown().optional(),
-    agentMessageAutoContinueEnabled: z.boolean().optional(),
-    agentSuggestionEnabled: z.boolean().optional(),
     dockerSnapshotAfterAgentMessageEnabled: z.boolean().optional(),
-  })
-  .passthrough();
-
-export const agentSuggestionUsedBodySchema = z
-  .object({
-    suggestion: z.unknown().optional(),
-    suggestionHash: z.unknown().optional(),
-    policyFingerprint: z.unknown().optional(),
   })
   .passthrough();

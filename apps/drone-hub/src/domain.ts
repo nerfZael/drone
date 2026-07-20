@@ -12,8 +12,6 @@ export type ChatInfo = {
   agentLocked: boolean;
   model: string | null;
   agentPermissionMode: AgentPermissionMode;
-  agentMessageAutoContinueEnabled: boolean;
-  agentSuggestionEnabled: boolean;
   dockerSnapshotAfterAgentMessageEnabled: boolean;
   sessionName: string;
   createdAt: string;
@@ -113,8 +111,6 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
       chat,
       model,
       agentPermissionMode: 'full-access',
-      agentMessageAutoContinueEnabled: false,
-      agentSuggestionEnabled: false,
       dockerSnapshotAfterAgentMessageEnabled: false,
       sessionName,
       createdAt,
@@ -142,8 +138,6 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
       chat,
       model,
       agentPermissionMode,
-      agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
-      agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
       dockerSnapshotAfterAgentMessageEnabled,
       sessionName,
       createdAt,
@@ -160,8 +154,6 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
         chat,
         model,
         agentPermissionMode,
-        agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
-        agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
         dockerSnapshotAfterAgentMessageEnabled,
         sessionName,
         createdAt,
@@ -176,8 +168,6 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
       chat,
       model,
       agentPermissionMode,
-      agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
-      agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
       dockerSnapshotAfterAgentMessageEnabled,
       sessionName,
       createdAt,
@@ -190,8 +180,6 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
       chat,
       model,
       agentPermissionMode,
-      agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
-      agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
       dockerSnapshotAfterAgentMessageEnabled,
       sessionName,
       createdAt,
@@ -199,24 +187,22 @@ function normalizeChatInfoPayloadBase(data: any): Omit<ChatInfo, 'agentLocked'> 
     };
   }
   if (String(data?.piSessionId ?? '').trim()) {
-    return { name, chat, model, agentPermissionMode, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'pi' } };
+    return { name, chat, model, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'pi' } };
   }
   if (String(data?.blipSessionId ?? '').trim()) {
-    return { name, chat, model, agentPermissionMode, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'blip' } };
+    return { name, chat, model, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'blip' } };
   }
   if (String(data?.codexThreadId ?? '').trim()) {
-    return { name, chat, model, agentPermissionMode, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'codex' } };
+    return { name, chat, model, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'codex' } };
   }
   if (String(data?.chatId ?? '').trim()) {
-    return { name, chat, model, agentPermissionMode, agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true, agentSuggestionEnabled: data?.agentSuggestionEnabled === true, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'cursor' } };
+    return { name, chat, model, agentPermissionMode, dockerSnapshotAfterAgentMessageEnabled, sessionName, createdAt, agent: { kind: 'builtin', id: 'cursor' } };
   }
   return {
     name,
     chat,
     model,
     agentPermissionMode,
-    agentMessageAutoContinueEnabled: data?.agentMessageAutoContinueEnabled === true,
-    agentSuggestionEnabled: data?.agentSuggestionEnabled === true,
     dockerSnapshotAfterAgentMessageEnabled,
     sessionName,
     createdAt,

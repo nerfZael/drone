@@ -1,19 +1,4 @@
 import React from 'react';
-import {
-  AUTOMATION_RUNS_DEFAULT,
-  AUTOMATION_RUNS_MAX,
-  AUTOMATION_RUNS_MIN,
-  AUTOMATION_SLEEP_AMOUNT_DEFAULT,
-  AUTOMATION_SLEEP_AMOUNT_MAX,
-  AUTOMATION_SLEEP_AMOUNT_MIN,
-  AUTOMATION_SLEEP_UNIT_DEFAULT,
-  formatAutomationSleepInterval,
-  normalizeAutomationRuns,
-  normalizeAutomationSleepAmount,
-  type AutomationSleepUnit,
-} from '../app/automation-config';
-import { CHAT_DRAFT_AUTOMATION_STOP_PHRASE_DEFAULT } from '../app/chat-draft-automation';
-import { AutomationRunnerPanel } from './AutomationRunnerPanel';
 import { ChatComposerContext, type ChatComposerContextConfig } from './ChatComposerContext';
 import { ChatComposerControls, type ChatComposerControlsConfig } from './ChatComposerControls';
 import {
@@ -62,26 +47,6 @@ export type ChatSendContext = {
   modifierKey: boolean;
 };
 
-export type ChatDraftAutomationPayload = ChatSendPayload & {
-  runs: number;
-  sleepAmount: number;
-  sleepUnit: AutomationSleepUnit;
-};
-
-export type ChatInputAutomationAction = {
-  id: string;
-  label: string;
-  onSelect: () => void;
-  onSelectWithRuns?: (runs: number) => void;
-  title?: string;
-  disabled?: boolean;
-  statusText?: string;
-  defaultRuns?: number;
-  minRuns?: number;
-  maxRuns?: number;
-  sleepBetweenRunsLabel?: string;
-};
-
 export type ChatInputProps = {
   resetKey: string;
   droneName: string;
@@ -98,13 +63,10 @@ export type ChatInputProps = {
   attachmentMode?: 'images' | 'files';
   composerContext?: ChatComposerContextConfig;
   composerControls?: ChatComposerControlsConfig;
-  automationActions?: ChatInputAutomationAction[];
-  automationMenuLabel?: string;
   allowSendWhileWaiting?: boolean;
   onSend: (payload: ChatSendPayload, context: ChatSendContext) => Promise<boolean>;
   onPublish?: () => Promise<boolean> | boolean;
   publishing?: boolean;
-  onSendAutomation?: (payload: ChatDraftAutomationPayload) => Promise<boolean>;
   onStop?: () => Promise<void> | void;
   stopping?: boolean;
 };
@@ -125,13 +87,10 @@ export function ChatInput({
   attachmentMode = 'images',
   composerContext,
   composerControls,
-  automationActions,
-  automationMenuLabel = 'Automations',
   allowSendWhileWaiting = false,
   onSend,
   onPublish,
   publishing = false,
-  onSendAutomation,
   onStop,
   stopping = false,
 }: ChatInputProps) {
@@ -139,43 +98,19 @@ export function ChatInput({
   const [attachments, setAttachments] = React.useState<DraftChatAttachment[]>([]);
   const [attachmentError, setAttachmentError] = React.useState<string | null>(null);
   const [dragActive, setDragActive] = React.useState(false);
-  const [automationPanelOpen, setAutomationPanelOpen] = React.useState(false);
-  const [selectedAutomationActionId, setSelectedAutomationActionId] = React.useState('');
-  const [automationRunsDraft, setAutomationRunsDraft] = React.useState('');
-  const [draftAutomationEnabled, setDraftAutomationEnabled] = React.useState(false);
   const [voiceActionInFlight, setVoiceActionInFlight] = React.useState(false);
   const [composerFocused, setComposerFocused] = React.useState(false);
   const [compactVoiceRecording, setCompactVoiceRecording] = React.useState(false);
-  const [draftAutomationRunsDraft, setDraftAutomationRunsDraft] = React.useState(String(AUTOMATION_RUNS_DEFAULT));
-  const [draftAutomationSleepAmountDraft, setDraftAutomationSleepAmountDraft] =
-    React.useState(String(AUTOMATION_SLEEP_AMOUNT_DEFAULT));
-  const [draftAutomationSleepUnit, setDraftAutomationSleepUnit] =
-    React.useState<AutomationSleepUnit>(AUTOMATION_SLEEP_UNIT_DEFAULT);
   const textareaRef = React.useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = React.useRef<HTMLInputElement | null>(null);
-  const automationPanelRef = React.useRef<HTMLDivElement | null>(null);
   const voiceActionInFlightRef = React.useRef(false);
   const voiceActionTokenRef = React.useRef(0);
   const controlledDraftEnabled = typeof draftValue === 'string' && typeof onDraftValueChange === 'function';
   const draft = controlledDraftEnabled ? draftValue : uncontrolledDraft;
   const draftRef = React.useRef(draft);
   const attachmentsRef = React.useRef(attachments);
-  const availableAutomationActions = React.useMemo(
-    () =>
-      (Array.isArray(automationActions) ? automationActions : []).filter(
-        (action) => String(action?.id ?? '').trim().length > 0 && String(action?.label ?? '').trim().length > 0,
-      ),
-    [automationActions],
-  );
   const composerLocked = Boolean(disabled);
   const attachmentControlsLocked = composerLocked || sending;
-  const selectedAutomationAction = React.useMemo(
-    () =>
-      availableAutomationActions.find((action) => action.id === selectedAutomationActionId) ??
-      availableAutomationActions[0] ??
-      null,
-    [availableAutomationActions, selectedAutomationActionId],
-  );
 
   const attachmentsOn = attachmentsEnabled !== false;
   const imageAttachmentCount = React.useMemo(
@@ -238,41 +173,14 @@ export function ChatInput({
   React.useEffect(() => {
     if (!controlledDraftEnabled) setUncontrolledDraft('');
     setAttachmentError(null);
-    setAutomationPanelOpen(false);
-    setSelectedAutomationActionId('');
-    setAutomationRunsDraft('');
-    setDraftAutomationEnabled(false);
     setComposerFocused(false);
     setCompactVoiceRecording(false);
-    setDraftAutomationRunsDraft(String(AUTOMATION_RUNS_DEFAULT));
-    setDraftAutomationSleepAmountDraft(String(AUTOMATION_SLEEP_AMOUNT_DEFAULT));
-    setDraftAutomationSleepUnit(AUTOMATION_SLEEP_UNIT_DEFAULT);
     // Revoke any preview object URLs.
     setAttachments((prev) => {
       revokeDraftImagePreviewUrls(prev);
       return [];
     });
   }, [controlledDraftEnabled, resetKey]);
-
-  React.useEffect(() => {
-    if (availableAutomationActions.length === 0) {
-      setSelectedAutomationActionId('');
-      return;
-    }
-    const existing = availableAutomationActions.some(
-      (action) => action.id === selectedAutomationActionId,
-    );
-    if (existing) return;
-    setSelectedAutomationActionId(availableAutomationActions[0].id);
-  }, [availableAutomationActions, selectedAutomationActionId]);
-
-  React.useEffect(() => {
-    const action = selectedAutomationAction;
-    if (!action || typeof action.defaultRuns !== 'number') return;
-    const current = Number(automationRunsDraft);
-    if (Number.isFinite(current) && current > 0) return;
-    setAutomationRunsDraft(String(action.defaultRuns));
-  }, [automationRunsDraft, selectedAutomationAction]);
 
   React.useEffect(() => {
     if (!autoFocus) return;
@@ -286,25 +194,9 @@ export function ChatInput({
     resizeTextarea();
   }, [draft, resetKey, resizeTextarea]);
 
-  React.useEffect(() => {
-    if (!automationPanelOpen) return;
-    const onPointerDown = (event: PointerEvent) => {
-      const target = event.target;
-      if (!(target instanceof Node)) return;
-      if (automationPanelRef.current && automationPanelRef.current.contains(target)) return;
-      setAutomationPanelOpen(false);
-    };
-    window.addEventListener('pointerdown', onPointerDown);
-    return () => {
-      window.removeEventListener('pointerdown', onPointerDown);
-    };
-  }, [automationPanelOpen]);
-
   const showStopAction = waiting && typeof onStop === 'function';
   const showSeparateStopAction = showStopAction && allowSendWhileWaiting;
   const hasModeHint = modeHint.trim().length > 0;
-  const supportsDraftAutomation = typeof onSendAutomation === 'function';
-  const draftAutomationActive = draftAutomationEnabled && supportsDraftAutomation;
   const voiceRecordingActive = voiceRecordingStatus !== 'idle';
   const voiceRecordingCanPauseOrStop = voiceRecordingStatus === 'recording' || voiceRecordingStatus === 'paused';
   const voiceRecordButtonDisabled =
@@ -323,9 +215,7 @@ export function ChatInput({
     Boolean(composerContext) ||
     Boolean(promptError || attachmentError) ||
     sending ||
-    (voiceRecordingActive && !compactVoiceRecording) ||
-    draftAutomationActive ||
-    automationPanelOpen;
+    (voiceRecordingActive && !compactVoiceRecording);
   const voiceRecordingLabel =
     voiceRecordingStatus === 'starting'
       ? 'Starting…'
@@ -337,11 +227,6 @@ export function ChatInput({
             ? 'Transcribing…'
             : '';
   const voiceRecordingDuration = formatChatVoiceDuration(voiceRecordingDurationMillis);
-
-  React.useEffect(() => {
-    if (supportsDraftAutomation || !draftAutomationEnabled) return;
-    setDraftAutomationEnabled(false);
-  }, [draftAutomationEnabled, supportsDraftAutomation]);
 
   React.useEffect(() => {
     voiceActionTokenRef.current += 1;
@@ -520,27 +405,9 @@ export function ChatInput({
 
   async function submitPromptSnapshot(prompt: string, snapshotAttachments: DraftChatAttachment[], context: ChatSendContext) {
     if (!prompt && snapshotAttachments.length === 0) return;
-    if (draftAutomationActive && snapshotAttachments.length > 0) {
-      setAttachmentError('Recurring chat automations do not support attachments yet.');
-      return;
-    }
     setDraft('');
     setAttachments([]);
     setAttachmentError(null);
-    if (draftAutomationActive && onSendAutomation) {
-      const ok = await onSendAutomation({
-        prompt,
-        attachments: [],
-        runs: normalizeAutomationRuns(draftAutomationRunsDraft),
-        sleepAmount: normalizeAutomationSleepAmount(draftAutomationSleepAmountDraft),
-        sleepUnit: draftAutomationSleepUnit,
-      });
-      if (!ok) {
-        setDraft((cur) => (cur.trim().length === 0 ? prompt : cur));
-        setAttachments((cur) => (cur.length === 0 ? snapshotAttachments : cur));
-      }
-      return;
-    }
     let encoded: ChatAttachmentPayload[] = [];
     try {
       encoded = await Promise.all(
@@ -652,50 +519,6 @@ export function ChatInput({
     })();
   };
 
-  const selectedAutomationActionDisabled = React.useMemo(() => {
-    if (!selectedAutomationAction) return true;
-    return Boolean(disabled) || Boolean(selectedAutomationAction.disabled);
-  }, [disabled, selectedAutomationAction]);
-
-  const selectedAutomationRuns = React.useMemo(() => {
-    const action = selectedAutomationAction;
-    if (!action || !action.onSelectWithRuns) return null;
-    const min = typeof action.minRuns === 'number' ? Math.max(1, Math.round(action.minRuns)) : 1;
-    const maxRaw = typeof action.maxRuns === 'number' ? Math.round(action.maxRuns) : min;
-    const max = Math.max(min, maxRaw);
-    const fallback = typeof action.defaultRuns === 'number' ? Math.max(min, Math.min(max, Math.round(action.defaultRuns))) : min;
-    const parsed = Number(automationRunsDraft);
-    if (!Number.isFinite(parsed)) return fallback;
-    return Math.max(min, Math.min(max, Math.round(parsed)));
-  }, [automationRunsDraft, selectedAutomationAction]);
-
-  const triggerSelectedAutomationAction = React.useCallback(() => {
-    const action = selectedAutomationAction;
-    if (!action) return;
-    if (selectedAutomationActionDisabled) return;
-    if (action.onSelectWithRuns) {
-      action.onSelectWithRuns(selectedAutomationRuns ?? action.defaultRuns ?? 1);
-      return;
-    }
-    action.onSelect();
-  }, [selectedAutomationAction, selectedAutomationActionDisabled, selectedAutomationRuns]);
-
-  const draftAutomationRuns = React.useMemo(
-    () => normalizeAutomationRuns(draftAutomationRunsDraft),
-    [draftAutomationRunsDraft],
-  );
-  const draftAutomationSleepAmount = React.useMemo(
-    () => normalizeAutomationSleepAmount(draftAutomationSleepAmountDraft),
-    [draftAutomationSleepAmountDraft],
-  );
-  const draftAutomationSleepLabel = React.useMemo(
-    () =>
-      formatAutomationSleepInterval({
-        sleepAmount: draftAutomationSleepAmount,
-        sleepUnit: draftAutomationSleepUnit,
-      }),
-    [draftAutomationSleepAmount, draftAutomationSleepUnit],
-  );
   const sendButtonLabel =
     showStopAction && !showSeparateStopAction
       ? stopping
@@ -709,9 +532,7 @@ export function ChatInput({
           ? 'Sending...'
           : waiting && !allowSendWhileWaiting
             ? 'Waiting...'
-            : draftAutomationActive
-              ? 'Start loop'
-              : 'Send';
+            : 'Send';
 
   return (
     <div
@@ -746,7 +567,6 @@ export function ChatInput({
           </div>
         )}
         <div
-          ref={automationPanelRef}
           data-chat-composer-expanded={composerExpanded ? 'true' : 'false'}
           onFocusCapture={(event) => {
             const target = event.target;
@@ -1084,58 +904,6 @@ export function ChatInput({
 
               {!voiceRecordingActive ? <ChatComposerControls config={composerControls} /> : null}
 
-              {!voiceRecordingActive && supportsDraftAutomation ? (
-              <button
-                type="button"
-                onClick={() => {
-                  setAttachmentError(null);
-                  setDraftAutomationEnabled((enabled) => {
-                    const next = !enabled;
-                    if (next) setAutomationPanelOpen(false);
-                    return next;
-                  });
-                }}
-                disabled={Boolean(disabled)}
-                className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--chat-composer-control-radius)] border px-3 text-[.625rem] font-medium tracking-wide uppercase transition-opacity ${
-                  Boolean(disabled)
-                    ? 'cursor-not-allowed border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] opacity-40'
-                    : draftAutomationActive
-                      ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] hover:opacity-70'
-                }`}
-                title="Send this draft as a repeating automation"
-              >
-                Repeat
-                <span className="text-[var(--text-9)] text-[var(--muted-dim)]">{draftAutomationActive ? 'On' : 'Off'}</span>
-              </button>
-              ) : null}
-              {!voiceRecordingActive && availableAutomationActions.length > 0 ? (
-              <div className="relative flex-shrink-0">
-                <button
-                  type="button"
-                  onClick={() => setAutomationPanelOpen((open) => !open)}
-                  disabled={Boolean(disabled)}
-                  className={`inline-flex h-8 items-center gap-1.5 rounded-[var(--chat-composer-control-radius)] border px-3 text-[.625rem] font-medium tracking-wide uppercase transition-opacity ${
-                    Boolean(disabled)
-                      ? 'cursor-not-allowed border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] opacity-40'
-                      : 'border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-control-bg)] text-[var(--chat-composer-control-fg)] hover:opacity-70'
-                  }`}
-                  title={automationMenuLabel}
-                >
-                  {automationMenuLabel}
-                  <svg
-                    className={`transition-transform ${automationPanelOpen ? 'rotate-180' : ''}`}
-                    width="12"
-                    height="12"
-                    viewBox="0 0 16 16"
-                    fill="currentColor"
-                    aria-hidden="true"
-                  >
-                    <path d="M4.427 6.573a.25.25 0 01.177-.073h6.792a.25.25 0 01.177.427l-3.396 3.396a.25.25 0 01-.354 0L4.427 7a.25.25 0 010-.354z" />
-                  </svg>
-                </button>
-              </div>
-              ) : null}
               {!voiceRecordingActive && onPublish ? (
               <button
                 type="button"
@@ -1257,87 +1025,6 @@ export function ChatInput({
               </button>
             </div>
           ) : null}
-          {draftAutomationActive && (
-            <div className="px-3 pb-3">
-              <div className="rounded-[var(--radius-medium)] border border-[var(--accent-muted)] bg-[var(--surface-soft)] p-2.5">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div
-                    className="text-[var(--text-9)] uppercase tracking-[0.08em] text-[var(--accent)]"
-                  >
-                    Repeat This Message
-                  </div>
-                  <div className="text-[var(--text-10)] text-[var(--muted-dim)]">
-                    Stops on <code>{CHAT_DRAFT_AUTOMATION_STOP_PHRASE_DEFAULT}</code>. No final message.
-                  </div>
-                </div>
-                <div className="mt-2 grid grid-cols-1 gap-2 sm:grid-cols-[110px_minmax(0,1fr)]">
-                  <label className="flex flex-col gap-1">
-                    <span className="text-[var(--text-9)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Count</span>
-                    <input
-                      type="number"
-                      min={AUTOMATION_RUNS_MIN}
-                      max={AUTOMATION_RUNS_MAX}
-                      step={1}
-                      value={draftAutomationRunsDraft}
-                      onChange={(e) => setDraftAutomationRunsDraft(e.target.value)}
-                      className="h-[var(--control-height)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
-                    />
-                  </label>
-                  <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_120px_minmax(0,1fr)]">
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[var(--text-9)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Every</span>
-                      <input
-                        type="number"
-                        min={AUTOMATION_SLEEP_AMOUNT_MIN}
-                        max={AUTOMATION_SLEEP_AMOUNT_MAX}
-                        step={1}
-                        value={draftAutomationSleepAmountDraft}
-                        onChange={(e) => setDraftAutomationSleepAmountDraft(e.target.value)}
-                        className="h-[var(--control-height)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
-                      />
-                    </label>
-                    <label className="flex flex-col gap-1">
-                      <span className="text-[var(--text-9)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Unit</span>
-                      <select
-                        value={draftAutomationSleepUnit}
-                        onChange={(e) => setDraftAutomationSleepUnit(e.target.value as AutomationSleepUnit)}
-                        className="h-[var(--control-height)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[var(--text-12)] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
-                      >
-                        <option value="seconds">Seconds</option>
-                        <option value="minutes">Minutes</option>
-                        <option value="hours">Hours</option>
-                        <option value="days">Days</option>
-                      </select>
-                    </label>
-                    <div className="flex items-end">
-                      <div className="h-[var(--control-height)] w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-10)] text-[var(--muted-dim)] flex items-center">
-                        {draftAutomationRuns} send{draftAutomationRuns === 1 ? '' : 's'} with {draftAutomationSleepLabel.toLowerCase()} between runs
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          )}
-          <AutomationRunnerPanel
-            open={automationPanelOpen}
-            actions={availableAutomationActions}
-            selectedAction={selectedAutomationAction}
-            selectedActionId={selectedAutomationAction?.id ?? ''}
-            onSelectActionId={(nextId) => {
-              setSelectedAutomationActionId(nextId);
-              const nextAction = availableAutomationActions.find((action) => action.id === nextId) ?? null;
-              if (nextAction && typeof nextAction.defaultRuns === 'number') {
-                setAutomationRunsDraft(String(nextAction.defaultRuns));
-              }
-            }}
-            runsDraft={automationRunsDraft}
-            onRunsDraftChange={setAutomationRunsDraft}
-            selectedRuns={selectedAutomationRuns}
-            selectedActionDisabled={selectedAutomationActionDisabled}
-            controlsDisabled={Boolean(disabled)}
-            onTriggerAction={triggerSelectedAutomationAction}
-          />
           {hasModeHint && (
             <div
               className="px-4 pb-2 text-[var(--text-10)] text-[var(--muted-dim)] tracking-wide uppercase"

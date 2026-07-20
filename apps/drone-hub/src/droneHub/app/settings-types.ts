@@ -1,5 +1,4 @@
 import type { NativeAgentDefaultSettings } from '@drone/assistant-chat';
-import type { AutomationConfig } from './automation-config';
 
 export type LlmProviderId = 'openai' | 'gemini' | 'codex';
 export type DroneDeleteMode = 'permanent' | 'archive';
@@ -126,35 +125,6 @@ export type RegistryBackupSettingsResponse = {
   createdBackup?: RegistryBackupManifest | null;
 };
 
-export type AgentMessageAutoContinueSettingsResponse = {
-  ok: true;
-  agentMessageAutoContinue: {
-    prompt: string;
-    promptSource: 'settings' | 'default';
-    enabledByDefault: boolean;
-    enabledByDefaultSource: 'settings' | 'default';
-    updatedAt: string | null;
-    defaultPrompt: string;
-    defaultEnabledByDefault: boolean;
-    maxPromptChars: number;
-  };
-};
-
-export type AgentSuggestionSettingsResponse = {
-  ok: true;
-  agentSuggestion: {
-    policyMarkdown: string;
-    policyMarkdownSource: 'settings' | 'default';
-    enabledByDefault: boolean;
-    enabledByDefaultSource: 'settings' | 'default';
-    updatedAt: string | null;
-    defaultPolicyMarkdown: string;
-    defaultEnabledByDefault: boolean;
-    maxPolicyChars: number;
-    policyFingerprint: string;
-  };
-};
-
 export type AgentsSettingsResponse = {
   ok: true;
   agents: {
@@ -190,7 +160,6 @@ export type UiPreferencesSettingsResponse = {
     sidebarChatOrderByDrone: Record<string, string[]>;
     hiddenSidebarGroups: string[];
     autoDelete: boolean;
-    automations: AutomationConfig[];
     spawnAgentKey: string;
     spawnModel: string;
     repoBranchSource: 'host' | 'remote';

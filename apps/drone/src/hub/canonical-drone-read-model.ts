@@ -134,17 +134,6 @@ export function readCanonicalActiveDroneModel(): CanonicalActiveDroneReadModel |
         ), selected_ids AS (
           SELECT drone_id,chat_name,turn_id
           FROM ranked WHERE recent_rank <= ?
-          UNION
-          SELECT turns.drone_id,turns.chat_name,turns.turn_id
-          FROM canonical_chat_turns AS turns
-          JOIN hub_canonical_drones AS drones ON drones.drone_id = turns.drone_id
-          JOIN json_each(json_extract(drones.lifecycle_json,'$.playbookQueueGate.initialPromptIds')) AS prompt_ids
-            ON turns.turn_id = prompt_ids.value
-          WHERE json_extract(drones.lifecycle_json,'$.playbookQueueGate.releasedAt') IS NULL
-            AND turns.chat_name = COALESCE(
-              json_extract(drones.lifecycle_json,'$.playbookQueueGate.chatName'),
-              'default'
-            )
         )
         SELECT turns.drone_id,turns.chat_name,turns.turn_json
         FROM selected_ids

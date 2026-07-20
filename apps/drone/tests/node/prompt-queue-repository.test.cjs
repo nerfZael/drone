@@ -70,6 +70,26 @@ test('enqueue is idempotent by request key and keeps the original payload', asyn
   assert.equal(queue.list({ droneId: 'alpha', chatName: 'default' }).length, 1);
 });
 
+test('drops retired automation metadata from prompt payloads', async () => {
+  const queue = repository('retired-automation');
+  const at = '2026-07-10T09:00:00.000Z';
+  const queued = await queue.enqueue({
+    droneId: 'alpha',
+    chatName: 'default',
+    prompt: {
+      ...prompt('p-retired', at),
+      automation: { runId: 'old-run' },
+      blockedByAutomation: true,
+    },
+  });
+
+  assert.equal(queued.prompt.automation, undefined);
+  assert.equal(queued.prompt.blockedByAutomation, undefined);
+  const stored = queue.get({ droneId: 'alpha', chatName: 'default', promptId: 'p-retired' });
+  assert.equal(stored.automation, undefined);
+  assert.equal(stored.blockedByAutomation, undefined);
+});
+
 test('pending prompt updates preserve live agent plans', async () => {
   const queue = repository('agent-plan');
   const at = '2026-07-10T09:00:00.000Z';
@@ -418,7 +438,6 @@ test('active-drone lifecycle uses the canonical queue without rewriting the regi
     normalizePendingPromptState: helpers.normalizePendingPromptState,
     normalizePendingPromptText: helpers.normalizePendingPromptText,
     normalizePendingStartupPrompts: helpers.normalizePendingStartupPrompts,
-    normalizePromptAutomationMeta: () => undefined,
     nowIso: () => now,
     onPendingPromptChanged: (change) => pendingChanges.push(change),
     startupPromptToPendingPrompt: helpers.startupPromptToPendingPrompt,

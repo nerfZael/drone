@@ -103,7 +103,7 @@ function chatUiModeForAgent(agent: ChatAgentConfig | null | undefined): 'transcr
 }
 
 function isStoppableTranscriptPendingPrompt(item: PendingPrompt | null | undefined): boolean {
-  if (!item || item.automation) return false;
+  if (!item) return false;
   return item.state === 'queued' || item.state === 'sending' || item.state === 'sent';
 }
 
@@ -207,14 +207,13 @@ export function useChatRuntimeOrchestration({
     (
       prompt: string,
       attachmentsRaw?: ChatSendPayload['attachments'],
-      opts?: { id?: string | null; state?: PendingPrompt['state']; blockedByAutomation?: boolean },
+      opts?: { id?: string | null; state?: PendingPrompt['state'] },
     ): PendingPrompt | null => {
       const item = createOptimisticPendingPrompt({
         id: opts?.id,
         prompt,
         attachments: attachmentsRaw,
         state: opts?.state,
-        blockedByAutomation: opts?.blockedByAutomation,
       });
       if (!item) return null;
       const nextState = normalizePendingPromptState(opts?.state);
@@ -229,14 +228,13 @@ export function useChatRuntimeOrchestration({
   const reconcileLocalPendingPrompt = React.useCallback(
     (
       optimisticId: string,
-      opts: { confirmedId?: string | null; state?: unknown; blockedByAutomation?: boolean; error?: string | null },
+      opts: { confirmedId?: string | null; state?: unknown; error?: string | null },
     ) => {
       setOptimisticPendingPrompts((prev) =>
         reconcileOptimisticPendingPrompt(prev, {
           optimisticId,
           confirmedId: opts.confirmedId,
           state: opts.state,
-          blockedByAutomation: opts.blockedByAutomation,
           error: opts.error,
         }),
       );
@@ -358,13 +356,11 @@ export function useChatRuntimeOrchestration({
             reconcileLocalPendingPrompt(optimisticId, {
               confirmedId: String((data as any)?.promptId ?? '').trim(),
               state: data?.pendingState,
-              blockedByAutomation: data?.blockedByAutomation === true,
             });
           } else {
             addOptimisticPendingPrompt(prompt, attachments, {
               id: String((data as any)?.promptId ?? '').trim(),
               state: data?.pendingState,
-              blockedByAutomation: data?.blockedByAutomation === true,
             });
           }
         }
@@ -496,7 +492,6 @@ export function useChatRuntimeOrchestration({
               addOptimisticPendingPrompt(head.prompt, head.attachmentPayloads, {
                 id,
                 state: data?.pendingState,
-                blockedByAutomation: data?.blockedByAutomation === true,
               });
             }
           } catch (e: any) {

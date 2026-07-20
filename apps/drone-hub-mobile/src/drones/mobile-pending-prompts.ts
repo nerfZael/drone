@@ -120,7 +120,7 @@ export function mobileDronePendingPrompts(
             item?.imageCount ?? (Array.isArray(item?.attachments) ? item.attachments.length : 0),
           ) || 0,
         ),
-        cancelable: state === 'queued' && !item?.automation,
+        cancelable: state === 'queued',
         ...(String(item?.at ?? '').trim() ? { startedAt: String(item.at).trim() } : {}),
         ...(agentPlan ? { agentPlan } : {}),
       } satisfies MobileDronePendingPrompt,

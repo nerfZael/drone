@@ -9,60 +9,9 @@ import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentR
 import type { MarkdownFileReference } from './MarkdownMessage';
 import type { DroneHubTask } from './drone-hub-task-parser';
 import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
-import { IconAlert, IconCheck, IconSnapshot, IconSpinner } from './icons';
+import { IconSnapshot, IconSpinner } from './icons';
 import { ChatMessageFrame } from './ChatMessageFrame';
 import { AgentRunSummaryLine } from './WorkingElapsedStatus';
-
-type AutoContinueBadge = {
-  title: string;
-  toneClassName: string;
-  icon: 'spinner' | 'check' | 'alert';
-};
-
-type AgentMessageAutoContinueState = NonNullable<TranscriptItem['agentMessageAutoContinue']>;
-
-function autoContinueSourceLabel(source: AgentMessageAutoContinueState['source'] | undefined): string {
-  if (source === 'llm') return 'LLM';
-  if (source === 'agent-copilot-json') return 'agent copilot JSON';
-  if (source === 'heuristic') return 'heuristic';
-  return 'unknown source';
-}
-
-function resolveAutoContinueBadge(state: TranscriptItem['agentMessageAutoContinue'] | undefined): AutoContinueBadge | null {
-  if (!state?.status) return null;
-  if (state.status === 'pending') {
-    return {
-      title: 'Checking whether Hub should auto-continue this chat.',
-      toneClassName: 'text-[var(--muted-dim)]',
-      icon: 'spinner',
-    };
-  }
-  if (state.status === 'failed') {
-    const error = String(state.error ?? '').trim();
-    return {
-      title: error ? `Auto-continue check failed: ${error}` : 'Auto-continue check failed.',
-      toneClassName: 'text-[var(--red)]',
-      icon: 'alert',
-    };
-  }
-
-  const source = autoContinueSourceLabel(state.source);
-  if (state.bucket === 'continue') {
-    return {
-      title: state.continuedAt
-        ? `Auto-continue checked via ${source}: classified as continue. Hub sent the follow-up prompt.`
-        : `Auto-continue checked via ${source}: classified as continue. Hub is sending the follow-up prompt.`,
-      toneClassName: 'text-[var(--muted-dim)]',
-      icon: 'check',
-    };
-  }
-  return {
-    title: `Auto-continue checked via ${source}: classified as wait for the next user turn. No follow-up prompt was sent.`,
-    toneClassName: 'text-[var(--muted-dim)]',
-    icon: 'check',
-  };
-}
-
 
 function sameAttachments(aRaw: unknown, bRaw: unknown): boolean {
   const a = normalizeImageAttachmentRefs(aRaw);
@@ -133,7 +82,6 @@ export const TranscriptTurn = React.memo(
       agentCompletedAtMs >= promptStartedAtMs
         ? agentCompletedAtMs - promptStartedAtMs
         : null;
-    const autoContinueBadge = resolveAutoContinueBadge(item.agentMessageAutoContinue);
     const dockerSnapshot = item.dockerSnapshot;
     const dockerSnapshotBusy = dockerSnapshot?.status === 'creating' || dockerSnapshot?.status === 'restoring';
     const canRollbackDockerSnapshot = Boolean(item.ok && dockerSnapshot?.id && dockerSnapshot.status === 'ready' && onRollbackDockerSnapshot);
@@ -175,17 +123,6 @@ export const TranscriptTurn = React.memo(
           showRoleIcon={showRoleIcons}
           showRoleLabel={showRoleIcons}
           plainAssistant={!showRoleIcons}
-          headerEnd={autoContinueBadge ? (
-            <span
-              className={`inline-flex h-3.5 w-3.5 items-center justify-center ${autoContinueBadge.toneClassName}`}
-              title={autoContinueBadge.title}
-              aria-label={autoContinueBadge.title}
-            >
-              {autoContinueBadge.icon === 'spinner' ? <IconSpinner className="h-3 w-3" /> : null}
-              {autoContinueBadge.icon === 'check' ? <IconCheck className="h-3 w-3" /> : null}
-              {autoContinueBadge.icon === 'alert' ? <IconAlert className="h-3 w-3" /> : null}
-            </span>
-          ) : null}
         >
           <ChatMessageBody
             role="assistant"
@@ -276,11 +213,6 @@ export const TranscriptTurn = React.memo(
     a.item.output === b.item.output &&
     JSON.stringify(a.item.agentPlan?.items ?? []) === JSON.stringify(b.item.agentPlan?.items ?? []) &&
     (a.item.agentPlan?.source ?? '') === (b.item.agentPlan?.source ?? '') &&
-    (a.item.agentMessageAutoContinue?.status ?? '') === (b.item.agentMessageAutoContinue?.status ?? '') &&
-    (a.item.agentMessageAutoContinue?.bucket ?? '') === (b.item.agentMessageAutoContinue?.bucket ?? '') &&
-    (a.item.agentMessageAutoContinue?.source ?? '') === (b.item.agentMessageAutoContinue?.source ?? '') &&
-    (a.item.agentMessageAutoContinue?.continuedAt ?? '') === (b.item.agentMessageAutoContinue?.continuedAt ?? '') &&
-    (a.item.agentMessageAutoContinue?.updatedAt ?? '') === (b.item.agentMessageAutoContinue?.updatedAt ?? '') &&
     (a.item.error ?? '') === (b.item.error ?? '') &&
     a.parsingJobs === b.parsingJobs &&
     a.onCreateJobs === b.onCreateJobs &&

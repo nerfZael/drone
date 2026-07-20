@@ -69,7 +69,6 @@ import { useDroneHubRegistryData } from './droneHub/app/use-drone-hub-registry-d
 import { useDroneHubToolbarMenuState } from './droneHub/app/use-drone-hub-toolbar-menu-state';
 import { useVoiceClipboardRecorder } from './droneHub/app/use-voice-clipboard-recorder';
 import { transcriptMessageId } from './droneHub/app/transcript-message-id';
-import { useAgentSuggestionState } from './droneHub/app/use-agent-suggestion-state';
 import { useWorkspaceNavigationActions } from './droneHub/app/use-workspace-navigation-actions';
 import { useWorkspaceActions } from './droneHub/app/use-workspace-actions';
 import {
@@ -198,7 +197,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
   const {
     activeRepoPath,
     settingsActiveTab,
-    settingsPlaybookFocusId,
     chatHeaderRepoPath,
     appView,
     sidebarGroupingMode,
@@ -216,7 +214,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedDrone,
     selectedDroneIds,
     selectedGroupMultiChat,
-    playbookRunsOpen,
     selectedChat,
     draftChat,
     reposModalOpen,
@@ -242,7 +239,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     shortcutBindings,
     setActiveRepoPath,
     setSettingsActiveTab,
-    setSettingsPlaybookFocusId,
     setChatHeaderRepoPath,
     setAppView,
     setCollapsedGroups,
@@ -255,7 +251,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSelectedDrone,
     setSelectedDroneIds,
     setSelectedGroupMultiChat,
-    setPlaybookRunsOpen,
     setGroupBroadcastExpanded,
     setSelectedChat,
     setDraftChat,
@@ -653,8 +648,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setChatAgent,
     setChatModel,
     setChatAgentPermissionMode,
-    setAgentMessageAutoContinueEnabled,
-    setAgentSuggestionEnabled,
     setDockerSnapshotAfterAgentMessageEnabled,
     handleSetAgentFailure,
   } = useChatConfigState({
@@ -1188,7 +1181,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     [drones],
   );
 
-  const { openCreateModal: openCreateModalBase, openDraftChatComposer: openDraftChatComposerBase, openPlaybookRuns } =
+  const { openCreateModal: openCreateModalBase, openDraftChatComposer: openDraftChatComposerBase } =
     useWorkspaceNavigationActions({
       creating,
       createMode,
@@ -1228,7 +1221,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
       setHomeOpen,
       setSelectedDrone,
       setSelectedDroneIds,
-      setPlaybookRunsOpen,
       setSelectedChat,
       resetDraftNameSuggestSeq: () => {
         draftNameSuggestSeqRef.current = 0;
@@ -1265,7 +1257,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setCreateError(null);
     closeDraftCreateSurface();
     setHomeOpen(true);
-    setPlaybookRunsOpen(false);
     setSelectedGroupMultiChat(null);
     resetSidebarDroneSelection();
   }, [
@@ -1281,7 +1272,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftCreateError,
     setDraftCreateOpen,
     setHomeOpen,
-    setPlaybookRunsOpen,
     setSelectedChat,
     setSelectedDrone,
     setSelectedDroneIds,
@@ -1402,7 +1392,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     selectedDroneIds,
     selectedChat,
     homeOpen,
-    playbookRunsOpen,
     draftChat,
     droneById,
     dronesFilteredByRepoIdSet,
@@ -1422,7 +1411,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setSelectedDrone,
     setSelectedDroneIds,
     setSelectedGroupMultiChat,
-    setPlaybookRunsOpen,
     setSelectedChat,
   });
   const selectDroneCard = React.useCallback(
@@ -1448,7 +1436,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     createDroneFromDraft,
     queueDraftPromptDuringCreate,
     startDraftPrompt,
-    startDraftAutomation,
   } =
     useDroneCreationActions({
       drones,
@@ -1826,30 +1813,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     requestJson,
     onAutoRenameChatFromFirstPrompt: handleAutoRenameChatFromFirstPrompt,
   });
-  const [agentSuggestionPolicyFingerprint, setAgentSuggestionPolicyFingerprint] = React.useState('');
-  const {
-    latestAgentSuggestionTarget,
-    latestAgentSuggestionState,
-    requestAgentSuggestionForMessage,
-  } = useAgentSuggestionState({
-    transcripts,
-    pendingPrompts: visiblePendingPromptsWithStartup,
-    chatUiModeRef,
-    requestJson,
-    transcriptMessageId,
-    enabled: chatInfo?.agentSuggestionEnabled === true,
-    currentPolicyFingerprint: agentSuggestionPolicyFingerprint,
-  });
-
-  React.useEffect(() => {
-    const next =
-      latestAgentSuggestionState?.status === 'ready' || latestAgentSuggestionState?.status === 'suppressed'
-        ? String(latestAgentSuggestionState.policyFingerprint ?? '').trim()
-        : '';
-    if (!next) return;
-    setAgentSuggestionPolicyFingerprint((prev) => (prev === next ? prev : next));
-  }, [latestAgentSuggestionState]);
-
   React.useEffect(() => {
     if (!selectedDrone) return;
     scrollChatToBottom();
@@ -2216,8 +2179,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
           agentLocked: false,
           model: startupSeedForCurrentDrone.model ?? null,
           agentPermissionMode: startupSeedForCurrentDrone.agentPermissionMode ?? 'full-access',
-          agentMessageAutoContinueEnabled: false,
-          agentSuggestionEnabled: false,
           dockerSnapshotAfterAgentMessageEnabled: false,
           sessionName: `drone-hub-chat-${startupSeedForCurrentDrone.chatName || selectedChat || 'default'}`,
           createdAt: startupSeedForCurrentDrone.at || new Date().toISOString(),
@@ -2742,34 +2703,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     return () => document.removeEventListener('keydown', onKeyDown);
   }, [goBackEditorLocationFromShortcut, goForwardEditorLocationFromShortcut, openQuickOpenFromShortcut, quickOpenOpen]);
 
-  const [pendingPlaybookArtifact, setPendingPlaybookArtifact] = React.useState<{
-    droneId: string;
-    path: string;
-    name: string;
-  } | null>(null);
-  React.useEffect(() => {
-    if (!pendingPlaybookArtifact) return;
-    if (String(currentDrone?.id ?? '') !== pendingPlaybookArtifact.droneId) return;
-    openFileInFilesPane({
-      path: pendingPlaybookArtifact.path,
-      name: pendingPlaybookArtifact.name,
-    });
-    setPendingPlaybookArtifact(null);
-  }, [currentDrone?.id, openFileInFilesPane, pendingPlaybookArtifact]);
-  const openPlaybookRunArtifact = React.useCallback(
-    (droneId: string, chatName: string, path: string, name: string) => {
-      const filePath = String(path ?? '').trim();
-      if (!filePath) return;
-      setPlaybookRunsOpen(false);
-      setPendingPlaybookArtifact({
-        droneId,
-        path: filePath,
-        name: String(name ?? '').trim() || filePath.split('/').filter(Boolean).pop() || filePath,
-      });
-      selectDroneChat(droneId, chatName);
-    },
-    [selectDroneChat, setPlaybookRunsOpen],
-  );
   const openMarkdownFileReference = React.useCallback(
     (ref: MarkdownFileReference) => {
       const containerPath = resolveDroneFileOpenPath(currentDrone, ref.path);
@@ -3830,7 +3763,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     draftSidebarPlaceholder,
     openDraftChatComposer,
     openCreateModal,
-    openPlaybookRuns,
     selectDroneCard,
     selectDroneChat,
     createDroneChat,
@@ -4031,7 +3963,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setDraftCreateParentDroneId,
     setDraftAutoRenaming,
     startDraftPrompt,
-    startDraftAutomation,
     queueDraftPromptDuringCreate,
     createDroneFromDraft,
     enqueueQueuedPrompt,
@@ -4059,17 +3990,12 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     unreadAgentMessageByChatNodeId,
     openDraftChatComposer,
     openCreateModal,
-    openPlaybookRuns,
-    openPlaybookRunArtifact,
     activeRepoPath,
     settingsActiveTab,
-    settingsPlaybookFocusId,
     registeredRepoPaths,
     registryGroupNames,
     setActiveRepoPath,
     setSettingsActiveTab,
-    setSettingsPlaybookFocusId,
-    playbookRunsOpen,
     currentDrone,
     deleteMode: deleteActionSettingsState.deleteSettings?.deleteAction.mode ?? 'permanent',
     currentDroneLabel,
@@ -4098,10 +4024,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     setChatModel,
     agentPermissionMode: effectiveChatInfo?.agentPermissionMode ?? 'full-access',
     setChatAgentPermissionMode,
-    agentMessageAutoContinueEnabled: effectiveChatInfo?.agentMessageAutoContinueEnabled === true,
-    setAgentMessageAutoContinueEnabled,
-    agentSuggestionEnabled: effectiveChatInfo?.agentSuggestionEnabled === true,
-    setAgentSuggestionEnabled,
     dockerSnapshotAfterAgentMessageEnabled: effectiveChatInfo?.dockerSnapshotAfterAgentMessageEnabled === true,
     setDockerSnapshotAfterAgentMessageEnabled,
     setChatInfoError,
@@ -4144,9 +4066,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     visiblePendingPromptsWithStartup,
     transcriptMessageId,
     parsingJobsByTurn,
-    latestAgentSuggestionTarget,
-    latestAgentSuggestionState,
-    requestAgentSuggestionForMessage,
     chatEndRef,
     outputScrollRef,
     updatePinned,
@@ -4188,7 +4107,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     rightPanelOpenRequestSeq,
     renderRightPanelTabContent,
     renderPersistentPreviewContent,
-    setPlaybookRunsOpen,
   });
 
   return {

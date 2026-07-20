@@ -10,7 +10,6 @@ type DockerSnapshotRuntimeDependencyName =
   | 'droneRuntime'
   | 'droneStatus'
   | 'enqueuePendingPromptPump'
-  | 'getPromptAutomationLane'
   | 'hubLog'
   | 'inferChatAgent'
   | 'loadRegistry'
@@ -19,7 +18,6 @@ type DockerSnapshotRuntimeDependencyName =
   | 'normalizeDroneIdentity'
   | 'nowIso'
   | 'projectCanonicalChatToRegistry'
-  | 'promptAutomationLaneBusy'
   | 'readChatFromStore'
   | 'resolveHostPort'
   | 'rollbackTranscriptToTurnInStore'
@@ -39,7 +37,6 @@ export function createDockerSnapshotRuntime(deps: DockerSnapshotRuntimeDependenc
     droneRuntime,
     droneStatus,
     enqueuePendingPromptPump,
-    getPromptAutomationLane,
     hubLog,
     inferChatAgent,
     loadRegistry,
@@ -48,7 +45,6 @@ export function createDockerSnapshotRuntime(deps: DockerSnapshotRuntimeDependenc
     normalizeDroneIdentity,
     nowIso,
     projectCanonicalChatToRegistry,
-    promptAutomationLaneBusy,
     readChatFromStore,
     resolveHostPort,
     rollbackTranscriptToTurnInStore,
@@ -925,10 +921,7 @@ export function createDockerSnapshotRuntime(deps: DockerSnapshotRuntimeDependenc
       (candidate: any) => String(candidate?.id ?? '').trim() === promptId,
     ) as any;
     const snap = normalizeDockerSnapshot(turn?.dockerSnapshot);
-    if (
-      chatHasActivePendingPromptsForSummary(chat) ||
-      promptAutomationLaneBusy(getPromptAutomationLane(droneId, chatName), { includeQueued: true })
-    ) {
+    if (chatHasActivePendingPromptsForSummary(chat)) {
       const error: Error & { statusCode?: number } = new Error(
         'chat is busy; wait for the current work to finish before rolling back',
       );

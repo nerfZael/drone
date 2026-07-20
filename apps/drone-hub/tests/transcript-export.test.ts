@@ -23,13 +23,6 @@ const sampleTurns: TranscriptItem[] = [
         relativePath: '.drone-hub/attachments/screenshot.png',
       },
     ],
-    automation: {
-      kind: 'prompt-loop',
-      stage: 'run',
-      automationLabel: 'Review loop',
-      runIndex: 1,
-      runsTotal: 3,
-    },
     session: 'chat-default',
     logPath: '/tmp/chat.log',
     ok: true,

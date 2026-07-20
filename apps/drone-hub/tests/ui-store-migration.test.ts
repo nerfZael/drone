@@ -18,14 +18,10 @@ describe('drone hub ui store migration', () => {
         transcriptInlineImages: false,
         showCanvasLastMessagePreviews: true,
         seenModelIds: ['gpt-5.4', 'o3'],
-        automations: [
-          {
-            id: 'automation-a',
-            label: 'Nightly',
-            prompt: 'Ship it',
-            sleepBetweenRunsSeconds: 3600,
-          },
-        ],
+        automations: [{ id: 'retired-automation' }],
+        playbookRunsSelectionInitialized: true,
+        playbookRunsSelectedPlaybookId: 'retired-playbook',
+        playbookRunsSelectedRepoPath: '/tmp/retired-playbook',
       },
       5,
     );
@@ -40,13 +36,10 @@ describe('drone hub ui store migration', () => {
     expect((migrated as any).viewMode).toBeUndefined();
     expect((migrated as any).assistantThreadSidebarDockSide).toBeUndefined();
     expect((migrated as any).transcriptInlineImages).toBeUndefined();
-    expect(Array.isArray(migrated.automations)).toBe(true);
-    expect((migrated.automations ?? [])[0]).toMatchObject({
-      id: 'automation-a',
-      label: 'Nightly',
-      prompt: 'Ship it',
-      sleepBetweenRunsSeconds: 3600,
-    });
+    expect((migrated as any).automations).toBeUndefined();
+    expect((migrated as any).playbookRunsSelectionInitialized).toBeUndefined();
+    expect((migrated as any).playbookRunsSelectedPlaybookId).toBeUndefined();
+    expect((migrated as any).playbookRunsSelectedRepoPath).toBeUndefined();
   });
 
   test('returns an empty object for invalid persisted payloads', () => {
@@ -149,7 +142,7 @@ describe('drone hub ui store migration', () => {
     });
   });
 
-  test('restores automations from the raw localStorage envelope when backend settings are still empty', () => {
+  test('restores UI preferences from the raw localStorage envelope when backend settings are still empty', () => {
     const restored = restoreUiPreferencesFromPersistedStorage(
       {
         sidebarGroupingMode: 'groups',
@@ -158,7 +151,6 @@ describe('drone hub ui store migration', () => {
         sidebarChatOrderByDrone: {},
         hiddenSidebarGroups: [],
         autoDelete: false,
-        automations: [],
         spawnAgentKey: 'builtin:cursor',
         spawnModel: '',
         repoBranchSource: 'host',
@@ -173,14 +165,6 @@ describe('drone hub ui store migration', () => {
           repoBranchSource: 'remote',
           repoCreateRemoteBranch: 'origin/voice',
           pullHostBranchBeforeCreate: false,
-          automations: [
-            {
-              id: 'automation-a',
-              label: 'Nightly',
-              prompt: 'Ship it',
-              sleepBetweenRunsSeconds: 3600,
-            },
-          ],
         },
         version: 5,
       }),
@@ -193,14 +177,6 @@ describe('drone hub ui store migration', () => {
     expect(restored.snapshot.repoBranchSource).toBe('remote');
     expect(restored.snapshot.repoCreateRemoteBranch).toBe('origin/voice');
     expect(restored.snapshot.pullHostBranchBeforeCreate).toBe(false);
-    expect(restored.snapshot.automations).toHaveLength(1);
-    expect(restored.snapshot.automations[0]).toMatchObject({
-      id: 'automation-a',
-      label: 'Nightly',
-      prompt: 'Ship it',
-      sleepAmount: 1,
-      sleepUnit: 'hours',
-    });
   });
 
   test('migrates the former create-chat default onto child-drone and moves create-chat to W', () => {

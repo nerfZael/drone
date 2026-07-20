@@ -2,38 +2,73 @@ import crypto from 'node:crypto';
 
 import type { ChatImageAttachment } from '../chat-attachments';
 import { chatPromptBodySchema } from '../chat-route-schemas';
-import type { AgentPermissionMode, ChatAgentConfig } from '../chat-types';
-import { describeHubError } from '../domain-errors';
 import { parseBoolParam } from '../hub-format';
 import { readJsonBody, sendJson as json } from '../hub-http';
 import type { PendingPromptState } from '../pendingPromptEnqueue';
-import type { PromptAutomationService } from '../prompt-automation-service';
 import { parseRequestSchema } from '../request-schema';
 import type { LegacyRouteDependencyContract, LegacyRouteHandler } from './legacy-route';
 
-export type PromptAutomationRouteService = PromptAutomationService;
+type ChatPromptRouteDependencyName =
+  | 'attachmentOnlyPromptLabel'
+  | 'autoRenameGeneratedChatFromFirstPrompt'
+  | 'cancelQueuedPendingPrompt'
+  | 'chatSnapshotResponseBody'
+  | 'claimChatAutoRenameFromFirstPrompt'
+  | 'createOrEnqueuePromptUnified'
+  | 'createRequestTimer'
+  | 'defaultDaemonReadyTimeoutMs'
+  | 'discoverAndRememberModelsForBuiltinAgent'
+  | 'droneRuntime'
+  | 'droneTerminalOutput'
+  | 'droneTerminalPrompt'
+  | 'dvmExec'
+  | 'dvmSessionRead'
+  | 'enqueuePendingPromptPump'
+  | 'ensureChatEntry'
+  | 'ensureHubChatSessionRunning'
+  | 'getChatEntry'
+  | 'hubChatSessionName'
+  | 'inferChatAgent'
+  | 'isDraftChatEntry'
+  | 'isSafePromptId'
+  | 'isStaleDockerExecErrorMessage'
+  | 'jsonWithEtag'
+  | 'jsonWithKnownEtag'
+  | 'logSlowHubRequest'
+  | 'normalizeChatImageAttachments'
+  | 'normalizeChatModel'
+  | 'normalizeChatName'
+  | 'normalizeDroneIdentity'
+  | 'normalizeSubmittedAtIso'
+  | 'nowIso'
+  | 'pushPendingPrompt'
+  | 'pushPendingStartupPrompt'
+  | 'readChatSnapshot'
+  | 'resolveChatTmuxCommand'
+  | 'resolveDroneDaemonClientForEntry'
+  | 'resolveDroneOrPendingForReadRef'
+  | 'resolveDroneOrRespond'
+  | 'shouldAutoRenameChatOnPrompt'
+  | 'stopChatResponse'
+  | 'waitForDroneDaemonReady'
+  | 'withLockedDroneContainer';
 
-import type { ChatAutomationRouteDependencies } from './chat-automation-routes';
+export type ChatPromptRouteDependencies =
+  LegacyRouteDependencyContract<ChatPromptRouteDependencyName>;
 
 export function createChatPromptRouteHandler(
-  deps: ChatAutomationRouteDependencies,
+  deps: ChatPromptRouteDependencies,
 ): LegacyRouteHandler {
   const {
-    archiveChatById,
     attachmentOnlyPromptLabel,
     autoRenameGeneratedChatFromFirstPrompt,
-    buildNewChatEntry,
     cancelQueuedPendingPrompt,
     chatSnapshotResponseBody,
     claimChatAutoRenameFromFirstPrompt,
-    collectDockerSnapshotImageRefsFromChatEntry,
-    createChatInStore,
     createOrEnqueuePromptUnified,
     createRequestTimer,
     defaultDaemonReadyTimeoutMs,
-    deleteActiveChatFromStore,
     discoverAndRememberModelsForBuiltinAgent,
-    dockerSnapshotAfterAgentMessageEnabledForChat,
     droneRuntime,
     droneTerminalOutput,
     droneTerminalPrompt,
@@ -44,60 +79,28 @@ export function createChatPromptRouteHandler(
     ensureHubChatSessionRunning,
     getChatEntry,
     hubChatSessionName,
-    importDroneChatsFromRegistry,
-    importResolvedChatToStore,
-    importResolvedDroneChatsToStore,
     inferChatAgent,
     isDraftChatEntry,
     isSafePromptId,
     isStaleDockerExecErrorMessage,
     jsonWithEtag,
     jsonWithKnownEtag,
-    listChatReadStatesFromStore,
-    listChatsFromStore,
     logSlowHubRequest,
-    markChatReadInStore,
-    markChatUnreadInStore,
-    markTranscriptTurnAgentSuggestionUsedDirect,
-    migrateInMemoryChatStateForRename,
-    normalizeAgentPermissionMode,
-    normalizeBuiltinAgentId,
     normalizeChatImageAttachments,
     normalizeChatModel,
     normalizeChatName,
-    normalizeChatReasoning,
     normalizeDroneIdentity,
-    normalizePendingStartupPrompts,
     normalizeSubmittedAtIso,
     nowIso,
-    parseAgentPermissionModeForUpdate,
-    parseChatModelForUpdate,
-    parseChatNameForMutation,
-    parseDraftFlag,
-    projectCanonicalChatToRegistry,
-    projectCanonicalChatsToRegistry,
-    promptAutomation,
     pushPendingPrompt,
     pushPendingStartupPrompt,
-    readChatReadStateFromStore,
     readChatSnapshot,
-    removeDockerSnapshotImagesBestEffort,
-    renameChatInStore,
     resolveChatTmuxCommand,
     resolveDroneDaemonClientForEntry,
-    resolveDroneFromRegistryRef,
     resolveDroneOrPendingForReadRef,
     resolveDroneOrRespond,
-    resolveEffectiveAgentMessageAutoContinueSettings,
-    resolveEffectiveAgentSuggestionSettings,
-    resolveEffectiveDeleteActionSettings,
-    restoreDockerSnapshotForTranscriptTurn,
-    setChatAgentConfig,
     shouldAutoRenameChatOnPrompt,
     stopChatResponse,
-    stopSingleDroneChatActivity,
-    stopTranscriptPendingPrompts,
-    updateChatInStore,
     waitForDroneDaemonReady,
     withLockedDroneContainer,
   } = deps;
@@ -209,7 +212,6 @@ export function createChatPromptRouteHandler(
                 kind: 'enqueued';
                 id: string;
                 pendingState: PendingPromptState;
-                blockedByAutomation: boolean;
               }
             | { kind: 'error'; status: number; error: string };
           if (resolved.kind === 'pending') {
@@ -238,7 +240,6 @@ export function createChatPromptRouteHandler(
                   kind: 'enqueued',
                   id: pendingPromptId,
                   pendingState: 'queued',
-                  blockedByAutomation: false,
                 };
               } else {
                 r = await createOrEnqueuePromptUnified({
@@ -280,7 +281,6 @@ export function createChatPromptRouteHandler(
                   kind: 'enqueued',
                   id: draftPromptId,
                   pendingState: 'queued',
-                  blockedByAutomation: false,
                 };
               }
             } else {
@@ -328,7 +328,6 @@ export function createChatPromptRouteHandler(
             droneId,
             chatName: chat,
             pendingState: r.pendingState,
-            blockedByAutomation: r.blockedByAutomation,
             status: 202,
           });
           json(res, 202, {
@@ -339,7 +338,6 @@ export function createChatPromptRouteHandler(
             chat,
             promptId: r.id,
             pendingState: r.pendingState,
-            blockedByAutomation: r.blockedByAutomation,
             autoRenameChat: autoRenameFromFirstPrompt,
           });
           return;

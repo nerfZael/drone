@@ -37,6 +37,8 @@ function seedRegistry() {
     settings: {
       filesystem: { uploadMaxBytes: 123, updatedAt: '2026-01-01T00:00:00.000Z' },
       openai: { apiKey: 'stale-key', updatedAt: '2026-01-01T00:00:00.000Z' },
+      agentMessageAutoContinue: { prompt: 'continue', enabledByDefault: true },
+      agentSuggestion: { enabledByDefault: true },
       syncSets: { items: [] },
     },
     skills: {
@@ -54,7 +56,21 @@ function seedRegistry() {
         id: 'alpha', name: 'Legacy Alpha', containerName: 'legacy-alpha', runtime: 'container',
         token: 'token', containerPort: 7777, createdAt: '2026-01-01T00:00:00.000Z',
         chats: {
-          default: { createdAt: '2026-01-01T00:00:00.000Z', turns: [] },
+          default: {
+            createdAt: '2026-01-01T00:00:00.000Z',
+            agentMessageAutoContinueEnabled: true,
+            agentSuggestionEnabled: true,
+            agentCopilotHandledSourceMessageIds: ['alpha:turn-1'],
+            turns: [{
+              id: 'legacy-follow-up-turn',
+              at: '2026-01-01T00:00:00.000Z',
+              prompt: 'continue',
+              ok: true,
+              output: 'done',
+              agentMessageAutoContinue: { status: 'classified' },
+              agentSuggestion: { usedDirectAt: '2026-01-01T00:01:00.000Z' },
+            }],
+          },
           review: {
             createdAt: '2026-01-01T00:00:00.000Z',
             turns: [],
@@ -93,6 +109,13 @@ test('projection backfills once, then canonical columns and tombstones win', asy
   assert.ok(first.drones.alpha.chats.default);
   assert.equal(first.drones.alpha.chats.review.pendingPrompts[0].id, 'review-prompt');
   assert.equal(first.drones.alpha.archivedChats.review.turns[0].id, 'archived-turn');
+  assert.equal(first.settings.agentMessageAutoContinue, undefined);
+  assert.equal(first.settings.agentSuggestion, undefined);
+  assert.equal(first.drones.alpha.chats.default.agentMessageAutoContinueEnabled, undefined);
+  assert.equal(first.drones.alpha.chats.default.agentSuggestionEnabled, undefined);
+  assert.equal(first.drones.alpha.chats.default.agentCopilotHandledSourceMessageIds, undefined);
+  assert.equal(first.drones.alpha.chats.default.turns[0].agentMessageAutoContinue, undefined);
+  assert.equal(first.drones.alpha.chats.default.turns[0].agentSuggestion, undefined);
 
   const lifecycle = await getDroneLifecycleRepository();
   await lifecycle.upsert('real', 'alpha', {
