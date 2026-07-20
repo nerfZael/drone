@@ -66,6 +66,8 @@ import { mobileDronePendingPrompts } from '../drones/mobile-pending-prompts';
 import { useDroneLinkedPullRequests } from '../drones/use-drone-linked-pull-requests';
 import { useLocalDroneControl } from '../drones/local-drone-control';
 import { ChatImageStrip } from '../drones/ChatImageStrip';
+import { FilePreviewModal } from '../drones/FilePreviewModal';
+import { useFilePreview } from '../drones/use-file-preview';
 import { pickChatImages, type MobileChatImage } from '../drones/pick-chat-images';
 import type { DroneControlOperation } from '@drone/device-protocol';
 import { useLocalAssistant } from '../local-assistant/LocalAssistantContext';
@@ -1170,6 +1172,13 @@ export function DronesScreen({
     droneId: selected?.id ?? '',
     messages: transcriptMessages,
   });
+  const filePreview = useFilePreview({
+    targetId,
+    selectedDrone: selected,
+    chatName,
+    phoneTarget,
+    requestDroneControl,
+  });
   const chatLoading = busy === 'chats' || busy === 'chat' || busy === 'create-chat';
   const latestMessageScroll = useLatestMessageScroll(
     selected ? `${selected.id}:${chatName}` : '',
@@ -1593,6 +1602,7 @@ export function DronesScreen({
                         linkedPullRequests={linkedPullRequests}
                         onLoadFullMessage={(message) => void loadFullChatMessage(message)}
                         fullMessageLoadingId={fullMessageBusyId}
+                        onOpenFileReference={filePreview.open}
                         onDeleteMessageRequest={
                           nativeMessages !== null
                             ? ({ message, deleteFollowing }) => {
@@ -1696,6 +1706,16 @@ export function DronesScreen({
           </View>
         )}
       </KeyboardAvoidingView>
+      <FilePreviewModal
+        visible={filePreview.visible}
+        preview={filePreview.preview}
+        requestedPath={filePreview.requestedPath}
+        line={filePreview.line}
+        loading={filePreview.loading}
+        error={filePreview.error}
+        onClose={filePreview.close}
+        onRetry={filePreview.retry}
+      />
       <ConfirmDialog
         visible={confirmAccessDiscard}
         title="Discard workspace changes?"

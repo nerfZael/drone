@@ -23,7 +23,8 @@ export async function transcribeMobileVoiceRecording(input: {
       throw new Error('The voice recording exceeds GROQ’s 25 MB upload limit.');
     }
     const form = new FormData();
-    form.append('file', file);
+    // Expo File is a runtime Blob; Bun's workspace types add server-only methods to global Blob.
+    form.append('file', file as unknown as Blob);
     form.append('model', MOBILE_GROQ_TRANSCRIPTION_MODEL);
     const response = await fetch(MOBILE_GROQ_TRANSCRIPTION_URL, {
       method: 'POST',

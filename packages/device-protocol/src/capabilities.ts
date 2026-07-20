@@ -23,6 +23,7 @@ export const DRONE_CONTROL_OPERATIONS = [
   'chat.stop',
   'chat.approval.resolve',
   'chat.message.delete',
+  'file.preview',
   'repo.pull-requests.read',
   'repo.pull-requests.merge',
   'repo.pull-requests.close',

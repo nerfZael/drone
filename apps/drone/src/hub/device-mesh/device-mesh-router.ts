@@ -52,6 +52,7 @@ function isBulkTransferRequest(request: SignedCapabilityRequest): boolean {
     (request.operation === 'files.transfer.read' || request.operation === 'files.transfer.write')
   )
     return true;
+  if (request.capability === 'drone-control' && request.operation === 'file.preview') return true;
   return (
     request.capability === 'drone-control' &&
     request.operation === 'chat.prompt' &&

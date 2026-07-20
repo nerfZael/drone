@@ -1,6 +1,7 @@
-import { DRONE_CONTROL_CAPABILITY } from '@drone/device-protocol';
+import { DRONE_CONTROL_CAPABILITY, MESH_BINARY_CHUNK_BYTES } from '@drone/device-protocol';
 import type { CapabilityHandler } from './device-mesh-types';
 import { boundedDroneChatPage } from './drone-chat-page';
+import { isLikelyImagePath, isLikelyVideoPath } from '../filesystem-media';
 import { localHubRequest, type LocalHubAccess } from './local-hub-request';
 import { meshJsonContentChunk } from './mesh-content-chunk';
 import type { MeshChatAttachmentStore } from './mesh-chat-attachment-store';
@@ -76,6 +77,7 @@ function compactPendingPrompts(value: unknown): any[] {
 
 const CREATE_REPO_BRANCH_PAGE_SIZE = 500;
 const CREATE_REPO_BRANCH_PAGE_BYTES = 160 * 1024;
+const MOBILE_FILE_MEDIA_MAX_BYTES = 32 * 1024 * 1024;
 
 function compactCreateRepoBranch(branch: unknown) {
   const entry = object(branch);
@@ -136,6 +138,17 @@ export function deviceMeshDroneSummary(drone: any) {
       drone?.repo?.path,
       drone?.repo?.hostPath,
       drone?.repo?.dest,
+    ),
+    cwd: firstText(drone?.cwd, drone?.workingDirectory),
+    repoAttached: Boolean(
+      drone?.repoAttached ??
+      firstText(
+        drone?.repoPath,
+        drone?.repositoryPath,
+        drone?.repo?.path,
+        drone?.repo?.hostPath,
+        drone?.repo?.dest,
+      ),
     ),
     fleetParentId: String(drone?.fleetParentId ?? '').trim() || null,
     chats: chats.map((chat: unknown) => String(chat ?? '').trim()).filter(Boolean),
@@ -408,6 +421,87 @@ export function createDroneControlCapability(
           `/api/drones/${encodedDrone}/repo/pull-requests/${pullNumber}/close`,
           { method: 'POST', body: '{}' },
         );
+      }
+      if (operation === 'file.preview') {
+        const filePath = requiredText(payload.path, 'path');
+        const fsFilePath = `/api/drones/${encodedDrone}/fs/file?path=${encodeURIComponent(filePath)}`;
+        const likelyMedia = isLikelyImagePath(filePath) || isLikelyVideoPath(filePath);
+        let metadata: any;
+        try {
+          metadata = await localHubRequest(
+            access,
+            likelyMedia ? `${fsFilePath}&metadata=1` : fsFilePath,
+          );
+        } catch (error: any) {
+          if (error?.code !== 'HUB_413' || likelyMedia) throw error;
+          metadata = await localHubRequest(access, `${fsFilePath}&metadata=1`);
+          if (metadata?.kind !== 'image' && metadata?.kind !== 'video') throw error;
+        }
+        if (metadata?.kind !== 'image' && metadata?.kind !== 'video') {
+          return {
+            contentChunk: meshJsonContentChunk(metadata, payload.contentOffset),
+          };
+        }
+
+        const size = Number(metadata?.size);
+        if (!Number.isSafeInteger(size) || size < 0)
+          throw Object.assign(new Error('the Hub returned invalid file metadata'), {
+            code: 'INVALID_RESPONSE',
+          });
+        if (size === 0)
+          throw Object.assign(new Error('empty media files cannot be previewed'), {
+            code: 'EMPTY_MEDIA',
+          });
+        if (size > MOBILE_FILE_MEDIA_MAX_BYTES)
+          throw Object.assign(
+            new Error(
+              `media is too large to preview on mobile (${size} bytes, max ${MOBILE_FILE_MEDIA_MAX_BYTES})`,
+            ),
+            { code: 'FILE_TOO_LARGE' },
+          );
+        const previewPath = requiredText(metadata?.path ?? filePath, 'preview path');
+
+        const requestedOffset = Number(payload.contentOffset);
+        const offset =
+          Number.isSafeInteger(requestedOffset) && requestedOffset > 0 ? requestedOffset : 0;
+        if (offset >= size)
+          throw Object.assign(new Error('media preview offset is outside the file'), {
+            code: 'INVALID_REQUEST',
+          });
+        const chunk = await localHubRequest(
+          access,
+          `/api/drones/${encodedDrone}/fs/chunk?path=${encodeURIComponent(previewPath)}&offset=${offset}&limit=${MESH_BINARY_CHUNK_BYTES}`,
+        );
+        const dataBase64 = String(chunk?.dataBase64 ?? '');
+        const bytes = Buffer.from(dataBase64, 'base64');
+        if (
+          chunk?.kind !== 'binary-chunk' ||
+          Number(chunk?.offset) !== offset ||
+          Number(chunk?.nextOffset) !== offset + bytes.length ||
+          Number(chunk?.size) !== size ||
+          bytes.toString('base64') !== dataBase64
+        ) {
+          throw Object.assign(new Error('the Hub returned an invalid media chunk'), {
+            code: 'INVALID_RESPONSE',
+          });
+        }
+        return {
+          preview: {
+            path: previewPath,
+            kind: metadata.kind,
+            mime: String(metadata.mime ?? chunk?.mime ?? ''),
+            size,
+            mtimeMs: Number.isFinite(Number(metadata.mtimeMs)) ? Number(metadata.mtimeMs) : null,
+          },
+          mediaChunk: {
+            encoding: 'base64-binary',
+            offset,
+            bytes: bytes.length,
+            totalBytes: size,
+            done: offset + bytes.length >= size,
+            dataBase64,
+          },
+        };
       }
 
       const chatName = requiredText(payload.chatName ?? 'default', 'chatName');
