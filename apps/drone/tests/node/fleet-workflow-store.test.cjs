@@ -38,21 +38,6 @@ function sync(id = 'sync') {
     updatedAt: '2026-01-01T00:00:00.000Z',
   };
 }
-function queue(id = 'queue') {
-  return {
-    id,
-    playbookId: 'pb',
-    playbookLabel: 'PB',
-    repoPath: '/repo',
-    requestedCount: 2,
-    launchedCount: 0,
-    inFlightCount: 0,
-    serializeFirstMessageGroup: false,
-    pullHostBranchBeforeCreate: false,
-    createdAt: '2026-01-01T00:00:00.000Z',
-    updatedAt: '2026-01-01T00:00:00.000Z',
-  };
-}
 test('legacy sync-set backfill is one-time and canonical delete wins', async () => {
   use('backfill');
   const s = await getFleetWorkflowStore();
@@ -91,37 +76,12 @@ test('concurrent sync-set transforms serialize and rollback includes outbox', as
   );
   assert.equal(new HubOutboxRepository().list().length, before);
 });
-test('queue enqueue is idempotent under concurrency and restart recovers in-flight work', async () => {
-  use('queue');
-  let s = await getFleetWorkflowStore();
-  const [a, b] = await Promise.all([
-    s.enqueue(queue()),
-    s.enqueue({ ...queue(), playbookLabel: 'duplicate' }),
-  ]);
-  assert.equal(a.id, b.id);
-  assert.equal(s.listQueue(true).length, 1);
-  assert.equal(
-    new HubOutboxRepository().list().filter((e) => e.eventType === 'playbook-run.queued').length,
-    1,
-  );
-  await s.updateQueue('queue', (r) => ({
-    ...r,
-    inFlightCount: 1,
-    updatedAt: '2026-01-01T00:00:01.000Z',
-  }));
-  assert.equal(s.listQueue(true)[0].state, 'running');
-  await resetHubDatabaseForTests();
-  s = await getFleetWorkflowStore();
-  const recovered = s.listQueue(true)[0];
-  assert.equal(recovered.state, 'queued');
-  assert.equal(recovered.inFlightCount, 0);
-});
 test('workflow cache follows data-dir switching', async () => {
   use('one');
   let s = await getFleetWorkflowStore();
-  await s.enqueue(queue());
+  await s.putSyncSet(sync());
   await resetHubDatabaseForTests();
   use('two');
   s = await getFleetWorkflowStore();
-  assert.deepEqual(s.listQueue(true), []);
+  assert.deepEqual(s.listSyncSets(), []);
 });

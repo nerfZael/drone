@@ -319,7 +319,7 @@ export function GroupMultiChatColumn({
   }, [sendingPrompt, visiblePendingPrompts]);
 
   const canStopResponse = React.useMemo(
-    () => visiblePendingPrompts.some((item) => !item.automation && (item.state === 'queued' || item.state === 'sending' || item.state === 'sent')),
+    () => visiblePendingPrompts.some((item) => item.state === 'queued' || item.state === 'sending' || item.state === 'sent'),
     [visiblePendingPrompts],
   );
 

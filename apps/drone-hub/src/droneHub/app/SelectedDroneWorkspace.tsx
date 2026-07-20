@@ -2,8 +2,6 @@ import React from 'react';
 import { createPortal } from 'react-dom';
 import {
   AgentChatTranscript,
-  PromptLoopTranscriptGroup,
-  AutomationLaneStatusCard,
   ChatSurface,
   ChatSurfaceComposer,
   ChatSurfaceLoadingView,
@@ -11,7 +9,6 @@ import {
   adaptExternalAgentChatSurface,
   adaptNativeAgentChatSurface,
   type AgentChatTranscriptItem,
-  type ChatDraftAutomationPayload,
   type ChatComposerControlsConfig,
   type DroneHubTask,
   type DroneHubTaskSpawnMode,
@@ -45,7 +42,7 @@ import {
 import { DroneWorkspaceHeaderFrame } from './DroneWorkspaceHeaderFrame';
 import { HeaderActionButton } from './HeaderActionButton';
 import { type RightPanelTab } from './app-config';
-import type { AgentSuggestionState, ChatModelOption, StartupSeedState } from './app-types';
+import type { ChatModelOption, StartupSeedState } from './app-types';
 import { chatConfigResolutionState } from './chat-selection-model';
 import type { RepoOpErrorMeta } from './helpers';
 import type { DroneDeleteMode } from './settings-types';
@@ -56,23 +53,10 @@ import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-act
 import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
 import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
-import { createDraftChatAutomationLaunch } from './chat-draft-automation';
-import { currentPromptAutomationDisplayStatus } from './prompt-automation-display-status';
 import { fetchDroneChatTranscript } from './chat-api';
 import { repoPathLabel } from './repo-path-label';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
-import { usePromptAutomationState } from './use-prompt-automation-state';
 import { CliPendingPromptStrip } from './CliPendingPromptStrip';
-import { buildChatTimelineBlocks } from './chat-timeline-blocks';
-import { buildPendingTimelineBlocks } from './pending-timeline-blocks';
-import {
-  buildPendingPromptLoopGroups,
-  buildTranscriptTimelineBlocks,
-  buildTranscriptRenderBlocks,
-  type TranscriptRenderBlock,
-  type TranscriptTimelineBlock,
-} from './prompt-loop-groups';
-import { resolveRunningPromptLoopIdentity } from './prompt-loop-running-identity';
 import type { RepoTransferActionResult, RepoTransferPeer } from './use-workspace-actions';
 import {
   displayedChatModelTitle,
@@ -90,6 +74,7 @@ import {
   formatTranscriptJson,
   formatTranscriptMarkdown,
 } from '../chat/transcript-export';
+import { buildChatTimelineItems } from './chat-timeline-items';
 
 type LaunchHint =
   | {
@@ -189,10 +174,6 @@ type SelectedDroneWorkspaceProps = {
   setChatModel: (model: string | null) => Promise<void>;
   agentPermissionMode: AgentPermissionMode;
   setChatAgentPermissionMode: (mode: AgentPermissionMode) => Promise<void>;
-  agentMessageAutoContinueEnabled: boolean;
-  setAgentMessageAutoContinueEnabled: (enabled: boolean) => Promise<void>;
-  agentSuggestionEnabled: boolean;
-  setAgentSuggestionEnabled: (enabled: boolean) => Promise<void>;
   dockerSnapshotAfterAgentMessageEnabled: boolean;
   setDockerSnapshotAfterAgentMessageEnabled: (enabled: boolean) => Promise<void>;
   setChatInfoError: React.Dispatch<React.SetStateAction<string | null>>;
@@ -243,9 +224,6 @@ type SelectedDroneWorkspaceProps = {
     task: DroneHubTask;
     mode: DroneHubTaskSpawnMode;
   }) => Promise<{ ok: boolean; error?: string | null }>;
-  latestAgentSuggestionTarget: TranscriptItem | null;
-  latestAgentSuggestionState: AgentSuggestionState | null;
-  requestAgentSuggestionForMessage: (item: TranscriptItem, opts?: { force?: boolean }) => Promise<void>;
   chatEndRef: React.RefObject<HTMLDivElement | null>;
   outputScrollRef: React.RefObject<HTMLDivElement | null>;
   updatePinned: (el: HTMLDivElement) => void;
@@ -313,10 +291,6 @@ export function SelectedDroneWorkspace({
   setChatModel,
   agentPermissionMode,
   setChatAgentPermissionMode,
-  agentMessageAutoContinueEnabled,
-  setAgentMessageAutoContinueEnabled,
-  agentSuggestionEnabled,
-  setAgentSuggestionEnabled,
   dockerSnapshotAfterAgentMessageEnabled,
   setDockerSnapshotAfterAgentMessageEnabled,
   setChatInfoError,
@@ -361,9 +335,6 @@ export function SelectedDroneWorkspace({
   parsingJobsByTurn,
   parseJobsFromAgentMessage,
   spawnDroneHubTaskFromAgentMessage,
-  latestAgentSuggestionTarget,
-  latestAgentSuggestionState,
-  requestAgentSuggestionForMessage,
   chatEndRef,
   outputScrollRef,
   updatePinned,
@@ -634,93 +605,6 @@ export function SelectedDroneWorkspace({
   );
   const chatDraftValue = useDroneHubUiStore((s) => s.chatInputDrafts[chatDraftKey] ?? '');
   const setChatInputDraft = useDroneHubUiStore((s) => s.setChatInputDraft);
-  const [sendingDirectAgentSuggestion, setSendingDirectAgentSuggestion] = React.useState(false);
-  const automations = useDroneHubUiStore((s) => s.automations);
-  const {
-    promptAutomationJob,
-    automationModeHint,
-    cancelQueuedAutomationErrorById,
-    cancellingQueuedAutomationById,
-    cancelQueuedPromptAutomation,
-    chatAutomationActions,
-    queuedAutomationItems,
-    startPromptAutomationLaunch,
-    stopPromptAutomation,
-    stoppingPromptAutomationMode,
-    stopPromptAutomationError,
-  } = usePromptAutomationState({
-    droneId: currentDrone.id,
-    chatName: activeChatName,
-    chatUiMode: nativeChatActive ? 'transcript' : chatUiMode,
-    automations,
-  });
-  const sendChatAutomation = React.useCallback(
-    async (payload: ChatDraftAutomationPayload): Promise<boolean> => {
-      try {
-        const launch = createDraftChatAutomationLaunch({
-          prompt: payload.prompt,
-          runs: payload.runs,
-          sleepAmount: payload.sleepAmount,
-          sleepUnit: payload.sleepUnit,
-        });
-        return await startPromptAutomationLaunch(launch);
-      } catch {
-        return false;
-      }
-    },
-    [startPromptAutomationLaunch],
-  );
-  const transcriptRenderBlocks = React.useMemo<TranscriptRenderBlock[]>(
-    () => buildTranscriptRenderBlocks(transcripts ?? []),
-    [transcripts],
-  );
-  const latestAgentSuggestionMessageId = React.useMemo(
-    () => (latestAgentSuggestionTarget ? transcriptMessageId(latestAgentSuggestionTarget) : null),
-    [latestAgentSuggestionTarget, transcriptMessageId],
-  );
-  const latestAgentSuggestionPromptId = React.useMemo(() => {
-    const explicit = String(latestAgentSuggestionTarget?.id ?? '').trim();
-    return explicit || null;
-  }, [latestAgentSuggestionTarget]);
-  const latestAgentSuggestionUsedDirectAt = React.useMemo(() => {
-    const value = String(latestAgentSuggestionTarget?.agentSuggestion?.usedDirectAt ?? '').trim();
-    return value || null;
-  }, [latestAgentSuggestionTarget]);
-  const latestAgentSuggestionKindLabel = React.useMemo(() => {
-    if (!latestAgentSuggestionState || latestAgentSuggestionState.status !== 'ready') return null;
-    const raw = String(latestAgentSuggestionState.kind ?? '').trim();
-    if (!raw) return null;
-    return raw.replace(/[-_]+/g, ' ');
-  }, [latestAgentSuggestionState]);
-  const showLatestAgentSuggestion = latestAgentSuggestionState?.status !== 'suppressed';
-
-  React.useEffect(() => {
-    setSendingDirectAgentSuggestion(false);
-  }, [currentDrone.id, activeChatName, latestAgentSuggestionMessageId, agentSuggestionEnabled]);
-
-  const editAgentSuggestionDraft = React.useCallback(() => {
-    if (!latestAgentSuggestionTarget || latestAgentSuggestionState?.status !== 'ready') return;
-    setChatInputDraft(chatDraftKey, latestAgentSuggestionState.suggestion);
-  }, [chatDraftKey, latestAgentSuggestionState, latestAgentSuggestionTarget, setChatInputDraft]);
-
-  const markAgentSuggestionUsedDirect = React.useCallback(
-    async (candidate: { promptId: string; suggestion: string; policyFingerprint: string }) => {
-      await requestJson(
-        `/api/drones/${encodeURIComponent(currentDrone.id)}/chats/${encodeURIComponent(activeChatName)}/transcript/${encodeURIComponent(
-          candidate.promptId,
-        )}/agent-suggestion/used-direct`,
-        {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            suggestion: candidate.suggestion,
-            policyFingerprint: candidate.policyFingerprint,
-          }),
-        },
-      );
-    },
-    [activeChatName, currentDrone.id],
-  );
   const rollbackDockerSnapshot = React.useCallback(
     async (item: TranscriptItem): Promise<void> => {
       const promptId = String(item?.id ?? '').trim();
@@ -742,230 +626,10 @@ export function SelectedDroneWorkspace({
     },
     [activeChatName, currentDrone, openDroneErrorModal, setChatInfoError],
   );
-  const sendAgentSuggestionDirectly = React.useCallback(async (): Promise<void> => {
-    if (
-      !latestAgentSuggestionTarget ||
-      latestAgentSuggestionState?.status !== 'ready' ||
-      sendingDirectAgentSuggestion
-    ) {
-      return;
-    }
-    const candidate = {
-      promptId: latestAgentSuggestionPromptId,
-      suggestion: latestAgentSuggestionState.suggestion,
-      policyFingerprint: latestAgentSuggestionState.policyFingerprint,
-    };
-    setSendingDirectAgentSuggestion(true);
-    try {
-      const sent = await sendPromptText({
-        prompt: candidate.suggestion,
-        attachments: [],
-      });
-      if (!sent) {
-        setChatInputDraft(chatDraftKey, candidate.suggestion);
-        return;
-      }
-      if (candidate.promptId) {
-        try {
-          await markAgentSuggestionUsedDirect({
-            promptId: candidate.promptId,
-            suggestion: candidate.suggestion,
-            policyFingerprint: candidate.policyFingerprint,
-          });
-        } catch {
-          // Ignore analytics write failures; the prompt already sent successfully.
-        }
-      }
-    } finally {
-      setSendingDirectAgentSuggestion(false);
-    }
-  }, [
-    chatDraftKey,
-    latestAgentSuggestionPromptId,
-    latestAgentSuggestionState,
-    latestAgentSuggestionTarget,
-    markAgentSuggestionUsedDirect,
-    sendPromptText,
-    sendingDirectAgentSuggestion,
-    setChatInputDraft,
-  ]);
-  const { pendingPromptLoopGroups, pendingPlainPrompts } = React.useMemo(
-    () => {
-      const built = buildPendingPromptLoopGroups(visiblePendingPromptsWithStartup);
-      return {
-        pendingPromptLoopGroups: built.groups,
-        pendingPlainPrompts: built.plainPendingPrompts,
-      };
-    },
-    [visiblePendingPromptsWithStartup],
-  );
-  const transcriptTimelineBlocks = React.useMemo<TranscriptTimelineBlock[]>(
-    () =>
-      buildTranscriptTimelineBlocks({
-        transcriptRenderBlocks,
-        pendingPlainPrompts,
-      }),
-    [pendingPlainPrompts, transcriptRenderBlocks],
-  );
-  const pendingPromptLoopByIdentity = React.useMemo(() => {
-    const out = new Map<string, PendingPrompt[]>();
-    for (const group of pendingPromptLoopGroups) out.set(group.identity, group.pendingRuns);
-    return out;
-  }, [pendingPromptLoopGroups]);
-  const pendingOnlyPromptLoopGroups = React.useMemo(() => {
-    const transcriptIdentities = new Set<string>();
-    for (const block of transcriptRenderBlocks) {
-      if (block.kind !== 'prompt-loop-group') continue;
-      transcriptIdentities.add(block.identity);
-    }
-    return pendingPromptLoopGroups.filter((group) => !transcriptIdentities.has(group.identity));
-  }, [pendingPromptLoopGroups, transcriptRenderBlocks]);
-  const runningAutomationJobKey = String(promptAutomationJob?.running ? promptAutomationJob?.jobKey ?? '' : '').trim();
-  const runningAutomationIdentity = React.useMemo(() => {
-    return resolveRunningPromptLoopIdentity({
-      job: promptAutomationJob,
-      transcriptRenderBlocks,
-      pendingPromptLoopGroups,
-    });
-  }, [pendingPromptLoopGroups, promptAutomationJob, transcriptRenderBlocks]);
-  const runningAutomationProgressLabel = React.useMemo(() => {
-    if (!promptAutomationJob?.running) return '';
-    const completed = Math.max(0, Number(promptAutomationJob.runsCompleted ?? 0) || 0);
-    const total = Math.max(0, Number(promptAutomationJob.runsTotal ?? 0) || 0);
-    return `Running ${completed}/${total}`;
-  }, [promptAutomationJob]);
-  const currentAutomationCardStatus = React.useMemo(
-    () => currentPromptAutomationDisplayStatus(promptAutomationJob),
-    [promptAutomationJob],
-  );
-  const runningAutomationHasRenderedGroup = Boolean(promptAutomationJob?.running && runningAutomationIdentity);
-  const pendingTimelineBlocks = React.useMemo(() => {
-    return buildPendingTimelineBlocks({
-      pendingOnlyPromptLoopGroups,
-      pendingPlainPrompts: [],
-      queuedAutomationItems,
-      promptAutomationJob,
-      runningAutomationIdentity,
-      runningAutomationHasRenderedGroup,
-      runningAutomationJobKey,
-    });
-  }, [
-    pendingOnlyPromptLoopGroups,
-    promptAutomationJob,
-    runningAutomationIdentity,
-    queuedAutomationItems,
-    runningAutomationHasRenderedGroup,
-    runningAutomationJobKey,
-  ]);
-  const chatTimelineBlocks = React.useMemo(
-    () =>
-      buildChatTimelineBlocks({
-        transcriptTimelineBlocks,
-        pendingTimelineBlocks,
-        runningAutomationIdentity,
-      }),
-    [pendingTimelineBlocks, runningAutomationIdentity, transcriptTimelineBlocks],
-  );
   const visibleCliPendingPrompts = React.useMemo(() => {
     if (chatUiMode !== 'cli') return [];
     return visiblePendingPromptsWithStartup.filter((item) => item.state !== 'failed').slice(-3);
   }, [chatUiMode, visiblePendingPromptsWithStartup]);
-  const queuedAutomationById = React.useMemo(() => {
-    const out = new Map<string, (typeof queuedAutomationItems)[number]>();
-    for (const item of queuedAutomationItems) {
-      const id = String(item.queueId ?? '').trim();
-      if (!id) continue;
-      out.set(id, item);
-    }
-    return out;
-  }, [queuedAutomationItems]);
-  const runningPromptLoopHeaderActions = React.useMemo(() => {
-    if (!promptAutomationJob?.running) return null;
-    const stopAllBusy = stoppingPromptAutomationMode === 'all';
-    const stopRunsOnlyBusy = stoppingPromptAutomationMode === 'runs-only';
-    return (
-      <div className="flex flex-wrap items-center gap-2">
-        <button
-          type="button"
-          onClick={() => stopPromptAutomation({ mode: 'all', clearQueued: false })}
-          disabled={stopAllBusy || stopRunsOnlyBusy}
-          className={`inline-flex items-center h-6 px-2 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-            stopAllBusy || stopRunsOnlyBusy
-              ? 'opacity-100 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)]'
-              : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[var(--red-border)]'
-          }`}
-          style={{ fontFamily: 'var(--display)' }}
-          title="Stop remaining runs and skip final message"
-        >
-          {stopAllBusy ? 'Stopping...' : 'Stop all'}
-        </button>
-        <button
-          type="button"
-          onClick={() => stopPromptAutomation({ mode: 'runs-only', clearQueued: false })}
-          disabled={stopAllBusy || stopRunsOnlyBusy}
-          className={`inline-flex items-center h-6 px-2 rounded border text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-            stopAllBusy || stopRunsOnlyBusy
-              ? 'opacity-100 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)]'
-              : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
-          }`}
-          style={{ fontFamily: 'var(--display)' }}
-          title="Stop remaining runs and still send final message when possible"
-        >
-          {stopRunsOnlyBusy ? 'Stopping...' : 'Stop runs only'}
-        </button>
-      </div>
-    );
-  }, [promptAutomationJob, stopPromptAutomation, stoppingPromptAutomationMode]);
-  const queuedAutomationStatusContent = (queued: (typeof queuedAutomationItems)[number]) => {
-    const queueId = String(queued.queueId ?? '').trim();
-    return (
-      <AutomationLaneStatusCard
-        status="queued"
-        automationLabel={
-          String(queued.automationLabel ?? '').trim() ||
-          String(queued.automationId ?? '').trim() ||
-          'Automation'
-        }
-        runsTotal={Number(queued.runsTotal ?? 0) || 0}
-        atIso={queued.enqueuedAt}
-        queueId={queueId}
-        cancelBusy={Boolean(cancellingQueuedAutomationById[queueId])}
-        cancelError={cancelQueuedAutomationErrorById[queueId] ?? null}
-        onCancelQueued={cancelQueuedPromptAutomation}
-      />
-    );
-  };
-  const runningAutomationStatusContent = promptAutomationJob?.running ? (
-    <AutomationLaneStatusCard
-      status={currentAutomationCardStatus}
-      automationLabel={String(promptAutomationJob.automationLabel ?? '').trim() || 'Automation'}
-      runsTotal={Number(promptAutomationJob.runsTotal ?? 0) || 0}
-      runsCompleted={Number(promptAutomationJob.runsCompleted ?? 0) || 0}
-      atIso={promptAutomationJob.startedAt ?? promptAutomationJob.updatedAt}
-      stopAllBusy={stoppingPromptAutomationMode === 'all'}
-      stopRunsOnlyBusy={stoppingPromptAutomationMode === 'runs-only'}
-      stopError={stopPromptAutomationError}
-      onStopAll={() => stopPromptAutomation({ mode: 'all', clearQueued: false })}
-      onStopRunsOnly={() => stopPromptAutomation({ mode: 'runs-only', clearQueued: false })}
-    />
-  ) : null;
-  const nativeAutomationTranscriptItems: AgentChatTranscriptItem[] = [];
-  if (runningAutomationStatusContent) {
-    nativeAutomationTranscriptItems.push({
-      key: `native-automation-running:${String(promptAutomationJob?.jobKey ?? 'current')}`,
-      kind: 'automation',
-      content: runningAutomationStatusContent,
-    });
-  }
-  for (const queued of queuedAutomationItems) {
-    const queueId = String(queued.queueId ?? '').trim();
-    if (!queueId) continue;
-    nativeAutomationTranscriptItems.push({
-      key: `native-automation-queued:${queueId}`,
-      kind: 'automation',
-      content: queuedAutomationStatusContent(queued),
-    });
-  }
   const shouldAutoFocusInput = React.useMemo(() => {
     if (chatUiMode === 'transcript') {
       return !loadingTranscript && (transcripts?.length ?? 0) === 0 && visiblePendingPromptsWithStartup.length === 0;
@@ -1280,97 +944,23 @@ export function SelectedDroneWorkspace({
         }
       : undefined;
 
-  const latestExternalAgentBlockKey = React.useMemo(() => {
-    for (let index = chatTimelineBlocks.length - 1; index >= 0; index -= 1) {
-      const entry = chatTimelineBlocks[index];
-      if (entry?.source !== 'transcript') continue;
-      if (entry.block.kind === 'turn' || entry.block.kind === 'prompt-loop-group') {
-        return entry.block.key;
-      }
-    }
-    return '';
-  }, [chatTimelineBlocks]);
+  const externalTimelineItems = buildChatTimelineItems(
+    transcripts ?? [],
+    visiblePendingPromptsWithStartup,
+  );
+  let latestExternalAgentMessageId = '';
+  for (let index = externalTimelineItems.length - 1; index >= 0; index -= 1) {
+    const entry = externalTimelineItems[index];
+    if (entry?.kind !== 'turn') continue;
+    latestExternalAgentMessageId = transcriptMessageId(entry.item);
+    break;
+  }
   const externalTranscriptItems: AgentChatTranscriptItem[] = [];
-  for (const entry of chatTimelineBlocks) {
-    if (entry.source === 'transcript') {
-      const block = entry.block;
-      if (block.kind === 'pending-prompt') {
-        const prompt = block.item;
-        externalTranscriptItems.push({
-          key: block.key,
-          kind: 'pending',
-          content: (
-            <PendingTranscriptTurn
-              item={prompt}
-              showRoleIcons={false}
-              onCancelQueued={requestCancelPendingPrompt}
-              onOpenFileReference={onOpenMarkdownFileReference}
-              onOpenLink={tryOpenMarkdownPullRequest}
-              droneId={currentDrone.id}
-              droneHomePath={currentDroneHomePath}
-              cancelBusy={Boolean(cancellingPendingPromptById[prompt.id])}
-              cancelError={cancelPendingPromptErrorById[prompt.id] ?? null}
-            />
-          ),
-        });
-        continue;
-      }
-      if (block.kind === 'prompt-loop-group') {
-        const runningGroup =
-          Boolean(promptAutomationJob?.running) &&
-          Boolean(runningAutomationIdentity) &&
-          block.identity === runningAutomationIdentity;
-        externalTranscriptItems.push({
-          key: block.key,
-          kind: 'automation',
-          content: (
-            <PromptLoopTranscriptGroup
-              runs={block.runs}
-              pendingRuns={pendingPromptLoopByIdentity.get(block.identity) ?? []}
-              autoExpandLatestAgentMessage={block.key === latestExternalAgentBlockKey}
-              headerBadgeLabel={runningGroup ? runningAutomationProgressLabel : undefined}
-              headerBadgeTone={runningGroup ? 'running' : undefined}
-              headerActions={runningGroup ? runningPromptLoopHeaderActions : undefined}
-              headerError={runningGroup ? stopPromptAutomationError : null}
-              onOpenFileReference={onOpenMarkdownFileReference}
-              onOpenLink={tryOpenMarkdownPullRequest}
-              linkedPullRequestContext={linkedPullRequestContext}
-            />
-          ),
-        });
-        continue;
-      }
-      const messageId = transcriptMessageId(block.item);
+  for (const entry of externalTimelineItems) {
+    if (entry.kind === 'pending') {
+      const prompt = entry.item;
       externalTranscriptItems.push({
-        key: block.key,
-        kind: 'message',
-        content: (
-          <TranscriptTurn
-            item={block.item}
-            autoExpandAgentMessage={block.key === latestExternalAgentBlockKey}
-            parsingJobs={Boolean(parsingJobsByTurn[block.item.turn])}
-            onCreateJobs={parseJobsFromAgentMessage}
-            onSpawnDroneHubTask={spawnCurrentDroneHubTask}
-            messageId={messageId}
-            onRollbackDockerSnapshot={rollbackDockerSnapshot}
-            onOpenFileReference={onOpenMarkdownFileReference}
-            onOpenLink={tryOpenMarkdownPullRequest}
-            linkedPullRequestContext={linkedPullRequestContext}
-            droneId={currentDrone.id}
-            droneHomePath={currentDroneHomePath}
-            showRoleIcons={false}
-            dockerSnapshotsEnabled={dockerSnapshotAfterAgentMessageEnabled}
-          />
-        ),
-      });
-      continue;
-    }
-
-    const block = entry.block;
-    if (block.kind === 'pending-prompt') {
-      const prompt = block.item;
-      externalTranscriptItems.push({
-        key: block.key,
+        key: `pending:${prompt.id}`,
         kind: 'pending',
         content: (
           <PendingTranscriptTurn
@@ -1388,45 +978,29 @@ export function SelectedDroneWorkspace({
       });
       continue;
     }
-    if (block.kind === 'prompt-loop-group') {
-      const runningGroup =
-        Boolean(promptAutomationJob?.running) &&
-        Boolean(runningAutomationIdentity) &&
-        block.identity === runningAutomationIdentity;
-      externalTranscriptItems.push({
-        key: block.key,
-        kind: 'automation',
-        content: (
-          <PromptLoopTranscriptGroup
-            runs={[]}
-            pendingRuns={block.pendingRuns}
-            headerBadgeLabel={runningGroup ? runningAutomationProgressLabel : undefined}
-            headerBadgeTone={runningGroup ? 'running' : undefined}
-            headerActions={runningGroup ? runningPromptLoopHeaderActions : undefined}
-            headerError={runningGroup ? stopPromptAutomationError : null}
-            onOpenFileReference={onOpenMarkdownFileReference}
-            onOpenLink={tryOpenMarkdownPullRequest}
-            linkedPullRequestContext={linkedPullRequestContext}
-          />
-        ),
-      });
-      continue;
-    }
-    if (block.kind === 'queued-automation') {
-      const queued = queuedAutomationById.get(block.queueId);
-      if (!queued) continue;
-      externalTranscriptItems.push({
-        key: block.key,
-        kind: 'automation',
-        content: queuedAutomationStatusContent(queued),
-      });
-      continue;
-    }
-    if (!runningAutomationStatusContent) continue;
+    const turn = entry.item;
+    const messageId = transcriptMessageId(turn);
     externalTranscriptItems.push({
-      key: block.key,
-      kind: 'automation',
-      content: runningAutomationStatusContent,
+      key: `transcript:${messageId}`,
+      kind: 'message',
+      content: (
+        <TranscriptTurn
+          item={turn}
+          autoExpandAgentMessage={messageId === latestExternalAgentMessageId}
+          parsingJobs={Boolean(parsingJobsByTurn[turn.turn])}
+          onCreateJobs={parseJobsFromAgentMessage}
+          onSpawnDroneHubTask={spawnCurrentDroneHubTask}
+          messageId={messageId}
+          onRollbackDockerSnapshot={rollbackDockerSnapshot}
+          onOpenFileReference={onOpenMarkdownFileReference}
+          onOpenLink={tryOpenMarkdownPullRequest}
+          linkedPullRequestContext={linkedPullRequestContext}
+          droneId={currentDrone.id}
+          droneHomePath={currentDroneHomePath}
+          showRoleIcons={false}
+          dockerSnapshotsEnabled={dockerSnapshotAfterAgentMessageEnabled}
+        />
+      ),
     });
   }
   externalTranscriptItems.push({
@@ -1730,86 +1304,6 @@ export function SelectedDroneWorkspace({
                       />
                     </span>
                     {dockerSnapshotAfterAgentMessageEnabled ? 'On' : 'Off'}
-                  </button>
-                </div>
-              ) : null}
-              {hasChats && chatUiMode === 'transcript' ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Auto-continue
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={agentMessageAutoContinueEnabled}
-                    onClick={() => {
-                      void setAgentMessageAutoContinueEnabled(!agentMessageAutoContinueEnabled).catch((err: any) =>
-                        setChatInfoError(err?.message ?? String(err)),
-                      );
-                    }}
-                    disabled={loadingChatInfo}
-                    className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                      loadingChatInfo
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : agentMessageAutoContinueEnabled
-                          ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Monitor agent messages in this chat and auto-send the configured continue prompt when the agent appears to have stopped mid-task."
-                  >
-                    <span
-                      className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                        agentMessageAutoContinueEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
-                          agentMessageAutoContinueEnabled ? 'translate-x-[11px]' : 'translate-x-[1px]'
-                        }`}
-                      />
-                    </span>
-                    {agentMessageAutoContinueEnabled ? 'On' : 'Off'}
-                  </button>
-                </div>
-              ) : null}
-              {hasChats && chatUiMode === 'transcript' ? (
-                <div className="flex items-center gap-1.5">
-                  <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Agent suggestion
-                  </span>
-                  <button
-                    type="button"
-                    role="switch"
-                    aria-checked={agentSuggestionEnabled}
-                    onClick={() => {
-                      void setAgentSuggestionEnabled(!agentSuggestionEnabled).catch((err: any) =>
-                        setChatInfoError(err?.message ?? String(err)),
-                      );
-                    }}
-                    disabled={loadingChatInfo}
-                    className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase transition-all ${
-                      loadingChatInfo
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : agentSuggestionEnabled
-                          ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                    title="Suggest a likely next user reply for new agent messages in this transcript chat."
-                  >
-                    <span
-                      className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                        agentSuggestionEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'
-                      }`}
-                    >
-                      <span
-                        className={`absolute top-[1px] h-3 w-3 rounded-full bg-white transition-transform ${
-                          agentSuggestionEnabled ? 'translate-x-[11px]' : 'translate-x-[1px]'
-                        }`}
-                      />
-                    </span>
-                    {agentSuggestionEnabled ? 'On' : 'Off'}
                   </button>
                 </div>
               ) : null}
@@ -2316,12 +1810,6 @@ export function SelectedDroneWorkspace({
                   onOpenFileReference: onOpenMarkdownFileReference,
                   onOpenLink: tryOpenMarkdownPullRequest,
                 }}
-                automationFeatures={{
-                  actions: chatAutomationActions,
-                  transcriptItems: nativeAutomationTranscriptItems,
-                  modeHint: automationModeHint,
-                  onSend: sendChatAutomation,
-                }}
                 onHistoryChange={setNativeHistoryObserved}
               />
             ) : chatUiMode === 'transcript' ? (
@@ -2404,90 +1892,6 @@ export function SelectedDroneWorkspace({
 
           {genericChatActive && chatUiMode === 'cli' ? <CliPendingPromptStrip items={visibleCliPendingPrompts} /> : null}
 
-          {genericChatActive && chatUiMode === 'transcript' && agentSuggestionEnabled && latestAgentSuggestionTarget && showLatestAgentSuggestion ? (
-            <div className="mx-4 mb-3 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
-              <div className="flex flex-wrap items-start justify-between gap-3">
-                <div className="min-w-0 flex-1">
-                  <div
-                    className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]"
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    Agent suggestion
-                    {latestAgentSuggestionKindLabel ? (
-                      <span className="ml-2 normal-case tracking-normal text-[var(--muted)]">{latestAgentSuggestionKindLabel}</span>
-                    ) : null}
-                  </div>
-                  {latestAgentSuggestionState?.status === 'loading' ? (
-                    <div className="mt-2 text-[var(--text-12)] text-[var(--muted-dim)]">Thinking about the likely next reply…</div>
-                  ) : latestAgentSuggestionState?.status === 'error' ? (
-                    <div className="mt-2 text-[var(--text-12)] text-[var(--red)]">{latestAgentSuggestionState.error}</div>
-                  ) : latestAgentSuggestionState?.status === 'ready' ? (
-                    <>
-                      <div className="mt-2 whitespace-pre-wrap text-[var(--text-13)] leading-relaxed text-[var(--fg-secondary)]">
-                        {latestAgentSuggestionState.suggestion}
-                      </div>
-                      {latestAgentSuggestionState.reason ? (
-                        <div className="mt-2 text-[var(--text-11)] text-[var(--muted)]">{latestAgentSuggestionState.reason}</div>
-                      ) : null}
-                      {latestAgentSuggestionUsedDirectAt ? (
-                        <div className="mt-2 text-[var(--text-11)] text-[var(--muted-dim)]">
-                          Used directly on {new Date(latestAgentSuggestionUsedDirectAt).toLocaleString()}.
-                        </div>
-                      ) : null}
-                    </>
-                  ) : (
-                    <div className="mt-2 text-[var(--text-12)] text-[var(--muted-dim)]">No assistant suggestion yet.</div>
-                  )}
-                </div>
-                <div className="flex flex-wrap items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void sendAgentSuggestionDirectly();
-                    }}
-                    disabled={latestAgentSuggestionState?.status !== 'ready' || sendingDirectAgentSuggestion}
-                    className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                      latestAgentSuggestionState?.status !== 'ready' || sendingDirectAgentSuggestion
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    {sendingDirectAgentSuggestion ? 'Sending…' : 'Send'}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={editAgentSuggestionDraft}
-                    disabled={latestAgentSuggestionState?.status !== 'ready'}
-                    className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                      latestAgentSuggestionState?.status !== 'ready'
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    Edit
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      void requestAgentSuggestionForMessage(latestAgentSuggestionTarget, { force: true });
-                    }}
-                    disabled={latestAgentSuggestionState?.status === 'loading' || sendingDirectAgentSuggestion}
-                    className={`h-8 px-3 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase border transition-all ${
-                      latestAgentSuggestionState?.status === 'loading' || sendingDirectAgentSuggestion
-                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                    }`}
-                    style={{ fontFamily: 'var(--display)' }}
-                  >
-                    Re-suggest
-                  </button>
-                </div>
-              </div>
-            </div>
-          ) : null}
-
           {genericChatActive ? (
             <ChatSurfaceComposer
               resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}`}
@@ -2502,8 +1906,6 @@ export function SelectedDroneWorkspace({
               publishing={publishingDraft}
               waiting={chatInputWaiting}
               composerControls={externalComposerControls}
-              automationActions={chatAutomationActions}
-              modeHint={automationModeHint}
               autoFocus={shouldAutoFocusInput}
               onStop={
                 !currentChatIsDraft && canStopResponse ? () => requestStopResponse() : undefined
@@ -2511,7 +1913,6 @@ export function SelectedDroneWorkspace({
               stopping={stoppingResponse}
               onPublish={currentChatIsDraft ? publishSelectedDraft : undefined}
               onSend={async (payload: ChatSendPayload) => await sendPromptText(payload)}
-              onSendAutomation={chatUiMode === 'transcript' ? sendChatAutomation : undefined}
             />
           ) : null}
           {fileOpenToast ? (

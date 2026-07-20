@@ -1,9 +1,9 @@
-import { getCatalogStore, type CatalogPlaybookRecord } from './catalog-store';
+import { getCatalogStore } from './catalog-store';
 import {
   getDroneLifecycleRepository,
   type CanonicalDroneLifecycleRecord,
 } from './drone-lifecycle-repository';
-import { getFleetWorkflowStore, type WorkflowQueueItem } from './fleet-workflow-store';
+import { getFleetWorkflowStore } from './fleet-workflow-store';
 import { getHubDatabase } from './hub-database';
 import { getPromptQueueRepository, type PromptQueueItem } from './prompt-queue-repository';
 import { loadRegistryCompatibilityBase, type DroneRegistry } from './registry';
@@ -79,8 +79,6 @@ function overlayCanonicalSettings(registry: any): void {
         break;
       case 'delete-action': setOrDelete(settings, 'deleteAction', value, updatedAt); break;
       case 'filesystem': setOrDelete(settings, 'filesystem', value, updatedAt); break;
-      case 'agent-message-auto-continue': setOrDelete(settings, 'agentMessageAutoContinue', value, updatedAt); break;
-      case 'agent-suggestion': setOrDelete(settings, 'agentSuggestion', value, updatedAt); break;
       case 'ui-preferences': setOrDelete(settings, 'uiPreferences', value, updatedAt); break;
       case 'registry-backups': setOrDelete(settings, 'backups', value, updatedAt); break;
       case 'agents.default': setOrDelete(settings, 'agents', value, updatedAt); break;
@@ -163,31 +161,6 @@ async function backfillLegacyChatState(registry: any): Promise<void> {
   }
 }
 
-function legacyPlaybooks(registry: any): CatalogPlaybookRecord[] {
-  return recordValues(registry?.playbooks).flatMap((raw: any) => {
-    const id = String(raw?.id ?? '').trim();
-    const label = String(raw?.label ?? '').trim();
-    if (!id || !label) return [];
-    const createdAt = String(raw.createdAt ?? '').trim() || new Date(0).toISOString();
-    return [{
-      ...raw,
-      id,
-      label,
-      agent: raw.agent ?? { kind: 'builtin', id: 'cursor' },
-      messages: Array.isArray(raw.messages) ? raw.messages : [],
-      artifacts: Array.isArray(raw.artifacts) ? raw.artifacts : [],
-      actions: Array.isArray(raw.actions) ? raw.actions : [],
-      createdAt,
-      updatedAt: String(raw.updatedAt ?? '').trim() || createdAt,
-    }];
-  });
-}
-
-function legacyQueue(registry: any): WorkflowQueueItem[] {
-  const items = Array.isArray(registry?.playbookRunQueue?.items) ? registry.playbookRunQueue.items : [];
-  return items.filter((item: any) => item && typeof item === 'object' && String(item.id ?? '').trim());
-}
-
 /** Builds the registry-shaped compatibility read model without rewriting canonical state. */
 export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Promise<DroneRegistry> {
   const base = clone(baseRegistry ?? (await loadRegistryCompatibilityBase())) as any;
@@ -227,7 +200,6 @@ export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Pro
     catalog.backfillSkills(listSkillsFromRegistry(base)),
     catalog.backfillMcpServers(listMcpServersFromRegistry(base)),
     catalog.backfillMcpTokens(listStoredTokensFromRegistry(base)),
-    catalog.backfillPlaybooks(legacyPlaybooks(base)),
     catalog.backfillGroups(Object.entries(base.groups ?? {}).map(([key, raw]: [string, any]) => {
       const name = String(raw?.name ?? key).trim();
       const createdAt = String(raw?.createdAt ?? '').trim() || new Date(0).toISOString();
@@ -243,13 +215,11 @@ export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Pro
   base.skills = mapBy(catalog.listSkills(), (record: any) => record.id);
   base.mcpServers = mapBy(catalog.listMcpServers(), (record: any) => record.id);
   base.mcpTokens = mapBy(catalog.listMcpTokens(), (record: any) => record.id);
-  base.playbooks = mapBy(catalog.listPlaybooks(), (record: any) => record.id);
   base.groups = mapBy(catalog.listGroups(), (record: any) => record.name);
   base.repos = mapBy(catalog.listRepositories(), (record: any) => record.path);
 
   const workflows = await getFleetWorkflowStore();
   await workflows.backfillSyncSets(readStoredSyncSets(base));
-  await workflows.backfillQueue(legacyQueue(base));
   const syncSets = workflows.listSyncSets();
   base.settings ??= {};
   base.settings.syncSets = {
@@ -259,11 +229,6 @@ export async function buildHubStateProjection(baseRegistry?: DroneRegistry): Pro
       null,
     ),
   };
-  const queueItems = workflows.listQueue(true).filter(
-    (item: any) => item.state !== 'completed' && item.state !== 'cancelled',
-  );
-  if (queueItems.length > 0) base.playbookRunQueue = { items: queueItems };
-  else delete base.playbookRunQueue;
   overlayCanonicalSettings(base);
   return base as DroneRegistry;
 }

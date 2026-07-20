@@ -29,7 +29,36 @@ const SETTINGS_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 2,
+    name: 'remove retired chat follow-up settings',
+    migrate(connection) {
+      connection.prepare(`
+        DELETE FROM hub_canonical_settings
+        WHERE setting_key IN ('agent-message-auto-continue', 'agent-suggestion')
+      `).run();
+    },
+  },
+  {
+    version: 3,
+    name: 'remove retired message automation settings',
+    migrate(connection) {
+      const row = connection.prepare(`
+        SELECT value_json FROM hub_canonical_settings WHERE setting_key = 'ui-preferences'
+      `).get() as { value_json: string } | undefined;
+      if (!row) return;
+      const value = JSON.parse(row.value_json);
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return;
+      delete value.automations;
+      connection.prepare(`
+        UPDATE hub_canonical_settings
+        SET value_json = ?, updated_at = ?, version = version + 1
+        WHERE setting_key = 'ui-preferences'
+      `).run(JSON.stringify(value), new Date().toISOString());
+    },
+  },
 ];
+const RETIRED_SETTING_KEYS = new Set(['agent-message-auto-continue', 'agent-suggestion']);
 const migratedDatabases = new WeakSet<HubDatabase>();
 
 function ensureSettingsMigrations(database: HubDatabase): void {
@@ -99,8 +128,19 @@ function normalizeExpectedVersion(value: number | null | undefined): number | nu
   return value;
 }
 
-function serializeValue(value: unknown): string {
-  const serialized = JSON.stringify(value);
+function sanitizeSettingValue<T>(key: string, value: T): T {
+  if (key !== 'ui-preferences') return value;
+  const sanitized = value && typeof value === 'object' && !Array.isArray(value)
+    ? { ...(value as Record<string, unknown>) }
+    : value;
+  if (sanitized && typeof sanitized === 'object' && 'automations' in sanitized) {
+    delete (sanitized as Record<string, unknown>).automations;
+  }
+  return sanitized as T;
+}
+
+function serializeValue(key: string, value: unknown): string {
+  const serialized = JSON.stringify(sanitizeSettingValue(key, value));
   if (serialized === undefined) throw new Error('Hub setting value must be JSON serializable');
   return serialized;
 }
@@ -154,7 +194,7 @@ function writeSetting<T>(
   updatedAt: string | null,
   current: HubSettingRecord<T> | null,
 ): HubSettingRecord<T> {
-  const valueJson = serializeValue(value);
+  const valueJson = serializeValue(key, value);
   const version = (current?.version ?? 0) + 1;
   const effectiveUpdatedAt = monotonicUpdatedAt(updatedAt, current);
   if (current) {
@@ -170,7 +210,7 @@ function writeSetting<T>(
       )
       .run(key, valueJson, effectiveUpdatedAt, version);
   }
-  return { key, value, updatedAt: effectiveUpdatedAt, version };
+  return { key, value: sanitizeSettingValue(key, value), updatedAt: effectiveUpdatedAt, version };
 }
 
 function compatibilityFilePath(): string {
@@ -181,27 +221,37 @@ function bunCompatibilityAvailable(): boolean {
   return typeof (globalThis as any).Bun !== 'undefined';
 }
 
-function readCompatibilityRows(filePath: string): Map<string, SettingRow> {
+function readCompatibilityRows(filePath: string): {
+  rows: Map<string, SettingRow>;
+  removedRetiredRows: boolean;
+} {
   try {
     const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8')) as CompatibilitySettingsFile;
     const settings = parsed?.version === 1 && parsed.settings && typeof parsed.settings === 'object'
       ? parsed.settings
       : {};
-    return new Map(
-      Object.entries(settings).filter((entry): entry is [string, SettingRow] => {
-        const row = entry[1];
-        return Boolean(
-          row &&
-            typeof row === 'object' &&
-            typeof row.setting_key === 'string' &&
-            typeof row.value_json === 'string' &&
-            Number.isSafeInteger(row.version) &&
-            row.version > 0,
-        );
-      }),
-    );
+    const removedRetiredRows = Object.keys(settings).some((key) => RETIRED_SETTING_KEYS.has(key));
+    return {
+      rows: new Map(
+        Object.entries(settings).filter((entry): entry is [string, SettingRow] => {
+          if (RETIRED_SETTING_KEYS.has(entry[0])) return false;
+          const row = entry[1];
+          return Boolean(
+            row &&
+              typeof row === 'object' &&
+              typeof row.setting_key === 'string' &&
+              typeof row.value_json === 'string' &&
+              Number.isSafeInteger(row.version) &&
+              row.version > 0,
+          );
+        }),
+      ),
+      removedRetiredRows,
+    };
   } catch (error: any) {
-    if (String(error?.code ?? '') === 'ENOENT') return new Map();
+    if (String(error?.code ?? '') === 'ENOENT') {
+      return { rows: new Map(), removedRetiredRows: false };
+    }
     throw error;
   }
 }
@@ -240,11 +290,14 @@ export class HubSettingsRepository {
       if (!bunCompatibilityAvailable()) database = requireHubDatabase();
       else {
         const filePath = compatibilityFilePath();
-        return new HubSettingsRepository(null, {
+        const { rows, removedRetiredRows } = readCompatibilityRows(filePath);
+        const backend = {
           path: filePath,
-          rows: readCompatibilityRows(filePath),
+          rows,
           queue: Promise.resolve(),
-        });
+        };
+        if (removedRetiredRows) await persistCompatibilityRows(backend);
+        return new HubSettingsRepository(null, backend);
       }
     }
     ensureSettingsMigrations(database);
@@ -297,15 +350,16 @@ export class HubSettingsRepository {
         if (expectedVersion !== undefined && expectedVersion !== (current?.version ?? null)) {
           throw new HubSettingVersionConflictError(key, expectedVersion, current);
         }
+        const sanitizedValue = sanitizeSettingValue(key, value);
         const next = {
           key,
-          value,
+          value: sanitizedValue,
           updatedAt: monotonicUpdatedAt(updatedAt, current),
           version: (current?.version ?? 0) + 1,
         };
         rows.set(key, {
           setting_key: key,
-          value_json: serializeValue(value),
+          value_json: serializeValue(key, sanitizedValue),
           updated_at: next.updatedAt,
           version: next.version,
         });
@@ -333,7 +387,7 @@ export class HubSettingsRepository {
     if (!this.database) {
       return this.compatibilityWrite((rows) => {
         const current = recordFromRow<T>(rows.get(key));
-        const value = transform(current);
+        const value = sanitizeSettingValue(key, transform(current));
         const next = {
           key,
           value,
@@ -342,7 +396,7 @@ export class HubSettingsRepository {
         };
         rows.set(key, {
           setting_key: key,
-          value_json: serializeValue(value),
+          value_json: serializeValue(key, value),
           updated_at: next.updatedAt,
           version: next.version,
         });
@@ -366,10 +420,11 @@ export class HubSettingsRepository {
       return this.compatibilityWrite((rows) => {
         const current = recordFromRow<T>(rows.get(key));
         if (current) return current;
-        const next = { key, value, updatedAt, version: 1 };
+        const sanitizedValue = sanitizeSettingValue(key, value);
+        const next = { key, value: sanitizedValue, updatedAt, version: 1 };
         rows.set(key, {
           setting_key: key,
-          value_json: serializeValue(value),
+          value_json: serializeValue(key, sanitizedValue),
           updated_at: updatedAt,
           version: 1,
         });
@@ -406,7 +461,7 @@ export function getHubSettingRecordSync<T>(keyRaw: string): HubSettingRecord<T> 
     return database.read((connection) => selectSetting<T>(connection, key));
   }
   if (!bunCompatibilityAvailable()) requireHubDatabase();
-  return recordFromRow<T>(readCompatibilityRows(compatibilityFilePath()).get(key));
+  return recordFromRow<T>(readCompatibilityRows(compatibilityFilePath()).rows.get(key));
 }
 
 export function resetHubSettingsRepositoryForTests(): void {

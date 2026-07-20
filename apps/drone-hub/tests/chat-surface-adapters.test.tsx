@@ -281,36 +281,6 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('Built-in agent model');
   });
 
-  test('the shared composer exposes the same automation controls for both agent types', () => {
-    for (const adapter of [adaptExternalAgentChatSurface(), adaptNativeAgentChatSurface()]) {
-      const html = renderToStaticMarkup(
-        <ChatSurface adapter={adapter}>
-          <ChatSurfaceComposer
-            resetKey={`automations-${adapter.agentType}`}
-            droneName="Test agent"
-            promptError={null}
-            sending={false}
-            waiting={false}
-            draftValue="Open controls"
-            onDraftValueChange={() => {}}
-            automationActions={[
-              {
-                id: 'automation-review',
-                label: 'Run review',
-                onSelect: () => {},
-              },
-            ]}
-            onSend={async () => true}
-            onSendAutomation={async () => true}
-          />
-        </ChatSurface>,
-      );
-
-      expect(html).toContain('Repeat');
-      expect(html).toContain('Automations');
-    }
-  });
-
   test('the empty composer collapses to add, message, and microphone controls', () => {
     const html = renderToStaticMarkup(
       <ChatSurface adapter={adaptExternalAgentChatSurface()}>

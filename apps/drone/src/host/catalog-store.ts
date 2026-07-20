@@ -102,6 +102,14 @@ const CATALOG_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    name: 'remove retired playbook catalog',
+    migrate(connection) {
+      connection.exec('DROP TABLE IF EXISTS catalog_playbooks;');
+      connection.prepare("DELETE FROM catalog_backfills WHERE domain = 'playbooks'").run();
+    },
+  },
 ];
 
 export type CatalogSkillRecord = {
@@ -152,18 +160,6 @@ export type CatalogRepositoryRecord = {
   agentsVersion?: number;
 };
 
-export type CatalogPlaybookRecord = {
-  id: string;
-  label: string;
-  agent: unknown;
-  model?: string;
-  messages: unknown[];
-  artifacts: unknown[];
-  actions: unknown[];
-  createdAt: string;
-  updatedAt: string;
-};
-
 function json(value: unknown): string {
   const serialized = JSON.stringify(value);
   if (serialized === undefined) throw new Error('Catalog value must be JSON serializable');
@@ -189,7 +185,7 @@ export class CatalogStore {
     return new CatalogStore(database);
   }
 
-  isBackfillComplete(domain: 'skills' | 'mcp-servers' | 'mcp-tokens' | 'playbooks'): boolean {
+  isBackfillComplete(domain: 'skills' | 'mcp-servers' | 'mcp-tokens'): boolean {
     return this.database.read((connection) => this.backfillComplete(connection, domain));
   }
 
@@ -535,48 +531,6 @@ export class CatalogStore {
     });
   }
 
-  listPlaybooks(): CatalogPlaybookRecord[] {
-    return this.database.read((connection) => (connection.prepare('SELECT * FROM catalog_playbooks ORDER BY label,id').all() as any[])
-      .map((row) => ({ id: row.id, label: row.label, agent: parse(row.agent_json),
-        ...(row.model ? { model: row.model } : {}), messages: parse(row.messages_json), artifacts: parse(row.artifacts_json),
-        actions: parse(row.actions_json), createdAt: row.created_at, updatedAt: row.updated_at })));
-  }
-
-  backfillPlaybooks(records: CatalogPlaybookRecord[]): Promise<boolean> {
-    return this.database.writeTransaction('backfill playbook catalog', (connection) => {
-      if (this.backfillComplete(connection, 'playbooks')) return false;
-      const insert = connection.prepare(`INSERT OR IGNORE INTO catalog_playbooks
-        (id,label,agent_json,model,messages_json,artifacts_json,actions_json,created_at,updated_at)
-        VALUES (?,?,?,?,?,?,?,?,?)`);
-      for (const record of records) insert.run(record.id, record.label, json(record.agent), record.model ?? null,
-        json(record.messages), json(record.artifacts), json(record.actions), record.createdAt, record.updatedAt);
-      this.completeBackfill(connection, 'playbooks');
-      return true;
-    });
-  }
-
-  putPlaybook(record: CatalogPlaybookRecord, insertOnly = false): Promise<void> {
-    return this.database.writeTransaction('write playbook catalog', (connection) => {
-      const values = [record.id, record.label, json(record.agent), record.model ?? null, json(record.messages),
-        json(record.artifacts), json(record.actions), record.createdAt, record.updatedAt];
-      const sql = insertOnly ? `INSERT OR IGNORE INTO catalog_playbooks
-        (id,label,agent_json,model,messages_json,artifacts_json,actions_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)`
-        : `INSERT INTO catalog_playbooks
-        (id,label,agent_json,model,messages_json,artifacts_json,actions_json,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?)
-        ON CONFLICT(id) DO UPDATE SET label=excluded.label,agent_json=excluded.agent_json,model=excluded.model,
-          messages_json=excluded.messages_json,artifacts_json=excluded.artifacts_json,actions_json=excluded.actions_json,
-          updated_at=excluded.updated_at`;
-      connection.prepare(sql).run(...values);
-    });
-  }
-
-  deletePlaybook(id: string): Promise<boolean> { return this.deleteById('catalog_playbooks', id, 'delete playbook'); }
-
-  clearPlaybooks(): Promise<number> {
-    return this.database.writeTransaction('clear playbook catalog', (connection) =>
-      Number(connection.prepare('DELETE FROM catalog_playbooks').run().changes ?? 0));
-  }
-
   private selectSkill<T extends CatalogSkillRecord>(connection: HubDatabaseConnection, id: string): T | null {
     const row = connection.prepare('SELECT record_json FROM catalog_skills WHERE id=?').get(id) as any;
     return row ? parse<T>(row.record_json) : null;
@@ -648,7 +602,7 @@ export class CatalogStore {
   }
 
   private deleteById(table: string, value: string, label: string, column = 'id'): Promise<boolean> {
-    const allowed = new Set(['catalog_skills', 'catalog_mcp_servers', 'catalog_groups', 'catalog_playbooks']);
+    const allowed = new Set(['catalog_skills', 'catalog_mcp_servers', 'catalog_groups']);
     if (!allowed.has(table)) throw new Error(`Unsupported catalog table: ${table}`);
     return this.database.writeTransaction(label, (connection) =>
       Number(connection.prepare(`DELETE FROM ${table} WHERE ${column}=?`).run(value).changes ?? 0) === 1);

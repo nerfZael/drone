@@ -42,7 +42,6 @@ type UseWorkspaceNavigationActionsArgs = {
   setHomeOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setSelectedDrone: React.Dispatch<React.SetStateAction<string | null>>;
   setSelectedDroneIds: React.Dispatch<React.SetStateAction<string[]>>;
-  setPlaybookRunsOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setSelectedChat: React.Dispatch<React.SetStateAction<string>>;
   resetDraftNameSuggestSeq: () => void;
 };
@@ -92,7 +91,6 @@ export function useWorkspaceNavigationActions({
   setHomeOpen,
   setSelectedDrone,
   setSelectedDroneIds,
-  setPlaybookRunsOpen,
   setSelectedChat,
   resetDraftNameSuggestSeq,
 }: UseWorkspaceNavigationActionsArgs) {
@@ -125,7 +123,6 @@ export function useWorkspaceNavigationActions({
   const openCreateModal = React.useCallback(() => {
     if (creating) return;
     setAppView('workspace');
-    setPlaybookRunsOpen(false);
     setDraftChat(null);
     resetDraftCreateState();
     setCreateError(null);
@@ -152,7 +149,6 @@ export function useWorkspaceNavigationActions({
     normalizeCreateRepoPath,
     resetDraftCreateState,
     setAppView,
-    setPlaybookRunsOpen,
     setCloneIncludeChats,
     setCloneSourceId,
     setCreateError,
@@ -181,7 +177,6 @@ export function useWorkspaceNavigationActions({
       setChatHeaderRepoPath('');
     }
     setAppView('workspace');
-    setPlaybookRunsOpen(false);
     setHomeOpen(false);
     setCreateOpen(false);
     setCreateError(null);
@@ -207,7 +202,6 @@ export function useWorkspaceNavigationActions({
     resetDraftCreateState,
     setAppView,
     setChatHeaderRepoPath,
-    setPlaybookRunsOpen,
     setHomeOpen,
     setCreateError,
     setCreateOpen,
@@ -231,7 +225,6 @@ export function useWorkspaceNavigationActions({
       const sourceRuntime = String(source?.runtime ?? 'container').trim().toLowerCase();
       if (sourceRuntime === 'host') return;
       setAppView('workspace');
-      setPlaybookRunsOpen(false);
       setDraftChat(null);
       setHomeOpen(false);
       resetDraftCreateState();
@@ -261,7 +254,6 @@ export function useWorkspaceNavigationActions({
       renamingDrones,
       resetDraftCreateState,
       setAppView,
-      setPlaybookRunsOpen,
       setHomeOpen,
       setCloneIncludeChats,
       setCloneSourceId,
@@ -285,15 +277,5 @@ export function useWorkspaceNavigationActions({
     openCreateModal,
     openDraftChatComposer,
     openCloneModal,
-    openPlaybookRuns: () => {
-      setAppView('workspace');
-      setDraftChat(null);
-      setCreateOpen(false);
-      setCreateError(null);
-      resetDraftCreateState();
-      setHomeOpen(false);
-      setPlaybookRunsOpen(true);
-      clearSidebarSelection();
-    },
   };
 }

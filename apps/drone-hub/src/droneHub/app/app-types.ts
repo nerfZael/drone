@@ -10,13 +10,6 @@ export type ChatModelOption = {
   isCurrent?: boolean;
 };
 
-export type AgentSuggestionState =
-  | { status: 'idle' }
-  | { status: 'loading' }
-  | { status: 'ready'; suggestion: string; reason: string; kind: string; policyFingerprint: string }
-  | { status: 'suppressed'; reason: string; policyFingerprint: string }
-  | { status: 'error'; error: string };
-
 export type AppView = 'workspace' | 'settings';
 
 export type StartupSeedState = {

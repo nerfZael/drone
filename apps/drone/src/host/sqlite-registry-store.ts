@@ -73,12 +73,7 @@ function normalizeTurn(raw: any): any {
     ...(promptAt ? { promptAt } : {}),
     ...(completedAt ? { completedAt } : {}),
     ...(Array.isArray(raw?.attachments) ? { attachments: raw.attachments } : {}),
-    ...(raw?.automation && typeof raw.automation === 'object' ? { automation: raw.automation } : {}),
     ...(raw?.inheritedFromClone === true ? { inheritedFromClone: true } : {}),
-    ...(raw?.agentMessageAutoContinue && typeof raw.agentMessageAutoContinue === 'object'
-      ? { agentMessageAutoContinue: raw.agentMessageAutoContinue }
-      : {}),
-    ...(raw?.agentSuggestion && typeof raw.agentSuggestion === 'object' ? { agentSuggestion: raw.agentSuggestion } : {}),
     ...(raw?.dockerSnapshot && typeof raw.dockerSnapshot === 'object' ? { dockerSnapshot: raw.dockerSnapshot } : {}),
   };
 }
@@ -160,26 +155,9 @@ class SqliteRegistryStore {
         group_json TEXT NOT NULL
       );
 
-      CREATE TABLE IF NOT EXISTS hub_playbooks (
-        playbook_id TEXT NOT NULL PRIMARY KEY,
-        label TEXT NOT NULL,
-        created_at TEXT,
-        updated_at TEXT,
-        playbook_json TEXT NOT NULL
-      );
-
       CREATE TABLE IF NOT EXISTS hub_skills (
         skill_id TEXT NOT NULL PRIMARY KEY,
         skill_json TEXT NOT NULL
-      );
-
-      CREATE TABLE IF NOT EXISTS hub_playbook_run_queue_items (
-        item_id TEXT NOT NULL PRIMARY KEY,
-        playbook_id TEXT,
-        repo_path TEXT,
-        created_at TEXT,
-        updated_at TEXT,
-        item_json TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS hub_drones (
@@ -270,6 +248,10 @@ class SqliteRegistryStore {
       CREATE INDEX IF NOT EXISTS idx_transcript_turns_chat_ordinal
         ON transcript_turns (drone_id, chat_name, ordinal);
     `);
+    this.db.exec(`
+      DROP TABLE IF EXISTS hub_playbooks;
+      DROP TABLE IF EXISTS hub_playbook_run_queue_items;
+    `);
 
     const upsertState = this.db.prepare(`
       INSERT INTO hub_registry_state (
@@ -298,16 +280,8 @@ class SqliteRegistryStore {
     const insertRepo = this.db.prepare('INSERT INTO hub_repos (repo_key, repo_path, added_at, repo_json) VALUES (?, ?, ?, ?)');
     const deleteGroups = this.db.prepare('DELETE FROM hub_groups');
     const insertGroup = this.db.prepare('INSERT INTO hub_groups (group_key, name, created_at, updated_at, group_json) VALUES (?, ?, ?, ?, ?)');
-    const deletePlaybooks = this.db.prepare('DELETE FROM hub_playbooks');
-    const insertPlaybook = this.db.prepare(
-      'INSERT INTO hub_playbooks (playbook_id, label, created_at, updated_at, playbook_json) VALUES (?, ?, ?, ?, ?)',
-    );
     const deleteSkills = this.db.prepare('DELETE FROM hub_skills');
     const insertSkill = this.db.prepare('INSERT INTO hub_skills (skill_id, skill_json) VALUES (?, ?)');
-    const deleteQueueItems = this.db.prepare('DELETE FROM hub_playbook_run_queue_items');
-    const insertQueueItem = this.db.prepare(
-      'INSERT INTO hub_playbook_run_queue_items (item_id, playbook_id, repo_path, created_at, updated_at, item_json) VALUES (?, ?, ?, ?, ?, ?)',
-    );
     const deleteDrones = this.db.prepare('DELETE FROM hub_drones');
     const insertDrone = this.db.prepare(`
       INSERT INTO hub_drones (
@@ -418,36 +392,9 @@ class SqliteRegistryStore {
         );
       }
 
-      deletePlaybooks.run();
-      for (const [key, value] of Object.entries(normalizeRecord(registry?.playbooks))) {
-        const id = String((value as any)?.id ?? key);
-        insertPlaybook.run(
-          id,
-          String((value as any)?.label ?? id),
-          typeof (value as any)?.createdAt === 'string' ? (value as any).createdAt : null,
-          typeof (value as any)?.updatedAt === 'string' ? (value as any).updatedAt : null,
-          stableJson(value),
-        );
-      }
-
       deleteSkills.run();
       for (const [key, value] of Object.entries(normalizeRecord(registry?.skills))) {
         insertSkill.run(key, stableJson(value));
-      }
-
-      deleteQueueItems.run();
-      const queueItems = Array.isArray(registry?.playbookRunQueue?.items) ? registry.playbookRunQueue.items : [];
-      for (const value of queueItems) {
-        const id = String((value as any)?.id ?? '').trim();
-        if (!id) continue;
-        insertQueueItem.run(
-          id,
-          typeof (value as any)?.playbookId === 'string' ? (value as any).playbookId : null,
-          typeof (value as any)?.repoPath === 'string' ? (value as any).repoPath : null,
-          typeof (value as any)?.createdAt === 'string' ? (value as any).createdAt : null,
-          typeof (value as any)?.updatedAt === 'string' ? (value as any).updatedAt : null,
-          stableJson(value),
-        );
       }
 
       deleteDrones.run();

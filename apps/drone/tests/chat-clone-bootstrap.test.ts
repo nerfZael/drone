@@ -73,7 +73,19 @@ describe('chat clone transcript bootstrap', () => {
       openCodeSessionId: 'opencode-session-id',
       piSessionId: '550e8400-e29b-41d4-a716-446655440000',
       blipSessionId: 'blip-session-id',
-      turns: [{ at: '2026-03-17T10:00:00.000Z', prompt: 'hi', ok: true, output: 'hello' }],
+      agentMessageAutoContinueEnabled: true,
+      agentMessageAutoContinueEnabledAt: '2026-03-17T10:00:00.000Z',
+      agentSuggestionEnabled: true,
+      agentSuggestionEnabledAt: '2026-03-17T10:00:00.000Z',
+      turns: [{
+        at: '2026-03-17T10:00:00.000Z',
+        prompt: 'hi',
+        ok: true,
+        output: 'hello',
+        agentMessageAutoContinue: { status: 'classified' },
+        agentSuggestion: { usedDirectAt: '2026-03-17T10:01:00.000Z' },
+        automation: { kind: 'prompt-loop', stage: 'run' },
+      }],
       pendingPrompts: [{ id: 'queued', at: '2026-03-17T10:01:00.000Z', prompt: 'later', state: 'queued' }],
       nested: { keep: true },
     });
@@ -95,5 +107,9 @@ describe('chat clone transcript bootstrap', () => {
     ]);
     expect(cloned.pendingPrompts).toBeUndefined();
     expect(cloned.nested).toEqual({ keep: true });
+    expect(cloned.agentMessageAutoContinueEnabled).toBeUndefined();
+    expect(cloned.agentMessageAutoContinueEnabledAt).toBeUndefined();
+    expect(cloned.agentSuggestionEnabled).toBeUndefined();
+    expect(cloned.agentSuggestionEnabledAt).toBeUndefined();
   });
 });

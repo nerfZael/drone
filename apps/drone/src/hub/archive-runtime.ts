@@ -31,8 +31,6 @@ type ArchiveRuntimeDependencyName =
   | 'readChatFromStore'
   | 'removeDockerSnapshotImagesBestEffort'
   | 'removeDroneRuntimeArtifacts'
-  | 'resolveEffectiveAgentMessageAutoContinueSettings'
-  | 'resolveEffectiveAgentSuggestionSettings'
   | 'restoreArchivedChatInStore'
   | 'revokeMcpAccessTokensForDrone'
   | 'updateRegistry'
@@ -74,8 +72,6 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     readChatFromStore,
     removeDockerSnapshotImagesBestEffort,
     removeDroneRuntimeArtifacts,
-    resolveEffectiveAgentMessageAutoContinueSettings,
-    resolveEffectiveAgentSuggestionSettings,
     restoreArchivedChatInStore,
     revokeMcpAccessTokensForDrone,
     updateRegistry,
@@ -142,10 +138,6 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
     const droneId = normalizeDroneIdentity(opts.droneId);
     const chatName = normalizeChatName(opts.chatName);
     const retention = normalizeArchiveRetention(opts.archiveRetention);
-    const autoContinueEnabledByDefault = (await resolveEffectiveAgentMessageAutoContinueSettings())
-      .enabledByDefault;
-    const agentSuggestionEnabledByDefault = (await resolveEffectiveAgentSuggestionSettings())
-      .enabledByDefault;
     if (!droneId || !chatName) {
       return {
         hadDrone: false,
@@ -198,8 +190,6 @@ export function createArchiveRuntime(deps: ArchiveRuntimeDependencies) {
       chatEntry: buildNewChatEntry({
         droneEntry,
         createdAt: nowIso(),
-        autoContinueEnabledByDefault,
-        agentSuggestionEnabledByDefault,
       }),
     };
     const stored = await archiveChatInStore({

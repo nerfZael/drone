@@ -82,7 +82,6 @@ export function createOptimisticPendingPrompt(args: {
   id?: string | null;
   at?: string | null;
   state?: unknown;
-  blockedByAutomation?: boolean;
 }): PendingPrompt | null {
   const attachmentPayloads = normalizeChatImageAttachmentPayloads(args.attachments);
   const prompt = pendingPromptPreviewText(args.prompt, attachmentPayloads);
@@ -100,7 +99,6 @@ export function createOptimisticPendingPrompt(args: {
         }
       : {}),
     state: normalizePendingPromptState(args.state),
-    ...(args.blockedByAutomation ? { blockedByAutomation: true } : {}),
   };
 }
 
@@ -126,7 +124,6 @@ export function reconcileOptimisticPendingPrompt(
     optimisticId: string;
     confirmedId?: string | null;
     state?: unknown;
-    blockedByAutomation?: boolean;
     error?: string | null;
   },
 ): PendingPrompt[] {
@@ -152,11 +149,6 @@ export function reconcileOptimisticPendingPrompt(
     id: targetId,
     state: nextState,
     updatedAt: now,
-    ...(args.blockedByAutomation === true
-      ? { blockedByAutomation: true }
-      : base.blockedByAutomation
-        ? { blockedByAutomation: true }
-        : {}),
   };
   const mergedAttachments = mergeAttachmentRefs(duplicateItem?.attachments, optimisticItem?.attachments);
   const mergedAttachmentPayloads = pickPreferredArray(optimisticItem?.attachmentPayloads, duplicateItem?.attachmentPayloads);

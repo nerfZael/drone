@@ -52,7 +52,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       : item.state === 'queued'
         ? 'Queued'
         : null;
-  const canCancelQueued = item.state === 'queued' && !item.automation && Boolean(onCancelQueued);
+  const canCancelQueued = item.state === 'queued' && Boolean(onCancelQueued);
   const showAgentPendingBubble = !(item.state === 'queued' && !isFailed);
   const userCopyText = String(promptText ?? '');
   const agentCopyText = isFailed ? stripAnsi(item.error || 'failed to send') : 'Working…';

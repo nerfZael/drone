@@ -6,7 +6,6 @@ import { ChatMessageCopyAction } from './ChatMessageCopyAction';
 import { DroneHubTaskList } from './DroneHubTaskList';
 import { LinkedPullRequestCards, type LinkedPullRequestContext } from './LinkedPullRequestCards';
 import type { MarkdownFileReference } from './MarkdownMessage';
-import { extractAgentCopilotFromAgentMessage } from './agent-copilot-parser';
 import type { DroneHubTask } from './drone-hub-task-parser';
 import { extractDroneHubTasksFromAgentMessage } from './drone-hub-task-parser';
 import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
@@ -21,8 +20,7 @@ export type AgentMessageContent = {
 export function extractAgentMessageContent(text: string, enabled = true): AgentMessageContent {
   if (!enabled) return { text, tasks: [] };
   const taskData = extractDroneHubTasksFromAgentMessage(text);
-  const copilotData = extractAgentCopilotFromAgentMessage(taskData.cleanedText);
-  return { text: copilotData.cleanedText, tasks: taskData.tasks };
+  return { text: taskData.cleanedText, tasks: taskData.tasks };
 }
 
 export type AgentMessageExtrasProps = {

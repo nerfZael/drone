@@ -50,12 +50,6 @@ export interface SettingsRouteDependencies {
   resolveRegistryBackupStatusResponse: ServiceFunction;
   upsertStoredRegistryBackupSettings: ServiceFunction;
   createRegistryBackup: ServiceFunction;
-  resolveAgentMessageAutoContinueSettingsResponse: ServiceFunction;
-  normalizeAgentMessageAutoContinuePrompt: ServiceFunction;
-  upsertStoredAgentMessageAutoContinueSettings: ServiceFunction;
-  resolveAgentSuggestionSettingsResponse: ServiceFunction;
-  normalizeAgentSuggestionPolicyMarkdown: ServiceFunction;
-  upsertStoredAgentSuggestionSettings: ServiceFunction;
   defaultAgentsPayload: ServiceFunction;
   normalizeAgentsMarkdown: ServiceFunction;
   upsertCanonicalDefaultAgentsConfig: ServiceFunction;
@@ -119,12 +113,6 @@ export function registerSettingsRoutes(
     resolveRegistryBackupStatusResponse,
     upsertStoredRegistryBackupSettings,
     createRegistryBackup,
-    resolveAgentMessageAutoContinueSettingsResponse,
-    normalizeAgentMessageAutoContinuePrompt,
-    upsertStoredAgentMessageAutoContinueSettings,
-    resolveAgentSuggestionSettingsResponse,
-    normalizeAgentSuggestionPolicyMarkdown,
-    upsertStoredAgentSuggestionSettings,
     defaultAgentsPayload,
     normalizeAgentsMarkdown,
     upsertCanonicalDefaultAgentsConfig,
@@ -346,67 +334,6 @@ export function registerSettingsRoutes(
     } catch (error: any) {
       respond(500, { ok: false, error: error?.message ?? String(error) });
     }
-  });
-
-  apiRouter.get('/api/settings/agent-message-auto-continue', async ({ json: respond }) => {
-    respond(200, await resolveAgentMessageAutoContinueSettingsResponse());
-  });
-
-  apiRouter.post(
-    '/api/settings/agent-message-auto-continue',
-    async ({ readJson, fail, json: respond }) => {
-      const body = await readJson<any>();
-      const prompt = normalizeAgentMessageAutoContinuePrompt(body?.prompt);
-      if (
-        body != null &&
-        typeof body === 'object' &&
-        Object.prototype.hasOwnProperty.call(body, 'enabledByDefault') &&
-        body.enabledByDefault !== true &&
-        body.enabledByDefault !== false &&
-        body.enabledByDefault !== null
-      ) {
-        return fail(400, 'enabledByDefault must be a boolean');
-      }
-      await upsertStoredAgentMessageAutoContinueSettings({
-        prompt: prompt || undefined,
-        enabledByDefault:
-          body != null &&
-          typeof body === 'object' &&
-          Object.prototype.hasOwnProperty.call(body, 'enabledByDefault')
-            ? body.enabledByDefault === true
-            : undefined,
-      });
-      respond(200, await resolveAgentMessageAutoContinueSettingsResponse());
-    },
-  );
-
-  apiRouter.get('/api/settings/agent-suggestion', async ({ json: respond }) => {
-    respond(200, await resolveAgentSuggestionSettingsResponse());
-  });
-
-  apiRouter.post('/api/settings/agent-suggestion', async ({ readJson, fail, json: respond }) => {
-    const body = await readJson<any>();
-    const policyMarkdown = normalizeAgentSuggestionPolicyMarkdown(body?.policyMarkdown);
-    if (
-      body != null &&
-      typeof body === 'object' &&
-      Object.prototype.hasOwnProperty.call(body, 'enabledByDefault') &&
-      body.enabledByDefault !== true &&
-      body.enabledByDefault !== false &&
-      body.enabledByDefault !== null
-    ) {
-      return fail(400, 'enabledByDefault must be a boolean');
-    }
-    await upsertStoredAgentSuggestionSettings({
-      policyMarkdown: policyMarkdown || undefined,
-      enabledByDefault:
-        body != null &&
-        typeof body === 'object' &&
-        Object.prototype.hasOwnProperty.call(body, 'enabledByDefault')
-          ? body.enabledByDefault === true
-          : undefined,
-    });
-    respond(200, await resolveAgentSuggestionSettingsResponse());
   });
 
   apiRouter.get('/api/settings/agents', async ({ json: respond }) => {

@@ -1,8 +1,5 @@
 import React from 'react';
 import { useShallow } from 'zustand/react/shallow';
-import {
-  normalizeAutomationConfigs,
-} from './automation-config';
 import type {
   SidebarDensityMode,
   SidebarGroupingMode,
@@ -77,7 +74,6 @@ function normalizeUiPreferencesSnapshot(value: Partial<UiPreferencesSnapshot> | 
     sidebarChatOrderByDrone: normalizeOrderedStringMap(value?.sidebarChatOrderByDrone),
     hiddenSidebarGroups: normalizeOrderedStringList(value?.hiddenSidebarGroups),
     autoDelete: value?.autoDelete === true,
-    automations: normalizeAutomationConfigs(value?.automations),
     spawnAgentKey: normalizeTrimmedText(value?.spawnAgentKey, 200) || 'builtin:cursor',
     spawnModel: normalizeTrimmedText(value?.spawnModel, 200),
     repoBranchSource: normalizeRepoBranchSource(value?.repoBranchSource),
@@ -100,7 +96,6 @@ function hasMeaningfulUiPreferencesSnapshot(value: UiPreferencesSnapshot): boole
     Object.keys(value.sidebarChatOrderByDrone).length > 0 ||
     value.hiddenSidebarGroups.length > 0 ||
     value.autoDelete ||
-    value.automations.length > 0 ||
     value.spawnAgentKey !== 'builtin:cursor' ||
     value.spawnModel.length > 0 ||
     value.repoBranchSource !== 'host' ||
@@ -122,7 +117,6 @@ function mergeUiPreferencesForRecovery(base: UiPreferencesSnapshot, rescue: UiPr
       Object.keys(base.sidebarChatOrderByDrone).length > 0 ? base.sidebarChatOrderByDrone : rescue.sidebarChatOrderByDrone,
     hiddenSidebarGroups: base.hiddenSidebarGroups.length > 0 ? base.hiddenSidebarGroups : rescue.hiddenSidebarGroups,
     autoDelete: base.autoDelete || rescue.autoDelete,
-    automations: base.automations.length > 0 ? base.automations : rescue.automations,
     spawnAgentKey: base.spawnAgentKey !== 'builtin:cursor' ? base.spawnAgentKey : rescue.spawnAgentKey,
     spawnModel: base.spawnModel || rescue.spawnModel,
     repoBranchSource: base.repoBranchSource !== 'host' ? base.repoBranchSource : rescue.repoBranchSource,
@@ -166,7 +160,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     sidebarChatOrderByDrone,
     hiddenSidebarGroups,
     autoDelete,
-    automations,
     spawnAgentKey,
     spawnModel,
     repoBranchSource,
@@ -180,7 +173,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
     setSidebarChatOrderByDrone,
     setHiddenSidebarGroups,
     setAutoDelete,
-    setAutomations,
     setSpawnAgentKey,
     setSpawnModel,
   } = useDroneHubUiStore(
@@ -193,7 +185,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       sidebarChatOrderByDrone: s.sidebarChatOrderByDrone,
       hiddenSidebarGroups: s.hiddenSidebarGroups,
       autoDelete: s.autoDelete,
-      automations: s.automations,
       spawnAgentKey: s.spawnAgentKey,
       spawnModel: s.spawnModel,
       repoBranchSource: s.repoBranchSource,
@@ -207,7 +198,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       setSidebarChatOrderByDrone: s.setSidebarChatOrderByDrone,
       setHiddenSidebarGroups: s.setHiddenSidebarGroups,
       setAutoDelete: s.setAutoDelete,
-      setAutomations: s.setAutomations,
       setSpawnAgentKey: s.setSpawnAgentKey,
       setSpawnModel: s.setSpawnModel,
     })),
@@ -229,14 +219,12 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       setSidebarChatOrderByDrone(normalized.sidebarChatOrderByDrone);
       setHiddenSidebarGroups(normalized.hiddenSidebarGroups);
       setAutoDelete(normalized.autoDelete);
-      setAutomations(normalized.automations);
       setSpawnAgentKey(normalized.spawnAgentKey);
       setSpawnModel(normalized.spawnModel);
       return normalized;
     },
     [
       setAutoDelete,
-      setAutomations,
       setSidebarDensityMode,
       setHiddenSidebarGroups,
       setSidebarChatOrderByDrone,
@@ -268,7 +256,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
         sidebarChatOrderByDrone,
         hiddenSidebarGroups,
         autoDelete,
-        automations,
         spawnAgentKey,
         spawnModel,
         repoBranchSource,
@@ -277,7 +264,6 @@ export function useUiPreferencesSettings({ requestJson }: UseUiPreferencesSettin
       }),
     [
       autoDelete,
-      automations,
       hiddenSidebarGroups,
       pullHostBranchBeforeCreate,
       repoBranchSource,

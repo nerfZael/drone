@@ -27,14 +27,11 @@ export type ChatReconciliationExecutorDependencies = {
   normalizeChatName: any;
   normalizeChatReasoning: any;
   normalizeDroneIdentity: any;
-  normalizePromptAutomationMeta: any;
   nowIso: any;
   parseBlipJobTranscript: any;
   parseCodexJobTranscript: any;
   parsePiJobTranscript: any;
   parseStructuredAgentJobTranscript: any;
-  processPendingAgentCopilotTurns: any;
-  processPendingAgentMessageAutoContinueTurns: any;
   projectCanonicalChatToRegistry: any;
   pruneCompletedPendingPrompts: any;
   readChatFromStore: any;
@@ -79,14 +76,11 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     normalizeChatName,
     normalizeChatReasoning,
     normalizeDroneIdentity,
-    normalizePromptAutomationMeta,
     nowIso,
     parseBlipJobTranscript,
     parseCodexJobTranscript,
     parsePiJobTranscript,
     parseStructuredAgentJobTranscript,
-    processPendingAgentCopilotTurns,
-    processPendingAgentMessageAutoContinueTurns,
     projectCanonicalChatToRegistry,
     pruneCompletedPendingPrompts,
     readChatFromStore,
@@ -152,22 +146,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     const pendingList: any[] = Array.isArray(entry?.pendingPrompts) ? entry.pendingPrompts : [];
     if (pendingList.length === 0) {
       clearScheduledReconcileRetryByKey(droneChatMapKey(droneId, chatName));
-      void processPendingAgentCopilotTurns({ droneId, chatName }).catch((error: any) => {
-        hubLog('warn', 'agent copilot scan failed after reconcile', {
-          droneId,
-          chatName,
-          error: String(error?.message ?? error ?? 'unknown error'),
-        });
-      });
-      void processPendingAgentMessageAutoContinueTurns({ droneId, chatName }).catch(
-        (error: any) => {
-          hubLog('warn', 'agent message auto-continue scan failed after reconcile', {
-            droneId,
-            chatName,
-            error: String(error?.message ?? error ?? 'unknown error'),
-          });
-        },
-      );
       return;
     }
 
@@ -197,7 +175,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
       const id = String(p?.id ?? '').trim();
       const state = String(p?.state ?? '');
       const promptAttachments = normalizeChatImageAttachmentRefs((p as any)?.attachments);
-      const promptAutomation = normalizePromptAutomationMeta((p as any)?.automation);
       const pendingModel =
         normalizeChatModel((p as any)?.model) ?? normalizeChatModel((entry as any)?.model);
       if (!id) continue;
@@ -405,7 +382,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ...(turnRuntime.reasoning ? { reasoning: turnRuntime.reasoning } : {}),
             ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
-            ...(promptAutomation ? { automation: promptAutomation } : {}),
             ok: true,
             output,
           });
@@ -463,7 +439,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ...(turnReasoning ? { reasoning: turnReasoning } : {}),
             ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
-            ...(promptAutomation ? { automation: promptAutomation } : {}),
             ok: true,
             output,
           });
@@ -507,7 +482,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ...(turnModel ? { model: turnModel } : {}),
             ...(turnReasoning ? { reasoning: turnReasoning } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
-            ...(promptAutomation ? { automation: promptAutomation } : {}),
             ok: true,
             output,
           });
@@ -551,7 +525,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ...(turnModel ? { model: turnModel } : {}),
             ...(turnReasoning ? { reasoning: turnReasoning } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
-            ...(promptAutomation ? { automation: promptAutomation } : {}),
             ok: true,
             output,
           });
@@ -590,7 +563,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           prompt: String(p?.prompt ?? ''),
           ...(pendingModel ? { model: pendingModel } : {}),
           ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
-          ...(promptAutomation ? { automation: promptAutomation } : {}),
           ok: true,
           output: output || '(no output)',
         });
@@ -640,7 +612,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ...(turnRuntime.reasoning ? { reasoning: turnRuntime.reasoning } : {}),
               ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
-              ...(promptAutomation ? { automation: promptAutomation } : {}),
               ok: true,
               output,
             });
@@ -679,7 +650,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ...(turnReasoning ? { reasoning: turnReasoning } : {}),
               ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
-              ...(promptAutomation ? { automation: promptAutomation } : {}),
               ok: true,
               output,
             });
@@ -749,7 +719,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ...(turnModel ? { model: turnModel } : {}),
               ...(turnReasoning ? { reasoning: turnReasoning } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
-              ...(promptAutomation ? { automation: promptAutomation } : {}),
               ok: true,
               output,
             });
@@ -795,7 +764,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ...(turnModel ? { model: turnModel } : {}),
               ...(turnReasoning ? { reasoning: turnReasoning } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
-              ...(promptAutomation ? { automation: promptAutomation } : {}),
               ok: true,
               output,
             });
@@ -926,21 +894,6 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
     } else {
       clearScheduledReconcileRetryByKey(droneChatMapKey(droneId, chatName));
     }
-
-    void processPendingAgentCopilotTurns({ droneId, chatName }).catch((error: any) => {
-      hubLog('warn', 'agent copilot scan failed after reconcile', {
-        droneId,
-        chatName,
-        error: String(error?.message ?? error ?? 'unknown error'),
-      });
-    });
-    void processPendingAgentMessageAutoContinueTurns({ droneId, chatName }).catch((error: any) => {
-      hubLog('warn', 'agent message auto-continue scan failed after reconcile', {
-        droneId,
-        chatName,
-        error: String(error?.message ?? error ?? 'unknown error'),
-      });
-    });
   }
 
   return { reconcileChatFromDaemon };

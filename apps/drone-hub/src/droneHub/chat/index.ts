@@ -19,9 +19,7 @@ export {
 } from './AgentChatTranscript';
 export { ChatTranscriptFrame, type ChatTranscriptFrameProps } from './ChatTranscriptFrame';
 export type {
-  ChatDraftAutomationPayload,
   ChatImageAttachmentPayload,
-  ChatInputAutomationAction,
   ChatInputProps,
   ChatSendContext,
   ChatSendPayload,
@@ -37,8 +35,6 @@ export { CollapsibleOutput } from './CollapsibleOutput';
 export { TranscriptTurn } from './TranscriptTurn';
 export type { DroneHubTask } from './drone-hub-task-parser';
 export type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
-export { PromptLoopTranscriptGroup } from './PromptLoopTranscriptGroup';
-export { AutomationLaneStatusCard } from './AutomationLaneStatusCard';
 export { ChatComposerMenu, type ChatComposerMenuAction } from './ChatComposerMenu';
 export {
   ChatComposerControls,

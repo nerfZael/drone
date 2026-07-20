@@ -26,7 +26,6 @@ type UseDroneSelectionStateArgs = {
   selectedDroneIds: string[];
   selectedChat: string;
   homeOpen: boolean;
-  playbookRunsOpen: boolean;
   draftChat: { prompt: unknown | null } | null;
   droneById: Record<string, DroneSummary>;
   dronesFilteredByRepoIdSet: Set<string>;
@@ -46,7 +45,6 @@ type UseDroneSelectionStateArgs = {
   setSelectedDrone: React.Dispatch<React.SetStateAction<string | null>>;
   setSelectedDroneIds: React.Dispatch<React.SetStateAction<string[]>>;
   setSelectedGroupMultiChat: React.Dispatch<React.SetStateAction<string | null>>;
-  setPlaybookRunsOpen: React.Dispatch<React.SetStateAction<boolean>>;
   setSelectedChat: React.Dispatch<React.SetStateAction<string>>;
 };
 
@@ -56,7 +54,6 @@ export function useDroneSelectionState({
   selectedDroneIds,
   selectedChat,
   homeOpen,
-  playbookRunsOpen,
   draftChat,
   droneById,
   dronesFilteredByRepoIdSet,
@@ -76,7 +73,6 @@ export function useDroneSelectionState({
   setSelectedDrone,
   setSelectedDroneIds,
   setSelectedGroupMultiChat,
-  setPlaybookRunsOpen,
   setSelectedChat,
 }: UseDroneSelectionStateArgs) {
   const lastSelectedChatByDroneRef = React.useRef<Record<string, string>>({});
@@ -140,7 +136,6 @@ export function useDroneSelectionState({
         selectedDroneIds[0] === id &&
         (String(selectedChat ?? '').trim() || 'default') === nextChat &&
         !homeOpen &&
-        !playbookRunsOpen &&
         !draftChat;
       // Manual card selection should always override any temporary preferred auto-selection.
       preferredSelectedDroneRef.current = null;
@@ -152,7 +147,6 @@ export function useDroneSelectionState({
       setAppView('workspace');
       setHomeOpen(false);
       setSelectedGroupMultiChat(null);
-      setPlaybookRunsOpen(false);
       setDraftChat(null);
       setDraftCreateOpen(false);
       setDraftCreateError(null);
@@ -177,7 +171,6 @@ export function useDroneSelectionState({
       orderedDroneIds,
       draftChat,
       homeOpen,
-      playbookRunsOpen,
       preferredSelectedDroneHoldUntilRef,
       preferredSelectedDroneRef,
       resolveChatForDrone,
@@ -195,7 +188,6 @@ export function useDroneSelectionState({
       setSelectedDrone,
       setSelectedDroneIds,
       setSelectedGroupMultiChat,
-      setPlaybookRunsOpen,
     ],
   );
 
@@ -225,10 +217,6 @@ export function useDroneSelectionState({
   // Auto-select first drone (and recover from deletions).
   React.useEffect(() => {
     if (homeOpen) {
-      clearSelectedDroneState();
-      return;
-    }
-    if (playbookRunsOpen) {
       clearSelectedDroneState();
       return;
     }
@@ -287,7 +275,6 @@ export function useDroneSelectionState({
     homeOpen,
     dronesFilteredByRepoIdSet,
     visibleDronesFilteredByRepo,
-    playbookRunsOpen,
     preferredSelectedDroneHoldUntilRef,
     preferredSelectedDroneRef,
     resolveChatForDrone,

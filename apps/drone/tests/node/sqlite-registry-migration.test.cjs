@@ -177,9 +177,9 @@ test('registry migrates one time to SQLite, keeps a backup, and removes registry
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_settings').get().count, 2);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_repos').get().count, 1);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_groups').get().count, 1);
-    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_playbooks').get().count, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'hub_playbooks'").get().count, 0);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_skills').get().count, 1);
-    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_playbook_run_queue_items').get().count, 1);
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'table' AND name = 'hub_playbook_run_queue_items'").get().count, 0);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM hub_chats').get().count, 1);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM transcript_turns').get().count, 2);
     assert.equal(db.prepare('SELECT COUNT(*) AS count FROM canonical_chats').get().count, 3);

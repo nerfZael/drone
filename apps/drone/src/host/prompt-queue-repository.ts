@@ -11,8 +11,6 @@ export type PromptQueueItem = {
   messageId?: string;
   cwd?: string | null;
   attachments?: unknown;
-  automation?: unknown;
-  blockedByAutomation?: boolean;
   state: PromptQueueState;
   error?: string;
   observability?: unknown;
@@ -129,6 +127,18 @@ export const PROMPT_QUEUE_MIGRATIONS: readonly HubDatabaseMigration[] = [
       `);
     },
   },
+  {
+    version: 3,
+    name: 'remove retired prompt automation metadata',
+    migrate(connection) {
+      connection.exec(`
+        UPDATE prompts
+        SET payload_json = json_remove(payload_json, '$.automation', '$.blockedByAutomation')
+        WHERE json_type(payload_json, '$.automation') IS NOT NULL
+           OR json_type(payload_json, '$.blockedByAutomation') IS NOT NULL;
+      `);
+    },
+  },
 ];
 
 type PromptRow = {
@@ -176,8 +186,11 @@ function normalizeItem(raw: PromptQueueItem, now: string): PromptQueueItem {
   if (!prompt.trim() && !hasPromptAttachments(raw?.attachments))
     throw new Error('Prompt text or attachments are required');
   const at = normalizeIso(raw.at, now);
+  const sanitized = { ...(raw as Record<string, unknown>) };
+  delete sanitized.automation;
+  delete sanitized.blockedByAutomation;
   return {
-    ...raw,
+    ...sanitized,
     id,
     at,
     prompt,
@@ -198,6 +211,8 @@ function parsePayload(raw: string): Record<string, unknown> {
 function recordFromRow(row: PromptRow | undefined): PromptQueueRecord | null {
   if (!row) return null;
   const payload = parsePayload(row.payload_json);
+  delete payload.automation;
+  delete payload.blockedByAutomation;
   return {
     ...(payload as PromptQueueItem),
     id: row.prompt_id,

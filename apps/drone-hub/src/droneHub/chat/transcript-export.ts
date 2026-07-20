@@ -18,7 +18,6 @@ type TranscriptExportTurn = {
   completedAt?: string;
   session?: string;
   logPath?: string;
-  automation?: TranscriptItem['automation'];
   user: {
     role: 'user';
     text: string;
@@ -97,7 +96,6 @@ function normalizeTurn(item: TranscriptItem): TranscriptExportTurn {
     ...(id ? { id } : {}),
     ...(session ? { session } : {}),
     ...(logPath ? { logPath } : {}),
-    ...(item.automation ? { automation: item.automation } : {}),
     user: {
       role: 'user',
       text: cleanText(item.prompt),

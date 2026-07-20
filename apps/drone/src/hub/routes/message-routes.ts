@@ -3,7 +3,6 @@ import {
   jobsPlanFromAgentMessage,
   suggestDroneNameFromMessage,
 } from '../jobs-from-message';
-import { suggestReplyToAgentMessage } from '../agent-suggestion';
 import { providerDisplayName, type LlmProviderId } from '../hub-settings';
 import { errorMessage } from '../hub-http';
 import type { HubRouter } from '../hub-router';
@@ -19,7 +18,6 @@ type HubLog = (
 export interface MessageRouteDependencies {
   resolveEffectiveLlmProvider: ServiceFunction;
   resolveEffectiveProviderApiKeySettings: ServiceFunction;
-  resolveEffectiveAgentSuggestionSettings: ServiceFunction;
   resolveNameSuggestionLlmSettings: ServiceFunction;
   logProviderApiKeyResolution: ServiceFunction;
   llmProviderEnvLogMeta: ServiceFunction;
@@ -27,91 +25,16 @@ export interface MessageRouteDependencies {
   hubLog: HubLog;
 }
 
-function normalizeMessageContext(body: any) {
-  return {
-    prompt: typeof body?.prompt === 'string' ? body.prompt : '',
-    response: String(body?.response ?? '').trim(),
-    context: (Array.isArray(body?.context) ? body.context : [])
-      .map((turn: any) => ({
-        turn: typeof turn?.turn === 'number' ? turn.turn : Number(turn?.turn ?? 0) || 0,
-        prompt: String(turn?.prompt ?? ''),
-        response: String(turn?.response ?? ''),
-      }))
-      .filter((turn: any) => typeof turn.response === 'string'),
-  };
-}
-
 export function registerMessageRoutes(apiRouter: HubRouter, deps: MessageRouteDependencies): void {
   const {
     resolveEffectiveLlmProvider,
     resolveEffectiveProviderApiKeySettings,
-    resolveEffectiveAgentSuggestionSettings,
     resolveNameSuggestionLlmSettings,
     logProviderApiKeyResolution,
     llmProviderEnvLogMeta,
     normalizeDroneIdentity,
     hubLog,
   } = deps;
-
-  apiRouter.post(
-    '/api/agent-suggestion/from-message',
-    async ({ method, url, readJson, fail, json }) => {
-      const input = normalizeMessageContext(await readJson());
-      if (!input.response) return fail(400, 'missing response');
-
-      let selectedProvider: LlmProviderId | null = null;
-      try {
-        const { provider } = await resolveEffectiveLlmProvider();
-        selectedProvider = provider;
-        const resolved = await resolveEffectiveProviderApiKeySettings(provider);
-        if (!resolved.apiKey) {
-          await logProviderApiKeyResolution(
-            'warn',
-            'agent-suggestion/from-message rejected: missing provider key',
-            provider,
-            { pathname: url.pathname, method },
-          );
-          json(412, {
-            ok: false,
-            error: `Missing ${providerDisplayName(provider)} API key. Configure it in Settings.`,
-          });
-          return;
-        }
-        const settings = await resolveEffectiveAgentSuggestionSettings();
-        const result = await suggestReplyToAgentMessage(
-          { ...input, policyMarkdown: settings.policyMarkdown },
-          { provider, apiKey: resolved.apiKey },
-        );
-        json(200, {
-          ok: true,
-          outcome: result.outcome,
-          suggestion: result.outcome === 'suggest' ? result.suggestion : null,
-          reason: result.reason,
-          kind: result.kind,
-          policyFingerprint: settings.policyFingerprint,
-        });
-      } catch (error) {
-        const details = {
-          model: String(process.env.DRONE_HUB_AGENT_SUGGESTION_MODEL ?? '').trim() || null,
-          error: errorMessage(error),
-        };
-        if (selectedProvider) {
-          await logProviderApiKeyResolution(
-            'error',
-            'agent-suggestion/from-message request failed',
-            selectedProvider,
-            { pathname: url.pathname, method, ...details },
-          );
-        } else {
-          hubLog('error', 'agent-suggestion/from-message request failed', {
-            ...llmProviderEnvLogMeta(),
-            ...details,
-          });
-        }
-        json(500, { ok: false, error: errorMessage(error) });
-      }
-    },
-  );
 
   apiRouter.post('/api/jobs/from-message', async ({ method, url, readJson, fail, json }) => {
     const message = String((await readJson<any>())?.message ?? '').trim();

@@ -60,7 +60,6 @@ async function seedDrone(droneId) {
       agent: { kind: 'builtin', id: 'cursor' },
       turns: [],
       pendingPrompts: [],
-      agentSuggestionEnabled: true,
     },
   });
   await getPromptQueueRepository().enqueue({
@@ -107,7 +106,6 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
     chatEntry: {
       createdAt: older,
       agent: { kind: 'builtin', id: 'cursor' },
-      agentSuggestionEnabled: true,
       turns: [
       {
         id: 'newer',
@@ -238,7 +236,6 @@ test('Node Hub transcript API uses SQLite read model and cheap conditional ETags
 
   const chatInfo = await apiFetch(baseUrl, token, `/api/drones/${encodeURIComponent(droneId)}/chats/default`);
   assert.equal(chatInfo.response.status, 200, chatInfo.text);
-  assert.equal(chatInfo.data.agentSuggestionEnabled, true);
   assert.equal(chatInfo.data.turns.length, 2);
 
   const pending = await apiFetch(baseUrl, token, `/api/drones/${encodeURIComponent(droneId)}/chats/default/pending`);

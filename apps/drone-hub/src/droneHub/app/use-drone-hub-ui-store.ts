@@ -19,13 +19,6 @@ import type { CustomAgentProfile } from '../types';
 import type { SettingsTabId } from './settings-tabs';
 import type { RepoBranchSourceMode } from './drone-create-runtime';
 import type { SidebarDensityMode } from './settings-types';
-import {
-  automationConfigsEqual,
-  createAutomationConfig,
-  normalizeAutomationConfigs,
-  patchAutomationConfig,
-  type AutomationConfig,
-} from './automation-config';
 import { normalizeSidebarRepoScopedGroupMap } from './sidebar-repo-scoped-groups';
 import { normalizeSidebarGroupOrder } from './sidebar-group-order';
 import { mergeSeenModelIds, normalizeSeenModelIds } from './spawn-model-history';
@@ -71,10 +64,6 @@ type DroneHubUiState = {
   themeId: DesktopThemeId;
   activeRepoPath: string;
   settingsActiveTab: SettingsTabId;
-  settingsPlaybookFocusId: string | null;
-  playbookRunsSelectionInitialized: boolean;
-  playbookRunsSelectedPlaybookId: string;
-  playbookRunsSelectedRepoPath: string;
   chatHeaderRepoPath: string;
   sidebarReposCollapsed: boolean;
   sidebarAutoMinimize: boolean;
@@ -97,7 +86,6 @@ type DroneHubUiState = {
   selectedDrone: string | null;
   selectedDroneIds: string[];
   selectedGroupMultiChat: string | null;
-  playbookRunsOpen: boolean;
   groupBroadcastExpanded: boolean;
   groupMultiChatColumnWidth: number;
   groupMultiChatStatusSort: boolean;
@@ -112,7 +100,6 @@ type DroneHubUiState = {
   outputView: OutputView;
   transcriptInlineImages: boolean;
   showCanvasLastMessagePreviews: boolean;
-  automations: AutomationConfig[];
   transcriptInlineImageOverrides: Record<string, boolean>;
   spawnContextRepoPath: string;
   spawnContextByRepoKey: Record<string, SpawnContextPreferences>;
@@ -135,10 +122,6 @@ type DroneHubUiState = {
   setThemeId: (next: Updater<DesktopThemeId>) => void;
   setActiveRepoPath: (next: Updater<string>) => void;
   setSettingsActiveTab: (next: Updater<SettingsTabId>) => void;
-  setSettingsPlaybookFocusId: (next: Updater<string | null>) => void;
-  setPlaybookRunsSelectionInitialized: (next: Updater<boolean>) => void;
-  setPlaybookRunsSelectedPlaybookId: (next: Updater<string>) => void;
-  setPlaybookRunsSelectedRepoPath: (next: Updater<string>) => void;
   setChatHeaderRepoPath: (next: Updater<string>) => void;
   setSidebarReposCollapsed: (next: Updater<boolean>) => void;
   setSidebarAutoMinimize: (next: Updater<boolean>) => void;
@@ -161,7 +144,6 @@ type DroneHubUiState = {
   setSelectedDrone: (next: Updater<string | null>) => void;
   setSelectedDroneIds: (next: Updater<string[]>) => void;
   setSelectedGroupMultiChat: (next: Updater<string | null>) => void;
-  setPlaybookRunsOpen: (next: Updater<boolean>) => void;
   setGroupBroadcastExpanded: (next: Updater<boolean>) => void;
   setGroupMultiChatColumnWidth: (next: Updater<number>) => void;
   setGroupMultiChatStatusSort: (next: Updater<boolean>) => void;
@@ -176,11 +158,6 @@ type DroneHubUiState = {
   setOutputView: (next: Updater<OutputView>) => void;
   setTranscriptInlineImages: (next: Updater<boolean>) => void;
   setShowCanvasLastMessagePreviews: (next: Updater<boolean>) => void;
-  setAutomations: (next: Updater<AutomationConfig[]>) => void;
-  addAutomation: (seed?: Partial<AutomationConfig>) => string;
-  updateAutomation: (id: string, patch: Partial<AutomationConfig>) => void;
-  removeAutomation: (id: string) => void;
-  clearAutomations: () => void;
   setTranscriptInlineImageOverride: (messageId: string, next: boolean | null) => void;
   setSpawnContextRepoPath: (next: Updater<string>) => void;
   updateSpawnContextForRepo: (repoPath: string, next: Partial<SpawnContextPreferences>) => void;
@@ -297,9 +274,6 @@ type DroneHubUiPersistedState = Pick<
   | 'themeId'
   | 'activeRepoPath'
   | 'settingsActiveTab'
-  | 'playbookRunsSelectionInitialized'
-  | 'playbookRunsSelectedPlaybookId'
-  | 'playbookRunsSelectedRepoPath'
   | 'chatHeaderRepoPath'
   | 'sidebarReposCollapsed'
   | 'sidebarAutoMinimize'
@@ -325,7 +299,6 @@ type DroneHubUiPersistedState = Pick<
   | 'outputView'
   | 'transcriptInlineImages'
   | 'showCanvasLastMessagePreviews'
-  | 'automations'
   | 'spawnContextByRepoKey'
   | 'spawnAgentKey'
   | 'spawnModel'
@@ -355,6 +328,10 @@ export function migrateDroneHubUiPersistedState(
   if (Object.prototype.hasOwnProperty.call(migrated, 'themeId')) {
     migrated.themeId = normalizeDesktopThemeId(migrated.themeId);
   }
+  delete (migrated as any).automations;
+  delete (migrated as any).playbookRunsSelectionInitialized;
+  delete (migrated as any).playbookRunsSelectedPlaybookId;
+  delete (migrated as any).playbookRunsSelectedRepoPath;
   if (Object.prototype.hasOwnProperty.call(migrated, 'sidebarDockSide')) {
     migrated.sidebarDockSide = normalizeSidebarDockSide(migrated.sidebarDockSide);
   }
@@ -556,40 +533,6 @@ function readPersistedChatInputDrafts(): Record<string, string> {
   return {};
 }
 
-function readPersistedDroneHubUiSelections(): Pick<
-  DroneHubUiState,
-  | 'playbookRunsSelectionInitialized'
-  | 'playbookRunsSelectedPlaybookId'
-  | 'playbookRunsSelectedRepoPath'
-> {
-  const storageRaw = readLocalStorageItem(profileStorageKey('droneHub.ui'));
-  if (!storageRaw) {
-    return {
-      playbookRunsSelectionInitialized: false,
-      playbookRunsSelectedPlaybookId: '',
-      playbookRunsSelectedRepoPath: '',
-    };
-  }
-  try {
-    const parsed = JSON.parse(storageRaw) as any;
-    const persistedState =
-      parsed && typeof parsed === 'object' && !Array.isArray(parsed) && Object.prototype.hasOwnProperty.call(parsed, 'state')
-        ? parsed.state
-        : parsed;
-    return {
-      playbookRunsSelectionInitialized: normalizeBoolean(persistedState?.playbookRunsSelectionInitialized),
-      playbookRunsSelectedPlaybookId: normalizeTrimmedString(persistedState?.playbookRunsSelectedPlaybookId),
-      playbookRunsSelectedRepoPath: normalizeTrimmedString(persistedState?.playbookRunsSelectedRepoPath),
-    };
-  } catch {
-    return {
-      playbookRunsSelectionInitialized: false,
-      playbookRunsSelectedPlaybookId: '',
-      playbookRunsSelectedRepoPath: '',
-    };
-  }
-}
-
 function writePersistedChatInputDrafts(value: Record<string, string>): void {
   try {
     if (Object.keys(value).length === 0) {
@@ -614,7 +557,6 @@ function schedulePersistChatInputDrafts(value: Record<string, string>): void {
 }
 
 const initialChatInputDrafts = readPersistedChatInputDrafts();
-const initialPlaybookRunsSelections = readPersistedDroneHubUiSelections();
 
 export const useDroneHubUiStore = create<DroneHubUiState>()(
   persist(
@@ -622,10 +564,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       themeId: 'monolith',
       activeRepoPath: '',
       settingsActiveTab: 'general',
-      settingsPlaybookFocusId: null,
-      playbookRunsSelectionInitialized: initialPlaybookRunsSelections.playbookRunsSelectionInitialized,
-      playbookRunsSelectedPlaybookId: initialPlaybookRunsSelections.playbookRunsSelectedPlaybookId,
-      playbookRunsSelectedRepoPath: initialPlaybookRunsSelections.playbookRunsSelectedRepoPath,
       chatHeaderRepoPath: '',
       sidebarReposCollapsed: false,
       sidebarAutoMinimize: false,
@@ -648,7 +586,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       selectedDrone: null,
       selectedDroneIds: [],
       selectedGroupMultiChat: null,
-      playbookRunsOpen: false,
       groupBroadcastExpanded: false,
       groupMultiChatColumnWidth: GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX,
       groupMultiChatStatusSort: false,
@@ -663,7 +600,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       outputView: 'screen',
       transcriptInlineImages: true,
       showCanvasLastMessagePreviews: false,
-      automations: [],
       transcriptInlineImageOverrides: {},
       spawnContextRepoPath: '',
       spawnContextByRepoKey: {
@@ -689,14 +625,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({ themeId: normalizeDesktopThemeId(resolveNext(s.themeId, next)) })),
       setActiveRepoPath: (next) => set((s) => ({ activeRepoPath: resolveNext(s.activeRepoPath, next) })),
       setSettingsActiveTab: (next) => set((s) => ({ settingsActiveTab: resolveNext(s.settingsActiveTab, next) })),
-      setSettingsPlaybookFocusId: (next) =>
-        set((s) => ({ settingsPlaybookFocusId: resolveNext(s.settingsPlaybookFocusId, next) })),
-      setPlaybookRunsSelectionInitialized: (next) =>
-        set((s) => ({ playbookRunsSelectionInitialized: resolveNext(s.playbookRunsSelectionInitialized, next) })),
-      setPlaybookRunsSelectedPlaybookId: (next) =>
-        set((s) => ({ playbookRunsSelectedPlaybookId: normalizeTrimmedString(resolveNext(s.playbookRunsSelectedPlaybookId, next)) })),
-      setPlaybookRunsSelectedRepoPath: (next) =>
-        set((s) => ({ playbookRunsSelectedRepoPath: normalizeTrimmedString(resolveNext(s.playbookRunsSelectedRepoPath, next)) })),
       setChatHeaderRepoPath: (next) => set((s) => ({ chatHeaderRepoPath: resolveNext(s.chatHeaderRepoPath, next) })),
       setSidebarReposCollapsed: (next) => set((s) => ({ sidebarReposCollapsed: resolveNext(s.sidebarReposCollapsed, next) })),
       setSidebarAutoMinimize: (next) => set((s) => ({ sidebarAutoMinimize: resolveNext(s.sidebarAutoMinimize, next) })),
@@ -739,7 +667,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       setSelectedDrone: (next) => set((s) => ({ selectedDrone: resolveNext(s.selectedDrone, next) })),
       setSelectedDroneIds: (next) => set((s) => ({ selectedDroneIds: resolveNext(s.selectedDroneIds, next) })),
       setSelectedGroupMultiChat: (next) => set((s) => ({ selectedGroupMultiChat: resolveNext(s.selectedGroupMultiChat, next) })),
-      setPlaybookRunsOpen: (next) => set((s) => ({ playbookRunsOpen: resolveNext(s.playbookRunsOpen, next) })),
       setGroupBroadcastExpanded: (next) => set((s) => ({ groupBroadcastExpanded: resolveNext(s.groupBroadcastExpanded, next) })),
       setGroupMultiChatColumnWidth: (next) =>
         set((s) => ({
@@ -785,40 +712,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         set((s) => ({ transcriptInlineImages: resolveNext(s.transcriptInlineImages, next) })),
       setShowCanvasLastMessagePreviews: (next) =>
         set((s) => ({ showCanvasLastMessagePreviews: resolveNext(s.showCanvasLastMessagePreviews, next) })),
-      setAutomations: (next) =>
-        set((s) => ({
-          automations: normalizeAutomationConfigs(resolveNext(s.automations, next)),
-        })),
-      addAutomation: (seed) => {
-        const created = createAutomationConfig(seed);
-        set((s) => {
-          if (s.automations.some((item) => item.id === created.id)) return s;
-          return { automations: normalizeAutomationConfigs([...s.automations, created]) };
-        });
-        return created.id;
-      },
-      updateAutomation: (idRaw, patch) =>
-        set((s) => {
-          const id = String(idRaw ?? '').trim();
-          if (!id) return s;
-          const idx = s.automations.findIndex((item) => item.id === id);
-          if (idx < 0) return s;
-          const cur = s.automations[idx];
-          const next = patchAutomationConfig(cur, patch);
-          if (automationConfigsEqual(next, cur)) return s;
-          const merged = s.automations.slice();
-          merged[idx] = next;
-          return { automations: merged };
-        }),
-      removeAutomation: (idRaw) =>
-        set((s) => {
-          const id = String(idRaw ?? '').trim();
-          if (!id) return s;
-          const next = s.automations.filter((item) => item.id !== id);
-          if (next.length === s.automations.length) return s;
-          return { automations: next };
-        }),
-      clearAutomations: () => set((s) => (s.automations.length ? { automations: [] } : s)),
       setTranscriptInlineImageOverride: (messageIdRaw, next) =>
         set((s) => {
           const messageId = String(messageIdRaw ?? '').trim();
@@ -976,9 +869,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         themeId: state.themeId,
         activeRepoPath: state.activeRepoPath,
         settingsActiveTab: state.settingsActiveTab,
-        playbookRunsSelectionInitialized: state.playbookRunsSelectionInitialized,
-        playbookRunsSelectedPlaybookId: state.playbookRunsSelectedPlaybookId,
-        playbookRunsSelectedRepoPath: state.playbookRunsSelectedRepoPath,
         chatHeaderRepoPath: state.chatHeaderRepoPath,
         sidebarReposCollapsed: state.sidebarReposCollapsed,
         sidebarAutoMinimize: state.sidebarAutoMinimize,
@@ -1004,7 +894,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         outputView: state.outputView,
         transcriptInlineImages: state.transcriptInlineImages,
         showCanvasLastMessagePreviews: state.showCanvasLastMessagePreviews,
-        automations: state.automations,
         spawnContextByRepoKey: state.spawnContextByRepoKey,
         spawnAgentKey: state.spawnAgentKey,
         spawnModel: state.spawnModel,
@@ -1017,15 +906,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         shortcutBindings: state.shortcutBindings,
       }),
       merge: (persistedState, currentState) => {
-        const persisted = (persistedState as Partial<DroneHubUiPersistedState>) ?? {};
-        const {
-          fsExplorerView: _ignoredFsExplorerView,
-          viewMode: _ignoredViewMode,
-          ...persistedRest
-        } = persisted as Partial<DroneHubUiPersistedState> & {
-          fsExplorerView?: unknown;
-          viewMode?: unknown;
-        };
+        const persisted = migrateDroneHubUiPersistedState(persistedState);
+        const persistedRest = persisted;
         const migratedShortcutBindings = migrateLegacyShortcutBindings(persisted.shortcutBindings);
         return {
           ...currentState,
@@ -1040,23 +922,12 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
             persisted.settingsActiveTab === 'trash' ||
             persisted.settingsActiveTab === 'archive' ||
             persisted.settingsActiveTab === 'shortcuts' ||
-            persisted.settingsActiveTab === 'automations' ||
-            persisted.settingsActiveTab === 'playbooks' ||
             persisted.settingsActiveTab === 'skills' ||
             persisted.settingsActiveTab === 'mcp' ||
             persisted.settingsActiveTab === 'agents' ||
             persisted.settingsActiveTab === 'system'
               ? persisted.settingsActiveTab
               : currentState.settingsActiveTab,
-          playbookRunsSelectionInitialized: normalizeBoolean(
-            persisted.playbookRunsSelectionInitialized ?? currentState.playbookRunsSelectionInitialized,
-          ),
-          playbookRunsSelectedPlaybookId: normalizeTrimmedString(
-            persisted.playbookRunsSelectedPlaybookId ?? currentState.playbookRunsSelectedPlaybookId,
-          ),
-          playbookRunsSelectedRepoPath: normalizeTrimmedString(
-            persisted.playbookRunsSelectedRepoPath ?? currentState.playbookRunsSelectedRepoPath,
-          ),
           appView: normalizeAppView(persisted.appView ?? currentState.appView),
           sidebarAutoMinimize: normalizeBoolean(persisted.sidebarAutoMinimize ?? currentState.sidebarAutoMinimize),
           showRecentDronesOnly: normalizeBoolean(
@@ -1104,9 +975,6 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
           showCanvasLastMessagePreviews: normalizeBoolean(
             persisted.showCanvasLastMessagePreviews ?? currentState.showCanvasLastMessagePreviews,
           ),
-          automations: normalizeAutomationConfigs(
-            (persisted as any).automations ?? currentState.automations,
-          ),
           spawnContextByRepoKey: normalizeSpawnContextByRepoKey(
             (persisted as any).spawnContextByRepoKey ?? currentState.spawnContextByRepoKey,
           ),
@@ -1136,10 +1004,6 @@ export function useDroneHubAppModelUiState() {
     useShallow((s) => ({
       activeRepoPath: s.activeRepoPath,
       settingsActiveTab: s.settingsActiveTab,
-      settingsPlaybookFocusId: s.settingsPlaybookFocusId,
-      playbookRunsSelectionInitialized: s.playbookRunsSelectionInitialized,
-      playbookRunsSelectedPlaybookId: s.playbookRunsSelectedPlaybookId,
-      playbookRunsSelectedRepoPath: s.playbookRunsSelectedRepoPath,
       chatHeaderRepoPath: s.chatHeaderRepoPath,
       appView: s.appView,
       sidebarGroupingMode: s.sidebarGroupingMode,
@@ -1159,7 +1023,6 @@ export function useDroneHubAppModelUiState() {
       selectedDrone: s.selectedDrone,
       selectedDroneIds: s.selectedDroneIds,
       selectedGroupMultiChat: s.selectedGroupMultiChat,
-      playbookRunsOpen: s.playbookRunsOpen,
       selectedChat: s.selectedChat,
       draftChat: s.draftChat,
       sidebarCollapsed: s.sidebarCollapsed,
@@ -1188,10 +1051,6 @@ export function useDroneHubAppModelUiState() {
       terminalMenuOpen: s.terminalMenuOpen,
       setActiveRepoPath: s.setActiveRepoPath,
       setSettingsActiveTab: s.setSettingsActiveTab,
-      setSettingsPlaybookFocusId: s.setSettingsPlaybookFocusId,
-      setPlaybookRunsSelectionInitialized: s.setPlaybookRunsSelectionInitialized,
-      setPlaybookRunsSelectedPlaybookId: s.setPlaybookRunsSelectedPlaybookId,
-      setPlaybookRunsSelectedRepoPath: s.setPlaybookRunsSelectedRepoPath,
       setChatHeaderRepoPath: s.setChatHeaderRepoPath,
       setAppView: s.setAppView,
       setSidebarGroupingMode: s.setSidebarGroupingMode,
@@ -1209,7 +1068,6 @@ export function useDroneHubAppModelUiState() {
       setSelectedDrone: s.setSelectedDrone,
       setSelectedDroneIds: s.setSelectedDroneIds,
       setSelectedGroupMultiChat: s.setSelectedGroupMultiChat,
-      setPlaybookRunsOpen: s.setPlaybookRunsOpen,
       setGroupBroadcastExpanded: s.setGroupBroadcastExpanded,
       setSelectedChat: s.setSelectedChat,
       setDraftChat: s.setDraftChat,
@@ -1256,7 +1114,6 @@ export function useDroneSidebarUiState() {
       selectedDrone: s.selectedDrone,
       selectedChat: s.selectedChat,
       selectedGroupMultiChat: s.selectedGroupMultiChat,
-      playbookRunsOpen: s.playbookRunsOpen,
       sidebarReposCollapsed: s.sidebarReposCollapsed,
       sidebarAutoMinimize: s.sidebarAutoMinimize,
       showRecentDronesOnly: s.showRecentDronesOnly,
@@ -1293,7 +1150,6 @@ export function useDroneSidebarUiState() {
       setActiveRepoPath: s.setActiveRepoPath,
       setAutoDelete: s.setAutoDelete,
       setHomeOpen: s.setHomeOpen,
-      setPlaybookRunsOpen: s.setPlaybookRunsOpen,
       setSidebarCollapsed: s.setSidebarCollapsed,
     })),
   );
