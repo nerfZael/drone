@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { compactRepeatedToolItems, renderItemsFromMessages } from '../src';
+import { renderItemsFromMessages } from '../src';
 
 describe('assistant message model', () => {
   test('pairs tool calls with their results on every platform', () => {
@@ -48,7 +48,7 @@ describe('assistant message model', () => {
     expect(items[0]).toMatchObject({ type: 'toolGroup', items: [{}, {}, {}] });
   });
 
-  test('regroups repeated calls after a non-rendering message is removed', () => {
+  test('keeps reasoning-only model turns inside one tool run', () => {
     const items = renderItemsFromMessages([
       {
         role: 'assistant',
@@ -69,11 +69,44 @@ describe('assistant message model', () => {
       { role: 'toolResult', toolCallId: 'call_3', toolName: 'list_files', content: 'third' },
     ]);
 
-    expect(items.map((item) => item.type)).toEqual(['tool', 'message', 'toolGroup']);
-    const visibleItems = compactRepeatedToolItems(
-      items.filter((item) => item.type !== 'message'),
+    expect(items).toHaveLength(1);
+    expect(items[0]).toMatchObject({ type: 'toolGroup', items: [{}, {}, {}] });
+  });
+
+  test('keeps every model/tool iteration for one prompt contiguous', () => {
+    const toolTurn = (prefix: string, name: string, count: number) => ({
+      role: 'assistant' as const,
+      content: [
+        { type: 'thinking' as const, thinking: `Planning ${prefix}` },
+        ...Array.from({ length: count }, (_, index) => ({
+          type: 'toolCall' as const,
+          id: `${prefix}_${index}`,
+          name,
+          arguments: {},
+        })),
+      ],
+    });
+    const messages = [
+      { role: 'user' as const, content: 'Read 10 files' },
+      toolTurn('list-a', 'list_files', 3),
+      toolTurn('list-b', 'list_files', 7),
+      toolTurn('read', 'read_file', 10),
+      { role: 'assistant' as const, content: 'Read 10 files.' },
+    ];
+    const items = renderItemsFromMessages(messages);
+    const runItems = items.slice(1, -1);
+    const callCount = runItems.reduce(
+      (total, item) =>
+        total + (item.type === 'toolGroup' ? item.items.length : item.type === 'tool' ? 1 : 0),
+      0,
     );
-    expect(visibleItems).toHaveLength(1);
-    expect(visibleItems[0]).toMatchObject({ type: 'toolGroup', items: [{}, {}, {}] });
+
+    expect(items.map((item) => item.type)).toEqual([
+      'message',
+      'toolGroup',
+      'toolGroup',
+      'message',
+    ]);
+    expect(callCount).toBe(20);
   });
 });

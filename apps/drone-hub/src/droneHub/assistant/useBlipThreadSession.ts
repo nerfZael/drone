@@ -9,6 +9,9 @@ import type {
   BlipThreadStreamEvent,
 } from '@blip/protocol';
 
+import { historyContainsStreamingAssistantText } from './assistant-streaming-state';
+import type { AssistantMessage } from './assistant-types';
+
 async function requestHistory(
   threadId: string,
   input?: { before?: number; limit?: number },
@@ -66,6 +69,9 @@ export function useBlipThreadSession({
   const [runError, setRunError] = React.useState<string | null>(null);
   const [historyError, setHistoryError] = React.useState<string | null>(null);
   const threadIdRef = React.useRef(threadId);
+  const runEpochRef = React.useRef(0);
+  const streamingTextRef = React.useRef('');
+  const replaceStreamingTextOnNextDeltaRef = React.useRef(true);
   const seenEventKeysRef = React.useRef<string[]>([]);
   const latestHistoryRequestRef = React.useRef(0);
   const onNativeChangeRef = React.useRef(onNativeChange);
@@ -83,6 +89,17 @@ export function useBlipThreadSession({
         if (threadIdRef.current !== threadId) return;
         setEntries((current) => mergeEntries(current, page.entries));
         setEntriesThreadId(threadId);
+        const streamedText = streamingTextRef.current;
+        if (
+          streamedText.trim() &&
+          historyContainsStreamingAssistantText(
+            page.entries.map((entry) => entry.message) as AssistantMessage[],
+            streamedText,
+          )
+        ) {
+          streamingTextRef.current = '';
+          setStreamingText((current) => (current === streamedText ? '' : current));
+        }
         const persistedToolCalls = new Set(
           page.entries.flatMap((entry) => {
             const message = entry.message as any;
@@ -127,9 +144,12 @@ export function useBlipThreadSession({
     setRuntimeThreadId(threadId);
     setRunning(false);
     setStreamingText('');
+    streamingTextRef.current = '';
+    replaceStreamingTextOnNextDeltaRef.current = true;
     setToolProgress({});
     setRunError(null);
     setHistoryError(null);
+    runEpochRef.current += 1;
     seenEventKeysRef.current = [];
     latestHistoryRequestRef.current += 1;
     if (enabled && threadId && !bootstrapHistory) void refreshHistory();
@@ -166,15 +186,24 @@ export function useBlipThreadSession({
   const handleRuntimeEvent = React.useCallback(
     (event: BlipRuntimeEvent) => {
       if (event.type === 'session_started' || event.type === 'turn_started') {
+        runEpochRef.current += 1;
         setRunning(true);
         setRunError(null);
-        if (event.type === 'turn_started') setStreamingText('');
+        // A model turn can follow a persisted assistant/tool message before the refreshed history
+        // reaches the browser. Keep the previous text visible during that gap, then replace it when
+        // the next turn produces its first text delta.
+        replaceStreamingTextOnNextDeltaRef.current = true;
         void refreshHistory({ quiet: true });
         return;
       }
       if (event.type === 'assistant_delta') {
         setRunning(true);
-        setStreamingText((current) => `${current}${event.text}`);
+        const next = replaceStreamingTextOnNextDeltaRef.current
+          ? event.text
+          : `${streamingTextRef.current}${event.text}`;
+        replaceStreamingTextOnNextDeltaRef.current = false;
+        streamingTextRef.current = next;
+        setStreamingText(next);
         return;
       }
       if (event.type === 'session_error') {
@@ -214,10 +243,19 @@ export function useBlipThreadSession({
         return;
       }
       if (event.type === 'session_finished') {
-        setRunning(false);
-        setStreamingText('');
+        const finishedRunEpoch = runEpochRef.current;
         if (event.status === 'error') setRunError(event.error ?? 'Assistant failed.');
-        void refreshHistory({ quiet: true });
+        // The final message is persisted before this event, but the UI history request is async.
+        // Keep the run visibly active until that refresh lands so the tool row cannot briefly turn
+        // idle (or disappear) before the final assistant response is available.
+        void refreshHistory({ quiet: true }).finally(() => {
+          if (
+            threadIdRef.current === threadId &&
+            runEpochRef.current === finishedRunEpoch
+          ) {
+            setRunning(false);
+          }
+        });
       }
     },
     [refreshHistory],
@@ -231,9 +269,9 @@ export function useBlipThreadSession({
         envelope.threadId === threadId
       ) {
         const nextRunning = envelope.running === true;
+        if (nextRunning) runEpochRef.current += 1;
         setRuntimeThreadId(threadId);
         setRunning(nextRunning);
-        if (!nextRunning) setStreamingText('');
         void refreshHistory({ quiet: true });
         return;
       }

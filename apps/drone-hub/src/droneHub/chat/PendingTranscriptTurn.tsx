@@ -9,6 +9,7 @@ import type { MarkdownFileReference } from './MarkdownMessage';
 import { RelativeTimeText } from './RelativeTimeText';
 import { TypingDots } from './icons';
 import { AgentPlanList } from './AgentPlanList';
+import { WorkingElapsedStatus } from './WorkingElapsedStatus';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
@@ -44,34 +45,36 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       : null;
   const isStopped =
     isFailed && /stopped by user|stopped before submission|stopped because the drone was archived|stopped because the drone was deleted/i.test(String(item.error ?? ''));
-  const badgeLabel = isStopped ? 'Stopped' : isFailed ? 'Failed' : item.state === 'queued' ? 'Queued' : 'Pending';
+  const badgeLabel = isStopped
+    ? 'Stopped'
+    : isFailed
+      ? 'Failed'
+      : item.state === 'queued'
+        ? 'Queued'
+        : null;
   const canCancelQueued = item.state === 'queued' && !item.automation && Boolean(onCancelQueued);
   const showAgentPendingBubble = !(item.state === 'queued' && !isFailed);
   const userCopyText = String(promptText ?? '');
-  const agentCopyText = isFailed
-    ? stripAnsi(item.error || 'failed to send')
-    : item.state === 'sending'
-      ? 'Sending…'
-      : item.state === 'sent'
-        ? 'Waiting…'
-        : 'Typing…';
-  const pendingHeader = (
+  const agentCopyText = isFailed ? stripAnsi(item.error || 'failed to send') : 'Working…';
+  const pendingHeader = badgeLabel || canCancelQueued ? (
     <>
-      <span
-        className={`rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
-          isFailed
-            ? isStopped
-              ? 'border-[rgba(255,178,36,.2)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
-              : 'border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] text-[var(--red)]'
-            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-        }`}
-        style={{ fontFamily: 'var(--display)' }}
-      >
-        <span className="inline-flex items-center gap-1">
-          {badgeLabel}
-          {item.state === 'queued' && !isFailed ? <TypingDots color="var(--muted-dim)" /> : null}
+      {badgeLabel ? (
+        <span
+          className={`rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
+            isFailed
+              ? isStopped
+                ? 'border-[rgba(255,178,36,.2)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+                : 'border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] text-[var(--red)]'
+              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+          }`}
+          style={{ fontFamily: 'var(--display)' }}
+        >
+          <span className="inline-flex items-center gap-1">
+            {badgeLabel}
+            {item.state === 'queued' && !isFailed ? <TypingDots color="var(--muted-dim)" /> : null}
+          </span>
         </span>
-      </span>
+      ) : null}
       {canCancelQueued ? (
         <button
           type="button"
@@ -89,10 +92,10 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         </button>
       ) : null}
     </>
-  );
+  ) : null;
 
   return (
-    <div className="group/pending-turn animate-fade-in opacity-90">
+    <div className={`group/pending-turn animate-fade-in ${isFailed || item.state === 'queued' ? 'opacity-90' : ''}`}>
       <ChatMessageFrame
         role="user"
         at={item.at}
@@ -121,7 +124,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       {showAgentPendingBubble ? (
         <ChatMessageFrame
           role="assistant"
-          at={item.at}
+          at={isFailed ? item.at : undefined}
           showRoleIcon={showRoleIcons}
           showRoleLabel={showRoleIcons}
           plainAssistant={!showRoleIcons}
@@ -139,10 +142,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
             </div>
           ) : (
             <>
-              <div className="flex items-center gap-2 text-[12.5px] leading-[1.6] text-[var(--muted)]">
-                <TypingDots color="var(--accent)" />
-                {item.state === 'sending' ? 'Sending…' : item.state === 'sent' ? 'Waiting…' : 'Typing…'}
-              </div>
+              <WorkingElapsedStatus startedAt={item.at} />
               {observability ? (
                 <div className="mt-2 border-t border-[var(--border-subtle)] pt-2 text-[10.5px] leading-[1.45] text-[var(--yellow)]">
                   <div>{observability.message}</div>

@@ -1,9 +1,11 @@
 import {
+  compactRepeatedToolItems,
   compactPreview,
   lastAssistantContentBlock,
   latestThinkingText,
   messageImageParts,
   messageText,
+  messageVisibleText,
   renderItemsFromMessages,
   toolCalls,
   toolItemName,
@@ -21,11 +23,13 @@ import type {
 const TOOL_ROW_TARGET_PREVIEW_MAX = 3;
 
 export {
+  compactRepeatedToolItems,
   compactPreview,
   lastAssistantContentBlock,
   latestThinkingText,
   messageImageParts,
   messageText,
+  messageVisibleText,
   renderItemsFromMessages,
   toolCalls,
   toolItemName,

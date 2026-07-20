@@ -14,6 +14,19 @@ export function runtimeSupportsCustomAgents(runtime: CreateRuntime): boolean {
   return runtime !== 'host';
 }
 
+export function shouldAutoRenameDraftDrone({
+  requested,
+  name,
+  createWithoutChat,
+}: {
+  requested?: boolean;
+  name?: string | null;
+  createWithoutChat: boolean;
+}): boolean {
+  if (createWithoutChat) return false;
+  return requested ?? !String(name ?? '').trim();
+}
+
 export function filterSpawnAgentMenuEntriesForRuntime(
   runtime: CreateRuntime,
   entries: UiMenuSelectEntry[],

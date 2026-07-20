@@ -20,7 +20,7 @@ import {
 import type { LinkedPullRequestContext } from '../chat/LinkedPullRequestCards';
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-dnd';
-import { CodexConnectControl } from '../app/CodexConnectControl';
+import { CodexConnectComposerNotice } from '../app/CodexConnectControl';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
 import {
   IconPencil,
@@ -32,6 +32,11 @@ import {
 import { IconChevron, IconDrone, IconFile, IconFolder, iconForFilePath } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import { useBlipThreadSession } from './useBlipThreadSession';
+import {
+  hasVisibleAssistantStreamingText,
+  latestActivityHasVisibleAssistantText,
+  visibleAssistantStreamingMessages,
+} from './assistant-streaming-state';
 import { AssistantThreadFilesView, selectDefaultArtifactPath } from './AssistantThreadFilesView';
 import { AssistantWorkspaceAccessView } from './AssistantWorkspaceAccessView';
 import {
@@ -460,53 +465,53 @@ export function AssistantDock({
     disabled: droneReferenceControlsLocked,
   });
   const droneReferenceDropActive = droneReferenceDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
+  const snapshotStreamingMessages = React.useMemo(
+    () =>
+      Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
+        ? snapshot.streamingMessages
+        : snapshot?.streamingMessage
+          ? [snapshot.streamingMessage]
+          : [],
+    [snapshot?.streamingMessage, snapshot?.streamingMessages],
+  );
+  const activeStreamingMessages = React.useMemo(() => {
+    return visibleAssistantStreamingMessages({
+      persistedMessages: blipSession.messages as AssistantMessage[],
+      snapshotMessages: snapshotStreamingMessages,
+      localMessage: blipSession.streamingMessage as AssistantMessage | null,
+    });
+  }, [blipSession.messages, blipSession.streamingMessage, snapshotStreamingMessages]);
   const visibleMessages = React.useMemo(() => {
     const messages = blipSession.messages as AssistantMessage[];
-    const snapshotStreamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
-      ? snapshot.streamingMessages
-      : snapshot?.streamingMessage
-        ? [snapshot.streamingMessage]
-        : [];
-    const streamingMessages = [
-      ...snapshotStreamingMessages,
-      ...(blipSession.streamingMessage ? [blipSession.streamingMessage as AssistantMessage] : []),
-    ];
-    const visibleStreaming = streamingMessages.filter((streaming) => streaming.role === 'assistant' || streaming.role === 'user');
-    if (visibleStreaming.length === 0) return messages;
-    return [...messages, ...visibleStreaming];
-  }, [blipSession.messages, blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages]);
+    if (activeStreamingMessages.length === 0) return messages;
+    return [...messages, ...activeStreamingMessages];
+  }, [activeStreamingMessages, blipSession.messages]);
   const visibleItems = React.useMemo(() => {
     return renderItemsFromMessages(visibleMessages);
   }, [visibleMessages]);
   const latestActivityItemKey = React.useMemo(() => {
     return visibleItems[visibleItems.length - 1]?.key ?? '';
   }, [visibleItems]);
+  const latestUserItemIndex = React.useMemo(() => {
+    for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
+      const item = visibleItems[index];
+      if (item?.type !== 'message' || item.message.role !== 'user') continue;
+      return index;
+    }
+    return -1;
+  }, [visibleItems]);
+  const hasActiveToolRun = React.useMemo(() => {
+    return visibleItems.some(
+      (item, index) => index > latestUserItemIndex && item.type !== 'message',
+    );
+  }, [latestUserItemIndex, visibleItems]);
   const streamingAssistantSourceIndex = React.useMemo(() => {
-    const snapshotStreamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
-      ? snapshot.streamingMessages
-      : snapshot?.streamingMessage
-        ? [snapshot.streamingMessage]
-        : [];
-    const streamingMessages = [
-      ...snapshotStreamingMessages,
-      ...(blipSession.streamingMessage ? [blipSession.streamingMessage as AssistantMessage] : []),
-    ];
-    const assistantStreamingOffset = streamingMessages.findIndex((streaming) => streaming.role === 'assistant');
+    const assistantStreamingOffset = activeStreamingMessages.findIndex(
+      (streaming) => streaming.role === 'assistant',
+    );
     if (assistantStreamingOffset < 0) return -1;
     return blipSession.messages.length + assistantStreamingOffset;
-  }, [blipSession.messages.length, blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages]);
-  const streamingAssistantMessage = React.useMemo(() => {
-    const snapshotStreamingMessages = Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
-      ? snapshot.streamingMessages
-      : snapshot?.streamingMessage
-        ? [snapshot.streamingMessage]
-        : [];
-    const streamingMessages = [
-      ...snapshotStreamingMessages,
-      ...(blipSession.streamingMessage ? [blipSession.streamingMessage as AssistantMessage] : []),
-    ];
-    return streamingMessages.find((streaming) => streaming.role === 'assistant') ?? null;
-  }, [blipSession.streamingMessage, snapshot?.streamingMessage, snapshot?.streamingMessages]);
+  }, [activeStreamingMessages, blipSession.messages.length]);
   const latestActivityShowsReasoning = React.useMemo(() => {
     if (!running || !latestActivityItemKey) return false;
     const item = visibleItems.find((candidate) => candidate.key === latestActivityItemKey);
@@ -517,8 +522,10 @@ export function AssistantDock({
   const showThinking =
     running &&
     activePendingApprovals.length === 0 &&
+    !hasActiveToolRun &&
     !latestActivityShowsReasoning &&
-    !messageText(streamingAssistantMessage ?? { role: 'assistant' }).trim();
+    !latestActivityHasVisibleAssistantText(visibleItems) &&
+    !hasVisibleAssistantStreamingText(activeStreamingMessages);
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
   const applySnapshot = React.useCallback((next: AssistantSnapshot) => setSnapshot(next), []);
@@ -1436,7 +1443,9 @@ export function AssistantDock({
 
   const nativeComposerOverlay = (
     <>
-      {activeThread?.provider === 'codex' ? <CodexConnectControl compact /> : null}
+      {activeThread?.provider === 'codex' ? (
+        <CodexConnectComposerNotice resetKey={`${nativeDroneId}:${nativeChatName}`} />
+      ) : null}
       {toolsPanelOpen ? (
         <AssistantToolsPanel
           tools={availableTools}
@@ -1610,8 +1619,8 @@ export function AssistantDock({
       if (followingAssistantAt !== undefined) break;
     }
     const startedAt =
-      precedingAssistantAt ??
-      (callStartedAt.length > 0 ? Math.min(...callStartedAt) : precedingUserAt);
+      precedingUserAt ??
+      (callStartedAt.length > 0 ? Math.min(...callStartedAt) : precedingAssistantAt);
     const endedAt =
       followingAssistantAt ??
       (resultEndedAt.length > 0
@@ -1619,7 +1628,10 @@ export function AssistantDock({
         : callStartedAt.length > 0
           ? Math.max(...callStartedAt)
           : undefined);
-    const runActive = running && runEndIndex === lastToolItemIndex;
+    const runActive =
+      running &&
+      runEndIndex === lastToolItemIndex &&
+      runEndIndex > latestUserItemIndex;
     const runKey = `tool-run:${runItems[0]?.key ?? runStartIndex}:${runActive ? 'active' : 'complete'}`;
     nativeTranscriptItems.push({
       key: runKey,

@@ -3,9 +3,11 @@ export { ChatInput } from './ChatInput';
 export {
   ChatSurface,
   ChatSurfaceComposer,
+  ChatSurfaceLoadingView,
   ChatSurfaceTranscript,
   useAgentChatSurfaceAdapter,
   type ChatSurfaceComposerProps,
+  type ChatSurfaceLoadingViewProps,
   type ChatSurfaceProps,
   type ChatSurfaceTranscriptProps,
 } from './ChatSurface';

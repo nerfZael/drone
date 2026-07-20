@@ -6,6 +6,7 @@ import {
   AutomationLaneStatusCard,
   ChatSurface,
   ChatSurfaceComposer,
+  ChatSurfaceLoadingView,
   ChatLoadingState,
   adaptExternalAgentChatSurface,
   adaptNativeAgentChatSurface,
@@ -2309,7 +2310,15 @@ export function SelectedDroneWorkspace({
           >
           <div className="relative flex min-h-0 flex-1 flex-col">
             {chatConfigPending ? (
-              <ChatLoadingState />
+              <ChatSurfaceLoadingView
+                resetKey={`${selectedDroneIdentity}:${selectedChat ?? ''}:loading`}
+                droneName={currentDrone.name}
+                draftValue={chatDraftValue}
+                onDraftValueChange={(next) => {
+                  setChatInputDraft(chatDraftKey, next);
+                }}
+                focusTargetId="primary-chat"
+              />
             ) : chatConfigFailed ? (
               <EmptyState
                 icon={<IconChat className="h-8 w-8 text-[var(--muted)]" />}

@@ -8,6 +8,7 @@ import {
   ChatMessageBody,
   ChatSurface,
   ChatSurfaceComposer,
+  ChatSurfaceLoadingView,
   adaptExternalAgentChatSurface,
   adaptNativeAgentChatSurface,
   type AgentChatSurfaceAdapter,
@@ -65,6 +66,27 @@ describe('agent chat surface adapters', () => {
       expect(html).toContain('animate-spin');
       expect(html).not.toContain('Visible message');
     }
+  });
+
+  test('the loading view reserves the message bar while chat configuration resolves', () => {
+    const html = renderToStaticMarkup(
+      <ChatSurface adapter={adaptExternalAgentChatSurface()}>
+        <ChatSurfaceLoadingView
+          resetKey="loading-chat"
+          droneName="Test agent"
+          draftValue="Preserved draft"
+          onDraftValueChange={() => {}}
+          focusTargetId="loading-chat-input"
+        />
+      </ChatSurface>,
+    );
+
+    expect(html).toContain('Loading conversation…');
+    expect(html).toContain('aria-label="Message Test agent"');
+    expect(html).toContain('data-chat-input-focus-id="loading-chat-input"');
+    expect(html).toContain('Preserved draft');
+    expect(html).toContain('<textarea');
+    expect(html).toContain('disabled=""');
   });
 
   test('external agents use image attachments without native tool activity', () => {
@@ -322,7 +344,7 @@ describe('agent chat surface adapters', () => {
     expect(thinkingHtml).not.toContain('>Agent<');
   });
 
-  test('active tool runs show only the latest five calls without an inner scroller', () => {
+  test('active tool runs stay collapsed as one live summary by default', () => {
     const items = Array.from({ length: 7 }, (_, index) => ({
       type: 'tool' as const,
       key: `tool-${index + 1}`,
@@ -333,12 +355,14 @@ describe('agent chat surface adapters', () => {
     );
 
     expect(html).toContain('Working for');
-    expect(html).toContain('Show all (7)');
-    expect(html).toContain('Showing the latest 5; 2 earlier');
+    expect(html).toContain('7 tool calls');
+    expect(html).toContain('text-[var(--muted)]');
+    expect(html).not.toContain('bg-[var(--accent)]');
+    expect(html).not.toContain('text-[var(--accent)]');
     expect(html).not.toContain('Tool 1');
     expect(html).not.toContain('Tool 2');
-    expect(html).toContain('Tool 3');
-    expect(html).toContain('Tool 7');
+    expect(html).not.toContain('Tool 3');
+    expect(html).not.toContain('Tool 7');
     expect(html).not.toContain('overflow-y-auto');
   });
 
@@ -359,13 +383,47 @@ describe('agent chat surface adapters', () => {
     );
 
     expect(formatAssistantRunDuration(3_723_000)).toBe('1h 2m 3s');
+    expect(formatAssistantRunDuration(62_992)).toBe('1m 2s');
     expect(html).toContain('Worked for 1h 2m 3s');
     expect(html).toContain('1 tool call');
-    expect(html).toContain('class="flex w-full items-center gap-2');
+    expect(html).toContain('class="flex min-h-9 w-full items-center gap-2');
     expect(html).toContain('text-sm font-semibold');
     expect(html).toContain('text-xs text-[var(--muted-dim)]');
     expect(html).not.toContain('uppercase');
     expect(html).not.toContain('ml-auto');
     expect(html).not.toContain('Read file');
+  });
+
+  test('expanded tool runs retain consecutive same-tool counts', () => {
+    const items = [
+      ...Array.from({ length: 5 }, (_, index) => ({
+        type: 'tool' as const,
+        key: `read-${index}`,
+        call: { id: `read-call-${index}`, name: 'read_file', args: {} },
+      })),
+      {
+        type: 'tool' as const,
+        key: 'search',
+        call: { id: 'search-call', name: 'search_files', args: {} },
+      },
+      ...Array.from({ length: 2 }, (_, index) => ({
+        type: 'tool' as const,
+        key: `list-${index}`,
+        call: { id: `list-call-${index}`, name: 'list_files', args: {} },
+      })),
+    ];
+    const html = renderToStaticMarkup(
+      <ToolRunActivity items={items} active initiallyExpanded />,
+    );
+
+    expect(html).toContain('8 tool calls');
+    expect(html).toContain('Read file');
+    expect(html).toContain('x5');
+    expect(html).toContain('List files');
+    expect(html).toContain('x2');
+    expect(html.indexOf('Read file')).toBeLessThan(html.indexOf('x5'));
+    expect(html.indexOf('List files')).toBeLessThan(html.indexOf('x2'));
+    expect(html).not.toContain('Complete');
+    expect(html).not.toContain('>Details<');
   });
 });

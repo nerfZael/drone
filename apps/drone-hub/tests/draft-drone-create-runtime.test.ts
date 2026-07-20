@@ -3,10 +3,29 @@ import {
   buildDraftDroneCreatePayload,
   filterSpawnAgentMenuEntriesForRuntime,
   runtimeSupportsCustomAgents,
+  shouldAutoRenameDraftDrone,
 } from '../src/droneHub/app/drone-create-runtime';
 import type { UiMenuSelectEntry } from '../src/ui/menuSelect';
 
 describe('draft drone create runtime support', () => {
+  test('auto-renames blank chat drone names when callers omit the option', () => {
+    expect(
+      shouldAutoRenameDraftDrone({ name: '', createWithoutChat: false }),
+    ).toBe(true);
+    expect(
+      shouldAutoRenameDraftDrone({ name: 'Named drone', createWithoutChat: false }),
+    ).toBe(false);
+    expect(
+      shouldAutoRenameDraftDrone({ requested: false, name: '', createWithoutChat: false }),
+    ).toBe(false);
+    expect(
+      shouldAutoRenameDraftDrone({ requested: true, name: 'Temporary', createWithoutChat: false }),
+    ).toBe(true);
+    expect(
+      shouldAutoRenameDraftDrone({ requested: true, name: '', createWithoutChat: true }),
+    ).toBe(false);
+  });
+
   test('includes host runtime in draft create payloads', () => {
     const payload = buildDraftDroneCreatePayload({
       name: 'host-drone',

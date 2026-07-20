@@ -9,6 +9,7 @@ import { createDraftQueuedPrompt } from './draft-chat-queue';
 import {
   buildDraftDroneCreatePayload,
   runtimeSupportsCustomAgents,
+  shouldAutoRenameDraftDrone,
   type RepoBranchSelectionState,
   type RepoBranchSourceMode,
 } from './drone-create-runtime';
@@ -700,6 +701,11 @@ export function useDroneCreationActions({
       const automationStopPhraseCaseSensitive = Boolean(automationStartRaw?.stopPhraseCaseSensitive);
       const nameRaw = String(opts?.name ?? draftCreateName ?? '');
       const name = nameRaw.trim();
+      const autoRename = shouldAutoRenameDraftDrone({
+        requested: opts?.autoRename,
+        name,
+        createWithoutChat,
+      });
       const group = String(opts?.group ?? draftCreateGroup ?? '').trim();
       const fleetParentId = String(draftCreateParentDroneId ?? '').trim();
       const runtime = createRuntime;
@@ -930,8 +936,8 @@ export function useDroneCreationActions({
             });
           }
 
-          if (opts?.autoRename && !createWithoutChat) {
-            const renameSourcePrompt = String(opts.autoRenamePrompt ?? prompt ?? '').trim();
+          if (autoRename) {
+            const renameSourcePrompt = String(opts?.autoRenamePrompt ?? prompt ?? '').trim();
             if (renameSourcePrompt) {
               setDraftAutoRenaming(true);
               void suggestAndRenameDraftDrone(droneId, renameSourcePrompt).finally(() => setDraftAutoRenaming(false));

@@ -1,0 +1,52 @@
+import React from 'react';
+import { describe, expect, test } from 'bun:test';
+import { renderToStaticMarkup } from 'react-dom/server';
+
+import { PendingTranscriptTurn } from '../src/droneHub/chat/PendingTranscriptTurn';
+import type { PendingPrompt } from '../src/droneHub/types';
+
+function pendingPrompt(patch: Partial<PendingPrompt> = {}): PendingPrompt {
+  return {
+    id: 'pending-1',
+    at: new Date(Date.now() - 65_000).toISOString(),
+    prompt: 'Inspect the repository',
+    state: 'sent',
+    ...patch,
+  };
+}
+
+describe('external pending transcript turn', () => {
+  test('shows sent prompts normally with elapsed working state and the live plan below', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          agentPlan: {
+            source: 'codex',
+            updatedAt: new Date().toISOString(),
+            items: [{ id: 'step-1', text: 'Read repository instructions', status: 'in_progress' }],
+          },
+        })}
+        showRoleIcons={false}
+      />,
+    );
+
+    expect(html).toContain('Inspect the repository');
+    expect(html).toMatch(/Working for 1m \d+s/);
+    expect(html).toContain('text-[var(--muted)]');
+    expect(html).not.toContain('h-1.5 w-1.5 animate-pulse');
+    expect(html).toContain('Read repository instructions');
+    expect(html).toContain('Plan');
+    expect(html).not.toContain('>Pending<');
+    expect(html).not.toContain('Waiting…');
+    expect(html.match(/1m ago/g)).toHaveLength(1);
+  });
+
+  test('keeps the queued badge only while the prompt has not been sent', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn item={pendingPrompt({ state: 'queued' })} showRoleIcons={false} />,
+    );
+
+    expect(html).toContain('Queued');
+    expect(html).not.toContain('Working for');
+  });
+});

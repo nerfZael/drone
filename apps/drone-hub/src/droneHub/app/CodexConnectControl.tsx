@@ -33,6 +33,10 @@ export function CodexConnectControl({
   const [busy, setBusy] = React.useState(false);
   const [error, setError] = React.useState<string | null>(null);
   const effectiveConnected = Boolean(connected || detectedConnected);
+  const connectionCheckKey = connected === undefined ? 'auto' : connected ? 'connected' : 'disconnected';
+  const [resolvedConnectionCheckKey, setResolvedConnectionCheckKey] = React.useState(
+    connected === true ? connectionCheckKey : '',
+  );
 
   const refreshConnection = React.useCallback(async () => {
     const status = await requestJson<CodexSettingsStatus>('/api/settings/codex');
@@ -55,6 +59,7 @@ export function CodexConnectControl({
           const hasConnection = await refreshConnection();
           if (!cancelled && hasConnection) await onConnected?.();
         }
+        if (!cancelled) setResolvedConnectionCheckKey(connectionCheckKey);
       })
       .catch((nextError) => {
         if (!cancelled) setError(nextError?.message ?? String(nextError));
@@ -62,7 +67,7 @@ export function CodexConnectControl({
     return () => {
       cancelled = true;
     };
-  }, [connected, onConnected, refreshConnection]);
+  }, [connected, connectionCheckKey, onConnected, refreshConnection]);
 
   React.useEffect(() => {
     if (
@@ -148,6 +153,7 @@ export function CodexConnectControl({
   };
 
   if (effectiveConnected) return null;
+  if (resolvedConnectionCheckKey !== connectionCheckKey) return null;
 
   const waiting =
     login?.status === 'starting' ||
@@ -158,7 +164,7 @@ export function CodexConnectControl({
     <div
       className={
         compact
-          ? 'mx-3 rounded border border-[rgba(203,166,247,.3)] bg-[rgba(203,166,247,.07)] px-3 py-2'
+          ? 'rounded border border-[rgba(203,166,247,.3)] bg-[rgba(203,166,247,.07)] px-3 py-2'
           : 'rounded border border-[rgba(203,166,247,.3)] bg-[rgba(203,166,247,.07)] p-3'
       }
     >
@@ -206,6 +212,16 @@ export function CodexConnectControl({
         </div>
       </div>
       {error ? <div className="mt-2 text-[10px] text-[var(--red)]">{error}</div> : null}
+    </div>
+  );
+}
+
+export function CodexConnectComposerNotice({ resetKey }: { resetKey: string }) {
+  return (
+    <div className="px-5">
+      <div className="mx-auto max-w-[1170px]">
+        <CodexConnectControl key={resetKey} compact />
+      </div>
     </div>
   );
 }

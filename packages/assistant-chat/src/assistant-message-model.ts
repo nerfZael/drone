@@ -32,6 +32,18 @@ export function messageText(message: AssistantMessage): string {
     .join('\n');
 }
 
+/** Text intended for the transcript, excluding private model reasoning. */
+export function messageVisibleText(message: AssistantMessage): string {
+  const content = message.content;
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  return content
+    .filter((part) => part?.type === 'text')
+    .map((part) => String(part.text ?? ''))
+    .filter(Boolean)
+    .join('\n');
+}
+
 export function messageImageParts(
   message: AssistantMessage,
 ): Array<{ data: string; mimeType: string }> {
@@ -204,7 +216,14 @@ export function renderItemsFromMessages(messages: AssistantMessage[]): Assistant
       });
       continue;
     }
-    if (messageText(message).trim() || message.errorMessage) {
+    // A reasoning block attached to a tool call is part of the same agent run. Treating it as a
+    // transcript message inserts an invisible boundary between model/tool iterations and makes one
+    // user request appear as several separate tool runs.
+    if (
+      messageVisibleText(message).trim() ||
+      messageImageParts(message).length > 0 ||
+      message.errorMessage
+    ) {
       items.push({
         type: 'message',
         key: `message:${index}:${message.role}`,

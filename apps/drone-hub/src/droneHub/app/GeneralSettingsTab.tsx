@@ -407,7 +407,7 @@ export function GeneralSettingsTab({
             OpenAI and finishes automatically through a temporary localhost callback.
           </div>
           <CodexConnectControl
-            connected={Boolean(llmSettings?.codex.hasKey)}
+            connected={llmSettings ? Boolean(llmSettings.codex.hasKey) : undefined}
             onConnected={loadLlmSettings}
           />
           {llmSettings?.codex.hasKey ? (

@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { ChatInput, type ChatInputProps } from './ChatInput';
+import { ChatLoadingState } from './ChatLoadingState';
 import { ChatTranscriptFrame, type ChatTranscriptFrameProps } from './ChatTranscriptFrame';
 import type { AgentChatSurfaceAdapter } from './agent-chat-surface-adapters';
 
@@ -87,5 +88,41 @@ export function ChatSurfaceComposer({ overlay, ...composer }: ChatSurfaceCompose
         allowSendWhileWaiting={sendWhileWaiting}
       />
     </div>
+  );
+}
+
+export type ChatSurfaceLoadingViewProps = Pick<
+  ChatInputProps,
+  'resetKey' | 'droneName' | 'draftValue' | 'onDraftValueChange' | 'focusTargetId'
+> & {
+  loadingMessage?: string;
+};
+
+export function ChatSurfaceLoadingView({
+  resetKey,
+  droneName,
+  draftValue,
+  onDraftValueChange,
+  focusTargetId,
+  loadingMessage,
+}: ChatSurfaceLoadingViewProps) {
+  return (
+    <>
+      <div className="relative min-h-0 flex-1">
+        <ChatLoadingState message={loadingMessage} />
+      </div>
+      <ChatSurfaceComposer
+        resetKey={resetKey}
+        droneName={droneName}
+        draftValue={draftValue}
+        onDraftValueChange={onDraftValueChange}
+        focusTargetId={focusTargetId}
+        promptError={null}
+        sending={false}
+        waiting={false}
+        disabled
+        onSend={async () => false}
+      />
+    </>
   );
 }

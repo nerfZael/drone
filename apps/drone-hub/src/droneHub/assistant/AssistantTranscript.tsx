@@ -9,9 +9,11 @@ import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
 import { ChatMessageCopyAction } from '../chat/ChatMessageCopyAction';
 import { ChatMessageFrame } from '../chat/ChatMessageFrame';
+import { formatWorkingDuration } from '../chat/WorkingElapsedStatus';
 import { IconDrone } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import {
+  compactRepeatedToolItems,
   compactPreview,
   isChatIdleToolName,
   lastAssistantContentBlock,
@@ -445,11 +447,10 @@ export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderI
   const label = toolLabel(name);
   const errorCount = items.filter((item) => item.result?.isError).length;
   const pendingCount = items.filter((item) => !item.result).length;
-  const statusParts = [
+  const statusText = [
     pendingCount > 0 ? `${pendingCount} pending` : '',
     errorCount > 0 ? `${errorCount} failed` : '',
-  ].filter(Boolean);
-  const statusText = statusParts.length > 0 ? statusParts.join(', ') : 'Complete';
+  ].filter(Boolean).join(', ');
   const statusResult: AssistantMessage | undefined =
     errorCount > 0
       ? { role: 'toolResult', isError: true, content: '' }
@@ -459,22 +460,32 @@ export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderI
 
   return (
     <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]">
-      <div className="flex min-w-0 items-center gap-2 px-2.5 py-2">
+      <button
+        type="button"
+        aria-expanded={detailsOpen}
+        aria-label={detailsOpen ? `Collapse ${label} calls` : `Expand ${label} calls`}
+        onClick={() => setDetailsOpen((value) => !value)}
+        className="flex w-full min-w-0 items-center gap-2 px-2.5 py-2 text-left hover:bg-[rgba(255,255,255,.025)]"
+      >
         <ToolStatusIndicator result={statusResult} />
-        <div
-          className="min-w-0 flex-1 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+        <span
+          className="min-w-0 truncate text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           {label}
-        </div>
+        </span>
         <span className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--fg-secondary)]">
           x{items.length}
         </span>
-        <span className="hidden flex-shrink-0 text-[10px] text-[var(--muted-dim)] sm:inline">
-          {statusText}
+        {statusText ? (
+          <span className="hidden flex-shrink-0 text-[10px] text-[var(--muted-dim)] sm:inline">
+            {statusText}
+          </span>
+        ) : null}
+        <span className="ml-auto text-[var(--muted-dim)]">
+          <ToolRunChevron open={detailsOpen} />
         </span>
-        <ToolDetailsButton open={detailsOpen} onClick={() => setDetailsOpen((value) => !value)} />
-      </div>
+      </button>
       {detailsOpen ? (
         <div className="grid gap-2 border-t border-[var(--border-subtle)] p-2">
           {items.map((item, index) => (
@@ -688,16 +699,8 @@ export function ToolActivityRow({
   );
 }
 
-const ACTIVE_TOOL_WINDOW_SIZE = 5;
-
 export function formatAssistantRunDuration(durationMs: number): string {
-  const totalSeconds = Math.max(0, Math.floor(Number(durationMs) / 1_000));
-  const hours = Math.floor(totalSeconds / 3_600);
-  const minutes = Math.floor((totalSeconds % 3_600) / 60);
-  const seconds = totalSeconds % 60;
-  if (hours > 0) return `${hours}h ${minutes}m ${seconds}s`;
-  if (minutes > 0) return `${minutes}m ${seconds}s`;
-  return `${seconds}s`;
+  return formatWorkingDuration(durationMs);
 }
 
 function ToolRunChevron({ open }: { open: boolean }) {
@@ -723,14 +726,16 @@ export function ToolRunActivity({
   startedAt,
   endedAt,
   droneNameById = {},
+  initiallyExpanded = false,
 }: {
   items: AssistantToolRenderItem[];
   active: boolean;
   startedAt?: number;
   endedAt?: number;
   droneNameById?: AssistantDroneNameMap;
+  initiallyExpanded?: boolean;
 }) {
-  const [expanded, setExpanded] = React.useState(false);
+  const [expanded, setExpanded] = React.useState(initiallyExpanded);
   const fallbackStart = React.useRef(Date.now()).current;
   const [now, setNow] = React.useState(() => Date.now());
 
@@ -744,92 +749,45 @@ export function ToolRunActivity({
   const start = Number.isFinite(startedAt) ? Number(startedAt) : fallbackStart;
   const end = active ? now : Number.isFinite(endedAt) ? Number(endedAt) : start;
   const duration = formatAssistantRunDuration(Math.max(0, end - start));
-  const hiddenCount = Math.max(0, items.length - ACTIVE_TOOL_WINDOW_SIZE);
-  const visibleItems = expanded || !active ? items : items.slice(-ACTIVE_TOOL_WINDOW_SIZE);
   const callLabel = `${items.length} tool ${items.length === 1 ? 'call' : 'calls'}`;
-
-  if (!active && !expanded) {
-    return (
-      <div>
-        <button
-          type="button"
-          aria-expanded={false}
-          onClick={() => setExpanded(true)}
-          className="flex w-full items-center gap-2 border-b border-[var(--border-subtle)] py-2 text-left text-[var(--muted)] hover:text-[var(--fg-secondary)]"
-        >
-          <span
-            className="text-sm font-semibold"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            Worked for {duration}
-          </span>
-          <span className="text-xs text-[var(--muted-dim)]">{callLabel}</span>
-          <span className="text-[var(--muted-dim)]">
-            <ToolRunChevron open={false} />
-          </span>
-        </button>
-      </div>
-    );
-  }
+  const groupedItems = compactRepeatedToolItems(items);
 
   return (
     <div>
-      {active ? (
-        <div className="flex min-h-9 items-center gap-2 border-b border-[var(--border-subtle)] py-1.5">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--accent)]" />
-          <span
-            className="text-sm font-semibold text-[var(--accent)]"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            Working for {duration}
-          </span>
-          <span className="text-xs text-[var(--muted-dim)]">{callLabel}</span>
-          {hiddenCount > 0 ? (
-            <button
-              type="button"
-              aria-expanded={expanded}
-              onClick={() => setExpanded((value) => !value)}
-              className="ml-auto rounded px-1.5 py-1 text-[10px] font-medium text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
-            >
-              {expanded ? 'Show latest 5' : `Show all (${items.length})`}
-            </button>
-          ) : null}
-        </div>
-      ) : (
-        <button
-          type="button"
-          aria-expanded={true}
-          aria-label="Collapse tool calls"
-          onClick={() => setExpanded(false)}
-          className="flex min-h-9 w-full items-center gap-2 border-b border-[var(--border-subtle)] py-1.5 text-left text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+      <button
+        type="button"
+        aria-expanded={expanded}
+        aria-label={expanded ? 'Collapse tool calls' : 'Expand tool calls'}
+        onClick={() => setExpanded((value) => !value)}
+        className="flex min-h-9 w-full items-center gap-2 border-b border-[var(--border-subtle)] py-1.5 text-left text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+      >
+        <span
+          className="text-sm font-semibold"
+          style={{ fontFamily: 'var(--display)' }}
         >
-          <span
-            className="text-sm font-semibold"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            Worked for {duration}
-          </span>
-          <span className="text-xs text-[var(--muted-dim)]">{callLabel}</span>
-          <span className="text-[var(--muted-dim)]">
-            <ToolRunChevron open />
-          </span>
-        </button>
-      )}
-      {active && hiddenCount > 0 && !expanded ? (
-        <div className="pb-1 pt-1.5 text-[0.6875rem] text-[var(--muted-dim)]">
-          Showing the latest {ACTIVE_TOOL_WINDOW_SIZE}; {hiddenCount} earlier
+          {active ? 'Working' : 'Worked'} for {duration}
+        </span>
+        <span className="text-xs text-[var(--muted-dim)]">{callLabel}</span>
+        <span className="text-[var(--muted-dim)]">
+          <ToolRunChevron open={expanded} />
+        </span>
+      </button>
+      {expanded ? (
+        <div className="mt-1 space-y-1">
+          {groupedItems.map((item) =>
+            item.type === 'toolGroup' ? (
+              <RepeatedToolActivityRow key={item.key} items={item.items} />
+            ) : item.type === 'tool' ? (
+              <ToolActivityRow
+                key={item.key}
+                call={item.call}
+                result={item.result}
+                droneNameById={droneNameById}
+              />
+            ) : null,
+          )}
         </div>
       ) : null}
-      <div className="mt-1 space-y-1">
-        {visibleItems.map((item) => (
-          <ToolActivityRow
-            key={item.key}
-            call={item.call}
-            result={item.result}
-            droneNameById={droneNameById}
-          />
-        ))}
-      </div>
     </div>
   );
 }
