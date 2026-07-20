@@ -18,8 +18,6 @@ import MessageCircle from 'lucide-react-native/icons/message-circle';
 import Network from 'lucide-react-native/icons/network';
 import Plus from 'lucide-react-native/icons/plus';
 import Settings from 'lucide-react-native/icons/settings';
-import CircleAlert from 'lucide-react-native/icons/circle-alert';
-import CircleCheck from 'lucide-react-native/icons/circle-check';
 import LoaderCircle from 'lucide-react-native/icons/loader-circle';
 import ChevronLeft from 'lucide-react-native/icons/chevron-left';
 import ChevronDown from 'lucide-react-native/icons/chevron-down';
@@ -46,6 +44,14 @@ import {
   type MobileDroneSummary,
   type MobileDroneTreeNode,
 } from '../drones/drone-sidebar-model';
+import {
+  addMobileDroneToStateSummary,
+  EMPTY_MOBILE_DRONE_STATE_SUMMARY,
+  mobileDroneDisplayState,
+  summarizeMobileDrones,
+  type MobileDroneDisplayState,
+  type MobileDroneStateSummary,
+} from '../drones/drone-state-summary';
 
 export function appDrawerWidth(windowWidth: number): number {
   return Math.min(windowWidth, 460);
@@ -238,47 +244,20 @@ function droneFolderContains(folder: MobileDroneGroupFolder, droneId: string): b
   );
 }
 
-type DroneDisplayState = 'working' | 'waiting' | 'starting' | 'blocked' | 'offline' | 'idle';
-type SwitchDisplayState = DroneDisplayState | 'done' | 'archiving' | 'deleting';
-type DroneStateSummary = { working: number; idle: number; issues: number };
-const EMPTY_DRONE_STATE_SUMMARY: DroneStateSummary = { working: 0, idle: 0, issues: 0 };
-
-function droneDisplayState(drone: MobileDroneSummary): DroneDisplayState {
-  const rawState = `${drone.phase ?? ''} ${drone.status ?? ''}`.toLowerCase();
-  if (drone.busyChats.length > 0) return 'working';
-  if (
-    rawState.includes('block') ||
-    rawState.includes('error') ||
-    rawState.includes('fail') ||
-    rawState.includes('problem')
-  )
-    return 'blocked';
-  if (drone.statusOk === false) return 'offline';
-  if (rawState.includes('wait')) return 'waiting';
-  if (rawState.includes('start') || rawState.includes('creat') || rawState.includes('seed'))
-    return 'starting';
-  return 'idle';
-}
-
-function addDroneToStateSummary(summary: DroneStateSummary, drone: MobileDroneSummary): void {
-  const state = droneDisplayState(drone);
-  if (state === 'working' || state === 'starting') summary.working += 1;
-  else if (state === 'blocked' || state === 'offline') summary.issues += 1;
-  else summary.idle += 1;
-}
+type SwitchDisplayState = MobileDroneDisplayState | 'done' | 'archiving' | 'deleting';
 
 function addDroneNodesToStateSummary(
-  summary: DroneStateSummary,
+  summary: MobileDroneStateSummary,
   nodes: MobileDroneTreeNode[],
 ): void {
   for (const node of nodes) {
-    addDroneToStateSummary(summary, node.drone);
+    addMobileDroneToStateSummary(summary, node.drone);
     addDroneNodesToStateSummary(summary, node.children);
   }
 }
 
 function addDroneFoldersToStateSummary(
-  summary: DroneStateSummary,
+  summary: MobileDroneStateSummary,
   folders: MobileDroneGroupFolder[],
 ): void {
   for (const folder of folders) {
@@ -287,17 +266,11 @@ function addDroneFoldersToStateSummary(
   }
 }
 
-function summarizeDrones(drones: MobileDroneSummary[]): DroneStateSummary {
-  const summary = { working: 0, idle: 0, issues: 0 };
-  for (const drone of drones) addDroneToStateSummary(summary, drone);
-  return summary;
-}
-
 function summarizeDroneScope(
   roots: MobileDroneTreeNode[],
   folders: MobileDroneGroupFolder[] = [],
-): DroneStateSummary {
-  const summary = { working: 0, idle: 0, issues: 0 };
+): MobileDroneStateSummary {
+  const summary = { ...EMPTY_MOBILE_DRONE_STATE_SUMMARY };
   addDroneNodesToStateSummary(summary, roots);
   addDroneFoldersToStateSummary(summary, folders);
   return summary;
@@ -307,7 +280,7 @@ function DroneStateCounts({
   summary,
   compact = false,
 }: {
-  summary: DroneStateSummary;
+  summary: MobileDroneStateSummary;
   compact?: boolean;
 }) {
   return (
@@ -320,16 +293,12 @@ function DroneStateCounts({
           </Text>
         </View>
       ) : null}
-      {summary.idle > 0 ? (
-        <View accessibilityLabel={`${summary.idle} available`} style={styles.fleetState}>
-          <CircleCheck color={colors.online} size={12} strokeWidth={2.2} />
-          <Text style={[styles.fleetStateText, styles.fleetStateTextIdle]}>{summary.idle}</Text>
-        </View>
-      ) : null}
-      {summary.issues > 0 ? (
-        <View accessibilityLabel={`${summary.issues} with issues`} style={styles.fleetState}>
-          <CircleAlert color={colors.danger} size={12} strokeWidth={2.2} />
-          <Text style={[styles.fleetStateText, styles.fleetStateTextIssue]}>{summary.issues}</Text>
+      {summary.unread > 0 ? (
+        <View accessibilityLabel={`${summary.unread} with unread chats`} style={styles.fleetState}>
+          <MessageCircle color={colors.online} size={12} strokeWidth={2.2} />
+          <Text style={[styles.fleetStateText, styles.fleetStateTextUnread]}>
+            {summary.unread}
+          </Text>
         </View>
       ) : null}
     </View>
@@ -456,7 +425,7 @@ function DrawerDroneNode({
   const selected = drone.id === activeDroneId;
   const selectedChat = selected && chats.includes(activeChatName) ? activeChatName : chats[0]!;
   const operation = droneOperationById[drone.id];
-  const displayState = operation ?? droneDisplayState(drone);
+  const displayState = operation ?? mobileDroneDisplayState(drone);
   const unread = (drone.unreadChats?.length ?? 0) > 0;
   return (
     <View style={styles.droneNode}>
@@ -876,7 +845,7 @@ function AppDrawerView({
     () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
     [droneSidebarOrder, drones],
   );
-  const fleetStatus = React.useMemo(() => summarizeDrones(drones), [drones]);
+  const fleetStatus = React.useMemo(() => summarizeMobileDrones(drones), [drones]);
   const repoStateSummaries = React.useMemo(
     () =>
       new Map(
@@ -1045,7 +1014,9 @@ function AppDrawerView({
                       ) : null}
                     </View>
                     <DroneStateCounts
-                      summary={repoStateSummaries.get(activeRepo.id) ?? EMPTY_DRONE_STATE_SUMMARY}
+                      summary={
+                        repoStateSummaries.get(activeRepo.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY
+                      }
                       compact
                     />
                   </Pressable>
@@ -1069,7 +1040,7 @@ function AppDrawerView({
                       ))
                     : droneGroups.map((group) => {
                         const stateSummary =
-                          repoStateSummaries.get(group.id) ?? EMPTY_DRONE_STATE_SUMMARY;
+                          repoStateSummaries.get(group.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY;
                         return (
                           <View key={group.id} style={styles.repoGroup}>
                             <Pressable
@@ -1350,8 +1321,7 @@ const styles = StyleSheet.create({
   fleetState: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   fleetStateText: { color: colors.muted, fontSize: 9, fontFamily: 'monospace' },
   fleetStateTextWorking: { color: colors.warning },
-  fleetStateTextIdle: { color: colors.online },
-  fleetStateTextIssue: { color: colors.danger },
+  fleetStateTextUnread: { color: colors.online },
   droneList: { paddingHorizontal: 8, paddingBottom: 24 },
   repoGroup: {
     borderBottomWidth: 1,
