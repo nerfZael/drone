@@ -303,7 +303,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     backgroundColor: colors.panelRaised,
   },
   modelToggleValue: { flexShrink: 1, color: colors.text, fontSize: 12, fontWeight: '800' },

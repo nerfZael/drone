@@ -67,7 +67,7 @@ function IconButton({
       ]}
     >
       <Icon
-        color={accent ? colors.crust : colors.text}
+        color={accent ? colors.onAccent : colors.text}
         size={17}
         strokeWidth={accent ? 2.6 : 2.1}
       />
@@ -358,6 +358,8 @@ export function AssistantComposer({
           maxLength={maxLength}
           placeholder={placeholder}
           placeholderTextColor={colors.muted}
+          selectionColor={colors.accent}
+          cursorColor={colors.accent}
           textAlignVertical="top"
           style={[
             styles.input,
@@ -529,7 +531,7 @@ const styles = StyleSheet.create({
     minHeight: 52,
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     backgroundColor: colors.panelRaised,
     shadowColor: colors.shadow,
     shadowOpacity: 0.22,
@@ -608,7 +610,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     backgroundColor: colors.surface1,
   },
   voiceButtonDanger: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
@@ -621,7 +623,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     backgroundColor: colors.surface1,
   },
   iconButtonAccent: { borderColor: colors.accent, backgroundColor: colors.accent },

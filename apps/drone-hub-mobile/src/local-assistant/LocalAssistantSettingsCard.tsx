@@ -216,6 +216,8 @@ export function LocalAssistantSettingsCard() {
             secureTextEntry
             placeholder={hasApiKey ? 'API key saved — enter to replace' : 'OpenAI API key'}
             placeholderTextColor={colors.muted}
+            selectionColor={colors.accent}
+            cursorColor={colors.accent}
             style={styles.input}
           />
         ) : null}
@@ -349,7 +351,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 13,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     backgroundColor: colors.whiteWashSoft,
   },
   modelCopy: { flex: 1, minWidth: 0 },
@@ -359,7 +361,7 @@ const styles = StyleSheet.create({
     minHeight: 46,
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     backgroundColor: colors.whiteWashSoft,
     color: colors.text,
     paddingHorizontal: 12,

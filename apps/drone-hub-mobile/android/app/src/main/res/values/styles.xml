@@ -2,10 +2,14 @@
   <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
     <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
     <item name="colorPrimary">@color/colorPrimary</item>
+    <item name="colorAccent">@color/colorPrimary</item>
+    <item name="android:windowBackground">@color/splashscreen_background</item>
     <item name="android:statusBarColor">@android:color/transparent</item>
     <item name="android:navigationBarColor">@android:color/transparent</item>
+    <item name="android:windowLightStatusBar">false</item>
+    <item name="android:windowLightNavigationBar">false</item>
   </style>
   <style name="Theme.App.SplashScreen" parent="AppTheme">
-    <item name="android:windowBackground">@drawable/splashscreen_logo</item>
+    <item name="android:windowBackground">@drawable/splashscreen</item>
   </style>
 </resources>

@@ -73,7 +73,7 @@ function PermissionToggle({
       ]}
     >
       <View style={[styles.checkbox, checked && styles.checkboxChecked]}>
-        {checked ? <Check color={colors.crust} size={10} strokeWidth={3} /> : null}
+        {checked ? <Check color={colors.onAccent} size={10} strokeWidth={3} /> : null}
       </View>
       <Text style={[styles.permissionText, checked && styles.permissionTextChecked]}>{label}</Text>
     </Pressable>

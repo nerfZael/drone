@@ -443,7 +443,7 @@ function Shell() {
                 style={[styles.draftCheckbox, dronesHeader.draft && styles.draftCheckboxActive]}
               >
                 {dronesHeader.draft ? (
-                  <Check color={colors.crust} size={12} strokeWidth={3} />
+                  <Check color={colors.onAccent} size={12} strokeWidth={3} />
                 ) : null}
               </View>
               <Text

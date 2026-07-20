@@ -117,6 +117,8 @@ export function PairScreen({ onComplete }: { onComplete(): void }) {
             onChangeText={setCode}
             placeholder={updatingConnection ? 'Paste connection JSON' : 'Paste pairing JSON'}
             placeholderTextColor={colors.subtle}
+            selectionColor={colors.accent}
+            cursorColor={colors.accent}
             multiline
             autoCapitalize="none"
             autoCorrect={false}
@@ -179,7 +181,7 @@ const styles = StyleSheet.create({
     minHeight: 92,
     color: colors.text,
     backgroundColor: colors.panel,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     borderWidth: 1,
     borderRadius: 14,
     padding: 12,

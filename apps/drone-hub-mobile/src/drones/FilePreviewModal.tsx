@@ -200,7 +200,7 @@ export function FilePreviewModal({
                 onPress={onRetry}
                 style={({ pressed }) => [styles.retryButton, pressed && styles.pressed]}
               >
-                <RotateCcw color={colors.background} size={15} strokeWidth={2.2} />
+                <RotateCcw color={colors.onAccent} size={15} strokeWidth={2.2} />
                 <Text style={styles.retryText}>Try again</Text>
               </Pressable>
             </View>
@@ -304,7 +304,7 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     backgroundColor: colors.accent,
   },
-  retryText: { color: colors.background, fontSize: 11, fontWeight: '900' },
+  retryText: { color: colors.onAccent, fontSize: 11, fontWeight: '900' },
   bodyScroll: { flex: 1 },
   markdownContent: { paddingHorizontal: 16, paddingVertical: 18, paddingBottom: 52 },
   textVerticalContent: { minWidth: '100%' },

@@ -1705,7 +1705,7 @@ export function DronesScreen({
                   ]}
                 >
                   {busy === 'create-chat' ? (
-                    <ActivityIndicator color={colors.background} size="small" />
+                    <ActivityIndicator color={colors.onAccent} size="small" />
                   ) : (
                     <Text style={styles.emptyDroneButtonText}>Create chat</Text>
                   )}
@@ -2057,7 +2057,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.accent,
   },
-  emptyDroneButtonText: { color: colors.background, fontSize: 14, fontWeight: '800' },
+  emptyDroneButtonText: { color: colors.onAccent, fontSize: 14, fontWeight: '800' },
   chatTabsFrame: {
     minHeight: 39,
     justifyContent: 'center',

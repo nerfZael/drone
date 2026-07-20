@@ -932,7 +932,7 @@ const styles = StyleSheet.create({
   },
   toolStatusError: { backgroundColor: colors.danger },
   toolStatusText: {
-    color: colors.crust,
+    color: colors.onAccent,
     fontSize: 8,
     lineHeight: 11,
     fontWeight: '900',

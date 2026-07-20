@@ -197,7 +197,7 @@ function CompactCheckbox({
       ]}
     >
       <View style={[styles.checkboxBox, value && styles.checkboxBoxActive]}>
-        {value ? <Check color={colors.crust} size={12} strokeWidth={3} /> : null}
+        {value ? <Check color={colors.onAccent} size={12} strokeWidth={3} /> : null}
       </View>
       <Text style={[styles.compactCheckboxText, value && styles.activeText]}>{label}</Text>
     </Pressable>
@@ -856,6 +856,8 @@ export function NewDroneScreen({
               editable={!busy}
               placeholder="Automatic name"
               placeholderTextColor={colors.subtle}
+              selectionColor={colors.accent}
+              cursorColor={colors.accent}
               autoCapitalize="none"
               style={[styles.input, styles.monoInput]}
             />
@@ -866,6 +868,8 @@ export function NewDroneScreen({
               editable={!busy}
               placeholder="No group"
               placeholderTextColor={colors.subtle}
+              selectionColor={colors.accent}
+              cursorColor={colors.accent}
               autoCapitalize="none"
               style={styles.input}
             />
@@ -1023,7 +1027,7 @@ export function NewDroneScreen({
             pressed && styles.pressed,
           ]}
         >
-          {busy ? <ActivityIndicator color={colors.crust} size="small" /> : null}
+          {busy ? <ActivityIndicator color={colors.onAccent} size="small" /> : null}
           <Text style={styles.submitText}>{busy ? 'Creating…' : 'Create drone'}</Text>
         </Pressable>
       )}
@@ -1059,7 +1063,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   segmentText: { color: colors.text, fontSize: 10, fontWeight: '800', textTransform: 'uppercase' },
-  segmentTextActive: { color: colors.crust },
+  segmentTextActive: { color: colors.onAccent },
   labeledSegmented: { flexDirection: 'row', alignItems: 'center', gap: 6 },
   segmentedLabel: {
     color: colors.accent,
@@ -1118,13 +1122,13 @@ const styles = StyleSheet.create({
   },
   switchTrackActive: { backgroundColor: colors.accent },
   switchThumb: { width: 16, height: 16, borderRadius: 8, backgroundColor: colors.text },
-  switchThumbActive: { transform: [{ translateX: 16 }], backgroundColor: colors.crust },
+  switchThumbActive: { transform: [{ translateX: 16 }], backgroundColor: colors.onAccent },
   input: {
     minHeight: 44,
     color: colors.text,
     fontSize: 13,
     backgroundColor: colors.panel,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     borderWidth: 1,
     borderRadius: 7,
     paddingHorizontal: 12,
@@ -1158,7 +1162,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     borderRadius: 7,
     backgroundColor: colors.panel,
   },
@@ -1206,7 +1210,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
   },
   submitText: {
-    color: colors.crust,
+    color: colors.onAccent,
     fontSize: 12,
     fontWeight: '900',
     textTransform: 'uppercase',

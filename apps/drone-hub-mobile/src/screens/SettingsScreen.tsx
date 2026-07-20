@@ -100,6 +100,8 @@ export function SettingsScreen({
                 onChangeText={setPhoneName}
                 placeholder="Android phone"
                 placeholderTextColor={colors.subtle}
+                selectionColor={colors.accent}
+                cursorColor={colors.accent}
                 autoCapitalize="words"
                 autoCorrect={false}
                 maxLength={80}
@@ -243,7 +245,7 @@ const styles = StyleSheet.create({
   nameInput: {
     minHeight: 44,
     color: colors.text,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
     borderBottomWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 0,
     paddingVertical: 9,

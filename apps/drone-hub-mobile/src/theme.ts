@@ -39,13 +39,14 @@ export const colors = {
   panel: catppuccin.mantle,
   panelRaised: catppuccin.surface0,
   border: catppuccin.surface1,
-  borderStrong: catppuccin.surface2,
+  borderStrong: catppuccin.overlay1,
   text: catppuccin.text,
   textStrong: catppuccin.rosewater,
-  muted: catppuccin.subtext0,
-  subtle: catppuccin.overlay0,
+  muted: catppuccin.subtext1,
+  subtle: catppuccin.subtext0,
   accent: catppuccin.mauve,
   accentAlt: catppuccin.lavender,
+  onAccent: catppuccin.crust,
   accentDark: 'rgba(203, 166, 247, 0.14)',
   accentBorder: 'rgba(203, 166, 247, 0.42)',
   accentWash: 'rgba(203, 166, 247, 0.07)',
@@ -53,7 +54,7 @@ export const colors = {
   warningDark: 'rgba(249, 226, 175, 0.12)',
   warningBorder: 'rgba(249, 226, 175, 0.38)',
   danger: catppuccin.red,
-  dangerDark: 'rgba(243, 139, 168, 0.12)',
+  dangerDark: 'rgba(243, 139, 168, 0.10)',
   dangerBorder: 'rgba(243, 139, 168, 0.38)',
   online: catppuccin.green,
   onlineDark: 'rgba(166, 227, 161, 0.12)',
@@ -73,4 +74,8 @@ export const radii = {
   large: 10,
   xlarge: 14,
   pill: 999,
+} as const;
+
+export const systemUi = {
+  statusBarStyle: 'light',
 } as const;

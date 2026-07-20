@@ -165,6 +165,8 @@ export function DevicesScreen() {
             refreshing={refreshing}
             onRefresh={() => void refresh()}
             tintColor={colors.accent}
+            colors={[colors.accent]}
+            progressBackgroundColor={colors.panelRaised}
           />
         }
       >
@@ -277,7 +279,7 @@ export function DevicesScreen() {
                                       style={[styles.checkbox, enabled && styles.checkboxEnabled]}
                                     >
                                       {enabled ? (
-                                        <Check color={colors.crust} size={11} strokeWidth={3} />
+                                        <Check color={colors.onAccent} size={11} strokeWidth={3} />
                                       ) : null}
                                     </View>
                                     <Text
@@ -445,7 +447,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     borderRadius: 4,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.borderStrong,
   },
   operationEnabled: { borderColor: colors.accentBorder, backgroundColor: colors.accentDark },
   operationChanged: { borderColor: colors.warning },

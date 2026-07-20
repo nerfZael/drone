@@ -45,7 +45,7 @@ export function Button({
   style?: ViewStyle;
 }) {
   const foreground =
-    tone === 'accent' ? colors.crust : tone === 'danger' ? colors.danger : colors.text;
+    tone === 'accent' ? colors.onAccent : tone === 'danger' ? colors.danger : colors.text;
 
   return (
     <Pressable
@@ -279,7 +279,7 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   buttonText: { color: colors.text, fontSize: 14, fontWeight: '700', letterSpacing: 0.1 },
-  accentButtonText: { color: colors.crust },
+  accentButtonText: { color: colors.onAccent },
   dangerButtonText: { color: colors.danger },
   disabled: { opacity: 0.45 },
   pressed: { opacity: 0.76, transform: [{ scale: 0.985 }] },
