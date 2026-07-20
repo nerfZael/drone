@@ -260,7 +260,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
       const label = state.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
       return (
         <span
-          className="inline-flex items-center rounded-[4px] border border-[rgba(255,178,36,.35)] bg-[rgba(17,20,28,.96)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_rgba(0,0,0,.35)]"
+          className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
           style={{ fontFamily: 'var(--display)' }}
           title={String(state.hubMessage ?? label)}
         >
@@ -278,7 +278,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
   if (state.statusChecking) {
     return (
       <span
-        className="inline-flex items-center rounded-[4px] border border-[rgba(255,178,36,.35)] bg-[rgba(18,14,8,.96)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_rgba(0,0,0,.35)]"
+        className="inline-flex items-center rounded-[4px] border border-[var(--yellow-border)] bg-[var(--warning-panel)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--yellow)] shadow-[0_4px_10px_var(--shadow-color)]"
         style={{ fontFamily: 'var(--display)' }}
         title={String(state.statusError ?? 'Checking status')}
       >
@@ -291,7 +291,7 @@ function renderNodeIndicator(state: DroneCanvasIndicatorState | null): React.Rea
     const label = state.hubPhase === 'error' ? 'Error' : 'Offline';
     return (
       <span
-        className="inline-flex items-center rounded-[4px] border border-[rgba(255,90,90,.4)] bg-[rgba(18,12,14,.96)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_rgba(0,0,0,.35)]"
+        className="inline-flex items-center rounded-[4px] border border-[var(--red-border)] bg-[var(--danger-panel)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--red)] shadow-[0_4px_10px_var(--shadow-color)]"
         style={{ fontFamily: 'var(--display)' }}
         title={String(state.hubMessage ?? state.statusError ?? label)}
       >
@@ -1912,7 +1912,7 @@ export function DroneCanvasDock({
             className={`inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border transition-all ${
               canvasControlsExpanded
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
             }`}
             title={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
             aria-label={canvasControlsExpanded ? 'Hide canvas creation controls' : 'Show canvas creation controls'}
@@ -1971,8 +1971,8 @@ export function DroneCanvasDock({
                 disabled={controlsDisabled}
                 className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
                   controlsDisabled
-                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                    : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
+                    : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
                 title="Manage custom agents"
@@ -2008,7 +2008,7 @@ export function DroneCanvasDock({
                   }}
                   disabled={controlsDisabled}
                   placeholder="Default model"
-                  className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
+                  className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all font-mono ${
                     controlsDisabled
                       ? 'opacity-40 cursor-not-allowed'
                       : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
@@ -2021,8 +2021,8 @@ export function DroneCanvasDock({
                   disabled={controlsDisabled || !normalizedSpawnModel.trim()}
                   className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
                     controlsDisabled || !normalizedSpawnModel.trim()
-                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                      : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
+                      : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
                   title="Clear model override"
@@ -2061,7 +2061,7 @@ export function DroneCanvasDock({
                 }}
                 disabled={controlsDisabled}
                 placeholder="Optional group"
-                className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
+                className={`h-[28px] w-[150px] rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[11px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none transition-all ${
                   controlsDisabled
                     ? 'opacity-40 cursor-not-allowed'
                     : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
@@ -2074,8 +2074,8 @@ export function DroneCanvasDock({
                 disabled={controlsDisabled || !normalizedCreateGroup.trim()}
                 className={`inline-flex items-center gap-1 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
                   controlsDisabled || !normalizedCreateGroup.trim()
-                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                    : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
+                    : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
                 title="Clear group"
@@ -2086,8 +2086,8 @@ export function DroneCanvasDock({
             <label
               className={`inline-flex items-center gap-1.5 h-[28px] px-2 rounded border border-[var(--border-subtle)] text-[10px] font-semibold tracking-wide uppercase transition-all ${
                 controlsDisabled
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] cursor-pointer'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] text-[var(--muted-dim)]'
+                  : 'bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] cursor-pointer'
               }`}
               style={{ fontFamily: 'var(--display)' }}
               title="Before creating a repo-attached drone, run a host git pull --ff-only on the current branch."
@@ -2120,7 +2120,7 @@ export function DroneCanvasDock({
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
-            backgroundImage: `radial-gradient(circle, rgba(141, 161, 197, ${dotOpacity.toFixed(3)}) ${DOT_GRID_RADIUS_PX}px, transparent ${DOT_GRID_RADIUS_PX}px)`,
+            backgroundImage: `radial-gradient(circle, rgba(var(--canvas-dot-rgb), ${dotOpacity.toFixed(3)}) ${DOT_GRID_RADIUS_PX}px, transparent ${DOT_GRID_RADIUS_PX}px)`,
             backgroundSize: `${DOT_GRID_BASE_SPACING_PX * scale}px ${DOT_GRID_BASE_SPACING_PX * scale}px`,
             backgroundPosition: `${panX}px ${panY}px`,
           }}
@@ -2152,7 +2152,7 @@ export function DroneCanvasDock({
                   markerHeight="7"
                   orient="auto-start-reverse"
                 >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(123, 188, 255, 0.92)" />
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--canvas-related)" />
                 </marker>
                 <marker
                   id={assignedMarkerId}
@@ -2163,7 +2163,7 @@ export function DroneCanvasDock({
                   markerHeight="7"
                   orient="auto-start-reverse"
                 >
-                  <path d="M 0 0 L 10 5 L 0 10 z" fill="rgba(255, 178, 36, 0.92)" />
+                  <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--canvas-assigned)" />
                 </marker>
               </defs>
               {relationshipEdges.map((edge) => (
@@ -2171,7 +2171,7 @@ export function DroneCanvasDock({
                   key={edge.key}
                   d={edge.path}
                   fill="none"
-                  stroke={edge.variant === 'assigned' ? 'rgba(255, 178, 36, 0.74)' : 'rgba(123, 188, 255, 0.74)'}
+                  stroke={edge.variant === 'assigned' ? 'var(--canvas-assigned-muted)' : 'var(--canvas-related-muted)'}
                   strokeWidth={edge.variant === 'assigned' ? '1.5' : '1.8'}
                   strokeLinecap="round"
                   strokeLinejoin="round"
@@ -2225,16 +2225,16 @@ export function DroneCanvasDock({
                 onClick={(event) => onNodeClick(node.droneId, event)}
                 onDoubleClick={(event) => onNodeDoubleClick(node.droneId, event)}
                 aria-pressed={selected}
-                className={`group/canvas-node absolute relative overflow-visible rounded-md border text-left px-2.5 shadow-[0_10px_20px_rgba(0,0,0,.28)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
+                className={`group/canvas-node absolute relative overflow-visible rounded-md border text-left px-2.5 shadow-[0_10px_20px_var(--shadow-color)] transition-[border-color,background-color,box-shadow] duration-100 flex items-center ${
                   dragging
                     ? 'border-[var(--accent)] bg-[var(--accent-subtle)]'
                     : assignmentHoverTarget
-                      ? 'border-[var(--accent)] bg-[rgba(21,31,46,.96)] shadow-[0_0_0_1px_rgba(123,188,255,.16),0_16px_28px_rgba(0,0,0,.3)]'
+                      ? 'border-[var(--accent)] bg-[var(--panel-raised)] shadow-[0_0_0_1px_var(--canvas-related-subtle),0_16px_28px_var(--shadow-color)]'
                     : selected || inlineEditing
-                      ? 'border-[var(--accent-muted)] bg-[rgba(38,46,66,.95)]'
+                      ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
                       : draftNode
-                        ? 'border-[rgba(138,152,184,.45)] bg-[rgba(16,18,23,.88)] hover:border-[rgba(138,152,184,.72)]'
-                        : 'border-[var(--border)] bg-[rgba(16,18,23,.92)] hover:border-[var(--accent-muted)]'
+                        ? 'border-[var(--user-border)] bg-[var(--panel-overlay-soft)] hover:border-[var(--muted)]'
+                        : 'border-[var(--border)] bg-[var(--panel-overlay)] hover:border-[var(--accent-muted)]'
                 }`}
                 style={{
                   left: 0,
@@ -2260,25 +2260,25 @@ export function DroneCanvasDock({
                 ) : null}
                 {showCanvasLastMessagePreviews && lastAgentSnippet ? (
                   <span
-                    className="pointer-events-none absolute left-0 bottom-full mb-[18px] z-[1] inline-flex max-w-[280px] rounded-[4px] border border-[var(--border-subtle)] bg-[rgba(10,14,22,.96)] px-2 py-1 text-[10px] leading-[1.35] text-[var(--muted)] shadow-[0_6px_14px_rgba(0,0,0,.35)]"
+                    className="pointer-events-none absolute left-0 bottom-full mb-[18px] z-[1] inline-flex max-w-[280px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-2 py-1 text-[10px] leading-[1.35] text-[var(--muted)] shadow-[0_6px_14px_var(--shadow-color)]"
                     title={lastAgentSnippet}
                   >
                     <span className="line-clamp-2 break-words whitespace-pre-wrap">{lastAgentSnippet}</span>
                   </span>
                 ) : null}
                 {draftNode ? (
-                  <span className="pointer-events-none absolute -top-2 left-2 z-[2] inline-flex items-center rounded-[4px] border border-[rgba(138,152,184,.4)] bg-[rgba(10,14,22,.96)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
+                  <span className="pointer-events-none absolute -top-2 left-2 z-[2] inline-flex items-center rounded-[4px] border border-[var(--user-border)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[8px] font-semibold uppercase tracking-[0.08em] text-[var(--muted)]">
                     Draft
                   </span>
                 ) : null}
                 {repoLabel ? (
-                  <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[rgba(10,14,22,.95)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_rgba(0,0,0,.28)]">
+                  <span className="pointer-events-none absolute left-2 top-full mt-[1px] inline-flex max-w-[260px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]">
                     {repoLabel}
                   </span>
                 ) : null}
                 {repoBranch ? (
                   <span
-                    className="pointer-events-none absolute right-2 top-full mt-[1px] inline-flex max-w-[180px] rounded-[4px] border border-[var(--border-subtle)] bg-[rgba(10,14,22,.95)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_rgba(0,0,0,.28)]"
+                    className="pointer-events-none absolute right-2 top-full mt-[1px] inline-flex max-w-[180px] rounded-[4px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] px-1.5 py-[1px] text-[9px] font-mono text-[var(--muted-dim)] shadow-[0_6px_14px_var(--shadow-color)]"
                     title={repoBranch}
                   >
                     {repoBranch}
@@ -2321,7 +2321,7 @@ export function DroneCanvasDock({
                           cancelInlineRename();
                         }
                       }}
-                      className="h-8 w-full rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[12.5px] font-semibold text-[var(--fg-secondary)] focus:outline-none focus:border-[var(--accent-muted)]"
+                      className="h-8 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[12.5px] font-semibold text-[var(--fg-secondary)] focus:outline-none focus:border-[var(--accent-muted)]"
                     />
                   ) : assignmentHoverTarget ? (
                     <span className="block">
@@ -2393,7 +2393,7 @@ export function DroneCanvasDock({
 
         {nodes.length === 0 ? (
           <div className="absolute inset-0 grid place-items-center px-5 text-center pointer-events-none">
-            <div className="rounded-lg border border-[var(--border-subtle)] bg-[rgba(11,13,18,.7)] px-4 py-3 max-w-[380px]">
+            <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-overlay-soft)] px-4 py-3 max-w-[380px]">
               <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                 Drone Canvas
               </div>

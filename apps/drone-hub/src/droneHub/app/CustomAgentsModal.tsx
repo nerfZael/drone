@@ -32,8 +32,8 @@ export function CustomAgentsModal({
   const canAdd = Boolean(newCustomAgentLabel.trim()) && Boolean(newCustomAgentCommand.trim());
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.55)] backdrop-blur-sm px-4" role="dialog" aria-modal="true">
-      <div className="w-full max-w-[640px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_rgba(0,0,0,.35)] overflow-hidden animate-slide-up relative">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim-soft)] backdrop-blur-sm px-4" role="dialog" aria-modal="true">
+      <div className="w-full max-w-[640px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_var(--shadow-color)] overflow-hidden animate-slide-up relative">
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
         <div className="px-5 py-4 border-b border-[var(--border)] flex items-center justify-between gap-3">
           <div className="font-semibold text-sm text-[var(--fg)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Custom agents</div>
@@ -50,7 +50,7 @@ export function CustomAgentsModal({
 
         <div className="px-5 py-4">
           {customAgentError && (
-            <div className="mb-3 p-3 rounded-lg bg-[var(--red-subtle)] border border-[rgba(248,81,73,.2)] text-xs text-[var(--red)]">
+            <div className="mb-3 p-3 rounded-lg bg-[var(--red-subtle)] border border-[var(--red-border)] text-xs text-[var(--red)]">
               {customAgentError}
             </div>
           )}
@@ -73,7 +73,7 @@ export function CustomAgentsModal({
                     <button
                       type="button"
                       onClick={() => onDeleteCustomAgent(a.id)}
-                      className="inline-flex items-center justify-center w-7 h-7 rounded-md border bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--red)] hover:border-[rgba(248,81,73,.35)] hover:bg-[var(--red-subtle)] transition-colors"
+                      className="inline-flex items-center justify-center w-7 h-7 rounded-md border bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--red)] hover:border-[var(--red-border)] hover:bg-[var(--red-subtle)] transition-colors"
                       title={`Delete custom agent "${a.label}"`}
                       aria-label={`Delete custom agent "${a.label}"`}
                     >

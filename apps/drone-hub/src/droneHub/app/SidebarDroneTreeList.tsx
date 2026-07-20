@@ -348,7 +348,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
   return (
     <div
       className={`relative flex items-stretch gap-1 rounded-md transition-colors ${
-        dragOverParenting ? 'bg-[rgba(80,130,255,.10)] ring-1 ring-[rgba(90,140,255,.34)]' : ''
+        dragOverParenting ? 'bg-[var(--info-subtle)] ring-1 ring-[var(--info-border)]' : ''
       }`}
       ref={reorderDropDisabled ? undefined : setNodeRef}
     >
@@ -496,7 +496,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
               }
             }}
             placeholder="Chat name"
-            className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[rgba(15,18,28,.88)] px-2 py-1 font-mono text-[11px] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
+            className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] px-2 py-1 font-mono text-[11px] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
           />
           {editorPending ? <IconSpinner className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-90" /> : null}
         </div>
@@ -555,7 +555,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
             }}
             onPointerDown={(event) => event.stopPropagation()}
             onMouseDown={(event) => event.stopPropagation()}
-            className={`inline-flex ${densityClasses.chatDeleteWidth} flex-shrink-0 items-center justify-center rounded border transition-opacity opacity-0 pointer-events-none group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto bg-[rgba(80,130,255,.10)] border-[rgba(90,140,255,.22)] text-[rgb(124,170,255)] hover:bg-[rgba(80,130,255,.16)]`}
+            className={`inline-flex ${densityClasses.chatDeleteWidth} flex-shrink-0 items-center justify-center rounded border transition-opacity opacity-0 pointer-events-none group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto bg-[var(--info-subtle)] border-[var(--info-border)] text-[var(--info)] hover:bg-[var(--info-subtle)]`}
             title={`Rename chat "${chatName}"`}
             aria-label={`Rename chat "${chatName}"`}
           >
@@ -575,7 +575,7 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
             className={`inline-flex ${densityClasses.chatDeleteWidth} flex-shrink-0 items-center justify-center rounded border transition-opacity ${
               deleting
                 ? 'bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                : 'opacity-0 pointer-events-none group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
+                : 'opacity-0 pointer-events-none group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
             }`}
             title={`Delete chat "${chatName}"`}
             aria-label={`Delete chat "${chatName}"`}
@@ -624,7 +624,7 @@ function SidebarDroneChildrenSection({
     <div
       ref={dropDisabled ? undefined : setNodeRef}
       className={`${className} rounded-md transition-colors ${
-        highlighted ? 'bg-[rgba(80,130,255,.08)] ring-1 ring-[rgba(90,140,255,.24)]' : ''
+        highlighted ? 'bg-[var(--info-subtle)] ring-1 ring-[var(--info-border)]' : ''
       }`}
     >
       {children}
@@ -710,7 +710,7 @@ function SidebarDroneNode({
             {drone.name}
           </span>
           <span
-            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-1 py-0.5 text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
+            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
             style={{ fontFamily: 'var(--display)' }}
             title="Draft"
           >
@@ -797,7 +797,7 @@ function SidebarDroneNode({
                     }
                   }}
                   placeholder="Chat name"
-                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[rgba(15,18,28,.88)] px-2 py-1 font-mono text-[11px] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
+                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] px-2 py-1 font-mono text-[11px] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
                 />
                 {chatEditor?.pending ? <IconSpinner className="h-3.5 w-3.5 flex-shrink-0 text-[var(--accent)] opacity-90" /> : null}
               </div>
@@ -812,7 +812,7 @@ function SidebarDroneNode({
                   className={`h-3 w-3 rounded-sm border ${
                     chatEditor?.createAsDraft === true
                       ? 'border-[var(--accent)] bg-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--surface-soft)]'
                   }`}
                 />
                 Draft

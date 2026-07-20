@@ -51,7 +51,7 @@ function settingsNavButtonClass(active: boolean) {
   return `w-full rounded border px-3 py-3 text-left transition-all ${
     active
       ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] shadow-[var(--glow-accent)]'
-      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] hover:bg-[var(--hover)]'
+      : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:bg-[var(--hover)]'
   }`;
 }
 
@@ -255,7 +255,7 @@ export function SettingsView({
                 <button
                   type="button"
                   onClick={onBackToWorkspace}
-                  className="w-full h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                  className="w-full h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   Back to drones
@@ -281,8 +281,8 @@ export function SettingsView({
                 disabled={settingsBusy}
                 className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                   settingsBusy
-                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
                 title="Refresh settings and logs"

@@ -168,7 +168,7 @@ export function DronePreviewDock({
             className={`inline-flex items-center justify-center h-5 w-5 rounded border transition-colors ${
               locked
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
             }`}
             title={
               locked
@@ -198,8 +198,8 @@ export function DronePreviewDock({
             disabled={!selectedUrl}
             className={`h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
               selectedUrl
-                ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
+                ? 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title={selectedUrl ? 'Reload browser preview' : 'No preview URL to reload'}
@@ -245,8 +245,8 @@ export function DronePreviewDock({
               placeholder={defaultDisplayUrl || (selectedPort ? `http://localhost:${selectedPort.containerPort}/` : 'http://localhost:3000/')}
               className={`flex-1 min-w-0 h-7 rounded border px-2 text-[11px] text-[var(--fg-secondary)] font-mono transition-colors ${
                 locked
-                  ? 'border-[var(--accent-muted)] bg-[rgba(0,0,0,.22)] text-[var(--muted)] cursor-default'
-                  : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] focus:outline-none focus:border-[var(--accent-muted)]'
+                  ? 'border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] text-[var(--muted)] cursor-default'
+                  : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] focus:outline-none focus:border-[var(--accent-muted)]'
               }`}
               title={locked ? 'Browser session is locked. Unlock to edit or save a new URL.' : 'Browser URL (saved per drone)'}
             />
@@ -254,7 +254,7 @@ export function DronePreviewDock({
               type="button"
               onClick={savePreviewUrl}
               disabled={locked}
-              className="h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
+              className="h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
               style={{ fontFamily: 'var(--display)' }}
               title={locked ? 'Unlock the browser session to save a new URL.' : 'Save browser URL for this drone'}
             >
@@ -271,7 +271,7 @@ export function DronePreviewDock({
               className={`h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
                 !locked && usingCustomUrl
                   ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:brightness-110'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
+                  : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
               }`}
               style={{ fontFamily: 'var(--display)' }}
               title={locked ? 'Unlock the browser session to change its saved URL.' : 'Reset to selected port URL'}
@@ -283,7 +283,7 @@ export function DronePreviewDock({
         </div>
 
         {!selectedUrl ? (
-          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[rgba(0,0,0,.1)] text-[11px] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
+          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] text-[11px] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
             {showStartupPlaceholder ? (
               <div className="max-w-[340px]">
                 <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -305,11 +305,11 @@ export function DronePreviewDock({
             )}
           </div>
         ) : shouldShowOfflineState ? (
-          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[rgba(0,0,0,.1)] text-[11px] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
+          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] text-[11px] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
             Port looks offline right now.
           </div>
         ) : iframeLoadFailed ? (
-          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[rgba(0,0,0,.1)] text-[11px] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
+          <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] text-[11px] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">
             This service does not allow iframe embedding.
           </div>
         ) : (

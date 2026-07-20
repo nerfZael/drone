@@ -14,9 +14,9 @@ type SetupWelcomeViewProps = {
 };
 
 function dependencyTone(status: string, blocking: boolean): string {
-  if (status === 'ready') return 'border-[rgba(52,211,153,.22)] bg-[rgba(16,185,129,.08)]';
-  if (blocking) return 'border-[rgba(255,90,90,.22)] bg-[rgba(255,90,90,.08)]';
-  return 'border-[rgba(255,214,102,.2)] bg-[rgba(255,214,102,.08)]';
+  if (status === 'ready') return 'border-[var(--green-border)] bg-[var(--green-subtle)]';
+  if (blocking) return 'border-[var(--red-border)] bg-[var(--red-subtle)]';
+  return 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)]';
 }
 
 function dependencySeverityLabel(status: string, blocking: boolean): string {
@@ -42,12 +42,12 @@ export function SetupWelcomeView({
     <div className="flex-1 overflow-y-auto">
       <div className="min-h-full px-4 py-5 sm:px-5 sm:py-6 lg:px-6 lg:py-8">
         <div className="mx-auto max-w-[1180px] flex flex-col gap-5">
-          <div className="rounded-[28px] border border-[rgba(255,255,255,.08)] bg-[linear-gradient(135deg,rgba(12,18,28,.96),rgba(17,25,36,.92))] overflow-hidden shadow-[0_30px_90px_rgba(0,0,0,.28)]">
+          <div className="rounded-[28px] border border-[var(--border)] bg-[linear-gradient(135deg,var(--panel-raised),var(--panel-alt))] overflow-hidden shadow-[0_30px_90px_var(--shadow-color)]">
             <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,.8fr)]">
               <div className="px-6 py-6 sm:px-8 sm:py-8 flex flex-col gap-5">
                 <div className="flex flex-col gap-3">
                   <div className="inline-flex items-center gap-2 text-[10px] uppercase tracking-[0.16em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-                    <span className="h-2 w-2 rounded-full bg-[var(--accent)] shadow-[0_0_18px_rgba(255,214,102,.55)]" />
+                    <span className="h-2 w-2 rounded-full bg-[var(--accent)] shadow-[var(--glow-accent)]" />
                     Drone Hub Setup
                   </div>
                   <div className="max-w-[18ch] text-[34px] leading-[1.02] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
@@ -59,13 +59,13 @@ export function SetupWelcomeView({
                 </div>
 
                 {setupStatusError && (
-                  <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+                  <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
                     {setupStatusError}
                   </div>
                 )}
 
                 <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-4 py-4">
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-4 py-4">
                     <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--muted-dim)] font-semibold">Active profile</div>
                     <div className="mt-2 text-[22px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
                       {setupStatus?.activeProfile ? formatProfileDisplayName(setupStatus.activeProfile) : 'Default'}
@@ -74,21 +74,21 @@ export function SetupWelcomeView({
                       {setupStatus?.profile.isFresh ? 'Fresh profile' : 'Returning profile'}
                     </div>
                   </div>
-                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-4 py-4">
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-4 py-4">
                     <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--muted-dim)] font-semibold">Blockers</div>
                     <div className="mt-2 text-[22px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
                       {blockers.length}
                     </div>
                     <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Things that will stop important flows from working.</div>
                   </div>
-                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-4 py-4">
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-4 py-4">
                     <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--muted-dim)] font-semibold">Warnings</div>
                     <div className="mt-2 text-[22px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
                       {recommended.length}
                     </div>
                     <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Recommended improvements that are not hard blockers.</div>
                   </div>
-                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-4 py-4">
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-4 py-4">
                     <div className="text-[10px] uppercase tracking-[0.1em] text-[var(--muted-dim)] font-semibold">Profile contents</div>
                     <div className="mt-2 text-[22px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
                       {setupStatus ? `${setupStatus.profile.droneCount} drones` : '...'}
@@ -106,7 +106,7 @@ export function SetupWelcomeView({
                     disabled={dismissingWelcome || setupStatusLoading}
                     className={`h-10 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                       dismissingWelcome || setupStatusLoading
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
@@ -116,7 +116,7 @@ export function SetupWelcomeView({
                   <button
                     type="button"
                     onClick={onOpenProfiles}
-                    className="h-10 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                    className="h-10 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                     style={{ fontFamily: 'var(--display)' }}
                   >
                     Open profiles
@@ -124,7 +124,7 @@ export function SetupWelcomeView({
                   <button
                     type="button"
                     onClick={onOpenGeneralSettings}
-                    className="h-10 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                    className="h-10 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                     style={{ fontFamily: 'var(--display)' }}
                   >
                     Open general settings
@@ -132,7 +132,7 @@ export function SetupWelcomeView({
                   <button
                     type="button"
                     onClick={onReload}
-                    className="h-10 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                    className="h-10 px-4 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                     style={{ fontFamily: 'var(--display)' }}
                   >
                     Refresh checks
@@ -140,7 +140,7 @@ export function SetupWelcomeView({
                 </div>
               </div>
 
-              <div className="border-t xl:border-t-0 xl:border-l border-[rgba(255,255,255,.08)] bg-[linear-gradient(180deg,rgba(255,255,255,.04),rgba(255,255,255,.015))] px-6 py-6 sm:px-8 sm:py-8 flex flex-col gap-4">
+              <div className="border-t xl:border-t-0 xl:border-l border-[var(--border)] bg-[linear-gradient(180deg,var(--surface-soft),var(--surface-faint))] px-6 py-6 sm:px-8 sm:py-8 flex flex-col gap-4">
                 <div>
                   <div className="text-[10px] uppercase tracking-[0.12em] text-[var(--muted-dim)] font-semibold" style={{ fontFamily: 'var(--display)' }}>
                     Suggested flow
@@ -150,15 +150,15 @@ export function SetupWelcomeView({
                   </div>
                 </div>
                 <div className="flex flex-col gap-3">
-                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-4 py-4">
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-4 py-4">
                     <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">1. Resolve blockers</div>
                     <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Docker, GitHub auth, and LLM setup have the biggest impact on first-run success.</div>
                   </div>
-                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-4 py-4">
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-4 py-4">
                     <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">2. Choose your profile strategy</div>
                     <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Keep this profile empty for onboarding tests or start creating drones and repos here.</div>
                   </div>
-                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-4 py-4">
+                  <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-4 py-4">
                     <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">3. Optional base image</div>
                     <div className="mt-1 text-[11px] text-[var(--muted-dim)]">Nice to have, not required. It improves repeatability once you know the shape of your environment.</div>
                   </div>
@@ -181,7 +181,7 @@ export function SetupWelcomeView({
               <div className="mt-4 grid grid-cols-1 md:grid-cols-2 gap-3">
                 {(setupStatusLoading && !setupStatus
                   ? Array.from({ length: 4 }).map((_, index) => (
-                      <div key={index} className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-4 py-4 text-[12px] text-[var(--muted-dim)]">
+                      <div key={index} className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-4 py-4 text-[12px] text-[var(--muted-dim)]">
                         Loading checks…
                       </div>
                     ))
@@ -216,15 +216,15 @@ export function SetupWelcomeView({
                     : 'This profile already contains saved Hub state, so it behaves like a returning workspace.'}
                 </div>
               </div>
-              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-4 py-4">
+              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-4">
                 <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">Drone data root</div>
                 <div className="mt-2 text-[11px] text-[var(--muted-dim)] break-all">{setupStatus?.profile.droneDataDir ?? 'Loading…'}</div>
               </div>
-              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-4 py-4">
+              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-4">
                 <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">DVM data root</div>
                 <div className="mt-2 text-[11px] text-[var(--muted-dim)] break-all">{setupStatus?.profile.dvmDataDir ?? 'Loading…'}</div>
               </div>
-              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-4 py-4">
+              <div className="rounded-2xl border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-4">
                 <div className="text-[11px] font-semibold text-[var(--fg-secondary)]">Recommended next move</div>
                 <div className="mt-2 text-[11px] text-[var(--muted-dim)]">
                   {blockers.length > 0

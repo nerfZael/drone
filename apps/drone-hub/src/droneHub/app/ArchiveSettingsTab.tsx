@@ -30,7 +30,7 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
   const archivedChatRows = archivedChats?.archived ?? [];
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
@@ -49,8 +49,8 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
           disabled={archivedDronesLoading || archivedChatsLoading}
           className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
             archivedDronesLoading || archivedChatsLoading
-              ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-              : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+              ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+              : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
           }`}
           style={{ fontFamily: 'var(--display)' }}
         >
@@ -59,12 +59,12 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
       </div>
 
       {(archivedDronesError || archivedChatsError) && (
-        <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
           {archivedDronesError ?? archivedChatsError}
         </div>
       )}
       {archiveNotice && (
-        <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
           {archiveNotice}
         </div>
       )}
@@ -75,11 +75,11 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
           {archivedDronesLoading && !archivedDrones ? (
             <div className="text-[12px] text-[var(--muted-dim)]">Loading archived drones…</div>
           ) : archivedRows.length === 0 ? (
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">No archived drones.</div>
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">No archived drones.</div>
           ) : (
             <div className="overflow-x-auto rounded border border-[var(--border-subtle)]">
               <table className="w-full min-w-[620px] text-left">
-                <thead className="bg-[rgba(255,255,255,.02)]">
+                <thead className="bg-[var(--surface-softest)]">
                   <tr>
                     <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Drone</th>
                     <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Archived</th>
@@ -114,8 +114,8 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
                               disabled={restoring || deleting}
                               className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                                 restoring || deleting
-                                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                               }`}
                               style={{ fontFamily: 'var(--display)' }}
                             >
@@ -127,8 +127,8 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
                               disabled={restoring || deleting}
                               className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                                 restoring || deleting
-                                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                  : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
+                                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                  : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
                               }`}
                               style={{ fontFamily: 'var(--display)' }}
                             >
@@ -150,11 +150,11 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
           {archivedChatsLoading && !archivedChats ? (
             <div className="text-[12px] text-[var(--muted-dim)]">Loading archived chats…</div>
           ) : archivedChatRows.length === 0 ? (
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">No archived chats.</div>
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">No archived chats.</div>
           ) : (
             <div className="overflow-x-auto rounded border border-[var(--border-subtle)]">
               <table className="w-full min-w-[720px] text-left">
-                <thead className="bg-[rgba(255,255,255,.02)]">
+                <thead className="bg-[var(--surface-softest)]">
                   <tr>
                     <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Drone</th>
                     <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Chat</th>
@@ -189,8 +189,8 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
                               disabled={restoring || deleting}
                               className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                                 restoring || deleting
-                                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                               }`}
                               style={{ fontFamily: 'var(--display)' }}
                             >
@@ -202,8 +202,8 @@ export function ArchiveSettingsTab({ deleteAction }: ArchiveSettingsTabProps) {
                               disabled={restoring || deleting}
                               className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                                 restoring || deleting
-                                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                  : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
+                                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                  : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
                               }`}
                               style={{ fontFamily: 'var(--display)' }}
                             >

@@ -35,7 +35,7 @@ export function ReferencesResultsPanel({
   if (!state.open) return null;
   const count = state.references.length;
   return (
-    <div className="border-t border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)]">
+    <div className="border-t border-[var(--border-subtle)] bg-[var(--surface-inset)]">
       <div className="h-9 px-3 flex items-center justify-between gap-3 border-b border-[var(--border-subtle)]">
         <div className="min-w-0 text-[11px] font-semibold text-[var(--fg-secondary)]">
           {state.loading ? 'Finding references...' : `${count} reference${count === 1 ? '' : 's'}`}

@@ -51,7 +51,7 @@ function AppliedSourceBadge({ source }: { source: 'repo' | 'drone' }) {
       className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] font-semibold tracking-wide uppercase ${
         source === 'repo'
           ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-          : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--fg-secondary)]'
+          : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)]'
       }`}
       style={{ fontFamily: 'var(--display)' }}
     >
@@ -230,7 +230,7 @@ export function DroneEnvDock({
           disabled={saving || Boolean(validationError)}
           className={`h-8 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
             saving || validationError
-              ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--muted-dim)]'
+              ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted-dim)]'
               : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
           }`}
           style={{ fontFamily: 'var(--display)' }}
@@ -241,33 +241,33 @@ export function DroneEnvDock({
 
       <div className="px-3 py-3 flex flex-col gap-3 text-[11px]">
         {disabled ? (
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-3 py-2 text-[var(--muted-dim)]">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[var(--muted-dim)]">
             {provisioningText}
           </div>
         ) : null}
         {loading ? (
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-3 py-3 text-[var(--muted-dim)]">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-3 text-[var(--muted-dim)]">
             Loading environment…
           </div>
         ) : null}
         {startup.waiting && !loading ? (
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-3 py-2 text-[var(--muted-dim)]">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[var(--muted-dim)]">
             {startup.timedOut ? 'Environment may still be syncing.' : provisioningText}
           </div>
         ) : null}
         {error ? (
-          <div className="rounded border border-[rgba(248,81,73,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--red)]">
+          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--red)]">
             {error}
           </div>
         ) : null}
         {saveNotice ? (
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-3 py-2 text-[var(--muted)]">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[var(--muted)]">
             {saveNotice}
           </div>
         ) : null}
         {data ? (
           <>
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3 flex flex-col gap-2">
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-2">
               <div className="flex items-center justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
@@ -297,7 +297,7 @@ export function DroneEnvDock({
               </div>
             </div>
 
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3 flex flex-col gap-2">
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-2">
               <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                 Applied Variables
               </div>
@@ -319,7 +319,7 @@ export function DroneEnvDock({
             </div>
 
             {repoEntries.length > 0 ? (
-              <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3 flex flex-col gap-2">
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-2">
                 <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                   Repository Variables
                 </div>
@@ -339,7 +339,7 @@ export function DroneEnvDock({
                         className={`h-8 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
                           !useRepoVars || saving
                             ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+                            : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
                         }`}
                         style={{ fontFamily: 'var(--display)' }}
                       >
@@ -366,7 +366,7 @@ export function DroneEnvDock({
                           className={`h-8 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
                             saving
                               ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+                              : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
                           }`}
                           style={{ fontFamily: 'var(--display)' }}
                         >
@@ -379,7 +379,7 @@ export function DroneEnvDock({
               </div>
             ) : null}
 
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3 flex flex-col gap-3">
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-3">
               <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
                 Custom Variables
               </div>

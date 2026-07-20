@@ -32,7 +32,7 @@ export function OpenedDroneFileTabs({
   if (normalizedTabs.length === 0) return null;
 
   return (
-    <div className="border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]">
+    <div className="border-b border-[var(--border-subtle)] bg-[var(--surface-soft)]">
       <div className="min-h-[34px] flex items-end gap-1 overflow-x-auto px-2 pt-1.5" role="tablist" aria-label="Open files">
         {normalizedTabs.map((tab) => {
           const active = tab.tabId === activeTabId;

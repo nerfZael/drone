@@ -138,7 +138,7 @@ export function GroupMultiChatWorkspace({
             </div>
           </div>
           <div className="flex items-center gap-2 flex-shrink-0">
-            <div className="inline-flex items-center gap-2 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
+            <div className="inline-flex items-center gap-2 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
               <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                 Width
               </span>
@@ -159,8 +159,8 @@ export function GroupMultiChatWorkspace({
                 disabled={groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX}
                 className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
                   groupMultiChatColumnWidth === GROUP_MULTI_CHAT_COLUMN_WIDTH_DEFAULT_PX
-                    ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                    ? 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-40 cursor-not-allowed'
+                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
                 title="Reset column width"
@@ -168,7 +168,7 @@ export function GroupMultiChatWorkspace({
                 Reset
               </button>
             </div>
-            <span className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-mono text-[var(--muted-dim)]">
+            <span className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-mono text-[var(--muted-dim)]">
               {selectedGroupMultiChatData.items.length} drone{selectedGroupMultiChatData.items.length !== 1 ? 's' : ''}
             </span>
             <button
@@ -178,7 +178,7 @@ export function GroupMultiChatWorkspace({
               className={`inline-flex items-center h-7 px-2 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
                 groupMultiChatStatusSort
                   ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
               title={
@@ -194,8 +194,8 @@ export function GroupMultiChatWorkspace({
               onClick={() => setGroupBroadcastExpanded((v) => !v)}
               className={`inline-flex items-center gap-1.5 h-7 px-2.5 rounded-md border text-[10px] font-semibold tracking-wide uppercase transition-all ${
                 groupBroadcastExpanded
-                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_0_1px_rgba(167,139,250,.15)]'
-                  : 'border-[var(--accent-muted)] bg-[rgba(167,139,250,.08)] text-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:shadow-[var(--glow-accent)]'
+                  ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[var(--glow-accent)]'
+                  : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent-subtle)] hover:shadow-[var(--glow-accent)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
               title={groupBroadcastExpanded ? 'Hide broadcast composer' : 'Broadcast a message to all drones'}
@@ -208,7 +208,7 @@ export function GroupMultiChatWorkspace({
             <button
               type="button"
               onClick={() => setSelectedGroupMultiChat(null)}
-              className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
+              className="inline-flex items-center h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
               style={{ fontFamily: 'var(--display)' }}
               title="Exit group multi-chat view"
             >
@@ -218,7 +218,7 @@ export function GroupMultiChatWorkspace({
         </div>
       </div>
       <div
-        className={`flex-shrink-0 overflow-hidden border-b border-[var(--border)] bg-[rgba(255,255,255,.01)] transition-[max-height,opacity,padding] duration-200 ease-out ${
+        className={`flex-shrink-0 overflow-hidden border-b border-[var(--border)] bg-[var(--surface-faint)] transition-[max-height,opacity,padding] duration-200 ease-out ${
           groupBroadcastExpanded ? 'max-h-[220px] opacity-100 px-3' : 'max-h-0 opacity-0 px-3 pointer-events-none'
         }`}
         aria-hidden={!groupBroadcastExpanded}

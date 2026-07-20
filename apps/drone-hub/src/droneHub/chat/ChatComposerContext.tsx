@@ -30,7 +30,7 @@ export function ChatComposerContext({ config }: { config?: ChatComposerContextCo
           {config.items.map((item) => (
             <div
               key={item.id}
-              className="relative w-[190px] flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-2 py-1.5"
+              className="relative w-[190px] flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5"
             >
               <div className="min-w-0 truncate text-[10px] font-medium text-[var(--fg-secondary)]" title={item.label}>
                 {item.label}

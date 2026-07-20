@@ -36,17 +36,17 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
   return (
     <div className="flex flex-col gap-4">
       {profileSettingsError && (
-        <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
           {profileSettingsError}
         </div>
       )}
       {profileSettingsNotice && (
-        <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
           {profileSettingsNotice}
         </div>
       )}
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,320px)_minmax(0,1fr)] gap-4">
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-4 py-4 flex flex-col gap-4">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-4 py-4 flex flex-col gap-4">
           <div className="flex flex-col gap-2">
             <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Active profile
@@ -59,7 +59,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
             </div>
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 flex flex-col gap-2">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 flex flex-col gap-2">
             <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Resolved paths</div>
             <div className="text-[11px] text-[var(--muted-dim)] break-all">Drone: {profileSettings?.droneDataDir ?? 'Loading…'}</div>
             <div className="text-[11px] text-[var(--muted-dim)] break-all">DVM: {profileSettings?.dvmDataDir ?? 'Loading…'}</div>
@@ -70,7 +70,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
             <input
               value={createProfileDraft}
               onChange={(e) => setCreateProfileDraft(e.target.value)}
-              className="h-10 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+              className="h-10 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
               placeholder="Enter profile name"
               disabled={isBusy}
             />
@@ -80,7 +80,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
               disabled={!createProfileDraftTrimmed || isBusy}
               className={`h-10 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 !createProfileDraftTrimmed || isBusy
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
               }`}
               style={{ fontFamily: 'var(--display)' }}
@@ -90,7 +90,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
           </div>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-4 py-4 flex flex-col gap-3">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-4 py-4 flex flex-col gap-3">
           <div className="flex items-center justify-between gap-3">
             <div>
               <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -120,7 +120,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                     className={`rounded border px-4 py-4 transition-colors ${
                       item.active
                         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)]'
                     }`}
                   >
                     <div className="flex flex-col gap-3">
@@ -136,7 +136,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                                     [item.name]: e.target.value,
                                   }))
                                 }
-                                className="h-10 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+                                className="h-10 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
                                 disabled={renaming}
                               />
                               <div className="flex items-center gap-2">
@@ -146,7 +146,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                                   disabled={!String(renameDraft).trim() || renaming}
                                   className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                                     !String(renameDraft).trim() || renaming
-                                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                                       : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
                                   }`}
                                   style={{ fontFamily: 'var(--display)' }}
@@ -164,7 +164,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                                     });
                                   }}
                                   disabled={renaming}
-                                  className="h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                                  className="h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                                   style={{ fontFamily: 'var(--display)' }}
                                 >
                                   Cancel
@@ -178,7 +178,7 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                                   {formatProfileDisplayName(item.name)}
                                 </div>
                                 {item.active && (
-                                  <span className="rounded-full border border-[rgba(52,211,153,.24)] bg-[rgba(16,185,129,.08)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[#34d399]">
+                                  <span className="rounded-full border border-[var(--green-border)] bg-[var(--green-subtle)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--green)]">
                                     Active
                                   </span>
                                 )}
@@ -197,8 +197,8 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                               disabled={item.active || rowBusy}
                               className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                                 item.active || rowBusy
-                                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                               }`}
                               style={{ fontFamily: 'var(--display)' }}
                             >
@@ -216,8 +216,8 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                               disabled={rowBusy}
                               className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                                 rowBusy
-                                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                               }`}
                               style={{ fontFamily: 'var(--display)' }}
                             >
@@ -235,8 +235,8 @@ export function ProfilesSettingsTab({ profile }: { profile: UseProfileSettingsRe
                               disabled={item.active || rowBusy}
                               className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                                 item.active || rowBusy
-                                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                  : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
+                                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                  : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
                               }`}
                               style={{ fontFamily: 'var(--display)' }}
                             >

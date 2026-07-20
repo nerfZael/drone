@@ -14,7 +14,7 @@ export function AutomationSettingsSection() {
   const clearAutomations = useDroneHubUiStore((s) => s.clearAutomations);
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
       <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
         Automation
       </div>
@@ -41,8 +41,8 @@ export function AutomationSettingsSection() {
             disabled={automations.length === 0}
             className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
               automations.length === 0
-                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
+                ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title="Delete all automation jobs"
@@ -53,7 +53,7 @@ export function AutomationSettingsSection() {
       </div>
 
       {automations.length === 0 ? (
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">
           No automation jobs yet. Create one, then run it from the chat automation button.
         </div>
       ) : (

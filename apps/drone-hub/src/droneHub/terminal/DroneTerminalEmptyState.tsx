@@ -7,7 +7,7 @@ export function DroneTerminalEmptyState({
 }) {
   return (
     <div className="absolute inset-0 z-10 flex items-center justify-center text-center px-6">
-      <div className="max-w-[320px] rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.35)] backdrop-blur px-4 py-3">
+      <div className="max-w-[320px] rounded-md border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] backdrop-blur px-4 py-3">
         <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
           Terminal
         </div>

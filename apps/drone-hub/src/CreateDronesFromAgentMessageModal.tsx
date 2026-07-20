@@ -66,9 +66,9 @@ export function CreateDronesFromAgentMessageModal(props: {
   ];
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.55)] backdrop-blur-sm px-4" role="dialog" aria-modal="true">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim)] backdrop-blur-sm px-4" role="dialog" aria-modal="true">
       <div
-        className="w-full max-w-[760px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_rgba(0,0,0,.35)] overflow-hidden animate-slide-up relative"
+        className="w-full max-w-[760px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_var(--shadow-color)] overflow-hidden animate-slide-up relative"
         onKeyDownCapture={(e) => {
           // Ctrl+Enter: spawn focused job (if inside a job card)
           // Ctrl+Shift+Enter: spawn all (anywhere in popup)
@@ -142,13 +142,13 @@ export function CreateDronesFromAgentMessageModal(props: {
               <input
                 value={jobsModal.group}
                 onChange={(e) => props.onChangeGroup(e.target.value)}
-                className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+                className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
                 placeholder="e.g. auth, billing, frontend"
               />
               <button
                 type="button"
                 onClick={props.onClearGroup}
-                className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
+                className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Clear group"
               >
@@ -244,7 +244,7 @@ export function CreateDronesFromAgentMessageModal(props: {
                             value={nameRaw}
                             onChange={(e) => props.onUpdateJob(j.id, { name: e.target.value })}
                             className={`w-full h-9 rounded-lg border bg-[var(--panel-raised)] px-3 text-[13px] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
-                              invalidName || dupName ? 'border-[rgba(248,81,73,.35)]' : 'border-[var(--border-subtle)]'
+                              invalidName || dupName ? 'border-[var(--red-border)]' : 'border-[var(--border-subtle)]'
                             }`}
                             placeholder="e.g. split-server-app"
                           />
@@ -268,7 +268,7 @@ export function CreateDronesFromAgentMessageModal(props: {
                       {detailsTrimmed && (
                         <div className="mt-2">
                           {!detailsOpen && detailsPreview && (
-                            <div className="text-[11px] leading-[1.6] text-[var(--muted-dim)] whitespace-pre-wrap border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] rounded-lg px-3 py-2">
+                            <div className="text-[11px] leading-[1.6] text-[var(--muted-dim)] whitespace-pre-wrap border border-[var(--border-subtle)] bg-[var(--surface-softest)] rounded-lg px-3 py-2">
                               {detailsPreview}
                             </div>
                           )}

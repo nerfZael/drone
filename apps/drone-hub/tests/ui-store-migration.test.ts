@@ -56,6 +56,15 @@ describe('drone hub ui store migration', () => {
     });
   });
 
+  test('normalizes persisted desktop themes', () => {
+    expect(migrateDroneHubUiPersistedState({ themeId: 'catppuccin-mocha' }, 14)).toMatchObject({
+      themeId: 'catppuccin-mocha',
+    });
+    expect(migrateDroneHubUiPersistedState({ themeId: 'unknown' }, 14)).toMatchObject({
+      themeId: 'monolith',
+    });
+  });
+
   test('migrates legacy global spawn defaults into the non-repo bucket', () => {
     const migrated = migrateDroneHubUiPersistedState(
       {

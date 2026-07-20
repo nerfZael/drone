@@ -157,7 +157,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
           statusLabel: item.ok ? 'Done' : 'Failed',
           output: output || (item.ok ? '(no output)' : 'failed'),
           outputClassName: item.ok ? 'dh-markdown--agent' : undefined,
-          fadeTo: 'rgba(0,0,0,.14)',
+          fadeTo: 'var(--surface-inset)',
         };
         }),
     [runs],
@@ -178,7 +178,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
           statusLabel: pendingRunStatusLabel(item.state),
           output: pendingRunOutput(item),
           outputClassName: item.state === 'failed' ? undefined : 'dh-markdown--agent',
-          fadeTo: item.state === 'failed' ? 'var(--red-subtle)' : 'rgba(29,43,66,.2)',
+          fadeTo: item.state === 'failed' ? 'var(--red-subtle)' : 'var(--info-subtle)',
         };
         }),
     [completedRows.length, pendingRuns],
@@ -203,7 +203,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
             statusLabel: item.ok ? 'Done' : 'Failed',
             output: output || (item.ok ? '(no output)' : 'failed'),
             outputClassName: item.ok ? 'dh-markdown--agent' : undefined,
-            fadeTo: item.ok ? 'rgba(29,43,66,.2)' : 'var(--red-subtle)',
+            fadeTo: item.ok ? 'var(--info-subtle)' : 'var(--red-subtle)',
           };
         }),
     [runs],
@@ -219,7 +219,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
           statusLabel: pendingRunStatusLabel(item.state),
           output: pendingRunOutput(item),
           outputClassName: item.state === 'failed' ? undefined : 'dh-markdown--agent',
-          fadeTo: item.state === 'failed' ? 'var(--red-subtle)' : 'rgba(29,43,66,.2)',
+          fadeTo: item.state === 'failed' ? 'var(--red-subtle)' : 'var(--info-subtle)',
         })),
     [pendingRuns],
   );
@@ -254,10 +254,10 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
               <span
                 className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
                   headerBadgeTone === 'failed'
-                    ? 'border-[rgba(255,90,90,.28)] bg-[var(--red-subtle)] text-[var(--red)]'
+                    ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
                     : headerBadgeTone === 'queued'
-                      ? 'border-[rgba(96,165,250,.35)] bg-[rgba(59,130,246,.12)] text-[#60a5fa]'
-                      : 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+                      ? 'border-[var(--info-border)] bg-[var(--info-subtle)] text-[var(--info)]'
+                      : 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
                 }`}
               >
                 {headerBadgeLabel}
@@ -270,7 +270,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
       {headerError ? <div className="mt-2 text-[10px] text-[var(--red)] whitespace-pre-wrap">{headerError}</div> : null}
 
       {promptText ? (
-        <div className="mt-3 rounded border border-[rgba(148,163,184,.16)] bg-[var(--user-dim)] px-3 py-2">
+        <div className="mt-3 rounded border border-[var(--user-border)] bg-[var(--user-dim)] px-3 py-2">
           <div className="text-[10px] text-[var(--muted-dim)] uppercase tracking-wide mb-1">Prompt</div>
           <div className="text-[12px] text-[var(--fg-secondary)] whitespace-pre-wrap break-words">{promptDisplay}</div>
           {promptNeedsTruncate ? (
@@ -289,7 +289,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
       {runRows.length > 0 ? (
         <div className="mt-3 overflow-x-auto rounded border border-[var(--border-subtle)]">
           <table className="w-full min-w-[560px] text-left">
-            <thead className="bg-[rgba(255,255,255,.02)]">
+            <thead className="bg-[var(--surface-softest)]">
               <tr>
                 <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Run</th>
                 <th className="px-3 py-2 text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Status</th>
@@ -308,10 +308,10 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
                         <span
                           className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
                             row.status === 'done'
-                              ? 'border-[rgba(52,211,153,.25)] bg-[rgba(16,185,129,.08)] text-[#34d399]'
+                              ? 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]'
                               : row.status === 'failed'
-                                ? 'border-[rgba(255,90,90,.28)] bg-[var(--red-subtle)] text-[var(--red)]'
-                                : 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+                                ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
+                                : 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
                           }`}
                         >
                           {row.statusLabel}
@@ -336,7 +336,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
                         <button
                           type="button"
                           onClick={() => setExpandedRunKey((prev) => (prev === row.rowKey ? null : row.rowKey))}
-                          className="h-7 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                          className="h-7 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                           style={{ fontFamily: 'var(--display)' }}
                         >
                           {expanded ? 'Hide' : 'Expand'}
@@ -344,7 +344,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
                       </td>
                     </tr>
                     {expanded ? (
-                      <tr className="border-t border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)]">
+                      <tr className="border-t border-[var(--border-subtle)] bg-[var(--surface-inset)]">
                         <td className="px-3 py-3" colSpan={4}>
                           <CollapsibleMarkdown
                             text={row.output}
@@ -370,17 +370,17 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
       ) : null}
 
       {latestSummary ? (
-        <div className="mt-3 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-3 py-3">
+        <div className="mt-3 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
           <div className="flex items-center justify-between gap-3">
             <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] font-semibold">Final message response</div>
             <div className="flex items-center gap-2">
               <span
                 className={`inline-flex items-center rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
                   latestSummary.status === 'done'
-                    ? 'border-[rgba(52,211,153,.25)] bg-[rgba(16,185,129,.08)] text-[#34d399]'
+                    ? 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]'
                     : latestSummary.status === 'failed'
-                      ? 'border-[rgba(255,90,90,.28)] bg-[var(--red-subtle)] text-[var(--red)]'
-                      : 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+                      ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
+                      : 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
                 }`}
               >
                 {latestSummary.statusLabel}

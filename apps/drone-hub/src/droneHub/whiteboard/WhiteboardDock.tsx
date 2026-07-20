@@ -27,7 +27,7 @@ export function WhiteboardDock() {
 
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] flex flex-col overflow-hidden">
-      <div className="flex-shrink-0 border-b border-[var(--border)] bg-[rgba(255,255,255,.03)] px-2.5 py-2 flex items-center gap-2">
+      <div className="flex-shrink-0 border-b border-[var(--border)] bg-[var(--surface-soft)] px-2.5 py-2 flex items-center gap-2">
         <div className="min-w-0 flex-1">
           <div className="text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
             Whiteboard
@@ -61,7 +61,7 @@ export function WhiteboardDock() {
         </div>
       </div>
       {error || notice ? (
-        <div className={`flex-shrink-0 border-b px-3 py-2 text-[11px] ${error ? 'border-red-500/30 bg-red-500/10 text-red-200' : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--muted)]'}`}>
+        <div className={`flex-shrink-0 border-b px-3 py-2 text-[11px] ${error ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted)]'}`}>
           {error ?? notice}
         </div>
       ) : null}

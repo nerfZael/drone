@@ -9,6 +9,8 @@ import { provisioningLabel, usePaneReadiness } from '../panes/usePaneReadiness';
 import { DroneTerminalEmptyState } from './DroneTerminalEmptyState';
 import { DroneTerminalTabsBar } from './DroneTerminalTabsBar';
 import type { TerminalPaneSessionsState } from './terminal-tabs-state';
+import { desktopThemeDefinition } from '../../theme';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
 
 const TERMINAL_INITIAL_TAIL_LINES = 40;
 const TERMINAL_MAX_BYTES = 200_000;
@@ -116,6 +118,7 @@ export function DroneTerminalDock({
   hubPhase?: 'draft' | 'creating' | 'starting' | 'seeding' | 'error' | null;
   hubMessage?: string | null;
 }) {
+  const themeId = useDroneHubUiStore((state) => state.themeId);
   const normalizedCwd = React.useMemo(() => normalizeTerminalCwdInput(defaultCwd), [defaultCwd]);
   const activeSession = React.useMemo(
     () => sessionsState.sessions.find((session) => session.id === sessionsState.activeSessionId) ?? null,
@@ -310,29 +313,7 @@ export function DroneTerminalDock({
       convertEol: false,
       fontSize: 12,
       fontFamily: "'JetBrains Mono', 'Fira Code', ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-      theme: {
-        background: '#101216',
-        foreground: '#A8AEBE',
-        cursor: '#A78BFA',
-        cursorAccent: '#101216',
-        selectionBackground: 'rgba(167,139,250,0.15)',
-        black: '#1E2329',
-        red: '#FF5A5A',
-        green: '#4ADE80',
-        yellow: '#FFB224',
-        blue: '#388bfd',
-        magenta: '#C084FC',
-        cyan: '#22D3EE',
-        white: '#DFE3EA',
-        brightBlack: '#4E5468',
-        brightRed: '#FF7676',
-        brightGreen: '#34FFBA',
-        brightYellow: '#FFD666',
-        brightBlue: '#60A5FA',
-        brightMagenta: '#D8B4FE',
-        brightCyan: '#67E8F9',
-        brightWhite: '#F0F2F6',
-      },
+      theme: desktopThemeDefinition(themeId).terminal,
       allowProposedApi: false,
       scrollback: 15_000,
     });
@@ -366,6 +347,12 @@ export function DroneTerminalDock({
       terminal.dispose();
     };
   }, [queueInput]);
+
+  React.useEffect(() => {
+    const terminal = terminalRef.current;
+    if (!terminal) return;
+    terminal.options.theme = desktopThemeDefinition(themeId).terminal;
+  }, [themeId]);
 
   React.useEffect(() => {
     if (!droneName || disabled || !activeSessionId || !activeSession) {
@@ -845,13 +832,13 @@ export function DroneTerminalDock({
         onCreateSession={handleCreateSession}
       />
 
-      <div className="flex-1 min-h-0 bg-[#101216] relative pt-1 pl-1">
+      <div className="flex-1 min-h-0 bg-[var(--bg)] relative pt-1 pl-1">
         {!disabled && sessionsState.initialized && sessionsState.sessions.length === 0 ? (
           <DroneTerminalEmptyState onCreateSession={handleCreateSession} />
         ) : null}
         {disabled && (
           <div className="absolute inset-0 z-10 flex items-center justify-center text-center px-6">
-            <div className="max-w-[360px] rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.35)] backdrop-blur px-4 py-3">
+            <div className="max-w-[360px] rounded-md border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] backdrop-blur px-4 py-3">
               <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                 {provisioningLabel(hubPhase)}
               </div>

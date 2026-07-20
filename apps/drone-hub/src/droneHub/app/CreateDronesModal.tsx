@@ -219,11 +219,11 @@ export function CreateDronesModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.55)] backdrop-blur-sm px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim-soft)] backdrop-blur-sm px-4"
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-[760px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_rgba(0,0,0,.35)] overflow-hidden animate-slide-up relative">
+      <div className="w-full max-w-[760px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_var(--shadow-color)] overflow-hidden animate-slide-up relative">
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
         <form
           onKeyDown={(e) => {
@@ -303,7 +303,7 @@ export function CreateDronesModal({
           </div>
           <div className="px-5 py-4 max-h-[70vh] overflow-auto">
             {createError && (
-              <div className="mb-4 p-3 rounded border border-[rgba(255,90,90,.15)] bg-[var(--red-subtle)] text-xs text-[var(--red)] whitespace-pre-wrap">
+              <div className="mb-4 p-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-xs text-[var(--red)] whitespace-pre-wrap">
                 {createError}
               </div>
             )}
@@ -393,14 +393,14 @@ export function CreateDronesModal({
                 <input
                   value={createGroup}
                   onChange={(e) => onCreateGroupChange(e.target.value)}
-                  className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+                  className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
                   placeholder="e.g. auth, billing, frontend"
                   disabled={creating}
                 />
                 <button
                   type="button"
                   onClick={onClearCreateGroup}
-                  className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
+                  className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
                   style={{ fontFamily: 'var(--display)' }}
                   title="Clear group"
                   disabled={creating}
@@ -434,7 +434,7 @@ export function CreateDronesModal({
                 <button
                   type="button"
                   onClick={onClearCreateRepoPath}
-                  className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
+                  className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
                   style={{ fontFamily: 'var(--display)' }}
                   title="Clear repo path"
                   disabled={creating}
@@ -520,8 +520,8 @@ export function CreateDronesModal({
                   disabled={creating || (createMode === 'clone' && cloneIncludeChats) || hostCustomAgentsUnsupported}
                   className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                     creating || (createMode === 'clone' && cloneIncludeChats) || hostCustomAgentsUnsupported
-                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
                   title={hostCustomAgentsUnsupported ? 'Custom agents are not yet supported for host runtime.' : 'Manage saved custom agents'}
@@ -550,7 +550,7 @@ export function CreateDronesModal({
                   className={`h-9 px-3 rounded border text-[11px] font-semibold tracking-wide uppercase transition-all ${
                     !spawnAgentAccessCopiedFromClone && spawnAgentPermissionMode === 'full-access'
                       ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                   } ${spawnAgentAccessDisabled ? 'opacity-40 cursor-not-allowed' : ''}`}
                   style={{ fontFamily: 'var(--display)' }}
                 >
@@ -566,7 +566,7 @@ export function CreateDronesModal({
                   className={`h-9 px-3 rounded border text-[11px] font-semibold tracking-wide uppercase transition-all ${
                     !spawnAgentAccessCopiedFromClone && spawnAgentPermissionMode === 'read-only'
                       ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                   } ${spawnAgentAccessDisabled || !spawnAgentReadOnlySupported ? 'opacity-40 cursor-not-allowed' : ''}`}
                   style={{ fontFamily: 'var(--display)' }}
                   title={
@@ -629,8 +629,8 @@ export function CreateDronesModal({
                   disabled={creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind === 'custom' || !spawnModel.trim()}
                   className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                     creating || (createMode === 'clone' && cloneIncludeChats) || spawnAgentConfig.kind === 'custom' || !spawnModel.trim()
-                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
                 >
@@ -662,7 +662,7 @@ export function CreateDronesModal({
                   />
                 </div>
               ) : null}
-              {modelCatalog.error ? <span className="mt-1 block text-[10px] text-[var(--danger)]">{modelCatalog.error}</span> : null}
+              {modelCatalog.error ? <span className="mt-1 block text-[10px] text-[var(--red)]">{modelCatalog.error}</span> : null}
               <span className="text-[10px] text-[var(--muted-dim)] block mt-1">
                 {createMode === 'clone' && cloneIncludeChats
                   ? 'When cloning chats, model settings are copied from the source chats.'
@@ -713,7 +713,7 @@ export function CreateDronesModal({
                 type="button"
                 onClick={onAppendCreateNameRow}
                 disabled={creating}
-                className="h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
+                className="h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Add another drone"
               >
@@ -740,7 +740,7 @@ export function CreateDronesModal({
                             value={nameRaw}
                             onChange={(e) => onUpdateCreateNameRow(idx, e.target.value)}
                             className={`w-full h-9 rounded-lg border bg-[var(--panel-raised)] px-3 text-[13px] font-mono text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none ${
-                              invalidName || dupName ? 'border-[rgba(248,81,73,.35)]' : 'border-[var(--border-subtle)]'
+                              invalidName || dupName ? 'border-[var(--red-border)]' : 'border-[var(--border-subtle)]'
                             }`}
                             placeholder="e.g. split-server-app"
                             disabled={creating}

@@ -138,7 +138,7 @@ export function ApprovalCard({
           <button
             type="button"
             onClick={() => setShowJson((value) => !value)}
-            className="h-7 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+            className="h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             {showJson ? 'Hide JSON' : 'JSON'}
@@ -147,7 +147,7 @@ export function ApprovalCard({
             type="button"
             disabled={busy}
             onClick={onDeny}
-            className="h-7 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-50"
+            className="h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-50"
             style={{ fontFamily: 'var(--display)' }}
           >
             Deny
@@ -179,7 +179,7 @@ export function ApprovalCard({
         </div>
       ) : null}
       {summary.markdown ? (
-        <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-2.5 py-2">
+        <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2.5 py-2">
           {summary.markdownLabel ? (
             <div
               className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
@@ -192,7 +192,7 @@ export function ApprovalCard({
         </div>
       ) : null}
       {showJson ? (
-        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-[rgba(0,0,0,.16)] p-2 text-[10px] text-[var(--muted)]">
+        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--surface-inset)] p-2 text-[10px] text-[var(--muted)]">
           {JSON.stringify(approval.args, null, 2)}
         </pre>
       ) : null}

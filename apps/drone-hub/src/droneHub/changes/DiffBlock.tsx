@@ -180,7 +180,7 @@ function GapActionButton({
       type="button"
       onClick={onClick}
       disabled={disabled}
-      className="inline-flex items-center justify-center rounded-full border border-[var(--border-subtle)] bg-transparent px-2 py-[1px] text-[9px] font-semibold tracking-wide text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.03)] disabled:opacity-40 disabled:cursor-wait"
+      className="inline-flex items-center justify-center rounded-full border border-[var(--border-subtle)] bg-transparent px-2 py-[1px] text-[9px] font-semibold tracking-wide text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--surface-soft)] disabled:opacity-40 disabled:cursor-wait"
       title={title}
     >
       {label}
@@ -203,7 +203,7 @@ function GapRow({
   return (
     <div className="w-full flex items-center justify-between gap-2 rounded-md px-2 py-1 text-[10px] text-[var(--muted)]">
       <div className="flex items-center gap-2 min-w-0">
-        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] leading-none text-[var(--muted-dim)]">
+        <span className="inline-flex items-center justify-center w-4 h-4 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] leading-none text-[var(--muted-dim)]">
           +
         </span>
         <span className="truncate text-[var(--muted-dim)]">{loading ? 'Expanding...' : hiddenLineLabel}</span>
@@ -466,7 +466,7 @@ export function DiffBlock({
   return (
     <div className="rdv-wrapper px-2 py-2">
       {expansionError ? (
-        <div className="mb-2 px-2 py-1 rounded border border-[rgba(255,90,90,.28)] bg-[var(--red-subtle)] text-[10px] text-[var(--red)]">
+        <div className="mb-2 px-2 py-1 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[10px] text-[var(--red)]">
           {expansionError}
         </div>
       ) : null}

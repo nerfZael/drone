@@ -227,12 +227,12 @@ function ViewedProgressBadge({
 
   return (
     <span
-      className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-1.5 py-[1px]"
+      className="inline-flex items-center gap-1.5 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-1.5 py-[1px]"
       title={`${safeViewed} of ${safeTotal} files viewed${safeStale > 0 ? ` • ${safeStale} changed since viewed` : ''}`}
     >
       <span className="relative inline-flex items-center justify-center w-4 h-4">
         <svg viewBox="0 0 16 16" className="w-4 h-4 -rotate-90" aria-hidden="true">
-          <circle cx="8" cy="8" r={radius} fill="none" stroke="rgba(255,255,255,0.12)" strokeWidth="2" />
+          <circle cx="8" cy="8" r={radius} fill="none" stroke="var(--border)" strokeWidth="2" />
           <circle
             cx="8"
             cy="8"
@@ -2474,8 +2474,8 @@ export function DroneChangesDock({
     const canToggleViewed = primaryView === 'changes' && Boolean(activeReviewScopeId);
     const buttonClassName = `inline-flex items-center justify-center w-6 h-6 rounded border transition-all ${
       alwaysVisible
-        ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
-        : 'opacity-0 pointer-events-none group-hover/file:opacity-100 group-hover/file:pointer-events-auto border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+        ? 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+        : 'opacity-0 pointer-events-none group-hover/file:opacity-100 group-hover/file:pointer-events-auto border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
     }`;
     return (
       <div className="shrink-0 inline-flex items-center gap-1">
@@ -2487,7 +2487,7 @@ export function DroneChangesDock({
               viewedState === 'viewed'
                 ? 'border-[var(--accent-muted)] text-[var(--accent)]'
                 : viewedState === 'stale'
-                  ? 'border-[rgba(255,178,36,.35)] text-[var(--yellow)]'
+                  ? 'border-[var(--yellow-border)] text-[var(--yellow)]'
                   : ''
             }`}
             title={
@@ -2556,9 +2556,9 @@ export function DroneChangesDock({
                 }}
                 className={`w-full text-left px-1 rounded border transition-colors flex items-center gap-0.5 ${
                   dirAllViewed
-                    ? 'border-transparent opacity-65 hover:bg-[rgba(255,255,255,.03)]'
+                    ? 'border-transparent opacity-65 hover:bg-[var(--surface-soft)]'
                     : dirHasChanged
-                      ? 'border-[rgba(255,178,36,.14)] bg-[rgba(255,178,36,.04)] hover:bg-[rgba(255,178,36,.08)]'
+                      ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] hover:bg-[var(--yellow-subtle)]'
                       : 'border-transparent hover:bg-[var(--hover)]'
                 }`}
                 style={{
@@ -2587,7 +2587,7 @@ export function DroneChangesDock({
                 </span>
                 {reviewSummary?.stale ? (
                   <span
-                    className="inline-flex items-center justify-center rounded border px-1 text-[var(--yellow)] border-[rgba(255,178,36,.35)] bg-[rgba(255,178,36,.08)] tabular-nums"
+                    className="inline-flex items-center justify-center rounded border px-1 text-[var(--yellow)] border-[var(--yellow-border)] bg-[var(--yellow-subtle)] tabular-nums"
                     style={{ fontSize: `${Math.max(8, explorerMetaTextSizePx - 1)}px`, height: `${explorerBadgeHeightPx}px` }}
                     title={`${reviewSummary.stale} file${reviewSummary.stale === 1 ? '' : 's'} changed since viewed`}
                   >
@@ -2598,7 +2598,7 @@ export function DroneChangesDock({
                   <span
                     className={`inline-flex items-center justify-center rounded border px-1 tabular-nums ${
                       hideViewed
-                        ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--muted)]'
+                        ? 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted)]'
                         : 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                     }`}
                     style={{ fontSize: `${Math.max(8, explorerMetaTextSizePx - 1)}px`, height: `${explorerBadgeHeightPx}px` }}
@@ -2647,9 +2647,9 @@ export function DroneChangesDock({
               active
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
                 : viewedState === 'viewed'
-                  ? 'border-transparent opacity-60 hover:bg-[rgba(255,255,255,.03)]'
+                  ? 'border-transparent opacity-60 hover:bg-[var(--surface-soft)]'
                   : viewedState === 'stale'
-                    ? 'border-[rgba(255,178,36,.18)] bg-[rgba(255,178,36,.05)] hover:bg-[rgba(255,178,36,.08)]'
+                    ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] hover:bg-[var(--yellow-subtle)]'
                     : 'border-transparent hover:bg-[var(--hover)]'
             }`}
             style={{
@@ -2678,7 +2678,7 @@ export function DroneChangesDock({
                 className={`inline-flex items-center justify-center rounded border px-1 font-semibold ${
                   viewedState === 'viewed'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[rgba(255,178,36,.35)] bg-[rgba(255,178,36,.08)] text-[var(--yellow)]'
+                    : 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
                 }`}
                 style={{ fontSize: `${Math.max(8, explorerMetaTextSizePx - 1)}px`, height: `${explorerBadgeHeightPx}px` }}
                 title={viewedState === 'viewed' ? 'Viewed' : 'Changed since viewed'}
@@ -2834,7 +2834,7 @@ export function DroneChangesDock({
                 className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
                   branchChangesMode === 'working-tree'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
                 title="Working tree changes inside the drone (staged/unstaged)"
@@ -2847,7 +2847,7 @@ export function DroneChangesDock({
                 className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
                   branchChangesMode === 'pull-preview'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
                 title="Apply preview: committed diff from base to drone HEAD (what applying changes would merge)"
@@ -2871,7 +2871,7 @@ export function DroneChangesDock({
                     className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
                       contextMode === 'branch'
                         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                     title="Inspect the current branch workspace and branch history"
@@ -2888,7 +2888,7 @@ export function DroneChangesDock({
                     className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
                       contextMode === 'pull-request'
                         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                     title={pullRequestNumber ? `Inspect PR #${pullRequestNumber}` : 'Click a PR title in the PRs tab to enter PR context'}
@@ -2907,7 +2907,7 @@ export function DroneChangesDock({
                 className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
                   primaryView === 'changes'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
                 title="Inspect the aggregate diff"
@@ -2920,7 +2920,7 @@ export function DroneChangesDock({
                 className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
                   primaryView === 'commits'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
                 title="Inspect individual commits"
@@ -2936,7 +2936,7 @@ export function DroneChangesDock({
             className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
               viewMode === 'stacked'
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title="PR-style stacked view"
@@ -2949,7 +2949,7 @@ export function DroneChangesDock({
             className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
               viewMode === 'split'
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title="Explorer + focused diff view"
@@ -2966,7 +2966,7 @@ export function DroneChangesDock({
             className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
               diffViewType === 'unified'
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title="Unified diff view"
@@ -2979,7 +2979,7 @@ export function DroneChangesDock({
             className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
               diffViewType === 'split'
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title="Side-by-side diff view"
@@ -2995,7 +2995,7 @@ export function DroneChangesDock({
                 className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
                   hideViewed
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
                 title={hideViewed ? 'Show files already marked viewed' : 'Hide files already marked viewed'}
@@ -3010,7 +3010,7 @@ export function DroneChangesDock({
           <button
             type="button"
             onClick={() => setRefreshNonce((n) => n + 1)}
-            className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+            className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
             title="Refresh changes"
           >
             Refresh
@@ -3113,7 +3113,7 @@ export function DroneChangesDock({
                 <MetaChip label="status" value="S/U" title={statusLegendTitle} mono />
                 {changes?.branch.head && (
                   <span
-                    className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-1.5 py-[1px] text-[10px]"
+                    className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-[10px]"
                     title={changes.branch.head}
                   >
                     <span className="uppercase tracking-[0.08em] text-[var(--muted-dim)]">branch</span>
@@ -3138,12 +3138,12 @@ export function DroneChangesDock({
         )}
       </div>
       {contextMode === 'pull-request' && awaitingPullRequestDetails ? (
-        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] text-[var(--muted)]">
+        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] text-[var(--muted)]">
           Loading PR #{selectedPullRequestNumber} details...
         </div>
       ) : null}
       {contextMode === 'pull-request' && hasLoadedActivePullRequest && activePullRequestNumber ? (
-        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.05)] flex items-start justify-between gap-3">
+        <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div
               className="text-[9px] font-semibold tracking-[0.12em] uppercase text-[var(--muted-dim)]"
@@ -3167,7 +3167,7 @@ export function DroneChangesDock({
                 void mergeActivePullRequest();
               }}
               disabled={Boolean(pullRequestActionBusy) || Boolean(activePullRequestActionBlockedReason)}
-              className="inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold uppercase tracking-wide border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              className="inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold uppercase tracking-wide border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
               title={activePullRequestActionBlockedReason ?? 'Merge pull request'}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -3179,7 +3179,7 @@ export function DroneChangesDock({
                 void closeActivePullRequest();
               }}
               disabled={Boolean(pullRequestActionBusy) || Boolean(activePullRequestActionBlockedReason)}
-              className="inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold uppercase tracking-wide border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              className="inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold uppercase tracking-wide border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
               title={activePullRequestActionBlockedReason ?? 'Close pull request without merging'}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -3196,7 +3196,7 @@ export function DroneChangesDock({
             ) : null}
             {activePullRequestHtmlUrl ? (
               <a
-                className="inline-flex items-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                className="inline-flex items-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                 href={activePullRequestHtmlUrl}
                 target="_blank"
                 rel="noreferrer"
@@ -3222,7 +3222,7 @@ export function DroneChangesDock({
         </div>
       ) : disabled ? (
         <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
-          <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+          <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
             <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               {provisioningLabel(hubPhase)}
             </div>
@@ -3304,7 +3304,7 @@ export function DroneChangesDock({
               <button
                 type="button"
                 onClick={() => setHideViewed(false)}
-                className="h-7 px-2.5 rounded-md border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[10px] font-semibold tracking-wide uppercase text-[var(--accent)] hover:bg-[rgba(92,226,255,.12)]"
+                className="h-7 px-2.5 rounded-md border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[10px] font-semibold tracking-wide uppercase text-[var(--accent)] hover:bg-[var(--selected)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 Show Viewed Files
@@ -3319,7 +3319,7 @@ export function DroneChangesDock({
               <button
                 type="button"
                 onClick={() => setBranchChangesMode('working-tree')}
-                className="h-7 px-2.5 rounded-md border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[10px] font-semibold tracking-wide uppercase text-[var(--accent)] hover:bg-[rgba(92,226,255,.12)]"
+                className="h-7 px-2.5 rounded-md border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[10px] font-semibold tracking-wide uppercase text-[var(--accent)] hover:bg-[var(--selected)]"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 Open Working Tree
@@ -3341,7 +3341,7 @@ export function DroneChangesDock({
                   className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
                     stackedPreferredKind === 'unstaged'
                       ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
                 >
@@ -3353,7 +3353,7 @@ export function DroneChangesDock({
                   className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
                     stackedPreferredKind === 'staged'
                       ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
                 >
@@ -3371,7 +3371,7 @@ export function DroneChangesDock({
                   return (
                     <section
                       key={`stacked:${entry.path}`}
-                      className="group/file rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden"
+                      className="group/file rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] overflow-hidden"
                       onMouseEnter={() => setHoveredFilePath(entry.path)}
                       onMouseLeave={() => {
                         setHoveredFilePath((prev) => (prev === entry.path ? null : prev));
@@ -3419,7 +3419,7 @@ export function DroneChangesDock({
                 return (
                   <section
                     key={`${dataMode === 'pull-request' ? 'pr' : 'apply'}:${entry.path}`}
-                    className="group/file rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden"
+                    className="group/file rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] overflow-hidden"
                     onMouseEnter={() => setHoveredFilePath(entry.path)}
                     onMouseLeave={() => {
                       setHoveredFilePath((prev) => (prev === entry.path ? null : prev));
@@ -3453,7 +3453,7 @@ export function DroneChangesDock({
                             });
                           }
                         }}
-                        className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                        className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                         title={open ? 'Hide diff' : 'Show diff'}
                       >
                         {open ? 'Hide' : 'Show'}
@@ -3478,7 +3478,7 @@ export function DroneChangesDock({
         </div>
       ) : (
         <div ref={splitLayoutRef} className="flex-1 min-h-0 overflow-hidden flex">
-          <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[rgba(0,0,0,.12)]">
+          <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[var(--surface-inset)]">
             <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center justify-between gap-2">
               <div className="min-w-0 text-[10px] text-[var(--muted)] font-mono truncate">
                 {selectedEntry ? selectedEntry.path : 'No file selected'}
@@ -3494,7 +3494,7 @@ export function DroneChangesDock({
                       className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
                         splitShownKind === 'unstaged'
                           ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                          : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
+                          : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
                       }`}
                       style={{ fontFamily: 'var(--display)' }}
                       title="Unstaged diff"
@@ -3508,7 +3508,7 @@ export function DroneChangesDock({
                       className={`h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase transition-colors ${
                         splitShownKind === 'staged'
                           ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                          : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
+                          : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-40 disabled:cursor-not-allowed'
                       }`}
                       style={{ fontFamily: 'var(--display)' }}
                       title="Staged diff"
@@ -3612,7 +3612,7 @@ export function DroneChangesDock({
                   type="button"
                   onClick={decreaseExplorerZoom}
                   disabled={explorerZoom <= EXPLORER_ZOOM_MIN}
-                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] font-bold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[11px] font-bold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Decrease explorer zoom"
                 >
                   -
@@ -3621,7 +3621,7 @@ export function DroneChangesDock({
                   type="button"
                   onClick={increaseExplorerZoom}
                   disabled={explorerZoom >= EXPLORER_ZOOM_MAX}
-                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] font-bold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[11px] font-bold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Increase explorer zoom"
                 >
                   +
@@ -3630,7 +3630,7 @@ export function DroneChangesDock({
                   type="button"
                   onClick={resetExplorerZoom}
                   disabled={Math.abs(explorerZoom - EXPLORER_ZOOM_DEFAULT) < 0.001}
-                  className="h-6 px-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
+                  className="h-6 px-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed"
                   title="Reset explorer zoom"
                 >
                   100%

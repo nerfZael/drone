@@ -116,8 +116,8 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
   }, []);
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
-      <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3 flex flex-col gap-3">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
+      <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-3">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
@@ -145,12 +145,12 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
         </div>
 
         {mcpTokenRevealValue && (
-          <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] p-3 flex flex-col gap-2">
+          <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] p-3 flex flex-col gap-2">
             <div className="flex flex-wrap items-center justify-between gap-2">
-              <div className="text-[10px] uppercase tracking-[0.08em] text-[#34d399]" style={{ fontFamily: 'var(--display)' }}>
+              <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--green)]" style={{ fontFamily: 'var(--display)' }}>
                 New token value
               </div>
-              <button type="button" onClick={clearMcpTokenRevealValue} className="text-[10px] uppercase tracking-wide text-[#34d399] opacity-80 hover:opacity-100">
+              <button type="button" onClick={clearMcpTokenRevealValue} className="text-[10px] uppercase tracking-wide text-[var(--green)] opacity-80 hover:opacity-100">
                 Hide
               </button>
             </div>
@@ -158,7 +158,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
           </div>
         )}
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.10)] overflow-hidden">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] overflow-hidden">
           {mcpAccessTokens.length === 0 ? (
             <div className="px-3 py-4 text-[11px] text-[var(--muted-dim)]">
               No MCP access tokens yet.
@@ -166,7 +166,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full min-w-[980px] border-collapse text-left">
-                <thead className="bg-[rgba(255,255,255,.03)] border-b border-[var(--border-subtle)]">
+                <thead className="bg-[var(--surface-soft)] border-b border-[var(--border-subtle)]">
                   <tr className="text-[9px] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                     <th className="px-3 py-2 font-semibold">Name</th>
                     <th className="px-3 py-2 font-semibold">Kind</th>
@@ -182,16 +182,16 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
                   {visibleTokens.map((token) => {
                     const revoked = Boolean(token.revokedAt);
                     return (
-                      <tr key={token.id} className={`border-b border-[var(--border-subtle)] last:border-b-0 ${revoked ? 'bg-[rgba(255,90,90,.035)]' : 'hover:bg-[rgba(255,255,255,.025)]'}`}>
+                      <tr key={token.id} className={`border-b border-[var(--border-subtle)] last:border-b-0 ${revoked ? 'bg-[var(--red-subtle)]' : 'hover:bg-[var(--surface-soft)]'}`}>
                         <td className="px-3 py-2 text-[12px] text-[var(--fg-secondary)] font-semibold max-w-[220px] truncate">{token.name}</td>
                         <td className="px-3 py-2">
-                          <span className={`text-[9px] uppercase ${token.kind === 'drone' ? 'text-[var(--accent)]' : 'text-[#34d399]'}`}>{token.kind}</span>
+                          <span className={`text-[9px] uppercase ${token.kind === 'drone' ? 'text-[var(--accent)]' : 'text-[var(--green)]'}`}>{token.kind}</span>
                         </td>
                         <td className="px-3 py-2 text-[10px] text-[var(--muted-dim)] font-mono max-w-[220px] truncate">{token.tokenPreview}</td>
                         <td className="px-3 py-2 text-[10px] text-[var(--muted-dim)] font-mono max-w-[180px] truncate">{token.droneId || '-'}</td>
                         <td className="px-3 py-2 text-[10px] text-[var(--muted-dim)] whitespace-nowrap">{formatTokenDate(token.createdAt)}</td>
                         <td className="px-3 py-2 text-[10px] text-[var(--muted-dim)] whitespace-nowrap">{formatTokenDate(token.lastUsedAt)}</td>
-                        <td className={`px-3 py-2 text-[9px] uppercase ${revoked ? 'text-[var(--red)]' : 'text-[#34d399]'}`}>{revoked ? 'Revoked' : 'Active'}</td>
+                        <td className={`px-3 py-2 text-[9px] uppercase ${revoked ? 'text-[var(--red)]' : 'text-[var(--green)]'}`}>{revoked ? 'Revoked' : 'Active'}</td>
                         <td className="px-3 py-2">
                           <div className="flex items-center justify-end gap-2">
                             {token.kind === 'host' && (
@@ -271,7 +271,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
       {(mcpServersError || mcpServersNotice) && (
         <div className="flex flex-col gap-2">
           {mcpServersError && (
-            <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)] flex items-center justify-between gap-3">
+            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)] flex items-center justify-between gap-3">
               <span>{mcpServersError}</span>
               <button type="button" onClick={clearMcpServersError} className="text-[10px] uppercase tracking-wide opacity-80 hover:opacity-100">
                 Dismiss
@@ -279,7 +279,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
             </div>
           )}
           {mcpServersNotice && (
-            <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399] flex items-center justify-between gap-3">
+            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)] flex items-center justify-between gap-3">
               <span>{mcpServersNotice}</span>
               <button type="button" onClick={clearMcpServersNotice} className="text-[10px] uppercase tracking-wide opacity-80 hover:opacity-100">
                 Dismiss
@@ -290,7 +290,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
       )}
 
       <div className="grid grid-cols-1 xl:grid-cols-[260px_minmax(0,1fr)] gap-3 min-w-0">
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-2 flex flex-col gap-2 min-w-0">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-2 flex flex-col gap-2 min-w-0">
           <div className="flex items-center justify-between gap-2 px-1">
             <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Servers
@@ -312,13 +312,13 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
                     onClick={() => handleSelect(server.id)}
                     className={`w-full text-left rounded border px-3 py-2 transition-colors ${
                       active
-                        ? 'border-[var(--accent)] bg-[rgba(255,255,255,.05)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.01)] hover:bg-[var(--hover)]'
+                        ? 'border-[var(--accent)] bg-[var(--surface-soft)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-faint)] hover:bg-[var(--hover)]'
                     }`}
                   >
                     <div className="flex items-center justify-between gap-2">
                       <div className="text-[12px] text-[var(--fg-secondary)] font-medium truncate">{server.name}</div>
-                      <div className={`text-[9px] uppercase ${server.enabled ? 'text-[#34d399]' : 'text-[var(--muted-dim)]'}`}>
+                      <div className={`text-[9px] uppercase ${server.enabled ? 'text-[var(--green)]' : 'text-[var(--muted-dim)]'}`}>
                         {server.enabled ? 'On' : 'Off'}
                       </div>
                     </div>
@@ -333,7 +333,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
           </div>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3 flex flex-col gap-4 min-w-0">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[13px] font-semibold text-[var(--fg)] truncate">{mcpDraft.id ? mcpDraft.name || 'Untitled MCP server' : 'New MCP server draft'}</div>
@@ -401,7 +401,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
             </label>
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Agents</div>
@@ -424,7 +424,7 @@ export function McpServersSection({ mcp }: { mcp: UseMcpServersResult }) {
                     className={`h-9 rounded border px-3 text-[11px] font-semibold transition-colors ${
                       selected
                         ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:bg-[var(--hover)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)]'
                     }`}
                   >
                     {agent.label}

@@ -50,7 +50,7 @@ export function DotenvImportSection({
           className={`h-8 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
             disabled || !importText.trim()
               ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
-              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+              : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
           }`}
           style={{ fontFamily: 'var(--display)' }}
         >
@@ -63,7 +63,7 @@ export function DotenvImportSection({
           className={`h-8 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
             disabled
               ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
-              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+              : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
           }`}
           style={{ fontFamily: 'var(--display)' }}
         >

@@ -97,7 +97,7 @@ export function FrontendUpdatePrompt() {
   return (
     <div className="fixed bottom-3 left-3 right-3 z-[90] flex justify-center pointer-events-none md:bottom-4">
       <div
-        className="pointer-events-auto flex w-full max-w-[420px] items-center justify-between gap-3 rounded border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2 shadow-[0_16px_50px_rgba(0,0,0,.35)]"
+        className="pointer-events-auto flex w-full max-w-[420px] items-center justify-between gap-3 rounded border border-[var(--border)] bg-[var(--panel-alt)] px-3 py-2 shadow-[0_16px_50px_var(--shadow-color)]"
         role="status"
         aria-live="polite"
       >

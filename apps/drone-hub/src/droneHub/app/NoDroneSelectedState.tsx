@@ -29,7 +29,7 @@ export function NoDroneSelectedState({
       <div className="dh-launch-grid pointer-events-none absolute inset-0" aria-hidden="true" />
       <section className="relative w-full max-w-[760px] animate-fade-in" aria-labelledby="launch-state-title">
         <div className="mb-7 flex items-center gap-3">
-          <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-[rgba(167,139,250,.22)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[var(--glow-accent)]">
+          <div className="flex h-11 w-11 items-center justify-center rounded-xl border border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[var(--glow-accent)]">
             <IconDrone className="h-5 w-5" />
           </div>
           <div>
@@ -48,7 +48,7 @@ export function NoDroneSelectedState({
         <p className="mt-4 max-w-[540px] text-[14px] leading-6 text-[var(--muted)] md:text-[15px]">{description}</p>
 
         {dronesError ? (
-          <div className="mt-5 rounded-xl border border-[rgba(255,90,90,.22)] bg-[var(--red-subtle)] px-3 py-2.5 text-[12px] text-[var(--red)]" role="alert">
+          <div className="mt-5 rounded-xl border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2.5 text-[12px] text-[var(--red)]" role="alert">
             {dronesError}
           </div>
         ) : null}
@@ -107,11 +107,11 @@ function LaunchAction({
       onClick={onClick}
       className={`group flex min-h-[112px] items-start gap-3 rounded-xl border p-4 text-left transition-all ${
         primary
-          ? 'border-[rgba(167,139,250,.3)] bg-[linear-gradient(135deg,rgba(167,139,250,.14),rgba(167,139,250,.045))] hover:border-[var(--accent)] hover:shadow-[var(--glow-accent)]'
-          : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.018)] hover:-translate-y-0.5 hover:border-[var(--accent-muted)] hover:bg-[rgba(255,255,255,.035)]'
+          ? 'border-[var(--accent-border)] bg-[linear-gradient(135deg,var(--accent-subtle),var(--selected))] hover:border-[var(--accent)] hover:shadow-[var(--glow-accent)]'
+          : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:-translate-y-0.5 hover:border-[var(--accent-muted)] hover:bg-[var(--surface-soft)]'
       }`}
     >
-      <span className={`mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-lg border ${primary ? 'border-[rgba(167,139,250,.24)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] text-[var(--muted)] group-hover:text-[var(--accent)]'}`}>
+      <span className={`mt-0.5 flex h-8 w-8 flex-none items-center justify-center rounded-lg border ${primary ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted)] group-hover:text-[var(--accent)]'}`}>
         {icon}
       </span>
       <span className="min-w-0">

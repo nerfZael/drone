@@ -218,15 +218,15 @@ export const DroneCard = React.memo(function DroneCard({
       className={`w-full text-left ${rowDensityClass} flex items-center rounded-md border transition-colors duration-150 group/drone relative ${
         selected
           ? selectedTone === 'muted'
-            ? 'bg-[rgba(255,255,255,.045)] border-[rgba(255,255,255,.08)]'
+            ? 'bg-[var(--surface-soft)] border-[var(--border)]'
             : 'bg-[var(--selected)] border-[var(--accent-muted)]'
           : highlighted
-            ? 'bg-[rgba(255,214,102,.10)] border-[rgba(255,214,102,.62)]'
-            : 'border-transparent hover:bg-[rgba(255,255,255,.03)] hover:border-[rgba(255,255,255,.06)]'
+            ? 'bg-[var(--yellow-subtle)] border-[var(--yellow-border)]'
+            : 'border-transparent hover:bg-[var(--surface-soft)] hover:border-[var(--border-subtle)]'
       } ${draggable ? 'cursor-grab touch-none active:cursor-grabbing' : ''} ${
         dragging ? 'opacity-35' : ''
       } ${disabled ? 'cursor-not-allowed opacity-60' : ''} ${
-        highlighted ? 'shadow-[0_0_0_1px_rgba(255,214,102,.28),0_0_18px_rgba(255,214,102,.14)]' : ''
+        highlighted ? 'shadow-[var(--glow-yellow)]' : ''
       } focus:outline-none focus-visible:outline-none`}
     >
       {/* Accent edge for selected state or open-chat state when requested */}
@@ -258,7 +258,7 @@ export const DroneCard = React.memo(function DroneCard({
         </span>
         {statusHint ? (
           <span
-            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-1 py-0.5 text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
+            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[9px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
             style={{ fontFamily: 'var(--display)' }}
             title={statusHint}
           >
@@ -304,7 +304,7 @@ export const DroneCard = React.memo(function DroneCard({
           >
             {showInlineError ? null : showOperationStatus ? (
               <span
-                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-[var(--yellow-subtle)] text-[var(--yellow)] border border-[rgba(255,178,36,.15)]"
+                className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[10px] font-semibold tracking-wide uppercase bg-[var(--yellow-subtle)] text-[var(--yellow)] border border-[var(--yellow-border)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title={activeOperationLabel}
                 aria-label={activeOperationLabel}
@@ -327,14 +327,14 @@ export const DroneCard = React.memo(function DroneCard({
           {hasActions && (
             <div
               data-onboarding-id="sidebar.droneCard.actions"
-              className={`absolute right-0 z-10 flex items-center gap-1 rounded-md border border-[rgba(255,255,255,.08)] py-0.5 pl-3 pr-0.5 shadow-[0_4px_12px_rgba(0,0,0,.28)] transition-opacity duration-150 before:absolute before:inset-y-0 before:-left-5 before:w-5 before:bg-gradient-to-l before:from-[rgb(19,25,34)] before:to-transparent ${
+              className={`absolute right-0 z-10 flex items-center gap-1 rounded-md border border-[var(--border)] py-0.5 pl-3 pr-0.5 shadow-[0_4px_12px_var(--shadow-color)] transition-opacity duration-150 before:absolute before:inset-y-0 before:-left-5 before:w-5 before:bg-gradient-to-l before:from-[var(--panel-raised)] before:to-transparent ${
                 pinActionsVisible
                   ? 'opacity-100 pointer-events-auto'
                   : 'opacity-0 pointer-events-none group-hover/drone:opacity-100 group-hover/drone:pointer-events-auto'
               } ${
                 selected
-                  ? 'bg-[rgb(30,26,43)] before:from-[rgb(30,26,43)]'
-                  : 'bg-[rgb(19,25,34)] before:from-[rgb(19,25,34)]'
+                  ? 'bg-[var(--accent-subtle)] before:from-[var(--panel-raised)]'
+                  : 'bg-[var(--panel-raised)] before:from-[var(--panel-raised)]'
               }`}
             >
               {canCreateChat && (
@@ -347,7 +347,7 @@ export const DroneCard = React.memo(function DroneCard({
                   className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-colors ${
                     createChatDisabled
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
                   }`}
                   title={`Create chat on "${shownName}"`}
                   aria-label={`Create chat on "${shownName}"`}
@@ -384,7 +384,7 @@ export const DroneCard = React.memo(function DroneCard({
                   className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-colors ${
                     renameDisabled
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[rgba(80,130,255,.12)] border-[rgba(90,140,255,.25)] text-[rgb(124,170,255)] hover:bg-[rgba(80,130,255,.18)]'
+                      : 'bg-[var(--info-subtle)] border-[var(--info-border)] text-[var(--info)] hover:bg-[var(--info-subtle)]'
                   }`}
                   title={renameDisabled ? `Renaming "${shownName}"…` : `Rename "${shownName}"`}
                   aria-label={renameDisabled ? `Renaming "${shownName}"` : `Rename "${shownName}"`}
@@ -403,7 +403,7 @@ export const DroneCard = React.memo(function DroneCard({
                   className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-colors ${
                     setBaseImageDisabled
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[rgba(250,204,21,.10)] border-[rgba(250,204,21,.22)] text-[rgb(253,224,71)] hover:bg-[rgba(250,204,21,.14)]'
+                      : 'bg-[var(--yellow-subtle)] border-[var(--yellow-border)] text-[var(--yellow)] hover:bg-[var(--yellow-subtle)]'
                   }`}
                   title={setBaseImageBusy ? `Setting base image from "${shownName}"…` : `Set "${shownName}" as base image`}
                   aria-label={setBaseImageBusy ? `Setting base image from "${shownName}"` : `Set "${shownName}" as base image`}
@@ -422,7 +422,7 @@ export const DroneCard = React.memo(function DroneCard({
                   className={`inline-flex items-center justify-center w-5 h-5 rounded border transition-colors ${
                     deleteDisabled
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,77,77,.15)]'
+                      : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--danger-panel)]'
                   }`}
                   title={deleteDisabled ? `Deleting "${shownName}"…` : `Delete "${shownName}"`}
                   aria-label={deleteDisabled ? `Deleting "${shownName}"` : `Delete "${shownName}"`}

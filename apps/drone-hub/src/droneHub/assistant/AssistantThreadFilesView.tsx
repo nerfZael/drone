@@ -89,7 +89,7 @@ function AssistantTreeIndentGuides({ depth }: { depth: number }) {
       {Array.from({ length: depth }).map((_, index) => (
         <span
           key={index}
-          className="absolute inset-y-0 w-px bg-[rgba(136,145,168,.18)]"
+          className="absolute inset-y-0 w-px bg-[var(--border-subtle)]"
           style={{ left: `${9 + index * 14}px` }}
         />
       ))}
@@ -167,13 +167,13 @@ export function AssistantThreadFilesView({
                 type="button"
                 onClick={() => toggleDirectory(node.path)}
                 title={node.path}
-                className="flex h-[22px] w-full min-w-0 items-center gap-1 pr-2 text-left text-[13px] text-[var(--fg-secondary)] transition-colors hover:bg-[rgba(255,255,255,.055)]"
+                className="flex h-[22px] w-full min-w-0 items-center gap-1 pr-2 text-left text-[13px] text-[var(--fg-secondary)] transition-colors hover:bg-[var(--surface-strong)]"
                 style={{ paddingLeft: `${indentPx}px` }}
               >
                 <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
                   <IconChevron down={open} size={12} />
                 </span>
-                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[#d7b85a]">
+                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--yellow)]">
                   <IconFolder size={13} />
                 </span>
                 <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
@@ -194,8 +194,8 @@ export function AssistantThreadFilesView({
           title={`${node.path} • ${formatUpdatedAt(node.file.updatedAt)} • ${formatArtifactSize(node.file.size)}`}
           className={`relative flex h-[22px] w-full min-w-0 items-center gap-1 pr-2 text-left text-[13px] transition-colors ${
             selected
-              ? 'bg-[rgba(55,118,171,.20)] text-[var(--fg)] shadow-[inset_0_0_0_1px_rgba(64,156,255,.55)]'
-              : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)]'
+              ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_0_0_0_1px_var(--info-border)]'
+              : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)]'
           }`}
           style={{ paddingLeft: `${indentPx}px` }}
         >
@@ -214,7 +214,7 @@ export function AssistantThreadFilesView({
   }
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col bg-[rgba(0,0,0,.08)]">
+    <div className="flex min-h-0 flex-1 flex-col bg-[var(--surface-inset-faint)]">
       <div className="flex h-10 flex-shrink-0 items-center justify-between gap-3 border-b border-[var(--border)] px-3">
         <div className="flex min-w-0 items-center gap-2.5">
           <IconFile className="h-4 w-4 flex-shrink-0 text-[var(--muted)]" />
@@ -239,7 +239,7 @@ export function AssistantThreadFilesView({
             type="button"
             onClick={onRefresh}
             disabled={!threadId || loading}
-            className="h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-45"
+            className="h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-45"
             style={{ fontFamily: 'var(--display)' }}
           >
             {loading ? 'Loading' : 'Refresh'}
@@ -247,7 +247,7 @@ export function AssistantThreadFilesView({
           <button
             type="button"
             onClick={onClose}
-            className="h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+            className="h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
             style={{ fontFamily: 'var(--display)' }}
           >
             Chat
@@ -255,7 +255,7 @@ export function AssistantThreadFilesView({
         </div>
       </div>
       {error ? (
-        <div className="mx-3 mt-3 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-2.5 py-2 text-[11px] text-[var(--red)]">
+        <div className="mx-3 mt-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-2.5 py-2 text-[11px] text-[var(--red)]">
           {error}
         </div>
       ) : null}
@@ -286,7 +286,7 @@ export function AssistantThreadFilesView({
                   <img
                     src={`data:${selectedFile.mimeType || 'image/png'};base64,${selectedFile.contentBase64}`}
                     alt={selectedFile.path}
-                    className="max-h-full max-w-full rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] object-contain"
+                    className="max-h-full max-w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] object-contain"
                   />
                 ) : selectedFile.content.trim() ? (
                   <MarkdownMessage

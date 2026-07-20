@@ -36,7 +36,7 @@ type Policy = {
 
 const emptyPolicy: Policy = { version: 2, roots: [], homeTargets: [], deviceGrants: [] };
 const fieldClass =
-  'min-w-0 rounded border border-[var(--border)] bg-[var(--input)] px-2.5 py-2 text-[11px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]';
+  'min-w-0 rounded border border-[var(--border)] bg-[var(--panel)] px-2.5 py-2 text-[11px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]';
 
 function normalizedPolicy(value: any): Policy {
   return {
@@ -419,7 +419,7 @@ export function CrossDeviceAssistantPolicyPanel({
             {policy.roots.map((root) => (
               <div
                 key={root.id}
-                className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"
+                className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)]"
               >
                 <div className="grid gap-2 border-b border-[var(--border-subtle)] p-3 sm:grid-cols-[1fr_2fr_auto_auto]">
                   <input
@@ -484,7 +484,7 @@ export function CrossDeviceAssistantPolicyPanel({
                     return (
                       <div
                         key={device.id}
-                        className={`flex flex-wrap items-center gap-3 rounded border px-3 py-2 ${changed ? 'border-[var(--yellow)] bg-[rgba(250,204,21,.04)]' : 'border-[var(--border-subtle)]'}`}
+                        className={`flex flex-wrap items-center gap-3 rounded border px-3 py-2 ${changed ? 'border-[var(--yellow)] bg-[var(--yellow-subtle)]' : 'border-[var(--border-subtle)]'}`}
                       >
                         <div className="min-w-36 flex-1">
                           <div className="text-[12px] font-semibold text-[var(--fg)]">
@@ -596,7 +596,7 @@ export function CrossDeviceAssistantPolicyPanel({
                         return (
                           <div
                             key={workspace.id}
-                            className={`flex flex-wrap items-center gap-3 rounded border px-3 py-2 ${changed ? 'border-[var(--yellow)] bg-[rgba(250,204,21,.04)]' : 'border-transparent bg-[rgba(255,255,255,.02)]'}`}
+                            className={`flex flex-wrap items-center gap-3 rounded border px-3 py-2 ${changed ? 'border-[var(--yellow)] bg-[var(--yellow-subtle)]' : 'border-transparent bg-[var(--surface-softest)]'}`}
                           >
                             <div className="min-w-36 flex-1">
                               <div className="text-[11px] font-semibold text-[var(--fg)]">
@@ -642,7 +642,7 @@ export function CrossDeviceAssistantPolicyPanel({
                         .map((target) => (
                           <div
                             key={targetKey(target)}
-                            className="flex items-center gap-3 rounded border border-[var(--yellow)] bg-[rgba(250,204,21,.04)] px-3 py-2"
+                            className="flex items-center gap-3 rounded border border-[var(--yellow)] bg-[var(--yellow-subtle)] px-3 py-2"
                           >
                             <div className="min-w-0 flex-1">
                               <div className="truncate text-[11px] font-semibold text-[var(--fg)]">

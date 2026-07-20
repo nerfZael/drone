@@ -70,7 +70,7 @@ export function AgentPlanList({
                 >
                   <span className="mt-[1px] flex h-4 w-4 items-center justify-center" aria-hidden="true">
                     {done ? (
-                      <span className="flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-[rgba(80,210,160,.35)] bg-[rgba(80,210,160,.08)] text-[var(--green)]">
+                      <span className="flex h-3.5 w-3.5 items-center justify-center rounded-sm border border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]">
                         <IconCheck className="h-2.5 w-2.5" />
                       </span>
                     ) : active && running ? (
@@ -84,7 +84,7 @@ export function AgentPlanList({
                   <span
                     className={
                       done
-                        ? 'break-words text-[var(--muted-dim)] line-through decoration-[rgba(148,163,184,.45)]'
+                        ? 'break-words text-[var(--muted-dim)] line-through decoration-[var(--muted)]'
                         : cancelled
                           ? 'break-words text-[var(--muted-dim)] line-through opacity-60'
                           : active

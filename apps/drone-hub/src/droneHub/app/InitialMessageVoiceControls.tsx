@@ -188,8 +188,8 @@ function InitialMessageVoiceControls(
           disabled={controlsDisabled}
           className={`inline-flex h-7 w-7 items-center justify-center rounded border transition-all ${
             controlsDisabled
-              ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-40'
-              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
+              ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-40'
+              : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
           }`}
           title="Record initial message"
           aria-label="Record initial message"
@@ -206,8 +206,8 @@ function InitialMessageVoiceControls(
             disabled={status === 'transcribing' || actionInFlight}
             className={`inline-flex h-7 w-7 items-center justify-center rounded border transition-all ${
               status === 'transcribing' || actionInFlight
-                ? 'cursor-not-allowed border-[rgba(248,113,113,.18)] bg-[rgba(248,113,113,.05)] text-[rgba(252,165,165,.55)] opacity-40'
-                : 'border-[rgba(248,113,113,.45)] bg-[rgba(248,113,113,.10)] text-[#fca5a5] hover:bg-[rgba(248,113,113,.16)]'
+                ? 'cursor-not-allowed border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] opacity-40'
+                : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
             }`}
             title="Discard recording"
             aria-label="Discard recording"
@@ -220,10 +220,10 @@ function InitialMessageVoiceControls(
             disabled={!canPauseOrStop || actionInFlight}
             className={`inline-flex h-7 w-7 items-center justify-center rounded border transition-all ${
               !canPauseOrStop || actionInFlight
-                ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-40'
+                ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-40'
                 : status === 'paused'
-                  ? 'border-[rgba(167,139,250,.38)] bg-[rgba(167,139,250,.10)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.16)]'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
+                  ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
             }`}
             title={status === 'paused' ? 'Resume recording' : 'Pause recording'}
             aria-label={status === 'paused' ? 'Resume recording' : 'Pause recording'}
@@ -238,8 +238,8 @@ function InitialMessageVoiceControls(
             disabled={!canPauseOrStop || actionInFlight}
             className={`inline-flex h-7 w-7 items-center justify-center rounded border transition-all ${
               !canPauseOrStop || actionInFlight
-                ? 'cursor-not-allowed border-[rgba(74,222,128,.16)] bg-[rgba(74,222,128,.04)] text-[rgba(74,222,128,.55)] opacity-40'
-                : 'border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] text-[var(--green)] hover:bg-[rgba(74,222,128,.13)]'
+                ? 'cursor-not-allowed border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] opacity-40'
+                : 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:bg-[var(--green-subtle)]'
             }`}
             title="Stop recording and transcribe"
             aria-label="Stop recording and transcribe"

@@ -89,7 +89,7 @@ export function QuickOpenModal({
       }}
     >
       <div className="mx-auto flex max-h-[72vh] w-full max-w-2xl flex-col overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel)] shadow-2xl">
-        <div className="border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] px-3 py-2">
+        <div className="border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2">
           <input
             ref={inputRef}
             value={query}

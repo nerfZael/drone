@@ -210,10 +210,10 @@ export const TranscriptTurn = React.memo(
                     dockerSnapshotBusy ? 'cursor-wait opacity-100' : 'opacity-0 group-hover:opacity-100'
                   } ${
                     canRollbackDockerSnapshot
-                      ? 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)] hover:text-[var(--accent)]'
+                      ? 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)]'
                       : dockerSnapshot.status === 'failed'
-                        ? 'border-[rgba(255,90,90,.25)] bg-[rgba(0,0,0,.15)] text-[var(--red)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] text-[var(--muted-dim)]'
+                        ? 'border-[var(--red-border)] bg-[var(--surface-inset)] text-[var(--red)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted-dim)]'
                   }`}
                   title={
                     dockerSnapshot.status === 'creating'
@@ -236,7 +236,7 @@ export const TranscriptTurn = React.memo(
                 <button
                   type="button"
                   disabled
-                  className="inline-flex h-7 w-7 cursor-not-allowed items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] text-[var(--muted-dim)] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
+                  className="inline-flex h-7 w-7 cursor-not-allowed items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted-dim)] opacity-0 transition-opacity group-hover:opacity-100 focus-visible:opacity-100"
                   title="No Docker snapshot exists for this message. Only messages completed after snapshots were enabled can be rolled back."
                   aria-label="No Docker snapshot for this message"
                 >

@@ -688,7 +688,7 @@ export function ChatInput({
         )}
         <div
           ref={automationPanelRef}
-          className={`relative rounded-lg border bg-[var(--panel-alt)] shadow-[0_0_40px_rgba(0,0,0,.2),0_0_80px_rgba(0,0,0,.1)] ${
+          className={`relative rounded-lg border bg-[var(--panel-alt)] shadow-[0_0_40px_var(--shadow-color),0_0_80px_var(--shadow-color)] ${
             dragActive ? 'border-[var(--accent)]' : 'border-[var(--border)]'
           }`}
         >
@@ -713,8 +713,8 @@ export function ChatInput({
                   disabled={attachmentControlsLocked}
                   className={`text-[10px] font-semibold tracking-wide uppercase px-2 py-1 rounded border transition-all ${
                     attachmentControlsLocked
-                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
                   title={attachmentMode === 'files' ? 'Attach more files' : 'Attach more images'}
@@ -729,10 +729,10 @@ export function ChatInput({
                       <img
                         src={a.previewUrl}
                         alt={a.name}
-                        className="w-14 h-14 object-cover rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)]"
+                        className="w-14 h-14 object-cover rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)]"
                       />
                     ) : (
-                      <div className="w-[180px] min-h-[56px] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-2 py-1.5">
+                      <div className="w-[180px] min-h-[56px] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5">
                         <div
                           className="text-[9px] uppercase tracking-wide text-[var(--muted-dim)]"
                           style={{ fontFamily: 'var(--display)' }}
@@ -785,8 +785,8 @@ export function ChatInput({
                   disabled={attachmentControlsLocked}
                   className={`inline-flex items-center justify-center w-[44px] h-[44px] rounded-md border transition-all ${
                     attachmentControlsLocked
-                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
+                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
                   }`}
                   title={attachmentMode === 'files' ? 'Attach files (paste or drag and drop also works)' : 'Attach images (paste or drag and drop also works)'}
                   aria-label={attachmentMode === 'files' ? 'Attach files' : 'Attach images'}
@@ -806,8 +806,8 @@ export function ChatInput({
                 disabled={voiceRecordButtonDisabled}
                 className={`inline-flex h-[44px] w-[44px] flex-shrink-0 items-center justify-center rounded-md border transition-all ${
                   voiceRecordButtonDisabled
-                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
+                    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
                 }`}
                 title="Record voice message"
                 aria-label="Record voice message"
@@ -827,8 +827,8 @@ export function ChatInput({
                   disabled={voiceRecordingStatus === 'transcribing' || voiceActionInFlight}
                   className={`inline-flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
                     voiceRecordingStatus === 'transcribing' || voiceActionInFlight
-                      ? 'opacity-40 cursor-not-allowed border-[rgba(248,113,113,.18)] bg-[rgba(248,113,113,.05)] text-[rgba(252,165,165,.55)]'
-                      : 'border-[rgba(248,113,113,.45)] bg-[rgba(248,113,113,.10)] text-[#fca5a5] hover:bg-[rgba(248,113,113,.16)]'
+                      ? 'opacity-40 cursor-not-allowed border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
+                      : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
                   }`}
                   title="Discard recording"
                   aria-label="Discard recording"
@@ -844,10 +844,10 @@ export function ChatInput({
                   disabled={voicePauseButtonDisabled}
                   className={`inline-flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
                     voicePauseButtonDisabled
-                      ? 'opacity-40 cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                      ? 'opacity-40 cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
                       : voiceRecordingStatus === 'paused'
-                        ? 'border-[rgba(167,139,250,.38)] bg-[rgba(167,139,250,.10)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.16)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
+                        ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
                   }`}
                   title={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
                   aria-label={voiceRecordingStatus === 'paused' ? 'Resume recording' : 'Pause recording'}
@@ -869,8 +869,8 @@ export function ChatInput({
                   disabled={voiceStopButtonDisabled}
                   className={`inline-flex h-9 w-9 items-center justify-center rounded-md border transition-all ${
                     voiceStopButtonDisabled
-                      ? 'opacity-40 cursor-not-allowed border-[rgba(74,222,128,.16)] bg-[rgba(74,222,128,.04)] text-[rgba(74,222,128,.55)]'
-                      : 'border-[rgba(74,222,128,.28)] bg-[rgba(74,222,128,.08)] text-[var(--green)] hover:bg-[rgba(74,222,128,.13)]'
+                      ? 'opacity-40 cursor-not-allowed border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]'
+                      : 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:bg-[var(--green-subtle)]'
                   }`}
                   title="Stop recording and transcribe"
                   aria-label="Stop recording and transcribe"
@@ -919,7 +919,7 @@ export function ChatInput({
               }}
               rows={1}
               placeholder="Message..."
-              className="min-w-[180px] flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 py-2 text-[13px] leading-[1.35] text-[var(--fg)] placeholder:text-[11px] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--user-muted)] transition-colors"
+              className="min-w-[180px] flex-1 resize-none rounded-md border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-[13px] leading-[1.35] text-[var(--fg)] placeholder:text-[11px] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--user-muted)] transition-colors"
               style={{ minHeight: CHAT_INPUT_TEXTAREA_MIN_HEIGHT_PX }}
               disabled={composerLocked}
               autoFocus={Boolean(autoFocus)}
@@ -942,8 +942,8 @@ export function ChatInput({
                   Boolean(disabled)
                     ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                     : draftAutomationActive
-                      ? 'bg-[rgba(255,255,255,.06)] border-[var(--accent-muted)] text-[var(--accent)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                      ? 'bg-[var(--surface-strong)] border-[var(--accent-muted)] text-[var(--accent)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
                 title="Send this draft as a repeating automation"
@@ -961,7 +961,7 @@ export function ChatInput({
                   className={`inline-flex items-center gap-1.5 h-9 px-3 rounded-md text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                     Boolean(disabled)
                       ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
                   title={automationMenuLabel}
@@ -1003,7 +1003,7 @@ export function ChatInput({
                 type="button"
                 onClick={() => void onStop?.()}
                 disabled={stopping}
-                className="inline-flex h-9 items-center justify-center rounded-md border border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--red)] hover:bg-[rgba(255,90,90,.14)] disabled:cursor-not-allowed disabled:opacity-50"
+                className="inline-flex h-9 items-center justify-center rounded-md border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--red)] hover:bg-[var(--red-subtle)] disabled:cursor-not-allowed disabled:opacity-50"
                 style={{ fontFamily: 'var(--display)' }}
               >
                 {stopping ? 'Stopping...' : 'Stop'}
@@ -1022,8 +1022,8 @@ export function ChatInput({
               className={`inline-flex items-center justify-center h-9 min-w-[80px] px-4 rounded-md text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 showStopAction && !showSeparateStopAction
                   ? stopping
-                    ? 'opacity-50 cursor-not-allowed bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)]'
-                    : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.35)] text-[var(--red)] hover:bg-[rgba(255,90,90,.14)]'
+                    ? 'opacity-50 cursor-not-allowed bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)]'
+                    : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
                   : sendDisabled
                     ? 'opacity-40 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                     : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
@@ -1036,7 +1036,7 @@ export function ChatInput({
           </div>
           {draftAutomationActive && (
             <div className="px-3 pb-3">
-              <div className="rounded-md border border-[var(--accent-muted)] bg-[rgba(255,255,255,.03)] p-2.5">
+              <div className="rounded-md border border-[var(--accent-muted)] bg-[var(--surface-soft)] p-2.5">
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div
                     className="text-[9px] uppercase tracking-[0.08em] text-[var(--accent)]"
@@ -1058,7 +1058,7 @@ export function ChatInput({
                       step={1}
                       value={draftAutomationRunsDraft}
                       onChange={(e) => setDraftAutomationRunsDraft(e.target.value)}
-                      className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                      className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
                     />
                   </label>
                   <div className="grid grid-cols-1 gap-2 sm:grid-cols-[120px_120px_minmax(0,1fr)]">
@@ -1071,7 +1071,7 @@ export function ChatInput({
                         step={1}
                         value={draftAutomationSleepAmountDraft}
                         onChange={(e) => setDraftAutomationSleepAmountDraft(e.target.value)}
-                        className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                        className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
                       />
                     </label>
                     <label className="flex flex-col gap-1">
@@ -1079,7 +1079,7 @@ export function ChatInput({
                       <select
                         value={draftAutomationSleepUnit}
                         onChange={(e) => setDraftAutomationSleepUnit(e.target.value as AutomationSleepUnit)}
-                        className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                        className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
                       >
                         <option value="seconds">Seconds</option>
                         <option value="minutes">Minutes</option>
@@ -1088,7 +1088,7 @@ export function ChatInput({
                       </select>
                     </label>
                     <div className="flex items-end">
-                      <div className="h-9 w-full rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 text-[10px] text-[var(--muted-dim)] flex items-center">
+                      <div className="h-9 w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[10px] text-[var(--muted-dim)] flex items-center">
                         {draftAutomationRuns} send{draftAutomationRuns === 1 ? '' : 's'} with {draftAutomationSleepLabel.toLowerCase()} between runs
                       </div>
                     </div>

@@ -122,7 +122,7 @@ function DeviceCard({
         <div>
           <div className="flex items-center gap-2">
             <span
-              className={`h-2 w-2 rounded-full ${connected || isSelf ? 'bg-[var(--green)] shadow-[0_0_10px_rgba(34,197,94,.55)]' : 'bg-[var(--muted-dim)]'}`}
+              className={`h-2 w-2 rounded-full ${connected || isSelf ? 'bg-[var(--green)] shadow-[var(--glow-green)]' : 'bg-[var(--muted-dim)]'}`}
             />
             <h3 className="text-[14px] font-semibold text-[var(--fg)]">{device.name}</h3>
             {isSelf ? (
@@ -146,7 +146,7 @@ function DeviceCard({
           <input
             value={name}
             onChange={(event) => setName(event.target.value)}
-            className="rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+            className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
           />
         </label>
         {!isSelf ? (
@@ -158,7 +158,7 @@ function DeviceCard({
               value={endpoint}
               onChange={(event) => setEndpoint(event.target.value)}
               placeholder="https://hub.example.com"
-              className="rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 font-mono text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+              className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
             />
           </label>
         ) : null}
@@ -201,7 +201,7 @@ function DeviceCard({
             if (!isSelf) update.endpoints = endpoint.trim() ? [endpoint.trim()] : [];
             onSave(update);
           }}
-          className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--fg)] hover:bg-[var(--accent-soft)] disabled:opacity-50"
+          className="rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2 text-[11px] font-semibold text-[var(--fg)] hover:bg-[var(--selected)] disabled:opacity-50"
         >
           {busy ? 'Saving…' : 'Save device'}
         </button>
@@ -210,7 +210,7 @@ function DeviceCard({
             type="button"
             disabled={busy}
             onClick={onRevoke}
-            className="rounded border border-[rgba(248,113,113,.35)] px-3 py-2 text-[11px] font-semibold text-[var(--red)] hover:bg-[rgba(248,113,113,.08)] disabled:opacity-50"
+            className="rounded border border-[var(--red-border)] px-3 py-2 text-[11px] font-semibold text-[var(--red)] hover:bg-[var(--red-subtle)] disabled:opacity-50"
           >
             Revoke
           </button>
@@ -422,7 +422,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                     readOnly
                     rows={4}
                     value={JSON.stringify(mesh.invitation.payload)}
-                    className="mt-3 w-full resize-none rounded border border-[var(--border)] bg-[var(--input)] p-2 font-mono text-[10px] text-[var(--muted)]"
+                    className="mt-3 w-full resize-none rounded border border-[var(--border)] bg-[var(--panel)] p-2 font-mono text-[10px] text-[var(--muted)]"
                   />
                   <button
                     type="button"
@@ -446,21 +446,21 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
                   onChange={(event) => setJoinCode(event.target.value)}
                   rows={3}
                   placeholder="Paste the pairing JSON shown on the other computer"
-                  className="resize-y rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 font-mono text-[11px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+                  className="resize-y rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-[11px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
                 />
               </label>
               <button
                 type="button"
                 disabled={mesh.busyId === 'join' || !joinCode.trim()}
                 onClick={() => void mesh.join(joinCode)}
-                className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-50"
+                className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-4 text-[11px] font-semibold uppercase tracking-wide text-[var(--fg)] hover:bg-[var(--hover)] disabled:opacity-50"
               >
                 {mesh.busyId === 'join' ? 'Waiting for approval…' : 'Request to join'}
               </button>
             </div>
           </section>
 
-          <section className="border-l-2 border-[rgba(250,204,21,.5)] px-3 py-1">
+          <section className="border-l-2 border-[var(--yellow)] px-3 py-1">
             <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--yellow)]">
               Prototype forwarding trust
             </div>
@@ -479,7 +479,7 @@ export function DeviceMeshSettingsTab({ requestJson }: { requestJson: RequestJso
               pendingSelections[pending.id] ?? operationsFromGrants(existing?.grants ?? []);
             const administrator = pendingAdmins[pending.id] ?? existing?.administrator ?? false;
             return (
-              <section key={pending.id} className="border-t border-[rgba(250,204,21,.38)] py-4">
+              <section key={pending.id} className="border-t border-[var(--yellow-border)] py-4">
                 <div className="flex flex-wrap items-start justify-between gap-2">
                   <div>
                     <div className="text-[10px] font-semibold uppercase tracking-wider text-[var(--yellow)]">

@@ -364,8 +364,8 @@ export function HeaderPullRequestShortcuts({
         onClick={onOpenPullRequestsTab}
         className={`inline-flex items-center gap-1 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
           error
-            ? 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]'
-            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+            ? 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
+            : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
         }`}
         style={{ fontFamily: 'var(--display)' }}
         title={error ?? 'Open pull requests tab'}
@@ -395,7 +395,7 @@ export function HeaderPullRequestShortcuts({
               void onQuickMerge();
             }}
             disabled={Boolean(busyAction)}
-            className="inline-flex items-center px-2 py-1 rounded text-[9px] font-semibold tracking-wide uppercase border border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed transition-all"
+            className="inline-flex items-center px-2 py-1 rounded text-[9px] font-semibold tracking-wide uppercase border border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed transition-all"
             style={{ fontFamily: 'var(--display)' }}
             title={`Quick merge #${firstPr.number}`}
           >
@@ -407,7 +407,7 @@ export function HeaderPullRequestShortcuts({
               void onQuickClose();
             }}
             disabled={Boolean(busyAction)}
-            className="inline-flex items-center px-2 py-1 rounded text-[9px] font-semibold tracking-wide uppercase border border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed transition-all"
+            className="inline-flex items-center px-2 py-1 rounded text-[9px] font-semibold tracking-wide uppercase border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed transition-all"
             style={{ fontFamily: 'var(--display)' }}
             title={`Quick close #${firstPr.number}`}
           >

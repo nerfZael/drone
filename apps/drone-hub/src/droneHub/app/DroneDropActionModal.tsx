@@ -35,7 +35,7 @@ export function DroneDropActionModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.55)] px-4 backdrop-blur-sm"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim-soft)] px-4 backdrop-blur-sm"
       role="dialog"
       aria-modal="true"
       aria-label="Assign drones"
@@ -43,7 +43,7 @@ export function DroneDropActionModal({
         if (event.target === event.currentTarget && !assigning) onRequestClose();
       }}
     >
-      <div className="w-full max-w-[560px] rounded-[18px] border border-[var(--border-subtle)] bg-[rgba(12,16,24,.98)] shadow-[0_28px_90px_rgba(0,0,0,.46)]">
+      <div className="w-full max-w-[560px] rounded-[18px] border border-[var(--border-subtle)] bg-[var(--panel-overlay)] shadow-[0_28px_90px_var(--shadow-color)]">
         <div className="flex items-start justify-between gap-4 border-b border-[var(--border-subtle)] px-6 py-5">
           <div className="min-w-0">
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -70,7 +70,7 @@ export function DroneDropActionModal({
         <div className="px-6 py-5">
           <div className="flex max-h-[280px] flex-col gap-2 overflow-y-auto">
             {droppedDrones.map((drone) => (
-              <div key={drone.id} className="rounded-[12px] border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-4 py-3">
+              <div key={drone.id} className="rounded-[12px] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-4 py-3">
                 <div className="truncate text-[13px] font-medium text-[var(--fg-secondary)]">{drone.label}</div>
                 {drone.group ? <div className="truncate text-[10px] text-[var(--muted-dim)]">{drone.group}</div> : null}
               </div>

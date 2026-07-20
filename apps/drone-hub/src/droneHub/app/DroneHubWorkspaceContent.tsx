@@ -42,7 +42,7 @@ function WorkspaceViewFallback() {
         <div
           role="status"
           aria-live="polite"
-          className="inline-flex h-9 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)] shadow-[0_16px_40px_rgba(0,0,0,.28)]"
+          className="inline-flex h-9 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--panel-alt)] px-3 text-[11px] font-semibold uppercase tracking-wide text-[var(--muted)] shadow-[0_16px_40px_var(--shadow-color)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           <span className="h-2 w-2 rounded-full bg-[var(--accent)] opacity-80 animate-pulse" />

@@ -26,7 +26,7 @@ export function HubTransientToasts({
 }: HubTransientToastsProps) {
   const nameSuggestToastTone = nameSuggestToast?.tone === 'success' ? 'success' : 'error';
   const nameSuggestToastBorderClass =
-    nameSuggestToastTone === 'success' ? 'border-[rgba(74,222,128,.28)]' : 'border-[rgba(255,90,90,.2)]';
+    nameSuggestToastTone === 'success' ? 'border-[var(--green-border)]' : 'border-[var(--red-border)]';
   const nameSuggestToastLabelClass =
     nameSuggestToastTone === 'success' ? 'text-[var(--green)]' : 'text-[var(--red)]';
   const voiceLevel = Math.max(0, Math.min(1, Number(nameSuggestToast?.voiceLevel ?? 0)));
@@ -37,7 +37,7 @@ export function HubTransientToasts({
         <div
           onClick={onDismissNameSuggestToast}
           title="Click to dismiss"
-          className={`fixed right-4 z-50 max-w-[420px] rounded-lg border ${nameSuggestToastBorderClass} bg-[var(--panel-alt)] shadow-[0_16px_48px_rgba(0,0,0,.3)] px-4 py-3 animate-slide-up ${
+          className={`fixed right-4 z-50 max-w-[420px] rounded-lg border ${nameSuggestToastBorderClass} bg-[var(--panel-alt)] shadow-[0_16px_48px_var(--shadow-color)] px-4 py-3 animate-slide-up ${
             jobsModalError && !jobsModalOpen ? 'bottom-[98px]' : 'bottom-4'
           } cursor-pointer`}
         >
@@ -52,7 +52,7 @@ export function HubTransientToasts({
             <button
               type="button"
               onClick={onDismissNameSuggestToast}
-              className="inline-flex items-center justify-center w-6 h-6 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)] transition-all"
+              className="inline-flex items-center justify-center w-6 h-6 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)] transition-all"
               title="Dismiss"
               aria-label="Dismiss"
             >
@@ -66,7 +66,7 @@ export function HubTransientToasts({
         <div
           onClick={onDismissJobsModalError}
           title="Click to dismiss"
-          className="fixed bottom-4 right-4 z-50 max-w-[420px] rounded-lg border border-[rgba(255,90,90,.2)] bg-[var(--panel-alt)] shadow-[0_16px_48px_rgba(0,0,0,.3)] px-4 py-3 animate-slide-up cursor-pointer"
+          className="fixed bottom-4 right-4 z-50 max-w-[420px] rounded-lg border border-[var(--red-border)] bg-[var(--panel-alt)] shadow-[0_16px_48px_var(--shadow-color)] px-4 py-3 animate-slide-up cursor-pointer"
         >
           <div className="text-[10px] font-semibold text-[var(--red)] mb-1 tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>Failed to create jobs</div>
           <div className="text-[11px] text-[var(--muted)] whitespace-pre-wrap">{jobsModalError}</div>
@@ -85,7 +85,7 @@ function VoiceLevelBars({ level }: { level: number }) {
         return (
           <span
             key={index}
-            className="w-1.5 rounded-full bg-[var(--green)] opacity-80 shadow-[0_0_10px_rgba(74,222,128,.18)] transition-[height,opacity] duration-100 ease-out"
+            className="w-1.5 rounded-full bg-[var(--green)] opacity-80 shadow-[var(--glow-green)] transition-[height,opacity] duration-100 ease-out"
             style={{
               height: `${Math.round(6 + lift * 22)}px`,
               opacity: 0.35 + level * 0.6,

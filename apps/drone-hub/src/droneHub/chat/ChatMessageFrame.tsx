@@ -33,12 +33,12 @@ export function ChatMessageFrame({
   const surfaceClass = transparentAssistant
     ? 'py-1'
     : user
-      ? 'rounded-lg rounded-tr-sm border border-[rgba(148,163,184,.14)] bg-[var(--user-dim)] px-4 py-3'
+      ? 'rounded-lg rounded-tr-sm border border-[var(--user-border)] bg-[var(--user-dim)] px-4 py-3'
       : warning
-        ? 'rounded-lg rounded-tl-sm border border-[rgba(255,178,36,.18)] bg-[var(--yellow-subtle)] px-4 py-3'
+        ? 'rounded-lg rounded-tl-sm border border-[var(--yellow-border)] bg-[var(--yellow-subtle)] px-4 py-3'
         : error
-          ? 'rounded-lg rounded-tl-sm border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-4 py-3'
-          : 'rounded-lg rounded-tl-sm border border-[rgba(167,139,250,.12)] bg-[var(--accent-subtle)] px-4 py-3';
+          ? 'rounded-lg rounded-tl-sm border border-[var(--red-border)] bg-[var(--red-subtle)] px-4 py-3'
+          : 'rounded-lg rounded-tl-sm border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-4 py-3';
   const bubble = (
     <div className={`${showRoleIcon ? (user ? 'max-w-[85%]' : 'min-w-0 flex-1') : user ? 'max-w-full' : 'w-full'} min-w-[120px]`}>
       {showHeader ? (
@@ -76,7 +76,7 @@ export function ChatMessageFrame({
     <div className="mb-3 flex justify-end">
       {bubble}
       {showRoleIcon ? (
-        <div className="ml-3 mt-6 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-[rgba(148,163,184,.15)] bg-[var(--user-subtle)]">
+        <div className="ml-3 mt-6 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-[var(--user-border)] bg-[var(--user-subtle)]">
           <IconUser className="h-3.5 w-3.5 text-[var(--user)]" />
         </div>
       ) : null}
@@ -84,7 +84,7 @@ export function ChatMessageFrame({
   ) : (
     <div className={showRoleIcon ? 'flex gap-3' : 'flex'}>
       {showRoleIcon ? (
-        <div className="mt-6 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-[rgba(167,139,250,.15)] bg-[var(--accent-subtle)]">
+        <div className="mt-6 flex h-7 w-7 flex-shrink-0 items-center justify-center rounded border border-[var(--accent-border)] bg-[var(--accent-subtle)]">
           <IconBot className="h-3.5 w-3.5 text-[var(--accent)]" />
         </div>
       ) : null}

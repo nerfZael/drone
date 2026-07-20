@@ -148,7 +148,7 @@ function LinkedPullRequestCard({
   const footerMessage = actionError ?? (loadError ? `Status unavailable: ${loadError}` : null);
 
   return (
-    <section className="w-fit max-w-full self-start overflow-hidden rounded-md border border-[rgba(167,139,250,.18)] border-l-2 border-l-[rgba(167,139,250,.42)] bg-transparent">
+    <section className="w-fit max-w-full self-start overflow-hidden rounded-md border border-[var(--accent-border)] border-l-2 border-l-[var(--accent)] bg-transparent">
       <div className="min-w-0 py-2 pl-3 pr-2">
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
           <span className="text-[9px] font-semibold uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -160,7 +160,7 @@ function LinkedPullRequestCard({
             className={`inline-flex items-center gap-1 rounded border px-1.5 py-[1px] text-[9px] capitalize ${
               pullRequest
                 ? pullRequestStateClassName(pullRequest.state)
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]'
             }`}
             title={loadError ?? statusLabel}
           >
@@ -192,7 +192,7 @@ function LinkedPullRequestCard({
                 type="button"
                 onClick={() => void mergePullRequest()}
                 disabled={!canManage || Boolean(blockedReason) || Boolean(busyAction) || anyActionBusy}
-                className="inline-flex h-6 min-w-[64px] items-center justify-center whitespace-nowrap rounded border border-[rgba(74,222,128,.38)] bg-[var(--green-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--green)] transition-[background-color,border-color,filter] hover:border-[rgba(74,222,128,.58)] hover:brightness-110 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(74,222,128,.55)] disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex h-6 min-w-[64px] items-center justify-center whitespace-nowrap rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--green)] transition-[background-color,border-color,filter] hover:border-[var(--green)] hover:brightness-110 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--green)] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ fontFamily: 'var(--display)' }}
                 title={blockedReason ? `Cannot merge: ${blockedReason}` : forceReason ? `Force merge: ${forceReason}` : `Merge PR #${link.pullNumber}`}
               >
@@ -202,7 +202,7 @@ function LinkedPullRequestCard({
                 type="button"
                 onClick={() => void closePullRequest()}
                 disabled={!canManage || Boolean(busyAction) || anyActionBusy}
-                className="inline-flex h-6 items-center justify-center whitespace-nowrap rounded border border-[rgba(255,90,90,.3)] bg-transparent px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--red)] transition-[background-color,border-color] hover:border-[rgba(255,90,90,.52)] hover:bg-[var(--red-subtle)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[rgba(255,90,90,.5)] disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex h-6 items-center justify-center whitespace-nowrap rounded border border-[var(--red-border)] bg-transparent px-2 text-[9px] font-semibold uppercase tracking-wide text-[var(--red)] transition-[background-color,border-color] hover:border-[var(--red)] hover:bg-[var(--red-subtle)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Close this pull request without merging"
               >
@@ -216,7 +216,7 @@ function LinkedPullRequestCard({
           <span className="font-mono text-[var(--muted)]">{link.owner}/{link.repo}</span>
           {pullRequest?.headRefName || pullRequest?.baseRefName ? (
             <>
-              <span aria-hidden="true" className="text-[var(--border-strong)]">·</span>
+              <span aria-hidden="true" className="text-[var(--border)]">·</span>
               <span className="min-w-0 font-mono break-all" title={`${pullRequest.headRefName} → ${pullRequest.baseRefName}`}>
                 {pullRequest.headRefName || '-'} → {pullRequest.baseRefName || '-'}
               </span>
@@ -224,13 +224,13 @@ function LinkedPullRequestCard({
           ) : null}
           {pullRequest?.authorLogin ? (
             <>
-              <span aria-hidden="true" className="text-[var(--border-strong)]">·</span>
+              <span aria-hidden="true" className="text-[var(--border)]">·</span>
               <span>by {pullRequest.authorLogin}</span>
             </>
           ) : null}
         </div>
         {footerMessage ? (
-          <div role="alert" className="mt-2 border-t border-[rgba(255,90,90,.16)] pt-2 text-[9px] text-[var(--red)]">
+          <div role="alert" className="mt-2 border-t border-[var(--red-border)] pt-2 text-[9px] text-[var(--red)]">
             {footerMessage}
           </div>
         ) : null}

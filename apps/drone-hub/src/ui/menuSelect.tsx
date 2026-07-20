@@ -50,9 +50,9 @@ type UiMenuSelectProps = {
 };
 
 const triggerBaseClassNameByVariant: Record<UiMenuSelectVariant, string> = {
-  form: 'w-full h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] focus:outline-none transition-colors flex items-center justify-between gap-2',
+  form: 'w-full h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] focus:outline-none transition-colors flex items-center justify-between gap-2',
   toolbar:
-    'inline-flex items-center gap-1.5 h-[28px] pl-2 pr-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[11px] font-semibold text-[var(--muted)] focus:outline-none transition-all',
+    'inline-flex items-center gap-1.5 h-[28px] pl-2 pr-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[11px] font-semibold text-[var(--muted)] focus:outline-none transition-all',
 };
 
 const panelPositionClassNameByVariant: Record<UiMenuSelectVariant, string> = {
@@ -253,7 +253,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
                 value={searchQuery}
                 onChange={(event) => setSearchQuery(event.target.value)}
                 placeholder={searchPlaceholder}
-                className="w-full h-8 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-2 text-[11px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
+                className="w-full h-8 rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-2 text-[11px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none"
               />
             </div>
           ) : null}

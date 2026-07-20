@@ -65,7 +65,7 @@ export function SkillSourceImportSection({
   const previewFileCount = sourceSkillPreview?.files.length ?? 0;
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3 flex flex-col gap-3">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
@@ -118,7 +118,7 @@ export function SkillSourceImportSection({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-[320px_minmax(0,1fr)] gap-3 min-w-0">
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] p-2 flex flex-col gap-2 min-w-0">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-2 flex flex-col gap-2 min-w-0">
           <div className="flex items-center justify-between gap-2 px-1">
             <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Source skills
@@ -144,8 +144,8 @@ export function SkillSourceImportSection({
                     onClick={() => void previewSourceSkill(candidate)}
                     className={`w-full text-left rounded border px-3 py-3 flex flex-col gap-2 transition-colors ${
                       active
-                        ? 'border-[var(--accent)] bg-[rgba(255,255,255,.05)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.01)] hover:bg-[var(--hover)]'
+                        ? 'border-[var(--accent)] bg-[var(--surface-soft)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-faint)] hover:bg-[var(--hover)]'
                     }`}
                   >
                     <div className="flex flex-wrap items-start justify-between gap-2">
@@ -170,7 +170,7 @@ export function SkillSourceImportSection({
           </div>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] p-3 flex flex-col gap-3 min-w-0">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-3 flex flex-col gap-3 min-w-0">
           {sourceSkillPreviewLoading ? (
             <div className="rounded border border-dashed border-[var(--border-subtle)] px-3 py-6 text-[11px] text-[var(--muted-dim)]">
               Loading preview…
@@ -219,20 +219,20 @@ export function SkillSourceImportSection({
               </div>
 
               {sourceSkillPreview.candidate.importReason && (
-                <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-2 text-[11px] text-[var(--muted-dim)]">
+                <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-2 text-[11px] text-[var(--muted-dim)]">
                   {sourceSkillPreview.candidate.importReason}
                 </div>
               )}
 
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 flex flex-col gap-2">
+                <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 flex flex-col gap-2">
                   <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Normalized import</div>
                   <div className="text-[11px] text-[var(--muted-dim)]">Slug: <span className="font-mono text-[var(--fg-secondary)]">{sourceSkillPreview.normalized.slug}</span></div>
                   <div className="text-[11px] text-[var(--muted-dim)]">Compatibility: {sourceSkillPreview.normalized.compatibility}</div>
                   <div className="text-[11px] text-[var(--muted-dim)]">Files carried over: {sourceSkillPreview.normalized.files.length}</div>
                   <div className="text-[11px] text-[var(--muted-dim)]">Metadata entries: {Object.keys(sourceSkillPreview.normalized.metadata ?? {}).length}</div>
                 </div>
-                <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 flex flex-col gap-2">
+                <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 flex flex-col gap-2">
                   <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Source snapshot</div>
                   <div className="text-[11px] text-[var(--muted-dim)]">Commit: <span className="font-mono text-[var(--fg-secondary)]">{sourceSkillPreview.sourceCommit}</span></div>
                   <div className="text-[11px] text-[var(--muted-dim)]">Package files available for review: {previewFileCount}</div>
@@ -244,7 +244,7 @@ export function SkillSourceImportSection({
               </div>
 
               <div className="grid grid-cols-1 xl:grid-cols-[220px_minmax(0,1fr)] gap-3 min-w-0">
-                <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-2 flex flex-col gap-2 min-w-0">
+                <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-2 flex flex-col gap-2 min-w-0">
                   <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)] px-1">Package files</div>
                   <div className="flex flex-col gap-1 max-h-[320px] overflow-y-auto pr-1">
                     {sourceSkillPreview.files.map((file) => {
@@ -256,8 +256,8 @@ export function SkillSourceImportSection({
                           onClick={() => selectSourcePreviewFile(file.path)}
                           className={`w-full text-left rounded border px-3 py-2 transition-colors ${
                             active
-                              ? 'border-[var(--accent)] bg-[rgba(255,255,255,.05)]'
-                              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.01)] hover:bg-[var(--hover)]'
+                              ? 'border-[var(--accent)] bg-[var(--surface-soft)]'
+                              : 'border-[var(--border-subtle)] bg-[var(--surface-faint)] hover:bg-[var(--hover)]'
                           }`}
                         >
                           <div className="text-[11px] text-[var(--fg-secondary)] font-mono break-all">{file.path}</div>
@@ -268,7 +268,7 @@ export function SkillSourceImportSection({
                   </div>
                 </div>
 
-                <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3 flex flex-col gap-2 min-w-0">
+                <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-2 min-w-0">
                   <div className="flex items-center justify-between gap-2">
                     <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Selected file</div>
                     <div className="text-[10px] text-[var(--muted-dim)] font-mono break-all">{selectedSourcePreviewFile?.path ?? 'None'}</div>

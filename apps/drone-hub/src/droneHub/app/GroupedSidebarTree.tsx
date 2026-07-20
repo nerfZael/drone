@@ -199,7 +199,7 @@ function groupedSidebarDensityClasses(sidebarDensityMode: SidebarDensityMode): {
     return {
       icon: 'h-3 w-3 text-[var(--muted-dim)] opacity-72',
       emptyHint:
-        'flex items-center gap-2 rounded-md border border-dashed border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.02)] px-2 py-1 text-[9.5px] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
+        'flex items-center gap-2 rounded-md border border-dashed border-[var(--border)] bg-[var(--surface-softest)] px-2 py-1 text-[9.5px] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
       chatRow: 'h-6 px-1.5 text-[10px]',
       chatDeleteWidth: 'w-5',
       chatPlaceholderWidth: 'w-5',
@@ -220,7 +220,7 @@ function groupedSidebarDensityClasses(sidebarDensityMode: SidebarDensityMode): {
     return {
       icon: 'h-[15px] w-[15px] text-[var(--muted-dim)] opacity-72',
       emptyHint:
-        'flex items-center gap-2 rounded-md border border-dashed border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.02)] px-2.5 py-2 text-[10.5px] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
+        'flex items-center gap-2 rounded-md border border-dashed border-[var(--border)] bg-[var(--surface-softest)] px-2.5 py-2 text-[10.5px] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
       chatRow: 'h-7 px-2 text-[11px]',
       chatDeleteWidth: 'w-7',
       chatPlaceholderWidth: 'w-7',
@@ -240,7 +240,7 @@ function groupedSidebarDensityClasses(sidebarDensityMode: SidebarDensityMode): {
   return {
     icon: 'h-3.5 w-3.5 text-[var(--muted-dim)] opacity-72',
     emptyHint:
-      'flex items-center gap-2 rounded-md border border-dashed border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.02)] px-2 py-1.5 text-[10px] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
+      'flex items-center gap-2 rounded-md border border-dashed border-[var(--border)] bg-[var(--surface-softest)] px-2 py-1.5 text-[10px] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]',
     chatRow: 'h-[25px] px-1.5 text-[10.5px]',
     chatDeleteWidth: 'w-6',
     chatPlaceholderWidth: 'w-6',
@@ -519,7 +519,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
               }
             }}
             placeholder="Chat name"
-            className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[rgba(15,18,28,.88)] px-2 py-1 font-mono text-[11px] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
+            className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] px-2 py-1 font-mono text-[11px] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
           />
           {chatEditor?.pending ? <IconSpinner className="opacity-90 text-[var(--accent)]" /> : null}
         </div>
@@ -545,10 +545,10 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
           }}
           className={`relative flex flex-1 items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${
             selected
-              ? 'border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.045)] text-[var(--fg)]'
+              ? 'border-[var(--border)] bg-[var(--surface-soft)] text-[var(--fg)]'
               : active
-                ? 'border-[rgba(255,255,255,.06)] bg-[rgba(255,255,255,.025)] text-[var(--fg-secondary)]'
-                : 'border-transparent text-[var(--muted)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] hover:text-[var(--fg-secondary)]'
+                ? 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)]'
+                : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
           } ${isDragging ? 'opacity-35' : ''} {!sidebarDndEnabled || movingDroneGroups || isOptimistic ? '' : 'cursor-grab touch-none active:cursor-grabbing'}`}
           title={`${uiDroneName(drone.name)} / ${chatName}`}
         >
@@ -585,7 +585,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
               }}
               onPointerDown={(event) => event.stopPropagation()}
               onMouseDown={(event) => event.stopPropagation()}
-              className={`inline-flex ${densityClasses.chatDeleteWidth} flex-shrink-0 items-center justify-center rounded border bg-[rgba(80,130,255,.10)] border-[rgba(90,140,255,.22)] text-[rgb(124,170,255)] opacity-0 pointer-events-none transition-opacity group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto hover:bg-[rgba(80,130,255,.16)]`}
+              className={`inline-flex ${densityClasses.chatDeleteWidth} flex-shrink-0 items-center justify-center rounded border bg-[var(--info-subtle)] border-[var(--info-border)] text-[var(--info)] opacity-0 pointer-events-none transition-opacity group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto hover:bg-[var(--info-subtle)]`}
               title={`Rename chat "${chatName}"`}
               aria-label={`Rename chat "${chatName}"`}
             >
@@ -600,7 +600,7 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
               onPointerDown={(event) => event.stopPropagation()}
               onMouseDown={(event) => event.stopPropagation()}
               disabled={Boolean(deletingChats[`${drone.id}:${chatName}`])}
-              className={`inline-flex ${densityClasses.chatDeleteWidth} flex-shrink-0 items-center justify-center rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] text-[var(--red)] opacity-0 pointer-events-none transition-opacity group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto disabled:opacity-50`}
+              className={`inline-flex ${densityClasses.chatDeleteWidth} flex-shrink-0 items-center justify-center rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] opacity-0 pointer-events-none transition-opacity group-hover/chat-row:opacity-100 group-hover/chat-row:pointer-events-auto disabled:opacity-50`}
               title={`Delete chat "${chatName}"`}
               aria-label={`Delete chat "${chatName}"`}
             >
@@ -647,10 +647,10 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
           }}
           className={`relative flex flex-1 items-center gap-1.5 rounded border text-left transition-colors ${densityClasses.chatRow} ${
             selected
-              ? 'border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.045)] text-[var(--fg)]'
+              ? 'border-[var(--border)] bg-[var(--surface-soft)] text-[var(--fg)]'
               : active
-                ? 'border-[rgba(255,255,255,.06)] bg-[rgba(255,255,255,.025)] text-[var(--fg-secondary)]'
-                : 'border-transparent text-[var(--muted)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] hover:text-[var(--fg-secondary)]'
+                ? 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)]'
+                : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
           }`}
           title={`${uiDroneName(drone.name)} / ${chatName}`}
         >
@@ -923,7 +923,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                     }
                   }}
                   placeholder="Chat name"
-                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[rgba(15,18,28,.88)] px-2 py-1 font-mono text-[11px] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
+                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] px-2 py-1 font-mono text-[11px] text-[var(--fg)] focus:border-[var(--accent)] focus:outline-none"
                 />
                 {chatEditor?.pending ? <IconSpinner className="opacity-90 text-[var(--accent)]" /> : null}
               </div>
@@ -938,7 +938,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
                   className={`h-3 w-3 rounded-sm border ${
                     chatEditor?.createAsDraft === true
                       ? 'border-[var(--accent)] bg-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--surface-soft)]'
                   }`}
                 />
                 Draft
@@ -952,7 +952,7 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
         </div>
       ) : null}
       {childDroneIds.length > 0 ? (
-        <div className={`${densityClasses.nestedDroneRail} flex flex-col gap-0.5 border-l border-[rgba(255,255,255,.05)]`}>
+        <div className={`${densityClasses.nestedDroneRail} flex flex-col gap-0.5 border-l border-[var(--border-subtle)]`}>
           {childDroneIds.map((childNode) => (
             <GroupedSidebarDroneRow
               key={childNode.id}
@@ -1145,8 +1145,8 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
             intoState
               ? 'bg-[var(--accent-subtle)] ring-1 ring-[var(--accent-muted)]'
               : isSelected
-                ? 'border border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.045)]'
-                : 'border border-transparent hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)]'
+                ? 'border border-[var(--border)] bg-[var(--surface-soft)]'
+                : 'border border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)]'
           } ${isDragging ? 'opacity-60' : isHiddenGroup ? 'opacity-70' : ''}`}
           style={{ paddingLeft: `${Math.max(0, node.depth) * densityClasses.folderDepthPaddingPx}px` }}
           onDoubleClick={handleFolderDoubleClick}
@@ -1173,7 +1173,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                     }
                   }}
                   maxLength={64}
-                  className={`min-w-0 flex-1 rounded-md border border-[var(--accent-muted)] bg-[rgba(15,18,28,.88)] text-[var(--fg)] shadow-[0_0_0_1px_rgba(167,139,250,.16)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[rgba(167,139,250,.18)] ${densityClasses.folderInput}`}
+                  className={`min-w-0 flex-1 rounded-md border border-[var(--accent-muted)] bg-[var(--panel-raised)] text-[var(--fg)] shadow-[var(--glow-accent)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] ${densityClasses.folderInput}`}
                 />
               </div>
             </div>
@@ -1220,7 +1220,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 }}
                 onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
-                className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]`}
+                className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] transition-colors hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]`}
                 title={isVirtualGroup ? `New top-level folder from "${node.label}"` : `New subfolder in "${node.label}"`}
               >
                 <IconPlus className="opacity-90" />
@@ -1235,7 +1235,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                   onPointerDown={(event) => event.stopPropagation()}
                   onMouseDown={(event) => event.stopPropagation()}
                   disabled={Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath])}
-                  className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] transition-colors hover:bg-[rgba(167,139,250,.12)] disabled:opacity-50`}
+                  className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border bg-[var(--accent-subtle)] border-[var(--accent-border)] text-[var(--accent)] transition-colors hover:bg-[var(--accent-subtle)] disabled:opacity-50`}
                   title={`Rename folder "${node.label}"`}
                 >
                   {renamingGroups[folderPath] ? <IconSpinner className="opacity-90" /> : <IconPencil className="opacity-90" />}
@@ -1252,7 +1252,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border transition-colors ${
                   isHiddenGroup
                     ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:bg-[var(--hover)] hover:text-[var(--muted)]'
+                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:bg-[var(--hover)] hover:text-[var(--muted)]'
                 }`}
                 title={isHiddenGroup ? `Unhide "${node.label}"` : `Hide "${node.label}"`}
               >
@@ -1269,7 +1269,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border transition-colors ${
                   selectedGroupMultiChat === folderPath
                     ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
+                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
                 }`}
                 title={`Open "${node.label}" multi-chat`}
               >
@@ -1291,7 +1291,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 onPointerDown={(event) => event.stopPropagation()}
                 onMouseDown={(event) => event.stopPropagation()}
                 disabled={Boolean(deletingGroups[folderPath]) || Boolean(renamingGroups[folderPath])}
-                className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] text-[var(--red)] transition-colors hover:bg-[rgba(255,90,90,.15)] disabled:opacity-50`}
+                className={`inline-flex ${densityClasses.folderActionButton} items-center justify-center rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] transition-colors hover:bg-[var(--red-subtle)] disabled:opacity-50`}
                 title={`Delete folder "${node.label}"`}
               >
                 {deletingGroups[folderPath] ? <IconSpinner className="opacity-90" /> : <IconTrash className="opacity-90" />}
@@ -1304,10 +1304,10 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
         <GroupedSidebarFolderBodyDropZone
           nodeId={node.id}
           disabled={!sidebarDndEnabled || isVirtualGroup}
-          className={`${densityClasses.folderBody} ${intoState ? 'border-[var(--accent-muted)] bg-[rgba(167,139,250,.03)]' : 'border-[rgba(255,255,255,.06)]'}`}
+          className={`${densityClasses.folderBody} ${intoState ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]' : 'border-[var(--border-subtle)]'}`}
         >
           {actionsEnabled && showCreateInline ? (
-            <div className={`flex items-center gap-2 rounded-md border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] shadow-[0_0_0_1px_rgba(167,139,250,.12)] ${densityClasses.folderCreateBody}`}>
+            <div className={`flex items-center gap-2 rounded-md border border-dashed border-[var(--accent-muted)] bg-[var(--accent-subtle)] shadow-[var(--glow-accent)] ${densityClasses.folderCreateBody}`}>
               <IconFolder className={`${densityClasses.icon} flex-shrink-0 text-[var(--accent)] opacity-80`} />
               <input
                 ref={folderEditorInputRef}
@@ -1325,7 +1325,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 }}
                 maxLength={64}
                 placeholder={folderEditor?.parentPath ? 'Subfolder name' : 'Folder name'}
-                className={`min-w-0 flex-1 rounded-md border border-[var(--accent-muted)] bg-[rgba(15,18,28,.88)] text-[var(--fg)] shadow-[0_0_0_1px_rgba(167,139,250,.16)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[rgba(167,139,250,.18)] ${densityClasses.folderInput}`}
+                className={`min-w-0 flex-1 rounded-md border border-[var(--accent-muted)] bg-[var(--panel-raised)] text-[var(--fg)] shadow-[var(--glow-accent)] focus:border-[var(--accent)] focus:outline-none focus:ring-2 focus:ring-[var(--focus-ring)] ${densityClasses.folderInput}`}
               />
             </div>
           ) : null}

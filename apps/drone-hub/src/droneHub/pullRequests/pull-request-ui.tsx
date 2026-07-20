@@ -45,7 +45,7 @@ export function MetaChip({
 }) {
   return (
     <span
-      className={`inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-1.5 py-[1px] text-[10px] ${
+      className={`inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-[10px] ${
         mono ? 'font-mono' : ''
       }`}
       title={title}
@@ -57,9 +57,9 @@ export function MetaChip({
 }
 
 const pullRequestBadgeClassNames = {
-  danger: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
-  success: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
-  warning: 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
+  danger: 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]',
+  success: 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]',
+  warning: 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]',
 } as const;
 
 export function mergeBlockedReason(pr: RepoPullRequestSummary): string | null {
@@ -101,10 +101,10 @@ export function PullRequestStatusBadgeStrip({
 
 export function pullRequestStateClassName(stateRaw: string | null | undefined): string {
   const state = String(stateRaw ?? '').trim().toLowerCase();
-  if (state === 'open') return 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]';
+  if (state === 'open') return 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]';
   if (state === 'merged') return 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]';
-  if (state === 'closed') return 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]';
-  return 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]';
+  if (state === 'closed') return 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]';
+  return 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]';
 }
 
 export function changeStatusLabel(entry: RepoPullRequestChangeEntry): string {

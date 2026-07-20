@@ -19,6 +19,8 @@ describe('whiteboard boundaries', () => {
     const canvas = readSource('WhiteboardCanvas.tsx');
     expect(canvas).toContain("@excalidraw/excalidraw'");
     expect(canvas).not.toContain('@excalidraw/excalidraw/index.css');
+    expect(canvas).toContain('className="dh-whiteboard-theme h-full w-full"');
+    expect(canvas).toContain('theme="dark"');
   });
 
   test('keeps whiteboard API state out of the render shell', () => {

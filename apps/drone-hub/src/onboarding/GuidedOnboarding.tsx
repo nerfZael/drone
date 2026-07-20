@@ -380,17 +380,17 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
           <path
             d={connector.d}
             fill="none"
-            stroke="rgba(167, 139, 250, .70)"
+            stroke="var(--focus-ring)"
             strokeWidth="1.6"
             strokeLinecap="round"
-            style={{ filter: 'drop-shadow(0 0 10px rgba(167, 139, 250, .22))' }}
+            style={{ filter: 'drop-shadow(0 0 10px var(--accent-border))' }}
           />
           <circle
             cx={connector.to.x}
             cy={connector.to.y}
             r={3.2}
-            fill="rgba(167, 139, 250, .90)"
-            style={{ filter: 'drop-shadow(0 0 10px rgba(167, 139, 250, .28))' }}
+            fill="var(--accent)"
+            style={{ filter: 'drop-shadow(0 0 10px var(--accent-border))' }}
           />
         </svg>
       ) : null}
@@ -405,9 +405,9 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
             top: Math.max(0, Math.round(targetRect.top) - 6),
             width: Math.round(targetRect.width) + 12,
             height: Math.round(targetRect.height) + 12,
-            border: '1px solid rgba(167, 139, 250, .55)',
-            boxShadow: '0 0 0 1px rgba(167, 139, 250, .15), 0 0 26px rgba(167, 139, 250, .14)',
-            background: 'rgba(167, 139, 250, .03)',
+            border: '1px solid var(--accent-border)',
+            boxShadow: 'var(--glow-accent-strong)',
+            background: 'var(--accent-subtle)',
           }}
         />
       ) : null}
@@ -425,7 +425,7 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
           maxWidth: pos.maxWidth,
         }}
       >
-        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_16px_80px_rgba(0,0,0,.55)] overflow-hidden">
+        <div className="rounded-xl border border-[var(--border)] bg-[var(--panel-alt)] shadow-[0_16px_80px_var(--shadow-color)] overflow-hidden">
           <div className="px-4 py-3 border-b border-[var(--border-subtle)] flex items-start justify-between gap-3">
             <div className="min-w-0">
               <div className="text-[9px] font-semibold tracking-[0.16em] uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
@@ -438,7 +438,7 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
             <button
               type="button"
               onClick={dismissCurrent}
-              className="flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
+              className="flex-shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
               aria-label="Dismiss this tip"
               title="Dismiss (Esc)"
             >
@@ -459,7 +459,7 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
             <button
               type="button"
               onClick={skipAll}
-              className="h-8 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
+              className="h-8 px-2.5 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors"
               style={{ fontFamily: 'var(--display)' }}
               title="Dismiss all tips"
             >
@@ -472,8 +472,8 @@ export function GuidedOnboarding({ steps = GUIDED_ONBOARDING_STEPS }: { steps?: 
               disabled={stepIndex <= 0}
               className={`h-8 px-3 rounded-md border text-[10px] font-semibold tracking-wide uppercase transition-all ${
                 stepIndex <= 0
-                  ? 'opacity-40 cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                  ? 'opacity-40 cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
               title="Back (←)"

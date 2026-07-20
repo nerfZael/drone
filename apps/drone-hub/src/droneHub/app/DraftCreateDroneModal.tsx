@@ -38,11 +38,11 @@ export function DraftCreateDroneModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-[rgba(0,0,0,.55)] backdrop-blur-sm px-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-[var(--scrim-soft)] backdrop-blur-sm px-4"
       role="dialog"
       aria-modal="true"
     >
-      <div className="w-full max-w-[420px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_rgba(0,0,0,.35)] overflow-hidden animate-slide-up relative">
+      <div className="w-full max-w-[420px] rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] shadow-[0_24px_80px_var(--shadow-color)] overflow-hidden animate-slide-up relative">
         <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-[var(--accent)] via-[var(--accent-muted)] to-transparent opacity-40" />
         <form
           onSubmit={(e) => {
@@ -75,7 +75,7 @@ export function DraftCreateDroneModal({
           </div>
           <div className="px-5 py-4">
             {draftCreateError && (
-              <div className="mb-3 p-2 rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] text-[11px] text-[var(--red)] whitespace-pre-wrap">
+              <div className="mb-3 p-2 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[11px] text-[var(--red)] whitespace-pre-wrap">
                 {draftCreateError}
               </div>
             )}
@@ -111,7 +111,7 @@ export function DraftCreateDroneModal({
                       disabled={draftCreating || draftCreateName.trim() === draftSuggestedName}
                       className={`h-6 px-2 rounded border font-semibold tracking-wide uppercase transition-all ${
                         draftCreating || draftCreateName.trim() === draftSuggestedName
-                          ? 'opacity-50 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                          ? 'opacity-50 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                           : 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)] hover:brightness-110'
                       }`}
                       style={{ fontFamily: 'var(--display)' }}
@@ -145,8 +145,8 @@ export function DraftCreateDroneModal({
               disabled={draftCreating}
               className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 draftCreating
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
             >

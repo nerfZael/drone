@@ -110,7 +110,7 @@ export function AgentMessageExtras({
             {inlineMedia.map((media) => (
               <div
                 key={media.id}
-                className="relative overflow-hidden rounded-md bg-[rgba(0,0,0,.16)]"
+                className="relative overflow-hidden rounded-md bg-[var(--surface-inset)]"
               >
                 {media.kind === 'image' ? (
                   <button
@@ -159,7 +159,7 @@ export function AgentMessageExtras({
                   <button
                     type="button"
                     onClick={() => openInlineMediaTarget(media)}
-                    className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.55)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]"
+                    className="absolute right-2 top-2 inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--scrim-soft)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]"
                     title={`Open ${media.label} from message link`}
                     aria-label={`Open ${media.label}`}
                   >
@@ -188,9 +188,9 @@ export function AgentMessageExtras({
             onClick={() => setInlineMediaOverride(messageId, !inlineMediaVisible)}
             className={`inline-flex h-7 w-7 items-center justify-center rounded border opacity-100 transition-opacity ${
               showInlineMedia
-                ? 'border-[var(--accent-muted)] bg-[rgba(0,0,0,.25)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] text-[var(--muted)]'
-            } hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)] hover:text-[var(--accent)]`}
+                ? 'border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)]'
+            } hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)]`}
             title={`${inlineMediaToggleLabel}${inlineMediaEnabled ? ' (global default on)' : ''}`}
             aria-label={inlineMediaToggleLabel}
           >
@@ -202,7 +202,7 @@ export function AgentMessageExtras({
             type="button"
             onClick={() => onCreateJobs(text)}
             disabled={parsingJobs}
-            className={`inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] text-[var(--muted)] transition-opacity hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)] hover:text-[var(--accent)] ${
+            className={`inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] transition-opacity hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] ${
               parsingJobs ? 'cursor-wait opacity-100' : 'opacity-0 group-hover:opacity-100'
             }`}
             title="Create jobs from this agent message"

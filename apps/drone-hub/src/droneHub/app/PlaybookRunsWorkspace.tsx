@@ -316,12 +316,12 @@ export function PlaybookRunsWorkspace({
     <div className="flex-1 flex flex-col min-w-0 min-h-0 overflow-hidden">
       {/* ── Header ── */}
       <div className="relative flex-shrink-0 border-b border-[var(--border-subtle)]">
-        <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(167,139,250,.04)_0%,transparent_80%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(180deg,var(--accent-subtle)_0%,transparent_80%)]" />
         <div className="dh-noise relative">
           <div className="px-6 py-5">
             <div className="flex items-start justify-between gap-4">
               <div className="flex items-start gap-3.5 min-w-0">
-                <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl bg-[rgba(167,139,250,.1)] text-[var(--accent)] shadow-[0_0_16px_rgba(167,139,250,.08)]">
+                <div className="mt-0.5 flex h-10 w-10 items-center justify-center rounded-xl bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[var(--glow-accent)]">
                   <IconBoard />
                 </div>
                 <div className="min-w-0">
@@ -329,7 +329,7 @@ export function PlaybookRunsWorkspace({
                     <span className="text-[15px] font-semibold tracking-tight text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
                       Playbook Runs
                     </span>
-                    <span className="inline-flex items-center gap-1.5 rounded-md bg-[rgba(255,255,255,.04)] px-2.5 py-1 text-[10px] font-medium text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
+                    <span className="inline-flex items-center gap-1.5 rounded-md bg-[var(--surface-strong)] px-2.5 py-1 text-[10px] font-medium text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
                       {filteredRuns.length}<span className="opacity-40">R</span>
                       {totalQueuedCount > 0 && <>{' '}{totalQueuedCount}<span className="opacity-40">Q</span></>}
                     </span>
@@ -348,7 +348,7 @@ export function PlaybookRunsWorkspace({
                 <button
                   type="button"
                   onClick={onClose}
-                  className="inline-flex h-8 items-center justify-center rounded-lg px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)] transition-all hover:bg-[rgba(255,255,255,.04)] hover:text-[var(--fg)]"
+                  className="inline-flex h-8 items-center justify-center rounded-lg px-3 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)] transition-all hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   Close
@@ -367,8 +367,8 @@ export function PlaybookRunsWorkspace({
                 onClick={() => setSelectedPlaybookId('')}
                 className={`inline-flex h-7 items-center rounded-lg px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-all ${
                   selectedPlaybookId === ''
-                    ? 'bg-[var(--fg)] text-[var(--panel)] shadow-[0_2px_8px_rgba(0,0,0,.2)]'
-                    : 'bg-[rgba(255,255,255,.04)] text-[var(--muted-dim)] hover:bg-[rgba(255,255,255,.07)] hover:text-[var(--fg)]'
+                    ? 'bg-[var(--fg)] text-[var(--panel)] shadow-[0_2px_8px_var(--shadow-color)]'
+                    : 'bg-[var(--surface-strong)] text-[var(--muted-dim)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
@@ -386,8 +386,8 @@ export function PlaybookRunsWorkspace({
                       onClick={() => setSelectedPlaybookId((current) => (current === playbook.id ? '' : playbook.id))}
                       className={`inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-all ${
                         active
-                          ? 'bg-[rgba(167,139,250,.16)] text-[var(--accent)] border border-[rgba(167,139,250,.2)]'
-                          : 'bg-[rgba(255,255,255,.04)] text-[var(--muted-dim)] border border-transparent hover:bg-[rgba(255,255,255,.07)] hover:text-[var(--fg)]'
+                          ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-border)]'
+                          : 'bg-[var(--surface-strong)] text-[var(--muted-dim)] border border-transparent hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]'
                       }`}
                       style={{ fontFamily: 'var(--display)' }}
                     >
@@ -400,7 +400,7 @@ export function PlaybookRunsWorkspace({
                       <button
                         type="button"
                         onClick={() => onOpenPlaybookSettings(playbook.id)}
-                        className="ml-0.5 inline-flex h-7 items-center rounded-lg px-1.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--accent)] hover:bg-[rgba(167,139,250,.08)]"
+                        className="ml-0.5 inline-flex h-7 items-center rounded-lg px-1.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--accent)] hover:bg-[var(--accent-subtle)]"
                         style={{ fontFamily: 'var(--display)' }}
                         title={`Edit "${playbook.label}"`}
                       >
@@ -422,8 +422,8 @@ export function PlaybookRunsWorkspace({
                 onClick={() => setSelectedRepoPath('')}
                 className={`inline-flex h-7 items-center rounded-lg px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-all ${
                   selectedRepoPath === ''
-                    ? 'bg-[var(--fg)] text-[var(--panel)] shadow-[0_2px_8px_rgba(0,0,0,.2)]'
-                    : 'bg-[rgba(255,255,255,.04)] text-[var(--muted-dim)] hover:bg-[rgba(255,255,255,.07)] hover:text-[var(--fg)]'
+                    ? 'bg-[var(--fg)] text-[var(--panel)] shadow-[0_2px_8px_var(--shadow-color)]'
+                    : 'bg-[var(--surface-strong)] text-[var(--muted-dim)] hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
@@ -440,8 +440,8 @@ export function PlaybookRunsWorkspace({
                     onClick={() => setSelectedRepoPath((current) => (current === repoPath ? '' : repoPath))}
                     className={`inline-flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-[10px] font-semibold uppercase tracking-wide transition-all ${
                       active
-                        ? 'bg-[rgba(167,139,250,.16)] text-[var(--accent)] border border-[rgba(167,139,250,.2)]'
-                        : 'bg-[rgba(255,255,255,.04)] text-[var(--muted-dim)] border border-transparent hover:bg-[rgba(255,255,255,.07)] hover:text-[var(--fg)]'
+                        ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-border)]'
+                        : 'bg-[var(--surface-strong)] text-[var(--muted-dim)] border border-transparent hover:bg-[var(--surface-strong)] hover:text-[var(--fg)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                   >
@@ -577,8 +577,8 @@ export function PlaybookRunsWorkspace({
                               disabled={Boolean(actionBusyByKey[busyKey])}
                               className={`h-6 px-2 rounded-md text-[9px] font-semibold tracking-wide uppercase border transition-all ${
                                 actionBusyByKey[busyKey]
-                                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                  : 'bg-[rgba(255,255,255,.03)] border-[var(--border-subtle)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[rgba(167,139,250,.06)] hover:text-[var(--accent)]'
+                                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                                  : 'bg-[var(--surface-soft)] border-[var(--border-subtle)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
                               }`}
                               style={{ fontFamily: 'var(--display)' }}
                               title={`${action.messages.length} queued message${action.messages.length === 1 ? '' : 's'}`}
@@ -602,7 +602,7 @@ export function PlaybookRunsWorkspace({
                               key={normalizedArtifact}
                               type="button"
                               onClick={() => onOpenArtifact(run.droneId, run.chatName, availability.path, availability.name)}
-                              className="h-6 px-2 rounded-md text-[9px] font-semibold tracking-wide border bg-[rgba(74,222,128,.04)] border-[rgba(74,222,128,.15)] text-[var(--green)] hover:bg-[rgba(74,222,128,.1)] hover:border-[rgba(74,222,128,.25)]"
+                              className="h-6 px-2 rounded-md text-[9px] font-semibold tracking-wide border bg-[var(--green-subtle)] border-[var(--green-border)] text-[var(--green)] hover:bg-[var(--green-subtle)] hover:border-[var(--green-border)]"
                               title={availability.path}
                               style={{ fontFamily: 'var(--code)' }}
                             >
@@ -620,7 +620,7 @@ export function PlaybookRunsWorkspace({
                         className={`inline-flex h-6 w-6 items-center justify-center rounded-md transition-all ${
                           deleteBusy
                             ? 'opacity-40 cursor-not-allowed text-[var(--muted-dim)]'
-                            : 'text-[var(--muted-dim)] opacity-0 hover:opacity-100 hover:bg-[rgba(255,90,90,.12)] hover:text-[var(--red)]'
+                            : 'text-[var(--muted-dim)] opacity-0 hover:opacity-100 hover:bg-[var(--red-subtle)] hover:text-[var(--red)]'
                         }`}
                         title={deleteBusy ? `Removing "${run.droneName}"...` : `Delete "${run.droneName}"`}
                       >

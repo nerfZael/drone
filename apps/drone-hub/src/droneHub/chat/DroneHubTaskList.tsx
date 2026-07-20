@@ -122,7 +122,7 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
   });
 
   return (
-    <div className="mt-3 rounded-xl border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] overflow-hidden">
+    <div className="mt-3 rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-inset)] overflow-hidden">
       <div className="px-3 py-2 border-b border-[var(--border-subtle)] flex items-center justify-between gap-2">
         <div
           className="text-[10px] font-semibold tracking-[0.08em] uppercase text-[var(--muted-dim)]"
@@ -138,7 +138,7 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
                 void spawnAllTasks('spawn');
               }}
               disabled={!canSpawnAny || Boolean(spawningAllMode)}
-              className="inline-flex items-center justify-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)] disabled:opacity-45 disabled:cursor-default"
+              className="inline-flex items-center justify-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)] disabled:opacity-45 disabled:cursor-default"
               style={{ fontFamily: 'var(--display)' }}
               title="Spawn all tasks as fresh drones"
             >
@@ -150,7 +150,7 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
                 void spawnAllTasks('clone');
               }}
               disabled={!canCloneAny || Boolean(spawningAllMode)}
-              className="inline-flex items-center justify-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)] disabled:opacity-45 disabled:cursor-default"
+              className="inline-flex items-center justify-center h-6 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)] disabled:opacity-45 disabled:cursor-default"
               style={{ fontFamily: 'var(--display)' }}
               title="Spawn all tasks as full clones"
             >
@@ -200,8 +200,8 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
                         : 'opacity-0 group-hover/task:opacity-100 focus-visible:opacity-100'
                     } ${
                       spawned
-                        ? 'border-[var(--accent-muted)] bg-[rgba(0,0,0,.24)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
+                        ? 'border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] text-[var(--accent)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
                     } ${spawning ? 'cursor-wait' : ''}`}
                     style={{ fontFamily: 'var(--display)' }}
                     title={spawned ? 'Drone queued' : 'Spawn a fresh drone for this task using repo defaults'}
@@ -231,8 +231,8 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
                         : 'opacity-0 group-hover/task:opacity-100 focus-visible:opacity-100'
                     } ${
                       cloneSpawned
-                        ? 'border-[var(--accent-muted)] bg-[rgba(0,0,0,.24)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
+                        ? 'border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] text-[var(--accent)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--accent)]'
                     } ${cloneSpawning ? 'cursor-wait' : ''}`}
                     style={{ fontFamily: 'var(--display)' }}
                     title={cloneSpawned ? 'Clone queued' : 'Spawn a full clone from this drone for this task'}
@@ -252,7 +252,7 @@ export function DroneHubTaskList({ tasks, onSpawnTask }: DroneHubTaskListProps) 
               </div>
               {expanded ? (
                 <div className="px-3 pb-3">
-                  <div className="rounded-lg border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-3 py-2 text-[12px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap">
+                  <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-2 text-[12px] leading-5 text-[var(--fg-secondary)] whitespace-pre-wrap">
                     {task.description}
                   </div>
                 </div>

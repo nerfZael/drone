@@ -85,7 +85,7 @@ export function ProviderCredentialTransferPanel({
               value={selectedSource?.id ?? ''}
               onChange={(event) => setSourceDeviceId(event.target.value)}
               disabled={busy !== null}
-              className="h-9 rounded border border-[var(--border)] bg-[var(--input)] px-3 text-[12px] text-[var(--fg)]"
+              className="h-9 rounded border border-[var(--border)] bg-[var(--panel)] px-3 text-[12px] text-[var(--fg)]"
             >
               {sources.map((device) => (
                 <option key={device.id} value={device.id}>

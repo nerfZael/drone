@@ -24,6 +24,8 @@ import { ReferencesResultsPanel, type ReferencesResultsState } from './Reference
 import { OpenedDroneFileTabs } from './OpenedDroneFileTabs';
 import type { DroneOpenedFileTabState } from './opened-file-types';
 import { VideoPreview } from '../media/VideoPreview';
+import { useDroneHubUiStore } from '../app/use-drone-hub-ui-store';
+import { DESKTOP_THEMES, desktopMonacoTheme } from '../../theme';
 
 type MonacoEditorComponent = (typeof import('@monaco-editor/react'))['default'];
 type MonacoEditorProps = React.ComponentProps<MonacoEditorComponent>;
@@ -174,7 +176,7 @@ function LargeTextFileViewer({
         </button>
       </div>
       {error ? (
-        <div className="m-3 rounded border border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
+        <div className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
           {error}
         </div>
       ) : null}
@@ -220,6 +222,8 @@ export function OpenedDroneFilePanel({
   onGoForward,
   readOnly = false,
 }: OpenedDroneFilePanelProps) {
+  const themeId = useDroneHubUiStore((state) => state.themeId);
+  const monacoTheme = desktopMonacoTheme(themeId);
   const {
     path: filePath,
     name: fileName,
@@ -554,7 +558,7 @@ export function OpenedDroneFilePanel({
           onCloseTab={(tabId) => onCloseFile?.(tabId)}
           onReorderTabs={(fromTabId, toTabId) => onReorderFileTabs?.(fromTabId, toTabId)}
         />
-        <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)] flex items-center justify-between gap-3">
+        <div className="px-4 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--surface-soft)] flex items-center justify-between gap-3">
           <div className="min-w-0 flex-1">
             <div className="flex items-center gap-2 min-w-0">
               <div className="truncate text-[13px] font-medium text-[var(--fg-secondary)]">
@@ -674,7 +678,7 @@ export function OpenedDroneFilePanel({
           </div>
         </div>
         {fileError ? (
-          <div className="m-3 rounded border border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
+          <div className="m-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
             {fileError}
           </div>
         ) : null}
@@ -797,6 +801,12 @@ export function OpenedDroneFilePanel({
                     language={editorLanguageForPath(activeFilePath)}
                     value={fileContent ?? ''}
                     onChange={(next) => onFileContentChange?.(next ?? '')}
+                    beforeMount={(monaco) => {
+                      for (const theme of DESKTOP_THEMES) {
+                        const editorTheme = desktopMonacoTheme(theme.id);
+                        monaco.editor.defineTheme(editorTheme.id, editorTheme.definition);
+                      }
+                    }}
                     onMount={(editor, monaco) => {
                       editorRef.current = editor;
                       editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
@@ -810,7 +820,7 @@ export function OpenedDroneFilePanel({
                       });
                       applyEditorCursorTarget();
                     }}
-                    theme="vs-dark"
+                    theme={monacoTheme.id}
                     options={{
                       readOnly: Boolean(fileSaving) || readOnly,
                       fontSize: 12,

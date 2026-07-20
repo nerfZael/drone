@@ -25,7 +25,7 @@ type AutomationSettingsCardProps = {
 
 export function AutomationSettingsCard({ automation, index, onDelete, onUpdate }: AutomationSettingsCardProps) {
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-3 py-3 flex flex-col gap-3">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
       <div className="flex items-center justify-between gap-2">
         <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
           Automation #{index + 1}
@@ -33,7 +33,7 @@ export function AutomationSettingsCard({ automation, index, onDelete, onUpdate }
         <button
           type="button"
           onClick={onDelete}
-          className="h-7 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]"
+          className="h-7 px-2 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]"
           style={{ fontFamily: 'var(--display)' }}
           title="Delete this automation"
         >
@@ -46,7 +46,7 @@ export function AutomationSettingsCard({ automation, index, onDelete, onUpdate }
           type="text"
           value={automation.label}
           onChange={(e) => onUpdate({ label: e.target.value })}
-          className="w-full h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+          className="w-full h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
           placeholder="e.g. Review and fix wins"
         />
       </div>
@@ -59,7 +59,7 @@ export function AutomationSettingsCard({ automation, index, onDelete, onUpdate }
           step={1}
           value={automation.runs}
           onChange={(e) => onUpdate({ runs: Number(e.target.value) })}
-          className="w-full sm:w-[140px] h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+          className="w-full sm:w-[140px] h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
         />
       </div>
       <div className="grid grid-cols-1 sm:grid-cols-[120px_1fr] gap-2 items-start">
@@ -72,7 +72,7 @@ export function AutomationSettingsCard({ automation, index, onDelete, onUpdate }
             step={1}
             value={automation.sleepAmount}
             onChange={(e) => onUpdate({ sleepAmount: Number(e.target.value) })}
-            className="w-full sm:w-[120px] h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+            className="w-full sm:w-[120px] h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
           />
           <select
             value={automation.sleepUnit}
@@ -81,7 +81,7 @@ export function AutomationSettingsCard({ automation, index, onDelete, onUpdate }
                 sleepUnit: e.target.value as AutomationSleepUnit,
               })
             }
-            className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+            className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
           >
             {AUTOMATION_SLEEP_UNIT_OPTIONS.map((option) => (
               <option key={option.value} value={option.value}>
@@ -99,7 +99,7 @@ export function AutomationSettingsCard({ automation, index, onDelete, onUpdate }
             type="text"
             value={automation.stopPhrase}
             onChange={(e) => onUpdate({ stopPhrase: e.target.value })}
-            className="w-full rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] h-9 px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+            className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] h-9 px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
             placeholder="If agent output contains this phrase, finish early"
           />
           <label className="inline-flex items-center gap-2 text-[11px] text-[var(--muted-dim)]">
@@ -111,7 +111,7 @@ export function AutomationSettingsCard({ automation, index, onDelete, onUpdate }
                   stopPhraseCaseSensitive: e.currentTarget.checked,
                 })
               }
-              className="rounded border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)]"
+              className="rounded border-[var(--border-subtle)] bg-[var(--surface-inset-strong)]"
             />
             Case sensitive
           </label>
@@ -122,7 +122,7 @@ export function AutomationSettingsCard({ automation, index, onDelete, onUpdate }
         <textarea
           value={automation.prompt}
           onChange={(e) => onUpdate({ prompt: e.target.value })}
-          className="w-full min-h-[140px] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] resize-y focus:outline-none focus:border-[var(--accent-muted)]"
+          className="w-full min-h-[140px] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] resize-y focus:outline-none focus:border-[var(--accent-muted)]"
           placeholder="Enter automation prompt..."
         />
       </div>
@@ -131,7 +131,7 @@ export function AutomationSettingsCard({ automation, index, onDelete, onUpdate }
         <textarea
           value={automation.onFailurePrompt}
           onChange={(e) => onUpdate({ onFailurePrompt: e.target.value })}
-          className="w-full min-h-[110px] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] resize-y focus:outline-none focus:border-[var(--accent-muted)]"
+          className="w-full min-h-[110px] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] resize-y focus:outline-none focus:border-[var(--accent-muted)]"
           placeholder="Optional message to send after automation runs finish, if at least one run succeeded (e.g. summarize what was fixed)."
         />
       </div>

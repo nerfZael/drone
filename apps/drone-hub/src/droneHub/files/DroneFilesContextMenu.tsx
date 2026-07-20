@@ -108,7 +108,7 @@ export function DroneFilesContextMenu({
       ref={menuRef}
       role="menu"
       aria-label="File explorer actions"
-      className="fixed z-[80] max-h-[calc(100vh-8px)] w-[220px] overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--panel)] p-1 shadow-[0_10px_30px_rgba(0,0,0,.45)]"
+      className="fixed z-[80] max-h-[calc(100vh-8px)] w-[220px] overflow-y-auto rounded-md border border-[var(--border)] bg-[var(--panel)] p-1 shadow-[0_10px_30px_var(--shadow-color)]"
       style={{ left: menu.x, top: menu.y }}
       onContextMenu={(event) => event.preventDefault()}
     >

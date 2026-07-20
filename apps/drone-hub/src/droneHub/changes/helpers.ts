@@ -69,7 +69,7 @@ export function pullRequestStateBadge(
     return {
       label: 'Open',
       title: 'Pull request is open.',
-      className: 'border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)]',
+      className: 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]',
     };
   }
   if (state === 'merged') {
@@ -83,13 +83,13 @@ export function pullRequestStateBadge(
     return {
       label: 'Closed',
       title: 'Pull request was closed without merging.',
-      className: 'border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)]',
+      className: 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]',
     };
   }
   return {
     label: state,
     title: `Pull request state: ${state}`,
-    className: 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]',
+    className: 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]',
   };
 }
 
@@ -201,13 +201,13 @@ export function statusBadgeTitle(entry: RepoChangeEntry, mode: ChangesDataMode):
 }
 
 export function badgeTone(entry: RepoChangeEntry): string {
-  if (entry.isConflicted) return 'text-[var(--red)] bg-[var(--red-subtle)] border-[rgba(255,90,90,.35)]';
-  if (entry.isUntracked) return 'text-[var(--green)] bg-[var(--green-subtle)] border-[rgba(74,222,128,.35)]';
+  if (entry.isConflicted) return 'text-[var(--red)] bg-[var(--red-subtle)] border-[var(--red-border)]';
+  if (entry.isUntracked) return 'text-[var(--green)] bg-[var(--green-subtle)] border-[var(--green-border)]';
   if (entry.stagedType === 'deleted' || entry.unstagedType === 'deleted') {
-    return 'text-[var(--red)] bg-[var(--red-subtle)] border-[rgba(255,90,90,.35)]';
+    return 'text-[var(--red)] bg-[var(--red-subtle)] border-[var(--red-border)]';
   }
   if (entry.stagedType === 'modified' || entry.unstagedType === 'modified') {
-    return 'text-[var(--yellow)] bg-[var(--yellow-subtle)] border-[rgba(255,178,36,.3)]';
+    return 'text-[var(--yellow)] bg-[var(--yellow-subtle)] border-[var(--yellow-border)]';
   }
   return 'text-[var(--accent)] bg-[var(--accent-subtle)] border-[var(--accent-muted)]';
 }

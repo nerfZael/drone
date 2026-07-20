@@ -53,8 +53,8 @@ export const AutomationLaneStatusCard = React.memo(function AutomationLaneStatus
           <span
             className={`inline-flex items-center gap-1.5 rounded border px-1.5 py-0.5 text-[9px] tracking-wide uppercase ${
               status === 'running'
-                ? 'border-[rgba(255,178,36,.35)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
-                : 'border-[rgba(96,165,250,.35)] bg-[rgba(59,130,246,.12)] text-[#60a5fa]'
+                ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+                : 'border-[var(--info-border)] bg-[var(--info-subtle)] text-[var(--info)]'
             }`}
           >
             {status === 'running' ? <IconSpinner className="w-2.5 h-2.5" /> : null}
@@ -85,8 +85,8 @@ export const AutomationLaneStatusCard = React.memo(function AutomationLaneStatus
             disabled={cancelBusy}
             className={`inline-flex items-center h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
               cancelBusy
-                ? 'opacity-100 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)]'
-                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[rgba(255,90,90,.35)]'
+                ? 'opacity-100 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)]'
+                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[var(--red-border)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title="Cancel queued automation"
@@ -105,8 +105,8 @@ export const AutomationLaneStatusCard = React.memo(function AutomationLaneStatus
               disabled={stopAllBusy || stopRunsOnlyBusy}
               className={`inline-flex items-center h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
                 stopAllBusy || stopRunsOnlyBusy
-                  ? 'opacity-100 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)]'
-                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[rgba(255,90,90,.35)]'
+                  ? 'opacity-100 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)]'
+                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[var(--red-border)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
               title="Stop remaining runs and skip final message"
@@ -121,8 +121,8 @@ export const AutomationLaneStatusCard = React.memo(function AutomationLaneStatus
               disabled={stopAllBusy || stopRunsOnlyBusy}
               className={`inline-flex items-center h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
                 stopAllBusy || stopRunsOnlyBusy
-                  ? 'opacity-100 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)]'
-                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
+                  ? 'opacity-100 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)]'
+                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
               title="Stop remaining runs and still send final message when possible"

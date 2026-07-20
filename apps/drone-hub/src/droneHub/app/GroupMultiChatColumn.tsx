@@ -652,7 +652,7 @@ export function GroupMultiChatColumn({
       className="flex-none h-full rounded-lg border border-[var(--border-subtle)] bg-[var(--panel-alt)] overflow-hidden flex flex-col"
       style={{ width: columnWidthPx, minWidth: columnWidthPx }}
     >
-      <div className="group/column-header flex-shrink-0 px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
+      <div className="group/column-header flex-shrink-0 px-3 py-2.5 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)]">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <div className="min-w-0 flex-1 flex items-center gap-2">
@@ -689,7 +689,7 @@ export function GroupMultiChatColumn({
                 className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
                   deleteBusy
                     ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                    : 'opacity-0 pointer-events-none group-hover/column-header:opacity-100 group-hover/column-header:pointer-events-auto bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
+                    : 'opacity-0 pointer-events-none group-hover/column-header:opacity-100 group-hover/column-header:pointer-events-auto bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
                 }`}
                 title={deleteBusy ? `Deleting "${shownName}"…` : `Delete "${shownName}"`}
                 aria-label={deleteBusy ? `Deleting "${shownName}"` : `Delete "${shownName}"`}
@@ -708,8 +708,8 @@ export function GroupMultiChatColumn({
               disabled={disabledByProvisioning || Boolean(quickActionBusy)}
               className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
                 disabledByProvisioning || Boolean(quickActionBusy)
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
               title={`SSH into "${shownName}"`}
@@ -724,8 +724,8 @@ export function GroupMultiChatColumn({
               disabled={disabledByProvisioning || !quickOpenTabUrl}
               className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
                 disabledByProvisioning || !quickOpenTabUrl
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
               title={quickOpenTabUrl ? `Open ${quickOpenTabUrl} in a new browser tab` : 'No preview URL available yet'}
@@ -742,8 +742,8 @@ export function GroupMultiChatColumn({
                   disabled={disabledByProvisioning || Boolean(quickActionBusy)}
                   className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
                     disabledByProvisioning || Boolean(quickActionBusy)
-                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
                   title={
@@ -762,8 +762,8 @@ export function GroupMultiChatColumn({
                   disabled={disabledByProvisioning || Boolean(quickActionBusy)}
                   className={`inline-flex items-center h-5 px-1.5 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
                     disabledByProvisioning || Boolean(quickActionBusy)
-                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
                   title={
@@ -784,7 +784,7 @@ export function GroupMultiChatColumn({
         {loading && !transcripts ? (
           <ChatLoadingState />
         ) : error ? (
-          <div className="rounded border border-[rgba(255,90,90,.24)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">{error}</div>
+          <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">{error}</div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
           <div className="space-y-5">
             {(transcripts ?? []).map((item) => {

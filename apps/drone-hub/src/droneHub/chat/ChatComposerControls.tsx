@@ -160,7 +160,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
               }}
               disabled={control.disabled}
               placeholder={control.placeholder}
-              className={`h-9 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none ${controlWidthClass(control.width)} ${
+              className={`h-9 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[10px] text-[var(--muted)] placeholder:text-[var(--muted-dim)] focus:outline-none ${controlWidthClass(control.width)} ${
                 control.disabled
                   ? 'cursor-not-allowed opacity-40'
                   : 'hover:border-[var(--border)] hover:text-[var(--fg-secondary)]'
@@ -174,7 +174,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
           return (
             <div
               key={control.id}
-              className="grid h-9 flex-shrink-0 grid-flow-col overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]"
+              className="grid h-9 flex-shrink-0 grid-flow-col overflow-hidden rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)]"
               role="group"
               aria-label={control.label}
             >
@@ -189,7 +189,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
                   className={`min-w-[42px] px-2 text-[10px] font-semibold uppercase tracking-wide disabled:opacity-40 ${
                     control.value === option.value
                       ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'text-[var(--muted)] hover:bg-[rgba(255,255,255,.025)] hover:text-[var(--fg-secondary)]'
+                      : 'text-[var(--muted)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
                 >
@@ -209,7 +209,7 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
             aria-label={control.title}
             title={control.title}
             onClick={control.onSelect}
-            className={`inline-flex h-9 flex-shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
+            className={`inline-flex h-9 flex-shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-semibold uppercase tracking-wide transition-colors disabled:cursor-not-allowed disabled:opacity-40 ${
               iconOnly ? 'w-9' : 'px-2'
             } ${
               control.active

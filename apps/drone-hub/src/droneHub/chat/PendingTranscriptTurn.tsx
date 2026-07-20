@@ -63,9 +63,9 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           className={`rounded border px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide ${
             isFailed
               ? isStopped
-                ? 'border-[rgba(255,178,36,.2)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
-                : 'border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] text-[var(--red)]'
-              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+                : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
+              : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
           }`}
           style={{ fontFamily: 'var(--display)' }}
         >
@@ -82,8 +82,8 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           disabled={cancelBusy}
           className={`inline-flex h-5 items-center rounded border px-1.5 text-[9px] font-semibold uppercase tracking-wide transition-all ${
             cancelBusy
-              ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] opacity-100'
-              : 'pointer-events-none border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-0 group-hover/pending-turn:pointer-events-auto group-hover/pending-turn:opacity-100 hover:border-[rgba(255,90,90,.35)] hover:text-[var(--red)]'
+              ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] opacity-100'
+              : 'pointer-events-none border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-0 group-hover/pending-turn:pointer-events-auto group-hover/pending-turn:opacity-100 hover:border-[var(--red-border)] hover:text-[var(--red)]'
           }`}
           style={{ fontFamily: 'var(--display)' }}
           title="Cancel queued prompt"

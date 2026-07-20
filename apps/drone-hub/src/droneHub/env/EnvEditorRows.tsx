@@ -50,7 +50,7 @@ export function EnvEditorRows({
               className={`h-9 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
                 disabled
                   ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'border-[rgba(248,81,73,.25)] bg-[var(--red-subtle)] text-[var(--red)]'
+                  : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -67,7 +67,7 @@ export function EnvEditorRows({
           className={`h-8 rounded border px-3 text-[10px] font-semibold tracking-wide uppercase ${
             disabled
               ? 'cursor-not-allowed border-[var(--border-subtle)] text-[var(--muted-dim)]'
-              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+              : 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
           }`}
           style={{ fontFamily: 'var(--display)' }}
         >

@@ -126,7 +126,7 @@ function TreeIndentGuides({ depth }: { depth: number }) {
       {Array.from({ length: depth }).map((_, index) => (
         <span
           key={index}
-          className="absolute inset-y-0 w-px bg-[rgba(136,145,168,.18)]"
+          className="absolute inset-y-0 w-px bg-[var(--border-subtle)]"
           style={{ left: `${9 + index * 14}px` }}
         />
       ))}
@@ -797,8 +797,8 @@ export function DroneFilesDock({
                 onContextMenu={(event) => openEntryContextMenu(node.entry, event)}
                 className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[13px] transition-colors disabled:opacity-60 ${
                   selected
-                    ? 'bg-[rgba(55,118,171,.32)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[rgba(55,118,171,.42)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
-                    : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                    ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                    : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                 }`}
                 style={{ paddingLeft: `${indentPx}px` }}
                 title={`${title} • Click to ${open ? 'collapse' : 'expand'} • Right-click for actions`}
@@ -806,7 +806,7 @@ export function DroneFilesDock({
                 <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--muted)]">
                   <IconChevron down={open} size={12} />
                 </span>
-                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[#d7b85a]">
+                <span className="inline-flex h-4 w-4 flex-shrink-0 items-center justify-center text-[var(--yellow)]">
                   <IconFolder size={13} />
                 </span>
                 <span className="min-w-0 flex-1 truncate leading-none">{node.name}</span>
@@ -861,10 +861,10 @@ export function DroneFilesDock({
             onContextMenu={(event) => openEntryContextMenu(entry, event)}
             className={`relative flex h-[22px] w-full items-center gap-1 pr-1 text-left text-[13px] transition-colors disabled:opacity-60 ${
               selected
-                ? 'bg-[rgba(55,118,171,.32)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[rgba(55,118,171,.42)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                ? 'bg-[var(--info-subtle)] text-[var(--fg)] shadow-[inset_2px_0_0_var(--accent)] hover:bg-[var(--selected)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
                 : active
-                  ? 'bg-[rgba(255,255,255,.035)] text-[var(--fg)] hover:bg-[rgba(255,255,255,.055)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
-                  : 'text-[var(--fg-secondary)] hover:bg-[rgba(255,255,255,.055)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                  ? 'bg-[var(--surface-soft)] text-[var(--fg)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
+                  : 'text-[var(--fg-secondary)] hover:bg-[var(--surface-strong)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-[var(--accent-muted)]'
             }`}
             style={{ paddingLeft: `${indentPx}px` }}
             title={`${entry.path} • ${modified} • Right-click for actions`}
@@ -934,27 +934,27 @@ export function DroneFilesDock({
       onKeyDown={handleExplorerKeyDown}
     >
       {uploadStatus ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[rgba(66,153,225,.12)] border border-[rgba(66,153,225,.28)] text-[12px] text-[var(--fg-secondary)]">
+        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--info-subtle)] border border-[var(--info-border)] text-[12px] text-[var(--fg-secondary)]">
           {uploadStatus}
         </div>
       ) : null}
       {actionStatus ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[rgba(66,153,225,.12)] border border-[rgba(66,153,225,.28)] text-[12px] text-[var(--fg-secondary)]">
+        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--info-subtle)] border border-[var(--info-border)] text-[12px] text-[var(--fg-secondary)]">
           {actionStatus}
         </div>
       ) : null}
       {actionError ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[rgba(248,81,73,.2)] text-[12px] text-[var(--red)]">
+        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[var(--red-border)] text-[12px] text-[var(--red)]">
           {actionError}
         </div>
       ) : null}
       {uploadError ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[rgba(248,81,73,.2)] text-[12px] text-[var(--red)]">
+        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[var(--red-border)] text-[12px] text-[var(--red)]">
           {uploadError}
         </div>
       ) : null}
       {error ? (
-        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[rgba(248,81,73,.2)] text-[12px] text-[var(--red)]">
+        <div className="mx-2.5 mt-2 p-2 rounded-md bg-[var(--red-subtle)] border border-[var(--red-border)] text-[12px] text-[var(--red)]">
           {error}
         </div>
       ) : null}
@@ -979,7 +979,7 @@ export function DroneFilesDock({
             }}
           >
             {showStartupPlaceholder ? (
-              <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[12px] text-[var(--muted)]">
+              <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[12px] text-[var(--muted)]">
                 <div className="text-[11px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                   {startupLabel}
                 </div>
@@ -987,11 +987,11 @@ export function DroneFilesDock({
                 {startupDetail ? <div className="mt-1 text-[11px] text-[var(--muted-dim)]">{startupDetail}</div> : null}
               </div>
             ) : !error && loading && entries.length === 0 ? (
-              <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[12px] text-[var(--muted)]">
+              <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[12px] text-[var(--muted)]">
                 Loading files...
               </div>
             ) : !error && !loading && entries.length === 0 ? (
-              <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[12px] text-[var(--muted)]">
+              <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[12px] text-[var(--muted)]">
                 {readOnly ? 'Directory is empty.' : 'Directory is empty. Right-click to create a file or folder.'}
               </div>
             ) : (
@@ -1049,7 +1049,7 @@ export function DroneFilesDock({
 
       {dragActive ? (
         <div className="pointer-events-none absolute inset-0 z-30 px-3 py-3">
-          <div className="w-full h-full rounded-md border-2 border-dashed border-[var(--accent-muted)] bg-[rgba(18,23,34,.55)] flex items-center justify-center text-center px-4">
+          <div className="w-full h-full rounded-md border-2 border-dashed border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] flex items-center justify-center text-center px-4">
             <div className="text-[12px] text-[var(--fg-secondary)]">
               Drop files to upload into
               <div className="mt-1 font-mono text-[11px] text-[var(--accent)] break-all">{normalizedPath}</div>

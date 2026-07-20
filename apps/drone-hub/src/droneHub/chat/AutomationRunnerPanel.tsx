@@ -32,13 +32,13 @@ export function AutomationRunnerPanel({
 
   return (
     <div className="px-3 pb-3">
-      <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] p-2.5 flex flex-col gap-2">
+      <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-inset)] p-2.5 flex flex-col gap-2">
         <div className="text-[9px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Automation Runner</div>
         <div className="grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_120px_auto] gap-2 items-center">
           <select
             value={selectedActionId}
             onChange={(e) => onSelectActionId(e.target.value)}
-            className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+            className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-[12px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
             disabled={controlsDisabled}
           >
             {actions.map((action) => {
@@ -61,8 +61,8 @@ export function AutomationRunnerPanel({
             disabled={!selectedAction?.onSelectWithRuns || selectedActionDisabled}
             className={`h-9 rounded border px-2 text-[12px] focus:outline-none ${
               !selectedAction?.onSelectWithRuns || selectedActionDisabled
-                ? 'opacity-50 cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] text-[var(--fg)] focus:border-[var(--accent-muted)]'
+                ? 'opacity-50 cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] text-[var(--fg)] focus:border-[var(--accent-muted)]'
             }`}
             title="Runs for this launch"
           />

@@ -19,7 +19,7 @@ export function DroneTerminalTabsBar({
   onCreateSession: () => void;
 }) {
   return (
-    <div className="px-2 py-1.5 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] flex items-center gap-2">
+    <div className="px-2 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] flex items-center gap-2">
       <div className="min-w-0 flex-1 flex items-center gap-1 overflow-x-auto pr-1">
         {sessions.map((session) => {
           const active = session.id === activeSessionId;
@@ -30,7 +30,7 @@ export function DroneTerminalTabsBar({
               className={`group flex items-center min-w-0 rounded border transition-colors ${
                 active
                   ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                  : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
+                  : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
               }`}
             >
               <button
@@ -53,7 +53,7 @@ export function DroneTerminalTabsBar({
                   busy
                     ? 'cursor-wait text-[var(--muted-dim)] opacity-50'
                     : active
-                      ? 'text-[var(--accent)] hover:bg-[rgba(255,255,255,.08)]'
+                      ? 'text-[var(--accent)] hover:bg-[var(--surface-strong)]'
                       : 'text-[var(--muted-dim)] hover:bg-[var(--hover)] hover:text-[var(--muted)]'
                 }`}
                 title={busy ? 'Closing terminal…' : 'Kill terminal session and close tab'}
@@ -76,7 +76,7 @@ export function DroneTerminalTabsBar({
         type="button"
         onClick={onCreateSession}
         disabled={disabled}
-        className="inline-flex items-center gap-1 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        className="inline-flex items-center gap-1 h-7 px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         style={{ fontFamily: 'var(--display)' }}
         title="Open a new terminal tab"
       >

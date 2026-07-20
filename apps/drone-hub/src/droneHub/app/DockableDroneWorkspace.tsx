@@ -597,7 +597,7 @@ export function DockableDroneWorkspace({
                 className={`inline-flex h-8 items-center rounded-md border px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
                   mobileActivePanel === 'chat'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
@@ -612,7 +612,7 @@ export function DockableDroneWorkspace({
                 className={`inline-flex h-8 items-center rounded-md border px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
                   mobileActivePanel === 'tool'
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >

@@ -74,7 +74,7 @@ export function RepoBranchSourceControls({
     <div
       className={
         className ??
-        `rounded-xl border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] ${compact ? 'px-3 py-3' : 'px-4 py-4'}`
+        `rounded-xl border border-[var(--border-subtle)] bg-[var(--surface-softest)] ${compact ? 'px-3 py-3' : 'px-4 py-4'}`
       }
     >
       <div className="flex items-center justify-between gap-3">
@@ -94,7 +94,7 @@ export function RepoBranchSourceControls({
           className={`rounded-xl border px-3 py-3 text-left transition-all ${
             branchSource === 'host'
               ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] hover:border-[var(--border)]'
+              : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:border-[var(--border)]'
           } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           <div className="text-[11px] font-semibold text-[var(--fg)]">Use host branch</div>
@@ -109,7 +109,7 @@ export function RepoBranchSourceControls({
           className={`rounded-xl border px-3 py-3 text-left transition-all ${
             branchSource === 'remote'
               ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] hover:border-[var(--border)]'
+              : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:border-[var(--border)]'
           } ${remoteBranchDisabled ? 'opacity-50 cursor-not-allowed' : ''}`}
         >
           <div className="text-[11px] font-semibold text-[var(--fg)]">Checkout remote branch</div>

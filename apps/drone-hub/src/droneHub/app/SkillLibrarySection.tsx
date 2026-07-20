@@ -79,7 +79,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
   }, [deleteSelectedSkill, draft.id, draft.name, draft.slug]);
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
@@ -105,7 +105,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
       {(skillsError || skillsNotice) && (
         <div className="flex flex-col gap-2">
           {skillsError && (
-            <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)] flex items-center justify-between gap-3">
+            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)] flex items-center justify-between gap-3">
               <span>{skillsError}</span>
               <button type="button" onClick={clearSkillsError} className="text-[10px] uppercase tracking-wide opacity-80 hover:opacity-100">
                 Dismiss
@@ -113,7 +113,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
             </div>
           )}
           {skillsNotice && (
-            <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399] flex items-center justify-between gap-3">
+            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)] flex items-center justify-between gap-3">
               <span>{skillsNotice}</span>
               <button type="button" onClick={clearSkillsNotice} className="text-[10px] uppercase tracking-wide opacity-80 hover:opacity-100">
                 Dismiss
@@ -147,7 +147,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
       />
 
       <div className="grid grid-cols-1 xl:grid-cols-[240px_minmax(0,1fr)] gap-3 min-w-0">
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-2 flex flex-col gap-2 min-w-0">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-2 flex flex-col gap-2 min-w-0">
           <div className="flex items-center justify-between gap-2 px-1">
             <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
               Skills
@@ -169,8 +169,8 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
                     onClick={() => handleSelectSkill(skill.id)}
                     className={`w-full text-left rounded border px-3 py-2 transition-colors ${
                       active
-                        ? 'border-[var(--accent)] bg-[rgba(255,255,255,.05)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.01)] hover:bg-[var(--hover)]'
+                        ? 'border-[var(--accent)] bg-[var(--surface-soft)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-faint)] hover:bg-[var(--hover)]'
                     }`}
                   >
                     <div className="text-[12px] text-[var(--fg-secondary)] font-medium truncate">{skill.name}</div>
@@ -183,7 +183,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
           </div>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3 flex flex-col gap-4 min-w-0">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-4 min-w-0">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="min-w-0">
               <div className="text-[13px] font-semibold text-[var(--fg)] truncate">{draft.id ? draft.name || 'Untitled skill' : 'New skill draft'}</div>
@@ -237,7 +237,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
             />
           </label>
 
-          <div className="flex flex-col gap-3 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3">
+          <div className="flex flex-col gap-3 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div>
                 <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Package files</div>
@@ -270,7 +270,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
                 draft.files.map((file: SkillFileDraft) => {
                   const option = SKILL_FILE_KIND_OPTIONS.find((entry) => entry.value === file.kind) ?? SKILL_FILE_KIND_OPTIONS[3];
                   return (
-                    <div key={file.localId} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-3 flex flex-col gap-3">
+                    <div key={file.localId} className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-3 flex flex-col gap-3">
                       <div className="grid grid-cols-1 md:grid-cols-[minmax(0,1fr)_140px_auto] gap-2 items-end">
                         <label className="flex flex-col gap-1">
                           <span className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Path</span>
@@ -318,7 +318,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
           </div>
 
           <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
               <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Codex</div>
               <div className="text-[11px] text-[var(--muted-dim)]">Optional `agents/openai.yaml` overlay.</div>
               <textarea
@@ -329,7 +329,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
               />
             </div>
 
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
               <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Claude</div>
               <div className="grid grid-cols-1 gap-2">
                 <input value={draft.claudeArgumentHint} onChange={(e) => updateDraftField('claudeArgumentHint', e.target.value)} className={inputClassName()} placeholder="Argument hint" />
@@ -354,7 +354,7 @@ export function SkillLibrarySection({ skillLibrary }: { skillLibrary: UseSkillLi
               </div>
             </div>
 
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
               <div className="text-[10px] uppercase tracking-[0.08em] text-[var(--muted-dim)]">Cursor + advanced</div>
               <label className="inline-flex items-center gap-2 text-[11px] text-[var(--muted)]">
                 <input type="checkbox" checked={draft.cursorDisableModelInvocation} onChange={(e) => updateDraftField('cursorDisableModelInvocation', e.target.checked)} />

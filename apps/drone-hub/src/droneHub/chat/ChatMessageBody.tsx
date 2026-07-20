@@ -69,7 +69,7 @@ export function ChatMessageBody({
               key={image.key}
               src={image.src}
               alt={image.alt}
-              className="max-h-44 max-w-[min(260px,100%)] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.18)] object-contain"
+              className="max-h-44 max-w-[min(260px,100%)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] object-contain"
             />
           ))}
         </div>

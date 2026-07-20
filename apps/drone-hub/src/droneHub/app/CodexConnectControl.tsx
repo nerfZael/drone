@@ -164,8 +164,8 @@ export function CodexConnectControl({
     <div
       className={
         compact
-          ? 'rounded border border-[rgba(203,166,247,.3)] bg-[rgba(203,166,247,.07)] px-3 py-2'
-          : 'rounded border border-[rgba(203,166,247,.3)] bg-[rgba(203,166,247,.07)] p-3'
+          ? 'rounded border border-[var(--accent-border)] bg-[var(--selected)] px-3 py-2'
+          : 'rounded border border-[var(--accent-border)] bg-[var(--selected)] p-3'
       }
     >
       <div className="flex flex-wrap items-center justify-between gap-2">

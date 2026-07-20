@@ -88,7 +88,7 @@ export function ShortcutSettingsSection() {
   );
 
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
@@ -104,7 +104,7 @@ export function ShortcutSettingsSection() {
             setCapturingActionId(null);
             resetShortcutBindings();
           }}
-          className="inline-flex items-center justify-center whitespace-nowrap shrink-0 h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+          className="inline-flex items-center justify-center whitespace-nowrap shrink-0 h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
           style={{ fontFamily: 'var(--display)' }}
           title="Reset all shortcuts to defaults"
         >
@@ -118,7 +118,7 @@ export function ShortcutSettingsSection() {
           const isCapturing = capturingActionId === def.id;
           const hasConflict = conflictingActionIds.has(def.id);
           return (
-            <div key={def.id} className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-2">
+            <div key={def.id} className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-2">
               <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
                   <div className="text-[12px] text-[var(--fg-secondary)] font-semibold">{def.label}</div>
@@ -136,7 +136,7 @@ export function ShortcutSettingsSection() {
                     className={`h-9 min-w-[180px] px-3 rounded text-[11px] font-semibold border transition-all font-mono ${
                       isCapturing
                         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--fg-secondary)] hover:bg-[var(--hover)]'
                     }`}
                     title={isCapturing ? 'Press your new shortcut. Esc to cancel, Backspace/Delete to clear.' : 'Click and press keys to change this shortcut'}
                   >
@@ -148,8 +148,8 @@ export function ShortcutSettingsSection() {
                     disabled={!binding}
                     className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                       binding
-                        ? 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
-                        : 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        ? 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                        : 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                     title="Remove this shortcut"
@@ -162,7 +162,7 @@ export function ShortcutSettingsSection() {
                       const defaultBinding = defaultShortcutBindings[def.id];
                       setShortcutBinding(def.id, defaultBinding ? { ...defaultBinding } : null);
                     }}
-                    className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                    className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                     style={{ fontFamily: 'var(--display)' }}
                     title="Reset this shortcut to its default value"
                   >

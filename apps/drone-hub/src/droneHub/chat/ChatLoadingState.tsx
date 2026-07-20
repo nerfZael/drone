@@ -9,7 +9,7 @@ export function ChatLoadingState({ message = 'Loading conversation…' }: { mess
     >
       <div className="flex flex-col items-center gap-3.5 text-center">
         <div className="relative h-9 w-9" aria-hidden="true">
-          <div className="absolute inset-0 rounded-full border border-[var(--border-subtle)] bg-[rgba(0,0,0,.08)]" />
+          <div className="absolute inset-0 rounded-full border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)]" />
           <svg
             className="absolute inset-0 h-9 w-9 animate-spin"
             viewBox="0 0 36 36"

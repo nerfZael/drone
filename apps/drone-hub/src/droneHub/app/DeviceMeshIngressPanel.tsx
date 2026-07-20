@@ -141,7 +141,7 @@ export function DeviceMeshIngressPanel({
           </p>
         </div>
         <span
-          className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider ${status.running ? 'bg-[rgba(34,197,94,.1)] text-[var(--green)]' : 'bg-[rgba(248,113,113,.1)] text-[var(--red)]'}`}
+          className={`rounded px-2 py-1 text-[9px] font-bold uppercase tracking-wider ${status.running ? 'bg-[var(--green-subtle)] text-[var(--green)]' : 'bg-[var(--red-subtle)] text-[var(--red)]'}`}
         >
           {status.running ? `Localhost:${status.port}` : 'Not running'}
         </span>
@@ -156,7 +156,7 @@ export function DeviceMeshIngressPanel({
             inputMode="numeric"
             value={port}
             onChange={(event) => setPort(event.target.value)}
-            className="rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 font-mono text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+            className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
           />
         </label>
         <label className="grid gap-1">
@@ -167,7 +167,7 @@ export function DeviceMeshIngressPanel({
             value={publicEndpoint}
             onChange={(event) => setPublicEndpoint(event.target.value)}
             placeholder="https://your-hub.ngrok.app"
-            className="rounded border border-[var(--border)] bg-[var(--input)] px-3 py-2 font-mono text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
+            className="rounded border border-[var(--border)] bg-[var(--panel)] px-3 py-2 font-mono text-[12px] text-[var(--fg)] outline-none focus:border-[var(--accent-muted)]"
           />
         </label>
       </div>

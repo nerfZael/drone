@@ -26,7 +26,7 @@ export function PullRequestListView({
         const blockedReason = mergeBlockedReason(pr);
         const forceReason = blockedReason ? null : forceMergeReason(pr);
         return (
-          <section key={`pr:${pr.number}`} className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
+          <section key={`pr:${pr.number}`} className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] overflow-hidden">
             <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-start gap-2">
               <a
                 href={pr.htmlUrl}
@@ -53,7 +53,7 @@ export function PullRequestListView({
                   <MetaChip label="updated" value={formatTimestamp(pr.updatedAt)} title={pr.updatedAt} />
                   <PullRequestStatusBadgeStrip pullRequest={pr} />
                   {pr.isCrossRepository ? (
-                    <span className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-1.5 py-[1px] text-[10px] text-[var(--muted)]">
+                    <span className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-[1px] text-[10px] text-[var(--muted)]">
                       Cross-repo
                     </span>
                   ) : null}
@@ -65,7 +65,7 @@ export function PullRequestListView({
                     type="button"
                     onClick={() => onMergePullRequest(pr)}
                     disabled={Boolean(busy) || anyBusy || Boolean(blockedReason)}
-                    className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+                    className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
                     style={{ fontFamily: 'var(--display)' }}
                     title={
                       blockedReason
@@ -81,7 +81,7 @@ export function PullRequestListView({
                     type="button"
                     onClick={() => onClosePullRequest(pr)}
                     disabled={Boolean(busy) || anyBusy}
-                    className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+                    className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
                     style={{ fontFamily: 'var(--display)' }}
                     title="Close pull request without merging"
                   >

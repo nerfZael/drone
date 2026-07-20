@@ -49,7 +49,7 @@ export function ChatComposerMenu({
         className={`inline-flex h-9 items-center gap-1.5 rounded-md border px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
           open
             ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+            : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
         }`}
         style={{ fontFamily: 'var(--display)' }}
       >
@@ -63,7 +63,7 @@ export function ChatComposerMenu({
       {open ? (
         <div
           role="menu"
-          className="absolute bottom-full right-0 z-40 mb-2 w-56 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] py-1 shadow-[0_18px_55px_rgba(0,0,0,.48)]"
+          className="absolute bottom-full right-0 z-40 mb-2 w-56 overflow-hidden rounded-lg border border-[var(--border)] bg-[var(--panel-alt)] py-1 shadow-[0_18px_55px_var(--shadow-color)]"
         >
           {actions.map((action) => (
             <button

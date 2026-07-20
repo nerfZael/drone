@@ -35,7 +35,7 @@ export function ChatMessageCopyAction({
         <div
           role="status"
           aria-live="polite"
-          className="pointer-events-none absolute right-8 top-0 rounded border border-[rgba(148,163,184,.28)] bg-[rgba(0,0,0,.42)] px-2 py-1 text-[9px] uppercase tracking-wide text-[var(--fg-secondary)]"
+          className="pointer-events-none absolute right-8 top-0 rounded border border-[var(--user-border)] bg-[var(--scrim-soft)] px-2 py-1 text-[9px] uppercase tracking-wide text-[var(--fg-secondary)]"
           style={{ fontFamily: 'var(--display)' }}
         >
           Copied
@@ -54,7 +54,7 @@ export function ChatMessageCopyAction({
             }, 1200);
           });
         }}
-        className="pointer-events-none inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] text-[var(--muted)] opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:border-[var(--accent-muted)] hover:bg-[rgba(0,0,0,.25)] hover:text-[var(--accent)] focus-visible:pointer-events-auto focus-visible:opacity-100"
+        className="pointer-events-none inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] opacity-0 transition-opacity group-hover:pointer-events-auto group-hover:opacity-100 hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] focus-visible:pointer-events-auto focus-visible:opacity-100"
         title="Copy message"
         aria-label="Copy message"
       >

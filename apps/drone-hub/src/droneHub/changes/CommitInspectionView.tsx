@@ -118,7 +118,7 @@ export function CommitInspectionView({
   return (
     <div ref={commitLayoutRef as React.RefObject<HTMLDivElement>} className="flex-1 min-h-0 overflow-hidden flex">
       <div
-        className={`shrink-0 border-r border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] overflow-auto ${
+        className={`shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-inset)] overflow-auto ${
           commitListResizing ? '' : 'transition-[width] duration-150 ease-out'
         }`}
         style={{
@@ -150,7 +150,7 @@ export function CommitInspectionView({
                 className={`w-full text-left rounded border px-2.5 py-2 transition-colors ${
                   active
                     ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-                    : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] hover:bg-[var(--hover)]'
+                    : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:bg-[var(--hover)]'
                 }`}
                 title={commit.subject}
               >
@@ -200,7 +200,7 @@ export function CommitInspectionView({
           <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">Loading commit details…</div>
         ) : (
           <>
-            <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)]">
+            <div className="px-2.5 py-2 border-b border-[var(--border-subtle)] bg-[var(--surface-soft)]">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-mono text-[11px] text-[var(--accent)]">{shortSha(selectedCommit.sha)}</span>
                 <span className="text-[12px] font-semibold text-[var(--fg-secondary)]">{selectedCommit.subject}</span>
@@ -228,7 +228,7 @@ export function CommitInspectionView({
                   const key = commitDiffStateKey(entry.path, selectedCommit.sha, contextMode);
                   const state = commitDiffByKey[key];
                   return (
-                    <section key={`commit:${selectedCommit.sha}:${entry.path}`} className="group/file rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] overflow-hidden">
+                    <section key={`commit:${selectedCommit.sha}:${entry.path}`} className="group/file rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] overflow-hidden">
                       <div className="px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/70 flex items-center gap-2">
                         <span
                           className={`inline-flex items-center justify-center min-w-[32px] h-5 rounded border text-[10px] font-mono ${badgeTone(entry)}`}
@@ -254,7 +254,7 @@ export function CommitInspectionView({
                               });
                             }
                           }}
-                          className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                          className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                           title={open ? 'Hide diff' : 'Show diff'}
                         >
                           {open ? 'Hide' : 'Show'}
@@ -267,7 +267,7 @@ export function CommitInspectionView({
               </div>
             ) : (
               <div ref={splitLayoutRef as React.RefObject<HTMLDivElement>} className="flex-1 min-h-0 overflow-hidden flex">
-                <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[rgba(0,0,0,.12)]">
+                <div className="flex-1 min-w-0 min-h-0 overflow-auto bg-[var(--surface-inset)]">
                   <div className="sticky top-0 z-10 px-2.5 py-1.5 border-b border-[var(--border-subtle)] bg-[var(--panel-raised)]/95 backdrop-blur flex items-center justify-between gap-2">
                     <div className="min-w-0 text-[10px] text-[var(--muted)] font-mono truncate">
                       {selectedCommitFileEntry ? selectedCommitFileEntry.path : 'No file selected'}

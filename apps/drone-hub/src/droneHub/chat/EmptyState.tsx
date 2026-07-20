@@ -16,7 +16,7 @@ export function EmptyState({
 }) {
   return (
     <div className="flex flex-col items-center justify-center h-full text-center px-8">
-      <div className="w-16 h-16 rounded-lg bg-[rgba(255,255,255,.02)] border border-[var(--border-subtle)] flex items-center justify-center mb-5 relative">
+      <div className="w-16 h-16 rounded-lg bg-[var(--surface-softest)] border border-[var(--border-subtle)] flex items-center justify-center mb-5 relative">
         {icon}
         {/* Corner brackets */}
         <div className="absolute -top-px -left-px w-2 h-2 border-t border-l border-[var(--accent-muted)] opacity-30" />

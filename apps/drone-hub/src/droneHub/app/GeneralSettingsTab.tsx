@@ -8,6 +8,8 @@ import type { UseGithubSettingsResult } from './use-github-settings';
 import type { UseLlmSettingsResult } from './use-llm-settings';
 import type { LlmProviderId } from './settings-types';
 import { CodexConnectControl } from './CodexConnectControl';
+import { DESKTOP_THEMES } from '../../theme';
+import { useDroneHubUiStore } from './use-drone-hub-ui-store';
 
 function llmProviderLabel(provider: LlmProviderId | null | undefined): string {
   if (provider === 'codex') return 'Codex';
@@ -44,6 +46,8 @@ export function GeneralSettingsTab({
   onReplayOnboarding,
   onResetOnboarding,
 }: GeneralSettingsTabProps) {
+  const themeId = useDroneHubUiStore((state) => state.themeId);
+  const setThemeId = useDroneHubUiStore((state) => state.setThemeId);
   const {
     llmSettings,
     llmSettingsLoading,
@@ -168,22 +172,22 @@ export function GeneralSettingsTab({
   return (
     <>
       {github.githubSettingsError && (
-        <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
           {github.githubSettingsError}
         </div>
       )}
       {llmSettingsError && (
-        <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
           {llmSettingsError}
         </div>
       )}
       {llmSettingsNotice && (
-        <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
           {llmSettingsNotice}
         </div>
       )}
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3">
+      <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
         {github.githubSettingsLoading && !github.githubSettings ? (
           <div className="text-[12px] text-[var(--muted-dim)]">Loading GitHub status…</div>
         ) : (
@@ -193,19 +197,19 @@ export function GeneralSettingsTab({
               <div className="text-[12px] text-[var(--muted)]">Hub PR actions use the GitHub API. Host `gh` is used only as an optional auth source.</div>
             </div>
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
-              <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">PR transport</div>
                 <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
                   {githubStatus?.pullRequestTransport === 'github-api' ? 'GitHub API' : 'Unknown'}
                 </div>
                 <div className="text-[11px] text-[var(--muted-dim)] mt-1">List, inspect, merge, and close PRs without shelling out to container `gh`.</div>
               </div>
-              <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Effective auth</div>
                 <div className="text-[13px] text-[var(--fg-secondary)] mt-2">{githubAuthLabel}</div>
                 <div className="text-[11px] text-[var(--muted-dim)] mt-1">{githubStatus?.authDetail ?? 'Loading GitHub auth status…'}</div>
               </div>
-              <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+              <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
                 <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Host gh CLI</div>
                 <div className="text-[13px] text-[var(--fg-secondary)] mt-2">{githubCliLabel}</div>
                 <div className="text-[11px] text-[var(--muted-dim)] mt-1">
@@ -218,12 +222,12 @@ export function GeneralSettingsTab({
         )}
       </div>
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3">
+      <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
         {llmSettingsLoading && !llmSettings ? (
           <div className="text-[12px] text-[var(--muted-dim)]">Loading settings…</div>
         ) : (
           <div className="grid grid-cols-1 xl:grid-cols-5 gap-3">
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
               <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Active provider</div>
               <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
                 {llmProviderLabel(llmSettings?.provider.selected)}
@@ -236,7 +240,7 @@ export function GeneralSettingsTab({
                     : 'Using default'}
               </div>
             </div>
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
               <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">OpenAI key</div>
               <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
                 {llmSettings?.openai.hasKey ? llmSettings.openai.keyHint ?? 'Configured' : 'Not configured'}
@@ -245,7 +249,7 @@ export function GeneralSettingsTab({
                 {llmSettings?.openai.updatedAt ? `Updated ${new Date(llmSettings.openai.updatedAt).toLocaleString()}` : 'Stored only when set in Hub'}
               </div>
             </div>
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
               <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Gemini key</div>
               <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
                 {llmSettings?.gemini.hasKey ? llmSettings.gemini.keyHint ?? 'Configured' : 'Not configured'}
@@ -254,7 +258,7 @@ export function GeneralSettingsTab({
                 {llmSettings?.gemini.updatedAt ? `Updated ${new Date(llmSettings.gemini.updatedAt).toLocaleString()}` : 'Stored only when set in Hub'}
               </div>
             </div>
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
               <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Codex login</div>
               <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
                 {llmSettings?.codex.hasKey ? llmSettings.codex.keyHint ?? 'Configured' : 'Not configured'}
@@ -263,7 +267,7 @@ export function GeneralSettingsTab({
                 {llmSettings?.codex.updatedAt ? `Refreshed ${new Date(llmSettings.codex.updatedAt).toLocaleString()}` : 'Uses local Codex CLI auth'}
               </div>
             </div>
-            <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+            <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
               <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">GROQ key</div>
               <div className="text-[13px] text-[var(--fg-secondary)] mt-2">
                 {llmSettings?.groq.hasKey ? llmSettings.groq.keyHint ?? 'Configured' : 'Not configured'}
@@ -276,7 +280,7 @@ export function GeneralSettingsTab({
         )}
       </div>
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3">
+      <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
         <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase mb-2" style={{ fontFamily: 'var(--display)' }}>
           Active provider
         </div>
@@ -288,7 +292,7 @@ export function GeneralSettingsTab({
             className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
               llmProviderDraft === 'openai'
                 ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
             } ${savingLlmProvider || llmSettingsLoading ? 'opacity-40 cursor-not-allowed' : ''}`}
             style={{ fontFamily: 'var(--display)' }}
           >
@@ -301,7 +305,7 @@ export function GeneralSettingsTab({
             className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
               llmProviderDraft === 'gemini'
                 ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
             } ${savingLlmProvider || llmSettingsLoading ? 'opacity-40 cursor-not-allowed' : ''}`}
             style={{ fontFamily: 'var(--display)' }}
           >
@@ -314,7 +318,7 @@ export function GeneralSettingsTab({
             className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
               llmProviderDraft === 'codex'
                 ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
             } ${savingLlmProvider || llmSettingsLoading ? 'opacity-40 cursor-not-allowed' : ''}`}
             style={{ fontFamily: 'var(--display)' }}
           >
@@ -376,7 +380,7 @@ export function GeneralSettingsTab({
               llmSettingsLoading ||
               !llmProviderDefaultsDirty ||
               !selectedDefaultModel
-                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                 : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
             }`}
             style={{ fontFamily: 'var(--display)' }}
@@ -390,7 +394,7 @@ export function GeneralSettingsTab({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
           <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Codex subscription auth
           </div>
@@ -418,8 +422,8 @@ export function GeneralSettingsTab({
                 disabled={llmSettingsLoading}
                 className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                   llmSettingsLoading
-                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
@@ -429,7 +433,7 @@ export function GeneralSettingsTab({
           ) : null}
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
           <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             OpenAI API key
           </div>
@@ -450,7 +454,7 @@ export function GeneralSettingsTab({
               name="openai-api-key"
               spellCheck={false}
               style={({ WebkitTextSecurity: showOpenAiKey ? 'none' : 'disc' } as React.CSSProperties)}
-              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
+              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
               placeholder="sk-..."
               disabled={savingOpenAiSettings || clearingOpenAiSettings || revealingOpenAiKey}
             />
@@ -460,8 +464,8 @@ export function GeneralSettingsTab({
               disabled={savingOpenAiSettings || clearingOpenAiSettings || revealingOpenAiKey}
               className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 savingOpenAiSettings || clearingOpenAiSettings || revealingOpenAiKey
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -475,7 +479,7 @@ export function GeneralSettingsTab({
               disabled={!openAiSettingsDraft.trim() || savingOpenAiSettings || clearingOpenAiSettings}
               className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 !openAiSettingsDraft.trim() || savingOpenAiSettings || clearingOpenAiSettings
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
               }`}
               style={{ fontFamily: 'var(--display)' }}
@@ -488,8 +492,8 @@ export function GeneralSettingsTab({
               disabled={clearingOpenAiSettings || savingOpenAiSettings || !llmSettings?.openai.hasKey}
               className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 clearingOpenAiSettings || savingOpenAiSettings || !llmSettings?.openai.hasKey
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -498,7 +502,7 @@ export function GeneralSettingsTab({
           </div>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
           <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Gemini API key
           </div>
@@ -519,7 +523,7 @@ export function GeneralSettingsTab({
               name="gemini-api-key"
               spellCheck={false}
               style={({ WebkitTextSecurity: showGeminiKey ? 'none' : 'disc' } as React.CSSProperties)}
-              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
+              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
               placeholder="AIza..."
               disabled={savingGeminiSettings || clearingGeminiSettings || revealingGeminiKey}
             />
@@ -529,8 +533,8 @@ export function GeneralSettingsTab({
               disabled={savingGeminiSettings || clearingGeminiSettings || revealingGeminiKey}
               className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 savingGeminiSettings || clearingGeminiSettings || revealingGeminiKey
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -544,7 +548,7 @@ export function GeneralSettingsTab({
               disabled={!geminiSettingsDraft.trim() || savingGeminiSettings || clearingGeminiSettings}
               className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 !geminiSettingsDraft.trim() || savingGeminiSettings || clearingGeminiSettings
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
               }`}
               style={{ fontFamily: 'var(--display)' }}
@@ -557,8 +561,8 @@ export function GeneralSettingsTab({
               disabled={clearingGeminiSettings || savingGeminiSettings || !llmSettings?.gemini.hasKey}
               className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 clearingGeminiSettings || savingGeminiSettings || !llmSettings?.gemini.hasKey
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -567,7 +571,7 @@ export function GeneralSettingsTab({
           </div>
         </div>
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
           <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             GROQ API key
           </div>
@@ -591,7 +595,7 @@ export function GeneralSettingsTab({
               name="groq-api-key"
               spellCheck={false}
               style={({ WebkitTextSecurity: showGroqKey ? 'none' : 'disc' } as React.CSSProperties)}
-              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
+              className="flex-1 h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
               placeholder="gsk_..."
               disabled={savingGroqSettings || clearingGroqSettings || revealingGroqKey}
             />
@@ -601,8 +605,8 @@ export function GeneralSettingsTab({
               disabled={savingGroqSettings || clearingGroqSettings || revealingGroqKey}
               className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 savingGroqSettings || clearingGroqSettings || revealingGroqKey
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -616,7 +620,7 @@ export function GeneralSettingsTab({
               disabled={!groqSettingsDraft.trim() || savingGroqSettings || clearingGroqSettings}
               className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 !groqSettingsDraft.trim() || savingGroqSettings || clearingGroqSettings
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                   : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
               }`}
               style={{ fontFamily: 'var(--display)' }}
@@ -629,8 +633,8 @@ export function GeneralSettingsTab({
               disabled={clearingGroqSettings || savingGroqSettings || !llmSettings?.groq.hasKey}
               className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                 clearingGroqSettings || savingGroqSettings || !llmSettings?.groq.hasKey
-                  ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                  : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.28)] text-[var(--red)] hover:bg-[rgba(255,90,90,.18)]'
+                  ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                  : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
             >
@@ -641,7 +645,7 @@ export function GeneralSettingsTab({
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
           <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
             Filesystem uploads
           </div>
@@ -649,12 +653,12 @@ export function GeneralSettingsTab({
             Configure the max size for a single uploaded file. Oversized uploads show an error and point users back to this setting.
           </div>
           {filesystemSettingsError && (
-            <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
               {filesystemSettingsError}
             </div>
           )}
           {filesystemSettingsNotice && (
-            <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
               {filesystemSettingsNotice}
             </div>
           )}
@@ -677,7 +681,7 @@ export function GeneralSettingsTab({
                     onChange={(e) => setUploadMaxMiBDraft(e.target.value.replace(/[^\d]/g, ''))}
                     inputMode="numeric"
                     pattern="[0-9]*"
-                    className="h-9 w-40 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
+                    className="h-9 w-40 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors"
                     placeholder={String(filesystemDefaultMiB)}
                     disabled={filesystemSettingsLoading || savingFilesystemSettings}
                   />
@@ -688,8 +692,8 @@ export function GeneralSettingsTab({
                   disabled={filesystemSettingsLoading || savingFilesystemSettings}
                   className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                     filesystemSettingsLoading || savingFilesystemSettings
-                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
                 >
@@ -701,7 +705,7 @@ export function GeneralSettingsTab({
                   disabled={!filesystemDirty || filesystemSettingsLoading || savingFilesystemSettings}
                   className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                     !filesystemDirty || filesystemSettingsLoading || savingFilesystemSettings
-                      ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                       : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
                   }`}
                   style={{ fontFamily: 'var(--display)' }}
@@ -717,7 +721,61 @@ export function GeneralSettingsTab({
         </div>
 
         <div className="flex flex-col gap-4">
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+          <section className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
+            <div>
+              <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
+                Appearance
+              </div>
+              <div className="mt-1 text-[11px] text-[var(--muted-dim)] leading-relaxed">
+                Choose the desktop color theme. Both options are dark and the preference is saved for this profile.
+              </div>
+            </div>
+            <div role="radiogroup" aria-label="Desktop color theme" className="grid grid-cols-1 gap-2 md:grid-cols-2">
+              {DESKTOP_THEMES.map((theme) => {
+                const selected = theme.id === themeId;
+                return (
+                  <button
+                    key={theme.id}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    onClick={() => setThemeId(theme.id)}
+                    className={`min-h-[104px] rounded-md border p-3 text-left transition-all ${
+                      selected
+                        ? 'border-[var(--accent)] bg-[var(--accent-subtle)] shadow-[var(--glow-accent)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
+                    }`}
+                  >
+                    <span className="flex items-start justify-between gap-3">
+                      <span>
+                        <span className="block text-[12px] font-semibold text-[var(--fg)]" style={{ fontFamily: 'var(--display)' }}>
+                          {theme.label}
+                        </span>
+                        <span className="mt-1 block text-[10px] leading-relaxed text-[var(--muted)]">
+                          {theme.description}
+                        </span>
+                      </span>
+                      <span
+                        aria-hidden="true"
+                        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                          selected ? 'border-[var(--accent)]' : 'border-[var(--border)]'
+                        }`}
+                      >
+                        {selected ? <span className="h-2 w-2 rounded-full bg-[var(--accent)]" /> : null}
+                      </span>
+                    </span>
+                    <span aria-hidden="true" className="mt-3 flex h-5 overflow-hidden rounded border border-[var(--border-subtle)]">
+                      {theme.swatches.map((color) => (
+                        <span key={color} className="flex-1" style={{ backgroundColor: color }} />
+                      ))}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </section>
+
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
             <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
               Auto-continue
             </div>
@@ -725,12 +783,12 @@ export function GeneralSettingsTab({
               Configure the user message Hub sends when a chat-level auto-continue toggle decides an agent stopped mid-task. The default is <span className="text-[var(--fg-secondary)] font-mono">continue</span>.
             </div>
             {agentMessageAutoContinueSettingsError && (
-              <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
                 {agentMessageAutoContinueSettingsError}
               </div>
             )}
             {agentMessageAutoContinueSettingsNotice && (
-              <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+              <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
                 {agentMessageAutoContinueSettingsNotice}
               </div>
             )}
@@ -764,7 +822,7 @@ export function GeneralSettingsTab({
                       className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                         autoContinueEnabledByDefaultDraft
                           ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                       } ${agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings ? 'opacity-40 cursor-not-allowed' : ''}`}
                       style={{ fontFamily: 'var(--display)' }}
                     >
@@ -777,7 +835,7 @@ export function GeneralSettingsTab({
                       className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                         !autoContinueEnabledByDefaultDraft
                           ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                       } ${agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings ? 'opacity-40 cursor-not-allowed' : ''}`}
                       style={{ fontFamily: 'var(--display)' }}
                     >
@@ -791,7 +849,7 @@ export function GeneralSettingsTab({
                     value={autoContinuePromptDraft}
                     onChange={(e) => setAutoContinuePromptDraft(e.target.value)}
                     maxLength={autoContinuePromptMaxChars}
-                    className="h-9 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
+                    className="h-9 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono"
                     placeholder="continue"
                     disabled={agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
                   />
@@ -810,8 +868,8 @@ export function GeneralSettingsTab({
                     disabled={agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
                     className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                       agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                   >
@@ -823,7 +881,7 @@ export function GeneralSettingsTab({
                     disabled={!autoContinueSettingsDirty || agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings}
                     className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                       !autoContinueSettingsDirty || agentMessageAutoContinueSettingsLoading || savingAgentMessageAutoContinueSettings
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
@@ -838,7 +896,7 @@ export function GeneralSettingsTab({
             )}
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
             <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
               Agent suggestion
             </div>
@@ -846,12 +904,12 @@ export function GeneralSettingsTab({
               Suggest a likely next user reply for each new agent message. The policy stays editable so you can tune it over time.
             </div>
             {agentSuggestionSettingsError && (
-              <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+              <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
                 {agentSuggestionSettingsError}
               </div>
             )}
             {agentSuggestionSettingsNotice && (
-              <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+              <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
                 {agentSuggestionSettingsNotice}
               </div>
             )}
@@ -884,7 +942,7 @@ export function GeneralSettingsTab({
                       className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                         agentSuggestionEnabledByDefaultDraft
                           ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                       } ${agentSuggestionSettingsLoading || savingAgentSuggestionSettings ? 'opacity-40 cursor-not-allowed' : ''}`}
                       style={{ fontFamily: 'var(--display)' }}
                     >
@@ -897,7 +955,7 @@ export function GeneralSettingsTab({
                       className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                         !agentSuggestionEnabledByDefaultDraft
                           ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                       } ${agentSuggestionSettingsLoading || savingAgentSuggestionSettings ? 'opacity-40 cursor-not-allowed' : ''}`}
                       style={{ fontFamily: 'var(--display)' }}
                     >
@@ -912,7 +970,7 @@ export function GeneralSettingsTab({
                     onChange={(e) => setAgentSuggestionPolicyDraft(e.target.value)}
                     maxLength={agentSuggestionPolicyMaxChars}
                     rows={12}
-                    className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono resize-y"
+                    className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors font-mono resize-y"
                     placeholder="# Agent Suggestion Policy"
                     disabled={agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
                   />
@@ -929,8 +987,8 @@ export function GeneralSettingsTab({
                     disabled={agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
                     className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                       agentSuggestionSettingsLoading || savingAgentSuggestionSettings
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                   >
@@ -942,7 +1000,7 @@ export function GeneralSettingsTab({
                     disabled={!agentSuggestionSettingsDirty || agentSuggestionSettingsLoading || savingAgentSuggestionSettings}
                     className={`h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
                       !agentSuggestionSettingsDirty || agentSuggestionSettingsLoading || savingAgentSuggestionSettings
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
@@ -957,7 +1015,7 @@ export function GeneralSettingsTab({
             )}
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
             <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
               Transcript
             </div>
@@ -971,7 +1029,7 @@ export function GeneralSettingsTab({
                 className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                   transcriptInlineImages
                     ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
@@ -983,7 +1041,7 @@ export function GeneralSettingsTab({
                 className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                   !transcriptInlineImages
                     ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
               >
@@ -992,7 +1050,7 @@ export function GeneralSettingsTab({
             </div>
           </div>
 
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
             <div className="text-[10px] font-semibold text-[var(--muted-dim)] tracking-[0.08em] uppercase" style={{ fontFamily: 'var(--display)' }}>
               Onboarding
             </div>
@@ -1020,7 +1078,7 @@ export function GeneralSettingsTab({
                   if (!ok) return;
                   onResetOnboarding();
                 }}
-                className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
+                className="h-9 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Clear onboarding dismissals without opening tips"
               >

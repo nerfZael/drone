@@ -24,7 +24,7 @@ export const CliPendingPromptStrip = React.memo(function CliPendingPromptStrip({
             <div className="flex items-center justify-between gap-3">
               <div className="flex items-center gap-2 min-w-0">
                 <span
-                  className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+                  className="inline-flex items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
                   style={{ fontFamily: 'var(--display)' }}
                 >
                   {pendingStatusLabel(item.state)}

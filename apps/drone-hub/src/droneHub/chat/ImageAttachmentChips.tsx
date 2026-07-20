@@ -146,14 +146,14 @@ export function ImageAttachmentChips({
         return (
           <div
             key={key}
-            className="inline-flex max-w-full items-center gap-1.5 rounded border border-[rgba(148,163,184,.2)] bg-[rgba(255,255,255,.03)] px-2 py-1 text-[10px]"
+            className="inline-flex max-w-full items-center gap-1.5 rounded border border-[var(--user-border)] bg-[var(--surface-soft)] px-2 py-1 text-[10px]"
           >
             {showThumb ? (
               <img
                 src={thumbSrc}
                 alt={a.name}
                 loading="lazy"
-                className="w-12 h-12 rounded object-cover border border-[rgba(148,163,184,.2)] bg-[rgba(0,0,0,.18)] flex-shrink-0"
+                className="w-12 h-12 rounded object-cover border border-[var(--user-border)] bg-[var(--surface-inset)] flex-shrink-0"
                 onError={() =>
                   setThumbFailCountByKey((prev) => {
                     const cur = Math.max(0, Math.floor(Number(prev[key] ?? 0)));

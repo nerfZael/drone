@@ -1518,7 +1518,7 @@ export function AssistantDock({
         <div className="text-center">
           <button
             type="button"
-            className="rounded border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--fg-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50"
+            className="rounded border border-[var(--border)] px-2.5 py-1 text-[11px] text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-50"
             disabled={blipSession.olderLoading}
             onClick={() => void loadOlderMessages()}
           >
@@ -1688,7 +1688,7 @@ export function AssistantDock({
       key: 'native-transcript-error',
       kind: 'status',
       content: (
-        <div className="mx-3 rounded border border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.08)] px-3 py-2 text-[11px] text-[var(--red)]">
+        <div className="mx-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[11px] text-[var(--red)]">
           {transcriptError}
         </div>
       ),
@@ -1718,7 +1718,7 @@ export function AssistantDock({
                 <button
                   type="button"
                   onClick={() => setSettingsOpen(false)}
-                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--fg)]"
+                  className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--fg)]"
                   title="Close settings"
                   aria-label="Close settings"
                 >
@@ -1757,7 +1757,7 @@ export function AssistantDock({
           <div
             ref={setScopeDropNodeRef}
             className={`flex-shrink-0 border-b border-[var(--border)] px-2 py-1.5 transition-colors ${
-              scopeDropActive ? 'bg-[var(--accent-subtle)]' : 'bg-[rgba(0,0,0,.08)]'
+              scopeDropActive ? 'bg-[var(--accent-subtle)]' : 'bg-[var(--surface-inset-faint)]'
             }`}
           >
             <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -1790,7 +1790,7 @@ export function AssistantDock({
                     {scopeDrones.map((drone) => (
                       <span
                         key={drone.id}
-                        className="inline-flex max-w-[150px] flex-shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-1.5 py-0.5 text-[10px] text-[var(--fg-secondary)]"
+                        className="inline-flex max-w-[150px] flex-shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-1.5 py-0.5 text-[10px] text-[var(--fg-secondary)]"
                       >
                         <span className="min-w-0 truncate">{drone.name || drone.id}</span>
                         <button

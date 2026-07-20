@@ -143,7 +143,7 @@ export function RightPanel({
           ) : null}
           {previewHostedHere ? <div className="absolute inset-0 min-h-0 overflow-hidden" aria-hidden="true" /> : null}
           {previewHostedElsewhere ? (
-            <div className="absolute inset-0 min-h-0 overflow-hidden flex items-center justify-center bg-[rgba(0,0,0,.08)] px-4 text-center text-[11px] text-[var(--muted-dim)]">
+            <div className="absolute inset-0 min-h-0 overflow-hidden flex items-center justify-center bg-[var(--surface-inset-faint)] px-4 text-center text-[11px] text-[var(--muted-dim)]">
               This Browser session is already active in the other preview pane.
             </div>
           ) : null}
@@ -190,11 +190,11 @@ export function RightPanel({
       ) : null}
       <div className={`flex-1 min-h-0 overflow-hidden flex flex-col ${rightPanelSplit ? '' : 'hidden'}`}>
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col" data-right-panel-pane="top">
-          <div className="flex-shrink-0 px-2 py-1 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] flex items-center gap-2">
+          <div className="flex-shrink-0 px-2 py-1 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] flex items-center gap-2">
             <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
               Top Pane
             </span>
-            <div className="w-[2px] h-3.5 rounded-full bg-[var(--muted)] opacity-65 shadow-[0_0_0_1px_rgba(255,255,255,.05)]" />
+            <div className="w-[2px] h-3.5 rounded-full bg-[var(--muted)] opacity-65 shadow-[0_0_0_1px_var(--border-subtle)]" />
             <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto pr-1">
               {rightPanelTabs.map((tab) => {
                 const active = rightPanelTab === tab;
@@ -221,11 +221,11 @@ export function RightPanel({
         </div>
         <div className="h-px bg-[var(--border)]" />
         <div className="flex-1 min-h-0 overflow-hidden flex flex-col" data-right-panel-pane="bottom">
-          <div className="flex-shrink-0 px-2 py-1 border-b border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] flex items-center gap-2">
+          <div className="flex-shrink-0 px-2 py-1 border-b border-[var(--border-subtle)] bg-[var(--surface-softest)] flex items-center gap-2">
             <span className="text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)]" style={{ fontFamily: 'var(--display)' }}>
               Bottom Pane
             </span>
-            <div className="w-[2px] h-3.5 rounded-full bg-[var(--muted)] opacity-65 shadow-[0_0_0_1px_rgba(255,255,255,.05)]" />
+            <div className="w-[2px] h-3.5 rounded-full bg-[var(--muted)] opacity-65 shadow-[0_0_0_1px_var(--border-subtle)]" />
             <div className="flex items-center gap-0.5 min-w-0 overflow-x-auto pr-1">
               {rightPanelTabs.map((tab) => {
                 const active = rightPanelBottomTab === tab;

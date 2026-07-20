@@ -63,7 +63,7 @@ export function AssistantQueuedPromptRow({
   const statusLabel = failed ? 'Failed' : running ? 'Working' : 'Queued';
   return (
     <div className="mx-3 flex justify-end">
-      <div className={`max-w-[88%] rounded-lg border px-3 py-2 ${failed ? 'border-[rgba(255,90,90,.35)] bg-[rgba(255,90,90,.07)]' : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.035)]'}`}>
+      <div className={`max-w-[88%] rounded-lg border px-3 py-2 ${failed ? 'border-[var(--red-border)] bg-[var(--red-subtle)]' : 'border-[var(--border-subtle)] bg-[var(--surface-soft)]'}`}>
         <div className="mb-1 flex items-center gap-2 text-[9px] font-semibold uppercase tracking-wide" style={{ fontFamily: 'var(--display)' }}>
           <span className={failed ? 'text-[var(--red)]' : 'text-[var(--muted)]'}>{statusLabel}</span>
           {prompt.imageCount > 0 ? <span className="text-[var(--muted-dim)]">{prompt.imageCount} image{prompt.imageCount === 1 ? '' : 's'}</span> : null}
@@ -98,11 +98,11 @@ function ToolDisclosure({
 }) {
   const [open, setOpen] = React.useState(false);
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)]">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)]">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[rgba(255,255,255,.025)] hover:text-[var(--fg-secondary)]"
+        className="flex w-full items-center gap-2 px-2 py-1.5 text-left text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]"
         style={{ fontFamily: 'var(--display)' }}
       >
         {status ? (
@@ -151,7 +151,7 @@ function ToolCheckIcon({ className }: { className?: string }) {
 function ThinkingPulseDots() {
   return (
     <span
-      className="inline-flex h-6 flex-shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2"
+      className="inline-flex h-6 flex-shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2"
       aria-hidden="true"
     >
       <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--muted)]" />
@@ -181,12 +181,12 @@ function ReasoningBlock({ text, headerPulse }: { text: string; headerPulse: bool
   if (!trimmed && !headerPulse) return null;
 
   return (
-    <div className="mb-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.015)]">
+    <div className="mb-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-faint)]">
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
         aria-expanded={open}
-        className="flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left hover:bg-[rgba(255,255,255,.04)]"
+        className="flex w-full min-w-0 items-center gap-2 px-2.5 py-1.5 text-left hover:bg-[var(--surface-strong)]"
       >
         <span
           className="flex-shrink-0 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
@@ -244,7 +244,7 @@ function ToolDetailsButton({ open, onClick }: { open: boolean; onClick: () => vo
     <button
       type="button"
       onClick={onClick}
-      className="ml-auto flex h-5 flex-shrink-0 items-center rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-1.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
+      className="ml-auto flex h-5 flex-shrink-0 items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 text-[9px] font-semibold uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
       style={{ fontFamily: 'var(--display)' }}
     >
       {open ? 'Hide details' : 'Details'}
@@ -333,7 +333,7 @@ function TransferActivityRow({
     progress?.destination?.targetLabel || call.args?.destinationTarget || 'Destination';
   return (
     <div
-      className={`mx-3 overflow-hidden rounded border ${failed ? 'border-[var(--red)]' : 'border-[var(--border-subtle)]'} bg-[rgba(255,255,255,.025)]`}
+      className={`mx-3 overflow-hidden rounded border ${failed ? 'border-[var(--red)]' : 'border-[var(--border-subtle)]'} bg-[var(--surface-soft)]`}
     >
       <div className="px-2.5 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
@@ -360,7 +360,7 @@ function TransferActivityRow({
           </div>
           <ToolDetailsButton open={detailsOpen} onClick={() => setDetailsOpen((value) => !value)} />
         </div>
-        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[rgba(255,255,255,.07)]">
+        <div className="mt-2 h-1.5 overflow-hidden rounded-full bg-[var(--surface-strong)]">
           <div
             className={`h-full rounded-full transition-[width] duration-200 ${failed ? 'bg-[var(--red)]' : 'bg-[var(--accent)]'}`}
             style={{ width: `${percent}%` }}
@@ -403,7 +403,7 @@ function TransferActivityRow({
               return (
                 <div
                   key={`${file.destinationPath}-${index}`}
-                  className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-2 py-1.5"
+                  className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5"
                 >
                   <div className="flex min-w-0 items-center gap-2 text-[10px]">
                     <span className="min-w-0 flex-1 truncate text-[var(--fg-secondary)]">
@@ -419,7 +419,7 @@ function TransferActivityRow({
                       {formatTransferBytes(file.size)}
                     </span>
                   </div>
-                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-[rgba(255,255,255,.06)]">
+                  <div className="mt-1 h-1 overflow-hidden rounded-full bg-[var(--surface-strong)]">
                     <div
                       className={`h-full rounded-full ${file.status === 'failed' ? 'bg-[var(--red)]' : file.status === 'retrying' ? 'bg-[var(--yellow)]' : 'bg-[var(--green)]'}`}
                       style={{ width: `${filePercent}%` }}
@@ -459,13 +459,13 @@ export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderI
         : { role: 'toolResult', content: '' };
 
   return (
-    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]">
+    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)]">
       <button
         type="button"
         aria-expanded={detailsOpen}
         aria-label={detailsOpen ? `Collapse ${label} calls` : `Expand ${label} calls`}
         onClick={() => setDetailsOpen((value) => !value)}
-        className="flex w-full min-w-0 items-center gap-2 px-2.5 py-2 text-left hover:bg-[rgba(255,255,255,.025)]"
+        className="flex w-full min-w-0 items-center gap-2 px-2.5 py-2 text-left hover:bg-[var(--surface-soft)]"
       >
         <ToolStatusIndicator result={statusResult} />
         <span
@@ -474,7 +474,7 @@ export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderI
         >
           {label}
         </span>
-        <span className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--fg-secondary)]">
+        <span className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[10px] font-semibold text-[var(--fg-secondary)]">
           x{items.length}
         </span>
         {statusText ? (
@@ -491,7 +491,7 @@ export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderI
           {items.map((item, index) => (
             <div
               key={item.key}
-              className="overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)]"
+              className="overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)]"
             >
               <div className="flex min-w-0 items-center gap-2 border-b border-[var(--border-subtle)] px-2.5 py-1.5">
                 <ToolStatusIndicator result={item.result} />
@@ -524,7 +524,7 @@ export function MessageDroneActivityRow({
   const summary = messageDroneDetails(call.args, droneNameById);
   const preview = compactPreview(summary.message, 220);
   return (
-    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]">
+    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)]">
       <div className="px-2.5 py-2">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -541,17 +541,17 @@ export function MessageDroneActivityRow({
             />
           </div>
           <div className="mt-1 flex min-w-0 flex-wrap items-center gap-1.5">
-            <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-1.5 py-0.5 text-[11px] text-[var(--fg-secondary)]">
+            <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[11px] text-[var(--fg-secondary)]">
               <span className="truncate">{summary.droneLabel || 'Target drone'}</span>
             </span>
             {summary.chatName && summary.chatName !== 'default' ? (
-              <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.14)] px-1.5 py-0.5 text-[11px] text-[var(--muted)]">
+              <span className="inline-flex max-w-full items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-1.5 py-0.5 text-[11px] text-[var(--muted)]">
                 <span className="truncate">{summary.chatName}</span>
               </span>
             ) : null}
           </div>
           {preview ? (
-            <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-2 py-1.5 text-[12px] leading-5 text-[var(--fg-secondary)]">
+            <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-1.5 text-[12px] leading-5 text-[var(--fg-secondary)]">
               {preview}
             </div>
           ) : (
@@ -580,7 +580,7 @@ export function ChatsIdleActivityRow({
   const targetSummary = summarizeWaitTargets(targets);
   const label = toolLabel(call.name);
   return (
-    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.025)]">
+    <div className="mx-3 overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)]">
       <div className="border-b border-[var(--border-subtle)] px-2.5 py-2">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -606,20 +606,20 @@ export function ChatsIdleActivityRow({
           targets.map((target) => (
             <div
               key={target.key}
-              className="flex min-h-8 min-w-0 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-2"
+              className="flex min-h-8 min-w-0 items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2"
             >
               <div className="min-w-0 flex-1 truncate text-[12px] font-medium text-[var(--fg-secondary)]">
                 {target.droneLabel}
               </div>
               {target.chatName && target.chatName !== 'default' ? (
-                <div className="max-w-[42%] truncate rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-1.5 py-0.5 text-[10px] text-[var(--muted)]">
+                <div className="max-w-[42%] truncate rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-1.5 py-0.5 text-[10px] text-[var(--muted)]">
                   {target.chatName}
                 </div>
               ) : null}
             </div>
           ))
         ) : (
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-2 py-2 text-[11px] text-[var(--muted-dim)]">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 py-2 text-[11px] text-[var(--muted-dim)]">
             Waiting for result...
           </div>
         )}

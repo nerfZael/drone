@@ -322,8 +322,8 @@ function ReadOnlySidebarGroups({
                                 type="button"
                                 className={`relative flex h-[25px] items-center gap-1.5 rounded border px-1.5 text-left text-[10.5px] transition-colors ${
                                   active
-                                    ? 'border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.045)] text-[var(--fg)]'
-                                    : 'border-transparent text-[var(--muted)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] hover:text-[var(--fg-secondary)]'
+                                    ? 'border-[var(--border)] bg-[var(--surface-soft)] text-[var(--fg)]'
+                                    : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
                                 }`}
                                 onClick={() => {
                                   if (droneId) onSelectDroneChat(droneId, chatName);
@@ -565,8 +565,8 @@ function StaticReadOnlySidebarTree({
                     disabledReason
                       ? 'cursor-not-allowed border-transparent text-[var(--muted-dim)] opacity-60'
                       : active
-                        ? 'border-[rgba(255,255,255,.08)] bg-[rgba(255,255,255,.045)] text-[var(--fg)]'
-                        : 'border-transparent text-[var(--muted)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] hover:text-[var(--fg-secondary)]'
+                        ? 'border-[var(--border)] bg-[var(--surface-soft)] text-[var(--fg)]'
+                        : 'border-transparent text-[var(--muted)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--fg-secondary)]'
                   }`}
                   onClick={() => {
                     if (!disabledReason) onSelectDroneChat(drone.id, chatName);
@@ -610,7 +610,7 @@ function StaticReadOnlySidebarTree({
       <div key={node.id} className="flex flex-col gap-0.5">
         <button
           type="button"
-          className={`relative flex items-center gap-1 rounded-md border border-transparent pr-2 text-left text-[var(--fg-secondary)] hover:border-[rgba(255,255,255,.06)] hover:bg-[rgba(255,255,255,.03)] ${densityClasses.folderRow}`}
+          className={`relative flex items-center gap-1 rounded-md border border-transparent pr-2 text-left text-[var(--fg-secondary)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] ${densityClasses.folderRow}`}
           style={{
             paddingLeft: `${Math.max(0, node.depth) * densityClasses.folderDepthPaddingPx + 4}px`,
           }}
@@ -826,7 +826,7 @@ function SidebarGroupSection({
       data-drone-sidebar-group-kind={kind}
       data-drone-sidebar-group-name={hoveredGroupName || undefined}
       data-drone-sidebar-repo-path={hoveredRepoPath || undefined}
-      className={`relative rounded-md border bg-[rgba(0,0,0,.15)] overflow-hidden transition-colors ${
+      className={`relative rounded-md border bg-[var(--surface-inset)] overflow-hidden transition-colors ${
         isDropTarget
           ? 'border-[var(--accent-muted)] ring-1 ring-[var(--accent-muted)]'
           : 'border-[var(--border-subtle)]'
@@ -887,7 +887,7 @@ function SidebarGroupSection({
                 className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
                   isDeletingGroup || isRenamingGroup
                     ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                    : 'bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
+                    : 'bg-[var(--accent-subtle)] border-[var(--accent-border)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
                 }`}
                 title={
                   isRenamingGroup
@@ -917,8 +917,8 @@ function SidebarGroupSection({
                     isDeletingGroup || isRenamingGroup
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                       : isHiddenGroup
-                        ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.18)]'
-                        : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
+                        ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
+                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
                   }`}
                   title={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
                   aria-label={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
@@ -938,7 +938,7 @@ function SidebarGroupSection({
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
                       : selectedGroupMultiChat === groupRef.group
                         ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                        : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
                   }`}
                   title={`Open "${groupLabel}" multi-chat`}
                   aria-label={`Open "${groupLabel}" multi-chat`}
@@ -959,7 +959,7 @@ function SidebarGroupSection({
                   className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
                     isDeletingGroup || isRenamingGroup
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
+                      : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
                   }`}
                   title={
                     isDeletingGroup
@@ -1158,7 +1158,7 @@ function SidebarFolderTreeNode({
             isDropTarget
               ? 'bg-[var(--accent-subtle)] ring-1 ring-[var(--accent-muted)]'
               : isSelected
-                ? 'bg-[rgba(255,255,255,.04)]'
+                ? 'bg-[var(--surface-strong)]'
                 : 'hover:bg-[var(--hover)]'
           } ${isReorderDragging ? 'opacity-70' : isHiddenGroup ? 'opacity-70' : ''}`}
           style={{ paddingLeft: `${Math.max(0, node.depth) * 8}px` }}
@@ -1196,7 +1196,7 @@ function SidebarFolderTreeNode({
                     }
                   }}
                   maxLength={64}
-                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[rgba(0,0,0,.2)] px-1.5 py-0.5 text-[11px] text-[var(--fg)] focus:outline-none"
+                  className="min-w-0 flex-1 rounded border border-[var(--accent-muted)] bg-[var(--surface-inset-strong)] px-1.5 py-0.5 text-[11px] text-[var(--fg)] focus:outline-none"
                 />
               ) : (
                 <span
@@ -1222,7 +1222,7 @@ function SidebarFolderTreeNode({
               <button
                 type="button"
                 onClick={() => onOpenFolderCreate(node.path)}
-                className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                className="inline-flex h-6 w-6 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
                 title={`New subfolder in "${groupLabel}"`}
                 aria-label={`New subfolder in "${groupLabel}"`}
               >
@@ -1237,7 +1237,7 @@ function SidebarFolderTreeNode({
                   className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
                     isDeletingGroup || isRenamingGroup
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[rgba(167,139,250,.08)] border-[rgba(167,139,250,.18)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.12)]'
+                      : 'bg-[var(--accent-subtle)] border-[var(--accent-border)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
                   }`}
                   title={`Rename folder "${groupLabel}"`}
                   aria-label={`Rename folder "${groupLabel}"`}
@@ -1254,8 +1254,8 @@ function SidebarFolderTreeNode({
                 onClick={() => toggleSidebarGroupHidden(groupRef)}
                 className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
                   isHiddenGroup
-                    ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.18)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
+                    ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
+                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]'
                 }`}
                 title={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
                 aria-label={isHiddenGroup ? `Unhide "${groupLabel}"` : `Hide "${groupLabel}"`}
@@ -1272,7 +1272,7 @@ function SidebarFolderTreeNode({
                 className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
                   selectedGroupMultiChat === node.path
                     ? 'opacity-100 pointer-events-auto bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
                 }`}
                 title={`Open "${groupLabel}" multi-chat`}
                 aria-label={`Open "${groupLabel}" multi-chat`}
@@ -1292,7 +1292,7 @@ function SidebarFolderTreeNode({
                   className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
                     isDeletingGroup || isRenamingGroup
                       ? 'opacity-50 cursor-not-allowed bg-[var(--panel-raised)] border-[var(--border-subtle)] text-[var(--muted)]'
-                      : 'bg-[var(--red-subtle)] border-[rgba(255,90,90,.2)] text-[var(--red)] hover:bg-[rgba(255,90,90,.15)]'
+                      : 'bg-[var(--red-subtle)] border-[var(--red-border)] text-[var(--red)] hover:bg-[var(--red-subtle)]'
                   }`}
                   title={`Delete folder "${groupLabel}"`}
                   aria-label={`Delete folder "${groupLabel}"`}
@@ -1310,7 +1310,7 @@ function SidebarFolderTreeNode({
       </div>
 
       {!collapsed ? (
-        <div className="ml-2 flex flex-col gap-0.5 border-l border-[rgba(255,255,255,.04)] pl-1.5">
+        <div className="ml-2 flex flex-col gap-0.5 border-l border-[var(--border-subtle)] pl-1.5">
           {node.children.map((child) => (
             <SidebarFolderTreeNode
               key={child.path}
@@ -1361,7 +1361,7 @@ function SidebarFolderTreeNode({
                 }}
                 maxLength={64}
                 placeholder={folderEditor.parentPath ? 'Subfolder name' : 'Folder name'}
-                className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 py-1 text-[11px] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+                className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1 text-[11px] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
               />
             </div>
           ) : null}
@@ -2317,7 +2317,7 @@ export function DroneSidebar({
       {sidebarDockDragActive ? (
         <div className="pointer-events-none fixed inset-0 z-[10000]" aria-hidden="true">
           <div
-            className={`absolute top-0 h-full w-[280px] border bg-[rgba(148,163,184,0.1)] border-[rgba(148,163,184,0.32)] shadow-[inset_0_0_0_1px_rgba(255,255,255,.025)] ${
+            className={`absolute top-0 h-full w-[280px] border bg-[var(--user-subtle)] border-[var(--user-border)] shadow-[inset_0_0_0_1px_var(--border-subtle)] ${
               sidebarDockPreviewSide === 'right' ? 'right-0' : 'left-0'
             }`}
           />
@@ -2363,7 +2363,7 @@ export function DroneSidebar({
           <div className="flex w-full items-center justify-between gap-2">
             <div className="flex min-w-0 flex-1 items-center gap-2">
               <div
-                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-[rgba(167,139,250,.18)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[0_0_12px_rgba(167,139,250,.08)]"
+                className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-md border border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)] shadow-[var(--glow-accent)]"
                 title="Drone Hub"
                 aria-label="Drone Hub"
               >
@@ -2383,8 +2383,8 @@ export function DroneSidebar({
                     disabled={renameSelectedDronesDisabled}
                     className={`inline-flex h-6 w-6 flex-shrink-0 items-center justify-center rounded border transition-all ${
                       renameSelectedDronesDisabled
-                        ? 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                        ? 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-50 cursor-not-allowed'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
                     }`}
                     title={
                       selectedDronesActionBusy
@@ -2416,7 +2416,7 @@ export function DroneSidebar({
                   className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
                     devicesSettingsActive
                       ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
                   }`}
                   title="Open device settings"
                   aria-label="Open device settings"
@@ -2433,7 +2433,7 @@ export function DroneSidebar({
                     className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
                       headerActionsMenuOpen
                         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
                     }`}
                     title="More sidebar actions"
                     aria-label="More sidebar actions"
@@ -2502,12 +2502,12 @@ export function DroneSidebar({
           }}
         >
           {dronesError && (
-            <div className="mx-2 mb-2 p-3 rounded border border-[rgba(255,90,90,.15)] bg-[var(--red-subtle)] text-xs text-[var(--red)]">
+            <div className="mx-2 mb-2 p-3 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-xs text-[var(--red)]">
               Failed to load drones: {dronesError}
             </div>
           )}
           {groupMoveError && (
-            <div className="mx-2 mb-2 p-2 rounded border border-[rgba(255,90,90,.15)] bg-[var(--red-subtle)] text-[11px] text-[var(--red)]">
+            <div className="mx-2 mb-2 p-2 rounded border border-[var(--red-border)] bg-[var(--red-subtle)] text-[11px] text-[var(--red)]">
               Group move failed: {groupMoveError}
             </div>
           )}
@@ -2560,7 +2560,7 @@ export function DroneSidebar({
                         <button
                           type="button"
                           onClick={onOpenDraftChatComposer}
-                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
                           title="Create new drone"
                           aria-label="Create new drone"
                         >
@@ -2575,7 +2575,7 @@ export function DroneSidebar({
                         <button
                           type="button"
                           onClick={onOpenCreateModal}
-                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                          className="inline-flex h-[30px] w-full items-center gap-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[11px] text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
                           title="Create multiple drones"
                           aria-label="Create multiple drones"
                         >
@@ -2597,7 +2597,7 @@ export function DroneSidebar({
                           className={`inline-flex h-[30px] w-full items-center gap-2 rounded border px-3 text-[11px] transition-all ${
                             playbookRunsOpen
                               ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                              : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
+                              : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]'
                           }`}
                           title="Open playbook runs"
                           aria-label="Open playbook runs"
@@ -2619,7 +2619,7 @@ export function DroneSidebar({
                 sidebarCapabilities.createDrones ? (
                   <div className="mt-4 text-[10px] text-[var(--muted-dim)]">
                     Or run{' '}
-                    <code className="rounded border border-[rgba(167,139,250,.08)] bg-[rgba(167,139,250,.06)] px-1.5 py-0.5 text-[10px] text-[#C4B5FD]">
+                    <code className="rounded border border-[var(--accent-border)] bg-[var(--accent-subtle)] px-1.5 py-0.5 text-[10px] text-[var(--code-fg)]">
                       drone create &lt;name&gt;
                     </code>{' '}
                     in your terminal.
@@ -2664,7 +2664,7 @@ export function DroneSidebar({
                 <button
                   type="button"
                   onClick={onOpenDraftChatComposer}
-                  className="inline-flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
+                  className="inline-flex h-7 min-w-0 flex-1 items-center gap-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 text-[10px] font-semibold uppercase tracking-[0.12em] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
                   style={{ fontFamily: 'var(--display)' }}
                   title="Create drone"
                   aria-label="Create drone"
@@ -2675,7 +2675,7 @@ export function DroneSidebar({
                 <button
                   type="button"
                   onClick={onOpenCreateModal}
-                  className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
+                  className="inline-flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] transition-all hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]"
                   title="Create multiple drones"
                   aria-label="Create multiple drones"
                 >
@@ -2731,7 +2731,7 @@ export function DroneSidebar({
                           <button
                             type="button"
                             onClick={() => openFolderCreate(null)}
-                            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
+                            className="inline-flex h-7 items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted)] transition-all hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)] hover:text-[var(--accent)]"
                             style={{ fontFamily: 'var(--display)' }}
                           >
                             <IconPlus className="opacity-80" />
@@ -2767,7 +2767,7 @@ export function DroneSidebar({
                               }}
                               maxLength={64}
                               placeholder="Folder name"
-                              className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 py-1 text-[11px] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
+                              className="min-w-0 flex-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1 text-[11px] text-[var(--fg)] focus:border-[var(--accent-muted)] focus:outline-none"
                             />
                           </div>
                         ) : null}
@@ -2885,7 +2885,7 @@ export function DroneSidebar({
                         dragOverCreateGroup ||
                         (createGroupTargetDroneIds && createGroupTargetDroneIds.length > 0)
                           ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)]'
-                          : 'border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)]'
+                          : 'border-[var(--border-subtle)] bg-[var(--surface-inset)]'
                       }`}
                     >
                       <div
@@ -2908,7 +2908,7 @@ export function DroneSidebar({
                             disabled={creatingGroupMove}
                             maxLength={64}
                             placeholder="Folder name"
-                            className="w-full rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 py-1.5 text-[11px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+                            className="w-full rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 py-1.5 text-[11px] text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
                           />
                           <div className="flex items-center gap-2">
                             <button
@@ -2917,7 +2917,7 @@ export function DroneSidebar({
                               className={`inline-flex h-7 items-center rounded px-2 text-[10px] font-semibold tracking-wide uppercase transition-all ${
                                 creatingGroupMove
                                   ? 'cursor-not-allowed border border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                                  : 'border border-[var(--accent-muted)] bg-[rgba(167,139,250,.12)] text-[var(--accent)] hover:bg-[rgba(167,139,250,.18)]'
+                                  : 'border border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)] hover:bg-[var(--accent-subtle)]'
                               }`}
                               style={{ fontFamily: 'var(--display)' }}
                             >
@@ -2954,7 +2954,7 @@ export function DroneSidebar({
         {sidebarCapabilities.repoFooter ||
         sidebarCapabilities.sidebarOptions ||
         sidebarCapabilities.collapseControl ? (
-          <div className="flex-shrink-0 border-t border-[var(--border)] bg-[rgba(0,0,0,.12)]">
+          <div className="flex-shrink-0 border-t border-[var(--border)] bg-[var(--surface-inset)]">
             <div className="px-2.5 py-1.5 flex items-center gap-1.5">
               {sidebarCapabilities.repoFooter ? (
                 <button
@@ -2989,7 +2989,7 @@ export function DroneSidebar({
                     className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ${
                       footerOptionsMenuOpen
                         ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                        : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                     }`}
                     title="Sidebar options"
                     aria-label="Sidebar options"
@@ -3003,7 +3003,7 @@ export function DroneSidebar({
                   <button
                     type="button"
                     onClick={onOpenReposModal}
-                    className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
+                    className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
                     title={`Manage repos (${repos.length})`}
                     aria-label="Manage repos"
                   >
@@ -3013,7 +3013,7 @@ export function DroneSidebar({
                 {sidebarCapabilities.collapseControl ? (
                   <SidebarIconButton
                     onClick={collapseSidebarWithGuard}
-                    className="border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]"
+                    className="border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] hover:bg-[var(--hover)]"
                     title="Collapse sidebar"
                     ariaLabel="Collapse sidebar"
                   >
@@ -3193,7 +3193,7 @@ export function DroneSidebar({
                         onClick={() => setActiveRepoPath((prev) => (prev === p ? '' : p))}
                         className={`w-full text-left px-2.5 py-2 rounded border transition-all ${
                           selected
-                            ? 'bg-[var(--selected)] border-[var(--accent-muted)] shadow-[0_0_8px_rgba(167,139,250,.06)]'
+                            ? 'bg-[var(--selected)] border-[var(--accent-muted)] shadow-[var(--glow-accent)]'
                             : 'border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--hover)]'
                         }`}
                         title={p}

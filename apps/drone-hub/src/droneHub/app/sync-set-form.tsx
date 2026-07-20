@@ -57,19 +57,19 @@ export function setSyncSetDraftSourceType(draft: SyncSetDraftInput, nextSourceTy
 }
 
 function formInputClass(disabled: boolean): string {
-  return `h-10 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.15)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`;
+  return `h-10 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[13px] text-[var(--fg)] placeholder:text-[var(--muted-dim)] focus:outline-none focus:border-[var(--accent-muted)] transition-colors ${disabled ? 'opacity-60 cursor-not-allowed' : ''}`;
 }
 
 export function actionButtonClass(enabled: boolean): string {
   return enabled
     ? 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
-    : 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]';
+    : 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]';
 }
 
 export function secondaryButtonClass(disabled: boolean): string {
   return disabled
-    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]';
+    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]';
 }
 
 export function SyncSetFields(props: {
@@ -133,7 +133,7 @@ export function SyncSetFields(props: {
           </div>
         </div>
       ) : (
-        <div className="xl:col-span-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+        <div className="xl:col-span-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
           <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Hub-managed source</div>
           <div className="text-[11px] text-[var(--muted-dim)] mt-1 leading-relaxed">
             A dedicated source directory is created on the host for this sync set. New drones always receive a full mirror of that directory after provisioning.

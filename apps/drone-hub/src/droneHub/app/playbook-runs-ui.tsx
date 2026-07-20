@@ -92,7 +92,7 @@ export function PlaybookRunLaunchControls({
             step={1}
             value={launchCountInput}
             onChange={(event) => onLaunchCountInputChange(event.target.value)}
-            className="h-7 w-[52px] rounded-md border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-2 text-right text-[11px] font-semibold text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
+            className="h-7 w-[52px] rounded-md border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-2 text-right text-[11px] font-semibold text-[var(--fg)] focus:outline-none focus:border-[var(--accent-muted)]"
             style={{ fontFamily: 'var(--code)' }}
           />
         </label>
@@ -104,8 +104,8 @@ export function PlaybookRunLaunchControls({
             disabled={runDisabled}
             className={`inline-flex h-8 items-center gap-1.5 rounded-lg px-3 text-[10px] font-semibold uppercase tracking-wide transition-all ${
               runDisabled
-                ? 'cursor-not-allowed bg-[rgba(255,255,255,.04)] text-[var(--muted-dim)] opacity-40'
-                : 'bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110 shadow-[0_0_12px_rgba(167,139,250,.15)]'
+                ? 'cursor-not-allowed bg-[var(--surface-strong)] text-[var(--muted-dim)] opacity-40'
+                : 'bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110 shadow-[var(--glow-accent)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
           >
@@ -118,10 +118,10 @@ export function PlaybookRunLaunchControls({
 }
 
 function queueStateClass(state: PlaybookRunQueueSummary['state']): string {
-  if (state === 'error') return 'border-[rgba(255,90,90,.18)] bg-[rgba(255,90,90,.08)] text-[var(--red)]';
-  if (state === 'launching') return 'border-[rgba(74,222,128,.18)] bg-[rgba(74,222,128,.08)] text-[var(--green)]';
-  if (state === 'waiting') return 'border-[rgba(251,191,36,.18)] bg-[rgba(251,191,36,.08)] text-[rgb(245,196,77)]';
-  return 'border-[rgba(167,139,250,.16)] bg-[rgba(167,139,250,.08)] text-[var(--accent)]';
+  if (state === 'error') return 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]';
+  if (state === 'launching') return 'border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)]';
+  if (state === 'waiting') return 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]';
+  return 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent)]';
 }
 
 function queueStateLabel(item: PlaybookRunQueueSummary): string {
@@ -158,7 +158,7 @@ export function PlaybookRunQueueSection({
         <span className="text-[9px] font-semibold uppercase tracking-[0.1em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
           Launch Queue
         </span>
-        <span className="rounded-md bg-[rgba(255,255,255,.05)] px-1.5 py-0.5 text-[9px] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
+        <span className="rounded-md bg-[var(--surface-soft)] px-1.5 py-0.5 text-[9px] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--code)' }}>
           {queue.length}
         </span>
         <div className="flex-1 h-px bg-[linear-gradient(90deg,var(--border-subtle),transparent)]" />
@@ -168,8 +168,8 @@ export function PlaybookRunQueueSection({
           disabled={Boolean(actionBusyByKey['queue:clear'])}
           className={`h-6 px-2 rounded-md text-[9px] font-semibold tracking-wide uppercase border transition-all ${
             actionBusyByKey['queue:clear']
-              ? 'opacity-40 cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)]'
-              : 'border-[rgba(255,90,90,.18)] bg-[rgba(255,90,90,.06)] text-[var(--red)] hover:bg-[rgba(255,90,90,.14)] hover:border-[rgba(255,90,90,.25)]'
+              ? 'opacity-40 cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
+              : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:bg-[var(--red-subtle)] hover:border-[var(--red-border)]'
           }`}
           style={{ fontFamily: 'var(--display)' }}
         >
@@ -198,7 +198,7 @@ export function PlaybookRunQueueSection({
                 <td>
                   <span className="text-[12px] font-medium text-[var(--fg)]">{item.playbookLabel}</span>
                   {item.serializeFirstMessageGroup && (
-                    <span className="ml-1.5 inline-flex items-center rounded-md bg-[rgba(251,191,36,.08)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.06em] text-[rgb(245,196,77)]" style={{ fontFamily: 'var(--display)' }}>
+                    <span className="ml-1.5 inline-flex items-center rounded-md bg-[var(--yellow-subtle)] px-1 py-0.5 text-[8px] font-semibold uppercase tracking-[0.06em] text-[var(--yellow)]" style={{ fontFamily: 'var(--display)' }}>
                       Serial
                     </span>
                   )}
@@ -245,7 +245,7 @@ export function PlaybookRunQueueSection({
                     className={`inline-flex h-6 w-6 items-center justify-center rounded-md transition-all ${
                       actionBusyByKey[busyKey]
                         ? 'opacity-40 cursor-not-allowed text-[var(--muted-dim)]'
-                        : 'text-[var(--muted-dim)] hover:bg-[rgba(255,90,90,.12)] hover:text-[var(--red)]'
+                        : 'text-[var(--muted-dim)] hover:bg-[var(--red-subtle)] hover:text-[var(--red)]'
                     }`}
                     title={actionBusyByKey[busyKey] ? 'Removing...' : 'Remove queued launches'}
                   >

@@ -486,7 +486,7 @@ export function DronePullRequestsDock({
             <button
               type="button"
               onClick={closeDetailView}
-              className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+              className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
               style={{ fontFamily: 'var(--display)' }}
               title="Return to the pull request list"
             >
@@ -497,7 +497,7 @@ export function DronePullRequestsDock({
                 href={activePullRequest.htmlUrl}
                 target="_blank"
                 rel="noreferrer"
-                className="inline-flex items-center h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+                className="inline-flex items-center h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold tracking-wide uppercase text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Open PR on GitHub"
               >
@@ -513,7 +513,7 @@ export function DronePullRequestsDock({
             <select
               value={mergeMethod}
               onChange={(event) => setMergeMethod(event.currentTarget.value as RepoPullRequestMergeMethod)}
-              className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold text-[var(--fg-secondary)]"
+              className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--fg-secondary)]"
               title="Default merge method"
             >
               <option value="merge">merge</option>
@@ -526,7 +526,7 @@ export function DronePullRequestsDock({
                 void mergeAllPullRequests();
               }}
               disabled={!repoAttached || disabled || mergeablePullRequests.length === 0 || anyBusy || Boolean(listError)}
-              className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[rgba(74,222,128,.35)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[var(--green-border)] bg-[var(--green-subtle)] text-[var(--green)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
               style={{ fontFamily: 'var(--display)' }}
               title={
                 mergeablePullRequests.length > 0
@@ -544,7 +544,7 @@ export function DronePullRequestsDock({
                 void closeAllPullRequests();
               }}
               disabled={!repoAttached || disabled || pullRequests.length === 0 || anyBusy || Boolean(listError)}
-              className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[rgba(255,90,90,.35)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
+              className="h-6 px-2 rounded-md border text-[9px] font-semibold tracking-wide uppercase border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)] hover:brightness-110 disabled:opacity-45 disabled:cursor-not-allowed"
               style={{ fontFamily: 'var(--display)' }}
               title="Close all open PRs without merging"
             >
@@ -553,7 +553,7 @@ export function DronePullRequestsDock({
             <button
               type="button"
               onClick={() => setRefreshNonce((n) => n + 1)}
-              className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
+              className="h-6 px-2 rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[9px] font-semibold text-[var(--muted)] hover:text-[var(--fg-secondary)] hover:bg-[var(--hover)]"
               title="Refresh pull requests"
             >
               Refresh
@@ -617,7 +617,7 @@ export function DronePullRequestsDock({
             <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--red)] bg-[var(--red-subtle)]">{actionError}</div>
           ) : null}
           {bulkActionLabel ? (
-            <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--muted)] bg-[rgba(255,255,255,.02)]">
+            <div className="px-3 py-2 border-b border-[var(--border-subtle)] text-[10px] text-[var(--muted)] bg-[var(--surface-softest)]">
               {bulkActionLabel}
             </div>
           ) : null}
@@ -628,7 +628,7 @@ export function DronePullRequestsDock({
             </div>
           ) : disabled ? (
             <div className="flex-1 min-h-0 overflow-auto px-3 py-3 text-[11px] text-[var(--muted)]">
-              <div className="rounded-md border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3">
+              <div className="rounded-md border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3">
                 <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
                   {provisioningLabel(hubPhase)}
                 </div>

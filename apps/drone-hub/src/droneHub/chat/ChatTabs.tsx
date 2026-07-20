@@ -20,7 +20,7 @@ export function ChatTabs({
             onClick={() => onSelect(c)}
             className={`px-3 py-1 rounded text-[11px] font-semibold whitespace-nowrap tracking-wide uppercase transition-all ${
               active
-                ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)] shadow-[0_0_12px_rgba(167,139,250,.08)]'
+                ? 'bg-[var(--accent-subtle)] text-[var(--accent)] border border-[var(--accent-muted)] shadow-[var(--glow-accent)]'
                 : 'text-[var(--muted-dim)] hover:text-[var(--muted)] hover:bg-[var(--hover)] border border-transparent'
             }`}
             style={{ fontFamily: 'var(--display)' }}

@@ -16,17 +16,17 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
   return (
     <>
       {agentsSettingsError ? (
-        <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+        <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
           {agentsSettingsError}
         </div>
       ) : null}
       {agentsSettingsNotice ? (
-        <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+        <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
           {agentsSettingsNotice}
         </div>
       ) : null}
 
-      <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-4 py-4 flex flex-col gap-4">
+      <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-4 py-4 flex flex-col gap-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--muted-dim)]">Default AGENTS.md</div>
@@ -43,7 +43,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
             disabled={savingAgentsSettings || agentsSettingsLoading}
             className={`h-9 rounded border px-4 text-[10px] font-semibold tracking-wide uppercase ${
               savingAgentsSettings || agentsSettingsLoading
-                ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] text-[var(--muted-dim)]'
+                ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--muted-dim)]'
                 : 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-fg)] hover:brightness-110'
             }`}
             style={{ fontFamily: 'var(--display)' }}
@@ -53,7 +53,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
         </div>
 
         {agentsSettingsLoading && !agentsSettings ? (
-          <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.03)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">
+          <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-soft)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">
             Loading AGENTS.md settings…
           </div>
         ) : null}
@@ -67,7 +67,7 @@ export function AgentsSettingsSection({ agents }: { agents: UseAgentsSettingsRes
           placeholder={'# Repo agent instructions\n\nDescribe project-specific expectations, commands, and guardrails.'}
         />
 
-        <div className="rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">
+        <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[11px] text-[var(--muted-dim)]">
           Per-repo overrides live in the Repository modal, where each repo can inherit this default, replace it, or disable injection.
         </div>
       </div>

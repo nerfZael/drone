@@ -894,8 +894,8 @@ export function SelectedDroneWorkspace({
           disabled={stopAllBusy || stopRunsOnlyBusy}
           className={`inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
             stopAllBusy || stopRunsOnlyBusy
-              ? 'opacity-100 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)]'
-              : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[rgba(255,90,90,.35)]'
+              ? 'opacity-100 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)]'
+              : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--red)] hover:border-[var(--red-border)]'
           }`}
           style={{ fontFamily: 'var(--display)' }}
           title="Stop remaining runs and skip final message"
@@ -908,8 +908,8 @@ export function SelectedDroneWorkspace({
           disabled={stopAllBusy || stopRunsOnlyBusy}
           className={`inline-flex items-center h-6 px-2 rounded border text-[9px] font-semibold tracking-wide uppercase transition-all ${
             stopAllBusy || stopRunsOnlyBusy
-              ? 'opacity-100 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)]'
-              : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
+              ? 'opacity-100 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)]'
+              : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--fg-secondary)] hover:border-[var(--border)]'
           }`}
           style={{ fontFamily: 'var(--display)' }}
           title="Stop remaining runs and still send final message when possible"
@@ -1470,10 +1470,10 @@ export function SelectedDroneWorkspace({
                       className={cn(
                         'inline-flex items-center gap-1.5 rounded-full border px-2 py-1 text-[10px] font-semibold transition-all',
                         fleetBadgeDropActive
-                          ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--fg-secondary)] shadow-[0_0_0_1px_rgba(167,139,250,.18)]'
+                          ? 'border-[var(--accent)] bg-[var(--accent-subtle)] text-[var(--fg-secondary)] shadow-[var(--glow-accent)]'
                           : fleetBadgeError
-                            ? 'border-[rgba(255,90,90,.28)] bg-[rgba(52,18,20,.75)] text-[var(--red)] hover:border-[rgba(255,90,90,.4)]'
-                            : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]',
+                            ? 'border-[var(--red-border)] bg-[var(--danger-panel)] text-[var(--red)] hover:border-[var(--red-border)]'
+                            : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--accent-muted)] hover:text-[var(--fg-secondary)]',
                       )}
                       title={fleetBadgeError ? `${fleetBadgeTitle} ${fleetBadgeError}` : fleetBadgeTitle}
                       aria-label={`${fleetBadgeSummaryText}. Drop drones here to assign them.`}
@@ -1647,10 +1647,10 @@ export function SelectedDroneWorkspace({
                     disabled={loadingChatInfo || !readOnlySupported}
                     className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
                       loadingChatInfo || !readOnlySupported
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : agentPermissionMode === 'read-only'
                           ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                     title={
@@ -1661,7 +1661,7 @@ export function SelectedDroneWorkspace({
                   >
                     <span
                       className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                        agentPermissionMode === 'read-only' ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
+                        agentPermissionMode === 'read-only' ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'
                       }`}
                     >
                       <span
@@ -1676,7 +1676,7 @@ export function SelectedDroneWorkspace({
               ) : null}
               {!hostRuntime ? (
                 <span
-                  className="inline-flex items-center h-[28px] px-2 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
+                  className="inline-flex items-center h-[28px] px-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[10px] font-semibold tracking-wide uppercase text-[var(--muted-dim)]"
                   style={{ fontFamily: 'var(--display)' }}
                   title={dockerSizeTitle}
                 >
@@ -1701,10 +1701,10 @@ export function SelectedDroneWorkspace({
                     disabled={loadingChatInfo || !dockerSnapshotSupported}
                     className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
                       loadingChatInfo || !dockerSnapshotSupported
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : dockerSnapshotAfterAgentMessageEnabled
                           ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                     title={
@@ -1715,7 +1715,7 @@ export function SelectedDroneWorkspace({
                   >
                     <span
                       className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                        dockerSnapshotAfterAgentMessageEnabled ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
+                        dockerSnapshotAfterAgentMessageEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'
                       }`}
                     >
                       <span
@@ -1745,17 +1745,17 @@ export function SelectedDroneWorkspace({
                     disabled={loadingChatInfo}
                     className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
                       loadingChatInfo
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : agentMessageAutoContinueEnabled
                           ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                     title="Monitor agent messages in this chat and auto-send the configured continue prompt when the agent appears to have stopped mid-task."
                   >
                     <span
                       className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                        agentMessageAutoContinueEnabled ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
+                        agentMessageAutoContinueEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'
                       }`}
                     >
                       <span
@@ -1785,17 +1785,17 @@ export function SelectedDroneWorkspace({
                     disabled={loadingChatInfo}
                     className={`inline-flex items-center gap-2 h-[28px] px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
                       loadingChatInfo
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : agentSuggestionEnabled
                           ? 'bg-[var(--accent-subtle)] border-[var(--accent-muted)] text-[var(--accent)]'
-                          : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                          : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                     title="Suggest a likely next user reply for new agent messages in this transcript chat."
                   >
                     <span
                       className={`relative inline-flex h-3.5 w-6 rounded-full transition-colors ${
-                        agentSuggestionEnabled ? 'bg-[var(--accent)]' : 'bg-[rgba(148,163,184,.3)]'
+                        agentSuggestionEnabled ? 'bg-[var(--accent)]' : 'bg-[var(--control-off)]'
                       }`}
                     >
                       <span
@@ -1834,7 +1834,7 @@ export function SelectedDroneWorkspace({
               {chatUiMode === 'cli' ? (
                 <button
                   onClick={() => setOutputView(outputView === 'screen' ? 'log' : 'screen')}
-                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]"
+                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]"
                   style={{ fontFamily: 'var(--display)' }}
                   title={outputView === 'screen' ? 'Click for raw log view' : 'Click for screen capture view'}
                 >
@@ -1844,7 +1844,7 @@ export function SelectedDroneWorkspace({
               {/* Separator */}
               <div className="w-px h-4 bg-[var(--border-subtle)]" />
               <div
-                className="inline-flex items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
+                className="inline-flex items-center gap-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-[var(--muted-dim)]"
                 style={{ fontFamily: 'var(--display)' }}
                 title={`Open chat: ${activeChatName}`}
               >
@@ -1856,7 +1856,7 @@ export function SelectedDroneWorkspace({
               </div>
               <div className="inline-flex items-center gap-1.5">
                 <div
-                  className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] p-0.5"
+                  className="inline-flex items-center rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] p-0.5"
                   style={{ fontFamily: 'var(--display)' }}
                   title="Choose where this workspace layout is saved."
                 >
@@ -1883,7 +1883,7 @@ export function SelectedDroneWorkspace({
                   className={`inline-flex h-6 w-6 items-center justify-center rounded border transition-all ${
                     workspacePaneHeaderMode === 'compact'
                       ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                      : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
+                      : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
                   }`}
                   title={workspacePaneHeaderMode === 'compact' ? 'Use normal pane headers' : 'Use compact pane headers'}
                   aria-label={workspacePaneHeaderMode === 'compact' ? 'Use normal pane headers' : 'Use compact pane headers'}
@@ -1899,7 +1899,7 @@ export function SelectedDroneWorkspace({
             className={`inline-flex h-7 w-7 items-center justify-center rounded border transition-all ${
               droneControlsExpanded
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
             }`}
             title={droneControlsExpanded ? 'Hide drone controls' : 'Show drone controls'}
             aria-label={droneControlsExpanded ? 'Hide drone controls' : 'Show drone controls'}
@@ -1913,8 +1913,8 @@ export function SelectedDroneWorkspace({
             disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || openingTerminal?.mode === 'ssh' || openingTerminal?.mode === 'agent'}
             className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
               openingTerminal
-                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title={`SSH into "${currentDroneLabel}"`}
@@ -1929,8 +1929,8 @@ export function SelectedDroneWorkspace({
             disabled={quickOpenTabDisabled}
             className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
               quickOpenTabDisabled
-                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
+                ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title={quickOpenTabUrl ? `Open ${quickOpenTabUrl} in a new browser tab` : 'No preview port selected yet'}
@@ -1942,8 +1942,8 @@ export function SelectedDroneWorkspace({
             disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal)}
             className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
               openingEditor || openingTerminal
-                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
+                ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title={`Open Cursor attached to "${currentDroneLabel}"`}
@@ -1963,8 +1963,8 @@ export function SelectedDroneWorkspace({
                 disabled={syncDisabled}
                 className={`inline-flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                   syncDisabled
-                    ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                    : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                    ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                    : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
                 }`}
                 style={{ fontFamily: 'var(--display)' }}
                 title="Sync this drone repo with the host or another drone"
@@ -2059,7 +2059,7 @@ export function SelectedDroneWorkspace({
                 setTerminalMenuOpen(false);
                 setHeaderOverflowOpen((v) => !v);
               }}
-              className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
+              className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
               title="More actions"
               aria-label="More actions"
               aria-haspopup="menu"
@@ -2221,7 +2221,7 @@ export function SelectedDroneWorkspace({
               type="button"
               onClick={resetWorkspaceLayout}
               className={`inline-flex items-center h-7 px-2 rounded border text-[10px] font-semibold tracking-wide uppercase transition-all ${
-                'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
               }`}
               style={{ fontFamily: 'var(--display)' }}
               title={`Reset the saved ${workspaceLayoutScope} workspace layout`}
@@ -2237,7 +2237,7 @@ export function SelectedDroneWorkspace({
             className={`inline-flex items-center justify-center w-7 h-7 rounded border transition-all ml-1 ${
               rightPanelOpen
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[rgba(255,255,255,.02)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
             }`}
             title={rightPanelOpen ? 'Keep existing panes and stop opening tool panes automatically' : 'Open workspace panes'}
             aria-label="Toggle workspace panes"
@@ -2283,10 +2283,10 @@ export function SelectedDroneWorkspace({
             <div className="pointer-events-none absolute inset-0 z-[5] flex items-center justify-center px-6 py-6">
               <div
                 className={cn(
-                  'flex w-full max-w-[560px] items-center justify-center rounded-xl border border-dashed px-6 py-8 text-center shadow-[0_24px_60px_rgba(0,0,0,.28)] backdrop-blur-sm transition-all',
+                  'flex w-full max-w-[560px] items-center justify-center rounded-xl border border-dashed px-6 py-8 text-center shadow-[0_24px_60px_var(--shadow-color)] backdrop-blur-sm transition-all',
                   fleetBadgeDropActive
-                    ? 'border-[var(--accent)] bg-[rgba(17,24,36,.94)] text-[var(--fg-secondary)] shadow-[inset_0_0_0_1px_rgba(123,188,255,.18),0_24px_60px_rgba(0,0,0,.28)]'
-                    : 'border-[var(--accent-muted)] bg-[rgba(17,20,28,.9)] text-[var(--muted)] shadow-[inset_0_0_0_1px_rgba(123,188,255,.1),0_24px_60px_rgba(0,0,0,.24)]',
+                    ? 'border-[var(--accent)] bg-[var(--panel-overlay)] text-[var(--fg-secondary)] shadow-[inset_0_0_0_1px_var(--canvas-related-subtle),0_24px_60px_var(--shadow-color)]'
+                    : 'border-[var(--accent-muted)] bg-[var(--panel-overlay-soft)] text-[var(--muted)] shadow-[inset_0_0_0_1px_var(--info-subtle),0_24px_60px_var(--shadow-color)]',
                 )}
               >
                 <div className="max-w-[420px]">
@@ -2376,7 +2376,7 @@ export function SelectedDroneWorkspace({
               >
                 {isDroneStartingOrSeeding(currentDrone.hubPhase) && String(startupSeedForCurrentDrone?.prompt ?? '').trim() && (
                   <div className="max-w-[1170px] mx-auto px-6 pt-2">
-                    <div className="rounded-md border border-[rgba(148,163,184,.2)] bg-[var(--user-dim)] px-3 py-2 text-[12px] text-[var(--fg-secondary)] whitespace-pre-wrap">
+                    <div className="rounded-md border border-[var(--user-border)] bg-[var(--user-dim)] px-3 py-2 text-[12px] text-[var(--fg-secondary)] whitespace-pre-wrap">
                       {String(startupSeedForCurrentDrone?.prompt ?? '').trim()}
                     </div>
                   </div>
@@ -2385,7 +2385,7 @@ export function SelectedDroneWorkspace({
                   <ChatLoadingState message="Loading session output…" />
                 ) : sessionText ? (
                   <div className="max-w-[1170px] mx-auto px-6 py-6">
-                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[rgba(0,0,0,.1)] px-4 py-3">
+                    <div className="rounded-lg border border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] px-4 py-3">
                       <CollapsibleOutput text={sessionText} ok={!sessionError} />
                     </div>
                   </div>
@@ -2413,7 +2413,7 @@ export function SelectedDroneWorkspace({
                         el.scrollTop = el.scrollHeight;
                         updatePinned(el);
                       }}
-                      className="pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-semibold tracking-wide uppercase border border-[var(--accent-muted)] bg-[var(--panel-raised)] text-[var(--accent)] hover:shadow-[var(--glow-accent)] shadow-[0_8px_24px_rgba(0,0,0,.25)] transition-all"
+                      className="pointer-events-auto inline-flex items-center gap-2 px-3 py-1.5 rounded text-[10px] font-semibold tracking-wide uppercase border border-[var(--accent-muted)] bg-[var(--panel-raised)] text-[var(--accent)] hover:shadow-[var(--glow-accent)] shadow-[0_8px_24px_var(--shadow-color)] transition-all"
                       style={{ fontFamily: 'var(--display)' }}
                       title="Scroll to bottom"
                     >
@@ -2428,7 +2428,7 @@ export function SelectedDroneWorkspace({
           {genericChatActive && chatUiMode === 'cli' ? <CliPendingPromptStrip items={visibleCliPendingPrompts} /> : null}
 
           {genericChatActive && chatUiMode === 'transcript' && agentSuggestionEnabled && latestAgentSuggestionTarget && showLatestAgentSuggestion ? (
-            <div className="mx-4 mb-3 rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.16)] px-3 py-3">
+            <div className="mx-4 mb-3 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3">
               <div className="flex flex-wrap items-start justify-between gap-3">
                 <div className="min-w-0 flex-1">
                   <div
@@ -2471,7 +2471,7 @@ export function SelectedDroneWorkspace({
                     disabled={latestAgentSuggestionState?.status !== 'ready' || sendingDirectAgentSuggestion}
                     className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                       latestAgentSuggestionState?.status !== 'ready' || sendingDirectAgentSuggestion
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
                         : 'bg-[var(--accent)] border-[var(--accent)] text-[var(--accent-fg)] hover:shadow-[var(--glow-accent)] hover:brightness-110'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
@@ -2484,8 +2484,8 @@ export function SelectedDroneWorkspace({
                     disabled={latestAgentSuggestionState?.status !== 'ready'}
                     className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                       latestAgentSuggestionState?.status !== 'ready'
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                   >
@@ -2499,8 +2499,8 @@ export function SelectedDroneWorkspace({
                     disabled={latestAgentSuggestionState?.status === 'loading' || sendingDirectAgentSuggestion}
                     className={`h-8 px-3 rounded text-[10px] font-semibold tracking-wide uppercase border transition-all ${
                       latestAgentSuggestionState?.status === 'loading' || sendingDirectAgentSuggestion
-                        ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                        : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                        ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                        : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
                     }`}
                     style={{ fontFamily: 'var(--display)' }}
                   >
@@ -2543,7 +2543,7 @@ export function SelectedDroneWorkspace({
                 type="button"
                 onClick={() => setFileOpenToast(null)}
                 title="Click to dismiss"
-                className="block max-w-[360px] text-left rounded border border-[rgba(255,90,90,.3)] bg-[rgba(30,12,14,.95)] px-3 py-2 shadow-[0_10px_26px_rgba(0,0,0,.35)] cursor-pointer"
+                className="block max-w-[360px] text-left rounded border border-[var(--red-border)] bg-[var(--danger-panel)] px-3 py-2 shadow-[0_10px_26px_var(--shadow-color)] cursor-pointer"
               >
                 <div className="text-[10px] font-semibold tracking-wide uppercase text-[var(--red)]" style={{ fontFamily: 'var(--display)' }}>
                   Open file failed

@@ -8,15 +8,18 @@ type WhiteboardCanvasProps = {
 
 export function WhiteboardCanvas({ initialData, onChange }: WhiteboardCanvasProps) {
   return (
-    <Excalidraw
-      initialData={initialData}
-      onChange={onChange}
-      UIOptions={{
-        canvasActions: {
-          loadScene: false,
-          saveToActiveFile: false,
-        },
-      }}
-    />
+    <div className="dh-whiteboard-theme h-full w-full">
+      <Excalidraw
+        theme="dark"
+        initialData={initialData}
+        onChange={onChange}
+        UIOptions={{
+          canvasActions: {
+            loadScene: false,
+            saveToActiveFile: false,
+          },
+        }}
+      />
+    </div>
   );
 }

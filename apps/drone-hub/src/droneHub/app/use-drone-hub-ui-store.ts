@@ -30,6 +30,7 @@ import { normalizeSidebarRepoScopedGroupMap } from './sidebar-repo-scoped-groups
 import { normalizeSidebarGroupOrder } from './sidebar-group-order';
 import { mergeSeenModelIds, normalizeSeenModelIds } from './spawn-model-history';
 import { profileStorageKey } from '../../profile-storage';
+import { normalizeDesktopThemeId, type DesktopThemeId } from '../../theme';
 
 type Updater<T> = T | ((prev: T) => T);
 
@@ -68,6 +69,7 @@ const DEFAULT_SPAWN_CONTEXT_PREFERENCES: SpawnContextPreferences = {
 };
 
 type DroneHubUiState = {
+  themeId: DesktopThemeId;
   activeRepoPath: string;
   settingsActiveTab: SettingsTabId;
   settingsPlaybookFocusId: string | null;
@@ -132,6 +134,7 @@ type DroneHubUiState = {
   shortcutBindings: ShortcutBindingMap;
   terminalMenuOpen: boolean;
   agentMenuOpen: boolean;
+  setThemeId: (next: Updater<DesktopThemeId>) => void;
   setActiveRepoPath: (next: Updater<string>) => void;
   setSettingsActiveTab: (next: Updater<SettingsTabId>) => void;
   setSettingsPlaybookFocusId: (next: Updater<string | null>) => void;
@@ -294,6 +297,7 @@ function buildUpdatedSpawnContextByRepoKey(
 
 type DroneHubUiPersistedState = Pick<
   DroneHubUiState,
+  | 'themeId'
   | 'activeRepoPath'
   | 'settingsActiveTab'
   | 'playbookRunsSelectionInitialized'
@@ -347,6 +351,9 @@ export function migrateDroneHubUiPersistedState(
     fsExplorerView?: unknown;
   };
   const migrated = { ...persisted };
+  if (Object.prototype.hasOwnProperty.call(migrated, 'themeId')) {
+    migrated.themeId = normalizeDesktopThemeId(migrated.themeId);
+  }
   if (Object.prototype.hasOwnProperty.call(migrated, 'sidebarDockSide')) {
     migrated.sidebarDockSide = normalizeSidebarDockSide(migrated.sidebarDockSide);
   }
@@ -615,6 +622,7 @@ const initialPlaybookRunsSelections = readPersistedDroneHubUiSelections();
 export const useDroneHubUiStore = create<DroneHubUiState>()(
   persist(
     (set) => ({
+      themeId: 'monolith',
       activeRepoPath: '',
       settingsActiveTab: 'general',
       settingsPlaybookFocusId: null,
@@ -681,6 +689,8 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
       shortcutBindings: cloneDefaultShortcutBindings(),
       terminalMenuOpen: false,
       agentMenuOpen: false,
+      setThemeId: (next) =>
+        set((s) => ({ themeId: normalizeDesktopThemeId(resolveNext(s.themeId, next)) })),
       setActiveRepoPath: (next) => set((s) => ({ activeRepoPath: resolveNext(s.activeRepoPath, next) })),
       setSettingsActiveTab: (next) => set((s) => ({ settingsActiveTab: resolveNext(s.settingsActiveTab, next) })),
       setSettingsPlaybookFocusId: (next) =>
@@ -964,10 +974,11 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
     }),
     {
       name: profileStorageKey('droneHub.ui'),
-      version: 13,
+      version: 14,
       storage: createJSONStorage(() => localStorage),
       migrate: (persistedState, version) => migrateDroneHubUiPersistedState(persistedState, version),
       partialize: (state): DroneHubUiPersistedState => ({
+        themeId: state.themeId,
         activeRepoPath: state.activeRepoPath,
         settingsActiveTab: state.settingsActiveTab,
         playbookRunsSelectionInitialized: state.playbookRunsSelectionInitialized,
@@ -1021,6 +1032,7 @@ export const useDroneHubUiStore = create<DroneHubUiState>()(
         return {
           ...currentState,
           ...persistedRest,
+          themeId: normalizeDesktopThemeId(persisted.themeId ?? currentState.themeId),
           settingsActiveTab:
             persisted.settingsActiveTab === 'general' ||
             persisted.settingsActiveTab === 'devices' ||

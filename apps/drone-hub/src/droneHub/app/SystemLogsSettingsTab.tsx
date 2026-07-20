@@ -55,7 +55,7 @@ function LogPanel({
   fallbackMaxBytes,
 }: LogPanelProps) {
   return (
-    <div className="rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.12)] px-3 py-3 flex flex-col gap-3">
+    <div className="rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 py-3 flex flex-col gap-3">
       <div
         role="button"
         tabIndex={0}
@@ -89,8 +89,8 @@ function LogPanel({
             disabled={loading}
             className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all ${
               loading
-                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title={refreshTitle}
@@ -106,8 +106,8 @@ function LogPanel({
             disabled={loading || !String(logs?.text ?? '').trim()}
             className={`h-8 px-3 rounded text-[11px] font-semibold tracking-wide uppercase border transition-all inline-flex items-center gap-1.5 ${
               loading || !String(logs?.text ?? '').trim()
-                ? 'opacity-40 cursor-not-allowed bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                : 'bg-[rgba(255,255,255,.02)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
+                ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
+                : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)]'
             }`}
             style={{ fontFamily: 'var(--display)' }}
             title={copyTitle}
@@ -121,12 +121,12 @@ function LogPanel({
       {expanded && (
         <>
           {error && (
-            <div className="rounded border border-[rgba(255,90,90,.2)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
+            <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[12px] text-[var(--red)]">
               {error}
             </div>
           )}
           {copiedNotice && (
-            <div className="rounded border border-[rgba(52,211,153,.2)] bg-[rgba(16,185,129,.08)] px-3 py-2 text-[12px] text-[#34d399]">
+            <div className="rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-3 py-2 text-[12px] text-[var(--green)]">
               {copiedNotice}
             </div>
           )}
@@ -149,7 +149,7 @@ function LogPanel({
             value={logs?.text ?? ''}
             onScroll={handleScroll}
             placeholder={loading ? loadingLabel : emptyLabel}
-            className="w-full min-h-[220px] max-h-[55vh] rounded border border-[var(--border-subtle)] bg-[rgba(0,0,0,.2)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] font-mono resize-y focus:outline-none"
+            className="w-full min-h-[220px] max-h-[55vh] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset-strong)] px-3 py-2 text-[12px] leading-relaxed text-[var(--fg-secondary)] font-mono resize-y focus:outline-none"
           />
           <div className="text-[10px] text-[var(--muted-dim)]">
             Showing up to {(logs?.tailLines ?? fallbackTailLines).toLocaleString()} lines and {(logs?.maxBytes ?? fallbackMaxBytes).toLocaleString()} bytes.
