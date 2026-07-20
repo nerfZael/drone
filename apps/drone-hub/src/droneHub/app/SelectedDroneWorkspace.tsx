@@ -31,7 +31,7 @@ import type {
   PendingPrompt,
   TranscriptItem,
 } from '../types';
-import { IconAutoMinimize, IconChat, IconChevron, IconCursorApp, IconFolder, IconSidebarExpand, IconTune } from './icons';
+import { IconAutoMinimize, IconChat, IconChevron, IconSidebarExpand, IconTune } from './icons';
 import {
   DockableDroneWorkspace,
   WORKSPACE_LAYOUT_SCOPES,
@@ -55,11 +55,10 @@ import { chatInputDraftKeyForDroneChat, droneHomePath, isDroneStartingOrSeeding,
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
-import { UiMenuSelect, type UiMenuSelectEntry } from '../../ui/menuSelect';
+import type { UiMenuSelectEntry } from '../../ui/menuSelect';
 import { createDraftChatAutomationLaunch } from './chat-draft-automation';
 import { currentPromptAutomationDisplayStatus } from './prompt-automation-display-status';
 import { fetchDroneChatTranscript } from './chat-api';
-import { repoPathLabel } from './repo-path-label';
 import { useDroneHubUiStore, useSelectedDroneWorkspaceUiState } from './use-drone-hub-ui-store';
 import { usePromptAutomationState } from './use-prompt-automation-state';
 import { CliPendingPromptStrip } from './CliPendingPromptStrip';
@@ -75,11 +74,7 @@ import {
 import { resolveRunningPromptLoopIdentity } from './prompt-loop-running-identity';
 import type { RepoTransferActionResult, RepoTransferPeer } from './use-workspace-actions';
 import {
-  displayedChatModelTitle,
-  formatAgentModelMetadata,
   formatBytes,
-  latestTranscriptRuntime,
-  resolveDisplayedChatModel,
 } from './selected-drone-workspace-utils';
 import { parseGithubPullRequestHref } from '../chat/github-pull-request-links';
 import { useHeaderRepoPullRequestSummary } from './HeaderPullRequestShortcuts';
@@ -301,10 +296,6 @@ export function SelectedDroneWorkspace({
   openDroneErrorModal,
   launchHint,
   currentAgentKey,
-  pickAgentValue,
-  toolbarAgentMenuEntries,
-  agentLocked,
-  agentDisabled,
   agentLabel,
   chatRuntimeMetadataAvailable,
   modelControlEnabled,
@@ -331,7 +322,6 @@ export function SelectedDroneWorkspace({
   chatModelsSource,
   currentDroneRepoAttached,
   currentDroneRepoPath,
-  createRepoMenuEntries,
   openDroneTerminal,
   openingTerminal,
   openDroneEditor,
@@ -392,14 +382,12 @@ export function SelectedDroneWorkspace({
 }: SelectedDroneWorkspaceProps) {
   const {
     sidebarCollapsed,
-    agentMenuOpen,
     terminalMenuOpen,
     headerOverflowOpen,
     outputView,
     selectedChat,
     terminalEmulator,
     setSidebarCollapsed,
-    setAgentMenuOpen,
     setTerminalMenuOpen,
     setHeaderOverflowOpen,
     setOutputView,
@@ -558,19 +546,6 @@ export function SelectedDroneWorkspace({
     openDroneErrorModal,
     onRequestDropActions,
   });
-  const compactRepoPath = String(currentDrone.repoPath ?? '').trim();
-  const compactRepoLabel = compactRepoPath ? repoPathLabel(compactRepoPath) : '';
-  const compactTranscriptRuntime = latestTranscriptRuntime(transcripts);
-  const compactModel = resolveDisplayedChatModel(
-    currentModel,
-    availableChatModels,
-    loadingChatModels,
-    modelControlEnabled,
-    compactTranscriptRuntime.model,
-  );
-  const compactModelTitle = displayedChatModelTitle(compactModel, compactTranscriptRuntime.reasoning);
-  const compactAgentModelLabel = formatAgentModelMetadata(agentLabel, compactModel, compactTranscriptRuntime.reasoning);
-  const showCompactRuntimeMetadata = hasChats && chatRuntimeMetadataAvailable;
   const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
   const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
   const nativeChatActive = currentAgentKey === 'native' && !currentChatIsDraft;
@@ -586,11 +561,6 @@ export function SelectedDroneWorkspace({
     !nativeChatActive &&
     !chatConfigFailed &&
     (currentChatIsDraft || !hasChats || chatRuntimeMetadataAvailable);
-  const [nativeHistoryObserved, setNativeHistoryObserved] = React.useState(false);
-  React.useEffect(() => {
-    setNativeHistoryObserved(false);
-  }, [currentAgentKey, currentDrone.id, activeChatName]);
-  const effectiveAgentLocked = agentLocked || nativeHistoryObserved;
   const showFleetBadge =
     fleetBadgeAssigning ||
     fleetBadgeDropActive ||
@@ -1204,20 +1174,26 @@ export function SelectedDroneWorkspace({
     setDroneControlsExpanded((expanded) => {
       const next = !expanded;
       if (!next) {
-        setAgentMenuOpen(false);
         setTerminalMenuOpen(false);
         setHeaderOverflowOpen(false);
         setSyncMenuOpen(false);
       }
       return next;
     });
-  }, [setAgentMenuOpen, setHeaderOverflowOpen, setTerminalMenuOpen]);
+  }, [setHeaderOverflowOpen, setTerminalMenuOpen]);
 
   const externalComposerControls: ChatComposerControlsConfig | undefined =
     hasChats && modelControlEnabled
       ? {
           onboardingId: 'chat.composer.model',
           controls: [
+            {
+              kind: 'label',
+              id: 'external-agent',
+              label: 'Agent',
+              value: agentLabel,
+              title: `Agent: ${agentLabel}`,
+            },
             {
               kind: 'model-picker',
               id: 'external-model',
@@ -1438,8 +1414,8 @@ export function SelectedDroneWorkspace({
   return (
     <>
       {/* Header - spans full workspace width */}
-      <DroneWorkspaceHeaderFrame selectedHeader>
-        <div className="flex h-full items-center px-4">
+      <DroneWorkspaceHeaderFrame selectedHeader expanded={droneControlsExpanded}>
+        <div className="flex h-[3.25rem] items-center px-4">
           <div className="flex w-full items-center justify-between gap-3">
             <div className="flex items-center gap-2 min-w-0">
               {sidebarCollapsed && (
@@ -1452,7 +1428,7 @@ export function SelectedDroneWorkspace({
                   <IconSidebarExpand />
                 </button>
               )}
-              <div className="flex min-w-0 flex-col justify-center gap-0.5">
+              <div className="flex min-w-0 flex-col justify-center">
                 <div className="flex min-w-0 items-center gap-2.5">
                   <span className="max-w-[min(34vw,360px)] truncate dh-type-title dh-type-workspace-title">
                     {currentDroneLabel}
@@ -1492,27 +1468,6 @@ export function SelectedDroneWorkspace({
                     </div>
                   ) : null}
                 </div>
-                {compactRepoPath || showCompactRuntimeMetadata ? (
-                  <div className="hidden min-w-0 max-w-[min(34vw,420px)] items-center gap-1.5 overflow-hidden dh-type-meta lg:flex">
-                    {compactRepoPath ? (
-                      <span className="inline-flex min-w-0 items-center gap-1.5" title={compactRepoPath}>
-                        <IconFolder className="h-3 w-3 flex-shrink-0 opacity-35" />
-                        <span className="min-w-0 max-w-[140px] truncate font-mono">{compactRepoLabel}</span>
-                      </span>
-                    ) : null}
-                    {compactRepoPath && showCompactRuntimeMetadata ? (
-                      <span className="flex-shrink-0 text-[var(--muted-dim)] opacity-45" aria-hidden="true">·</span>
-                    ) : null}
-                    {showCompactRuntimeMetadata ? (
-                      <span
-                        className="min-w-0 max-w-[240px] truncate"
-                        title={`${agentLabel} · ${compactModelTitle}`}
-                      >
-                        {compactAgentModelLabel}
-                      </span>
-                    ) : null}
-                  </div>
-                ) : null}
               </div>
             </div>
             {/* Status indicators */}
@@ -1600,39 +1555,6 @@ export function SelectedDroneWorkspace({
         >
           {droneControlsExpanded ? (
             <>
-              {/* Agent selector */}
-              {hasChats ? (
-                <div data-onboarding-id="chat.toolbar.agent" className="flex items-center gap-1.5">
-                  <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
-                    Agent
-                  </span>
-                  <UiMenuSelect
-                    variant="toolbar"
-                    value={currentAgentKey}
-                    onValueChange={pickAgentValue}
-                    entries={toolbarAgentMenuEntries}
-                    open={agentMenuOpen}
-                    onOpenChange={(open) => {
-                      if (open) {
-                        setTerminalMenuOpen(false);
-                        setHeaderOverflowOpen(false);
-                      }
-                      setAgentMenuOpen(open);
-                    }}
-                    disabled={agentDisabled || effectiveAgentLocked}
-                    title={
-                      effectiveAgentLocked
-                        ? 'This chat has history. Create a new chat to use a different agent.'
-                        : 'Choose agent implementation for this chat.'
-                    }
-                    triggerLabel={agentLabel}
-                    chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                    panelClassName="w-[260px]"
-                    header="Choose agent"
-                    headerStyle={{ fontFamily: 'var(--display)' }}
-                  />
-                </div>
-              ) : null}
               {hasChats && chatUiMode === 'transcript' ? (
                 <div className="flex items-center gap-1.5">
                   <span className="text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted-dim)] tracking-wide uppercase" style={{ fontFamily: 'var(--display)' }}>
@@ -1813,28 +1735,6 @@ export function SelectedDroneWorkspace({
                   </button>
                 </div>
               ) : null}
-              {/* Repo (read-only for repo-attached drones only) */}
-              {currentDroneRepoAttached && (
-                <div className="flex items-center gap-1.5">
-                  <span className="dh-type-section-label">
-                    Repo
-                  </span>
-                  <UiMenuSelect
-                    variant="toolbar"
-                    value={currentDroneRepoPath}
-                    onValueChange={() => {}}
-                    entries={createRepoMenuEntries}
-                    disabled={true}
-                    triggerClassName="min-w-[220px] max-w-[420px]"
-                    panelClassName="w-[380px] max-w-[calc(100vw-3rem)]"
-                    menuClassName="max-h-[240px] overflow-y-auto"
-                    title={currentDroneRepoPath || 'No repo'}
-                    triggerLabel={currentDroneRepoPath ? repoPathLabel(currentDroneRepoPath) : 'No repo'}
-                    triggerLabelClassName={currentDroneRepoPath ? 'font-mono text-[var(--text-10)] text-[var(--chrome-muted)]' : undefined}
-                    chevron={() => <IconChevron down className="text-[var(--muted-dim)] opacity-60" />}
-                  />
-                </div>
-              )}
               {/* View mode */}
               {chatUiMode === 'cli' ? (
                 <button
@@ -1912,31 +1812,6 @@ export function SelectedDroneWorkspace({
           >
             <IconTune className="h-3.5 w-3.5" />
           </button>
-          {/* Primary actions */}
-          <HeaderActionButton
-            onClick={() => openDroneTerminal('ssh')}
-            disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingTerminal)}
-            title={`SSH into "${currentDroneLabel}"`}
-          >
-            SSH
-          </HeaderActionButton>
-          <HeaderActionButton
-            onClick={() => {
-              openDroneTabFromLastPreview(currentDrone);
-            }}
-            disabled={quickOpenTabDisabled}
-            title={quickOpenTabUrl ? `Open ${quickOpenTabUrl} in a new browser tab` : 'No preview port selected yet'}
-          >
-            Open tab
-          </HeaderActionButton>
-          <HeaderActionButton
-            onClick={() => openDroneEditor('cursor')}
-            disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal)}
-            title={`Open Cursor attached to "${currentDroneLabel}"`}
-          >
-            <IconCursorApp className="opacity-70" />
-            Cursor
-          </HeaderActionButton>
           {currentDroneRepoAttached && (
             <div ref={syncMenuRef} className="relative">
               <HeaderActionButton
@@ -2034,7 +1909,6 @@ export function SelectedDroneWorkspace({
             <button
               type="button"
               onClick={() => {
-                setAgentMenuOpen(false);
                 setTerminalMenuOpen(false);
                 setHeaderOverflowOpen((v) => !v);
               }}
@@ -2053,6 +1927,33 @@ export function SelectedDroneWorkspace({
             {headerOverflowOpen && (
               <HeaderDropdownPortal open={headerOverflowOpen} anchorRef={headerOverflowRef} width={220}>
                 <div className="py-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeaderOverflowOpen(false);
+                      openDroneTerminal('ssh');
+                    }}
+                    disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingTerminal)}
+                    className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
+                    role="menuitem"
+                    title={`SSH into "${currentDroneLabel}"`}
+                  >
+                    SSH
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeaderOverflowOpen(false);
+                      openDroneTabFromLastPreview(currentDrone);
+                    }}
+                    disabled={quickOpenTabDisabled}
+                    className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
+                    role="menuitem"
+                    title={quickOpenTabUrl ? `Open ${quickOpenTabUrl} in a new browser tab` : 'No preview port selected yet'}
+                  >
+                    Open default tab
+                  </button>
+                  <div className="my-1 border-t border-[var(--border-subtle)]" />
                   <button
                     type="button"
                     onClick={() => {
@@ -2103,6 +2004,18 @@ export function SelectedDroneWorkspace({
                     role="menuitem"
                   >
                     Open VS Code
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setHeaderOverflowOpen(false);
+                      openDroneEditor('cursor');
+                    }}
+                    disabled={isDroneStartingOrSeeding(currentDrone.hubPhase) || Boolean(openingEditor) || Boolean(openingTerminal)}
+                    className={cn(dropdownMenuItemBaseClass, 'text-[var(--fg-secondary)] hover:bg-[var(--hover)] disabled:opacity-40 disabled:cursor-not-allowed')}
+                    role="menuitem"
+                  >
+                    Open Cursor
                   </button>
                   {currentDroneRepoAttached && (
                     <>
@@ -2322,7 +2235,6 @@ export function SelectedDroneWorkspace({
                   modeHint: automationModeHint,
                   onSend: sendChatAutomation,
                 }}
-                onHistoryChange={setNativeHistoryObserved}
               />
             ) : chatUiMode === 'transcript' ? (
               <AgentChatTranscript

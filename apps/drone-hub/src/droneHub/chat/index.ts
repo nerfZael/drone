@@ -46,6 +46,7 @@ export {
   type ChatComposerChoicePickerControl,
   type ChatComposerControl,
   type ChatComposerControlsConfig,
+  type ChatComposerLabelControl,
   type ChatComposerModelPickerControl,
   type ChatComposerSegmentedControl,
   type ChatComposerSelectControl,

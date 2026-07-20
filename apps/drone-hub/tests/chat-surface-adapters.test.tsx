@@ -210,6 +210,12 @@ describe('agent chat surface adapters', () => {
           composerControls={{
             controls: [
               {
+                kind: 'label',
+                id: 'agent',
+                label: 'Agent',
+                value: 'Codex',
+              },
+              {
                 kind: 'select',
                 id: 'model',
                 value: 'model-a',
@@ -227,6 +233,7 @@ describe('agent chat surface adapters', () => {
     );
 
     expect(html).toContain('Model A');
+    expect(html).toContain('aria-label="Agent: Codex"');
     expect(html).toContain('Chat options');
     expect(html).not.toContain('Thread files');
   });

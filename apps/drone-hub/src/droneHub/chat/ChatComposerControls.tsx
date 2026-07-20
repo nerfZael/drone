@@ -48,6 +48,14 @@ export type ChatComposerButtonControl = {
   icon?: 'refresh' | 'star';
 };
 
+export type ChatComposerLabelControl = {
+  kind: 'label';
+  id: string;
+  label: string;
+  value: string;
+  title?: string;
+};
+
 export type ChatComposerSegmentedControl = {
   kind: 'segmented';
   id: string;
@@ -70,6 +78,7 @@ export type ChatComposerControl =
   | ChatComposerSelectControl
   | ChatComposerTextControl
   | ChatComposerButtonControl
+  | ChatComposerLabelControl
   | ChatComposerSegmentedControl
   | ChatComposerChoicePickerControl
   | ChatComposerModelPickerControl;
@@ -133,6 +142,21 @@ export function ChatComposerControls({ config }: { config?: ChatComposerControls
       className="flex min-w-0 flex-shrink-0 flex-wrap items-center gap-[.4375rem]"
     >
       {config.controls.map((control) => {
+        if (control.kind === 'label') {
+          return (
+            <div
+              key={control.id}
+              className="inline-flex h-8 flex-shrink-0 items-center gap-1.5 px-1 text-[.625rem]"
+              title={control.title ?? `${control.label}: ${control.value}`}
+              aria-label={`${control.label}: ${control.value}`}
+            >
+              <span className="font-medium uppercase tracking-wide text-[var(--chat-composer-placeholder)]">
+                {control.label}
+              </span>
+              <span className="font-medium text-[var(--chat-composer-model-fg)]">{control.value}</span>
+            </div>
+          );
+        }
         if (control.kind === 'choice-picker') {
           return <ChatComposerChoicePicker key={control.id} config={control} />;
         }
