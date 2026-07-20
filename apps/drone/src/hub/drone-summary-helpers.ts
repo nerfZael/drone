@@ -3,7 +3,10 @@ function parseIsoOrZero(raw: unknown): number {
   return Number.isFinite(ms) ? ms : 0;
 }
 
-export function summarizeDroneActivity(entry: any): {
+export function summarizeDroneActivity(
+  entry: any,
+  canonicalMessageAtByChatId?: ReadonlyMap<string, string>,
+): {
   lastActivityAt: string | null;
   lastMessageAt: string | null;
   lastActivityChat: string | null;
@@ -19,6 +22,19 @@ export function summarizeDroneActivity(entry: any): {
 
   const chats = entry?.chats && typeof entry.chats === 'object' ? entry.chats : {};
   for (const [chatName, chatEntry] of Object.entries(chats) as Array<[string, any]>) {
+    const chatId = String(chatEntry?.id ?? '').trim();
+    const canonicalMessageMs = parseIsoOrZero(
+      chatId ? canonicalMessageAtByChatId?.get(chatId) : null,
+    );
+    if (canonicalMessageMs > lastMessageMs) {
+      lastMessageMs = canonicalMessageMs;
+      lastMessageChat = chatName;
+    }
+    if (canonicalMessageMs > lastActivityMs) {
+      lastActivityMs = canonicalMessageMs;
+      lastActivityChat = chatName;
+    }
+
     for (const turn of Array.isArray(chatEntry?.turns) ? chatEntry.turns : []) {
       const turnMs = Math.max(
         parseIsoOrZero(turn?.completedAt),

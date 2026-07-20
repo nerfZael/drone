@@ -215,7 +215,6 @@ export function ChatInput({
     Boolean(composerContext) ||
     Boolean(promptError || attachmentError) ||
     sending ||
-    waiting ||
     (voiceRecordingActive && !compactVoiceRecording);
   const voiceRecordingLabel =
     voiceRecordingStatus === 'starting'
