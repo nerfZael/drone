@@ -52,7 +52,7 @@ type UiMenuSelectProps = {
 const triggerBaseClassNameByVariant: Record<UiMenuSelectVariant, string> = {
   form: 'w-full h-[var(--control-height)] rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-3 text-[var(--text-13)] focus:outline-none transition-colors flex items-center justify-between gap-2',
   toolbar:
-    'inline-flex items-center gap-1.5 h-[28px] pl-2 pr-1.5 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)] focus:outline-none transition-all',
+    'inline-flex items-center gap-1.5 h-[28px] pl-2 pr-1.5 rounded border border-[var(--toolbar-control-border)] bg-[var(--toolbar-control-bg)] text-[var(--text-11)] font-[var(--weight-semibold)] text-[var(--muted)] focus:outline-none focus-visible:border-[var(--accent-muted)] transition-all',
 };
 
 const panelPositionClassNameByVariant: Record<UiMenuSelectVariant, string> = {
@@ -225,7 +225,7 @@ export function UiMenuSelect(props: UiMenuSelectProps) {
               : 'text-[var(--fg)] hover:border-[var(--border)]'
             : disabled
             ? 'opacity-40 cursor-not-allowed'
-            : 'hover:text-[var(--fg-secondary)] hover:border-[var(--border)]',
+            : 'hover:bg-[var(--hover)] hover:text-[var(--fg-secondary)] hover:border-[var(--toolbar-control-hover-border)]',
           triggerClassName
         )}
       >

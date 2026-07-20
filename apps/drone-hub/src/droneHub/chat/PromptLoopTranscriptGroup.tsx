@@ -123,6 +123,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
   headerBadgeTone = 'running',
   headerActions,
   headerError,
+  autoExpandLatestAgentMessage = false,
 }: {
   runs: TranscriptItem[];
   pendingRuns?: PendingPrompt[];
@@ -133,6 +134,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
   headerBadgeTone?: 'running' | 'queued' | 'failed';
   headerActions?: React.ReactNode;
   headerError?: string | null;
+  autoExpandLatestAgentMessage?: boolean;
 }) {
   const [promptExpanded, setPromptExpanded] = React.useState(false);
   const [expandedRunKey, setExpandedRunKey] = React.useState<string | null>(null);
@@ -397,6 +399,7 @@ export const PromptLoopTranscriptGroup = React.memo(function PromptLoopTranscrip
               text={latestSummary.output}
               fadeTo={latestSummary.fadeTo}
               className={latestSummary.outputClassName ?? ''}
+              autoExpand={autoExpandLatestAgentMessage}
               onOpenFileReference={onOpenFileReference}
               onOpenLink={onOpenLink}
             />

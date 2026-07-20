@@ -16,6 +16,7 @@ import {
   mobileVoiceStatusLabel,
 } from './mobile-voice-transcription-model';
 import { useSharedMobileChatVoiceRecorder } from './MobileChatVoiceRecorderContext';
+import { mobileAssistantComposerExpanded } from './assistant-composer-model';
 
 type ComposerIcon = typeof ArrowUp;
 
@@ -67,7 +68,7 @@ function IconButton({
       ]}
     >
       <Icon
-        color={accent ? colors.onAccent : colors.text}
+        color={accent ? colors.onAccent : colors.textSecondary}
         size={17}
         strokeWidth={accent ? 2.6 : 2.1}
       />
@@ -95,7 +96,7 @@ function VoiceIconButton({
         ? colors.online
         : tone === 'paused'
           ? colors.accent
-          : colors.text;
+          : colors.textSecondary;
   return (
     <Pressable
       accessibilityRole="button"
@@ -200,8 +201,13 @@ export function AssistantComposer({
     running,
     queueWhileRunning,
   });
-  const expanded =
-    focused || Boolean(value.trim()) || hasAttachments || running || voiceActive || Boolean(voiceError);
+  const expanded = mobileAssistantComposerExpanded({
+    focused,
+    value,
+    hasAttachments,
+    voiceActive,
+    voiceError,
+  });
   const canSend =
     (Boolean(value.trim()) || hasAttachments || voiceCanPauseOrStop) &&
     !sending &&
@@ -246,6 +252,17 @@ export function AssistantComposer({
     setFocused(false);
     Keyboard.dismiss();
   }, [voiceActive]);
+
+  const previousRunningRef = React.useRef(running);
+  React.useEffect(() => {
+    const startedRunning = running && !previousRunningRef.current;
+    previousRunningRef.current = running;
+    if (!startedRunning || valueRef.current.trim() || hasAttachments || voiceActiveRef.current)
+      return;
+    inputRef.current?.blur();
+    setFocused(false);
+    Keyboard.dismiss();
+  }, [hasAttachments, running]);
 
   React.useEffect(
     () => () => {
@@ -357,7 +374,7 @@ export function AssistantComposer({
           multiline
           maxLength={maxLength}
           placeholder={placeholder}
-          placeholderTextColor={colors.muted}
+          placeholderTextColor={colors.secondary}
           selectionColor={colors.accent}
           cursorColor={colors.accent}
           textAlignVertical="top"
@@ -368,6 +385,7 @@ export function AssistantComposer({
               (attachmentsEnabled
                 ? styles.inputWithCollapsedVoice
                 : styles.inputWithCollapsedVoiceOnly),
+            !expanded && running && onStop && styles.inputWithCollapsedStop,
           ]}
         />
         {!expanded ? (
@@ -386,7 +404,7 @@ export function AssistantComposer({
                   pressed && styles.pressed,
                 ]}
               >
-                <Plus color={colors.text} size={17} strokeWidth={2.1} />
+                <Plus color={colors.textSecondary} size={17} strokeWidth={2.1} />
               </Pressable>
             ) : null}
             <Pressable
@@ -398,12 +416,24 @@ export function AssistantComposer({
               onPress={() => void beginVoiceRecording()}
               style={({ pressed }) => [
                 styles.collapsedVoiceButton,
+                running && onStop && styles.collapsedVoiceButtonWithStop,
                 voiceRecordActionDisabled && styles.disabled,
                 pressed && styles.pressed,
               ]}
             >
-              <Mic color={colors.text} size={17} strokeWidth={2.1} />
+              <Mic color={colors.textSecondary} size={17} strokeWidth={2.1} />
             </Pressable>
+            {running && onStop ? (
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel="Stop assistant"
+                hitSlop={6}
+                onPress={onStop}
+                style={({ pressed }) => [styles.collapsedStopButton, pressed && styles.pressed]}
+              >
+                <Square color={colors.danger} size={15} strokeWidth={2.2} fill={colors.danger} />
+              </Pressable>
+            ) : null}
           </>
         ) : null}
         {voiceError || voiceStatusText ? (
@@ -463,7 +493,7 @@ export function AssistantComposer({
                     {model}
                     {reasoning ? ` ${reasoning}` : ''}
                   </Text>
-                  <ChevronDown color={colors.accent} size={14} strokeWidth={2.2} />
+                  <ChevronDown color={colors.secondary} size={14} strokeWidth={2.2} />
                 </Pressable>
                 <IconButton
                   label="Record voice message"
@@ -524,20 +554,20 @@ const styles = StyleSheet.create({
   frame: {
     paddingHorizontal: 9,
     paddingTop: 6,
-    paddingBottom: 9,
+    paddingBottom: 8,
     backgroundColor: colors.background,
   },
   composer: {
     minHeight: 52,
     borderRadius: 7,
     borderWidth: 1,
-    borderColor: colors.borderStrong,
+    borderColor: colors.composerBorder,
     backgroundColor: colors.panelRaised,
     shadowColor: colors.shadow,
-    shadowOpacity: 0.22,
-    shadowRadius: 12,
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: 5 },
-    elevation: 5,
+    elevation: 2,
     overflow: 'hidden',
   },
   composerExpanded: { borderRadius: 7, borderColor: colors.accentBorder },
@@ -554,6 +584,7 @@ const styles = StyleSheet.create({
   inputExpanded: { minHeight: 44, paddingTop: 12, paddingBottom: 0 },
   inputWithCollapsedVoice: { paddingLeft: 54, paddingRight: 54 },
   inputWithCollapsedVoiceOnly: { paddingLeft: 16, paddingRight: 54 },
+  inputWithCollapsedStop: { paddingRight: 97 },
   collapsedAddButton: {
     position: 'absolute',
     left: 9,
@@ -574,6 +605,20 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  collapsedVoiceButtonWithStop: { right: 52 },
+  collapsedStopButton: {
+    position: 'absolute',
+    right: 9,
+    top: 9,
+    width: 34,
+    height: 34,
+    borderRadius: 5,
+    borderWidth: 1,
+    borderColor: colors.dangerBorder,
+    backgroundColor: colors.dangerDark,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   controls: {
     minHeight: 47,
     flexDirection: 'row',
@@ -591,15 +636,15 @@ const styles = StyleSheet.create({
   voiceFeedbackText: {
     color: colors.accent,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '600',
     letterSpacing: 0.25,
   },
-  voiceFeedbackError: { color: colors.danger, fontWeight: '700', letterSpacing: 0 },
+  voiceFeedbackError: { color: colors.danger, fontWeight: '600', letterSpacing: 0 },
   voiceTimer: {
     color: colors.text,
     fontFamily: 'monospace',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '400',
     fontVariant: ['tabular-nums'],
   },
   voicePrimaryControls: { flexDirection: 'row', alignItems: 'center', gap: 10 },
@@ -610,8 +655,8 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.surface1,
+    borderColor: colors.border,
+    backgroundColor: colors.controlSurface,
   },
   voiceButtonDanger: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
   voiceButtonSuccess: { borderColor: colors.onlineBorder, backgroundColor: colors.onlineDark },
@@ -623,11 +668,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: colors.borderStrong,
-    backgroundColor: colors.surface1,
+    borderColor: colors.border,
+    backgroundColor: colors.controlSurface,
   },
   iconButtonAccent: { borderColor: colors.accent, backgroundColor: colors.accent },
-  footer: { paddingTop: 10, paddingBottom: 10 },
+  footer: { paddingTop: 8, paddingBottom: 6 },
   modelControl: {
     minHeight: 32,
     maxWidth: '58%',
@@ -636,7 +681,7 @@ const styles = StyleSheet.create({
     gap: 4,
     paddingHorizontal: 8,
   },
-  modelLabel: { color: colors.muted, fontSize: 11, fontWeight: '800', flexShrink: 1 },
+  modelLabel: { color: colors.secondary, fontSize: 11, fontWeight: '500', flexShrink: 1 },
   disabled: { opacity: 0.4 },
   pressed: { opacity: 0.72 },
 });

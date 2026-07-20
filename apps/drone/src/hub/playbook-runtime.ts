@@ -390,7 +390,10 @@ export function createPlaybookRuntime(dependencies: PlaybookRuntimeDependencies)
     return Number.isFinite(ms) ? ms : 0;
   }
 
-  function summarizeDroneActivity(entry: any): {
+  function summarizeDroneActivity(
+    entry: any,
+    canonicalMessageAtByChatId?: ReadonlyMap<string, string>,
+  ): {
     lastActivityAt: string | null;
     lastMessageAt: string | null;
     lastActivityChat: string | null;
@@ -406,6 +409,19 @@ export function createPlaybookRuntime(dependencies: PlaybookRuntimeDependencies)
 
     const chats = entry?.chats && typeof entry.chats === 'object' ? entry.chats : {};
     for (const [chatName, chatEntry] of Object.entries(chats) as Array<[string, any]>) {
+      const chatId = String(chatEntry?.id ?? '').trim();
+      const canonicalMessageMs = parseIsoOrZero(
+        chatId ? canonicalMessageAtByChatId?.get(chatId) : null,
+      );
+      if (canonicalMessageMs > lastMessageMs) {
+        lastMessageMs = canonicalMessageMs;
+        lastMessageChat = chatName;
+      }
+      if (canonicalMessageMs > lastActivityMs) {
+        lastActivityMs = canonicalMessageMs;
+        lastActivityChat = chatName;
+      }
+
       const turns = Array.isArray(chatEntry?.turns) ? chatEntry.turns : [];
       for (const turn of turns) {
         const turnMs = Math.max(

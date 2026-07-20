@@ -385,7 +385,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.panel,
   },
   connectedCard: { borderColor: colors.onlineBorder },
-  selectedCard: { borderColor: colors.accentBorder, backgroundColor: colors.accentWash },
+  selectedCard: { borderColor: colors.border, backgroundColor: colors.selectionWash },
   deviceIcon: {
     width: 36,
     height: 36,

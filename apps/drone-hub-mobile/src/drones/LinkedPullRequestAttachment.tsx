@@ -1,7 +1,6 @@
 import React from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Linking,
   Pressable,
   StyleSheet,
@@ -19,9 +18,11 @@ import {
   type GithubPullRequestLink,
 } from '@drone/assistant-chat';
 import { colors, radii } from '../theme';
+import { ConfirmDialog } from '../components/Ui';
 import type { MobileLinkedPullRequestContext } from './use-drone-linked-pull-requests';
 
 type StatusTone = 'accent' | 'danger' | 'muted' | 'success' | 'warning';
+type PullRequestConfirmation = 'merge' | 'close' | null;
 
 function stop(event: GestureResponderEvent): void {
   event.stopPropagation();
@@ -52,6 +53,8 @@ function LinkedPullRequestRow({
 }) {
   const [actionError, setActionError] = React.useState<string | null>(null);
   const [actionNotice, setActionNotice] = React.useState<string | null>(null);
+  const [confirmation, setConfirmation] = React.useState<PullRequestConfirmation>(null);
+  const [confirmationBusy, setConfirmationBusy] = React.useState(false);
   const sameRepo = githubPullRequestMatchesRepo(link, context.data?.github);
   const pullRequest =
     sameRepo === true
@@ -63,6 +66,7 @@ function LinkedPullRequestRow({
   const forceReason = pullRequest ? githubPullRequestForceMergeReason(pullRequest) : null;
   const busy = context.busyAction?.pullNumber === link.pullNumber;
   const anyActionBusy = context.busyAction != null;
+  const showActions = isOpen && sameRepo && (context.canMerge || context.canClose);
   const statusLabel = pullRequest
     ? state
       ? `${state[0]?.toUpperCase()}${state.slice(1)}`
@@ -76,6 +80,8 @@ function LinkedPullRequestRow({
   React.useEffect(() => {
     setActionError(null);
     setActionNotice(null);
+    setConfirmation(null);
+    setConfirmationBusy(false);
   }, [link.href]);
 
   const openOnGithub = (event: GestureResponderEvent) => {
@@ -86,59 +92,38 @@ function LinkedPullRequestRow({
     });
   };
 
-  const merge = (event: GestureResponderEvent) => {
+  const requestMerge = (event: GestureResponderEvent) => {
     stop(event);
     if (!pullRequest || blockedReason || anyActionBusy) return;
-    const force = Boolean(forceReason);
-    Alert.alert(
-      force ? `Force merge PR #${pullRequest.number}?` : `Merge PR #${pullRequest.number}?`,
-      `${forceReason ? `${forceReason[0]?.toUpperCase()}${forceReason.slice(1)}. ` : ''}Merge into ${pullRequest.baseRefName || 'the base branch'} using a merge commit?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: force ? 'Force merge' : 'Merge',
-          onPress: () => {
-            setActionError(null);
-            setActionNotice(null);
-            void context
-              .merge(pullRequest.number)
-              .then(setActionNotice)
-              .catch((error) => setActionError(error instanceof Error ? error.message : String(error)));
-          },
-        },
-      ],
-    );
+    setConfirmation('merge');
   };
 
-  const close = (event: GestureResponderEvent) => {
+  const requestClose = (event: GestureResponderEvent) => {
     stop(event);
     if (!pullRequest || anyActionBusy) return;
-    Alert.alert(
-      `Close PR #${pullRequest.number}?`,
-      'This closes the pull request without merging it.',
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Close',
-          style: 'destructive',
-          onPress: () => {
-            setActionError(null);
-            setActionNotice(null);
-            void context
-              .close(pullRequest.number)
-              .then(setActionNotice)
-              .catch((error) => setActionError(error instanceof Error ? error.message : String(error)));
-          },
-        },
-      ],
-    );
+    setConfirmation('close');
+  };
+
+  const confirmAction = () => {
+    if (!pullRequest || !confirmation || confirmationBusy || anyActionBusy) return;
+    const action = confirmation;
+    setConfirmationBusy(true);
+    setActionError(null);
+    setActionNotice(null);
+    void (action === 'merge' ? context.merge(pullRequest.number) : context.close(pullRequest.number))
+      .then(setActionNotice)
+      .catch((error) => setActionError(error instanceof Error ? error.message : String(error)))
+      .finally(() => {
+        setConfirmationBusy(false);
+        setConfirmation(null);
+      });
   };
 
   return (
-    <View style={styles.attachment}>
+    <View style={styles.attachment} onTouchStart={stop} onTouchEnd={stop}>
       <View style={styles.topRow}>
         <View style={styles.identityRow}>
-          <Text style={styles.eyebrow}>LINKED REQUEST</Text>
+          <Text style={styles.eyebrow}>PULL REQUEST</Text>
           <Text style={styles.number}>#{link.pullNumber}</Text>
           {context.loading && !pullRequest ? (
             <View
@@ -179,58 +164,62 @@ function LinkedPullRequestRow({
         ) : null}
         {pullRequest?.authorLogin ? <Text style={styles.author}>by {pullRequest.authorLogin}</Text> : null}
       </View>
-      {pullRequest ? (
-        <View style={styles.badges}>
-          {githubPullRequestStatusBadges(pullRequest).map((badge) => (
-            <TonePill key={badge.key} label={badge.label} tone={badge.tone} />
-          ))}
-        </View>
-      ) : null}
-      {isOpen && sameRepo && (context.canMerge || context.canClose) ? (
-        <View style={styles.actions}>
-          {context.canMerge ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={blockedReason ? `Merge blocked: ${blockedReason}` : forceReason ? `Force merge pull request ${link.pullNumber}` : `Merge pull request ${link.pullNumber}`}
-              accessibilityState={{ disabled: Boolean(blockedReason) || anyActionBusy, busy }}
-              disabled={Boolean(blockedReason) || anyActionBusy}
-              hitSlop={{ top: 4, bottom: 4 }}
-              onPress={merge}
-              style={({ pressed }) => [
-                styles.actionButton,
-                styles.mergeButton,
-                (blockedReason || anyActionBusy) && styles.disabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              {busy && context.busyAction?.action === 'merge' ? (
-                <ActivityIndicator color={colors.online} size={12} />
-              ) : null}
-              <Text style={styles.mergeText}>
-                {blockedReason ? 'Blocked' : forceReason ? 'Force merge' : 'Merge'}
-              </Text>
-            </Pressable>
+      {pullRequest || showActions ? (
+        <View style={styles.statusActionsRow}>
+          {pullRequest ? (
+            <View style={styles.badges}>
+              {githubPullRequestStatusBadges(pullRequest).map((badge) => (
+                <TonePill key={badge.key} label={badge.label} tone={badge.tone} />
+              ))}
+            </View>
           ) : null}
-          {context.canClose ? (
-            <Pressable
-              accessibilityRole="button"
-              accessibilityLabel={`Close pull request ${link.pullNumber}`}
-              accessibilityState={{ disabled: anyActionBusy, busy }}
-              disabled={anyActionBusy}
-              hitSlop={{ top: 4, bottom: 4 }}
-              onPress={close}
-              style={({ pressed }) => [
-                styles.actionButton,
-                styles.closeButton,
-                anyActionBusy && styles.disabled,
-                pressed && styles.pressed,
-              ]}
-            >
-              {busy && context.busyAction?.action === 'close' ? (
-                <ActivityIndicator color={colors.danger} size={12} />
+          {showActions ? (
+            <View style={styles.actions}>
+              {context.canClose ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Close pull request ${link.pullNumber}`}
+                  accessibilityState={{ disabled: anyActionBusy, busy }}
+                  disabled={anyActionBusy}
+                  hitSlop={{ top: 4, bottom: 4 }}
+                  onPress={requestClose}
+                  style={({ pressed }) => [
+                    styles.actionButton,
+                    styles.closeButton,
+                    anyActionBusy && styles.disabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  {busy && context.busyAction?.action === 'close' ? (
+                    <ActivityIndicator color={colors.danger} size={12} />
+                  ) : null}
+                  <Text style={styles.closeText}>Close</Text>
+                </Pressable>
               ) : null}
-              <Text style={styles.closeText}>Close</Text>
-            </Pressable>
+              {context.canMerge ? (
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={blockedReason ? `Merge blocked: ${blockedReason}` : forceReason ? `Force merge pull request ${link.pullNumber}` : `Merge pull request ${link.pullNumber}`}
+                  accessibilityState={{ disabled: Boolean(blockedReason) || anyActionBusy, busy }}
+                  disabled={Boolean(blockedReason) || anyActionBusy}
+                  hitSlop={{ top: 4, bottom: 4 }}
+                  onPress={requestMerge}
+                  style={({ pressed }) => [
+                    styles.actionButton,
+                    styles.mergeButton,
+                    (blockedReason || anyActionBusy) && styles.disabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  {busy && context.busyAction?.action === 'merge' ? (
+                    <ActivityIndicator color={colors.online} size={12} />
+                  ) : null}
+                  <Text style={styles.mergeText}>
+                    {blockedReason ? 'Blocked' : forceReason ? 'Force merge' : 'Merge'}
+                  </Text>
+                </Pressable>
+              ) : null}
+            </View>
           ) : null}
         </View>
       ) : null}
@@ -268,6 +257,28 @@ function LinkedPullRequestRow({
           </Pressable>
         </View>
       ) : null}
+      <ConfirmDialog
+        visible={confirmation != null}
+        title={
+          confirmation === 'close'
+            ? `Close PR #${pullRequest?.number ?? link.pullNumber}?`
+            : forceReason
+              ? `Force merge PR #${pullRequest?.number ?? link.pullNumber}?`
+              : `Merge PR #${pullRequest?.number ?? link.pullNumber}?`
+        }
+        message={
+          confirmation === 'close'
+            ? 'This closes the pull request without merging it.'
+            : `${forceReason ? `${forceReason[0]?.toUpperCase()}${forceReason.slice(1)}. ` : ''}Merge into ${pullRequest?.baseRefName || 'the base branch'} using a merge commit?`
+        }
+        confirmLabel={
+          confirmation === 'close' ? 'Close pull request' : forceReason ? 'Force merge' : 'Merge'
+        }
+        destructive={confirmation === 'close' || Boolean(forceReason)}
+        busy={confirmationBusy}
+        onCancel={() => setConfirmation(null)}
+        onConfirm={confirmAction}
+      />
     </View>
   );
 }
@@ -311,20 +322,20 @@ const toneTextStyles = StyleSheet.create({
 });
 
 const styles = StyleSheet.create({
-  list: { gap: 9, marginTop: 13 },
+  list: { gap: 10, marginTop: 12 },
   attachment: {
     borderLeftWidth: 2,
     borderLeftColor: colors.accentBorder,
     paddingLeft: 11,
-    paddingVertical: 3,
+    paddingVertical: 2,
   },
   topRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   identityRow: { flex: 1, minWidth: 0, flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6 },
   eyebrow: { color: colors.subtle, fontSize: 8, fontWeight: '900', letterSpacing: 1 },
   number: { color: colors.accent, fontSize: 10, fontFamily: 'monospace', fontWeight: '700' },
   externalButton: {
-    width: 32,
-    height: 32,
+    width: 28,
+    height: 28,
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: radii.small,
@@ -334,24 +345,36 @@ const styles = StyleSheet.create({
   repo: { color: colors.subtle, fontSize: 8, fontFamily: 'monospace' },
   branch: { color: colors.muted, fontSize: 8, lineHeight: 12, fontFamily: 'monospace' },
   author: { color: colors.subtle, fontSize: 8 },
-  badges: { flexDirection: 'row', flexWrap: 'wrap', gap: 5, marginTop: 7 },
+  statusActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginTop: 8,
+  },
+  badges: { flex: 1, minWidth: 0, flexDirection: 'row', flexWrap: 'wrap', gap: 5 },
   pill: { borderWidth: 1, borderRadius: radii.small, paddingHorizontal: 6, paddingVertical: 2 },
   pillText: { fontSize: 8, lineHeight: 10, fontWeight: '700' },
-  actions: { flexDirection: 'row', justifyContent: 'flex-end', flexWrap: 'wrap', gap: 7, marginTop: 9 },
+  actions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    flexShrink: 0,
+    gap: 6,
+  },
   actionButton: {
-    minHeight: 40,
+    minHeight: 32,
     borderWidth: 1,
     borderRadius: radii.small,
-    paddingHorizontal: 12,
+    paddingHorizontal: 9,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 6,
   },
-  mergeButton: { borderColor: colors.onlineBorder, backgroundColor: colors.onlineDark },
-  closeButton: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
-  mergeText: { color: colors.online, fontSize: 9, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.4 },
-  closeText: { color: colors.danger, fontSize: 9, fontWeight: '900', textTransform: 'uppercase', letterSpacing: 0.4 },
+  mergeButton: { minWidth: 56, borderColor: colors.onlineBorder, backgroundColor: colors.onlineDark },
+  closeButton: { minWidth: 52, borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
+  mergeText: { color: colors.online, fontSize: 10, fontWeight: '700' },
+  closeText: { color: colors.danger, fontSize: 10, fontWeight: '700' },
   notice: { color: colors.online, fontSize: 9, lineHeight: 13, marginTop: 7 },
   error: { color: colors.danger, fontSize: 9, lineHeight: 13, marginTop: 7 },
   errorRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },

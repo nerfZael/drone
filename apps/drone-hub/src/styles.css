@@ -43,6 +43,9 @@
   --sidebar-create-bg: var(--panel-raised);
   --sidebar-create-border: var(--border);
   --sidebar-create-hover-bg: var(--selected);
+  --toolbar-control-bg: var(--surface-softest);
+  --toolbar-control-border: var(--border-subtle);
+  --toolbar-control-hover-border: var(--border);
   --sidebar-brand-fg: var(--sidebar-heading-fg);
   --sidebar-brand-size: var(--text-12);
   --sidebar-brand-weight: 500;
@@ -53,9 +56,9 @@
   --sidebar-drone-fg: var(--sidebar-fg);
   --sidebar-drone-active-fg: var(--sidebar-fg-active);
   --sidebar-drone-weight: 400;
-  --sidebar-row-selected-bg: var(--selected);
-  --sidebar-row-selected-border: var(--accent-muted);
-  --sidebar-row-selected-edge: var(--accent);
+  --sidebar-row-selected-bg: var(--surface-strong);
+  --sidebar-row-selected-border: transparent;
+  --sidebar-row-selected-edge: transparent;
   --sidebar-row-radius: var(--radius-medium);
   --sidebar-meta-fg: var(--muted-dim);
   --sidebar-drone-compact-size: var(--text-10-5);
@@ -124,6 +127,7 @@
   --assistant-bubble-border: var(--accent-border);
   --assistant-bubble-fade: var(--accent-subtle);
   --assistant-message-fg: var(--fg-secondary);
+  --chat-list-marker: var(--accent);
   --user-bubble: var(--user-dim);
   --user-bubble-border: var(--user-border);
   --user-bubble-fg: var(--fg-secondary);
@@ -203,54 +207,57 @@
 :root[data-theme='catppuccin-mocha'] {
   --bg: #1e1e2e;
   --fg: #cdd6f4;
-  --fg-strong: #f5e0dc;
+  --fg-strong: #cdd6f4;
   --fg-secondary: #bac2de;
-  --muted: #bac2de;
-  --muted-dim: #a6adc8;
+  --muted: #a6adc8;
+  --muted-dim: #7f849c;
   --panel: #181825;
   --panel-alt: #181825;
   --panel-raised: #313244;
   --workspace: #1e1e2e;
   --app-header-bg: #181825;
-  --app-header-border: #45475a;
+  --app-header-border: rgba(69, 71, 90, .52);
   --workspace-header-title-fg: #cdd6f4;
-  --border: #45475a;
-  --border-subtle: #313244;
-  --chrome-muted: #9399b2;
+  --border: rgba(69, 71, 90, .56);
+  --border-subtle: rgba(49, 50, 68, .78);
+  --chrome-muted: #7f849c;
   --sidebar-fg: #a6adc8;
   --sidebar-fg-active: #bac2de;
-  --sidebar-subitem-fg: #9399b2;
+  --sidebar-subitem-fg: #7f849c;
   --sidebar-heading-fg: #bac2de;
-  --sidebar-action-fg: #9399b2;
-  --sidebar-bg: #1e1e2e;
-  --sidebar-section-bg: #1e1e2e;
-  --sidebar-section-border: #313244;
+  --sidebar-action-fg: #7f849c;
+  --sidebar-bg: #181825;
+  --sidebar-section-bg: #181825;
+  --sidebar-section-border: rgba(49, 50, 68, .78);
   --sidebar-tab-active-bg: transparent;
   --sidebar-create-bg: transparent;
   --sidebar-create-border: transparent;
   --sidebar-create-hover-bg: #313244;
-  --sidebar-brand-fg: #f5e0dc;
+  --toolbar-control-bg: transparent;
+  --toolbar-control-border: transparent;
+  --toolbar-control-hover-border: rgba(69, 71, 90, .68);
+  --sidebar-brand-fg: #cdd6f4;
   --sidebar-brand-size: .9375rem;
-  --sidebar-brand-weight: 800;
+  --sidebar-brand-weight: 700;
   --sidebar-brand-letter-spacing: .0375rem;
   --sidebar-brand-transform: uppercase;
   --sidebar-font: system-ui, -apple-system, sans-serif;
-  --sidebar-heading-weight: 800;
-  --sidebar-drone-fg: #cdd6f4;
-  --sidebar-drone-active-fg: #cba6f7;
-  --sidebar-drone-weight: 800;
-  --sidebar-row-selected-bg: #313244;
+  --sidebar-heading-weight: 600;
+  --sidebar-drone-fg: #a6adc8;
+  --sidebar-drone-active-fg: #cdd6f4;
+  --sidebar-drone-weight: 500;
+  --sidebar-row-selected-bg: rgba(49, 50, 68, .44);
   --sidebar-row-selected-border: transparent;
   --sidebar-row-selected-edge: transparent;
   --sidebar-row-radius: .25rem;
-  --sidebar-meta-fg: #a6adc8;
+  --sidebar-meta-fg: #7f849c;
   --sidebar-drone-compact-size: .75rem;
   --sidebar-drone-size: .75rem;
   --sidebar-drone-comfortable-size: .75rem;
   --accent: #cba6f7;
   --accent-muted: #b4befe;
-  --accent-subtle: rgba(203, 166, 247, .14);
-  --accent-border: rgba(203, 166, 247, .42);
+  --accent-subtle: rgba(203, 166, 247, .075);
+  --accent-border: rgba(203, 166, 247, .26);
   --accent-fg: #11111b;
   --user: #89b4fa;
   --user-muted: #74c7ec;
@@ -272,8 +279,8 @@
   --info-border: rgba(137, 180, 250, .36);
   --surface-softest: rgba(205, 214, 244, .022);
   --surface-faint: rgba(205, 214, 244, .012);
-  --surface-soft: rgba(205, 214, 244, .045);
-  --surface-strong: rgba(205, 214, 244, .075);
+  --surface-soft: rgba(205, 214, 244, .035);
+  --surface-strong: rgba(205, 214, 244, .06);
   --surface-inset-faint: rgba(17, 17, 27, .10);
   --surface-inset: rgba(205, 214, 244, .022);
   --surface-inset-strong: #313244;
@@ -284,10 +291,10 @@
   --panel-overlay-soft: rgba(24, 24, 37, .90);
   --danger-panel: #313244;
   --warning-panel: #313244;
-  --hover: rgba(205, 214, 244, .07);
-  --selected: rgba(203, 166, 247, .07);
-  --focus-ring: rgba(203, 166, 247, .86);
-  --shadow-color: rgba(17, 17, 27, .34);
+  --hover: rgba(205, 214, 244, .035);
+  --selected: rgba(69, 71, 90, .34);
+  --focus-ring: rgba(203, 166, 247, .68);
+  --shadow-color: rgba(17, 17, 27, .28);
   --canvas-dot: rgba(147, 153, 178, .18);
   --canvas-dot-rgb: 147, 153, 178;
   --canvas-related: rgba(137, 180, 250, .92);
@@ -303,26 +310,27 @@
   --assistant-bubble: transparent;
   --assistant-bubble-border: transparent;
   --assistant-bubble-fade: var(--bg);
-  --assistant-message-fg: var(--fg);
-  --user-bubble: #45475a;
-  --user-bubble-border: #585b70;
-  --user-bubble-fg: #f5e0dc;
+  --assistant-message-fg: #bac2de;
+  --chat-list-marker: #7f849c;
+  --user-bubble: #313244;
+  --user-bubble-border: rgba(69, 71, 90, .48);
+  --user-bubble-fg: #cdd6f4;
   --chat-background: #1e1e2e;
-  --chat-message-time: #a6adc8;
-  --chat-user-message-time: #bac2de;
-  --chat-composer-border: #7f849c;
-  --chat-composer-focus-border: rgba(203, 166, 247, .42);
+  --chat-message-time: #7f849c;
+  --chat-user-message-time: #a6adc8;
+  --chat-composer-border: rgba(69, 71, 90, .56);
+  --chat-composer-focus-border: rgba(203, 166, 247, .26);
   --chat-composer-surface: #313244;
   --chat-composer-fg: #cdd6f4;
-  --chat-composer-placeholder: #bac2de;
-  --chat-composer-control-bg: #45475a;
-  --chat-composer-control-border: #7f849c;
-  --chat-composer-control-fg: #cdd6f4;
-  --chat-composer-model-fg: #bac2de;
+  --chat-composer-placeholder: #7f849c;
+  --chat-composer-control-bg: rgba(69, 71, 90, .34);
+  --chat-composer-control-border: transparent;
+  --chat-composer-control-fg: #a6adc8;
+  --chat-composer-model-fg: #9399b2;
   --chat-composer-font: system-ui, -apple-system, sans-serif;
   --chat-composer-radius: .4375rem;
   --chat-composer-control-radius: .3125rem;
-  --chat-composer-shadow: 0 .3125rem .75rem rgba(17, 17, 27, .22);
+  --chat-composer-shadow: 0 .25rem .875rem rgba(17, 17, 27, .18);
   --chat-composer-input: #313244;
   --chat-composer-input-border: transparent;
   --chat-composer-input-focus-border: transparent;
@@ -330,7 +338,7 @@
   --link-hover: #f5c2e7;
   --link-strong: #f5e0dc;
   --code-bg: #313244;
-  --code-border: #313244;
+  --code-border: rgba(69, 71, 90, .48);
   --code-fg: #b4befe;
   --code-block-bg: #11111b;
   --code-block-border: #313244;
@@ -718,6 +726,17 @@ code, pre {
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--muted-dim); }
 
+.dh-sidebar-scrollbar {
+  scrollbar-color: var(--border-subtle) transparent;
+  scrollbar-width: thin;
+}
+.dh-sidebar-scrollbar::-webkit-scrollbar { width: 3px; }
+.dh-sidebar-scrollbar::-webkit-scrollbar-thumb {
+  background: var(--border-subtle);
+  border-radius: 999px;
+}
+.dh-sidebar-scrollbar::-webkit-scrollbar-thumb:hover { background: var(--border); }
+
 /* ──────────────────────────────────────────────────────────
    Collapse/expand
    ────────────────────────────────────────────────────────── */
@@ -1093,7 +1112,7 @@ code, pre {
   transform: translateY(1px);
   accent-color: var(--accent-muted);
 }
-.dh-markdown li::marker { color: var(--accent); }
+.dh-markdown li::marker { color: var(--chat-list-marker); }
 .dh-markdown ol > li::marker {
   font-weight: var(--weight-semibold);
   font-variant-numeric: tabular-nums;

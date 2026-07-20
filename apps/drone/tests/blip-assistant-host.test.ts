@@ -67,6 +67,13 @@ describe('Blip assistant host', () => {
       const latestPage = await host.historyPage('thread-one', { limit: 2 });
       expect(latestPage.entries).toHaveLength(2);
       expect(latestPage.page.hasOlder).toBe(true);
+      const latestTimestamps = await host.latestMessageTimestamps([
+        'thread-one',
+        'thread-one',
+        'missing-thread',
+      ]);
+      expect(latestTimestamps.get('thread-one')).toBe(latestPage.entries[1]!.timestamp);
+      expect(latestTimestamps.has('missing-thread')).toBe(false);
       await expect(host.message('thread-one', latestPage.entries[0]!.id)).resolves.toEqual(
         latestPage.entries[0],
       );

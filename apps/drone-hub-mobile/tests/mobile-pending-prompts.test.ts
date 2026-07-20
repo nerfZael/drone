@@ -6,6 +6,29 @@ import {
 } from '../src/drones/mobile-pending-prompts';
 
 describe('mobile drone pending prompts', () => {
+  test('preserves the active run timestamp and plan', () => {
+    expect(
+      mobileDronePendingPrompts(
+        [
+          {
+            id: 'pending-1',
+            at: '2026-07-20T10:00:00.000Z',
+            state: 'sent',
+            prompt: 'Implement it',
+            agentPlan: {
+              items: [{ text: 'Edit mobile UI', status: 'in_progress' }],
+              source: 'codex',
+            },
+          },
+        ],
+        [],
+      )[0],
+    ).toMatchObject({
+      startedAt: '2026-07-20T10:00:00.000Z',
+      agentPlan: { items: [{ text: 'Edit mobile UI', status: 'in_progress' }] },
+    });
+  });
+
   test('keeps a locally sent prompt optimistic and does not regress it to queued', () => {
     const local = optimisticMobilePendingPrompt({
       id: 'prompt-1',

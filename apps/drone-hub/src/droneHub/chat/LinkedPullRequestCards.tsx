@@ -148,11 +148,11 @@ function LinkedPullRequestCard({
   const footerMessage = actionError ?? (loadError ? `Status unavailable: ${loadError}` : null);
 
   return (
-    <section className="w-fit max-w-full self-start overflow-hidden rounded-[var(--radius-medium)] border border-[var(--accent-border)] border-l-2 border-l-[var(--accent)] bg-transparent">
-      <div className="min-w-0 py-2 pl-3 pr-2">
+    <section className="w-full max-w-[42rem] self-start border-l-2 border-l-[var(--accent-muted)] bg-transparent">
+      <div className="min-w-0 py-1.5 pl-3 pr-1">
         <div className="flex min-w-0 flex-wrap items-center gap-x-1.5 gap-y-1">
           <span className="text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.12em] text-[var(--muted-dim)]" style={{ fontFamily: 'var(--display)' }}>
-            Linked request
+            Pull request
           </span>
           <span className="font-mono text-[var(--text-10)] text-[var(--accent)]">#{link.pullNumber}</span>
           <span
@@ -187,26 +187,26 @@ function LinkedPullRequestCard({
               {actionNotice}
             </span>
           ) : isOpen && sameRepo ? (
-            <div className="flex shrink-0 items-center gap-1.5" aria-label="Pull request actions">
-              <button
-                type="button"
-                onClick={() => void mergePullRequest()}
-                disabled={!canManage || Boolean(blockedReason) || Boolean(busyAction) || anyActionBusy}
-                className="inline-flex h-6 min-w-[64px] items-center justify-center whitespace-nowrap rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--green)] transition-[background-color,border-color,filter] hover:border-[var(--green)] hover:brightness-110 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--green)] disabled:cursor-not-allowed disabled:opacity-45"
-                style={{ fontFamily: 'var(--display)' }}
-                title={blockedReason ? `Cannot merge: ${blockedReason}` : forceReason ? `Force merge: ${forceReason}` : `Merge PR #${link.pullNumber}`}
-              >
-                {busyAction === 'merge' ? 'Merging…' : blockedReason ? 'Blocked' : forceReason ? 'Force merge' : 'Merge'}
-              </button>
+            <div className="ml-auto flex shrink-0 items-center gap-1.5" aria-label="Pull request actions">
               <button
                 type="button"
                 onClick={() => void closePullRequest()}
                 disabled={!canManage || Boolean(busyAction) || anyActionBusy}
-                className="inline-flex h-6 items-center justify-center whitespace-nowrap rounded border border-[var(--red-border)] bg-transparent px-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--red)] transition-[background-color,border-color] hover:border-[var(--red)] hover:bg-[var(--red-subtle)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:opacity-45"
+                className="inline-flex h-7 min-w-[52px] items-center justify-center whitespace-nowrap rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--red)] transition-[background-color,border-color,filter] hover:border-[var(--red)] hover:brightness-110 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:opacity-45"
                 style={{ fontFamily: 'var(--display)' }}
                 title="Close this pull request without merging"
               >
                 {busyAction === 'close' ? 'Closing…' : 'Close'}
+              </button>
+              <button
+                type="button"
+                onClick={() => void mergePullRequest()}
+                disabled={!canManage || Boolean(blockedReason) || Boolean(busyAction) || anyActionBusy}
+                className="inline-flex h-7 min-w-[56px] items-center justify-center whitespace-nowrap rounded border border-[var(--green-border)] bg-[var(--green-subtle)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--green)] transition-[background-color,border-color,filter] hover:border-[var(--green)] hover:brightness-110 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--green)] disabled:cursor-not-allowed disabled:opacity-45"
+                style={{ fontFamily: 'var(--display)' }}
+                title={blockedReason ? `Cannot merge: ${blockedReason}` : forceReason ? `Force merge: ${forceReason}` : `Merge PR #${link.pullNumber}`}
+              >
+                {busyAction === 'merge' ? 'Merging…' : blockedReason ? 'Blocked' : forceReason ? 'Force merge' : 'Merge'}
               </button>
             </div>
           ) : null}

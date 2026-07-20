@@ -332,7 +332,7 @@ function SwitchItemState({
   unread?: boolean;
 }) {
   const stateColor = switchStateColor(state);
-  const indicatorColor = unread && state !== 'working' ? colors.online : stateColor;
+  const indicatorColor = unread && state === 'idle' ? colors.online : stateColor;
   const stateLabel = unread && state === 'idle' ? 'Unread' : switchStateLabel(state);
   return (
     <View
@@ -354,7 +354,7 @@ function SwitchItemState({
           <View style={[styles.switchStateDot, { backgroundColor: indicatorColor }]} />
         </View>
       )}
-      <Text numberOfLines={1} style={[styles.switchItemMeta, { color: stateColor }]}>
+      <Text numberOfLines={1} style={styles.switchItemMeta}>
         <Text style={{ color: indicatorColor }}>{stateLabel}</Text>
         {detail ? ` · ${detail}` : ''}
       </Text>
@@ -935,7 +935,7 @@ function AppDrawerView({
                     ]}
                   >
                     <Icon
-                      color={item.active ? colors.accent : colors.muted}
+                      color={item.active ? colors.accent : colors.secondary}
                       size={18}
                       strokeWidth={item.active ? 2.3 : 1.9}
                     />
@@ -1006,9 +1006,9 @@ function AppDrawerView({
                     style={({ pressed }) => [styles.repoNavigationHead, pressed && styles.pressed]}
                   >
                     <View style={styles.groupIcon}>
-                      <FolderGit2 color={colors.accent} size={16} strokeWidth={1.9} />
+                      <FolderGit2 color={colors.mutedDim} size={16} strokeWidth={1.9} />
                       <View style={styles.groupChevron}>
-                        <ChevronLeft color={colors.accent} size={10} strokeWidth={2.3} />
+                        <ChevronLeft color={colors.mutedDim} size={10} strokeWidth={2.3} />
                       </View>
                     </View>
                     <View style={styles.repoCopy}>
@@ -1065,7 +1065,7 @@ function AppDrawerView({
                                 pressed && styles.pressed,
                               ]}
                             >
-                              <FolderGit2 color={colors.accent} size={15} strokeWidth={1.9} />
+                              <FolderGit2 color={colors.mutedDim} size={15} strokeWidth={1.9} />
                               <View style={styles.repoCopy}>
                                 <Text numberOfLines={1} style={styles.repoName}>
                                   {group.label}
@@ -1134,13 +1134,13 @@ const styles = StyleSheet.create({
   },
   drawer: {
     flex: 1,
-    backgroundColor: colors.background,
+    backgroundColor: colors.panel,
     borderRightColor: colors.border,
     borderRightWidth: 1,
-    elevation: 20,
+    elevation: 8,
     shadowColor: colors.shadow,
-    shadowOpacity: 0.5,
-    shadowRadius: 24,
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
     shadowOffset: { width: 10, height: 0 },
     overflow: 'hidden',
   },
@@ -1153,13 +1153,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
     borderBottomColor: colors.border,
     borderBottomWidth: 1,
+    backgroundColor: colors.panel,
     zIndex: 30,
   },
   headerCopy: { flex: 1, minWidth: 0 },
   title: {
     color: colors.textStrong,
     fontSize: 15,
-    fontWeight: '800',
+    fontWeight: '700',
     letterSpacing: 0.6,
     textTransform: 'uppercase',
   },
@@ -1167,7 +1168,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     backgroundColor: colors.panel,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.borderSubtle,
   },
   navigationItem: {
     flex: 1,
@@ -1180,11 +1181,11 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     position: 'relative',
   },
-  navigationItemActive: { backgroundColor: colors.accentWash },
+  navigationItemActive: { backgroundColor: 'transparent' },
   navigationLabel: {
-    color: colors.muted,
+    color: colors.secondary,
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '500',
     letterSpacing: 0.1,
   },
   navigationLabelActive: { color: colors.accentAlt },
@@ -1206,16 +1207,16 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingHorizontal: 14,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.borderSubtle,
     backgroundColor: colors.panel,
     cursor: 'pointer',
   },
   sidebarToolbarText: {
     flex: 1,
     minWidth: 0,
-    color: colors.muted,
+    color: colors.secondary,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '500',
   },
   sidebarToolbarActions: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   loadingSummary: {
@@ -1225,7 +1226,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  loadingSummaryText: { color: colors.muted, fontSize: 10, fontWeight: '800' },
+  loadingSummaryText: { color: colors.secondary, fontSize: 10, fontWeight: '500' },
   create: {
     width: 36,
     height: 36,
@@ -1233,12 +1234,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderRadius: 6,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.panelRaised,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
   },
   createDisabled: { opacity: 0.42 },
   scroll: { flex: 1 },
-  activeText: { color: colors.accent, fontWeight: '800' },
+  activeText: { color: colors.text, fontWeight: '600' },
   empty: { color: colors.muted, fontSize: 12, lineHeight: 18, padding: 12 },
   drawerError: { gap: 10, padding: 12 },
   drawerErrorText: { color: colors.danger, fontSize: 11, lineHeight: 17 },
@@ -1251,7 +1252,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.panelRaised,
   },
-  retryText: { color: colors.accent, fontSize: 10, fontWeight: '800' },
+  retryText: { color: colors.accent, fontSize: 10, fontWeight: '600' },
   devicePickerSection: {
     position: 'relative',
     width: '55%',
@@ -1274,11 +1275,11 @@ const styles = StyleSheet.create({
   devicePickerPressed: { backgroundColor: colors.whiteWashSoft },
   devicePickerTriggerCopy: { flexShrink: 1, minWidth: 0 },
   devicePickerCopy: { flex: 1, minWidth: 0 },
-  devicePickerName: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  devicePickerName: { color: colors.text, fontSize: 12, fontWeight: '600' },
   devicePickerDetail: {
     color: colors.muted,
     fontSize: 8,
-    fontWeight: '800',
+    fontWeight: '500',
     marginTop: 2,
     textTransform: 'uppercase',
     letterSpacing: 0.45,
@@ -1295,10 +1296,10 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panelRaised,
-    elevation: 24,
+    elevation: 8,
     shadowColor: colors.shadow,
-    shadowOpacity: 0.45,
-    shadowRadius: 12,
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
     shadowOffset: { width: 0, height: 6 },
   },
   deviceOptionsContent: {
@@ -1313,8 +1314,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 5,
   },
-  deviceOptionActive: { backgroundColor: colors.accentWash },
-  deviceOptionName: { color: colors.text, fontSize: 12, fontWeight: '700' },
+  deviceOptionActive: { backgroundColor: colors.selectionWash },
+  deviceOptionName: { color: colors.text, fontSize: 12, fontWeight: '600' },
   repoNavigationHead: {
     minHeight: 56,
     flexDirection: 'row',
@@ -1322,9 +1323,9 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 10,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.borderSubtle,
   },
-  repoNavigationTitle: { color: colors.text, fontSize: 13, fontWeight: '800' },
+  repoNavigationTitle: { color: colors.text, fontSize: 13, fontWeight: '600' },
   fleetStates: { flexDirection: 'row', alignItems: 'center', gap: 9 },
   fleetStatesCompact: { flexShrink: 0, gap: 6 },
   fleetState: { flexDirection: 'row', alignItems: 'center', gap: 4 },
@@ -1344,10 +1345,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 7,
     borderRadius: 4,
   },
-  repoRowActive: { backgroundColor: colors.accentWash },
+  repoRowActive: { backgroundColor: colors.selectionWash },
   repoCopy: { flex: 1, minWidth: 0 },
-  repoName: { color: colors.text, fontSize: 12, fontWeight: '800' },
-  repoPath: { color: colors.muted, fontSize: 8, fontFamily: 'monospace', marginTop: 1 },
+  repoName: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
+  repoPath: { color: colors.mutedDim, fontSize: 8, fontFamily: 'monospace', marginTop: 1 },
   droneNode: { position: 'relative' },
   switchItemRow: {
     minHeight: 48,
@@ -1357,24 +1358,24 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     borderRadius: 4,
   },
-  switchItemRowActive: { backgroundColor: colors.panelRaised },
+  switchItemRowActive: { backgroundColor: colors.selectionWash },
   switchItemCopy: { flex: 1, minWidth: 0 },
   switchItemTitleRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   switchItemTitle: {
     flex: 1,
     minWidth: 0,
-    color: colors.text,
+    color: colors.textSecondary,
     fontSize: 12,
-    fontWeight: '800',
+    fontWeight: '500',
   },
   switchItemTime: {
-    color: colors.subtle,
+    color: colors.secondary,
     fontSize: 9,
     fontFamily: 'monospace',
-    fontWeight: '700',
+    fontWeight: '400',
   },
   switchItemMeta: {
-    color: colors.muted,
+    color: colors.secondary,
     flexShrink: 1,
     fontSize: 9,
     fontWeight: '500',
@@ -1426,9 +1427,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 5,
-    backgroundColor: colors.background,
+    backgroundColor: colors.panel,
   },
-  groupName: { color: colors.muted, fontSize: 11, fontWeight: '800', flex: 1 },
+  groupName: { color: colors.secondary, fontSize: 11, fontWeight: '500', flex: 1 },
   drawerFill: { flex: 1 },
   voiceFooter: {
     flexShrink: 0,
@@ -1453,13 +1454,13 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     gap: 10,
   },
-  voiceFooterLabel: { flex: 1, color: colors.accent, fontSize: 11, fontWeight: '800' },
+  voiceFooterLabel: { flex: 1, color: colors.accent, fontSize: 11, fontWeight: '600' },
   voiceFooterLabelError: { color: colors.danger },
   voiceFooterTimer: {
     color: colors.text,
     fontFamily: 'monospace',
     fontSize: 11,
-    fontWeight: '800',
+    fontWeight: '400',
     fontVariant: ['tabular-nums'],
   },
   voiceFooterActions: { flexDirection: 'row', alignItems: 'center', gap: 8 },
@@ -1476,7 +1477,7 @@ const styles = StyleSheet.create({
   voiceFooterCancel: { borderColor: colors.dangerBorder, backgroundColor: colors.dangerDark },
   voiceFooterStop: { borderColor: colors.onlineBorder, backgroundColor: colors.onlineDark },
   voiceFooterButtonDisabled: { opacity: 0.42 },
-  voiceFooterButtonText: { fontSize: 10, fontWeight: '900', textTransform: 'uppercase' },
+  voiceFooterButtonText: { fontSize: 10, fontWeight: '600', textTransform: 'uppercase' },
   voiceFooterCancelText: { color: colors.danger },
   voiceFooterStopText: { color: colors.online },
   pressed: { opacity: 0.65 },

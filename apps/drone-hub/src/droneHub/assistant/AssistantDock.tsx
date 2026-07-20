@@ -67,6 +67,7 @@ import {
   messageDroneDetails,
   messageImageParts,
   messageText,
+  messageVisibleText,
   normalizeAssistantWaitTargets,
   renderItemsFromMessages,
   summarizeWaitTargets,
@@ -491,6 +492,15 @@ export function AssistantDock({
   }, [visibleMessages]);
   const latestActivityItemKey = React.useMemo(() => {
     return visibleItems[visibleItems.length - 1]?.key ?? '';
+  }, [visibleItems]);
+  const latestAssistantMessageItemKey = React.useMemo(() => {
+    for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
+      const item = visibleItems[index];
+      if (item?.type !== 'message' || item.message.role !== 'assistant') continue;
+      if (!messageVisibleText(item.message).trim()) continue;
+      return item.key;
+    }
+    return '';
   }, [visibleItems]);
   const latestUserItemIndex = React.useMemo(() => {
     for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
@@ -1552,6 +1562,7 @@ export function AssistantDock({
         content: (
           <AssistantMessageRow
             message={item.message}
+            autoExpandAgentMessage={item.key === latestAssistantMessageItemKey}
             messageExtras={{
               messageId: `${activeThreadId}:${item.key}`,
               parsingJobs: Boolean(messageFeatures.parsingJobsByTurn[jobsTurn]),

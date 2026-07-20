@@ -1180,7 +1180,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: colors.border,
   },
-  selectionRowActive: { backgroundColor: colors.accentWash },
+  selectionRowActive: { backgroundColor: colors.selectionWash },
   selectionCopy: { flex: 1, minWidth: 0 },
   selectionLabel: { color: colors.text, fontSize: 12, fontWeight: '700' },
   selectionDetail: { color: colors.muted, fontSize: 9, fontFamily: 'monospace', marginTop: 3 },
@@ -1198,7 +1198,7 @@ const styles = StyleSheet.create({
   accordionSummary: { color: colors.muted, fontSize: 10, marginTop: 3 },
   accordionBody: { gap: 9, paddingTop: 4 },
   messageSection: { flexGrow: 1, justifyContent: 'flex-end', paddingBottom: 0 },
-  composerWrap: { marginHorizontal: -9, marginBottom: -9 },
+  composerWrap: { marginHorizontal: -9, marginBottom: -8 },
   submit: {
     minHeight: 48,
     flexDirection: 'row',

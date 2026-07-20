@@ -51,7 +51,7 @@ export function ChatComposerChoicePicker({ config }: { config: ChatComposerChoic
         aria-haspopup="dialog"
         aria-expanded={open}
         title={title}
-        className="inline-flex h-8 max-w-[14rem] items-center gap-1 px-2 text-[.6875rem] font-extrabold normal-case tracking-normal text-[var(--chat-composer-model-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+        className="inline-flex h-8 max-w-[14rem] items-center gap-1 px-2 text-[.6875rem] font-medium normal-case tracking-normal text-[var(--chat-composer-model-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <span className="min-w-0 truncate">{selected?.label ?? value}</span>
         <span className="text-[var(--accent)]"><ChevronIcon up={open} /></span>
@@ -61,10 +61,10 @@ export function ChatComposerChoicePicker({ config }: { config: ChatComposerChoic
         <div
           role="dialog"
           aria-label={title}
-          className="absolute bottom-full left-0 z-50 mb-[.375rem] flex max-h-[64vh] w-[min(11rem,calc(100vw-1.25rem))] flex-col overflow-hidden rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] shadow-[0_.5rem_1.5rem_rgba(17,17,27,.36)]"
+          className="absolute bottom-full left-0 z-50 mb-[.375rem] flex max-h-[64vh] w-[min(11rem,calc(100vw-1.25rem))] flex-col overflow-hidden rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] shadow-[var(--chat-composer-shadow)]"
         >
           <div className="flex min-h-9 flex-shrink-0 items-center px-3">
-            <div className="text-[.8125rem] font-extrabold text-[var(--fg-strong)]">
+            <div className="text-[.8125rem] font-semibold text-[var(--fg-strong)]">
               {sectionTitle}
             </div>
           </div>
@@ -81,7 +81,7 @@ export function ChatComposerChoicePicker({ config }: { config: ChatComposerChoic
                     setOpen(false);
                   }}
                   title={option.title}
-                  className={`flex min-h-9 items-center rounded-[.5rem] border px-2.5 text-left text-[.75rem] font-bold transition-colors disabled:opacity-40 ${
+                  className={`flex min-h-9 items-center rounded-[.5rem] border px-2.5 text-left text-[.75rem] font-medium transition-colors disabled:opacity-40 ${
                     active
                       ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
                       : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'

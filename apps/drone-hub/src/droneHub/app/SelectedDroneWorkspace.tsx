@@ -1280,6 +1280,16 @@ export function SelectedDroneWorkspace({
         }
       : undefined;
 
+  const latestExternalAgentBlockKey = React.useMemo(() => {
+    for (let index = chatTimelineBlocks.length - 1; index >= 0; index -= 1) {
+      const entry = chatTimelineBlocks[index];
+      if (entry?.source !== 'transcript') continue;
+      if (entry.block.kind === 'turn' || entry.block.kind === 'prompt-loop-group') {
+        return entry.block.key;
+      }
+    }
+    return '';
+  }, [chatTimelineBlocks]);
   const externalTranscriptItems: AgentChatTranscriptItem[] = [];
   for (const entry of chatTimelineBlocks) {
     if (entry.source === 'transcript') {
@@ -1317,6 +1327,7 @@ export function SelectedDroneWorkspace({
             <PromptLoopTranscriptGroup
               runs={block.runs}
               pendingRuns={pendingPromptLoopByIdentity.get(block.identity) ?? []}
+              autoExpandLatestAgentMessage={block.key === latestExternalAgentBlockKey}
               headerBadgeLabel={runningGroup ? runningAutomationProgressLabel : undefined}
               headerBadgeTone={runningGroup ? 'running' : undefined}
               headerActions={runningGroup ? runningPromptLoopHeaderActions : undefined}
@@ -1336,6 +1347,7 @@ export function SelectedDroneWorkspace({
         content: (
           <TranscriptTurn
             item={block.item}
+            autoExpandAgentMessage={block.key === latestExternalAgentBlockKey}
             parsingJobs={Boolean(parsingJobsByTurn[block.item.turn])}
             onCreateJobs={parseJobsFromAgentMessage}
             onSpawnDroneHubTask={spawnCurrentDroneHubTask}
@@ -1889,10 +1901,10 @@ export function SelectedDroneWorkspace({
           <button
             type="button"
             onClick={toggleDroneControlsExpanded}
-            className={`inline-flex h-7 w-7 items-center justify-center rounded border transition-all ${
+            className={`inline-flex h-7 w-7 items-center justify-center rounded border transition-all focus-visible:border-[var(--accent-muted)] focus-visible:outline-none ${
               droneControlsExpanded
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
-                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
+                : 'border-[var(--toolbar-control-border)] bg-[var(--toolbar-control-bg)] text-[var(--muted-dim)] hover:border-[var(--toolbar-control-hover-border)] hover:bg-[var(--hover)] hover:text-[var(--muted)]'
             }`}
             title={droneControlsExpanded ? 'Hide drone controls' : 'Show drone controls'}
             aria-label={droneControlsExpanded ? 'Hide drone controls' : 'Show drone controls'}

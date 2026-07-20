@@ -102,6 +102,10 @@ export class BlipAssistantHost {
     return this.repository.readThreadHistoryPage(threadId, input);
   }
 
+  latestMessageTimestamps(threadIds: string[]): Promise<Map<string, string>> {
+    return this.repository.latestThreadMessageTimestamps(threadIds);
+  }
+
   message(threadId: string, entryId: string): Promise<Record<string, unknown>> {
     return this.repository.readThreadMessage(threadId, entryId);
   }

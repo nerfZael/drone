@@ -51,6 +51,27 @@ function contrastRatio(foreground: string | Rgb, background: string | Rgb) {
 }
 
 describe('mobile theme contrast', () => {
+  test('keeps the quiet hierarchy and the established user-message treatment explicit', () => {
+    expect(colors.textSecondary).toBe('#bac2de');
+    expect(colors.textStrong).toBe('#cdd6f4');
+    expect(colors.muted).toBe('#bac2de');
+    expect(colors.secondary).toBe('#a6adc8');
+    expect(colors.mutedDim).toBe('#848aa3');
+    expect(colors.border).toBe('rgba(69, 71, 90, 0.56)');
+    expect(colors.borderSubtle).toBe('rgba(49, 50, 68, 0.78)');
+    expect(colors.accentDark).toBe('rgba(203, 166, 247, 0.075)');
+    expect(colors.accentBorder).toBe('rgba(203, 166, 247, 0.26)');
+    expect(colors.accentWash).toBe('rgba(203, 166, 247, 0.06)');
+    expect(colors.selectionWash).toBe('rgba(69, 71, 90, 0.34)');
+    expect(colors.composerBorder).toBe('rgba(69, 71, 90, 0.56)');
+    expect(colors.controlSurface).toBe('rgba(69, 71, 90, 0.34)');
+
+    expect(colors.userBubble).toBe('#45475a');
+    expect(colors.userBubbleBorder).toBe('#585b70');
+    expect(colors.userBubbleText).toBe('#f5e0dc');
+    expect(contrastRatio(colors.userBubbleText, colors.userBubble)).toBeGreaterThanOrEqual(4.5);
+  });
+
   test('keeps secondary text readable on its standard surfaces', () => {
     for (const foreground of [colors.muted, colors.subtle]) {
       for (const background of [colors.background, colors.panel, colors.panelRaised]) {
@@ -60,6 +81,9 @@ describe('mobile theme contrast', () => {
 
     expect(contrastRatio(colors.muted, colors.surface1)).toBeGreaterThanOrEqual(4.5);
     expect(contrastRatio(colors.subtle, colors.crust)).toBeGreaterThanOrEqual(4.5);
+    for (const background of [colors.background, colors.panel]) {
+      expect(contrastRatio(colors.mutedDim, background)).toBeGreaterThanOrEqual(4.5);
+    }
   });
 
   test('keeps primary text readable on raised message surfaces', () => {

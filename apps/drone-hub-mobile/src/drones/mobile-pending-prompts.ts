@@ -1,3 +1,8 @@
+import {
+  normalizeMobileAgentPlan,
+  type MobileAgentPlan,
+} from '../local-assistant/mobile-transcript-runs';
+
 export type MobileDronePendingPrompt = {
   id: string;
   prompt: string;
@@ -5,6 +10,8 @@ export type MobileDronePendingPrompt = {
   error: string | null;
   imageCount: number;
   cancelable: boolean;
+  startedAt?: string;
+  agentPlan?: MobileAgentPlan;
 };
 
 export type MobileOptimisticPendingPrompt = {
@@ -100,6 +107,7 @@ export function mobileDronePendingPrompts(
     // The Hub deliberately retains recently completed pending rows for reconciliation. Once the
     // matching transcript turn is visible, rendering that row again would duplicate the prompt.
     if (state !== 'failed' && completedTurnIds.has(id)) return [];
+    const agentPlan = normalizeMobileAgentPlan(item?.agentPlan);
     return [
       {
         id,
@@ -113,6 +121,8 @@ export function mobileDronePendingPrompts(
           ) || 0,
         ),
         cancelable: state === 'queued' && !item?.automation,
+        ...(String(item?.at ?? '').trim() ? { startedAt: String(item.at).trim() } : {}),
+        ...(agentPlan ? { agentPlan } : {}),
       } satisfies MobileDronePendingPrompt,
     ];
   });

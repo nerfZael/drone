@@ -1888,7 +1888,7 @@ export function DronesScreen({
                       onAddAttachment={() => void addPromptImages()}
                       attachmentActionsDisabled={phoneTarget && running}
                       sendBlocked={phoneTarget && running && promptImages.length > 0}
-                      footer={
+                      footer={promptImages.length > 0 ? (
                         <ChatImageStrip
                           images={promptImages}
                           disabled={busy === 'prompt'}
@@ -1896,7 +1896,7 @@ export function DronesScreen({
                             setPromptImages((current) => current.filter((image) => image.id !== id))
                           }
                         />
-                      }
+                      ) : undefined}
                     />
                     <AssistantModelPicker
                       open={modelOpen}
@@ -2063,7 +2063,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: colors.background,
     borderBottomWidth: 1,
-    borderBottomColor: colors.border,
+    borderBottomColor: colors.borderSubtle,
   },
   chats: { gap: 3, paddingHorizontal: 10 },
   chatTab: {
@@ -2081,7 +2081,7 @@ const styles = StyleSheet.create({
     borderBottomColor: colors.accent,
   },
   chatTabPressed: { opacity: 0.72 },
-  chatText: { flexShrink: 1, color: colors.muted, fontSize: 10, fontWeight: '800' },
+  chatText: { flexShrink: 1, color: colors.secondary, fontSize: 10, fontWeight: '700' },
   chatTextActive: { color: colors.accent },
   chatUnreadDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.warning },
   chatError: { paddingHorizontal: 12, paddingTop: 9 },

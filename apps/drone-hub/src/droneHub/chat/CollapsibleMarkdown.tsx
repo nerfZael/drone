@@ -105,6 +105,7 @@ export function CollapsibleMarkdown({
   collapseAfterLines = 40,
   preserveLeadParagraph = false,
   toggleOnMessageClick = false,
+  autoExpand = false,
 }: {
   text: string;
   className?: string;
@@ -117,11 +118,12 @@ export function CollapsibleMarkdown({
   collapseAfterLines?: number;
   preserveLeadParagraph?: boolean;
   toggleOnMessageClick?: boolean;
+  autoExpand?: boolean;
 }) {
   const normalizedText = React.useMemo(() => text.replace(/\r\n/g, '\n'), [text]);
   const totalLines = React.useMemo(() => normalizedText.split('\n').length, [normalizedText]);
   const isLong = totalLines > collapseAfterLines || text.length > 2000;
-  const [collapsed, setCollapsed] = React.useState(isLong);
+  const [collapsed, setCollapsed] = React.useState(isLong && !autoExpand);
   const pointerDownRef = React.useRef<{ clientX: number; clientY: number; ignored: boolean; pointerId: number } | null>(null);
   const pointerToggleTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const leadSplit = React.useMemo(() => {
@@ -140,8 +142,8 @@ export function CollapsibleMarkdown({
   const shouldDeferHiddenMarkdown = isLong && collapsed;
 
   React.useEffect(() => {
-    setCollapsed(isLong);
-  }, [isLong, text]);
+    setCollapsed(isLong && !autoExpand);
+  }, [autoExpand, isLong, text]);
 
   const canExpandByPointer = toggleOnMessageClick && isLong && collapsed;
   const clearPendingPointerToggle = React.useCallback(() => {

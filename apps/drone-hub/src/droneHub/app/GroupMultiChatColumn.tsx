@@ -787,12 +787,13 @@ export function GroupMultiChatColumn({
           <div className="rounded border border-[var(--red-border)] bg-[var(--red-subtle)] px-3 py-2 text-[var(--text-11)] text-[var(--red)]">{error}</div>
         ) : (transcripts && transcripts.length > 0) || visiblePendingPrompts.length > 0 ? (
           <div className="space-y-5">
-            {(transcripts ?? []).map((item) => {
+            {(transcripts ?? []).map((item, index, items) => {
               const messageId = `${drone.id}:${item.turn}:${item.at}`;
               return (
                 <TranscriptTurn
                   key={messageId}
                   item={item}
+                  autoExpandAgentMessage={index === items.length - 1}
                   parsingJobs={false}
                   onCreateJobs={onCreateJobs}
                   onSpawnDroneHubTask={spawnDroneHubTaskForColumn}

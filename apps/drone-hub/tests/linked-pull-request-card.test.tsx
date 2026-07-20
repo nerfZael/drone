@@ -94,7 +94,7 @@ describe('linked pull request messages', () => {
       />,
     );
 
-    expect(html).toContain('Linked request');
+    expect(html).toContain('Pull request');
     expect(html).toContain('#596');
     expect(html).toContain('Status unavailable');
     expect(html).toContain('https://github.com/nerfzael/drone/pull/596');
@@ -147,17 +147,20 @@ describe('linked pull request messages', () => {
     expect(html).not.toContain('Open on GitHub');
     expect(html).not.toContain('Merge requires confirmation');
     expect(html).toContain('border-l-2');
-    expect(html).toContain('rounded-[var(--radius-medium)]');
-    expect(html).toContain('w-fit');
-    expect(html).toContain('max-w-full');
+    expect(html).not.toContain('rounded-[var(--radius-medium)]');
+    expect(html).toContain('w-full');
+    expect(html).toContain('max-w-[42rem]');
     expect(html).not.toContain('hover:border-l-');
     expect(html).not.toContain('sm:grid-cols-[minmax(0,1fr)_auto]');
     expect(html).toContain('aria-label="Pull request actions"');
     expect(html).not.toContain('shadow-[inset_3px_0_0');
     expect(html).toContain('Force merge');
     expect(html).toContain('Close');
+    expect(html).toContain('ml-auto flex shrink-0');
+    expect(html).toContain('border-[var(--red-border)] bg-[var(--red-subtle)]');
     expect(html.indexOf('Checks pending')).toBeLessThan(html.indexOf('Add resilient workspace file and folder transfers'));
-    expect(html.indexOf('Add resilient workspace file and folder transfers')).toBeLessThan(html.indexOf('Force merge'));
+    expect(html.indexOf('Add resilient workspace file and folder transfers')).toBeLessThan(html.indexOf('Close'));
+    expect(html.indexOf('Close')).toBeLessThan(html.indexOf('Force merge'));
     expect(html.match(/href=/g)).toHaveLength(1);
   });
 

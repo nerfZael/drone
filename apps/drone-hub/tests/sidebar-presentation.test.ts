@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import {
   sidebarChatRowTone,
+  sidebarChatStateClass,
   sidebarDensityClasses,
   sidebarFolderLabelClass,
 } from '../src/droneHub/sidebar/presentation';
@@ -20,9 +21,17 @@ describe('sidebar presentation', () => {
   });
 
   test('keeps chat row state hierarchy centralized and calm', () => {
-    expect(sidebarChatRowTone({ selected: true })).toContain('sidebar-fg-active');
-    expect(sidebarChatRowTone({ active: true })).toContain('sidebar-fg');
+    const selected = sidebarChatRowTone({ selected: true });
+    const active = sidebarChatRowTone({ active: true });
+    expect(selected).toContain('sidebar-fg-active');
+    expect(selected).toContain('border-transparent');
+    expect(selected).not.toContain('border-[var(--border)]');
+    expect(active).toContain('sidebar-fg');
+    expect(active).toContain('border-transparent');
     expect(sidebarChatRowTone({})).toContain('sidebar-subitem-fg');
     expect(sidebarChatRowTone({ disabled: true })).toContain('cursor-not-allowed');
+    expect(sidebarChatStateClass).toContain('grid-cols-[.75rem_minmax(0,1fr)]');
+    expect(sidebarChatStateClass).toContain('w-[4.75rem]');
+    expect(sidebarChatStateClass).toContain('leading-none');
   });
 });

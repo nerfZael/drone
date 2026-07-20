@@ -789,6 +789,7 @@ export function AssistantMessageRow({
   showToolCalls = true,
   isStreamingAssistant = false,
   showReasoning = false,
+  autoExpandAgentMessage = false,
 }: {
   message: AssistantMessage;
   messageExtras?: Omit<AgentMessageExtrasProps, 'text' | 'tasks'>;
@@ -797,6 +798,7 @@ export function AssistantMessageRow({
   showToolCalls?: boolean;
   isStreamingAssistant?: boolean;
   showReasoning?: boolean;
+  autoExpandAgentMessage?: boolean;
 }) {
   const calls = showToolCalls ? toolCalls(message) : [];
   const content = message.content;
@@ -854,6 +856,7 @@ export function AssistantMessageRow({
               key={`tx:${i}`}
               role="assistant"
               text={t}
+              autoExpand={autoExpandAgentMessage}
               onOpenFileReference={messageExtras?.onOpenFileReference}
               onOpenLink={messageExtras?.onOpenLink}
               textMentionLinks={droneMentionLinks}
@@ -878,6 +881,7 @@ export function AssistantMessageRow({
           src: `data:${image.mimeType};base64,${image.data}`,
           alt: 'Attached image',
         }))}
+        autoExpand={message.role === 'assistant' && autoExpandAgentMessage}
         onOpenFileReference={messageExtras?.onOpenFileReference}
         onOpenLink={messageExtras?.onOpenLink}
         textMentionLinks={droneMentionLinks}

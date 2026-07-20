@@ -1,12 +1,17 @@
 import React from 'react';
 import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
-import { DroneCard } from '../overview';
-import { TypingDots } from '../overview/icons';
+import {
+  DroneCard,
+  SidebarItemStateIndicator,
+  sidebarChatDisplayState,
+  sidebarDroneStateLabel,
+  sidebarItemStateToneClass,
+} from '../overview';
 import type { DroneSummary } from '../types';
 import { createCanvasChatNodeId } from './app-config';
 import { normalizedDroneChats } from './chat-node-helpers';
 import { isDroneStartingOrSeeding } from './helpers';
-import { IconChatThread, IconPencil, IconSpinner, IconTrash } from './icons';
+import { IconPencil, IconSpinner, IconTrash } from './icons';
 import {
   createSidebarChatDragData,
   parseDroneHubDragData,
@@ -32,7 +37,11 @@ import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
 import type { SidebarDroneTree } from './sidebar-drone-tree';
 import type { DroneDeleteMode, SidebarDensityMode } from './settings-types';
 import type { ChatEditorState } from './use-sidebar-interactions';
-import { sidebarChatRowTone, sidebarDensityClasses } from '../sidebar/presentation';
+import {
+  sidebarChatRowTone,
+  sidebarChatStateClass,
+  sidebarDensityClasses,
+} from '../sidebar/presentation';
 
 export type SidebarDroneTreeListProps = {
   droneById: Record<string, DroneSummary>;
@@ -414,6 +423,10 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
 }: SidebarChatRowProps) {
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const chatKey = `${drone.id}:${chatName}`;
+  const chatUnread = unread && !selected;
+  const chatState = sidebarChatDisplayState(drone, busy);
+  const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
+  const chatStateToneClass = sidebarItemStateToneClass(chatState, chatUnread);
   const chatDragData = React.useMemo(
     () => createSidebarChatDragData(drone.id, chatName, `${uiDroneName(drone.name)} / ${chatName}`),
     [chatName, drone.id, drone.name, uiDroneName],
@@ -438,7 +451,6 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
     return (
       <div className="flex flex-col gap-0.5">
         <div className={`flex items-center gap-1.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 ${densityClasses.chatRow}`}>
-          <IconChatThread className="h-3 w-3 flex-shrink-0 text-[var(--accent)] opacity-85" />
           <input
             type="text"
             value={editorValue}
@@ -480,11 +492,6 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
         }`}
         title={`${uiDroneName(drone.name)} / ${chatName}`}
       >
-        {!busy && unread ? (
-          <span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)] flex-shrink-0" />
-        ) : (
-          <span className="h-1.5 w-1.5 flex-shrink-0" />
-        )}
         <span className="min-w-0 flex-1 truncate font-mono">
           {chatName}
         </span>
@@ -493,11 +500,13 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
             Draft
           </span>
         ) : null}
-        {busy ? (
-          <span className="inline-flex items-center flex-shrink-0" title="Agent responding">
-            <TypingDots color="var(--yellow)" />
-          </span>
-        ) : null}
+        <span
+          className={`${sidebarChatStateClass} ${chatStateToneClass}`}
+          title={chatStateLabel}
+        >
+          <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
+          {chatStateLabel}
+        </span>
       </button>
       <div className="flex items-center gap-1">
         {actionsEnabled && canRename ? (
@@ -734,7 +743,6 @@ function SidebarDroneNode({
           {showCreateChatEditor ? (
             <div className="flex flex-col gap-0.5">
               <div className={`flex items-center gap-1.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-2 ${densityClasses.chatRow}`}>
-                <IconChatThread className="h-3 w-3 flex-shrink-0 text-[var(--accent)] opacity-85" />
                 <input
                   ref={chatEditorInputRef}
                   type="text"

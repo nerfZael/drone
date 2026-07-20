@@ -208,6 +208,41 @@ export class HubSessionRepository implements SessionRepository {
     };
   }
 
+  async latestThreadMessageTimestamps(threadIds: string[]): Promise<Map<string, string>> {
+    const uniqueThreadIds = [...new Set(threadIds.map((id) => String(id).trim()).filter(Boolean))];
+    const timestamps = new Map<string, string>();
+    const chunkSize = 500;
+    for (let offset = 0; offset < uniqueThreadIds.length; offset += chunkSize) {
+      const chunk = uniqueThreadIds.slice(offset, offset + chunkSize);
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows = this.db.prepare(`
+        SELECT bindings.thread_id, entries.entry_json
+        FROM assistant_blip_thread_bindings AS bindings
+        JOIN assistant_blip_entries AS entries
+          ON entries.session_id = bindings.session_id
+          AND entries.sequence = (
+            SELECT latest.sequence
+            FROM assistant_blip_entries AS latest
+            WHERE latest.session_id = bindings.session_id
+              AND json_extract(latest.entry_json, '$.type') = 'message'
+            ORDER BY latest.sequence DESC
+            LIMIT 1
+          )
+        WHERE bindings.thread_id IN (${placeholders})
+      `).all(...chunk) as Array<{ thread_id: string; entry_json: string }>;
+      for (const row of rows) {
+        try {
+          const entry = JSON.parse(row.entry_json) as { timestamp?: unknown };
+          const timestamp = String(entry.timestamp ?? '').trim();
+          if (Number.isFinite(Date.parse(timestamp))) timestamps.set(row.thread_id, timestamp);
+        } catch {
+          // Ignore a malformed historical entry instead of breaking the drone list.
+        }
+      }
+    }
+    return timestamps;
+  }
+
   async readThreadMessage(threadId: string, entryId: string): Promise<Record<string, unknown>> {
     const sessionId = await this.sessionIdForThread(threadId);
     if (!sessionId) throw new Error(`unknown Hub assistant session for thread: ${threadId}`);

@@ -5378,9 +5378,10 @@ export async function startDroneHubApiServer(opts: {
     regAny: any,
     d: any,
     storedReadStates: Record<string, ChatReadState>,
+    canonicalMessageAtByChatId: ReadonlyMap<string, string>,
   ): Promise<any> {
     const runtime = normalizeDroneRuntime(d?.runtime);
-    const activity = summarizeDroneActivity(d);
+    const activity = summarizeDroneActivity(d, canonicalMessageAtByChatId);
     const hubPhase = typeof d?.hub?.phase === 'string' ? String(d.hub.phase) : null;
     const hubMessage = typeof d?.hub?.message === 'string' ? String(d.hub.message) : null;
     const repoPath = String(d?.repoPath ?? '').trim();
@@ -5460,6 +5461,15 @@ export async function startDroneHubApiServer(opts: {
       buildPendingDroneSummary(regAny, p),
     );
     const realDrones = Object.values(regAny.drones ?? {});
+    const nativeChatIds = realDrones.flatMap((drone: any) =>
+      Object.values(drone?.chats ?? {}).flatMap((chatEntry: any) => {
+        if (inferChatAgent(chatEntry, drone).kind !== 'native') return [];
+        const chatId = String(chatEntry?.id ?? '').trim();
+        return chatId ? [chatId] : [];
+      }),
+    );
+    const canonicalMessageAtByChatId =
+      await blipAssistantHost.latestMessageTimestamps(nativeChatIds);
     const readStatesByDroneId = listChatReadStatesForDronesFromStore({
       droneIds: realDrones.map((drone: any) => normalizeDroneIdentity(drone?.id)).filter(Boolean),
     });
@@ -5468,7 +5478,12 @@ export async function startDroneHubApiServer(opts: {
       DRONE_STATUS_SUMMARY_CONCURRENCY,
       async (d) => {
         const droneId = normalizeDroneIdentity((d as any)?.id);
-        return buildRealDroneSummary(regAny, d, readStatesByDroneId.get(droneId) ?? {});
+        return buildRealDroneSummary(
+          regAny,
+          d,
+          readStatesByDroneId.get(droneId) ?? {},
+          canonicalMessageAtByChatId,
+        );
       },
     );
 
@@ -5562,9 +5577,11 @@ export async function startDroneHubApiServer(opts: {
   notifyDroneRegistryWrite = notifyCanonicalDroneRegistryWrite;
   const notifyCanonicalPromptQueueChatWrite = (droneId: string, chatName: string) => {
     // Prompt delivery state is canonical SQLite state and does not rewrite the
-    // registry. Invalidate the projection and wake chat SSE clients explicitly
-    // so live plan/status changes are not delayed until the fallback poll.
+    // registry. Invalidate the projection and wake chat and sidebar SSE clients
+    // explicitly so live state and native-message timestamps are not delayed
+    // until the fallback poll.
     canonicalActiveModelCache = null;
+    scheduleDroneRegistryBroadcasterRefresh();
     scheduleDroneChatEventRefresh();
     void deviceMesh.broadcastDroneChatChange({
       reason: 'chat_write',

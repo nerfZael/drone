@@ -1,14 +1,19 @@
 import React from 'react';
 import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type DragMoveEvent, type DragOverEvent } from '@dnd-kit/core';
 import { isUngroupedGroupName } from '../../domain';
-import { DroneCard } from '../overview';
-import { TypingDots } from '../overview/icons';
+import {
+  DroneCard,
+  SidebarItemStateIndicator,
+  sidebarChatDisplayState,
+  sidebarDroneStateLabel,
+  sidebarItemStateToneClass,
+} from '../overview';
 import type { DroneSummary } from '../types';
 import { createCanvasChatNodeId } from './app-config';
 import { normalizedDroneChats } from './chat-node-helpers';
 import { createSidebarChatDragData, parseDroneHubDragData, useDroneHubActiveDrag, type SidebarDroneDragData } from './drone-hub-dnd';
 import { isDroneStartingOrSeeding } from './helpers';
-import { IconChatThread, IconColumns, IconEye, IconEyeOff, IconFolder, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
+import { IconColumns, IconEye, IconEyeOff, IconFolder, IconPencil, IconPlus, IconSpinner, IconTrash } from './icons';
 import { canReparentSidebarDroneSelection, canSetSidebarDroneSelectionParent } from './sidebar-drone-drop';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { buildSidebarDroneTree, type SidebarDroneTree } from './sidebar-drone-tree';
@@ -41,6 +46,7 @@ import type { MoveDronesToGroupResult } from './use-group-management';
 import type { SidebarGroup } from './use-sidebar-view-model';
 import {
   sidebarChatRowTone,
+  sidebarChatStateClass,
   sidebarCountClass,
   sidebarDensityClasses,
   sidebarFolderLabelClass,
@@ -70,6 +76,8 @@ type ChatEditorState = {
 
 type GroupedSidebarTreeProps = {
   sidebarGroups: SidebarGroup[];
+  nodeTreeOverride?: SidebarNodeTreeModel | null;
+  displayRootNodeId?: string | null;
   sidebarGroupCreatedAtByName: Record<string, string | null>;
   sidebarDensityMode: SidebarDensityMode;
   sidebarFolderTree: import('./sidebar-folder-tree').SidebarFolderNode[];
@@ -171,6 +179,7 @@ type TreeDropPlacement = SidebarGroupDropPlacement | 'into';
 
 type GroupedSidebarTreeContextValue = GroupedSidebarTreeProps & {
   nodeTree: SidebarNodeTreeModel;
+  displayDepthOffset: number;
   droneTreeByGroupPath: Record<string, SidebarDroneTree>;
   visibleDroneOrder: string[];
   dragOverTreeTarget: { nodeId: string; placement: TreeDropPlacement } | null;
@@ -287,6 +296,7 @@ function groupedFolderPathFromNode(node: SidebarTreeFolderNode | null | undefine
 function flattenVisibleDroneOrderFromNodeTree(
   nodeTree: SidebarNodeTreeModel,
   collapsedGroups: Record<string, boolean>,
+  rootNodeIds: readonly string[] = nodeTree.rootChildIds,
 ): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
@@ -303,7 +313,7 @@ function flattenVisibleDroneOrderFromNodeTree(
     }
     for (const childId of nodeTree.childIdsByParent[node.id] ?? []) visit(childId);
   };
-  for (const nodeId of nodeTree.rootChildIds) visit(nodeId);
+  for (const nodeId of rootNodeIds) visit(nodeId);
   return out;
 }
 
@@ -412,6 +422,11 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
   });
   const active = selectedDrone === drone.id && activeChatName === chatName;
   const selected = selectedSidebarNodeId === sidebarChatId;
+  const chatBusy = busyChatNodeIdSet.has(chatNodeId);
+  const chatUnread = !active && unreadAgentMessageByChatNodeId[chatNodeId] === true;
+  const chatState = sidebarChatDisplayState(drone, chatBusy);
+  const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
+  const chatStateToneClass = sidebarItemStateToneClass(chatState, chatUnread);
   const draft = drone.draftChats?.[chatName] === true;
   const reorderPreviewClass =
     dragOverChat?.key === `${drone.id}:${chatName}`
@@ -425,9 +440,6 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
     return (
       <div className={`flex flex-col gap-0.5 transition-[margin] duration-150 ${reorderPreviewClass}`}>
         <div className={`flex items-center gap-1.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] ${densityClasses.chatRow}`}>
-          <span className="inline-flex flex-shrink-0 items-center">
-            <IconChatThread className={densityClasses.icon} />
-          </span>
           <input
             ref={chatEditorInputRef}
             type="text"
@@ -474,25 +486,19 @@ const GroupedSidebarChatRowDnd = React.memo(function GroupedSidebarChatRowDnd({ 
           {active ? (
             <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
           ) : null}
-          <span className="inline-flex flex-shrink-0 items-center">
-            <IconChatThread className={densityClasses.icon} />
-          </span>
-          {!active && !busyChatNodeIdSet.has(chatNodeId) && unreadAgentMessageByChatNodeId[chatNodeId] ? (
-            <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--yellow)]" />
-          ) : (
-            <span className="h-1.5 w-1.5 flex-shrink-0" />
-          )}
           <span className="min-w-0 flex-1 truncate font-mono">{chatName}</span>
           {draft ? (
             <span className="flex-shrink-0 rounded border border-[var(--accent-muted)] px-1 py-0.5 text-[var(--text-8)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]">
               Draft
             </span>
           ) : null}
-          {busyChatNodeIdSet.has(chatNodeId) ? (
-            <span className="inline-flex items-center flex-shrink-0" title="Agent responding">
-              <TypingDots color="var(--yellow)" />
-            </span>
-          ) : null}
+          <span
+            className={`${sidebarChatStateClass} ${chatStateToneClass}`}
+            title={chatStateLabel}
+          >
+            <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
+            {chatStateLabel}
+          </span>
         </button>
         {actionsEnabled && chatName !== 'default' ? (
           <>
@@ -553,6 +559,11 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
   const sidebarChatId = sidebarChatSidebarNodeId(drone.id, chatName);
   const active = selectedDrone === drone.id && activeChatName === chatName;
   const selected = selectedSidebarNodeId === sidebarChatId;
+  const chatBusy = busyChatNodeIdSet.has(chatNodeId);
+  const chatUnread = !active && unreadAgentMessageByChatNodeId[chatNodeId] === true;
+  const chatState = sidebarChatDisplayState(drone, chatBusy);
+  const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
+  const chatStateToneClass = sidebarItemStateToneClass(chatState, chatUnread);
   return (
     <div className="flex flex-col gap-0.5">
       <div className="relative flex items-stretch gap-1 group/chat-row">
@@ -568,20 +579,14 @@ const GroupedSidebarChatRowStatic = React.memo(function GroupedSidebarChatRowSta
           title={`${uiDroneName(drone.name)} / ${chatName}`}
         >
           {active ? <span className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" /> : null}
-          <span className="inline-flex flex-shrink-0 items-center">
-            <IconChatThread className={densityClasses.icon} />
-          </span>
-          {!active && !busyChatNodeIdSet.has(chatNodeId) && unreadAgentMessageByChatNodeId[chatNodeId] ? (
-            <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--yellow)]" />
-          ) : (
-            <span className="h-1.5 w-1.5 flex-shrink-0" />
-          )}
           <span className="min-w-0 flex-1 truncate font-mono">{chatName}</span>
-          {busyChatNodeIdSet.has(chatNodeId) ? (
-            <span className="inline-flex items-center flex-shrink-0" title="Agent responding">
-              <TypingDots color="var(--yellow)" />
-            </span>
-          ) : null}
+          <span
+            className={`${sidebarChatStateClass} ${chatStateToneClass}`}
+            title={chatStateLabel}
+          >
+            <SidebarItemStateIndicator state={chatState} unread={chatUnread} />
+            {chatStateLabel}
+          </span>
         </button>
         {actionsEnabled && chatName !== 'default' ? (
           <span className={`${densityClasses.chatPlaceholderWidth} flex-shrink-0`} />
@@ -816,9 +821,6 @@ const GroupedSidebarDroneRow = React.memo(function GroupedSidebarDroneRow({ node
           {showCreateChatEditor ? (
             <div className="flex flex-col gap-0.5">
               <div className={`flex items-center gap-1.5 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] ${densityClasses.chatRow}`}>
-                <span className="inline-flex flex-shrink-0 items-center">
-                  <IconChatThread className={densityClasses.icon} />
-                </span>
                 <input
                   ref={chatEditorInputRef}
                   type="text"
@@ -940,6 +942,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
     selectedGroupMultiChat,
     onDeleteGroup,
     shouldSuppressClick,
+    displayDepthOffset,
     actionsEnabled = true,
   } = useGroupedSidebarTreeContext();
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
@@ -1060,7 +1063,7 @@ function GroupedSidebarFolderRow({ node }: { node: SidebarTreeFolderNode }) {
                 ? 'border border-[var(--border)] bg-[var(--surface-soft)]'
                 : 'border border-transparent hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)]'
           } ${isDragging ? 'opacity-60' : isHiddenGroup ? 'opacity-70' : ''}`}
-          style={{ paddingLeft: `${Math.max(0, node.depth) * densityClasses.folderDepthPaddingPx}px` }}
+          style={{ paddingLeft: `${Math.max(0, node.depth - displayDepthOffset) * densityClasses.folderDepthPaddingPx}px` }}
           onDoubleClick={handleFolderDoubleClick}
         >
           {showEditorInline && folderEditor ? (
@@ -1302,6 +1305,8 @@ function GroupedSidebarNodeEntry({ nodeId, groupPath }: { nodeId: string; groupP
 export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
   const {
     sidebarGroups,
+    nodeTreeOverride,
+    displayRootNodeId,
     sidebarGroupCreatedAtByName,
     sidebarFolderTree,
     sidebarGroupOrder,
@@ -1327,7 +1332,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
 
   const nodeTree = React.useMemo(
     () =>
-      buildSidebarNodeTree({
+      nodeTreeOverride ?? buildSidebarNodeTree({
         sidebarFolderTree,
         sidebarGroups,
         sidebarGroupOrder,
@@ -1336,11 +1341,23 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
         sidebarNodeOrderByParent,
         sidebarGroupCreatedAtByName,
       }),
-    [repoScopedGroupPathsByRepoGroup, sidebarDroneOrderByGroup, sidebarFolderTree, sidebarGroupCreatedAtByName, sidebarGroupOrder, sidebarGroups, sidebarNodeOrderByParent],
+    [nodeTreeOverride, repoScopedGroupPathsByRepoGroup, sidebarDroneOrderByGroup, sidebarFolderTree, sidebarGroupCreatedAtByName, sidebarGroupOrder, sidebarGroups, sidebarNodeOrderByParent],
   );
+  const displayedRootChildIds = React.useMemo(
+    () =>
+      displayRootNodeId
+        ? (nodeTree.childIdsByParent[displayRootNodeId] ?? [])
+        : nodeTree.rootChildIds,
+    [displayRootNodeId, nodeTree],
+  );
+  const displayDepthOffset = React.useMemo(() => {
+    if (!displayRootNodeId) return 0;
+    const displayRoot = nodeTree.nodesById[displayRootNodeId];
+    return displayRoot?.kind === 'folder' ? displayRoot.depth + 1 : 0;
+  }, [displayRootNodeId, nodeTree]);
   const visibleDroneOrder = React.useMemo(
-    () => flattenVisibleDroneOrderFromNodeTree(nodeTree, props.collapsedGroups),
-    [nodeTree, props.collapsedGroups],
+    () => flattenVisibleDroneOrderFromNodeTree(nodeTree, props.collapsedGroups, displayedRootChildIds),
+    [displayedRootChildIds, nodeTree, props.collapsedGroups],
   );
 
   const orderedGroupItemsByPath = React.useMemo(() => {
@@ -2025,6 +2042,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
     () => ({
       ...props,
       nodeTree,
+      displayDepthOffset,
       droneTreeByGroupPath,
       dragOverTreeTarget,
       dragOverFolderBodyId,
@@ -2108,6 +2126,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
       props.uiDroneName,
       props.unreadAgentMessageByChatNodeId,
       deletingChats,
+      displayDepthOffset,
       dragOverChat,
       dragOverFolderBodyId,
       dragOverTreeTarget,
@@ -2121,7 +2140,7 @@ export function GroupedSidebarTree(props: GroupedSidebarTreeProps) {
 
   return (
     <GroupedSidebarTreeContext.Provider value={contextValue}>
-      {nodeTree.rootChildIds.map((nodeId) => (
+      {displayedRootChildIds.map((nodeId) => (
         <GroupedSidebarNodeEntry key={nodeId} nodeId={nodeId} groupPath={null} />
       ))}
     </GroupedSidebarTreeContext.Provider>

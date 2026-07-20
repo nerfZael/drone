@@ -83,9 +83,5 @@ export function WorkingElapsedStatus({ startedAt }: { startedAt?: string | numbe
     return () => window.clearInterval(timer);
   }, []);
 
-  return (
-    <div className="text-[var(--text-12-5)] font-[var(--weight-semibold)] leading-[1.6] text-[var(--muted)]">
-      <span>Working for {formatWorkingDuration(now - start)}</span>
-    </div>
-  );
+  return <AgentRunSummaryLine active durationMs={now - start} />;
 }

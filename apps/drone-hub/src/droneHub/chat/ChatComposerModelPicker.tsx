@@ -193,7 +193,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
         aria-haspopup="dialog"
         aria-expanded={open}
         title={title}
-        className="inline-flex h-8 max-w-[14rem] items-center gap-1 px-2 text-[.6875rem] font-extrabold normal-case tracking-normal text-[var(--chat-composer-model-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
+        className="inline-flex h-8 max-w-[14rem] items-center gap-1 px-2 text-[.6875rem] font-medium normal-case tracking-normal text-[var(--chat-composer-model-fg)] transition-opacity hover:opacity-70 disabled:cursor-not-allowed disabled:opacity-40"
       >
         <span className="min-w-0 truncate">{triggerLabel}</span>
         <span className="text-[var(--accent)]"><ChevronIcon up={open} /></span>
@@ -203,10 +203,10 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
         <div
           role="dialog"
           aria-label={title}
-          className="absolute bottom-full right-0 z-50 mb-[.375rem] flex max-h-[64vh] w-[min(20rem,calc(100vw-1.25rem))] flex-col overflow-hidden rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] shadow-[0_.5rem_1.5rem_rgba(17,17,27,.36)]"
+          className="absolute bottom-full right-0 z-50 mb-[.375rem] flex max-h-[64vh] w-[min(20rem,calc(100vw-1.25rem))] flex-col overflow-hidden rounded-[.75rem] border border-[var(--border)] bg-[var(--panel)] shadow-[var(--chat-composer-shadow)]"
         >
           <div className="flex min-h-9 flex-shrink-0 items-center px-3">
-            <div className="text-[.8125rem] font-extrabold text-[var(--fg-strong)]">
+            <div className="text-[.8125rem] font-semibold text-[var(--fg-strong)]">
               {showReasoning && !modelsOpen ? 'Reasoning' : 'Model'}
             </div>
           </div>
@@ -221,7 +221,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
                     type="button"
                     disabled={disabled}
                     onClick={() => selectReasoning(level)}
-                    className={`inline-flex h-8 items-center justify-center gap-1 rounded-[.5rem] border px-2.5 text-[.75rem] font-bold transition-colors disabled:opacity-40 ${
+                    className={`inline-flex h-8 items-center justify-center gap-1 rounded-[.5rem] border px-2.5 text-[.75rem] font-medium transition-colors disabled:opacity-40 ${
                       active
                         ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
                         : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'
@@ -240,7 +240,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
             onClick={() => setModelsOpen((value) => !value)}
             className="mx-2 mb-2 flex h-[2.375rem] flex-shrink-0 items-center justify-between gap-3 rounded-[.5rem] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] px-2.5 text-left"
           >
-            <span className="min-w-0 truncate text-[.75rem] font-extrabold text-[var(--chat-composer-fg)]">
+            <span className="min-w-0 truncate text-[.75rem] font-medium text-[var(--chat-composer-fg)]">
               {currentName}
             </span>
             <span className="text-[var(--accent)]"><ChevronIcon up={modelsOpen} /></span>
@@ -256,7 +256,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
                     onChange={(event) => setSearchQuery(event.target.value)}
                     placeholder={searchPlaceholder}
                     aria-label={searchPlaceholder}
-                    className="h-8 w-full rounded-[.5rem] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] px-2.5 text-[.75rem] font-bold text-[var(--chat-composer-fg)] placeholder:font-normal placeholder:text-[var(--chat-composer-placeholder)] focus:border-[var(--accent-border)] focus:outline-none"
+                    className="h-8 w-full rounded-[.5rem] border border-[var(--chat-composer-control-border)] bg-[var(--chat-composer-surface)] px-2.5 text-[.75rem] font-normal text-[var(--chat-composer-fg)] placeholder:font-normal placeholder:text-[var(--chat-composer-placeholder)] focus:border-[var(--accent-border)] focus:outline-none"
                   />
                 </div>
               ) : null}
@@ -273,7 +273,7 @@ export function ChatComposerModelPicker({ config }: { config: ChatComposerModelP
                           disabled={disabled}
                           onClick={() => selectModel(choice)}
                           title={choice.id || choice.name}
-                          className={`flex min-h-9 items-center rounded-[.5rem] border px-2.5 text-left text-[.75rem] font-bold transition-colors disabled:opacity-40 ${
+                          className={`flex min-h-9 items-center rounded-[.5rem] border px-2.5 text-left text-[.75rem] font-medium transition-colors disabled:opacity-40 ${
                             active
                               ? 'border-[var(--accent-border)] bg-[var(--accent-subtle)] text-[var(--accent-muted)]'
                               : 'border-transparent text-[var(--muted)] hover:bg-[var(--hover)]'

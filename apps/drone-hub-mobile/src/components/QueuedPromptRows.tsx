@@ -2,6 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import X from 'lucide-react-native/icons/x';
 import { colors } from '../theme';
+import type { MobileAgentPlan } from '../local-assistant/mobile-transcript-runs';
 
 export type MobileQueuedPrompt = {
   id: string;
@@ -10,6 +11,8 @@ export type MobileQueuedPrompt = {
   error?: string | null;
   imageCount?: number;
   cancelable?: boolean;
+  startedAt?: string;
+  agentPlan?: MobileAgentPlan;
 };
 
 export function QueuedPromptRows({

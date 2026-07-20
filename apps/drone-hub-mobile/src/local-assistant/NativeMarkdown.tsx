@@ -240,11 +240,11 @@ export function NativeMarkdown({
 
 const styles = StyleSheet.create({
   markdown: { width: '100%', minWidth: 0, alignSelf: 'stretch', gap: 10 },
-  body: { flex: 1, color: colors.text, fontSize: 14, lineHeight: 21 },
+  body: { flex: 1, color: colors.assistantText, fontSize: 14, lineHeight: 21 },
   heading: { color: colors.text, fontWeight: '900', letterSpacing: -0.2 },
   headingLarge: { fontSize: 19, lineHeight: 25, marginTop: 3 },
   headingSmall: { fontSize: 16, lineHeight: 22, marginTop: 2 },
-  strong: { fontWeight: '900', color: colors.textStrong },
+  strong: { fontWeight: '800', color: colors.text },
   emphasis: { fontStyle: 'italic' },
   strike: { textDecorationLine: 'line-through', color: colors.muted },
   link: { color: colors.accent, textDecorationLine: 'underline' },
@@ -313,8 +313,8 @@ const styles = StyleSheet.create({
   quoteText: { color: colors.muted, fontSize: 13, lineHeight: 20 },
   list: { gap: 5 },
   listRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
-  listMarker: { width: 22, color: colors.accent, fontSize: 13, lineHeight: 21, textAlign: 'right' },
-  divider: { height: 1, backgroundColor: colors.border, marginVertical: 4 },
+  listMarker: { width: 22, color: colors.chatListMarker, fontSize: 13, lineHeight: 21, textAlign: 'right' },
+  divider: { height: 1, backgroundColor: colors.borderSubtle, marginVertical: 4 },
   tableFrame: {
     borderWidth: 1,
     borderColor: colors.surface1,

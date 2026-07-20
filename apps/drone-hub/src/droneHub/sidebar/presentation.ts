@@ -109,18 +109,21 @@ export function sidebarChatRowTone(args: {
     return 'cursor-not-allowed border-transparent text-[var(--muted-dim)] opacity-60';
   }
   if (args.selected) {
-    return 'border-[var(--border)] bg-[var(--selected)] text-[var(--sidebar-fg-active)]';
+    return 'border-transparent bg-[var(--sidebar-row-selected-bg)] text-[var(--sidebar-fg-active)]';
   }
   if (args.active) {
-    return 'border-[var(--border-subtle)] bg-[var(--surface-soft)] text-[var(--sidebar-fg)]';
+    return 'border-transparent bg-[var(--surface-soft)] text-[var(--sidebar-fg)]';
   }
-  return 'border-transparent text-[var(--sidebar-subitem-fg)] hover:border-[var(--border-subtle)] hover:bg-[var(--surface-soft)] hover:text-[var(--sidebar-fg)]';
+  return 'border-transparent text-[var(--sidebar-subitem-fg)] hover:bg-[var(--surface-soft)] hover:text-[var(--sidebar-fg)]';
 }
 
 export const sidebarFolderLabelClass =
   'min-w-0 flex-1 truncate font-normal dh-type-sidebar-heading';
 
 export const sidebarCountClass = 'flex-shrink-0 dh-type-count';
+
+export const sidebarChatStateClass =
+  'grid w-[4.75rem] flex-shrink-0 grid-cols-[.75rem_minmax(0,1fr)] items-center gap-1 font-mono text-[.5625rem] font-medium leading-none';
 
 export function sidebarItemTypeClass(active: boolean): string {
   return cn(active ? 'dh-type-sidebar-item-active' : 'dh-type-sidebar-item');

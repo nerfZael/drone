@@ -389,6 +389,30 @@ describe('mobile drone sidebar model', () => {
     ]);
   });
 
+  test('carries a completed external-agent plan into the mobile run metadata', () => {
+    expect(
+      mobileDroneTurnsToAssistantMessages([
+        {
+          id: 'turn-with-plan',
+          prompt: 'Implement it',
+          output: 'Done',
+          agentPlan: {
+            items: [{ text: 'Edit the transcript', status: 'completed' }],
+            source: 'codex',
+          },
+        },
+      ])[1],
+    ).toMatchObject({
+      role: 'assistant',
+      details: {
+        mobileRun: {
+          id: 'turn-with-plan',
+          plan: { items: [{ text: 'Edit the transcript', status: 'completed' }] },
+        },
+      },
+    });
+  });
+
   test('normalizes DroneHub transcript metadata for the native chat presentation', () => {
     expect(
       normalizeMobileDroneTurns([
@@ -400,6 +424,11 @@ describe('mobile drone sidebar model', () => {
           prompt: 'Ship it',
           output: 'Done',
           model: 'gpt-5.2-codex',
+          agentPlan: {
+            items: [{ id: 'step-1', text: 'Ship the change', status: 'in_progress' }],
+            source: 'codex',
+            updatedAt: '2026-07-14T10:00:01.000Z',
+          },
           attachments: [{ name: 'plan.md', mime: 'text/markdown', size: 42 }],
         },
       ])[0],
@@ -410,6 +439,10 @@ describe('mobile drone sidebar model', () => {
       output: 'Done',
       ok: true,
       model: 'gpt-5.2-codex',
+      agentPlan: {
+        items: [{ id: 'step-1', text: 'Ship the change', status: 'in_progress' }],
+        source: 'codex',
+      },
       attachments: [{ name: 'plan.md', mime: 'text/markdown', size: 42 }],
     });
   });

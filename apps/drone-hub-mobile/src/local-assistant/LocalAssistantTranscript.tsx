@@ -10,6 +10,9 @@ import {
   Text,
   View,
 } from 'react-native';
+import Check from 'lucide-react-native/icons/check';
+import ChevronDown from 'lucide-react-native/icons/chevron-down';
+import ChevronRight from 'lucide-react-native/icons/chevron-right';
 import {
   compactRepeatedToolItems,
   messageImageParts,
@@ -33,6 +36,13 @@ import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
 import type { LocalAssistantThread } from './local-assistant-types';
 import { LinkedPullRequestAttachments } from '../drones/LinkedPullRequestAttachment';
 import type { MobileLinkedPullRequestContext } from '../drones/use-drone-linked-pull-requests';
+import {
+  groupMobileTranscriptRuns,
+  workingDurationLabel,
+  type MobileAgentPlan,
+  type MobileTranscriptRun,
+} from './mobile-transcript-runs';
+import { shouldToggleMessageTimestamp } from './message-touch-model';
 
 function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
   const dots = React.useRef([
@@ -198,9 +208,10 @@ function TappableMessageView({
       }}
       onTouchEnd={() => {
         const current = touch.current;
+        const wasActive = current.active;
         touch.current.active = false;
         clearLongPress();
-        if (!current.moved && !current.longPressed) onTap();
+        if (shouldToggleMessageTimestamp({ ...current, active: wasActive })) onTap();
       }}
       onTouchCancel={() => {
         touch.current.active = false;
@@ -476,12 +487,215 @@ function messageTimestamp(message: AssistantMessage): string | number | undefine
   return message.createdAt ?? message.timestamp;
 }
 
-function hasVisibleMessageContent(message: AssistantMessage): boolean {
-  return Boolean(
-    visibleMessageText(message).trim() ||
-    messageImageParts(message).length > 0 ||
-    attachments(message).length > 0 ||
-    message.errorMessage,
+const DEFAULT_VISIBLE_PLAN_ITEMS = 8;
+
+function timestampMs(value: string | number | null | undefined): number {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : Number.NaN;
+  return Date.parse(String(value ?? ''));
+}
+
+function AgentRunSummary({
+  active,
+  startedAt,
+  completedAt,
+  toolCallCount,
+  expanded,
+  onToggle,
+}: {
+  active: boolean;
+  startedAt?: string | number;
+  completedAt?: string | number;
+  toolCallCount: number;
+  expanded: boolean;
+  onToggle?: () => void;
+}) {
+  const fallbackStart = React.useRef(Date.now()).current;
+  const parsedStart = timestampMs(startedAt);
+  const start = Number.isFinite(parsedStart) ? parsedStart : fallbackStart;
+  const parsedEnd = timestampMs(completedAt);
+  const [now, setNow] = React.useState(() => Date.now());
+
+  React.useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setNow(Date.now()), 1_000);
+    return () => clearInterval(timer);
+  }, [active]);
+
+  const end = active ? now : Number.isFinite(parsedEnd) ? parsedEnd : start;
+  const label = `${active ? 'Working' : 'Worked'} for ${workingDurationLabel(end - start)}`;
+  const content = (
+    <>
+      <Text style={styles.runSummaryLabel}>{label}</Text>
+      {toolCallCount > 0 ? (
+        <Text style={styles.runSummaryDetail}>
+          {toolCallCount} tool {toolCallCount === 1 ? 'call' : 'calls'}
+        </Text>
+      ) : null}
+      {onToggle ? (
+        expanded ? (
+          <ChevronDown color={colors.mutedDim} size={14} strokeWidth={1.8} />
+        ) : (
+          <ChevronRight color={colors.mutedDim} size={14} strokeWidth={1.8} />
+        )
+      ) : null}
+    </>
+  );
+
+  if (!onToggle) return <View style={styles.runSummary}>{content}</View>;
+  return (
+    <Pressable
+      accessibilityRole="button"
+      accessibilityLabel={expanded ? 'Collapse tool calls' : 'Expand tool calls'}
+      accessibilityState={{ expanded }}
+      onPress={onToggle}
+      style={({ pressed }) => [styles.runSummary, pressed && styles.runSummaryPressed]}
+    >
+      {content}
+    </Pressable>
+  );
+}
+
+function MobileAgentPlanList({
+  plan,
+  running = false,
+}: {
+  plan?: MobileAgentPlan;
+  running?: boolean;
+}) {
+  const [planExpanded, setPlanExpanded] = React.useState(running);
+  const [stepsExpanded, setStepsExpanded] = React.useState(false);
+  React.useEffect(() => {
+    if (running) setPlanExpanded(true);
+  }, [running]);
+  if (!plan?.items.length) return null;
+  const complete = plan.items.filter((item) => item.status === 'completed').length;
+  const showItems = running || planExpanded;
+  const hiddenCount = Math.max(0, plan.items.length - DEFAULT_VISIBLE_PLAN_ITEMS);
+  const visibleItems = stepsExpanded ? plan.items : plan.items.slice(0, DEFAULT_VISIBLE_PLAN_ITEMS);
+  return (
+    <View accessibilityLabel="Plan" style={styles.plan}>
+      {running ? (
+        <View style={[styles.planToggle, showItems && styles.planToggleExpanded]}>
+          <Text style={styles.planToggleText}>Plan</Text>
+          <Text style={styles.planProgress}>
+            ({complete}/{plan.items.length})
+          </Text>
+        </View>
+      ) : (
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={planExpanded ? 'Hide plan' : 'Show plan'}
+          accessibilityState={{ expanded: planExpanded }}
+          onPress={() => setPlanExpanded((value) => !value)}
+          style={({ pressed }) => [
+            styles.planToggle,
+            showItems && styles.planToggleExpanded,
+            pressed && styles.planTogglePressed,
+          ]}
+        >
+          {planExpanded ? (
+            <ChevronDown color={colors.muted} size={13} strokeWidth={1.8} />
+          ) : (
+            <ChevronRight color={colors.muted} size={13} strokeWidth={1.8} />
+          )}
+          <Text style={styles.planToggleText}>{planExpanded ? 'Hide plan' : 'Show plan'}</Text>
+          <Text style={styles.planProgress}>
+            ({complete}/{plan.items.length})
+          </Text>
+        </Pressable>
+      )}
+      {showItems ? (
+        <View style={styles.planItems}>
+          {visibleItems.map((item, index) => {
+            const done = item.status === 'completed';
+            const active = item.status === 'in_progress';
+            const cancelled = item.status === 'cancelled';
+            return (
+              <View key={item.id || `${index}:${item.text}`} style={styles.planItem}>
+                <View style={styles.planStatusSlot}>
+                  {done ? (
+                    <View style={styles.planDone}>
+                      <Check color={colors.online} size={9} strokeWidth={2.6} />
+                    </View>
+                  ) : active && running ? (
+                    <ActivityIndicator color={colors.accent} size={13} />
+                  ) : (
+                    <View
+                      style={[
+                        styles.planDot,
+                        active && styles.planDotActive,
+                        cancelled && styles.planDotCancelled,
+                      ]}
+                    />
+                  )}
+                </View>
+                <Text
+                  style={[
+                    styles.planItemText,
+                    done && styles.planItemDone,
+                    active && styles.planItemActive,
+                    cancelled && styles.planItemCancelled,
+                  ]}
+                >
+                  {item.text}
+                </Text>
+              </View>
+            );
+          })}
+          {hiddenCount > 0 ? (
+            <Pressable
+              accessibilityRole="button"
+              accessibilityState={{ expanded: stepsExpanded }}
+              onPress={() => setStepsExpanded((value) => !value)}
+              style={({ pressed }) => pressed && styles.planTogglePressed}
+            >
+              <Text style={styles.planMore}>
+                {stepsExpanded ? 'Show fewer steps' : `Show ${hiddenCount} more`}
+              </Text>
+            </Pressable>
+          ) : null}
+        </View>
+      ) : null}
+    </View>
+  );
+}
+
+function TranscriptRun({
+  run,
+  renderItem,
+}: {
+  run: MobileTranscriptRun;
+  renderItem: (item: AssistantRenderItem) => any;
+}) {
+  const [toolsExpanded, setToolsExpanded] = React.useState(false);
+  return (
+    <View>
+      {renderItem(run.user)}
+      <View style={styles.runBody}>
+        <AgentRunSummary
+          active={run.active}
+          startedAt={run.startedAt}
+          completedAt={run.completedAt}
+          toolCallCount={run.toolCallCount}
+          expanded={toolsExpanded}
+          onToggle={run.toolCallCount > 0 ? () => setToolsExpanded((value) => !value) : undefined}
+        />
+      </View>
+      {run.items.map((item) => {
+        const tool = item.type === 'tool' || item.type === 'toolGroup';
+        if (tool && !toolsExpanded) return null;
+        return tool ? (
+          <View key={item.key} style={styles.runBody}>
+            {renderItem(item)}
+          </View>
+        ) : (
+          renderItem(item)
+        );
+      })}
+      <View style={styles.runBody}>
+        <MobileAgentPlanList plan={run.plan} running={run.active} />
+      </View>
+    </View>
   );
 }
 
@@ -525,12 +739,7 @@ export function MobileAssistantTranscript({
   onOpenFileReference?: (reference: MobileFileReference) => void;
 }) {
   const items = React.useMemo(
-    () =>
-      compactRepeatedToolItems(
-        renderItemsFromMessages(messages).filter(
-          (item) => item.type !== 'message' || hasVisibleMessageContent(item.message),
-        ),
-      ),
+    () => compactRepeatedToolItems(renderItemsFromMessages(messages)),
     [messages],
   );
   const [visibleMessageTimestamps, setVisibleMessageTimestamps] = React.useState<Set<string>>(
@@ -564,163 +773,169 @@ export function MobileAssistantTranscript({
       </View>
     );
   }
+  const renderItem = (item: AssistantRenderItem): any => {
+    if (item.type === 'tool') return <ToolRow key={item.key} item={item} />;
+    if (item.type === 'toolGroup') {
+      return <ToolGroupRow key={item.key} item={item} />;
+    }
+    const text = visibleMessageText(item.message).trim();
+    const images = messageImageParts(item.message);
+    const files = attachments(item.message);
+    if (!text && images.length === 0 && files.length === 0 && !item.message.errorMessage)
+      return null;
+    const user = item.message.role === 'user';
+    const assistant = item.message.role === 'assistant';
+    const timestamp = messageTimestamp(item.message);
+    const timestampKey = `${item.key}:${String(timestamp ?? '')}`;
+    const timestampVisible = visibleMessageTimestamps.has(timestampKey);
+    const openMessageActions =
+      onDeleteMessageRequest && !messageActionsDisabled
+        ? () =>
+            setMessageActionTarget({
+              message: item.message,
+              sourceMessageIndex: item.sourceMessageIndex,
+            })
+        : undefined;
+    const content = (
+      <>
+        {text && assistant ? (
+          <>
+            <NativeMarkdown text={text} onOpenFileReference={onOpenFileReference} />
+            <LinkedPullRequestAttachments text={text} context={linkedPullRequests} />
+          </>
+        ) : text ? (
+          <LinkedMessageText text={text} user={user} onOpenFileReference={onOpenFileReference} />
+        ) : null}
+        {item.message.errorMessage ? (
+          <Text style={styles.messageError}>{item.message.errorMessage}</Text>
+        ) : null}
+        {images.length > 0 ? (
+          <View style={styles.images}>
+            {images.map((image, index) => (
+              <Image
+                key={`${image.mimeType}:${index}`}
+                source={{ uri: `data:${image.mimeType};base64,${image.data}` }}
+                resizeMode="contain"
+                style={styles.image}
+              />
+            ))}
+          </View>
+        ) : null}
+        {files.length > 0 ? (
+          <View style={styles.attachments}>
+            {files.map((file, index) => {
+              const fileReference = parseMobileFileReference(
+                String(file?.path ?? file?.filePath ?? ''),
+              );
+              return (
+                <Pressable
+                  key={String(file?.id ?? file?.name ?? index)}
+                  accessibilityRole={fileReference && onOpenFileReference ? 'button' : undefined}
+                  accessibilityHint={
+                    fileReference && onOpenFileReference
+                      ? 'Opens a read-only file preview'
+                      : undefined
+                  }
+                  disabled={!fileReference || !onOpenFileReference}
+                  onPress={() => fileReference && onOpenFileReference?.(fileReference)}
+                  style={({ pressed }) => [
+                    styles.attachment,
+                    fileReference && onOpenFileReference && styles.attachmentLinked,
+                    pressed && styles.attachmentPressed,
+                  ]}
+                >
+                  <Text style={styles.attachmentIcon}>▧</Text>
+                  <View style={styles.attachmentCopy}>
+                    <Text numberOfLines={1} style={styles.attachmentName}>
+                      {String(file?.name ?? 'Attachment')}
+                    </Text>
+                    <Text numberOfLines={1} style={styles.attachmentMeta}>
+                      {String(file?.mime ?? file?.mimeType ?? 'file')}
+                    </Text>
+                  </View>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
+        {item.message.meshTruncated ? (
+          <Pressable
+            accessibilityRole="button"
+            accessibilityLabel="Load the full message"
+            accessibilityState={{
+              disabled:
+                !item.message.id || !onLoadFullMessage || fullMessageLoadingId === item.message.id,
+            }}
+            disabled={
+              !item.message.id || !onLoadFullMessage || fullMessageLoadingId === item.message.id
+            }
+            onPress={() => onLoadFullMessage?.(item.message)}
+            style={({ pressed }) => [
+              styles.fullMessageButton,
+              pressed && styles.fullMessageButtonPressed,
+            ]}
+          >
+            {fullMessageLoadingId === item.message.id ? (
+              <ActivityIndicator color={colors.accent} size="small" />
+            ) : (
+              <Text style={styles.fullMessageText}>Load full message</Text>
+            )}
+          </Pressable>
+        ) : null}
+      </>
+    );
+    if (user) {
+      return (
+        <Pressable
+          key={item.key}
+          accessibilityRole="button"
+          accessibilityHint={
+            openMessageActions
+              ? 'Tap to show the timestamp. Press and hold for message actions.'
+              : 'Shows or hides this message timestamp'
+          }
+          accessibilityState={{ expanded: timestampVisible }}
+          onPress={() => toggleMessageTimestamp(timestampKey)}
+          onLongPress={openMessageActions}
+          delayLongPress={500}
+          style={styles.userMessageGroup}
+        >
+          {timestampVisible ? (
+            <RelativeMessageTimestamp timestamp={timestamp} style={styles.userMessageTime} />
+          ) : null}
+          <View style={[styles.message, styles.userMessage]}>{content}</View>
+        </Pressable>
+      );
+    }
+    return (
+      <TappableMessageView
+        key={item.key}
+        onTap={() => toggleMessageTimestamp(timestampKey)}
+        onLongPress={openMessageActions}
+      >
+        {content}
+        {timestampVisible ? (
+          <RelativeMessageTimestamp timestamp={timestamp} style={styles.messageTime} />
+        ) : null}
+      </TappableMessageView>
+    );
+  };
+  const groups = groupMobileTranscriptRuns(items, {
+    running,
+    hasSeparateActivePrompt: activePrompts.length > 0,
+  });
+  const activePrompt = activePrompts.at(-1);
+  const lastGroup = groups.at(-1);
+  const groupedActiveRun = lastGroup?.type === 'run' && lastGroup.active;
   return (
     <View style={styles.messages}>
-      {items.map((item) => {
-        if (item.type === 'tool') return <ToolRow key={item.key} item={item} />;
-        if (item.type === 'toolGroup') {
-          return <ToolGroupRow key={item.key} item={item} />;
-        }
-        const text = visibleMessageText(item.message).trim();
-        const images = messageImageParts(item.message);
-        const files = attachments(item.message);
-        if (!text && images.length === 0 && files.length === 0 && !item.message.errorMessage)
-          return null;
-        const user = item.message.role === 'user';
-        const assistant = item.message.role === 'assistant';
-        const timestamp = messageTimestamp(item.message);
-        const timestampKey = `${item.key}:${String(timestamp ?? '')}`;
-        const timestampVisible = visibleMessageTimestamps.has(timestampKey);
-        const openMessageActions =
-          onDeleteMessageRequest && !messageActionsDisabled
-            ? () =>
-                setMessageActionTarget({
-                  message: item.message,
-                  sourceMessageIndex: item.sourceMessageIndex,
-                })
-            : undefined;
-        const content = (
-          <>
-            {text && assistant ? (
-              <>
-                <NativeMarkdown text={text} onOpenFileReference={onOpenFileReference} />
-                <LinkedPullRequestAttachments text={text} context={linkedPullRequests} />
-              </>
-            ) : text ? (
-              <LinkedMessageText
-                text={text}
-                user={user}
-                onOpenFileReference={onOpenFileReference}
-              />
-            ) : null}
-            {item.message.errorMessage ? (
-              <Text style={styles.messageError}>{item.message.errorMessage}</Text>
-            ) : null}
-            {images.length > 0 ? (
-              <View style={styles.images}>
-                {images.map((image, index) => (
-                  <Image
-                    key={`${image.mimeType}:${index}`}
-                    source={{ uri: `data:${image.mimeType};base64,${image.data}` }}
-                    resizeMode="contain"
-                    style={styles.image}
-                  />
-                ))}
-              </View>
-            ) : null}
-            {files.length > 0 ? (
-              <View style={styles.attachments}>
-                {files.map((file, index) => {
-                  const fileReference = parseMobileFileReference(
-                    String(file?.path ?? file?.filePath ?? ''),
-                  );
-                  return (
-                    <Pressable
-                      key={String(file?.id ?? file?.name ?? index)}
-                      accessibilityRole={
-                        fileReference && onOpenFileReference ? 'button' : undefined
-                      }
-                      accessibilityHint={
-                        fileReference && onOpenFileReference
-                          ? 'Opens a read-only file preview'
-                          : undefined
-                      }
-                      disabled={!fileReference || !onOpenFileReference}
-                      onPress={() => fileReference && onOpenFileReference?.(fileReference)}
-                      style={({ pressed }) => [
-                        styles.attachment,
-                        fileReference && onOpenFileReference && styles.attachmentLinked,
-                        pressed && styles.attachmentPressed,
-                      ]}
-                    >
-                      <Text style={styles.attachmentIcon}>▧</Text>
-                      <View style={styles.attachmentCopy}>
-                        <Text numberOfLines={1} style={styles.attachmentName}>
-                          {String(file?.name ?? 'Attachment')}
-                        </Text>
-                        <Text numberOfLines={1} style={styles.attachmentMeta}>
-                          {String(file?.mime ?? file?.mimeType ?? 'file')}
-                        </Text>
-                      </View>
-                    </Pressable>
-                  );
-                })}
-              </View>
-            ) : null}
-            {item.message.meshTruncated ? (
-              <Pressable
-                accessibilityRole="button"
-                accessibilityLabel="Load the full message"
-                accessibilityState={{
-                  disabled:
-                    !item.message.id ||
-                    !onLoadFullMessage ||
-                    fullMessageLoadingId === item.message.id,
-                }}
-                disabled={
-                  !item.message.id || !onLoadFullMessage || fullMessageLoadingId === item.message.id
-                }
-                onPress={() => onLoadFullMessage?.(item.message)}
-                style={({ pressed }) => [
-                  styles.fullMessageButton,
-                  pressed && styles.fullMessageButtonPressed,
-                ]}
-              >
-                {fullMessageLoadingId === item.message.id ? (
-                  <ActivityIndicator color={colors.accent} size="small" />
-                ) : (
-                  <Text style={styles.fullMessageText}>Load full message</Text>
-                )}
-              </Pressable>
-            ) : null}
-          </>
-        );
-        if (user) {
-          return (
-            <Pressable
-              key={item.key}
-              accessibilityRole="button"
-              accessibilityHint={
-                openMessageActions
-                  ? 'Tap to show the timestamp. Press and hold for message actions.'
-                  : 'Shows or hides this message timestamp'
-              }
-              accessibilityState={{ expanded: timestampVisible }}
-              onPress={() => toggleMessageTimestamp(timestampKey)}
-              onLongPress={openMessageActions}
-              delayLongPress={500}
-              style={styles.userMessageGroup}
-            >
-              {timestampVisible ? (
-                <RelativeMessageTimestamp timestamp={timestamp} style={styles.userMessageTime} />
-              ) : null}
-              <View style={[styles.message, styles.userMessage]}>{content}</View>
-            </Pressable>
-          );
-        }
-        return (
-          <TappableMessageView
-            key={item.key}
-            onTap={() => toggleMessageTimestamp(timestampKey)}
-            onLongPress={openMessageActions}
-          >
-            {content}
-            {timestampVisible ? (
-              <RelativeMessageTimestamp timestamp={timestamp} style={styles.messageTime} />
-            ) : null}
-          </TappableMessageView>
-        );
-      })}
+      {groups.map((group) =>
+        group.type === 'run' ? (
+          <TranscriptRun key={group.key} run={group} renderItem={renderItem} />
+        ) : (
+          <React.Fragment key={group.key}>{renderItem(group.item)}</React.Fragment>
+        ),
+      )}
       {activePrompts.length > 0 ? (
         <QueuedPromptRows
           prompts={activePrompts}
@@ -728,22 +943,30 @@ export function MobileAssistantTranscript({
           onCancel={onCancelQueuedPrompt}
         />
       ) : null}
-      {running ? (
-        currentReasoning.trim() ? (
-          <View style={styles.reasoning}>
-            <Text style={styles.messageRole}>{assistantLabel}</Text>
-            <View style={styles.reasoningHead}>
-              <TypingDots label={`${assistantLabel} is working`} />
-              <Text style={styles.reasoningLabel}>Reasoning</Text>
-            </View>
-            <Text style={styles.reasoningText}>{currentReasoning.trim()}</Text>
-          </View>
-        ) : (
-          <View style={styles.waiting}>
-            <Text style={styles.messageRole}>{assistantLabel}</Text>
+      {running && activePrompt ? (
+        <View style={styles.runBody}>
+          <AgentRunSummary
+            active
+            startedAt={activePrompt.startedAt}
+            toolCallCount={0}
+            expanded={false}
+          />
+          <MobileAgentPlanList plan={activePrompt.agentPlan} running />
+        </View>
+      ) : null}
+      {running && currentReasoning.trim() ? (
+        <View style={styles.reasoning}>
+          <View style={styles.reasoningHead}>
             <TypingDots label={`${assistantLabel} is working`} />
+            <Text style={styles.reasoningLabel}>Reasoning</Text>
           </View>
-        )
+          <Text style={styles.reasoningText}>{currentReasoning.trim()}</Text>
+        </View>
+      ) : running && !groupedActiveRun && !activePrompt ? (
+        <View style={styles.waiting}>
+          <AgentRunSummary active toolCallCount={0} expanded={false} />
+          <TypingDots label={`${assistantLabel} is working`} />
+        </View>
       ) : null}
       {inactivePrompts.length > 0 ? (
         <QueuedPromptRows
@@ -809,6 +1032,75 @@ export function LocalAssistantTranscript({
 
 const styles = StyleSheet.create({
   messages: { gap: 0 },
+  runBody: { marginHorizontal: 10 },
+  runSummary: {
+    minHeight: 36,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.borderSubtle,
+    paddingVertical: 7,
+  },
+  runSummaryPressed: { opacity: 0.72 },
+  runSummaryLabel: { color: colors.muted, fontSize: 14, fontWeight: '600' },
+  runSummaryDetail: {
+    flex: 1,
+    color: colors.mutedDim,
+    fontSize: 11,
+  },
+  plan: {
+    marginTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.borderSubtle,
+    paddingTop: 9,
+    marginBottom: 9,
+  },
+  planToggle: { flexDirection: 'row', alignItems: 'center', gap: 5, minHeight: 24 },
+  planToggleExpanded: { marginBottom: 7 },
+  planTogglePressed: { opacity: 0.68 },
+  planToggleText: { color: colors.muted, fontSize: 11, fontWeight: '600' },
+  planProgress: {
+    color: colors.mutedDim,
+    fontSize: 10,
+    fontFamily: 'monospace',
+  },
+  planItems: { gap: 6 },
+  planItem: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  planStatusSlot: {
+    width: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  planDone: {
+    width: 14,
+    height: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: colors.onlineBorder,
+    backgroundColor: colors.onlineDark,
+  },
+  planDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    borderWidth: 1,
+    borderColor: colors.accentBorder,
+  },
+  planDotActive: { borderColor: colors.accent, backgroundColor: colors.accentWash },
+  planDotCancelled: { borderColor: colors.mutedDim, opacity: 0.45 },
+  planItemText: { flex: 1, color: colors.textSecondary, fontSize: 12, lineHeight: 18 },
+  planItemDone: {
+    color: colors.mutedDim,
+    textDecorationLine: 'line-through',
+    textDecorationColor: colors.muted,
+  },
+  planItemActive: { color: colors.text, fontWeight: '600' },
+  planItemCancelled: { color: colors.mutedDim, textDecorationLine: 'line-through', opacity: 0.6 },
+  planMore: { color: colors.muted, fontSize: 11, fontWeight: '600', marginTop: 3 },
   message: { width: '100%', paddingHorizontal: 10, paddingVertical: 13 },
   userMessageGroup: {
     width: 'auto',
@@ -824,14 +1116,14 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
     paddingHorizontal: 13,
     paddingVertical: 10,
-    backgroundColor: colors.surface1,
+    backgroundColor: colors.userBubble,
     borderWidth: 1,
-    borderColor: colors.surface2,
+    borderColor: colors.userBubbleBorder,
     borderRadius: 10,
     borderBottomRightRadius: 3,
   },
-  messageText: { color: colors.text, fontSize: 14, lineHeight: 21 },
-  userMessageText: { color: colors.textStrong },
+  messageText: { color: colors.assistantText, fontSize: 14, lineHeight: 21 },
+  userMessageText: { color: colors.userBubbleText },
   fileLink: {
     color: colors.accentAlt,
     fontWeight: '700',
@@ -840,25 +1132,25 @@ const styles = StyleSheet.create({
   },
   messageTime: {
     alignSelf: 'flex-start',
-    color: colors.subtle,
+    color: colors.mutedDim,
     fontSize: 9,
     fontFamily: 'monospace',
-    fontWeight: '700',
+    fontWeight: '400',
     marginTop: 7,
   },
   userMessageTime: {
     alignSelf: 'flex-end',
-    color: colors.muted,
+    color: colors.secondary,
     fontSize: 9,
     fontFamily: 'monospace',
-    fontWeight: '700',
+    fontWeight: '400',
     marginRight: 3,
     marginBottom: 4,
   },
   messageRole: {
-    color: colors.muted,
+    color: colors.secondary,
     fontSize: 9,
-    fontWeight: '900',
+    fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.8,
     marginBottom: 8,
@@ -880,7 +1172,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accentWash,
   },
   fullMessageButtonPressed: { opacity: 0.72 },
-  fullMessageText: { color: colors.accent, fontSize: 11, fontWeight: '800' },
+  fullMessageText: { color: colors.accent, fontSize: 11, fontWeight: '600' },
   attachment: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -894,14 +1186,14 @@ const styles = StyleSheet.create({
   attachmentPressed: { opacity: 0.7 },
   attachmentIcon: { color: colors.accent, fontSize: 18 },
   attachmentCopy: { flex: 1, minWidth: 0 },
-  attachmentName: { color: colors.text, fontSize: 11, fontWeight: '700' },
+  attachmentName: { color: colors.text, fontSize: 11, fontWeight: '600' },
   attachmentMeta: { color: colors.muted, fontSize: 9, marginTop: 2 },
   tool: {
     borderRadius: 6,
-    borderColor: colors.surface1,
+    borderColor: colors.border,
     borderWidth: 1,
     backgroundColor: colors.whiteWashSoft,
-    marginHorizontal: 10,
+    marginHorizontal: 0,
     marginVertical: 2,
   },
   toolNested: { marginHorizontal: 0, backgroundColor: colors.crust },
@@ -935,7 +1227,7 @@ const styles = StyleSheet.create({
     color: colors.onAccent,
     fontSize: 8,
     lineHeight: 11,
-    fontWeight: '900',
+    fontWeight: '700',
     includeFontPadding: false,
   },
   toolCopy: { flex: 1, minWidth: 0 },
@@ -947,38 +1239,38 @@ const styles = StyleSheet.create({
   toolTitle: {
     color: colors.muted,
     fontSize: 10,
-    fontWeight: '800',
+    fontWeight: '600',
     textTransform: 'uppercase',
     letterSpacing: 0.45,
   },
   toolCount: {
     color: colors.subtle,
     fontSize: 9,
-    fontWeight: '800',
+    fontWeight: '500',
   },
   toolDetails: {
     gap: 6,
     paddingHorizontal: 9,
     paddingVertical: 8,
     borderTopWidth: 1,
-    borderTopColor: colors.surface1,
+    borderTopColor: colors.borderSubtle,
     backgroundColor: colors.mantle,
   },
-  detailLabel: { color: colors.accent, fontSize: 7, fontWeight: '900', letterSpacing: 1 },
+  detailLabel: { color: colors.accent, fontSize: 7, fontWeight: '600', letterSpacing: 1 },
   detailText: { color: colors.muted, fontSize: 10, lineHeight: 15, fontFamily: 'monospace' },
   groupDetails: {
     gap: 2,
     padding: 5,
     borderTopWidth: 1,
-    borderTopColor: colors.surface1,
+    borderTopColor: colors.borderSubtle,
     backgroundColor: colors.mantle,
   },
   transfer: {
     borderRadius: 6,
-    borderColor: colors.surface1,
+    borderColor: colors.border,
     borderWidth: 1,
     backgroundColor: colors.whiteWashSoft,
-    marginHorizontal: 10,
+    marginHorizontal: 0,
     marginVertical: 2,
     overflow: 'hidden',
   },
@@ -1009,7 +1301,7 @@ const styles = StyleSheet.create({
   progressFailed: { backgroundColor: colors.danger },
   transferMeta: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 5 },
   transferMetaText: { color: colors.subtle, fontSize: 8, fontFamily: 'monospace' },
-  transferFiles: { gap: 5, padding: 8, borderTopWidth: 1, borderTopColor: colors.surface1 },
+  transferFiles: { gap: 5, padding: 8, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
   transferFile: {
     borderWidth: 1,
     borderColor: colors.border,
@@ -1040,9 +1332,9 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.panel,
   },
-  waiting: { alignSelf: 'flex-start', gap: 2, marginHorizontal: 10, marginVertical: 10 },
+  waiting: { alignSelf: 'stretch', gap: 8, marginHorizontal: 10, marginVertical: 10 },
   reasoningHead: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  reasoningLabel: { color: colors.muted, fontSize: 11, fontWeight: '700' },
+  reasoningLabel: { color: colors.muted, fontSize: 11, fontWeight: '600' },
   reasoningText: { color: colors.muted, fontSize: 12, lineHeight: 18, marginTop: 9 },
   typingDots: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   typingDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.accent },
@@ -1092,7 +1384,7 @@ const styles = StyleSheet.create({
   loadingTranscriptText: {
     color: colors.muted,
     fontSize: 10,
-    fontWeight: '700',
+    fontWeight: '600',
     letterSpacing: 1.4,
     textTransform: 'uppercase',
   },
@@ -1113,7 +1405,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.accent,
     transform: [{ rotate: '45deg' }],
   },
-  emptyTitle: { color: colors.text, fontSize: 21, fontWeight: '800', letterSpacing: -0.4 },
+  emptyTitle: { color: colors.text, fontSize: 21, fontWeight: '700', letterSpacing: -0.4 },
   emptyBody: {
     color: colors.muted,
     textAlign: 'center',

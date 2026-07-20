@@ -17,6 +17,7 @@ export function ChatMessageBody({
   images = [],
   preserveLeadParagraph = false,
   toggleOnMessageClick = false,
+  autoExpand = false,
   onOpenFileReference,
   onOpenLink,
   textMentionLinks,
@@ -29,6 +30,7 @@ export function ChatMessageBody({
   images?: ChatMessageImage[];
   preserveLeadParagraph?: boolean;
   toggleOnMessageClick?: boolean;
+  autoExpand?: boolean;
   onOpenFileReference?: (ref: MarkdownFileReference) => void;
   onOpenLink?: (href: string) => boolean;
   textMentionLinks?: MarkdownTextMentionLink[];
@@ -53,6 +55,7 @@ export function ChatMessageBody({
           className={className}
           preserveLeadParagraph={preserveLeadParagraph}
           toggleOnMessageClick={toggleOnMessageClick}
+          autoExpand={autoExpand}
           onOpenFileReference={onOpenFileReference}
           onOpenLink={onOpenLink}
           textMentionLinks={textMentionLinks}

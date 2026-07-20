@@ -108,4 +108,22 @@ describe('CollapsibleMarkdown', () => {
     expect(html).not.toContain('dh-collapsible-markdown--click-toggle');
     expect(html).toContain('aria-expanded="false"');
   });
+
+  test('renders long markdown fully when it is the latest agent message', () => {
+    const tail = 'latest response tail remains visible';
+    const text = [...Array.from({ length: 12 }, (_, i) => `line ${i + 1}`), tail].join('\n');
+    const html = renderToStaticMarkup(
+      React.createElement(CollapsibleMarkdown, {
+        text,
+        fadeTo: 'var(--assistant-bubble-fade)',
+        collapseAfterLines: 3,
+        autoExpand: true,
+      }),
+    );
+
+    expect(html).toContain(tail);
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('Collapse');
+    expect(html).not.toContain('Show more');
+  });
 });

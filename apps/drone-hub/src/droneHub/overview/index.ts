@@ -1,5 +1,12 @@
 export { GroupBadge } from './GroupBadge';
 export { StatusBadge } from './StatusBadge';
-export { DroneCard } from './DroneCard';
+export {
+  DroneCard,
+  SidebarItemStateIndicator,
+  SidebarWorkingStatusIndicator,
+  sidebarChatDisplayState,
+  sidebarDroneStateLabel,
+  sidebarItemStateToneClass,
+} from './DroneCard';
 export { DroneLinksDock } from './DroneLinksDock';
 export { DronePreviewDock } from './DronePreviewDock';

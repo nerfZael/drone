@@ -1,3 +1,7 @@
+import {
+  buildRepoSidebarModel,
+  type RepoSidebarModel,
+} from '@drone/hub-model/sidebar';
 import type { DroneSummary, RepoSummary } from '../types';
 
 export type SidebarRepositoryNavigationItem<TStateSummary> = {
@@ -8,40 +12,58 @@ export type SidebarRepositoryNavigationItem<TStateSummary> = {
   stateSummary: TStateSummary;
 };
 
+export type SidebarRepositoryNavigationModel<TStateSummary> =
+  RepoSidebarModel<DroneSummary> & {
+    items: Array<SidebarRepositoryNavigationItem<TStateSummary>>;
+  };
+
+export function buildSidebarRepositoryNavigationModel<TStateSummary>(args: {
+  repos: readonly RepoSummary[];
+  drones: readonly DroneSummary[];
+  summarize: (drones: readonly DroneSummary[]) => TStateSummary;
+  sidebarGroupOrder?: readonly string[];
+  sidebarDroneOrderByGroup?: Readonly<Record<string, string[]>>;
+  sidebarNodeOrderByParent?: Readonly<Record<string, string[]>>;
+  sidebarGroupCreatedAtByName?: Readonly<Record<string, string | null>>;
+  repoScopedGroupPathsByRepoGroup?: Readonly<Record<string, string[]>>;
+}): SidebarRepositoryNavigationModel<TStateSummary> {
+  const model = buildRepoSidebarModel({
+    drones: [...args.drones],
+    registeredRepoPaths: args.repos
+      .map((repo) => String(repo.path ?? '').trim())
+      .filter(Boolean),
+    sidebarGroupOrder: [...(args.sidebarGroupOrder ?? [])],
+    sidebarDroneOrderByGroup: { ...(args.sidebarDroneOrderByGroup ?? {}) },
+    sidebarNodeOrderByParent: { ...(args.sidebarNodeOrderByParent ?? {}) },
+    sidebarGroupCreatedAtByName: { ...(args.sidebarGroupCreatedAtByName ?? {}) },
+    repoScopedGroupPathsByRepoGroup: { ...(args.repoScopedGroupPathsByRepoGroup ?? {}) },
+  });
+  return {
+    ...model,
+    items: model.groups.map((group) => {
+      const repoPath = group.group === 'repo:ungrouped'
+        ? ''
+        : group.group.slice('repo:'.length);
+      return {
+        id: group.group,
+        repoPath,
+        label: group.label,
+        droneCount: group.items.length,
+        stateSummary: args.summarize(group.items),
+      };
+    }),
+  };
+}
+
 export function buildSidebarRepositoryNavigationItems<TStateSummary>(args: {
   repos: readonly RepoSummary[];
   drones: readonly DroneSummary[];
   summarize: (drones: readonly DroneSummary[]) => TStateSummary;
+  sidebarGroupOrder?: readonly string[];
+  sidebarDroneOrderByGroup?: Readonly<Record<string, string[]>>;
+  sidebarNodeOrderByParent?: Readonly<Record<string, string[]>>;
+  sidebarGroupCreatedAtByName?: Readonly<Record<string, string | null>>;
+  repoScopedGroupPathsByRepoGroup?: Readonly<Record<string, string[]>>;
 }): Array<SidebarRepositoryNavigationItem<TStateSummary>> {
-  const repoPathSet = new Set(
-    args.repos.map((repo) => String(repo.path ?? '').trim()).filter(Boolean),
-  );
-  let hasUngroupedDrones = false;
-  for (const drone of args.drones) {
-    const repoPath = String(drone.repoPath ?? '').trim();
-    if (repoPath) repoPathSet.add(repoPath);
-    else hasUngroupedDrones = true;
-  }
-
-  const paths = [...repoPathSet];
-  if (hasUngroupedDrones) paths.unshift('');
-  return paths
-    .map((repoPath) => {
-      const drones = args.drones.filter(
-        (drone) => String(drone.repoPath ?? '').trim() === repoPath,
-      );
-      const pathParts = repoPath.split(/[\\/]/).filter(Boolean);
-      return {
-        id: repoPath ? `repo:${repoPath}` : 'repo:ungrouped',
-        repoPath,
-        label: repoPath ? pathParts[pathParts.length - 1] || repoPath : 'Ungrouped',
-        droneCount: drones.length,
-        stateSummary: args.summarize(drones),
-      };
-    })
-    .sort((left, right) => {
-      if (!left.repoPath) return -1;
-      if (!right.repoPath) return 1;
-      return left.label.localeCompare(right.label) || left.repoPath.localeCompare(right.repoPath);
-    });
+  return buildSidebarRepositoryNavigationModel(args).items;
 }

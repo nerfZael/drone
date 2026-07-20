@@ -4,8 +4,11 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import type { DroneSummary } from '../src/droneHub/types';
 import {
   DroneCard,
+  SidebarItemStateIndicator,
+  sidebarChatDisplayState,
   sidebarDroneDisplayState,
   sidebarDroneStateLabel,
+  sidebarItemStateToneClass,
 } from '../src/droneHub/overview/DroneCard';
 
 function drone(overrides: Partial<DroneSummary> = {}): DroneSummary {
@@ -47,6 +50,37 @@ describe('desktop sidebar drone presentation', () => {
     expect(sidebarDroneStateLabel('idle', true)).toBe('Unread');
     expect(sidebarDroneStateLabel('offline', false)).toBe('Unavailable');
     expect(sidebarDroneStateLabel('working', false)).toBe('Working');
+  });
+
+  test('derives chat state from the selected chat while preserving runtime failures', () => {
+    expect(sidebarChatDisplayState(drone({ busyChats: ['other'] }), false)).toBe('idle');
+    expect(sidebarChatDisplayState(drone(), true)).toBe('working');
+    expect(sidebarChatDisplayState(drone({ hubPhase: 'error' }), false)).toBe('blocked');
+    expect(sidebarItemStateToneClass('idle', true)).toContain('--green');
+    expect(sidebarItemStateToneClass('blocked', true)).toContain('--red');
+  });
+
+  test('keeps runtime metadata neutral while the state changes color', () => {
+    const html = renderToStaticMarkup(
+      createElement(DroneCard, {
+        drone: drone({ runtime: 'container', busyChats: ['default'] }),
+        selected: false,
+        onClick: () => {},
+      }),
+    );
+
+    expect(html).toContain('text-[var(--yellow)]');
+    expect(html).toContain('text-[var(--muted)]"> · container</span>');
+  });
+
+  test('matches the mobile working indicator geometry and baseline slot', () => {
+    const html = renderToStaticMarkup(
+      createElement(SidebarItemStateIndicator, { state: 'working' }),
+    );
+
+    expect(html).toContain('h-3 w-3 flex-shrink-0 self-center');
+    expect(html).toContain('stroke-width="2.4"');
+    expect(html).toContain('M21 12a9 9 0 1 1-6.219-8.56');
   });
 
   test('reserves hover actions for delete and the context menu', () => {

@@ -49,6 +49,8 @@ describe('agent chat surface adapters', () => {
     expect(loaderHtml).toContain('role="status"');
     expect(loaderHtml).toContain('Loading conversation…');
     expect(loaderHtml).toContain('animate-spin');
+    expect(loaderHtml).toContain('h-11 w-11');
+    expect(loaderHtml).toContain('!text-[.8125rem]');
     expect(loaderHtml).toContain('dh-type-status');
     expect(loaderHtml).not.toContain('uppercase');
     expect(loaderHtml).not.toContain('animate-pulse');
@@ -104,7 +106,9 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('data-agent-type="external"');
     expect(html).toContain('data-tool-activity="hidden"');
     expect(html).toContain('accept="image/*"');
-    expect(html).toContain('aria-label="Stop"');
+    expect(html).toContain('data-chat-composer-expanded="false"');
+    expect(html).toContain('aria-label="Record voice message"');
+    expect(html).toContain('aria-label="Stop response"');
     expect(html).not.toContain('aria-label="Send"');
   });
 
@@ -120,8 +124,10 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('data-agent-type="native"');
     expect(html).toContain('data-tool-activity="visible"');
     expect(html).not.toContain('accept="image/*"');
-    expect(html).toContain('>Stop<');
-    expect(html).toContain('aria-label="Send"');
+    expect(html).toContain('data-chat-composer-expanded="false"');
+    expect(html).toContain('aria-label="Record voice message"');
+    expect(html).toContain('aria-label="Stop response"');
+    expect(html).not.toContain('aria-label="Send"');
   });
 
   test('capabilities can be extended without adding agent checks to the surface', () => {
@@ -436,7 +442,7 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('Drone tasks');
     expect(html).toContain('Follow up');
     expect(html).toContain('screenshot.png');
-    expect(html).toContain('Linked request');
+    expect(html).toContain('Pull request');
     expect(html).toContain('#609');
     expect(html).not.toContain('&quot;type&quot;:&quot;drone-hub-task&quot;');
   });

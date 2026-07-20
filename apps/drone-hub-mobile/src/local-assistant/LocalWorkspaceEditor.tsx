@@ -456,7 +456,7 @@ const styles = StyleSheet.create({
     borderColor: colors.border,
     backgroundColor: colors.panel,
   },
-  deviceRowOpen: { borderColor: colors.accentBorder, backgroundColor: colors.accentWash },
+  deviceRowOpen: { borderColor: colors.border, backgroundColor: colors.selectionWash },
   deviceDot: { width: 7, height: 7, borderRadius: 4, backgroundColor: colors.subtle },
   deviceDotOnline: { backgroundColor: colors.online },
   deviceCopy: { flex: 1 },

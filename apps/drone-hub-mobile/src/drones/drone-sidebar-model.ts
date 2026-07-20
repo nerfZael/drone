@@ -6,6 +6,11 @@ import {
   type SidebarNodeTreeModel,
   type SidebarTreeFolderNode,
 } from '@drone/hub-model/sidebar';
+import {
+  mobileRunDetails,
+  normalizeMobileAgentPlan,
+  type MobileAgentPlan,
+} from '../local-assistant/mobile-transcript-runs';
 
 export type MobileDroneSummary = {
   id: string;
@@ -48,6 +53,7 @@ export type MobileDroneTurn = {
   ok: boolean;
   model: string;
   reasoning: string;
+  agentPlan?: MobileAgentPlan;
   attachments: Array<{ name: string; mime: string; size: number | null }>;
   meshTruncated?: boolean;
 };
@@ -296,10 +302,10 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
         ? value.repoAttached
         : Boolean(
             text(value.repoPath) ||
-              text(value.repositoryPath) ||
-              text(repo.path) ||
-              text(repo.hostPath) ||
-              text(repo.dest),
+            text(value.repositoryPath) ||
+            text(repo.path) ||
+            text(repo.hostPath) ||
+            text(repo.dest),
           ),
     fleetParentId: text(value.fleetParentId) || null,
     chats,
@@ -484,15 +490,17 @@ export function buildMobileDroneRepoGroups(
       },
     );
     const repoPath = group.group === 'repo:ungrouped' ? '' : group.group.slice('repo:'.length);
-    return [{
-      id: group.group,
-      label: group.label,
-      repoPath,
-      roots: entries.flatMap((entry) => (entry.kind === 'drone' ? [entry.node] : [])),
-      folders: entries.flatMap((entry) => (entry.kind === 'folder' ? [entry.folder] : [])),
-      entries,
-      droneCount: group.items.length,
-    }];
+    return [
+      {
+        id: group.group,
+        label: group.label,
+        repoPath,
+        roots: entries.flatMap((entry) => (entry.kind === 'drone' ? [entry.node] : [])),
+        folders: entries.flatMap((entry) => (entry.kind === 'folder' ? [entry.folder] : [])),
+        entries,
+        droneCount: group.items.length,
+      },
+    ];
   });
 }
 
@@ -510,7 +518,10 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
         ...(turn.meshTruncated ? { meshTruncated: true } : {}),
       });
     }
-    if (output || error) {
+    if (output || error || turn.completedAt || turn.agentPlan) {
+      const runDetails = turn.agentPlan
+        ? mobileRunDetails({ id: turn.id, plan: turn.agentPlan })
+        : undefined;
       messages.push(
         !turn.ok && error
           ? {
@@ -518,6 +529,7 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
               role: 'assistant',
               ...(output ? { content: output } : {}),
               ...(turn.completedAt || turn.at ? { createdAt: turn.completedAt || turn.at } : {}),
+              ...(runDetails ? { details: runDetails } : {}),
               isError: true,
               errorMessage: error,
               ...(turn.meshTruncated ? { meshTruncated: true } : {}),
@@ -527,6 +539,7 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
               role: 'assistant',
               content: output || error,
               ...(turn.completedAt || turn.at ? { createdAt: turn.completedAt || turn.at } : {}),
+              ...(runDetails ? { details: runDetails } : {}),
               ...(turn.meshTruncated ? { meshTruncated: true } : {}),
             },
       );
@@ -593,6 +606,7 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
     const turn = item as Record<string, unknown>;
     const turnNumber = Number(turn.turn);
     const at = text(turn.at);
+    const agentPlan = normalizeMobileAgentPlan(turn.agentPlan);
     return [
       {
         id: text(turn.id) || `turn-${Number.isFinite(turnNumber) ? turnNumber : index}`,
@@ -606,6 +620,7 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
         ok: turn.ok !== false,
         model: text(turn.model),
         reasoning: text(turn.reasoning),
+        ...(agentPlan ? { agentPlan } : {}),
         attachments: normalizeTurnAttachments(turn.attachments),
         ...(turn.meshTruncated === true ? { meshTruncated: true } : {}),
       },

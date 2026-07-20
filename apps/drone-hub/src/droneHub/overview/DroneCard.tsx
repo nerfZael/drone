@@ -57,16 +57,7 @@ export type SidebarDroneDisplayState =
   | 'archiving'
   | 'deleting';
 
-export function sidebarDroneDisplayState(
-  drone: DroneSummary,
-  busy = false,
-  operationLabel = '',
-): SidebarDroneDisplayState {
-  const operation = operationLabel.trim().toLowerCase();
-  if (operation.includes('archiv')) return 'archiving';
-  if (operation.includes('delet')) return 'deleting';
-  if (busy || drone.busy || (drone.busyChats?.length ?? 0) > 0) return 'working';
-
+function sidebarDroneInactiveDisplayState(drone: DroneSummary): SidebarDroneDisplayState {
   const rawState = `${drone.hubPhase ?? ''} ${drone.hubMessage ?? ''} ${drone.statusError ?? ''}`.toLowerCase();
   if (
     rawState.includes('block') ||
@@ -82,11 +73,89 @@ export function sidebarDroneDisplayState(
   return 'idle';
 }
 
+export function sidebarDroneDisplayState(
+  drone: DroneSummary,
+  busy = false,
+  operationLabel = '',
+): SidebarDroneDisplayState {
+  const operation = operationLabel.trim().toLowerCase();
+  if (operation.includes('archiv')) return 'archiving';
+  if (operation.includes('delet')) return 'deleting';
+  if (busy || drone.busy || (drone.busyChats?.length ?? 0) > 0) return 'working';
+
+  return sidebarDroneInactiveDisplayState(drone);
+}
+
+export function sidebarChatDisplayState(
+  drone: DroneSummary,
+  busy = false,
+): SidebarDroneDisplayState {
+  if (busy) return 'working';
+  return sidebarDroneInactiveDisplayState(drone);
+}
+
 export function sidebarDroneStateLabel(state: SidebarDroneDisplayState, unread: boolean): string {
   if (unread && state === 'idle') return 'Unread';
   if (state === 'offline') return 'Unavailable';
   if (state === 'idle') return 'Ready';
   return `${state[0]?.toUpperCase() ?? ''}${state.slice(1)}`;
+}
+
+export function sidebarItemStateToneClass(
+  state: SidebarDroneDisplayState,
+  unread = false,
+): string {
+  if (state === 'working' || state === 'archiving' || state === 'deleting') {
+    return 'text-[var(--yellow)]';
+  }
+  if (unread && state === 'idle') return 'text-[var(--green)]';
+  if (state === 'waiting' || state === 'starting') return 'text-[var(--info)]';
+  if (state === 'blocked' || state === 'offline') return 'text-[var(--red)]';
+  return 'text-[var(--muted)]';
+}
+
+export function SidebarItemStateIndicator({
+  state,
+  unread = false,
+}: {
+  state: SidebarDroneDisplayState;
+  unread?: boolean;
+}) {
+  const working = state === 'working' || state === 'archiving' || state === 'deleting';
+  const indicatorToneClass =
+    unread && state === 'idle'
+      ? 'bg-[var(--green)]'
+      : state === 'waiting' || state === 'starting'
+        ? 'bg-[var(--info)]'
+        : state === 'blocked' || state === 'offline'
+          ? 'bg-[var(--red)]'
+          : 'bg-[var(--muted)]';
+  return (
+    <span className="inline-flex h-3 w-3 flex-shrink-0 self-center items-center justify-center leading-none" aria-hidden="true">
+      {working ? (
+        <SidebarWorkingStatusIndicator />
+      ) : (
+        <span className={`h-1.5 w-1.5 rounded-full ${indicatorToneClass}`} />
+      )}
+    </span>
+  );
+}
+
+export function SidebarWorkingStatusIndicator() {
+  return (
+    <svg
+      className="block h-3 w-3 animate-spin text-[var(--yellow)]"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.4"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
 }
 
 function sameDroneCardDrone(a: DroneSummary, b: DroneSummary): boolean {
@@ -202,19 +271,7 @@ export const DroneCard = React.memo(function DroneCard({
   const displayState = sidebarDroneDisplayState(drone, Boolean(busy), activeOperationLabel);
   const stateLabel = sidebarDroneStateLabel(displayState, unread);
   const runtimeLabel = drone.runtime ?? 'container';
-  const workingState =
-    displayState === 'working' || displayState === 'archiving' || displayState === 'deleting';
-  const stateToneClass =
-    workingState
-      ? 'text-[var(--yellow)]'
-      : displayState === 'waiting' || displayState === 'starting'
-        ? 'text-[var(--info)]'
-        : displayState === 'blocked' || displayState === 'offline'
-          ? 'text-[var(--red)]'
-          : 'text-[var(--muted)]';
-  const indicatorToneClass = unread && displayState !== 'working' ? 'bg-[var(--green)]' :
-    displayState === 'waiting' || displayState === 'starting' ? 'bg-[var(--info)]' :
-      displayState === 'blocked' || displayState === 'offline' ? 'bg-[var(--red)]' : 'bg-[var(--muted)]';
+  const stateToneClass = sidebarItemStateToneClass(displayState, unread);
   const showActiveIndicator = Boolean(active) && !unread;
   const renderActiveEdge = showActiveIndicator && activeIndicatorStyle === 'edge';
   const errText = String(drone.hubMessage ?? drone.statusError ?? '').trim();
@@ -264,11 +321,11 @@ export const DroneCard = React.memo(function DroneCard({
       className={`w-full text-left ${rowDensityClass} grid grid-cols-[minmax(0,1fr)_auto] grid-rows-[auto_auto] items-center rounded-[var(--sidebar-row-radius)] border transition-colors duration-150 group/drone relative ${
         selected
           ? selectedTone === 'muted'
-            ? 'bg-[var(--surface-soft)] border-[var(--border)]'
+            ? 'bg-[var(--surface-soft)] border-transparent'
             : 'bg-[var(--sidebar-row-selected-bg)] border-[var(--sidebar-row-selected-border)]'
           : highlighted
             ? 'bg-[var(--yellow-subtle)] border-[var(--yellow-border)]'
-            : 'border-transparent hover:bg-[var(--surface-soft)] hover:border-[var(--border-subtle)]'
+            : 'border-transparent hover:bg-[var(--surface-soft)]'
       } ${draggable ? 'cursor-grab touch-none active:cursor-grabbing' : ''} ${
         dragging ? 'opacity-35' : ''
       } ${disabled ? 'cursor-not-allowed opacity-60' : ''} ${
@@ -307,40 +364,37 @@ export const DroneCard = React.memo(function DroneCard({
             <RelativeTimeText
               at={drone.lastMessageAt}
               compact
-              className="flex-shrink-0 font-mono text-[.5625rem] font-bold text-[var(--sidebar-meta-fg)]"
+              className="flex-shrink-0 font-mono text-[.5625rem] font-normal text-[var(--sidebar-meta-fg)]"
               title={`Last message ${timeAgo(drone.lastMessageAt)}`}
             />
           ) : null}
       </div>
       <div
-        className="col-start-1 row-start-2 mt-[3px] flex min-w-0 items-center gap-1.5 font-mono text-[.5625rem] font-medium tracking-[.00625rem]"
+        className="col-start-1 row-start-2 mt-[3px] flex min-w-0 items-center gap-1.5 font-mono text-[.5625rem] font-medium leading-none tracking-[.00625rem]"
         aria-label={`${stateLabel}, ${runtimeLabel}${drone.chats.length > 1 ? `, ${drone.chats.length} chats` : ''}`}
       >
-          <span className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center" aria-hidden="true">
-            {workingState ? (
-              <IconSpinner className="h-3 w-3 animate-spin text-[var(--yellow)]" />
-            ) : (
-              <span className={`h-1.5 w-1.5 rounded-full ${indicatorToneClass}`} />
-            )}
-          </span>
+          <SidebarItemStateIndicator state={displayState} unread={unread} />
           {canOpenInlineError ? (
-            <button
-              type="button"
-              onClick={(e) => {
-                stopCardSelection(e);
-                onErrorClick?.(drone, errText);
-              }}
-              onMouseDown={stopActionPressPropagation}
-              onPointerDown={stopActionPressPropagation}
-              className={`min-w-0 truncate hover:underline focus:outline-none ${stateToneClass}`}
-              title="View full error details"
-            >
-              {stateLabel} · {runtimeLabel}
-            </button>
+            <span className="flex min-w-0 items-center">
+              <button
+                type="button"
+                onClick={(e) => {
+                  stopCardSelection(e);
+                  onErrorClick?.(drone, errText);
+                }}
+                onMouseDown={stopActionPressPropagation}
+                onPointerDown={stopActionPressPropagation}
+                className={`flex-shrink-0 hover:underline focus:outline-none ${stateToneClass}`}
+                title="View full error details"
+              >
+                {stateLabel}
+              </button>
+              <span className="min-w-0 truncate text-[var(--muted)]">{' · '}{runtimeLabel}</span>
+            </span>
           ) : (
-            <span className={`min-w-0 truncate ${stateToneClass}`} title={errText || undefined}>
-              <span className={unread && displayState !== 'working' ? 'text-[var(--green)]' : undefined}>{stateLabel}</span>
-              {' · '}{runtimeLabel}
+            <span className="flex min-w-0 items-center" title={errText || undefined}>
+              <span className={`flex-shrink-0 ${stateToneClass}`}>{stateLabel}</span>
+              <span className="min-w-0 truncate text-[var(--muted)]">{' · '}{runtimeLabel}</span>
             </span>
           )}
           {drone.chats.length > 1 ? (

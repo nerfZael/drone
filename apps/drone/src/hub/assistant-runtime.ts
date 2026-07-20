@@ -566,6 +566,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
     if (event.threadId) {
       void assistantService.nativeThreadOwner(event.threadId).then((owner) => {
         if (!owner) return;
+        if (event.reason === 'canonical_history_changed') onNativePromptQueueChanged?.(owner);
         return deviceMesh.broadcastDroneChatChange({
           sequence: event.sequence,
           reason: event.reason,
