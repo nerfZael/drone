@@ -109,7 +109,7 @@ test('CLI repo command registers through the canonical application command', asy
   const repo = path.join(root, 'repo');
   fs.mkdirSync(repo);
   execFileSync('git', ['init', '-q', repo]);
-  const stdout = execFileSync(process.execPath, [path.resolve(__dirname, '../../dist/cli.js'), 'repo', repo], {
+  const stdout = execFileSync(process.execPath, [path.resolve(__dirname, '../../dist/cli.js'), '--json', 'repo', repo], {
     env: { ...process.env, DRONE_DATA_DIR: dataDir },
     encoding: 'utf8',
   });

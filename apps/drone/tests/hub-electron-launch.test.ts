@@ -26,6 +26,7 @@ describe('Drone Hub Electron background launch', () => {
     );
 
     expect(args.slice(0, 3)).toEqual(['/app/cli.js', 'hub', 'start']);
+    expect(args).toContain('--json');
     expect(args).toContain('--ui-mode');
     expect(args).toContain('static');
     expect(args).toContain('/app/hub-ui');

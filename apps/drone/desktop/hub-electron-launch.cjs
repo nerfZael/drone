@@ -9,6 +9,7 @@ function detachedHubStartArgs(cliPath, env = process.env, platform = process.pla
     cliPath,
     'hub',
     'start',
+    '--json',
     '--ui-mode',
     'static',
     '--port',

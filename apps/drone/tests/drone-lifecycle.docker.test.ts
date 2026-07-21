@@ -231,14 +231,14 @@ describe('drone docker lifecycle regression', () => {
       try {
         const created = runOrThrow(
           'node',
-          [droneCli, 'create', droneName, '--repo', '-', '--group', 'regression', '--container-port', '7777'],
+          [droneCli, '--json', 'create', droneName, '--repo', '-', '--group', 'regression', '--container-port', '7777'],
           { cwd: appRoot, env, timeoutMs: 240_000 }
         );
         const createPayload = JSON.parse(created.stdout) as { ok?: boolean; name?: string };
         expect(createPayload.ok).toBe(true);
         expect(createPayload.name).toBe(droneName);
 
-        const renamed = runOrThrow('node', [droneCli, 'rename', droneName, renamedDroneName], {
+        const renamed = runOrThrow('node', [droneCli, '--json', 'rename', droneName, renamedDroneName], {
           cwd: appRoot,
           env,
           timeoutMs: 90_000,
@@ -248,7 +248,7 @@ describe('drone docker lifecycle regression', () => {
         expect(renamePayload.oldName).toBe(droneName);
         expect(renamePayload.newName).toBe(renamedDroneName);
 
-        const status = runOrThrow('node', [droneCli, 'status', renamedDroneName], { cwd: appRoot, env, timeoutMs: 60_000 });
+        const status = runOrThrow('node', [droneCli, '--json', 'status', renamedDroneName], { cwd: appRoot, env, timeoutMs: 60_000 });
         const statusPayload = JSON.parse(status.stdout) as {
           name?: string;
           hostPort?: number;
@@ -267,7 +267,7 @@ describe('drone docker lifecycle regression', () => {
         });
         expect(exec.stdout).toContain('DRONE_LIFECYCLE_OK');
 
-        const removed = runOrThrow('node', [droneCli, 'rm', renamedDroneName, '--keep-volume'], {
+        const removed = runOrThrow('node', [droneCli, '--json', 'rm', renamedDroneName, '--keep-volume'], {
           cwd: appRoot,
           env,
           timeoutMs: 90_000,
@@ -348,7 +348,7 @@ describe('drone docker lifecycle regression', () => {
         fs.chmodSync(registryDir, 0o700);
 
         // Rollback should leave old container/name intact.
-        const oldStatus = runOrThrow('node', [droneCli, 'status', droneName], { cwd: appRoot, env, timeoutMs: 60_000 });
+        const oldStatus = runOrThrow('node', [droneCli, '--json', 'status', droneName], { cwd: appRoot, env, timeoutMs: 60_000 });
         const oldStatusPayload = JSON.parse(oldStatus.stdout) as { name?: string };
         expect(oldStatusPayload.name).toBe(droneName);
 

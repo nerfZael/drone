@@ -2542,11 +2542,6 @@ export function DroneSidebar({
                     <span className="block truncate text-[.8125rem] font-semibold text-[var(--fg)]">
                       {activeRepositoryNavigationItem.label}
                     </span>
-                    {activeRepositoryNavigationItem.repoPath ? (
-                      <span className="mt-px block truncate font-mono text-[.5rem] text-[var(--muted)]">
-                        {activeRepositoryNavigationItem.repoPath}
-                      </span>
-                    ) : null}
                   </span>
                   <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem] leading-none">
                     {activeRepositoryNavigationItem.stateSummary.approval > 0 ? (
@@ -2764,7 +2759,7 @@ export function DroneSidebar({
                   return (
                     <div
                       key={item.id}
-                      className={`group flex min-h-14 w-full items-center rounded-[.25rem] border-b border-[var(--surface-soft)] transition-colors ${
+                      className={`group/repository-row flex min-h-14 w-full items-center rounded-[.25rem] border-b border-[var(--surface-soft)] transition-colors ${
                         containsSelectedDrone
                           ? 'bg-[var(--selected)]'
                           : 'hover:bg-[var(--hover)]'
@@ -2782,13 +2777,10 @@ export function DroneSidebar({
                           <span className="block truncate text-[.75rem] font-semibold text-[var(--fg)]">
                             {item.label}
                           </span>
-                          {item.repoPath ? (
-                            <span className="mt-px block truncate font-mono text-[.5rem] text-[var(--muted)]">
-                              {item.repoPath}
-                            </span>
-                          ) : null}
                         </span>
-                        <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem] leading-none">
+                      </button>
+                      <div className="relative mr-1 h-8 w-8 flex-shrink-0">
+                        <span className="pointer-events-none absolute inset-0 inline-flex items-center justify-end gap-1.5 whitespace-nowrap pr-2 font-mono text-[.5625rem] leading-none transition-opacity duration-150 group-hover/repository-row:opacity-0 group-focus-within/repository-row:opacity-0">
                           {item.stateSummary.approval > 0 ? (
                             <span
                               className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]"
@@ -2811,17 +2803,17 @@ export function DroneSidebar({
                             </span>
                           ) : null}
                         </span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => createDroneInRepository(item)}
-                        disabled={!sidebarCapabilities.createDrones}
-                        className="mr-1 inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[.25rem] text-[var(--muted)] opacity-0 transition-[color,background-color,opacity] hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] group-hover:opacity-100 group-focus-within:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
-                        title={`Create drone in ${item.label}`}
-                        aria-label={`Create drone in ${item.label}`}
-                      >
-                        <IconPlus className="h-4 w-4" />
-                      </button>
+                        <button
+                          type="button"
+                          onClick={() => createDroneInRepository(item)}
+                          disabled={!sidebarCapabilities.createDrones}
+                          className="absolute inset-0 inline-flex items-center justify-center rounded-[.25rem] text-[var(--muted)] opacity-0 transition-[color,background-color,opacity] duration-150 hover:bg-[var(--sidebar-create-hover-bg)] hover:text-[var(--accent)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--accent-muted)] group-hover/repository-row:opacity-100 group-focus-within/repository-row:opacity-100 disabled:cursor-not-allowed disabled:opacity-0"
+                          title={`Create drone in ${item.label}`}
+                          aria-label={`Create drone in ${item.label}`}
+                        >
+                          <IconPlus className="h-4 w-4" />
+                        </button>
+                      </div>
                     </div>
                   );
                 })}

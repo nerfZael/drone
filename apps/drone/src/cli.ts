@@ -11,6 +11,7 @@ import path from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 
+import { formatHubStartOutput, formatHubStopOutput, formatHumanOutput } from './cli-output';
 import { health, procStart, procStop, readOutput, sendInput, sendKeys, status } from './host/api';
 import { ensureContainerDroneDaemonSession } from './host/container-daemon';
 import { dvmClone, dvmCopyToContainer, dvmCreate, dvmExec, dvmLs, dvmPorts, dvmRemove, dvmSessionStart } from './host/dvm';
@@ -1545,12 +1546,20 @@ async function isDroneContainer(containerName: string): Promise<boolean> {
   return String(r.stdout ?? '').trim().split('\n').pop() === 'yes';
 }
 
-function formatList(items: string[]): string {
-  return items.map((x) => `- ${x}`).join('\n');
+function jsonOutputRequested(localOptions?: { json?: boolean }): boolean {
+  return Boolean(localOptions?.json || program.opts().json);
+}
+
+function printCommandOutput(value: unknown): void {
+  // eslint-disable-next-line no-console
+  console.log(jsonOutputRequested() ? JSON.stringify(value, null, 2) : formatHumanOutput(value));
 }
 
 const program = new Command();
-program.name('drone').description('Manage drone daemons (container or host runtime)');
+program
+  .name('drone')
+  .description('Manage drone daemons (container or host runtime)')
+  .option('--json', 'Print machine-readable JSON', false);
 
 const createCommand = addCreateOptions(
   program
@@ -1632,22 +1641,15 @@ createCommand
         throw error;
       }
 
-      // eslint-disable-next-line no-console
-      console.log(
-        JSON.stringify(
-          {
-            ok: true,
-            id: stableId,
-            runtime: 'host',
-            name: displayName,
-            hostPort,
-            daemonPid: hostPid,
-            ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
-          },
-          null,
-          2
-        )
-      );
+      printCommandOutput({
+        ok: true,
+        id: stableId,
+        runtime: 'host',
+        name: displayName,
+        hostPort,
+        daemonPid: hostPid,
+        ...(effectiveCwd ? { cwd: effectiveCwd } : {}),
+      });
       return;
     }
 
@@ -1780,14 +1782,7 @@ createCommand
       };
     await persistRealDroneEntry(stableId, createdEntry);
 
-    // eslint-disable-next-line no-console
-    console.log(
-      JSON.stringify(
-        { ok: true, id: stableId, runtime: 'container', name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) },
-        null,
-        2
-      )
-    );
+    printCommandOutput({ ok: true, id: stableId, runtime: 'container', name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) });
   });
 
 const importCommand = addCreateOptions(
@@ -1858,14 +1853,7 @@ importCommand
       };
     await persistRealDroneEntry(stableId, importedEntry);
 
-    // eslint-disable-next-line no-console
-    console.log(
-      JSON.stringify(
-        { ok: true, id: stableId, runtime: 'container', name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) },
-        null,
-        2
-      )
-    );
+    printCommandOutput({ ok: true, id: stableId, runtime: 'container', name: displayName, containerName, hostPort, containerPort, ...(cwd ? { cwd } : {}) });
   });
 
 program
@@ -1922,21 +1910,14 @@ program
 
     if (removeErr) throw new Error(removeErr);
 
-    // eslint-disable-next-line no-console
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          id: resolvedKey,
-          name: nameStr,
-          runtime,
-          containerName: runtime === 'container' ? containerName : null,
-          removedRegistry: removedRegistry || hadEntry,
-        },
-        null,
-        2
-      )
-    );
+    printCommandOutput({
+      ok: true,
+      id: resolvedKey,
+      name: nameStr,
+      runtime,
+      containerName: runtime === 'container' ? containerName : null,
+      removedRegistry: removedRegistry || hadEntry,
+    });
   });
 
 program
@@ -1948,8 +1929,7 @@ program
     const oldName = normalizeDroneDisplayName(oldNameRaw);
     const newName = normalizeDroneDisplayName(newNameRaw);
     if (oldName === newName) {
-      // eslint-disable-next-line no-console
-      console.log(JSON.stringify({ ok: true, oldName, newName, renamed: false, reason: 'same-name' }, null, 2));
+      printCommandOutput({ ok: true, oldName, newName, renamed: false, reason: 'same-name' });
       return;
     }
 
@@ -1963,22 +1943,15 @@ program
 
     await renameDroneDisplayName({ droneId: oldKey, state: 'real', name: newName });
 
-    // eslint-disable-next-line no-console
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          id: oldKey,
-          oldName,
-          newName,
-          containerName,
-          hostPort: (oldEntry as any)?.hostPort ?? null,
-          containerPort: Number((oldEntry as any)?.containerPort ?? 7777),
-        },
-        null,
-        2
-      )
-    );
+    printCommandOutput({
+      ok: true,
+      id: oldKey,
+      oldName,
+      newName,
+      containerName,
+      hostPort: (oldEntry as any)?.hostPort ?? null,
+      containerPort: Number((oldEntry as any)?.containerPort ?? 7777),
+    });
   });
 
 program
@@ -2012,28 +1985,17 @@ program
 
     const targets = [...new Set([...inRegistryContainers, ...orphans])].sort();
     if (targets.length === 0) {
-      // eslint-disable-next-line no-console
-      console.log(JSON.stringify({ ok: true, removed: 0, targets: [] }, null, 2));
+      printCommandOutput({ ok: true, removed: 0, targets: [] });
       return;
     }
 
     if (!options.apply) {
-      // eslint-disable-next-line no-console
-      console.log(
-        JSON.stringify(
-          {
-            ok: true,
-            dryRun: true,
-            targets,
-            note: 'Run again with --apply to actually delete these drones/containers.',
-          },
-          null,
-          2
-        )
-      );
-      // Also print a human-friendly list for quick scanning.
-      // eslint-disable-next-line no-console
-      console.log(formatList(targets));
+      printCommandOutput({
+        ok: true,
+        dryRun: true,
+        targets,
+        note: 'Run again with --apply to actually delete these drones/containers.',
+      });
       return;
     }
 
@@ -2058,8 +2020,7 @@ program
       }
     }
 
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ ok: errors.length === 0, removed: targets.length - errors.length, errors }, null, 2));
+    printCommandOutput({ ok: errors.length === 0, removed: targets.length - errors.length, errors });
     if (errors.length > 0) process.exitCode = 1;
   });
 
@@ -2110,8 +2071,7 @@ program
         out.push({ name: d.name, runtime, group: d.group ?? null, ok: false, error: err?.message ?? String(err) });
       }
     }
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify(out, null, 2));
+    printCommandOutput(out);
   });
 
 program
@@ -2143,19 +2103,12 @@ program
 
     ungrouped.sort((a, b) => a.localeCompare(b));
 
-    // eslint-disable-next-line no-console
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          groups,
-          ungrouped,
-          totalDrones: Object.keys(reg.drones).length,
-        },
-        null,
-        2
-      )
-    );
+    printCommandOutput({
+      ok: true,
+      groups,
+      ungrouped,
+      totalDrones: Object.keys(reg.drones).length,
+    });
   });
 
 program
@@ -2174,8 +2127,7 @@ program
     const prev = String(drone.group ?? '').trim() || null;
     await setDroneGroupMetadata({ droneId: key, state: 'real', group });
 
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ ok: true, name: String(name), previousGroup: prev, group }, null, 2));
+    printCommandOutput({ ok: true, name: String(name), previousGroup: prev, group });
   });
 
 program
@@ -2189,8 +2141,7 @@ program
     const prev = String(drone.group ?? '').trim() || null;
     await setDroneGroupMetadata({ droneId: key, state: 'real', group: null });
 
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ ok: true, name: String(name), previousGroup: prev, group: null }, null, 2));
+    printCommandOutput({ ok: true, name: String(name), previousGroup: prev, group: null });
   });
 
 program
@@ -2221,8 +2172,7 @@ program
       .filter((r: any) => r.path)
       .sort((a: any, b: any) => String(a.path).localeCompare(String(b.path)));
 
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ ok: true, added: repoRoot, repos }, null, 2));
+    printCommandOutput({ ok: true, added: repoRoot, repos });
   });
 
 async function cleanupLegacyRemoteHubForCli(): Promise<void> {
@@ -2449,25 +2399,30 @@ async function hubStart(options: any) {
         'The hub is already running with a different LLM environment snapshot. Restart it to pick up the current OPENAI_API_KEY/GEMINI_API_KEY/DRONE_HUB_LLM_PROVIDER values.'
       );
     }
+    const output = {
+      ok: true,
+      alreadyRunning: true,
+      state: cur,
+      ...(restartReasons.length > 0
+        ? {
+            restartRecommended: true,
+            reason: restartReasons.join(' '),
+            ...(launchEnvChanged ? { runningLaunchEnv: cur.launchEnv, currentLaunchEnv } : {}),
+          }
+        : {}),
+    };
     // eslint-disable-next-line no-console
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
+    console.log(jsonOutputRequested(options)
+      ? JSON.stringify(output, null, 2)
+      : formatHubStartOutput({
+          pid: cur.pid,
           alreadyRunning: true,
-          state: cur,
-          ...(restartReasons.length > 0
-            ? {
-                restartRecommended: true,
-                reason: restartReasons.join(' '),
-                ...(launchEnvChanged ? { runningLaunchEnv: cur.launchEnv, currentLaunchEnv } : {}),
-              }
-            : {}),
-        },
-        null,
-        2
-      )
-    );
+          apiUrl: `http://${cur.apiHost}:${cur.apiPort}`,
+          uiUrl: `http://127.0.0.1:${cur.uiPort}`,
+          ...(cur.containerMcp ? { containerMcpUrl: cur.containerMcp.url } : {}),
+          logPath: cur.logPath,
+          ...(restartReasons.length > 0 ? { restartReason: restartReasons.join(' ') } : {}),
+        }));
     return;
   }
   if (cur && !pidIsRunning(cur.pid)) {
@@ -2521,25 +2476,20 @@ async function hubStart(options: any) {
       await sleep(80);
     }
 
+    const output = {
+      ok: true,
+      pid: child.pid,
+      ...(state
+        ? {
+            apiUrl: `http://${state.apiHost}:${state.apiPort}`,
+            uiUrl: `http://127.0.0.1:${state.uiPort}`,
+            ...(state.containerMcp ? { containerMcpUrl: state.containerMcp.url } : {}),
+            logPath: state.logPath,
+          }
+        : { logPath }),
+    };
     // eslint-disable-next-line no-console
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          pid: child.pid,
-          ...(state
-            ? {
-                apiUrl: `http://${state.apiHost}:${state.apiPort}`,
-                uiUrl: `http://127.0.0.1:${state.uiPort}`,
-                ...(state.containerMcp ? { containerMcpUrl: state.containerMcp.url } : {}),
-                logPath: state.logPath,
-              }
-            : { logPath }),
-        },
-        null,
-        2
-      )
-    );
+    console.log(jsonOutputRequested(options) ? JSON.stringify(output, null, 2) : formatHubStartOutput(output));
   } finally {
     try {
       await logHandle.close();
@@ -2549,7 +2499,7 @@ async function hubStart(options: any) {
   }
 }
 
-async function hubStop() {
+async function hubStop(options: { json?: boolean } = {}) {
   await cleanupLegacyRemoteHubForCli();
   const cur = await readHubState();
   const fallbackUiPort = cur?.uiPort ?? 5174;
@@ -2564,12 +2514,14 @@ async function hubStop() {
       } catch {
         // ignore
       }
+      const output = { ok: true, stopped: true, recovered: true, pids: recoveredPids };
       // eslint-disable-next-line no-console
-      console.log(JSON.stringify({ ok: true, stopped: true, recovered: true, pids: recoveredPids }, null, 2));
+      console.log(jsonOutputRequested(options) ? JSON.stringify(output, null, 2) : formatHubStopOutput({ kind: 'recovered', pids: recoveredPids }));
       return;
     }
+    const output = { ok: true, stopped: false, reason: 'not running' };
     // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ ok: true, stopped: false, reason: 'not running' }, null, 2));
+    console.log(jsonOutputRequested(options) ? JSON.stringify(output, null, 2) : formatHubStopOutput({ kind: 'not-running' }));
     return;
   }
 
@@ -2585,12 +2537,14 @@ async function hubStop() {
       for (const recoveredPid of recoveredPids) {
         await stopHubProcess(recoveredPid);
       }
+      const output = { ok: true, stopped: true, recovered: true, pids: recoveredPids };
       // eslint-disable-next-line no-console
-      console.log(JSON.stringify({ ok: true, stopped: true, recovered: true, pids: recoveredPids }, null, 2));
+      console.log(jsonOutputRequested(options) ? JSON.stringify(output, null, 2) : formatHubStopOutput({ kind: 'recovered', pids: recoveredPids }));
       return;
     }
+    const output = { ok: true, stopped: false, reason: 'stale state file', previousPid: pid };
     // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ ok: true, stopped: false, reason: 'stale state file', previousPid: pid }, null, 2));
+    console.log(jsonOutputRequested(options) ? JSON.stringify(output, null, 2) : formatHubStopOutput({ kind: 'stale', previousPid: pid }));
     return;
   }
 
@@ -2602,8 +2556,9 @@ async function hubStop() {
     // ignore
   }
 
+  const output = { ok: true, stopped: true, pid };
   // eslint-disable-next-line no-console
-  console.log(JSON.stringify({ ok: true, stopped: true, pid }, null, 2));
+  console.log(jsonOutputRequested(options) ? JSON.stringify(output, null, 2) : formatHubStopOutput({ kind: 'stopped', pid }));
 }
 
 function resolveElectronCliPath(): string {
@@ -2663,44 +2618,33 @@ async function hubApp(options: any) {
 }
 
 async function profileListCommand() {
-  // eslint-disable-next-line no-console
-  console.log(JSON.stringify({ ok: true, ...(await listProfilesState()) }, null, 2));
+  printCommandOutput({ ok: true, ...(await listProfilesState()) });
 }
 
 async function profileCurrentCommand() {
   const activeProfile = (await readActiveProfileName()) ?? DEFAULT_PROFILE_NAME;
-  // eslint-disable-next-line no-console
-  console.log(
-    JSON.stringify(
-      {
-        ok: true,
-        activeProfile,
-        mode: 'profile',
-        droneDataDir: activeProfile ? profileDroneRootDir(activeProfile) : defaultProfileDroneRootDir(),
-        dvmDataDir: activeProfile ? profileDvmRootDir(activeProfile) : defaultProfileDvmRootDir(),
-      },
-      null,
-      2,
-    ),
-  );
+  printCommandOutput({
+    ok: true,
+    activeProfile,
+    mode: 'profile',
+    droneDataDir: activeProfile ? profileDroneRootDir(activeProfile) : defaultProfileDroneRootDir(),
+    dvmDataDir: activeProfile ? profileDvmRootDir(activeProfile) : defaultProfileDvmRootDir(),
+  });
 }
 
 async function profileCreateCommand(nameRaw: string, options: { use?: boolean }) {
   const result = await createManagedProfile(nameRaw, { use: options.use, stopCurrentHub: true });
-  // eslint-disable-next-line no-console
-  console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+  printCommandOutput({ ok: true, ...result });
 }
 
 async function profileUseCommand(nameRaw: string) {
   const result = await useManagedProfile(nameRaw, { stopCurrentHub: true });
-  // eslint-disable-next-line no-console
-  console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+  printCommandOutput({ ok: true, ...result });
 }
 
 async function profileDeleteCommand(nameRaw: string) {
   const result = await deleteManagedProfile(nameRaw);
-  // eslint-disable-next-line no-console
-  console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+  printCommandOutput({ ok: true, ...result });
 }
 
 const profile = program.command('profile').description('Manage repo-local Drone/DVM profiles');
@@ -2730,6 +2674,7 @@ profile.command('delete <name>')
 const hub = program.command('hub').description('Manage the local Drone Hub (detached dev server)');
 hub.command('start')
   .description('Start the hub in detached mode')
+  .option('--json', 'Print machine-readable JSON', false)
   .option('--port <port>', 'UI port (Vite dev server or static UI server; pass 0 for auto in static mode)', '5174')
   .option('--ui-mode <mode>', 'UI mode: dev|static', 'dev')
   .option('--static-ui-dir <path>', 'Built drone-hub dist directory for --ui-mode static')
@@ -2743,11 +2688,13 @@ hub.command('start')
   });
 hub.command('stop')
   .description('Stop the detached hub')
-  .action(async () => {
-    await hubStop();
+  .option('--json', 'Print machine-readable JSON', false)
+  .action(async (options) => {
+    await hubStop(options);
   });
 hub.command('restart')
   .description('Restart the detached hub')
+  .option('--json', 'Print machine-readable JSON', false)
   .option('--port <port>', 'UI port (Vite dev server or static UI server; pass 0 for auto in static mode)', '5174')
   .option('--ui-mode <mode>', 'UI mode: dev|static', 'dev')
   .option('--static-ui-dir <path>', 'Built drone-hub dist directory for --ui-mode static')
@@ -2757,7 +2704,7 @@ hub.command('restart')
   .option('--container-mcp-port <port>', `Container MCP-only server port (${DEFAULT_CONTAINER_MCP_PORT} by default)`, String(DEFAULT_CONTAINER_MCP_PORT))
   .option('--container-mcp-url <url>', 'MCP URL projected into container agent configs')
   .action(async (options) => {
-    await hubStop();
+    await hubStop(options);
     await hubStart(options);
   });
 hub.command('run')
@@ -2799,8 +2746,7 @@ program
     await withDroneClient(name, async ({ drone, hostPort, client }) => {
       const s = await status(client);
       const runtime = normalizeDroneRuntime((drone as any)?.runtime);
-      // eslint-disable-next-line no-console
-      console.log(JSON.stringify({ name, runtime, hostPort, containerPort: drone.containerPort, status: s }, null, 2));
+      printCommandOutput({ name, runtime, hostPort, containerPort: drone.containerPort, status: s });
     });
   });
 
@@ -2828,8 +2774,7 @@ program
         force: !!options.force,
       });
 
-      // eslint-disable-next-line no-console
-      console.log(JSON.stringify(resp, null, 2));
+      printCommandOutput(resp);
     });
   });
 
@@ -3005,8 +2950,7 @@ program
 
     // Default: list chats (chatName -> {chatId, createdAt, ...})
     if (!chatOpt) {
-      // eslint-disable-next-line no-console
-      console.log(JSON.stringify({ ok: true, name: String(name), chats }, null, 2));
+      printCommandOutput({ ok: true, name: String(name), chats });
       return;
     }
 
@@ -3017,8 +2961,7 @@ program
 
     // If --turn omitted: show turn metadata.
     if (!turnOpt) {
-      // eslint-disable-next-line no-console
-      console.log(JSON.stringify({ ok: true, name: String(name), chat: chatName, chatId: c.chatId, turns }, null, 2));
+      printCommandOutput({ ok: true, name: String(name), chat: chatName, chatId: c.chatId, turns });
       return;
     }
 
@@ -3073,8 +3016,7 @@ program
       (reg as any).drones[key] = d;
     });
     else await deleteChatFromStore({ droneId, chatName });
-    // eslint-disable-next-line no-console
-    console.log(JSON.stringify({ ok: true, name: String(name), chat: chatName, removed: had }, null, 2));
+    printCommandOutput({ ok: true, name: String(name), chat: chatName, removed: had });
   });
 
 program
@@ -3103,8 +3045,7 @@ program
   .action(async (name, options) => {
     await withDroneClient(name, async ({ client }) => {
       const resp = await procStop(client, options.session ? { session: String(options.session) } : {});
-      // eslint-disable-next-line no-console
-      console.log(JSON.stringify(resp, null, 2));
+      printCommandOutput(resp);
     });
   });
 
@@ -3125,8 +3066,7 @@ program
         await sleep(60);
         submitted = await sendKeys(client, { keys: ['C-m'] });
       }
-      // eslint-disable-next-line no-console
-      console.log(JSON.stringify({ ok: true, typed, submitted }, null, 2));
+      printCommandOutput({ ok: true, typed, submitted });
     });
   });
 
@@ -3137,8 +3077,7 @@ program
   .action(async (name, keysArr) => {
     await withDroneClient(name, async ({ client }) => {
       const resp = await sendKeys(client, { keys: keysArr as string[] });
-      // eslint-disable-next-line no-console
-      console.log(JSON.stringify(resp, null, 2));
+      printCommandOutput(resp);
     });
   });
 
@@ -3150,8 +3089,7 @@ program
   .action(async (name, options) => {
     await withDroneClient(name, async ({ client }) => {
       const resp = await readOutput(client, { since: Number(options.since), max: Number(options.max) });
-      // eslint-disable-next-line no-console
-      console.log(JSON.stringify(resp, null, 2));
+      printCommandOutput(resp);
     });
   });
 
