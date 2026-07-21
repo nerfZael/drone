@@ -34,6 +34,7 @@ describe('external pending transcript turn', () => {
     expect(html).toMatch(/Working for 1m \d+s/);
     expect(html).toContain('text-[var(--muted)]');
     expect(html).toContain('border-b border-[var(--border-subtle)]');
+    expect(html).not.toContain('border-t border-[var(--border-subtle)]');
     expect(html).toContain('min-h-9');
     expect(html).not.toContain('h-1.5 w-1.5 animate-pulse');
     expect(html).toContain('Read repository instructions');
