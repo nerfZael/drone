@@ -26,6 +26,7 @@ describe('AgentPlanList', () => {
     expect(html).toContain('line-through');
     expect(html).toContain('Update the UI');
     expect(html).toContain('animate-spin');
+    expect(html).toContain('border-t border-[var(--border-subtle)]');
   });
 
   test('renders nothing without a published plan', () => {

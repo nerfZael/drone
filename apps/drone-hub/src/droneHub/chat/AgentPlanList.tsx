@@ -7,11 +7,13 @@ const DEFAULT_VISIBLE_ITEMS = 8;
 export function AgentPlanList({
   plan,
   running = false,
+  showTopDivider = true,
   className = '',
   headerActions,
 }: {
   plan?: AgentPlan;
   running?: boolean;
+  showTopDivider?: boolean;
   className?: string;
   headerActions?: React.ReactNode;
 }) {
@@ -26,7 +28,7 @@ export function AgentPlanList({
 
   return (
     <section
-      className={`mt-2.5 border-t border-[var(--border-subtle)] pt-2.5 ${className}`}
+      className={`mt-2.5 ${showTopDivider ? 'border-t border-[var(--border-subtle)] pt-2.5' : ''} ${className}`}
       aria-label="Plan"
     >
       <div className={`${showPlanItems ? 'mb-2' : ''} flex min-h-7 items-center justify-between gap-3`}>
