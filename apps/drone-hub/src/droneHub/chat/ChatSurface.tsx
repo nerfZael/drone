@@ -47,7 +47,6 @@ export function ChatSurfaceTranscript({
   loadingMessage,
   hasContent,
   emptyState,
-  initialScrollKey,
   children,
 }: ChatSurfaceTranscriptProps) {
   return (
@@ -59,7 +58,6 @@ export function ChatSurfaceTranscript({
         loadingMessage={loadingMessage}
         hasContent={hasContent}
         emptyState={emptyState}
-        initialScrollKey={initialScrollKey}
       >
         {children}
       </ChatTranscriptFrame>

@@ -17,7 +17,10 @@ export type AgentChatTranscriptItemKind =
 export type AgentChatTranscriptItem = {
   key: string;
   kind: AgentChatTranscriptItemKind;
-  content: React.ReactNode;
+  latestActivityEligible?: boolean;
+  content:
+    | React.ReactNode
+    | ((state: { isLatestActivity: boolean }) => React.ReactNode);
 };
 
 export type AgentChatTranscriptProps = Omit<ChatSurfaceTranscriptProps, 'children'> & {
@@ -30,17 +33,30 @@ export function AgentChatTranscript({ items, ...frame }: AgentChatTranscriptProp
   const visibleItems = toolActivityVisible
     ? items
     : items.filter((item) => item.kind !== 'tool');
+  let latestActivityIndex = -1;
+  for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
+    const item = visibleItems[index];
+    if (item?.latestActivityEligible === false) continue;
+    const kind = item?.kind;
+    if (kind === 'message' || kind === 'tool' || kind === 'pending') {
+      latestActivityIndex = index;
+      break;
+    }
+  }
 
   return (
     <ChatSurfaceTranscript {...frame}>
       {visibleItems.map((item, index) => {
         const followsTool = item.kind === 'tool' && visibleItems[index - 1]?.kind === 'tool';
+        const content = typeof item.content === 'function'
+          ? item.content({ isLatestActivity: index === latestActivityIndex })
+          : item.content;
         return followsTool ? (
           <div key={item.key} data-transcript-item-kind={item.kind} className="-mt-5">
-            {item.content}
+            {content}
           </div>
         ) : (
-          <React.Fragment key={item.key}>{item.content}</React.Fragment>
+          <React.Fragment key={item.key}>{content}</React.Fragment>
         );
       })}
     </ChatSurfaceTranscript>

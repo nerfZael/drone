@@ -4,7 +4,6 @@ import type { TranscriptItem } from '../types';
 import { AgentMessageExtras, extractAgentMessageContent } from './AgentMessageExtras';
 import type { LinkedPullRequestContext } from './LinkedPullRequestCards';
 import { ChatMessageBody } from './ChatMessageBody';
-import { ChatMessageCopyAction } from './ChatMessageCopyAction';
 import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
 import type { DroneHubTask } from './drone-hub-task-parser';
@@ -12,6 +11,7 @@ import type { DroneHubTaskSpawnMode } from './drone-hub-task-spawn';
 import { IconSnapshot, IconSpinner } from './icons';
 import { ChatMessageFrame } from './ChatMessageFrame';
 import { AgentRunSummaryLine } from './WorkingElapsedStatus';
+import { UserChatMessage } from './UserChatMessage';
 
 function sameAttachments(aRaw: unknown, bRaw: unknown): boolean {
   const a = normalizeImageAttachmentRefs(aRaw);
@@ -87,26 +87,21 @@ export const TranscriptTurn = React.memo(
     const canRollbackDockerSnapshot = Boolean(item.ok && dockerSnapshot?.id && dockerSnapshot.status === 'ready' && onRollbackDockerSnapshot);
     return (
       <div className="group/turn animate-fade-in">
-        <ChatMessageFrame
-          role="user"
+        <UserChatMessage
           at={promptIso}
-          showRoleIcon={showRoleIcons}
-          showRoleLabel={showRoleIcons}
-          hoverActions={<ChatMessageCopyAction text={promptText} position="hover-rail" />}
-        >
-          <ChatMessageBody
-            role="user"
-            text={promptText}
-            onOpenFileReference={onOpenFileReference}
-            onOpenLink={onOpenLink}
-          />
-          <ImageAttachmentChips
-            attachments={attachments}
-            droneId={droneId}
-            droneHomePath={droneHomePath}
-            onOpenFileReference={onOpenFileReference}
-          />
-        </ChatMessageFrame>
+          showRoleIcons={showRoleIcons}
+          text={promptText}
+          onOpenFileReference={onOpenFileReference}
+          onOpenLink={onOpenLink}
+          attachmentContent={(
+            <ImageAttachmentChips
+              attachments={attachments}
+              droneId={droneId}
+              droneHomePath={droneHomePath}
+              onOpenFileReference={onOpenFileReference}
+            />
+          )}
+        />
 
         {completedRunDurationMs !== null ? (
           <AgentRunSummaryLine

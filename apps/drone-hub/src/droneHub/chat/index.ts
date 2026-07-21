@@ -18,6 +18,12 @@ export {
   type AgentChatTranscriptProps,
 } from './AgentChatTranscript';
 export { ChatTranscriptFrame, type ChatTranscriptFrameProps } from './ChatTranscriptFrame';
+export {
+  computePrependedTranscriptScrollTop,
+  isTranscriptPinned,
+  shouldAutoFollowTranscript,
+  usePinnedTranscriptScroll,
+} from './use-pinned-transcript-scroll';
 export type {
   ChatImageAttachmentPayload,
   ChatInputProps,
@@ -65,6 +71,7 @@ export {
 } from './ChatComposerContext';
 export { ChatMessageFrame } from './ChatMessageFrame';
 export { ChatMessageBody, type ChatMessageImage } from './ChatMessageBody';
+export { UserChatMessage } from './UserChatMessage';
 export { ChatMessageCopyAction } from './ChatMessageCopyAction';
 export { PendingTranscriptTurn } from './PendingTranscriptTurn';
 export { RelativeTimeText } from './RelativeTimeText';

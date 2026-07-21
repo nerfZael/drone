@@ -63,7 +63,14 @@ describe('Blip assistant host', () => {
       expect(messages.filter((message) => message.role === 'assistant')).toHaveLength(2);
       expect(events.filter((event) => event.type === 'session_started')).toHaveLength(1);
       expect(events.filter((event) => event.type === 'session_finished')).toHaveLength(2);
+      expect(events.filter((event) => event.type === 'assistant_delta')).toHaveLength(0);
       expect(subscribedEvents.filter((event) => event.type === 'session_finished')).toHaveLength(1);
+      expect(subscribedEvents.filter((event) => event.type === 'assistant_delta')).toHaveLength(0);
+      expect(
+        (await repository.readTranscript(session)).filter(
+          (entry) => entry.type === 'runtime_event' && entry.event.type === 'assistant_delta',
+        ),
+      ).toHaveLength(0);
       const latestPage = await host.historyPage('thread-one', { limit: 2 });
       expect(latestPage.entries).toHaveLength(2);
       expect(latestPage.page.hasOlder).toBe(true);

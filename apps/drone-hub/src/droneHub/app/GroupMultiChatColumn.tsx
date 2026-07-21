@@ -793,7 +793,9 @@ export function GroupMultiChatColumn({
                 <TranscriptTurn
                   key={messageId}
                   item={item}
-                  autoExpandAgentMessage={index === items.length - 1}
+                  autoExpandAgentMessage={
+                    index === items.length - 1 && visiblePendingPrompts.length === 0
+                  }
                   parsingJobs={false}
                   onCreateJobs={onCreateJobs}
                   onSpawnDroneHubTask={spawnDroneHubTaskForColumn}
@@ -804,10 +806,11 @@ export function GroupMultiChatColumn({
                 />
               );
             })}
-            {visiblePendingPrompts.map((item) => (
+            {visiblePendingPrompts.map((item, index) => (
               <PendingTranscriptTurn
                 key={`${drone.id}:pending:${item.id}`}
                 item={item}
+                autoExpandPrompt={index === visiblePendingPrompts.length - 1}
                 droneId={drone.id}
                 droneHomePath={droneHome}
                 showRoleIcons={false}

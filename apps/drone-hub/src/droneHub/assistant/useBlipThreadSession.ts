@@ -9,9 +9,6 @@ import type {
   BlipThreadStreamEvent,
 } from '@blip/protocol';
 
-import { historyContainsStreamingAssistantText } from './assistant-streaming-state';
-import type { AssistantMessage } from './assistant-types';
-
 async function requestHistory(
   threadId: string,
   input?: { before?: number; limit?: number },
@@ -64,14 +61,11 @@ export function useBlipThreadSession({
   const [olderLoading, setOlderLoading] = React.useState(false);
   const [runtimeThreadId, setRuntimeThreadId] = React.useState('');
   const [running, setRunning] = React.useState(false);
-  const [streamingText, setStreamingText] = React.useState('');
   const [toolProgress, setToolProgress] = React.useState<Record<string, BlipHistoryMessage>>({});
   const [runError, setRunError] = React.useState<string | null>(null);
   const [historyError, setHistoryError] = React.useState<string | null>(null);
   const threadIdRef = React.useRef(threadId);
   const runEpochRef = React.useRef(0);
-  const streamingTextRef = React.useRef('');
-  const replaceStreamingTextOnNextDeltaRef = React.useRef(true);
   const seenEventKeysRef = React.useRef<string[]>([]);
   const latestHistoryRequestRef = React.useRef(0);
   const onNativeChangeRef = React.useRef(onNativeChange);
@@ -89,17 +83,6 @@ export function useBlipThreadSession({
         if (threadIdRef.current !== threadId) return;
         setEntries((current) => mergeEntries(current, page.entries));
         setEntriesThreadId(threadId);
-        const streamedText = streamingTextRef.current;
-        if (
-          streamedText.trim() &&
-          historyContainsStreamingAssistantText(
-            page.entries.map((entry) => entry.message) as AssistantMessage[],
-            streamedText,
-          )
-        ) {
-          streamingTextRef.current = '';
-          setStreamingText((current) => (current === streamedText ? '' : current));
-        }
         const persistedToolCalls = new Set(
           page.entries.flatMap((entry) => {
             const message = entry.message as any;
@@ -143,9 +126,6 @@ export function useBlipThreadSession({
     setOlderLoading(false);
     setRuntimeThreadId(threadId);
     setRunning(false);
-    setStreamingText('');
-    streamingTextRef.current = '';
-    replaceStreamingTextOnNextDeltaRef.current = true;
     setToolProgress({});
     setRunError(null);
     setHistoryError(null);
@@ -189,21 +169,12 @@ export function useBlipThreadSession({
         runEpochRef.current += 1;
         setRunning(true);
         setRunError(null);
-        // A model turn can follow a persisted assistant/tool message before the refreshed history
-        // reaches the browser. Keep the previous text visible during that gap, then replace it when
-        // the next turn produces its first text delta.
-        replaceStreamingTextOnNextDeltaRef.current = true;
         void refreshHistory({ quiet: true });
         return;
       }
       if (event.type === 'assistant_delta') {
-        setRunning(true);
-        const next = replaceStreamingTextOnNextDeltaRef.current
-          ? event.text
-          : `${streamingTextRef.current}${event.text}`;
-        replaceStreamingTextOnNextDeltaRef.current = false;
-        streamingTextRef.current = next;
-        setStreamingText(next);
+        // Native chats render only durable assistant messages. Per-token updates are intentionally
+        // ignored so partial text never competes with canonical history.
         return;
       }
       if (event.type === 'session_error') {
@@ -311,17 +282,6 @@ export function useBlipThreadSession({
     return () => source.close();
   }, [enabled, handleStreamEvent, threadId]);
 
-  const streamingMessage = React.useMemo<BlipHistoryMessage | null>(
-    () =>
-      runtimeThreadId === threadId && streamingText
-        ? {
-            role: 'assistant',
-            content: [{ type: 'text', text: streamingText }],
-            timestamp: Date.now(),
-          }
-        : null,
-    [runtimeThreadId, streamingText, threadId],
-  );
   const visibleEntries = React.useMemo(
     () =>
       entriesThreadId === threadId
@@ -341,7 +301,6 @@ export function useBlipThreadSession({
 
   return {
     messages,
-    streamingMessage,
     running: runtimeThreadId === threadId && running,
     runError: runtimeThreadId === threadId ? runError : null,
     historyError: entriesThreadId === threadId ? historyError : null,

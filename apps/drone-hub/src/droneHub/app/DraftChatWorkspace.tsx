@@ -423,9 +423,16 @@ export function DraftChatWorkspace({
         {draftChat.prompt ? (
           <div className="px-5 py-5">
             <div className="mx-auto max-w-[1275px] space-y-5">
-              <PendingTranscriptTurn item={draftChat.prompt} />
-              {visibleQueuedDraftPrompts.map((p) => (
-                <PendingTranscriptTurn key={`draft-queued-${p.id}`} item={p} />
+              <PendingTranscriptTurn
+                item={draftChat.prompt}
+                autoExpandPrompt={visibleQueuedDraftPrompts.length === 0}
+              />
+              {visibleQueuedDraftPrompts.map((p, index) => (
+                <PendingTranscriptTurn
+                  key={`draft-queued-${p.id}`}
+                  item={p}
+                  autoExpandPrompt={index === visibleQueuedDraftPrompts.length - 1}
+                />
               ))}
             </div>
           </div>

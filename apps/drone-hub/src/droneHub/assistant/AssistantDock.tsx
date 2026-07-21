@@ -8,6 +8,7 @@ import {
   ChatSurfaceComposer,
   EmptyState,
   useAgentChatSurfaceAdapter,
+  usePinnedTranscriptScroll,
   type AgentChatTranscriptItem,
   type ChatComposerMenuAction,
   type ChatComposerContextConfig,
@@ -30,11 +31,7 @@ import {
 import { IconChevron, IconDrone, IconFile, IconFolder, iconForFilePath } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import { useBlipThreadSession } from './useBlipThreadSession';
-import {
-  hasVisibleAssistantStreamingText,
-  latestActivityHasVisibleAssistantText,
-  visibleAssistantStreamingMessages,
-} from './assistant-streaming-state';
+import { latestActivityHasVisibleAssistantText } from './assistant-streaming-state';
 import { AssistantThreadFilesView, selectDefaultArtifactPath } from './AssistantThreadFilesView';
 import { AssistantWorkspaceAccessView } from './AssistantWorkspaceAccessView';
 import {
@@ -46,7 +43,7 @@ import {
 import {
   AssistantQueuedPromptRow,
   AssistantMessageRow,
-  AssistantThinkingRow,
+  AssistantWorkingRow,
   ToolRunActivity,
 } from './AssistantTranscript';
 import { ApprovalCard } from './AssistantWorkflowCards';
@@ -108,8 +105,6 @@ import type {
   PendingAssistantScopeSave,
 } from './assistant-types';
 const ASSISTANT_FILES_OPEN_STORAGE_KEY = 'droneHub.assistant.filesOpen';
-/** Distance from bottom (px) below which we treat the assistant transcript as "pinned" for auto-scroll. */
-const ASSISTANT_SCROLL_BOTTOM_THRESHOLD_PX = 48;
 
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
 const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
@@ -310,10 +305,6 @@ export function AssistantDock({
   const [systemPromptError, setSystemPromptError] = React.useState<string | null>(null);
   const [systemPromptNotice, setSystemPromptNotice] = React.useState<string | null>(null);
   const activeDroneHubDrag = useDroneHubActiveDrag();
-  const scrollRef = React.useRef<HTMLDivElement | null>(null);
-  const scrollContentRef = React.useRef<HTMLDivElement | null>(null);
-  /** When false, new transcript content must not force scroll position (user scrolled up). */
-  const assistantStickToBottomRef = React.useRef(true);
   const referencedDronesRef = React.useRef<AssistantDroneReference[]>([]);
   const refocusInputWhenIdleRef = React.useRef(false);
   const activeThreadIdRef = React.useRef('');
@@ -334,40 +325,6 @@ export function AssistantDock({
   });
   const scopeDropActive = scopeDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
 
-  const updateAssistantPinned = React.useCallback((node: HTMLDivElement | null) => {
-    if (!node) return;
-    const gap = node.scrollHeight - node.scrollTop - node.clientHeight;
-    assistantStickToBottomRef.current = gap <= ASSISTANT_SCROLL_BOTTOM_THRESHOLD_PX;
-  }, []);
-
-  const scrollAssistantToBottom = React.useCallback((options: { force?: boolean; retries?: number } = {}) => {
-    const { force = false, retries = 4 } = options;
-    if (force) assistantStickToBottomRef.current = true;
-    let triesRemaining = retries;
-    const attempt = () => {
-      requestAnimationFrame(() => {
-        const node = scrollRef.current;
-        if (!node) {
-          if (triesRemaining > 0) {
-            triesRemaining -= 1;
-            attempt();
-          }
-          return;
-        }
-        if (!force && !assistantStickToBottomRef.current) return;
-        node.scrollTop = node.scrollHeight;
-        updateAssistantPinned(node);
-        if (force) assistantStickToBottomRef.current = true;
-        const gap = node.scrollHeight - node.scrollTop - node.clientHeight;
-        if (gap > 1 && triesRemaining > 0) {
-          triesRemaining -= 1;
-          attempt();
-        }
-      });
-    };
-    attempt();
-  }, [updateAssistantPinned]);
-
   const activeThread = snapshot?.threads[0] ?? null;
   const activeThreadId = activeThread?.id ?? '';
   activeThreadIdRef.current = activeThreadId;
@@ -382,9 +339,6 @@ export function AssistantDock({
   });
   const hasHistory =
     blipSession.messages.length > 0 ||
-    Boolean(blipSession.streamingMessage) ||
-    Boolean(snapshot?.streamingMessage) ||
-    Boolean(snapshot?.streamingMessages?.length) ||
     Boolean(activeThread?.queuedPrompts?.length);
   React.useEffect(() => {
     if (hasHistory) onHistoryChange?.(true);
@@ -392,17 +346,6 @@ export function AssistantDock({
   React.useEffect(() => {
     if (activeThreadId) void blipSession.refreshHistory({ quiet: true });
   }, [activeThread?.updatedAt, activeThreadId, blipSession.refreshHistory]);
-  const loadOlderMessages = React.useCallback(async () => {
-    const node = scrollRef.current;
-    const previousHeight = node?.scrollHeight ?? 0;
-    const previousTop = node?.scrollTop ?? 0;
-    await blipSession.loadOlder();
-    requestAnimationFrame(() => {
-      const current = scrollRef.current;
-      if (!current) return;
-      current.scrollTop = previousTop + Math.max(0, current.scrollHeight - previousHeight);
-    });
-  }, [blipSession]);
   const promptDeliveryMode: AssistantPromptDeliveryMode = activeThread?.promptDeliveryMode === 'asap' ? 'asap' : 'queue';
   const activeAccessScope: AssistantAccessScope | null = activeThread?.accessScope ?? snapshot?.accessScope ?? null;
   const activeAccessScopeDroneIdsKey = activeAccessScope?.droneIds?.join('\u0000') ?? '';
@@ -423,6 +366,40 @@ export function AssistantDock({
     blipSession.running ||
     activeThread?.status === 'running' ||
     activeThread?.status === 'waiting_for_approval';
+  const transcriptContentVersion = React.useMemo(
+    () => [
+      blipSession.messages,
+      activeThread?.queuedPrompts,
+      snapshot?.pendingApprovals,
+      running,
+      error,
+      blipSession.runError,
+      blipSession.historyError,
+    ],
+    [
+      activeThread?.queuedPrompts,
+      blipSession.historyError,
+      blipSession.messages,
+      blipSession.runError,
+      error,
+      running,
+      snapshot?.pendingApprovals,
+    ],
+  );
+  const {
+    bindContentRef: bindScrollContentRef,
+    bindScrollRef,
+    preserveScrollOnPrepend,
+    scrollRef,
+    scrollToBottom: scrollAssistantToBottom,
+  } = usePinnedTranscriptScroll({
+    contextKey: `${nativeDroneId}:${nativeChatName}:${activeThreadId}`,
+    contentVersion: transcriptContentVersion,
+    enabled: !filesOpen,
+  });
+  const loadOlderMessages = React.useCallback(async () => {
+    await preserveScrollOnPrepend(() => blipSession.loadOlder());
+  }, [blipSession.loadOlder, preserveScrollOnPrepend]);
   const droneMentionLinks = React.useMemo<MarkdownTextMentionLink[]>(() => {
     const nameCounts = new Map<string, number>();
     for (const name of Object.values(droneNameById)) {
@@ -455,41 +432,12 @@ export function AssistantDock({
     disabled: droneReferenceControlsLocked,
   });
   const droneReferenceDropActive = droneReferenceDropIsOver && assignedDroneIdsFromData(activeDroneHubDrag).length > 0;
-  const snapshotStreamingMessages = React.useMemo(
-    () =>
-      Array.isArray(snapshot?.streamingMessages) && snapshot.streamingMessages.length > 0
-        ? snapshot.streamingMessages
-        : snapshot?.streamingMessage
-          ? [snapshot.streamingMessage]
-          : [],
-    [snapshot?.streamingMessage, snapshot?.streamingMessages],
-  );
-  const activeStreamingMessages = React.useMemo(() => {
-    return visibleAssistantStreamingMessages({
-      persistedMessages: blipSession.messages as AssistantMessage[],
-      snapshotMessages: snapshotStreamingMessages,
-      localMessage: blipSession.streamingMessage as AssistantMessage | null,
-    });
-  }, [blipSession.messages, blipSession.streamingMessage, snapshotStreamingMessages]);
-  const visibleMessages = React.useMemo(() => {
-    const messages = blipSession.messages as AssistantMessage[];
-    if (activeStreamingMessages.length === 0) return messages;
-    return [...messages, ...activeStreamingMessages];
-  }, [activeStreamingMessages, blipSession.messages]);
+  const visibleMessages = blipSession.messages as AssistantMessage[];
   const visibleItems = React.useMemo(() => {
     return renderItemsFromMessages(visibleMessages);
   }, [visibleMessages]);
   const latestActivityItemKey = React.useMemo(() => {
     return visibleItems[visibleItems.length - 1]?.key ?? '';
-  }, [visibleItems]);
-  const latestAssistantMessageItemKey = React.useMemo(() => {
-    for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
-      const item = visibleItems[index];
-      if (item?.type !== 'message' || item.message.role !== 'assistant') continue;
-      if (!messageVisibleText(item.message).trim()) continue;
-      return item.key;
-    }
-    return '';
   }, [visibleItems]);
   const latestUserItemIndex = React.useMemo(() => {
     for (let index = visibleItems.length - 1; index >= 0; index -= 1) {
@@ -504,27 +452,25 @@ export function AssistantDock({
       (item, index) => index > latestUserItemIndex && item.type !== 'message',
     );
   }, [latestUserItemIndex, visibleItems]);
-  const streamingAssistantSourceIndex = React.useMemo(() => {
-    const assistantStreamingOffset = activeStreamingMessages.findIndex(
-      (streaming) => streaming.role === 'assistant',
-    );
-    if (assistantStreamingOffset < 0) return -1;
-    return blipSession.messages.length + assistantStreamingOffset;
-  }, [activeStreamingMessages, blipSession.messages.length]);
+  const latestUserStartedAt = React.useMemo(() => {
+    const latestUser = visibleItems[latestUserItemIndex];
+    return latestUser?.type === 'message'
+      ? assistantMessageTimestampMs(latestUser.message)
+      : undefined;
+  }, [latestUserItemIndex, visibleItems]);
   const latestActivityShowsReasoning = React.useMemo(() => {
     if (!running || !latestActivityItemKey) return false;
     const item = visibleItems.find((candidate) => candidate.key === latestActivityItemKey);
     if (item?.type !== 'message' || item.message.role !== 'assistant') return false;
     if (lastAssistantContentBlock(item.message)?.type !== 'thinking') return false;
-    return Boolean(latestThinkingText(item.message).trim() || item.sourceMessageIndex === streamingAssistantSourceIndex);
-  }, [latestActivityItemKey, running, streamingAssistantSourceIndex, visibleItems]);
-  const showThinking =
+    return Boolean(latestThinkingText(item.message).trim());
+  }, [latestActivityItemKey, running, visibleItems]);
+  const showWorking =
     running &&
     activePendingApprovals.length === 0 &&
     !hasActiveToolRun &&
     !latestActivityShowsReasoning &&
-    !latestActivityHasVisibleAssistantText(visibleItems) &&
-    !hasVisibleAssistantStreamingText(activeStreamingMessages);
+    !latestActivityHasVisibleAssistantText(visibleItems);
   const toolDroneKey = React.useMemo(() => toolDroneLookupKey(visibleItems), [visibleItems]);
 
   const applySnapshot = React.useCallback((next: AssistantSnapshot) => setSnapshot(next), []);
@@ -915,35 +861,6 @@ export function AssistantDock({
       });
     },
   });
-
-  React.useLayoutEffect(() => {
-    scrollAssistantToBottom({ force: true });
-  }, [activeThreadId, filesOpen, scrollAssistantToBottom]);
-
-  React.useEffect(() => {
-    const node = scrollRef.current;
-    if (!node) return;
-    const onScroll = () => updateAssistantPinned(node);
-    node.addEventListener('scroll', onScroll, { passive: true });
-    return () => node.removeEventListener('scroll', onScroll);
-  }, [activeThreadId, filesOpen, updateAssistantPinned]);
-
-  React.useEffect(() => {
-    if (!assistantStickToBottomRef.current) return;
-    scrollAssistantToBottom();
-  }, [activePendingApprovals.length, scrollAssistantToBottom, showThinking, snapshot?.streamingMessage, visibleItems, visibleQueuedPrompts.length]);
-
-  React.useEffect(() => {
-    const node = scrollRef.current;
-    const content = scrollContentRef.current;
-    if ((!node && !content) || typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(() => {
-      if (assistantStickToBottomRef.current) scrollAssistantToBottom({ retries: 1 });
-    });
-    if (node) observer.observe(node);
-    if (content) observer.observe(content);
-    return () => observer.disconnect();
-  }, [activeThreadId, filesOpen, scrollAssistantToBottom]);
 
   React.useEffect(() => {
     if (running || !refocusInputWhenIdleRef.current) return;
@@ -1545,13 +1462,22 @@ export function AssistantDock({
     const item = visibleItems[itemIndex]!;
     if (item.type === 'message') {
       const jobsTurn = -(item.sourceMessageIndex + 1);
+      const latestActivityEligible = Boolean(
+        item.message.role === 'user' ||
+        messageVisibleText(item.message).trim() ||
+        messageImageParts(item.message).length > 0 ||
+        item.message.errorMessage ||
+        (toolActivityVisible && item.showToolCalls && toolCalls(item.message).length > 0) ||
+        (running && latestThinkingText(item.message).trim()),
+      );
       nativeTranscriptItems.push({
         key: item.key,
         kind: 'message',
-        content: (
+        latestActivityEligible,
+        content: ({ isLatestActivity }) => (
           <AssistantMessageRow
             message={item.message}
-            autoExpandAgentMessage={item.key === latestAssistantMessageItemKey}
+            autoExpandMessage={isLatestActivity}
             messageExtras={{
               messageId: `${activeThreadId}:${item.key}`,
               parsingJobs: Boolean(messageFeatures.parsingJobsByTurn[jobsTurn]),
@@ -1567,11 +1493,7 @@ export function AssistantDock({
             droneMentionLinks={droneMentionLinks}
             onOpenDroneMention={openDroneMention}
             showToolCalls={toolActivityVisible && item.showToolCalls}
-            isStreamingAssistant={
-              item.message.role === 'assistant' &&
-              item.sourceMessageIndex === streamingAssistantSourceIndex
-            }
-            showReasoning={running && item.key === latestActivityItemKey}
+            showReasoning={running && isLatestActivity}
           />
         ),
       });
@@ -1636,22 +1558,24 @@ export function AssistantDock({
     nativeTranscriptItems.push({
       key: runKey,
       kind: 'tool',
-      content: (
+      content: ({ isLatestActivity }) => (
         <ToolRunActivity
+          key={isLatestActivity ? 'latest' : 'history'}
           items={runItems}
           active={runActive}
           startedAt={startedAt}
           endedAt={endedAt}
           droneNameById={droneNameById}
+          initiallyExpanded={isLatestActivity}
         />
       ),
     });
   }
-  if (showThinking) {
+  if (showWorking) {
     nativeTranscriptItems.push({
-      key: 'native-thinking',
+      key: 'native-working',
       kind: 'status',
-      content: <AssistantThinkingRow />,
+      content: <AssistantWorkingRow startedAt={latestUserStartedAt} />,
     });
   }
   for (const approval of activePendingApprovals) {
@@ -1833,9 +1757,8 @@ export function AssistantDock({
             }`}
           >
             <AgentChatTranscript
-              scrollRef={scrollRef}
-              contentRef={scrollContentRef}
-              initialScrollKey={`${nativeDroneId}:${nativeChatName}:${activeThreadId ?? ''}`}
+              scrollRef={bindScrollRef}
+              contentRef={bindScrollContentRef}
               loading={Boolean(
                 (loading && !snapshot) || (blipSession.historyLoading && visibleItems.length === 0),
               )}
@@ -1843,7 +1766,7 @@ export function AssistantDock({
               hasContent={Boolean(
                 blipSession.hasOlder ||
                 visibleItems.length > 0 ||
-                showThinking ||
+                showWorking ||
                 activePendingApprovals.length > 0 ||
                 visibleQueuedPrompts.length > 0 ||
                 error ||

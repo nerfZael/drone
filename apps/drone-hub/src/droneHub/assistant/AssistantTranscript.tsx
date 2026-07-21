@@ -7,9 +7,13 @@ import {
 } from '../chat/AgentMessageExtras';
 import type { MarkdownTextMentionLink } from '../chat/MarkdownMessage';
 import { ChatMessageBody } from '../chat/ChatMessageBody';
-import { ChatMessageCopyAction } from '../chat/ChatMessageCopyAction';
 import { ChatMessageFrame } from '../chat/ChatMessageFrame';
-import { AgentRunSummaryLine, formatWorkingDuration } from '../chat/WorkingElapsedStatus';
+import { UserChatMessage } from '../chat/UserChatMessage';
+import {
+  AgentRunSummaryLine,
+  formatWorkingDuration,
+  WorkingElapsedStatus,
+} from '../chat/WorkingElapsedStatus';
 import { IconDrone } from '../icons';
 import { dispatchAssistantOpenDroneChat } from './open-drone-chat-event';
 import {
@@ -93,7 +97,7 @@ function ToolDisclosure({
   children,
 }: {
   title: string;
-  status?: 'ok' | 'error';
+  status?: 'pending' | 'ok' | 'error';
   children: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -107,14 +111,19 @@ function ToolDisclosure({
       >
         {status ? (
           <span
+            data-tool-status={status}
             className={`inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-full ${
               status === 'error'
                 ? 'bg-[var(--red)] text-[var(--bg)]'
-                : 'bg-[var(--green)] text-[var(--bg)]'
+                : status === 'ok'
+                  ? 'bg-[var(--green)] text-[var(--bg)]'
+                  : 'text-[var(--accent)]'
             }`}
           >
             {status === 'error' ? (
               <span className="h-1.5 w-1.5 rounded-full bg-current" />
+            ) : status === 'pending' ? (
+              <ToolSpinnerIcon className="h-3 w-3" />
             ) : (
               <ToolCheckIcon className="h-2.5 w-2.5" />
             )}
@@ -148,37 +157,37 @@ function ToolCheckIcon({ className }: { className?: string }) {
   );
 }
 
-function ThinkingPulseDots() {
+function ToolSpinnerIcon({ className }: { className?: string }) {
   return (
-    <span
-      className="inline-flex h-6 flex-shrink-0 items-center gap-1 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-2"
+    <svg
+      className={`animate-spin ${className ?? ''}`}
+      viewBox="0 0 12 12"
+      fill="none"
       aria-hidden="true"
     >
-      <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--muted)]" />
-      <span
-        className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--muted)]"
-        style={{ animationDelay: '120ms' }}
+      <circle cx="6" cy="6" r="4.5" stroke="currentColor" strokeWidth="1.5" opacity="0.25" />
+      <path
+        d="M6 1.5a4.5 4.5 0 0 1 4.5 4.5"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
       />
-      <span
-        className="h-1.5 w-1.5 animate-pulse rounded-full bg-[var(--muted)]"
-        style={{ animationDelay: '240ms' }}
-      />
-    </span>
+    </svg>
   );
 }
 
-export function AssistantThinkingRow() {
+export function AssistantWorkingRow({ startedAt }: { startedAt?: string | number | null }) {
   return (
-    <div className="px-3 py-2">
-      <ThinkingPulseDots />
+    <div className="px-3">
+      <WorkingElapsedStatus startedAt={startedAt} />
     </div>
   );
 }
 
-function ReasoningBlock({ text, headerPulse }: { text: string; headerPulse: boolean }) {
+function ReasoningBlock({ text }: { text: string }) {
   const [open, setOpen] = React.useState(false);
   const trimmed = text.trim();
-  if (!trimmed && !headerPulse) return null;
+  if (!trimmed) return null;
 
   return (
     <div className="mb-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-faint)]">
@@ -194,7 +203,6 @@ function ReasoningBlock({ text, headerPulse }: { text: string; headerPulse: bool
         >
           Reasoning
         </span>
-        {headerPulse ? <ThinkingPulseDots /> : null}
         <span className="ml-auto flex-shrink-0 text-[var(--text-10)] text-[var(--muted)]">
           {open ? 'Hide' : 'Show'}
         </span>
@@ -213,26 +221,34 @@ function ReasoningBlock({ text, headerPulse }: { text: string; headerPulse: bool
             </div>
           </div>
         )
-      ) : headerPulse ? (
-        <div className="border-t border-[var(--border-subtle)] px-2.5 py-2 text-[var(--text-11)] text-[var(--muted-dim)]">
-          …
-        </div>
       ) : null}
     </div>
   );
 }
 
 function ToolStatusIndicator({ result }: { result?: AssistantMessage }) {
-  const dotClass = !result
-    ? 'bg-[var(--accent)]'
-    : result.isError
-      ? 'bg-[var(--red)]'
-      : 'bg-[var(--green)]';
-  if (!result || result.isError)
-    return <span className={`h-1.5 w-1.5 flex-shrink-0 rounded-full ${dotClass}`} />;
+  if (!result) {
+    return (
+      <span
+        data-tool-status="pending"
+        className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center text-[var(--accent)]"
+      >
+        <ToolSpinnerIcon className="h-3 w-3" />
+      </span>
+    );
+  }
+  if (result.isError) {
+    return (
+      <span
+        data-tool-status="error"
+        className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--red)]"
+      />
+    );
+  }
   return (
     <span
-      className={`inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-full ${dotClass} text-[var(--bg)]`}
+      data-tool-status="ok"
+      className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center rounded-full bg-[var(--green)] text-[var(--bg)]"
     >
       <ToolCheckIcon className="h-2.5 w-2.5" />
     </span>
@@ -653,7 +669,7 @@ export function ToolActivityRow({
   const resultText = result ? messageText(result) : '';
   return (
     <div className="mx-3">
-      <ToolDisclosure title={title} status={result ? (result.isError ? 'error' : 'ok') : undefined}>
+      <ToolDisclosure title={title} status={result ? (result.isError ? 'error' : 'ok') : 'pending'}>
         {call ? (
           <div>
             <div
@@ -726,7 +742,7 @@ export function ToolRunActivity({
   startedAt,
   endedAt,
   droneNameById = {},
-  initiallyExpanded = false,
+  initiallyExpanded = active,
 }: {
   items: AssistantToolRenderItem[];
   active: boolean;
@@ -787,18 +803,16 @@ export function AssistantMessageRow({
   droneMentionLinks,
   onOpenDroneMention,
   showToolCalls = true,
-  isStreamingAssistant = false,
   showReasoning = false,
-  autoExpandAgentMessage = false,
+  autoExpandMessage = false,
 }: {
   message: AssistantMessage;
   messageExtras?: Omit<AgentMessageExtrasProps, 'text' | 'tasks'>;
   droneMentionLinks?: MarkdownTextMentionLink[];
   onOpenDroneMention?: (mention: MarkdownTextMentionLink) => void;
   showToolCalls?: boolean;
-  isStreamingAssistant?: boolean;
   showReasoning?: boolean;
-  autoExpandAgentMessage?: boolean;
+  autoExpandMessage?: boolean;
 }) {
   const calls = showToolCalls ? toolCalls(message) : [];
   const content = message.content;
@@ -823,6 +837,26 @@ export function AssistantMessageRow({
     return <ToolActivityRow result={message} />;
   }
 
+  if (message.role === 'user') {
+    const images = messageImageParts(message);
+    return (
+      <UserChatMessage
+        at={message.createdAt}
+        text={visibleText}
+        images={images.map((image, index) => ({
+          key: `${image.mimeType}:${index}`,
+          src: `data:${image.mimeType};base64,${image.data}`,
+          alt: 'Attached image',
+        }))}
+        autoExpand={autoExpandMessage}
+        onOpenFileReference={messageExtras?.onOpenFileReference}
+        onOpenLink={messageExtras?.onOpenLink}
+        textMentionLinks={droneMentionLinks}
+        onOpenTextMention={onOpenDroneMention}
+      />
+    );
+  }
+
   let body: React.ReactNode = null;
   if (message.role === 'assistant' && structuredAssistant) {
     const blocks: React.ReactNode[] = [];
@@ -839,10 +873,9 @@ export function AssistantMessageRow({
         const currentReasoning = Boolean(
           showReasoning && lastBlock?.type === 'thinking' && i === lastThinkingPartIndex,
         );
-        const headerPulse = Boolean(isStreamingAssistant && currentReasoning);
         if (currentReasoning) {
           blocks.push(
-            <ReasoningBlock key={`th:${i}`} text={thinkingText} headerPulse={headerPulse} />,
+            <ReasoningBlock key={`th:${i}`} text={thinkingText} />,
           );
         }
       } else if (part.type === 'text') {
@@ -856,7 +889,7 @@ export function AssistantMessageRow({
               key={`tx:${i}`}
               role="assistant"
               text={t}
-              autoExpand={autoExpandAgentMessage}
+              autoExpand={autoExpandMessage}
               onOpenFileReference={messageExtras?.onOpenFileReference}
               onOpenLink={messageExtras?.onOpenLink}
               textMentionLinks={droneMentionLinks}
@@ -868,11 +901,11 @@ export function AssistantMessageRow({
     }
     body = blocks.length > 0 ? <div className="space-y-1">{blocks}</div> : null;
   } else {
-    const text = message.role === 'assistant' ? agentMessage.text : visibleText;
+    const text = agentMessage.text;
     const images = messageImageParts(message);
     body = text || images.length > 0 || message.errorMessage ? (
       <ChatMessageBody
-        role={message.role === 'user' ? 'user' : 'assistant'}
+        role="assistant"
         text={text}
         error={Boolean(message.errorMessage)}
         errorMessage={message.errorMessage}
@@ -881,7 +914,7 @@ export function AssistantMessageRow({
           src: `data:${image.mimeType};base64,${image.data}`,
           alt: 'Attached image',
         }))}
-        autoExpand={message.role === 'assistant' && autoExpandAgentMessage}
+        autoExpand={autoExpandMessage}
         onOpenFileReference={messageExtras?.onOpenFileReference}
         onOpenLink={messageExtras?.onOpenLink}
         textMentionLinks={droneMentionLinks}
@@ -901,13 +934,12 @@ export function AssistantMessageRow({
 
   return (
     <ChatMessageFrame
-      role={message.role === 'user' ? 'user' : 'assistant'}
+      role="assistant"
       at={message.createdAt}
       error={Boolean(message.errorMessage)}
       showRoleLabel={false}
       plainAssistant
     >
-      {message.role === 'user' ? <ChatMessageCopyAction text={visibleText} /> : null}
       {body}
       {!body && message.errorMessage ? (
         <div className="text-[var(--text-12)] text-[var(--red)]">{message.errorMessage}</div>

@@ -7,7 +7,7 @@ import { isUngroupedGroupName } from '../../domain';
 import type { ShortcutActionId, ShortcutBindingMap } from './shortcuts';
 import { SHORTCUT_DEFINITIONS, isShortcutMatch } from './shortcuts';
 import { isDroneStartingOrSeeding } from './helpers';
-import { computeTranscriptAutoScrollDecision, shouldDispatchEditableShortcutAction } from './lifecycle-effect-helpers';
+import { shouldDispatchEditableShortcutAction } from './lifecycle-effect-helpers';
 import { useDropdownDismiss } from '../../ui/dropdown';
 
 type Updater<T> = T | ((prev: T) => T);
@@ -74,8 +74,6 @@ type UseDroneHubLifecycleEffectsArgs = {
   drones: DroneSummary[];
   transcripts: TranscriptItem[] | null;
   visiblePendingPromptsWithStartup: PendingPrompt[];
-  prevChatItemsLenRef: React.MutableRefObject<number>;
-  chatEndRef: React.RefObject<HTMLDivElement | null>;
   sessionText: string;
   prevOutputLenRef: React.MutableRefObject<number>;
   pinnedToBottomRef: React.MutableRefObject<boolean>;
@@ -141,8 +139,6 @@ export function useDroneHubLifecycleEffects({
   drones,
   transcripts,
   visiblePendingPromptsWithStartup,
-  prevChatItemsLenRef,
-  chatEndRef,
   sessionText,
   prevOutputLenRef,
   pinnedToBottomRef,
@@ -157,7 +153,6 @@ export function useDroneHubLifecycleEffects({
   onDeleteSelectedDroneFromInputShortcut,
   onMarkSelectedDronesUnreadShortcut,
 }: UseDroneHubLifecycleEffectsArgs) {
-  const transcriptScrollContextRef = React.useRef<string>('');
   const outputScrollContextRef = React.useRef<string>('');
   useDropdownDismiss(terminalMenuRef, terminalMenuOpen, setTerminalMenuOpen);
   useDropdownDismiss(headerOverflowRef, headerOverflowOpen, setHeaderOverflowOpen);
@@ -578,33 +573,6 @@ export function useDroneHubLifecycleEffects({
       return changed ? next : prev;
     });
   }, [drones, setStartupSeedByDrone]);
-
-  React.useEffect(() => {
-    const decision = computeTranscriptAutoScrollDecision({
-      chatUiMode,
-      selectedDrone,
-      selectedChat,
-      previousContextKey: transcriptScrollContextRef.current,
-      previousTrackedLength: prevChatItemsLenRef.current,
-      transcripts,
-      pendingCount: visiblePendingPromptsWithStartup.length,
-    });
-    transcriptScrollContextRef.current = decision.nextContextKey;
-    prevChatItemsLenRef.current = decision.nextTrackedLength;
-    if (decision.shouldScroll) {
-      requestAnimationFrame(() => {
-        chatEndRef.current?.scrollIntoView({ behavior: 'auto' });
-      });
-    }
-  }, [
-    chatUiMode,
-    chatEndRef,
-    prevChatItemsLenRef,
-    selectedChat,
-    selectedDrone,
-    transcripts,
-    visiblePendingPromptsWithStartup.length,
-  ]);
 
   React.useEffect(() => {
     if (chatUiMode !== 'cli') return;

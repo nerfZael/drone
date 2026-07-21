@@ -15,7 +15,7 @@ import {
 } from '../src/droneHub/chat';
 import {
   AssistantMessageRow,
-  AssistantThinkingRow,
+  AssistantWorkingRow,
   ToolRunActivity,
   formatAssistantRunDuration,
 } from '../src/droneHub/assistant/AssistantTranscript';
@@ -194,6 +194,61 @@ describe('agent chat surface adapters', () => {
 
     expect(html).toContain('data-transcript-item-kind="tool"');
     expect(html).toContain('class="-mt-5"');
+  });
+
+  test('the shared transcript identifies the latest visible activity', () => {
+    const renderItems = () => [
+      {
+        key: 'message',
+        kind: 'message' as const,
+        content: ({ isLatestActivity }: { isLatestActivity: boolean }) => (
+          <div data-message-latest={String(isLatestActivity)}>Message</div>
+        ),
+      },
+      {
+        key: 'tool',
+        kind: 'tool' as const,
+        content: ({ isLatestActivity }: { isLatestActivity: boolean }) => (
+          <div data-tool-latest={String(isLatestActivity)}>Tool</div>
+        ),
+      },
+      {
+        key: 'invisible-message',
+        kind: 'message' as const,
+        latestActivityEligible: false,
+        content: ({ isLatestActivity }: { isLatestActivity: boolean }) => (
+          <div data-invisible-latest={String(isLatestActivity)}>Invisible</div>
+        ),
+      },
+      { key: 'working', kind: 'status' as const, content: <div>Working</div> },
+      { key: 'end', kind: 'sentinel' as const, content: <div>End</div> },
+    ];
+    const nativeHtml = renderToStaticMarkup(
+      <ChatSurface adapter={adaptNativeAgentChatSurface()}>
+        <AgentChatTranscript
+          loading={false}
+          hasContent
+          emptyState={null}
+          items={renderItems()}
+        />
+      </ChatSurface>,
+    );
+    const externalHtml = renderToStaticMarkup(
+      <ChatSurface adapter={adaptExternalAgentChatSurface()}>
+        <AgentChatTranscript
+          loading={false}
+          hasContent
+          emptyState={null}
+          items={renderItems()}
+        />
+      </ChatSurface>,
+    );
+
+    expect(nativeHtml).toContain('data-message-latest="false"');
+    expect(nativeHtml).toContain('data-tool-latest="true"');
+    expect(nativeHtml).toContain('data-invisible-latest="false"');
+    expect(externalHtml).toContain('data-message-latest="true"');
+    expect(externalHtml).not.toContain('data-tool-latest');
   });
 
   test('the shared composer renders structured model controls and menu actions', () => {
@@ -453,7 +508,7 @@ describe('agent chat surface adapters', () => {
     const userHtml = renderToStaticMarkup(
       <AssistantMessageRow message={{ id: 'plain-user', role: 'user', content: 'A prompt.' }} />,
     );
-    const thinkingHtml = renderToStaticMarkup(<AssistantThinkingRow />);
+    const workingHtml = renderToStaticMarkup(<AssistantWorkingRow startedAt={Date.now() - 4_000} />);
 
     expect(assistantHtml).toContain('A plain response.');
     expect(assistantHtml).not.toContain('>Agent<');
@@ -462,10 +517,12 @@ describe('agent chat surface adapters', () => {
     expect(userHtml).toContain('bg-[var(--user-bubble)]');
     expect(userHtml).toContain('text-[var(--user-bubble-fg)]');
     expect(userHtml).not.toContain('>You<');
-    expect(thinkingHtml).not.toContain('>Agent<');
+    expect(workingHtml).toContain('Working for 4s');
+    expect(workingHtml).not.toContain('animate-pulse');
+    expect(workingHtml).not.toContain('>Agent<');
   });
 
-  test('active tool runs stay collapsed as one live summary by default', () => {
+  test('active tool runs expand their calls by default', () => {
     const items = Array.from({ length: 7 }, (_, index) => ({
       type: 'tool' as const,
       key: `tool-${index + 1}`,
@@ -479,12 +536,30 @@ describe('agent chat surface adapters', () => {
     expect(html).toContain('7 tool calls');
     expect(html).toContain('text-[var(--muted)]');
     expect(html).not.toContain('bg-[var(--accent)]');
-    expect(html).not.toContain('text-[var(--accent)]');
-    expect(html).not.toContain('Tool 1');
-    expect(html).not.toContain('Tool 2');
-    expect(html).not.toContain('Tool 3');
-    expect(html).not.toContain('Tool 7');
+    expect(html).toContain('Tool 1');
+    expect(html).toContain('Tool 2');
+    expect(html).toContain('Tool 3');
+    expect(html).toContain('Tool 7');
+    expect(html.match(/data-tool-status="pending"/g)).toHaveLength(7);
+    expect(html.match(/animate-spin/g)).toHaveLength(7);
+    expect(html).not.toContain('data-tool-status="ok"');
     expect(html).not.toContain('overflow-y-auto');
+  });
+
+  test('the latest native user message is expanded by default', () => {
+    const html = renderToStaticMarkup(
+      <AssistantMessageRow
+        message={{
+          id: 'latest-user',
+          role: 'user',
+          content: Array.from({ length: 45 }, (_, index) => `User line ${index + 1}`).join('\n'),
+        }}
+        autoExpandMessage
+      />,
+    );
+
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('User line 45');
   });
 
   test('completed tool runs collapse to a precise duration summary', () => {

@@ -1134,9 +1134,7 @@ export class HubAssistantService {
   private threads: AssistantThread[] = [];
   private loaded = false;
   private runtimePromise: Promise<AssistantRuntime> | null = null;
-  private modelStreamingText = new Map<string, string>();
   private runningThreadIds = new Set<string>();
-  private runtimeChangeTimers = new Map<string, ReturnType<typeof setTimeout>>();
   private defaultSystemPrompt = ASSISTANT_SYSTEM_PROMPT_DEFAULT;
   private defaultSystemPromptUpdatedAt: string | null = null;
   private defaultModelSelection: AssistantDefaultModel = {
@@ -1172,26 +1170,10 @@ export class HubAssistantService {
     await this.ensureLoaded();
     const thread = this.getThread(threadId);
     const type = String(event?.type ?? '');
-    const emit = (reason: string, throttled = false) => {
-      if (!throttled) {
-        const timer = this.runtimeChangeTimers.get(thread.id);
-        if (timer) clearTimeout(timer);
-        this.runtimeChangeTimers.delete(thread.id);
-        this.emitChange(reason, thread.id);
-        return;
-      }
-      if (this.runtimeChangeTimers.has(thread.id)) return;
-      const timer = setTimeout(() => {
-        this.runtimeChangeTimers.delete(thread.id);
-        this.emitChange(reason, thread.id);
-      }, 120);
-      timer.unref?.();
-      this.runtimeChangeTimers.set(thread.id, timer);
-    };
+    const emit = (reason: string) => this.emitChange(reason, thread.id);
 
     if (type === 'session_started' || type === 'turn_started') {
       this.runningThreadIds.add(thread.id);
-      this.modelStreamingText.set(thread.id, '');
       thread.status = 'running';
       thread.error = null;
       thread.updatedAt = nowIso();
@@ -1199,16 +1181,11 @@ export class HubAssistantService {
       return;
     }
     if (type === 'assistant_delta') {
-      this.runningThreadIds.add(thread.id);
-      const text = `${this.modelStreamingText.get(thread.id) ?? ''}${String(event?.text ?? '')}`;
-      this.modelStreamingText.set(thread.id, text.slice(-24_000));
-      thread.updatedAt = nowIso();
-      emit('runtime_streaming', true);
+      // Native chats expose completed assistant messages rather than partial token streams.
       return;
     }
     if (type === 'transcript_changed') {
       this.runningThreadIds.add(thread.id);
-      if (String(event?.role ?? '') === 'assistant') this.modelStreamingText.delete(thread.id);
       thread.updatedAt = nowIso();
       emit('canonical_history_changed');
       return;
@@ -1226,7 +1203,6 @@ export class HubAssistantService {
     }
     if (type === 'session_finished') {
       this.runningThreadIds.delete(thread.id);
-      this.modelStreamingText.delete(thread.id);
       const failed = String(event?.status ?? '').trim() === 'error';
       thread.status = failed ? 'error' : 'idle';
       thread.error = failed
@@ -1239,7 +1215,6 @@ export class HubAssistantService {
     }
     if (type === 'session_error') {
       this.runningThreadIds.delete(thread.id);
-      this.modelStreamingText.delete(thread.id);
       thread.status = 'error';
       thread.error = cleanOptionalString(event?.error) || 'Built-in agent prompt failed';
       thread.updatedAt = nowIso();
@@ -1268,22 +1243,6 @@ export class HubAssistantService {
         // Ignore a broken listener so one stale SSE client cannot block assistant work.
       }
     }
-  }
-
-  private threadStreamingMessages(threadId: string): any[] {
-    if (!this.modelStreamingText.has(threadId)) return [];
-    return [
-      {
-        role: 'assistant',
-        content: [{ type: 'text', text: this.modelStreamingText.get(threadId) ?? '' }],
-        timestamp: Date.now(),
-      },
-    ];
-  }
-
-  private primaryThreadStreamingMessage(threadId: string): any | null {
-    const messages = this.threadStreamingMessages(threadId);
-    return messages[messages.length - 1] ?? null;
   }
 
   private emitUiAction(uiAction: AssistantUiAction, threadId?: string): void {
@@ -1577,8 +1536,6 @@ export class HubAssistantService {
     const id = cleanOptionalString(threadId);
     const targetThread = this.threads.find((thread) => thread.id === id);
     if (!targetThread) throw new Error(`unknown assistant thread: ${threadId}`);
-    const streamingMessages = this.threadStreamingMessages(id);
-    const streamingMessage = this.primaryThreadStreamingMessage(id);
     const availableWorkspaces = await this.availableWorkspacesForThread(id);
     const enabledWorkspaces = availableWorkspaces.filter((workspace) =>
       this.workspaceEnabled(targetThread, workspace.id),
@@ -1599,9 +1556,6 @@ export class HubAssistantService {
       availableTools,
       availableWorkspaces,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
-      ...(streamingMessage
-        ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages }
-        : {}),
     };
   }
 
@@ -1743,7 +1697,6 @@ export class HubAssistantService {
     const threadId = cleanOptionalString(threadIdRaw);
     const thread = this.getThread(threadId);
     this.runningThreadIds.delete(threadId);
-    this.modelStreamingText.delete(threadId);
     thread.status = 'error';
     thread.error =
       cleanOptionalString((error as any)?.message ?? error) || 'Built-in agent prompt failed';
@@ -1992,11 +1945,7 @@ export class HubAssistantService {
   async deleteThread(threadId: string): Promise<{ ok: true; deleted: boolean; threadId: string }> {
     await this.ensureLoaded();
     const existing = this.threads.find((thread) => thread.id === threadId);
-    this.modelStreamingText.delete(threadId);
     this.runningThreadIds.delete(threadId);
-    const runtimeTimer = this.runtimeChangeTimers.get(threadId);
-    if (runtimeTimer) clearTimeout(runtimeTimer);
-    this.runtimeChangeTimers.delete(threadId);
     await deleteAssistantArtifactsForThread(threadId);
     if (existing) {
       await this.promptQueue()?.deleteChat(this.promptQueueIdentity(existing));
@@ -3055,8 +3004,6 @@ export class HubAssistantService {
     const targetThread = this.threads.find((thread) => thread.id === id);
     if (!targetThread) throw new Error(`unknown assistant thread: ${threadId}`);
     const snapshotThreadId = targetThread.id;
-    const streamingMessages = this.threadStreamingMessages(snapshotThreadId);
-    const streamingMessage = this.primaryThreadStreamingMessage(snapshotThreadId);
     const fallbackDroneIds = Array.from(
       new Set([
         ...targetThread.accessScope.droneIds,
@@ -3106,9 +3053,6 @@ export class HubAssistantService {
       availableTools: this.availableToolsForWorkspaces(enabledWorkspaces),
       availableWorkspaces,
       accessScope: sanitizeMessage(targetThread.accessScope ?? makeAssistantAccessScope()),
-      ...(streamingMessage
-        ? { streamingMessage: sanitizeMessage(streamingMessage), streamingMessages }
-        : {}),
     };
   }
 

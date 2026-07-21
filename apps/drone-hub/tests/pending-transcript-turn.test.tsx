@@ -50,5 +50,20 @@ describe('external pending transcript turn', () => {
 
     expect(html).toContain('Queued');
     expect(html).not.toContain('Working for');
+    expect(html).not.toContain('animate-pulse-dot');
+  });
+
+  test('expands the latest external user prompt by default', () => {
+    const html = renderToStaticMarkup(
+      <PendingTranscriptTurn
+        item={pendingPrompt({
+          prompt: Array.from({ length: 45 }, (_, index) => `Prompt line ${index + 1}`).join('\n'),
+        })}
+        autoExpandPrompt
+      />,
+    );
+
+    expect(html).toContain('aria-expanded="true"');
+    expect(html).toContain('Prompt line 45');
   });
 });

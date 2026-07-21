@@ -236,6 +236,9 @@ export class BlipAssistantHost {
   }
 
   private async publishEvent(threadId: string, event: BlipRuntimeEvent): Promise<void> {
+    // The Hub transcript intentionally renders canonical messages only. Do not fan out per-token
+    // deltas to snapshots or SSE clients; the final transcript_changed event refreshes history.
+    if (event.type === 'assistant_delta') return;
     try {
       await this.eventObserver?.(threadId, event);
     } catch {

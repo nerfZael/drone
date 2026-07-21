@@ -17,6 +17,7 @@ import {
   EmptyState,
   PendingTranscriptTurn,
   TranscriptTurn,
+  usePinnedTranscriptScroll,
 } from '../chat';
 import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { StatusBadge } from '../overview';
@@ -247,7 +248,6 @@ type SelectedDroneWorkspaceProps = {
     task: DroneHubTask;
     mode: DroneHubTaskSpawnMode;
   }) => Promise<{ ok: boolean; error?: string | null }>;
-  chatEndRef: React.RefObject<HTMLDivElement | null>;
   outputScrollRef: React.RefObject<HTMLDivElement | null>;
   updatePinned: (el: HTMLDivElement) => void;
   startupSeedForCurrentDrone: StartupSeedState | null;
@@ -347,7 +347,6 @@ export function SelectedDroneWorkspace({
   parsingJobsByTurn,
   parseJobsFromAgentMessage,
   spawnDroneHubTaskFromAgentMessage,
-  chatEndRef,
   outputScrollRef,
   updatePinned,
   startupSeedForCurrentDrone,
@@ -387,7 +386,29 @@ export function SelectedDroneWorkspace({
     setSelectedChat,
     setTerminalEmulator,
   } = useSelectedDroneWorkspaceUiState();
-  const transcriptScrollRef = React.useRef<HTMLDivElement | null>(null);
+  const explicitSelectedChat = String(selectedChat ?? '').trim();
+  const activeChatName = React.useMemo(
+    () => explicitSelectedChat || resolveChatNameForDrone(currentDrone, selectedChat),
+    [currentDrone, explicitSelectedChat, selectedChat],
+  );
+  const selectedChatIsDraft = currentDrone.draftChats?.[activeChatName] === true;
+  const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
+  const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
+  const externalTimelineItems = React.useMemo(
+    () => buildChatTimelineItems(transcripts ?? [], visiblePendingPromptsWithStartup),
+    [transcripts, visiblePendingPromptsWithStartup],
+  );
+  const {
+    bindContentRef: bindTranscriptContentRef,
+    bindScrollRef: bindTranscriptScrollRef,
+    scrollRef: transcriptScrollRef,
+    scrollToBottom: scrollTranscriptToBottom,
+    updatePinned: updateTranscriptPinned,
+  } = usePinnedTranscriptScroll({
+    contextKey: `${currentDrone.id}:${activeChatName}`,
+    contentVersion: externalTimelineItems,
+    enabled: chatUiMode === 'transcript' && (currentAgentKey !== 'native' || currentChatIsDraft),
+  });
   const workspaceChatScrollSnapshotRef = React.useRef<ChatScrollSnapshot | null>(null);
   const captureWorkspaceChatScroll = React.useCallback(() => {
     const mode = chatUiMode === 'transcript' ? 'transcript' : 'cli';
@@ -398,7 +419,7 @@ export function SelectedDroneWorkspace({
       scrollTop: node.scrollTop,
       scrollHeight: node.scrollHeight,
     };
-  }, [chatUiMode, outputScrollRef]);
+  }, [chatUiMode, outputScrollRef, transcriptScrollRef]);
   const restoreWorkspaceChatScroll = React.useCallback(() => {
     const snapshot = workspaceChatScrollSnapshotRef.current;
     if (!snapshot) return;
@@ -409,15 +430,10 @@ export function SelectedDroneWorkspace({
       const heightDelta = node.scrollHeight - snapshot.scrollHeight;
       const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
       node.scrollTop = Math.min(maxScrollTop, Math.max(0, snapshot.scrollTop + heightDelta));
-      updatePinned(node);
+      if (snapshot.mode === 'transcript') updateTranscriptPinned(node);
+      else updatePinned(node);
     });
-  }, [outputScrollRef, updatePinned]);
-  const explicitSelectedChat = String(selectedChat ?? '').trim();
-  const activeChatName = React.useMemo(
-    () => explicitSelectedChat || resolveChatNameForDrone(currentDrone, selectedChat),
-    [currentDrone, explicitSelectedChat, selectedChat],
-  );
-  const selectedChatIsDraft = currentDrone.draftChats?.[activeChatName] === true;
+  }, [outputScrollRef, transcriptScrollRef, updatePinned, updateTranscriptPinned]);
   const currentDroneHomePath = React.useMemo(() => droneHomePath(currentDrone), [currentDrone]);
   const spawnCurrentDroneHubTask = React.useCallback(
     (mode: DroneHubTaskSpawnMode, task: DroneHubTask) =>
@@ -539,8 +555,6 @@ export function SelectedDroneWorkspace({
     openDroneErrorModal,
     onRequestDropActions,
   });
-  const currentDroneIsDraft = currentDrone.draft === true || currentDrone.hubPhase === 'draft';
-  const currentChatIsDraft = currentDroneIsDraft || selectedChatIsDraft;
   const nativeChatActive = currentAgentKey === 'native' && !currentChatIsDraft;
   const chatConfigResolution = chatConfigResolutionState({
     currentChatIsDraft,
@@ -900,25 +914,15 @@ export function SelectedDroneWorkspace({
         }
       : undefined;
 
-  const externalTimelineItems = buildChatTimelineItems(
-    transcripts ?? [],
-    visiblePendingPromptsWithStartup,
-  );
-  let latestExternalAgentMessageId = '';
-  for (let index = externalTimelineItems.length - 1; index >= 0; index -= 1) {
-    const entry = externalTimelineItems[index];
-    if (entry?.kind !== 'turn') continue;
-    latestExternalAgentMessageId = transcriptMessageId(entry.item);
-    break;
-  }
   const externalTranscriptItems: AgentChatTranscriptItem[] = [];
-  for (const entry of externalTimelineItems) {
+  for (let timelineIndex = 0; timelineIndex < externalTimelineItems.length; timelineIndex += 1) {
+    const entry = externalTimelineItems[timelineIndex]!;
     if (entry.kind === 'pending') {
       const prompt = entry.item;
       externalTranscriptItems.push({
         key: `pending:${prompt.id}`,
         kind: 'pending',
-        content: (
+        content: ({ isLatestActivity }) => (
           <PendingTranscriptTurn
             item={prompt}
             showRoleIcons={false}
@@ -929,6 +933,7 @@ export function SelectedDroneWorkspace({
             droneHomePath={currentDroneHomePath}
             cancelBusy={Boolean(cancellingPendingPromptById[prompt.id])}
             cancelError={cancelPendingPromptErrorById[prompt.id] ?? null}
+            autoExpandPrompt={isLatestActivity}
           />
         ),
       });
@@ -939,10 +944,10 @@ export function SelectedDroneWorkspace({
     externalTranscriptItems.push({
       key: `transcript:${messageId}`,
       kind: 'message',
-      content: (
+      content: ({ isLatestActivity }) => (
         <TranscriptTurn
           item={turn}
-          autoExpandAgentMessage={messageId === latestExternalAgentMessageId}
+          autoExpandAgentMessage={isLatestActivity}
           parsingJobs={Boolean(parsingJobsByTurn[turn.turn])}
           onCreateJobs={parseJobsFromAgentMessage}
           onSpawnDroneHubTask={spawnCurrentDroneHubTask}
@@ -959,12 +964,6 @@ export function SelectedDroneWorkspace({
       ),
     });
   }
-  externalTranscriptItems.push({
-    key: 'external-chat-end',
-    kind: 'sentinel',
-    content: <div ref={chatEndRef as React.RefObject<HTMLDivElement>} />,
-  });
-
   return (
     <>
       {/* Header - spans full workspace width */}
@@ -1537,8 +1536,8 @@ export function SelectedDroneWorkspace({
               />
             ) : chatUiMode === 'transcript' ? (
               <AgentChatTranscript
-                scrollRef={transcriptScrollRef}
-                initialScrollKey={`${currentDrone.id}:${activeChatName}`}
+                scrollRef={bindTranscriptScrollRef}
+                contentRef={bindTranscriptContentRef}
                 loading={loadingTranscript && !transcripts && visiblePendingPromptsWithStartup.length === 0}
                 hasContent={Boolean((transcripts && transcripts.length > 0) || visiblePendingPromptsWithStartup.length > 0)}
                 emptyState={
@@ -1635,7 +1634,12 @@ export function SelectedDroneWorkspace({
               }
               stopping={stoppingResponse}
               onPublish={currentChatIsDraft ? publishSelectedDraft : undefined}
-              onSend={async (payload: ChatSendPayload) => await sendPromptText(payload)}
+              onSend={async (payload: ChatSendPayload) => {
+                if (chatUiMode === 'transcript') scrollTranscriptToBottom({ force: true });
+                const sent = await sendPromptText(payload);
+                if (sent && chatUiMode === 'transcript') scrollTranscriptToBottom({ force: true });
+                return sent;
+              }}
             />
           ) : null}
           {fileOpenToast ? (

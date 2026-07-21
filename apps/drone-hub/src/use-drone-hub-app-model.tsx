@@ -656,9 +656,7 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     droneById,
     requestJson,
   });
-  const chatEndRef = React.useRef<HTMLDivElement | null>(null);
   const chatUiModeRef = React.useRef<'transcript' | 'cli'>('transcript');
-  const prevChatItemsLenRef = React.useRef(0);
 
   React.useEffect(() => {
     const ids = droneIdentityByNameRef.current;
@@ -1347,16 +1345,10 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     pinnedToBottomRef.current = true;
     setPinnedToBottom(true);
     prevOutputLenRef.current = -1;
-    prevChatItemsLenRef.current = -1;
     let triesRemaining = 4;
     const attempt = () => {
       requestAnimationFrame(() => {
         let didScroll = false;
-        const transcriptEnd = chatEndRef.current;
-        if (transcriptEnd) {
-          transcriptEnd.scrollIntoView({ behavior: 'auto' });
-          didScroll = true;
-        }
         const el = outputScrollRef.current;
         if (el) {
           el.scrollTop = el.scrollHeight;
@@ -3255,8 +3247,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     drones,
     transcripts,
     visiblePendingPromptsWithStartup,
-    prevChatItemsLenRef,
-    chatEndRef,
     sessionText,
     prevOutputLenRef,
     pinnedToBottomRef,
@@ -4066,7 +4056,6 @@ export function useDroneHubAppModel(): DroneHubAppModel {
     visiblePendingPromptsWithStartup,
     transcriptMessageId,
     parsingJobsByTurn,
-    chatEndRef,
     outputScrollRef,
     updatePinned,
     startupSeedForCurrentDrone,

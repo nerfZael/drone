@@ -129,6 +129,9 @@ export class HubSessionRepository implements SessionRepository {
   }
 
   appendRuntimeEvent(session: BlipSessionState, event: BlipRuntimeEvent): Promise<void> {
+    // Native chats publish only durable assistant messages. Persisting every token delta creates a
+    // large volume of SQLite rows without contributing to history or the final transcript.
+    if (event.type === 'assistant_delta') return Promise.resolve();
     return this.appendEntry(session, { type: 'runtime_event', id: crypto.randomUUID(), timestamp: nowIso(), event });
   }
 

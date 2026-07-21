@@ -1,15 +1,14 @@
 import React from 'react';
 import { stripAnsi } from '../../domain';
 import type { PendingPrompt } from '../types';
-import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import { ChatMessageCopyAction } from './ChatMessageCopyAction';
 import { ChatMessageFrame } from './ChatMessageFrame';
 import { ImageAttachmentChips, isAttachmentOnlyPrompt, normalizeImageAttachmentRefs } from './ImageAttachmentChips';
 import type { MarkdownFileReference } from './MarkdownMessage';
 import { RelativeTimeText } from './RelativeTimeText';
-import { TypingDots } from './icons';
 import { AgentPlanList } from './AgentPlanList';
 import { WorkingElapsedStatus } from './WorkingElapsedStatus';
+import { UserChatMessage } from './UserChatMessage';
 
 export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   item,
@@ -21,6 +20,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   droneHomePath,
   cancelBusy = false,
   cancelError = null,
+  autoExpandPrompt = false,
 }: {
   item: PendingPrompt;
   showRoleIcons?: boolean;
@@ -31,6 +31,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
   droneHomePath?: string;
   cancelBusy?: boolean;
   cancelError?: string | null;
+  autoExpandPrompt?: boolean;
 }) {
   const attachments = normalizeImageAttachmentRefs((item as any).attachments);
   const promptText = isAttachmentOnlyPrompt(item.prompt, attachments) ? '' : item.prompt;
@@ -54,7 +55,6 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         : null;
   const canCancelQueued = item.state === 'queued' && Boolean(onCancelQueued);
   const showAgentPendingBubble = !(item.state === 'queued' && !isFailed);
-  const userCopyText = String(promptText ?? '');
   const agentCopyText = isFailed ? stripAnsi(item.error || 'failed to send') : 'Working…';
   const pendingHeader = badgeLabel || canCancelQueued ? (
     <>
@@ -69,10 +69,7 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
           }`}
           style={{ fontFamily: 'var(--display)' }}
         >
-          <span className="inline-flex items-center gap-1">
-            {badgeLabel}
-            {item.state === 'queued' && !isFailed ? <TypingDots color="var(--muted-dim)" /> : null}
-          </span>
+          {badgeLabel}
         </span>
       ) : null}
       {canCancelQueued ? (
@@ -96,30 +93,23 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
 
   return (
     <div className={`group/pending-turn animate-fade-in ${isFailed || item.state === 'queued' ? 'opacity-90' : ''}`}>
-      <ChatMessageFrame
-        role="user"
+      <UserChatMessage
         at={item.at}
-        showRoleIcon={showRoleIcons}
-        showRoleLabel={showRoleIcons}
+        showRoleIcons={showRoleIcons}
         headerEnd={pendingHeader}
-        hoverActions={<ChatMessageCopyAction text={userCopyText} position="hover-rail" />}
-      >
-        {promptText ? (
-          <CollapsibleMarkdown
-            text={promptText}
-            fadeTo="var(--user-bubble)"
-            className="dh-markdown--user"
+        text={promptText}
+        autoExpand={autoExpandPrompt}
+        onOpenFileReference={onOpenFileReference}
+        onOpenLink={onOpenLink}
+        attachmentContent={(
+          <ImageAttachmentChips
+            attachments={attachments}
+            droneId={droneId}
+            droneHomePath={droneHomePath}
             onOpenFileReference={onOpenFileReference}
-            onOpenLink={onOpenLink}
           />
-        ) : null}
-        <ImageAttachmentChips
-          attachments={attachments}
-          droneId={droneId}
-          droneHomePath={droneHomePath}
-          onOpenFileReference={onOpenFileReference}
-        />
-      </ChatMessageFrame>
+        )}
+      />
 
       {showAgentPendingBubble ? (
         <ChatMessageFrame
