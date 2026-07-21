@@ -1440,9 +1440,8 @@ export function SelectedDroneWorkspace({
                 >
                   <span>{rightPanelTabLabels[tab]}</span>
                   {tab === 'prs' && prCount > 0 ? (
-                    <span className="ml-1 inline-flex items-center gap-1 font-mono text-[var(--text-9)] leading-none tabular-nums text-[var(--accent)]">
-                      <span aria-hidden="true" className="text-[var(--chrome-muted)]">·</span>
-                      <span>{prCount > 99 ? '99+' : prCount}</span>
+                    <span className="ml-1 font-mono text-[var(--text-9)] leading-none tabular-nums text-[var(--accent)]">
+                      ({prCount > 99 ? '99+' : prCount})
                     </span>
                   ) : null}
                 </button>
