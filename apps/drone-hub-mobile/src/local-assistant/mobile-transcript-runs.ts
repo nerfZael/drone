@@ -93,6 +93,7 @@ function metadataFromMessage(message: AssistantMessage): MobileTranscriptRunMeta
 
 function itemTimestamp(item: AssistantRenderItem): string | number | undefined {
   if (item.type === 'message') return item.message.createdAt ?? item.message.timestamp;
+  if (item.type === 'runSummary') return item.fileChanges.capturedAt;
   if (item.type === 'tool') {
     return item.result?.createdAt ?? item.result?.timestamp;
   }
@@ -120,7 +121,7 @@ function planFromRunItems(items: AssistantRenderItem[]): MobileAgentPlan | undef
       plan = metadataFromMessage(item.message)?.plan ?? plan;
     } else if (item.type === 'tool') {
       plan = planFromTool(item) ?? plan;
-    } else {
+    } else if (item.type === 'toolGroup') {
       for (const tool of item.items) plan = planFromTool(tool) ?? plan;
     }
   }

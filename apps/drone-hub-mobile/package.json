@@ -14,6 +14,7 @@
   },
   "dependencies": {
     "@blip/core": "workspace:*",
+    "@blip/protocol": "workspace:*",
     "@drone/assistant-chat": "workspace:*",
     "@drone/device-protocol": "workspace:*",
     "@drone/hub-model": "workspace:*",

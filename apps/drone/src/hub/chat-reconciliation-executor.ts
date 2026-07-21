@@ -1,5 +1,6 @@
 import type { AgentPlan } from './agent-plan';
 import type { PendingPrompt } from './drone-pending-prompts';
+import { finalizeDroneRunFileChanges } from './run-file-changes';
 
 export type ChatReconciliationExecutorDependencies = {
   applyChatReconciliationInStore: any;
@@ -328,6 +329,29 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
         continue;
       }
 
+      if ((p as any).fileChangesBaseline && !(p as any).fileChanges) {
+        try {
+          const fileChanges = await finalizeDroneRunFileChanges({
+            baseline: (p as any).fileChangesBaseline,
+            drone: d,
+          });
+          (p as any).fileChanges = fileChanges ?? {
+            version: 1,
+            capturedAt: nowIso(),
+            counts: { changed: 0, additions: 0, deletions: 0 },
+            workspaces: [],
+          };
+          changed = true;
+        } catch (error: any) {
+          hubLog('warn', 'failed finalizing agent run file changes', {
+            droneId,
+            chatName,
+            promptId: id,
+            error: String(error?.message ?? error ?? 'unknown error'),
+          });
+        }
+      }
+
       if (jobState === 'done') {
         const stdout = typeof job?.stdout === 'string' ? job.stdout : '';
         const stderr = typeof job?.stderr === 'string' ? job.stderr : '';
@@ -382,6 +406,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ...(turnRuntime.reasoning ? { reasoning: turnRuntime.reasoning } : {}),
             ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+            ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
             ok: true,
             output,
           });
@@ -439,6 +464,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ...(turnReasoning ? { reasoning: turnReasoning } : {}),
             ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+            ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
             ok: true,
             output,
           });
@@ -482,6 +508,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ...(turnModel ? { model: turnModel } : {}),
             ...(turnReasoning ? { reasoning: turnReasoning } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+            ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
             ok: true,
             output,
           });
@@ -525,6 +552,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             ...(turnModel ? { model: turnModel } : {}),
             ...(turnReasoning ? { reasoning: turnReasoning } : {}),
             ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+            ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
             ok: true,
             output,
           });
@@ -563,6 +591,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
           prompt: String(p?.prompt ?? ''),
           ...(pendingModel ? { model: pendingModel } : {}),
           ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+          ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
           ok: true,
           output: output || '(no output)',
         });
@@ -612,6 +641,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ...(turnRuntime.reasoning ? { reasoning: turnRuntime.reasoning } : {}),
               ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+              ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
               ok: true,
               output,
             });
@@ -650,6 +680,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ...(turnReasoning ? { reasoning: turnReasoning } : {}),
               ...(parsed.agentPlan ? { agentPlan: parsed.agentPlan } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+              ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
               ok: true,
               output,
             });
@@ -719,6 +750,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ...(turnModel ? { model: turnModel } : {}),
               ...(turnReasoning ? { reasoning: turnReasoning } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+              ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
               ok: true,
               output,
             });
@@ -764,6 +796,7 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
               ...(turnModel ? { model: turnModel } : {}),
               ...(turnReasoning ? { reasoning: turnReasoning } : {}),
               ...(promptAttachments.length > 0 ? { attachments: promptAttachments } : {}),
+              ...((p as any).fileChanges ? { fileChanges: (p as any).fileChanges } : {}),
               ok: true,
               output,
             });
@@ -863,6 +896,8 @@ export function createChatReconciliationExecutor(deps: ChatReconciliationExecuto
             observability: pending.observability,
             blipClones: pending.blipClones,
             agentPlan: pending.agentPlan,
+            fileChangesBaseline: pending.fileChangesBaseline,
+            fileChanges: pending.fileChanges,
             updatedAt: pending.updatedAt,
           },
         });

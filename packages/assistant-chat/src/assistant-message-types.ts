@@ -11,7 +11,7 @@ export type AssistantMessageContentPart = {
 
 export type AssistantMessage = {
   id?: string;
-  role: 'user' | 'assistant' | 'toolResult';
+  role: 'user' | 'assistant' | 'toolResult' | 'runSummary';
   content?: string | AssistantMessageContentPart[];
   toolName?: string;
   toolCallId?: string;

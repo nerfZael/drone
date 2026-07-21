@@ -99,6 +99,12 @@ function sameAgentPlan(left: TranscriptItem['agentPlan'], right: TranscriptItem[
   return left.source === right.source && JSON.stringify(left.items) === JSON.stringify(right.items);
 }
 
+function sameFileChanges(left: TranscriptItem['fileChanges'], right: TranscriptItem['fileChanges']): boolean {
+  if (left === right) return true;
+  if (!left || !right) return false;
+  return JSON.stringify(left) === JSON.stringify(right);
+}
+
 export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem): boolean {
   return (
     left.turn === right.turn &&
@@ -117,6 +123,7 @@ export function sameTranscriptItem(left: TranscriptItem, right: TranscriptItem):
     left.output === right.output &&
     sameAttachments(left.attachments, right.attachments) &&
     sameAgentPlan(left.agentPlan, right.agentPlan) &&
+    sameFileChanges(left.fileChanges, right.fileChanges) &&
     sameDockerSnapshot(left.dockerSnapshot, right.dockerSnapshot)
   );
 }

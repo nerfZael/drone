@@ -91,6 +91,52 @@ describe('Blip assistant host', () => {
     });
   });
 
+  test('persists a native run changed-files summary in history', async () => {
+    await withTempDroneDataDir('blip-assistant-run-files-', async () => {
+      const faux = registerFauxProvider({ api: 'faux', provider: 'faux', tokensPerSecond: 0 });
+      faux.setResponses([fauxAssistantMessage('implemented')]);
+      const host = new BlipAssistantHost(async () => ({
+        provider: 'faux',
+        model: faux.getModel().id,
+        thinkingLevel: 'off',
+        systemPrompt: 'Hub host prompt',
+        tools: [],
+        afterPrompt: async () => ({
+          fileChanges: {
+            version: 1,
+            capturedAt: '2026-07-21T00:00:00.000Z',
+            counts: { changed: 1, additions: 1, deletions: 0 },
+            workspaces: [
+              {
+                targetId: 'drone:d1',
+                droneId: 'd1',
+                label: 'Drone 1',
+                repoRoot: '/work/repo',
+                counts: { changed: 1, additions: 1, deletions: 0 },
+                entries: [
+                  { path: 'src/a.ts', status: 'modified', additions: 1, deletions: 0 },
+                ],
+              },
+            ],
+          },
+        }),
+      }));
+
+      await host.promptThread('thread-run-files', 'implement it');
+      const page = await host.historyPage('thread-run-files', { limit: 10 });
+
+      expect(page.entries.map((entry) => entry.message.role)).toEqual([
+        'user',
+        'assistant',
+        'runSummary',
+      ]);
+      expect(page.entries.at(-1)?.message.details).toMatchObject({
+        fileChanges: { counts: { changed: 1, additions: 1, deletions: 0 } },
+      });
+      faux.unregister();
+    });
+  });
+
   test('forks a completed thread transcript into an independent thread', async () => {
     await withTempDroneDataDir('blip-assistant-clone-', async () => {
       const faux = registerFauxProvider({

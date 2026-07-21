@@ -18,6 +18,7 @@ import {
   PendingPromptPump,
 } from './pending-prompt-pump';
 import type { PendingPrompt } from './drone-pending-prompts';
+import { captureDroneRunFileChangesBaseline } from './run-file-changes';
 
 type ChatPromptRuntimeDependencyName =
   | 'NON_REPO_HOME_CWD'
@@ -1584,6 +1585,34 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       : 'Prompt delivery was interrupted; retrying when the drone daemon is available.';
   }
 
+  async function capturePendingPromptFileChangesBaseline(input: {
+    droneId: string;
+    chatName: string;
+    promptId: string;
+    drone: any;
+  }): Promise<void> {
+    try {
+      const baseline = await captureDroneRunFileChangesBaseline({
+        droneId: input.droneId,
+        drone: input.drone,
+      });
+      if (!baseline) return;
+      await updatePendingPrompt({
+        droneId: input.droneId,
+        chatName: input.chatName,
+        id: input.promptId,
+        patch: { fileChangesBaseline: baseline },
+      });
+    } catch (error: any) {
+      hubLog('warn', 'failed capturing agent run file changes baseline', {
+        droneId: input.droneId,
+        chatName: input.chatName,
+        promptId: input.promptId,
+        error: String(error?.message ?? error ?? 'unknown error'),
+      });
+    }
+  }
+
   async function pumpQueuedPendingPromptsForChat(opts: {
     droneId: string;
     chatName: string;
@@ -1688,6 +1717,13 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       if (!claimed) {
         continue;
       }
+
+      await capturePendingPromptFileChangesBaseline({
+        droneId,
+        chatName,
+        promptId: id,
+        drone: d,
+      });
 
       try {
         const enqueueTimeoutMs = defaultPromptEnqueueTimeoutMs();
@@ -2114,6 +2150,15 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       enqueuePendingPromptPump(droneId, chatName);
       opts.mark?.('queuePump');
       return { id, pendingState: 'queued' };
+    }
+
+    if (inferChatAgent(chat, d).kind === 'builtin') {
+      await capturePendingPromptFileChangesBaseline({
+        droneId,
+        chatName,
+        promptId: id,
+        drone: d,
+      });
     }
 
     try {

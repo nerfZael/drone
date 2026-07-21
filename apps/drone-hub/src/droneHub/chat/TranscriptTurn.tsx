@@ -146,6 +146,7 @@ export const TranscriptTurn = React.memo(
             onOpenFileReference={onOpenFileReference}
             onOpenLink={onOpenLink}
             plan={item.agentPlan}
+            fileChanges={item.fileChanges}
             actionEnd={
               actionsEnabled && item.ok && dockerSnapshot &&
               (dockerSnapshotBusy || dockerSnapshot.status === 'failed' || onRollbackDockerSnapshot) ? (

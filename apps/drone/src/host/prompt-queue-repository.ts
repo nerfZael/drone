@@ -16,6 +16,8 @@ export type PromptQueueItem = {
   observability?: unknown;
   blipClones?: unknown;
   agentPlan?: unknown;
+  fileChangesBaseline?: unknown;
+  fileChanges?: unknown;
   updatedAt?: string;
 };
 
@@ -553,7 +555,14 @@ export class PromptQueueRepository {
     patch: Partial<
       Pick<
         PromptQueueItem,
-        'state' | 'error' | 'observability' | 'blipClones' | 'agentPlan' | 'updatedAt'
+        | 'state'
+        | 'error'
+        | 'observability'
+        | 'blipClones'
+        | 'agentPlan'
+        | 'fileChangesBaseline'
+        | 'fileChanges'
+        | 'updatedAt'
       >
     >;
     now?: string;

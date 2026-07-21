@@ -109,4 +109,41 @@ describe('assistant message model', () => {
     ]);
     expect(callCount).toBe(20);
   });
+
+  test('renders persisted run file changes as a dedicated summary item', () => {
+    const items = renderItemsFromMessages([
+      { role: 'assistant', content: 'Done.' },
+      {
+        id: 'summary-1',
+        role: 'runSummary',
+        content: '',
+        details: {
+          fileChanges: {
+            version: 1,
+            capturedAt: '2026-07-21T00:00:00.000Z',
+            counts: { changed: 1, additions: 2, deletions: 0 },
+            workspaces: [
+              {
+                targetId: 'drone:d1',
+                droneId: 'd1',
+                label: 'Drone 1',
+                repoRoot: '/work/repo',
+                counts: { changed: 1, additions: 2, deletions: 0 },
+                entries: [
+                  { path: 'src/a.ts', status: 'modified', additions: 2, deletions: 0 },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    ]);
+
+    expect(items.map((item) => item.type)).toEqual(['message', 'runSummary']);
+    expect(items[1]).toMatchObject({
+      type: 'runSummary',
+      key: 'run-summary:summary-1',
+      fileChanges: { counts: { changed: 1, additions: 2, deletions: 0 } },
+    });
+  });
 });

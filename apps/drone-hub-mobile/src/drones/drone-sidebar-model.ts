@@ -1,4 +1,5 @@
 import type { AssistantMessage } from '@drone/assistant-chat';
+import type { AgentRunFileChanges } from '@blip/protocol';
 import {
   buildRepoSidebarModel,
   compareSidebarDronesByNewestFirst,
@@ -55,6 +56,7 @@ export type MobileDroneTurn = {
   model: string;
   reasoning: string;
   agentPlan?: MobileAgentPlan;
+  fileChanges?: AgentRunFileChanges;
   attachments: Array<{ name: string; mime: string; size: number | null }>;
   meshTruncated?: boolean;
 };
@@ -549,6 +551,15 @@ export function mobileDroneTurnsToAssistantMessages(raw: unknown): AssistantMess
             },
       );
     }
+    if (turn.fileChanges?.version === 1 && turn.fileChanges.counts.changed > 0) {
+      messages.push({
+        id: `${turn.id}:run-summary`,
+        role: 'runSummary',
+        content: '',
+        createdAt: turn.completedAt || turn.at,
+        details: { fileChanges: turn.fileChanges },
+      });
+    }
     return messages;
   });
 }
@@ -612,6 +623,10 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
     const turnNumber = Number(turn.turn);
     const at = text(turn.at);
     const agentPlan = normalizeMobileAgentPlan(turn.agentPlan);
+    const fileChanges =
+      turn.fileChanges && typeof turn.fileChanges === 'object' && !Array.isArray(turn.fileChanges)
+        ? (turn.fileChanges as AgentRunFileChanges)
+        : undefined;
     return [
       {
         id: text(turn.id) || `turn-${Number.isFinite(turnNumber) ? turnNumber : index}`,
@@ -626,6 +641,7 @@ export function normalizeMobileDroneTurns(raw: unknown): MobileDroneTurn[] {
         model: text(turn.model),
         reasoning: text(turn.reasoning),
         ...(agentPlan ? { agentPlan } : {}),
+        ...(fileChanges?.version === 1 ? { fileChanges } : {}),
         attachments: normalizeTurnAttachments(turn.attachments),
         ...(turn.meshTruncated === true ? { meshTruncated: true } : {}),
       },
