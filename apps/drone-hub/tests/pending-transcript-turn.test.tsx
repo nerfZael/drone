@@ -45,10 +45,19 @@ describe('external pending transcript turn', () => {
 
   test('keeps the queued badge only while the prompt has not been sent', () => {
     const html = renderToStaticMarkup(
-      <PendingTranscriptTurn item={pendingPrompt({ state: 'queued' })} showRoleIcons={false} />,
+      <PendingTranscriptTurn
+        item={pendingPrompt({ state: 'queued' })}
+        showRoleIcons={false}
+        onCancelQueued={() => {}}
+      />,
     );
 
     expect(html).toContain('Queued');
+    expect(html).toContain('aria-label="Queued, waiting to send"');
+    expect(html).toContain('aria-label="Cancel queued prompt"');
+    expect(html).toContain('>Cancel</button>');
+    expect(html).not.toContain('border-t border-[var(--user-border)]');
+    expect(html).not.toContain('group-hover/pending-turn');
     expect(html).not.toContain('Working for');
     expect(html).not.toContain('animate-pulse-dot');
   });

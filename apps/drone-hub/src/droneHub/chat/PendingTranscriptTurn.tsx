@@ -46,53 +46,59 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
       : null;
   const isStopped =
     isFailed && /stopped by user|stopped before submission|stopped because the drone was archived|stopped because the drone was deleted/i.test(String(item.error ?? ''));
-  const badgeLabel = isStopped
-    ? 'Stopped'
-    : isFailed
-      ? 'Failed'
-      : item.state === 'queued'
-        ? 'Queued'
-        : null;
+  const badgeLabel = isStopped ? 'Stopped' : isFailed ? 'Failed' : null;
   const canCancelQueued = item.state === 'queued' && Boolean(onCancelQueued);
   const showAgentPendingBubble = !(item.state === 'queued' && !isFailed);
   const agentCopyText = isFailed ? stripAnsi(item.error || 'failed to send') : 'Working…';
-  const pendingHeader = badgeLabel || canCancelQueued ? (
-    <>
-      {badgeLabel ? (
-        <span
-          className={`rounded border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${
-            isFailed
-              ? isStopped
-                ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
-                : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
-              : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)]'
-          }`}
-          style={{ fontFamily: 'var(--display)' }}
-        >
-          {badgeLabel}
-        </span>
-      ) : null}
+  const queuedFooter = item.state === 'queued' ? (
+    <div className="mt-2 flex items-center justify-between gap-3">
+      <span
+        role="status"
+        aria-label="Queued, waiting to send"
+        title="Waiting to send"
+        className="inline-flex items-center gap-1.5 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--user-muted)]"
+      >
+        <svg className="h-3 w-3" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+          <circle cx="8" cy="8" r="5.5" stroke="currentColor" strokeWidth="1.35" />
+          <path
+            d="M8 4.75V8l2.1 1.35"
+            stroke="currentColor"
+            strokeWidth="1.35"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+        Queued
+      </span>
       {canCancelQueued ? (
         <button
           type="button"
           onClick={() => void onCancelQueued?.(item.id)}
           disabled={cancelBusy}
-          className={`inline-flex h-5 items-center rounded border px-1.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide transition-all ${
-            cancelBusy
-              ? 'cursor-not-allowed border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] opacity-100'
-              : 'pointer-events-none border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] opacity-0 group-hover/pending-turn:pointer-events-auto group-hover/pending-turn:opacity-100 hover:border-[var(--red-border)] hover:text-[var(--red)]'
-          }`}
-          style={{ fontFamily: 'var(--display)' }}
+          className="inline-flex min-h-5 items-center rounded px-1 text-[var(--text-10)] font-[var(--weight-semibold)] text-[var(--muted)] transition-colors hover:bg-[var(--red-subtle)] hover:text-[var(--red)] focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-[var(--red)] disabled:cursor-not-allowed disabled:text-[var(--muted-dim)]"
+          aria-label="Cancel queued prompt"
           title="Cancel queued prompt"
         >
-          {cancelBusy ? 'Canceling...' : 'Cancel'}
+          {cancelBusy ? 'Canceling…' : 'Cancel'}
         </button>
       ) : null}
-    </>
+    </div>
+  ) : null;
+  const pendingHeader = badgeLabel ? (
+    <span
+      className={`rounded border px-1.5 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-wide ${
+        isStopped
+          ? 'border-[var(--yellow-border)] bg-[var(--yellow-subtle)] text-[var(--yellow)]'
+          : 'border-[var(--red-border)] bg-[var(--red-subtle)] text-[var(--red)]'
+      }`}
+      style={{ fontFamily: 'var(--display)' }}
+    >
+      {badgeLabel}
+    </span>
   ) : null;
 
   return (
-    <div className={`group/pending-turn animate-fade-in ${isFailed || item.state === 'queued' ? 'opacity-90' : ''}`}>
+    <div className={`animate-fade-in ${isFailed ? 'opacity-90' : ''}`}>
       <UserChatMessage
         at={item.at}
         showRoleIcons={showRoleIcons}
@@ -102,12 +108,15 @@ export const PendingTranscriptTurn = React.memo(function PendingTranscriptTurn({
         onOpenFileReference={onOpenFileReference}
         onOpenLink={onOpenLink}
         attachmentContent={(
-          <ImageAttachmentChips
-            attachments={attachments}
-            droneId={droneId}
-            droneHomePath={droneHomePath}
-            onOpenFileReference={onOpenFileReference}
-          />
+          <>
+            <ImageAttachmentChips
+              attachments={attachments}
+              droneId={droneId}
+              droneHomePath={droneHomePath}
+              onOpenFileReference={onOpenFileReference}
+            />
+            {queuedFooter}
+          </>
         )}
       />
 

@@ -588,28 +588,11 @@ export function ChatInput({
           <ChatComposerContext config={composerContext} />
           {attachmentsOn && attachments.length > 0 && (
             <div className="px-3 pt-3">
-              <div className="flex items-center justify-between gap-2">
-                <div
-                  className="text-[var(--text-10)] text-[var(--muted-dim)] tracking-wide uppercase"
-                >
-                  {attachments.length} attachment{attachments.length === 1 ? '' : 's'} attached
-                  {imageAttachmentCount > 0 ? ` • ${imageAttachmentCount} image${imageAttachmentCount === 1 ? '' : 's'}` : ''}
-                  {textAttachmentCount > 0 ? ` • ${textAttachmentCount} text attachment${textAttachmentCount === 1 ? '' : 's'}` : ''}
-                  {fileAttachmentCount > 0 ? ` • ${fileAttachmentCount} file${fileAttachmentCount === 1 ? '' : 's'}` : ''}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => openPicker()}
-                  disabled={attachmentControlsLocked}
-                  className={`text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase px-2 py-1 rounded border transition-all ${
-                    attachmentControlsLocked
-                      ? 'opacity-40 cursor-not-allowed bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)]'
-                      : 'bg-[var(--surface-softest)] border-[var(--border-subtle)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)]'
-                  }`}
-                  title={attachmentMode === 'files' ? 'Attach more files' : 'Attach more images'}
-                >
-                  Add
-                </button>
+              <div className="text-[var(--text-10)] uppercase tracking-wide text-[var(--muted-dim)]">
+                {attachments.length} attachment{attachments.length === 1 ? '' : 's'} attached
+                {imageAttachmentCount > 0 ? ` • ${imageAttachmentCount} image${imageAttachmentCount === 1 ? '' : 's'}` : ''}
+                {textAttachmentCount > 0 ? ` • ${textAttachmentCount} text attachment${textAttachmentCount === 1 ? '' : 's'}` : ''}
+                {fileAttachmentCount > 0 ? ` • ${fileAttachmentCount} file${fileAttachmentCount === 1 ? '' : 's'}` : ''}
               </div>
               <div className="mt-2 flex gap-2 overflow-x-auto pb-1 no-scrollbar">
                 {attachments.map((a) => (
