@@ -3,6 +3,7 @@ import { useDndMonitor, useDraggable, useDroppable, type DragEndEvent, type Drag
 import {
   DroneCard,
   SidebarItemStateIndicator,
+  SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
   sidebarDroneStateLabel,
   sidebarItemStateToneClass,
@@ -11,6 +12,7 @@ import type { DroneSummary } from '../types';
 import { createCanvasChatNodeId } from './app-config';
 import { normalizedDroneChats } from './chat-node-helpers';
 import { isDroneStartingOrSeeding } from './helpers';
+import { isDroneProvisioningPhase } from '../hub-phase';
 import { IconPencil, IconSpinner, IconTrash } from './icons';
 import {
   createSidebarChatDragData,
@@ -664,6 +666,7 @@ function SidebarDroneNode({
   void onRenameDroneChat;
 
   if (drone.id === draftSidebarPlaceholderId) {
+    const starting = isDroneProvisioningPhase(drone.hubPhase);
     return (
       <div key={drone.id} className={`w-full text-left flex items-center rounded-[var(--radius-medium)] border bg-[var(--selected)] border-[var(--accent-muted)] relative ${densityClasses.draftRow}`}>
         <div className="absolute left-0 top-1 bottom-1 w-[2px] rounded-full bg-[var(--accent)]" />
@@ -671,13 +674,20 @@ function SidebarDroneNode({
           <span className={`flex-1 min-w-0 truncate dh-type-sidebar-item-active ${densityClasses.draftText}`} title={`${drone.name} · pending draft`}>
             {drone.name}
           </span>
-          <span
-            className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
-            style={{ fontFamily: 'var(--display)' }}
-            title="Draft"
-          >
-            draft
-          </span>
+          {starting ? (
+            <span className="inline-flex flex-shrink-0 items-center gap-1 text-[var(--text-9)] font-[var(--weight-semibold)] text-[var(--yellow)]" title="Starting">
+              <SidebarWorkingStatusIndicator />
+              Starting
+            </span>
+          ) : (
+            <span
+              className="flex-shrink-0 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-1 py-0.5 text-[var(--text-9)] font-[var(--weight-semibold)] tracking-wide uppercase text-[var(--muted-dim)]"
+              style={{ fontFamily: 'var(--display)' }}
+              title="Draft"
+            >
+              draft
+            </span>
+          )}
         </div>
       </div>
     );

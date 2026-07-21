@@ -45,6 +45,7 @@ import type { DroneDeleteMode } from './settings-types';
 import { requestChangesPullRequest } from '../changes/navigation';
 import { copyText, downloadTextFile } from './clipboard';
 import { chatInputDraftKeyForDroneChat, droneHomePath, isDroneStartingOrSeeding, resolveChatNameForDrone } from './helpers';
+import { isDroneProvisioningPhase } from '../hub-phase';
 import { openDroneTabFromLastPreview, resolveDroneOpenTabUrl } from './quick-actions';
 import { cn } from '../../ui/cn';
 import { dropdownMenuItemBaseClass, dropdownPanelBaseClass, useDropdownDismiss } from '../../ui/dropdown';
@@ -251,6 +252,7 @@ type SelectedDroneWorkspaceProps = {
   outputScrollRef: React.RefObject<HTMLDivElement | null>;
   updatePinned: (el: HTMLDivElement) => void;
   startupSeedForCurrentDrone: StartupSeedState | null;
+  clearStartupSeedForDrone: (droneId: string) => void;
   sessionText: string;
   pinnedToBottom: boolean;
   selectedDroneIdentity: string;
@@ -351,6 +353,7 @@ export function SelectedDroneWorkspace({
   outputScrollRef,
   updatePinned,
   startupSeedForCurrentDrone,
+  clearStartupSeedForDrone,
   sessionText,
   pinnedToBottom,
   selectedDroneIdentity,
@@ -555,9 +558,10 @@ export function SelectedDroneWorkspace({
     !chatConfigFailed &&
     (currentChatIsDraft || !hasChats || chatRuntimeMetadataAvailable);
   const showFleetBadge =
-    fleetBadgeAssigning ||
-    fleetBadgeDropActive ||
-    (!currentDroneIsDraft && (Boolean(fleetBadgeError) || /\b[1-9]\d*\b/.test(fleetBadgeSummaryText)));
+    !isDroneProvisioningPhase(currentDrone.hubPhase) &&
+    (fleetBadgeAssigning ||
+      fleetBadgeDropActive ||
+      (!currentDroneIsDraft && (Boolean(fleetBadgeError) || /\b[1-9]\d*\b/.test(fleetBadgeSummaryText))));
   const selectedChatDockerSnapshotBusy = React.useMemo(
     () =>
       (transcripts ?? []).some((item) => {
@@ -1524,6 +1528,16 @@ export function SelectedDroneWorkspace({
               <AssistantDock
                 key={`${currentDrone.id}:${activeChatName}`}
                 nativeChat={{ droneId: currentDrone.id, chatName: activeChatName }}
+                startupPrompt={
+                  startupSeedForCurrentDrone?.agent?.kind === 'native' &&
+                  String(startupSeedForCurrentDrone.prompt ?? '').trim()
+                    ? {
+                        prompt: String(startupSeedForCurrentDrone.prompt).trim(),
+                        at: startupSeedForCurrentDrone.at,
+                      }
+                    : null
+                }
+                onStartupPromptReconciled={() => clearStartupSeedForDrone(currentDrone.id)}
                 messageFeatures={{
                   parsingJobsByTurn,
                   onCreateJobs: parseJobsFromAgentMessage,

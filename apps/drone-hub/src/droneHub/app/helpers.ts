@@ -9,6 +9,7 @@ import {
   compareSidebarDronesByNewestFirst,
   parseIsoTimestampMs,
 } from '@drone/hub-model/sidebar';
+import { isDroneProvisioningPhase } from '../hub-phase';
 
 export { parseIsoTimestampMs };
 
@@ -35,11 +36,11 @@ export function makeId(): string {
 }
 
 export function isDroneStartingOrSeeding(hubPhase: string | null | undefined): boolean {
-  return hubPhase === 'draft' || hubPhase === 'creating' || hubPhase === 'starting' || hubPhase === 'seeding';
+  return hubPhase === 'draft' || isDroneProvisioningPhase(hubPhase);
 }
 
 export function shouldReadChatRuntimeForHubPhase(hubPhase: string | null | undefined): boolean {
-  return hubPhase !== 'creating' && hubPhase !== 'starting' && hubPhase !== 'seeding';
+  return !isDroneProvisioningPhase(hubPhase);
 }
 
 export function parseConflictFilesFromMessage(message: string): string[] {

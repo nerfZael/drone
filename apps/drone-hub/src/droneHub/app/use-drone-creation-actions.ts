@@ -3,9 +3,9 @@ import type { AgentPermissionMode, ChatAgentConfig } from '../../domain';
 import type { DroneSummary } from '../types';
 import type { ChatSendPayload } from '../chat';
 import type { DraftChatState } from './app-types';
-import { attachmentRefsFromPayload, normalizeChatImageAttachmentPayloads } from './chat-attachment-payloads';
+import { normalizeChatImageAttachmentPayloads } from './chat-attachment-payloads';
 import { resolveRepoSeedFromParentDroneId } from './child-drone-repo-seed';
-import { createDraftQueuedPrompt } from './draft-chat-queue';
+import { createDraftQueuedPrompt, createSubmittedDraftChat } from './draft-chat-queue';
 import {
   buildDraftDroneCreatePayload,
   runtimeSupportsCustomAgents,
@@ -92,6 +92,7 @@ type UseDroneCreationActionsArgs = {
       chatName?: string;
       group?: string | null;
       repoPath?: string | null;
+      at?: string | null;
     },
   ) => void;
   rememberSeenModels: (models: Iterable<string | null | undefined>) => void;
@@ -637,6 +638,7 @@ export function useDroneCreationActions({
       autoRename?: boolean;
       autoRenamePrompt?: string;
       keepDraftComposerOpen?: boolean;
+      submittedAt?: string;
     }): Promise<boolean> => {
       const latestDraftChat = draftChatRef.current;
       const pending = latestDraftChat?.prompt ?? null;
@@ -713,6 +715,7 @@ export function useDroneCreationActions({
       let postCreateError: string | null = null;
       const optimisticDraftName =
         name ||
+        String(latestDraftChat?.droneName ?? '').trim() ||
         allocateUntitledDisplayName(drones.map((drone) => String(drone?.name ?? '').trim()));
       const optimisticSeeds = createWithoutChat
         ? addOptimisticStartupSeeds(setStartupSeedByDrone, [optimisticDraftName], {
@@ -786,7 +789,7 @@ export function useDroneCreationActions({
               group,
               repoPath,
             });
-          } else if (shouldSeedPromptViaCreate) {
+          } else if (!createWithoutChat) {
             if (seedModel) rememberSeenModels([seedModel]);
             rememberStartupSeed([{ id: droneId, name: createdName }], {
               runtime,
@@ -797,6 +800,7 @@ export function useDroneCreationActions({
               chatName: 'default',
               group,
               repoPath,
+              at: opts?.submittedAt ?? pending?.at ?? null,
             });
           }
           if (!keepDraftComposerOpen) {
@@ -813,7 +817,9 @@ export function useDroneCreationActions({
             return {
               ...(prev ?? { focusKey: undefined }),
               droneId,
-              droneName: createdName,
+              // Keep the optimistic display name stable until the automatic rename
+              // completes and the real workspace takes over.
+              droneName: String(prev.droneName ?? '').trim() || createdName,
               queuedPrompts: Array.isArray(prev.queuedPrompts) ? prev.queuedPrompts : [],
               prompt: {
                 ...prev.prompt,
@@ -982,19 +988,14 @@ export function useDroneCreationActions({
           keepDraftComposerOpen: true,
         });
       }
-      const nextDraftChat: DraftChatState = {
-        droneId: '',
-        droneName: '',
+      const nextDraftChat = createSubmittedDraftChat({
+        payload: { prompt, attachments },
+        droneName:
+          draftCreateName.trim() ||
+          allocateUntitledDisplayName(drones.map((drone) => String(drone?.name ?? '').trim())),
         focusKey: draftChat?.focusKey,
-        queuedPrompts: [],
-        prompt: {
-          id: `draft-${makeId()}`,
-          at: new Date().toISOString(),
-          prompt,
-          ...(attachments.length > 0 ? { attachments: attachmentRefsFromPayload(attachments), attachmentPayloads: attachments } : {}),
-          state: 'sending',
-        },
-      };
+      });
+      if (!nextDraftChat) return false;
       setDraftChatState(nextDraftChat);
       setDraftCreateError(null);
       setDraftCreateName('');
@@ -1004,10 +1005,16 @@ export function useDroneCreationActions({
       setDraftAutoRenaming(false);
       setDraftCreateOpen(false);
 
-      return await createDroneFromDraft({ prompt, attachments, autoRename: !draftCreateName.trim() });
+      return await createDroneFromDraft({
+        prompt,
+        attachments,
+        autoRename: !draftCreateName.trim(),
+        submittedAt: nextDraftChat.prompt?.at,
+      });
     },
     [
       createDroneFromDraft,
+      drones,
       draftCreateName,
       setDraftAutoRenaming,
       setDraftChatState,

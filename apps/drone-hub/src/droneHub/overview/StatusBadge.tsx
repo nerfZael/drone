@@ -1,5 +1,6 @@
 import React from 'react';
 import type { DroneSummary } from '../types';
+import { droneProvisioningLabel, isDroneProvisioningPhase } from '../hub-phase';
 import { TypingDots } from './icons';
 
 export function StatusBadge({
@@ -28,17 +29,16 @@ export function StatusBadge({
       </span>
     );
   }
-  if (hubPhase === 'creating' || hubPhase === 'starting' || hubPhase === 'seeding') {
-    const label = hubPhase === 'seeding' ? 'Seeding' : 'Starting';
+  if (isDroneProvisioningPhase(hubPhase)) {
+    const label = droneProvisioningLabel(hubPhase);
     const title = String(hubMessage ?? label);
     return (
       <span
-        className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded text-[var(--text-10)] font-[var(--weight-semibold)] tracking-wide uppercase bg-[var(--yellow-subtle)] text-[var(--yellow)] border border-[var(--yellow-border)]"
-        style={{ fontFamily: 'var(--display)' }}
+        className="inline-flex items-center gap-1.5 text-[var(--text-10)] font-[var(--weight-medium)] text-[var(--muted-dim)]"
         title={title}
         aria-label={label}
       >
-        <TypingDots color="var(--yellow)" />
+        <span className="h-1.5 w-1.5 rounded-full bg-[var(--yellow)] animate-pulse" />
         {label}
       </span>
     );
