@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   captureDroneRunFileChangesBaseline,
   finalizeDroneRunFileChanges,
+  isMutatingWorkspaceTool,
 } from '../src/hub/run-file-changes';
 
 const temporaryDirectories: string[] = [];
@@ -41,6 +42,25 @@ afterEach(() => {
 });
 
 describe('agent run file changes', () => {
+  test('recognizes every write-capable workspace tool', () => {
+    for (const tool of [
+      'bash',
+      'write_file',
+      'apply_patch',
+      'delete_file',
+      'move_path',
+      'create_directory',
+      'delete_directory',
+      'transfer_mkdir',
+      'transfer_prepare',
+      'transfer_write',
+      'transfer_commit',
+    ]) {
+      expect(isMutatingWorkspaceTool(tool)).toBe(true);
+    }
+    expect(isMutatingWorkspaceTool('read_file')).toBe(false);
+  });
+
   test('reports only changes made after the run baseline', async () => {
     const repoPath = createRepository();
     fs.appendFileSync(path.join(repoPath, 'src', 'existing.ts'), 'dirty before run\n');

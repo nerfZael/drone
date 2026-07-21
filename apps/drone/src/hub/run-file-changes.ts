@@ -185,6 +185,19 @@ function parseNumstat(raw: string): Map<string, { additions: number; deletions: 
   return stats;
 }
 
+function splitGitPatches(raw: string): string[] {
+  const starts: number[] = [];
+  if (raw.startsWith('diff --git ')) starts.push(0);
+  let cursor = 0;
+  while (cursor < raw.length) {
+    const next = raw.indexOf('\ndiff --git ', cursor);
+    if (next < 0) break;
+    starts.push(next + 1);
+    cursor = next + 1;
+  }
+  return starts.map((start, index) => raw.slice(start, starts[index + 1] ?? raw.length));
+}
+
 async function summarizeTrees(input: {
   baseline: AgentRunFileChangesBaseline;
   currentTreeOid: string;
@@ -193,7 +206,7 @@ async function summarizeTrees(input: {
 }): Promise<AgentRunFileChangeWorkspace | null> {
   if (input.baseline.treeOid === input.currentTreeOid) return null;
   const revisionArgs = [input.baseline.treeOid, input.currentTreeOid];
-  const [nameStatusRaw, numstatRaw] = await Promise.all([
+  const [nameStatusRaw, numstatRaw, patchRaw] = await Promise.all([
     gitOrThrow(input.runGit, [
       'diff',
       '--no-color',
@@ -212,9 +225,22 @@ async function summarizeTrees(input: {
       '-z',
       ...revisionArgs,
     ]),
+    gitOrThrow(input.runGit, [
+      'diff',
+      '--no-color',
+      '--no-ext-diff',
+      '--find-renames',
+      '--unified=3',
+      ...revisionArgs,
+    ]),
   ]);
   const statusEntries = parseNameStatus(nameStatusRaw);
   if (statusEntries.length === 0) return null;
+  const patchChunks = splitGitPatches(patchRaw);
+  const patchesByPath =
+    patchChunks.length === statusEntries.length
+      ? new Map(statusEntries.map((entry, index) => [entry.path, patchChunks[index]!]))
+      : null;
   const stats = parseNumstat(numstatRaw);
   const entries: AgentRunFileChangeEntry[] = statusEntries.map((entry) => {
     const stat = stats.get(entry.path) ?? { additions: 0, deletions: 0, binary: false };
@@ -238,6 +264,8 @@ async function summarizeTrees(input: {
     label: input.baseline.label,
     entries: persistedEntries,
     readPatch: async (entry) => {
+      const combinedPatch = patchesByPath?.get(entry.path);
+      if (combinedPatch != null) return combinedPatch;
       const paths = [
         ...new Set(
           [entry.originalPath, entry.path].filter((value): value is string => Boolean(value)),
@@ -381,6 +409,7 @@ export function isMutatingWorkspaceTool(toolNameRaw: unknown): boolean {
     toolName === 'write_file' ||
     toolName === 'apply_patch' ||
     toolName === 'delete_file' ||
+    toolName === 'move_path' ||
     toolName === 'move_file' ||
     toolName === 'create_directory' ||
     toolName === 'delete_directory' ||

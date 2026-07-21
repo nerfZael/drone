@@ -49,6 +49,8 @@ function createRepository() {
   git(repoPath, 'config', 'user.name', 'Test');
   fs.mkdirSync(path.join(repoPath, 'src'));
   fs.writeFileSync(path.join(repoPath, 'src', 'existing.ts'), 'one\ntwo\n');
+  fs.writeFileSync(path.join(repoPath, 'deleted.txt'), 'delete me\n');
+  fs.writeFileSync(path.join(repoPath, 'renamed.txt'), 'rename me\n');
   git(repoPath, 'add', '-A');
   git(repoPath, 'commit', '--quiet', '-m', 'base');
   return repoPath;
@@ -107,6 +109,9 @@ describe('agent run diff artifacts', () => {
       owner: { chatName: 'default', promptId: 'prompt-1' },
     });
     fs.appendFileSync(path.join(repoPath, 'src', 'existing.ts'), 'added by run\n');
+    fs.writeFileSync(path.join(repoPath, 'new.txt'), 'new file\n');
+    fs.unlinkSync(path.join(repoPath, 'deleted.txt'));
+    fs.renameSync(path.join(repoPath, 'renamed.txt'), path.join(repoPath, 'moved.txt'));
 
     const summary = await finalizeDroneRunFileChanges({ baseline, drone });
     const artifactId = summary.workspaces[0].diffArtifactId;
@@ -117,6 +122,18 @@ describe('agent run diff artifacts', () => {
     });
     assert.match(historical.patch, /\+added by run/);
     assert.doesNotMatch(historical.patch, /^\+dirty before run$/m);
+    assert.match(
+      (await readAgentRunFileDiff({ artifactId, path: 'new.txt' })).patch,
+      /new file mode/,
+    );
+    assert.match(
+      (await readAgentRunFileDiff({ artifactId, path: 'deleted.txt' })).patch,
+      /deleted file mode/,
+    );
+    assert.match(
+      (await readAgentRunFileDiff({ artifactId, path: 'moved.txt' })).patch,
+      /rename from renamed\.txt[\s\S]*rename to moved\.txt/,
+    );
     assert.deepEqual(historical.owner, {
       droneId: 'host-1',
       chatName: 'default',
@@ -146,5 +163,26 @@ describe('agent run diff artifacts', () => {
       readAgentRunFileDiff({ artifactId, path: 'new.txt' }),
       (error) => error.statusCode === 404,
     );
+  });
+
+  test('removes abandoned artifact directories after a safety grace period', async () => {
+    const dataDir = useDroneDataDir();
+    const root = path.join(dataDir, 'agent-run-diffs');
+    const orphan = path.join(root, '018fdce7-6e20-7d31-a78c-3f95d665cc72');
+    const temporary = path.join(
+      root,
+      '.018fdce7-6e20-7d31-a78c-3f95d665cc73.018fdce7-6e20-7d31-a78c-3f95d665cc74.tmp',
+    );
+    const unrelated = path.join(root, 'keep-me');
+    for (const directory of [orphan, temporary, unrelated]) {
+      fs.mkdirSync(directory, { recursive: true });
+      fs.utimesSync(directory, new Date(0), new Date(0));
+    }
+
+    await cleanupAgentRunDiffArtifacts({ nowMs: Date.now(), force: true });
+
+    assert.equal(fs.existsSync(orphan), false);
+    assert.equal(fs.existsSync(temporary), false);
+    assert.equal(fs.existsSync(unrelated), true);
   });
 });

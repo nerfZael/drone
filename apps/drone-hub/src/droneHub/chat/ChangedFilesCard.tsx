@@ -2,7 +2,7 @@ import React from 'react';
 import type { AgentRunFileChangeEntry, AgentRunFileChanges } from '@blip/protocol';
 
 import { IconChevron } from './icons';
-import { requestJson } from '../http';
+import { requestJsonWithTimeout } from '../http';
 
 type LoadedHistoricalDiff = {
   patch: string;
@@ -12,7 +12,7 @@ type LoadedHistoricalDiff = {
 type HistoricalDiffState =
   | { status: 'loading' }
   | { status: 'loaded'; value: LoadedHistoricalDiff }
-  | { status: 'error'; message: string };
+  | { status: 'error'; message: string; retryable: boolean };
 
 const MAX_RENDERED_DIFF_LINES = 2_500;
 
@@ -20,11 +20,13 @@ async function loadHistoricalDiff(
   artifactId: string,
   filePath: string,
 ): Promise<LoadedHistoricalDiff> {
-  const result = await requestJson<{
+  const result = await requestJsonWithTimeout<{
     ok: true;
     diff: { patch: string; truncated?: boolean };
   }>(
     `/api/agent-run-diffs/${encodeURIComponent(artifactId)}/file?path=${encodeURIComponent(filePath)}`,
+    undefined,
+    15_000,
   );
   return {
     patch: String(result.diff?.patch ?? ''),
@@ -97,13 +99,15 @@ function HistoricalDiffPanel({
     return (
       <div className="flex items-center justify-between gap-3 border-t border-[var(--border-subtle)] bg-[var(--red-subtle)] px-3 py-2.5 text-[var(--text-10)] text-[var(--red)]">
         <span>{state.message}</span>
-        <button
-          type="button"
-          onClick={onRetry}
-          className="shrink-0 rounded border border-[var(--red-border)] px-2 py-1 font-[var(--weight-semibold)] hover:bg-[var(--surface-inset)]"
-        >
-          Retry
-        </button>
+        {state.retryable ? (
+          <button
+            type="button"
+            onClick={onRetry}
+            className="shrink-0 rounded border border-[var(--red-border)] px-2 py-1 font-[var(--weight-semibold)] hover:bg-[var(--surface-inset)]"
+          >
+            Retry
+          </button>
+        ) : null}
       </div>
     );
   }
@@ -221,11 +225,13 @@ export function ChangedFilesCard({
         setDiffs((current) => ({ ...current, [key]: { status: 'loaded', value } }));
       })
       .catch((error: any) => {
+        const status = Number(error?.status ?? 0);
         setDiffs((current) => ({
           ...current,
           [key]: {
             status: 'error',
             message: String(error?.message ?? error ?? 'Unable to load historical diff.'),
+            retryable: status < 400 || status >= 500,
           },
         }));
       });

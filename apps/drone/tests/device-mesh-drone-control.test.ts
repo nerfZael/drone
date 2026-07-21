@@ -574,6 +574,81 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('validates native historical diffs without opening the native session', async () => {
+    const originalFetch = globalThis.fetch;
+    const requests: Array<{ path: string; method: string }> = [];
+    globalThis.fetch = (async (input, init) => {
+      const url = new URL(String(input));
+      requests.push({ path: `${url.pathname}${url.search}`, method: String(init?.method ?? 'GET') });
+      if (url.pathname.endsWith('/native')) {
+        return Response.json({ ok: true, nativeChatId: 'native-chat-1' });
+      }
+      return Response.json({
+        ok: true,
+        diff: {
+          path: 'src/a.ts',
+          patch: '+new line\n',
+          owner: { droneId: 'drone-1', threadId: 'native-chat-1', turnId: 'turn-1' },
+        },
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('chat.read', {
+          droneId: 'drone-1',
+          chatName: 'default',
+          diffArtifactId: '018fdce7-6e20-7d31-a78c-3f95d665cc72',
+          diffPath: 'src/a.ts',
+        }),
+      ).resolves.toMatchObject({ diff: { patch: '+new line\n' } });
+      expect(requests).toEqual([
+        {
+          path: '/api/agent-run-diffs/018fdce7-6e20-7d31-a78c-3f95d665cc72/file?path=src%2Fa.ts',
+          method: 'GET',
+        },
+        { path: '/api/drones/drone-1/chats/default/native', method: 'GET' },
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
+  test('bounds historical diffs to a safe mobile response size', async () => {
+    const originalFetch = globalThis.fetch;
+    globalThis.fetch = (async () =>
+      Response.json({
+        ok: true,
+        diff: {
+          path: 'src/large.ts',
+          patch: `+${'x'.repeat(300 * 1024)}\n`,
+          truncated: false,
+          owner: { droneId: 'drone-1', chatName: 'default', promptId: 'prompt-1' },
+        },
+      })) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      const result: any = await capability.invoke('chat.read', {
+        droneId: 'drone-1',
+        chatName: 'default',
+        diffArtifactId: '018fdce7-6e20-7d31-a78c-3f95d665cc72',
+        diffPath: 'src/large.ts',
+      });
+
+      expect(result.diff.truncated).toBe(true);
+      expect(Buffer.byteLength(result.diff.patch)).toBeLessThanOrEqual(80 * 1024);
+      expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThan(220 * 1024);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('forwards permission-scoped pull request reads and actions', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; method: string; body: string }> = [];

@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import type { Dirent } from 'node:fs';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -23,6 +24,7 @@ const ARTIFACT_STORE_MAX_BYTES = 1024 * 1024 * 1024;
 const ARTIFACT_RETENTION_MS = 90 * 24 * 60 * 60 * 1000;
 const ARTIFACT_WRITE_CONCURRENCY = 6;
 const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
+const ORPHAN_GRACE_MS = 60 * 60 * 1000;
 
 export type AgentRunDiffArtifactOwner = {
   droneId: string;
@@ -236,7 +238,7 @@ export async function persistAgentRunDiffArtifact(input: {
   let artifactPatchBytes = 0;
   let compressedBytes = 0;
 
-  await fs.mkdir(temporaryDirectory, { recursive: true });
+  await fs.mkdir(temporaryDirectory, { recursive: true, mode: 0o700 });
   try {
     await mapWithConcurrency(input.entries, ARTIFACT_WRITE_CONCURRENCY, async (entry, index) => {
       const rawPatch = await input.readPatch(entry);
@@ -312,6 +314,9 @@ export async function readAgentRunFileDiff(input: { artifactId: string; path: st
   const artifactId = validArtifactId(input.artifactId);
   const filePath = String(input.path ?? '').trim();
   if (!filePath) throw new AgentRunDiffArtifactError('A changed file path is required.', 400);
+  if (Buffer.byteLength(filePath, 'utf8') > 16 * 1024) {
+    throw new AgentRunDiffArtifactError('The changed file path is too long.', 400);
+  }
   const row = repository().read(artifactId);
   if (!row) throw new AgentRunDiffArtifactError('This historical diff has expired.', 404);
   const manifest = parseManifest(row.manifest_json);
@@ -367,7 +372,39 @@ export async function cleanupAgentRunDiffArtifacts(input?: {
     await fs.rm(path.join(artifactRoot(), record.storage_dir), { recursive: true, force: true });
   }
   await repository().remove(remove.map((record) => record.id));
+  const removedIds = new Set(remove.map((record) => record.id));
+  const retainedDirectories = new Set(
+    records
+      .filter((record) => !removedIds.has(record.id))
+      .map((record) => record.storage_dir),
+  );
+  await cleanupOrphanedArtifactDirectories(retainedDirectories, nowMs);
   return { removed: remove.length };
+}
+
+async function cleanupOrphanedArtifactDirectories(
+  retainedDirectories: Set<string>,
+  nowMs: number,
+): Promise<void> {
+  let entries: Dirent[];
+  try {
+    entries = await fs.readdir(artifactRoot(), { withFileTypes: true });
+  } catch (error: any) {
+    if (error?.code === 'ENOENT') return;
+    throw error;
+  }
+  await Promise.all(
+    entries.map(async (entry) => {
+      if (!entry.isDirectory() || retainedDirectories.has(entry.name)) return;
+      const isArtifactDirectory = /^[0-9a-f-]{36}$/i.test(entry.name);
+      const isTemporaryDirectory = /^\.[0-9a-f-]{36}\.[0-9a-f-]{36}\.tmp$/i.test(entry.name);
+      if (!isArtifactDirectory && !isTemporaryDirectory) return;
+      const directory = path.join(artifactRoot(), entry.name);
+      const stat = await fs.stat(directory).catch(() => null);
+      if (!stat || nowMs - stat.mtimeMs <= ORPHAN_GRACE_MS) return;
+      await fs.rm(directory, { recursive: true, force: true });
+    }),
+  );
 }
 
 export function agentRunDiffArtifactStatus(error: unknown): number {

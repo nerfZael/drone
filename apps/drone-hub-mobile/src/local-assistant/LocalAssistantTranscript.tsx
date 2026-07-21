@@ -101,7 +101,7 @@ function ChangedFilesSummary({
       string,
       | { status: 'loading' }
       | { status: 'loaded'; patch: string; truncated: boolean }
-      | { status: 'error'; message: string }
+      | { status: 'error'; message: string; retryable: boolean }
     >
   >({});
   const summary = item.fileChanges;
@@ -127,11 +127,17 @@ function ChangedFilesSummary({
         }));
       })
       .catch((error: any) => {
+        const errorCode = String(error?.code ?? '');
+        const hubStatus = Number(/^HUB_(\d+)$/.exec(errorCode)?.[1] ?? 0);
+        const terminal =
+          errorCode === 'INVALID_REQUEST' ||
+          (hubStatus >= 400 && hubStatus < 500 && hubStatus !== 408 && hubStatus !== 429);
         setDiffs((current) => ({
           ...current,
           [key]: {
             status: 'error',
             message: String(error?.message ?? error ?? 'Unable to load historical diff.'),
+            retryable: !terminal,
           },
         }));
       });
@@ -231,7 +237,7 @@ function ChangedFilesSummary({
                               Loading historical diff…
                             </Text>
                           </View>
-                        ) : diff.status === 'error' ? (
+                        ) : diff.status === 'error' && diff.retryable ? (
                           <Pressable
                             accessibilityRole="button"
                             accessibilityLabel="Retry loading historical diff"
@@ -244,12 +250,26 @@ function ChangedFilesSummary({
                             <Text style={styles.changedFilesDiffErrorText}>{diff.message}</Text>
                             <Text style={styles.changedFilesDiffRetry}>Retry</Text>
                           </Pressable>
+                        ) : diff.status === 'error' ? (
+                          <View style={styles.changedFilesDiffError}>
+                            <Text style={styles.changedFilesDiffErrorText}>{diff.message}</Text>
+                          </View>
                         ) : (
                           <>
-                            <ScrollView horizontal showsHorizontalScrollIndicator>
-                              <Text selectable style={styles.changedFilesDiffText}>
-                                {diff.patch.slice(0, 80_000)}
-                              </Text>
+                            <ScrollView
+                              nestedScrollEnabled
+                              showsVerticalScrollIndicator
+                              style={styles.changedFilesDiffScroll}
+                            >
+                              <ScrollView
+                                horizontal
+                                nestedScrollEnabled
+                                showsHorizontalScrollIndicator
+                              >
+                                <Text selectable style={styles.changedFilesDiffText}>
+                                  {diff.patch.slice(0, 80_000)}
+                                </Text>
+                              </ScrollView>
                             </ScrollView>
                             {diff.truncated || diff.patch.length > 80_000 ? (
                               <Text style={styles.changedFilesDiffHint}>
@@ -1280,12 +1300,12 @@ const styles = StyleSheet.create({
   changedFilesPath: { flex: 1, color: colors.text, fontSize: 10, fontFamily: 'monospace' },
   changedFilesLineCounts: { color: colors.muted, fontSize: 9, fontFamily: 'monospace' },
   changedFilesDiffPanel: {
-    maxHeight: 330,
     borderTopWidth: 1,
     borderTopColor: colors.border,
     backgroundColor: colors.surface0,
     paddingVertical: 8,
   },
+  changedFilesDiffScroll: { maxHeight: 300 },
   changedFilesDiffLoading: {
     minHeight: 42,
     flexDirection: 'row',
