@@ -2535,16 +2535,16 @@ export function DroneSidebar({
                         {activeRepositoryNavigationItem.stateSummary.approval}
                       </span>
                     ) : null}
-                    {activeRepositoryNavigationItem.stateSummary.working > 0 ? (
-                      <span className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]">
-                        <SidebarWorkingStatusIndicator />
-                        {activeRepositoryNavigationItem.stateSummary.working}
-                      </span>
-                    ) : null}
                     {activeRepositoryNavigationItem.stateSummary.unread > 0 ? (
                       <span className="inline-flex items-center gap-1 text-[var(--green)]">
                         <SidebarItemStateIndicator state="idle" unread />
                         {activeRepositoryNavigationItem.stateSummary.unread}
+                      </span>
+                    ) : null}
+                    {activeRepositoryNavigationItem.stateSummary.working > 0 ? (
+                      <span className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]">
+                        <SidebarWorkingStatusIndicator />
+                        {activeRepositoryNavigationItem.stateSummary.working}
                       </span>
                     ) : null}
                   </span>
@@ -2771,16 +2771,16 @@ export function DroneSidebar({
                               {item.stateSummary.approval}
                             </span>
                           ) : null}
-                          {item.stateSummary.working > 0 ? (
-                            <span className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]">
-                              <SidebarWorkingStatusIndicator />
-                              {item.stateSummary.working}
-                            </span>
-                          ) : null}
                           {item.stateSummary.unread > 0 ? (
                             <span className="inline-flex items-center gap-1 text-[var(--green)]">
                               <SidebarItemStateIndicator state="idle" unread />
                               {item.stateSummary.unread}
+                            </span>
+                          ) : null}
+                          {item.stateSummary.working > 0 ? (
+                            <span className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]">
+                              <SidebarWorkingStatusIndicator />
+                              {item.stateSummary.working}
                             </span>
                           ) : null}
                         </span>

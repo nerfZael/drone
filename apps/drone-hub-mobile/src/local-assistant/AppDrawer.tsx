@@ -409,18 +409,18 @@ function DroneStateCounts({
           </Text>
         </View>
       ) : null}
+      {summary.unread > 0 ? (
+        <View accessibilityLabel={`${summary.unread} with unread chats`} style={styles.fleetState}>
+          <UnreadStatusIndicator />
+          <Text style={[styles.fleetStateText, styles.fleetStateTextUnread]}>{summary.unread}</Text>
+        </View>
+      ) : null}
       {summary.working > 0 ? (
         <View accessibilityLabel={`${summary.working} working`} style={styles.fleetState}>
           <WorkingStatusIndicator />
           <Text style={[styles.fleetStateText, styles.fleetStateTextWorking]}>
             {summary.working}
           </Text>
-        </View>
-      ) : null}
-      {summary.unread > 0 ? (
-        <View accessibilityLabel={`${summary.unread} with unread chats`} style={styles.fleetState}>
-          <UnreadStatusIndicator />
-          <Text style={[styles.fleetStateText, styles.fleetStateTextUnread]}>{summary.unread}</Text>
         </View>
       ) : null}
     </View>
@@ -456,14 +456,17 @@ function SwitchItemStatusIndicator({
   state: SwitchDisplayState;
   unread?: boolean;
 }) {
+  const ready = state === 'idle' && !unread;
+  const working =
+    state === 'working' ||
+    state === 'starting' ||
+    state === 'archiving' ||
+    state === 'deleting';
   const stateColor = switchStateColor(state);
   const indicatorColor = unread && state === 'idle' ? colors.online : stateColor;
   return (
     <View accessible={false} style={styles.switchItemStatus}>
-      {state === 'working' ||
-      state === 'starting' ||
-      state === 'archiving' ||
-      state === 'deleting' ? (
+      {ready ? null : working ? (
         <WorkingStatusIndicator />
       ) : state === 'approval' ? (
         <ApprovalStatusIndicator />

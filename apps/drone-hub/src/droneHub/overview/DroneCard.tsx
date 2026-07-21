@@ -129,6 +129,7 @@ export function SidebarItemStateIndicator({
   state: SidebarDroneDisplayState;
   unread?: boolean;
 }) {
+  const ready = state === 'idle' && !unread;
   const working = state === 'working' || state === 'starting' || state === 'archiving' || state === 'deleting';
   const approvalRequired = state === 'approval';
   const indicatorToneClass =
@@ -141,7 +142,7 @@ export function SidebarItemStateIndicator({
           : 'bg-[var(--muted)]';
   return (
     <span className="inline-flex h-3 w-3 flex-shrink-0 self-center items-center justify-center leading-none" aria-hidden="true">
-      {working ? (
+      {ready ? null : working ? (
         <SidebarWorkingStatusIndicator />
       ) : approvalRequired ? (
         <SidebarApprovalStatusIndicator />

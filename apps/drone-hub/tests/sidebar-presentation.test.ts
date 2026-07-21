@@ -127,4 +127,23 @@ describe('sidebar presentation', () => {
     );
     expect(sidebarSource).not.toContain("containsSelectedDrone\n                          ? 'bg-[var(--selected)]'");
   });
+
+  test('orders repository header states by approval, unread, then working', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+    const headerStart = sidebarSource.indexOf(
+      'activeRepositoryNavigationItem.stateSummary.approval',
+    );
+    const headerEnd = sidebarSource.indexOf('</button>', headerStart);
+    const headerStates = sidebarSource.slice(headerStart, headerEnd);
+
+    expect(headerStates.indexOf('stateSummary.approval')).toBeLessThan(
+      headerStates.indexOf('stateSummary.unread'),
+    );
+    expect(headerStates.indexOf('stateSummary.unread')).toBeLessThan(
+      headerStates.indexOf('stateSummary.working'),
+    );
+  });
 });

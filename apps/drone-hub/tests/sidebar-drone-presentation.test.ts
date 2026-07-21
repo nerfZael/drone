@@ -102,6 +102,21 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).not.toContain('animate-[spin_1.6s_linear_infinite]');
   });
 
+  test('leaves ready drones visually quiet while preserving unread emphasis', () => {
+    const readyHtml = renderToStaticMarkup(
+      createElement(SidebarItemStateIndicator, { state: 'idle' }),
+    );
+    const unreadHtml = renderToStaticMarkup(
+      createElement(SidebarItemStateIndicator, { state: 'idle', unread: true }),
+    );
+
+    expect(readyHtml).toContain('h-3 w-3 flex-shrink-0 self-center');
+    expect(readyHtml).not.toContain('rounded-full');
+    expect(readyHtml).not.toContain('bg-[var(--muted)]');
+    expect(unreadHtml).toContain('rounded-full');
+    expect(unreadHtml).toContain('bg-[var(--green)]');
+  });
+
   test('keeps starting in the working color and motion language', () => {
     const html = renderToStaticMarkup(
       createElement(SidebarItemStateIndicator, { state: 'starting' }),

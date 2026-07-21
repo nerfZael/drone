@@ -37,6 +37,23 @@ describe('mobile sidebar presentation', () => {
     expect(source).toContain("repoCopy: { flex: 1, minWidth: 0, justifyContent: 'center' }");
   });
 
+  test('orders header states by approval, unread, then working', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+    const countsStart = source.indexOf('function DroneStateCounts');
+    const countsEnd = source.indexOf('function switchStateLabel', countsStart);
+    const countsSource = source.slice(countsStart, countsEnd);
+
+    expect(countsSource.indexOf('summary.approval')).toBeLessThan(
+      countsSource.indexOf('summary.unread'),
+    );
+    expect(countsSource.indexOf('summary.unread')).toBeLessThan(
+      countsSource.indexOf('summary.working'),
+    );
+  });
+
   test('matches the desktop drone row hierarchy and selection treatment', () => {
     const source = readFileSync(
       new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
@@ -68,8 +85,22 @@ describe('mobile sidebar presentation', () => {
 
     expect(source).toContain("state === 'starting' ||");
     expect(source).toContain("state === 'archiving' ||");
-    expect(source).toContain("state === 'deleting' ? (");
+    expect(source).toContain("state === 'deleting';");
+    expect(source).toContain('{ready ? null : working ? (');
     expect(source).not.toContain('{stateLabel}</Text>');
+  });
+
+  test('keeps a fixed leading status gutter while leaving ready drones visually silent', () => {
+    const source = readFileSync(
+      new URL('../src/local-assistant/AppDrawer.tsx', import.meta.url),
+      'utf8',
+    );
+
+    expect(source).toContain("const ready = state === 'idle' && !unread;");
+    expect(source).toContain('{ready ? null : working ? (');
+    expect(source).toContain(
+      "switchItemStatus: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' }",
+    );
   });
 
   test('omits the selected-drone subtitle while preserving contextual create copy', () => {
