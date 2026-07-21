@@ -6,9 +6,11 @@ import { IconCopy } from './icons';
 export function ChatMessageCopyAction({
   text,
   position = 'top',
+  copyLabel = 'message',
 }: {
   text: string;
-  position?: 'top' | 'bottom' | 'inline' | 'hover-rail';
+  position?: 'top' | 'bottom' | 'inline' | 'hover-rail' | 'block';
+  copyLabel?: string;
 }) {
   const [copiedValue, setCopiedValue] = React.useState<string | null>(null);
   const timerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -28,6 +30,8 @@ export function ChatMessageCopyAction({
       className={
         position === 'inline' || position === 'hover-rail'
           ? 'relative z-20'
+          : position === 'block'
+            ? 'absolute right-2 top-2 z-20'
           : `absolute right-2 z-20 ${position === 'top' ? 'top-2' : 'bottom-2'}`
       }
     >
@@ -59,10 +63,12 @@ export function ChatMessageCopyAction({
         className={`inline-flex h-7 w-7 items-center justify-center rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] text-[var(--muted)] transition-opacity hover:border-[var(--accent-muted)] hover:bg-[var(--surface-inset-strong)] hover:text-[var(--accent)] focus-visible:pointer-events-auto focus-visible:opacity-100 ${
           position === 'hover-rail'
             ? 'pointer-events-auto opacity-100'
-            : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
+            : position === 'block'
+              ? 'pointer-events-none opacity-0 group-hover/markdown-block:pointer-events-auto group-hover/markdown-block:opacity-100'
+              : 'pointer-events-none opacity-0 group-hover:pointer-events-auto group-hover:opacity-100'
         }`}
-        title="Copy message"
-        aria-label="Copy message"
+        title={`Copy ${copyLabel}`}
+        aria-label={`Copy ${copyLabel}`}
       >
         <IconCopy className="h-3.5 w-3.5 opacity-90" />
       </button>

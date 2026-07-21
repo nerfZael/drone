@@ -14,6 +14,8 @@ describe('preview iframe containment', () => {
     const dockSource = readFileSync(new URL('../src/droneHub/overview/DronePreviewDock.tsx', import.meta.url), 'utf8');
 
     expect(dockSource).toContain('sandbox={previewIframeSandbox}');
+    expect(dockSource).toContain('<DroneLinksContent');
+    expect(dockSource).toContain('aria-expanded={linksExpanded}');
     expect(dockSource).toContain("document.addEventListener('focusout'");
     expect(dockSource).toContain("window.addEventListener('blur'");
     expect(PREVIEW_IFRAME_STRICT_SANDBOX).toContain('allow-scripts');

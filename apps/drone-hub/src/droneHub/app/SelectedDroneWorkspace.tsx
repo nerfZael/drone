@@ -38,7 +38,7 @@ import {
 } from './DockableDroneWorkspace';
 import { DroneWorkspaceHeaderFrame } from './DroneWorkspaceHeaderFrame';
 import { HeaderActionButton } from './HeaderActionButton';
-import { type RightPanelTab } from './app-config';
+import { rightPanelHeaderTabs, type RightPanelTab } from './app-config';
 import type { ChatModelOption, StartupSeedState } from './app-types';
 import { chatConfigResolutionState } from './chat-selection-model';
 import type { RepoOpErrorMeta } from './helpers';
@@ -987,7 +987,7 @@ export function SelectedDroneWorkspace({
               )}
               <div className="flex min-w-0 flex-col justify-center">
                 <div className="flex min-w-0 items-center gap-2.5">
-                  <span className="max-w-[min(34vw,360px)] truncate dh-type-title dh-type-workspace-title">
+                  <span className="max-w-[min(34vw,360px)] truncate dh-type-title dh-type-workspace-title !text-[.9375rem]">
                     {currentDroneLabel}
                   </span>
                   {showRespondingAsStatusInHeader ? (
@@ -1423,7 +1423,7 @@ export function SelectedDroneWorkspace({
           {/* Workspace pane controls */}
           <div className="w-px h-4 bg-[var(--border-subtle)] ml-1" />
           <div className="flex items-center gap-0.5">
-            {rightPanelTabs.map((tab) => {
+            {rightPanelHeaderTabs(rightPanelTabs).map((tab) => {
               const prCount = tab === 'prs' ? Number(openPullRequestCount ?? 0) : 0;
               return (
                 <button

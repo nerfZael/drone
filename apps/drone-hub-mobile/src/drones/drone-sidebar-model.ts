@@ -25,6 +25,7 @@ export type MobileDroneSummary = {
   fleetParentId: string | null;
   chats: string[];
   busyChats: string[];
+  approvalRequired?: boolean;
   unreadChats?: string[];
   chatReadStates?: Record<
     string,
@@ -310,6 +311,10 @@ export function normalizeMobileDrone(raw: unknown): MobileDroneSummary | null {
     fleetParentId: text(value.fleetParentId) || null,
     chats,
     busyChats: stringList(value.busyChats),
+    approvalRequired:
+      value.approvalRequired === true ||
+      value.requiresApproval === true ||
+      /approval/.test(`${text(value.phase)} ${text(value.status)}`.toLowerCase()),
     unreadChats,
     chatReadStates,
     createdAt: text(value.createdAt) || undefined,

@@ -221,13 +221,13 @@ function CurrentDevicePicker() {
   return (
     <button
       type="button"
-      className="flex h-8 min-w-0 max-w-[8.5rem] cursor-default items-center gap-2 rounded-[var(--radius-medium)] px-2 text-left text-[var(--text-11)] font-semibold text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)]"
+      className="flex h-8 min-w-0 cursor-default items-center rounded-[var(--radius-medium)] pl-1.5 pr-0.5 text-left text-[var(--text-11)] font-semibold text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)]"
       title={`${deviceName} (device switching is coming soon)`}
       aria-label={`Current device: ${deviceName}. Device switching is not available yet.`}
     >
-      <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--green)]" />
-      <span className="min-w-0 flex-1 truncate">{deviceName}</span>
-      <IconChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" />
+      <span className="mr-1.5 h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--green)]" />
+      <span className="min-w-0 truncate">{deviceName}</span>
+      <IconChevronDown className="ml-2 h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" />
     </button>
   );
 }
@@ -2477,7 +2477,7 @@ export function DroneSidebar({
         onWheel={sidebarCapabilities.sidebarOptions ? onSidebarWheel : undefined}
       >
         <div
-          className={`relative flex h-[3.25rem] flex-shrink-0 select-none items-center border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] px-3.5 ${
+          className={`relative flex h-[3.25rem] flex-shrink-0 select-none items-center border-b border-[var(--app-header-border)] bg-[var(--app-header-bg)] pl-3.5 pr-2 ${
             sidebarDockDragEnabled
               ? `touch-none ${sidebarDockDragActive ? 'cursor-grabbing' : 'cursor-grab'}`
               : ''
@@ -2492,28 +2492,12 @@ export function DroneSidebar({
             <button
               type="button"
               onClick={() => setAppView('workspace')}
-              className="min-w-0 flex-1 truncate text-left dh-type-sidebar-brand"
+              className="flex-shrink-0 text-left dh-type-sidebar-brand"
               title="Open drones workspace"
             >
               DRONE HUB
             </button>
             {sidebarCapabilities.headerActions ? <CurrentDevicePicker /> : null}
-            {sidebarCapabilities.headerActions ? (
-              <button
-                type="button"
-                onClick={() => setAppView('settings')}
-                className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] transition-colors ${
-                  settingsViewActive
-                    ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
-                    : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]'
-                }`}
-                title="Open settings"
-                aria-label="Open settings"
-                aria-pressed={settingsViewActive}
-              >
-                <IconSettings className="h-3.5 w-3.5" />
-              </button>
-            ) : null}
             {headerAccessory ? (
               <div className="flex items-center gap-1 flex-shrink-0">{headerAccessory}</div>
             ) : null}
@@ -3085,10 +3069,10 @@ export function DroneSidebar({
               {sidebarCapabilities.repoFooter ? (
                 <button
                   type="button"
-                  onClick={openRepositoryOverview}
+                  onClick={onOpenReposModal}
                   className="flex-1 min-w-0 inline-flex items-center gap-2 px-1.5 py-1 rounded text-left dh-type-sidebar-action dh-type-sidebar-action--quiet hover:bg-[var(--hover)] transition-all"
-                  title="Show repositories"
-                  aria-label="Show repositories"
+                  title={`Manage repositories (${repos.length})`}
+                  aria-label="Manage repositories"
                 >
                   <IconFolderGit className="h-3 w-3 text-[var(--accent)] opacity-80" />
                   <span className="truncate">Repositories {repositoryNavigationItems.length || ''}</span>
@@ -3120,10 +3104,15 @@ export function DroneSidebar({
                 {sidebarCapabilities.repoFooter ? (
                   <button
                     type="button"
-                    onClick={onOpenReposModal}
-                    className="inline-flex items-center justify-center w-7 h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:text-[var(--muted)] hover:border-[var(--border)] transition-all"
-                    title={`Manage repos (${repos.length})`}
-                    aria-label="Manage repos"
+                    onClick={() => setAppView('settings')}
+                    className={`inline-flex items-center justify-center h-7 w-7 rounded border transition-all ${
+                      settingsViewActive
+                        ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                        : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted-dim)] hover:border-[var(--border)] hover:text-[var(--muted)]'
+                    }`}
+                    title="Open settings"
+                    aria-label="Open settings"
+                    aria-pressed={settingsViewActive}
                   >
                     <IconSettings className="opacity-70" />
                   </button>

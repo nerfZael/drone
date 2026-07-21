@@ -1,6 +1,7 @@
 import type { MobileDroneSummary } from './drone-sidebar-model';
 
 export type MobileDroneDisplayState =
+  | 'approval'
   | 'working'
   | 'waiting'
   | 'starting'
@@ -9,17 +10,20 @@ export type MobileDroneDisplayState =
   | 'idle';
 
 export type MobileDroneStateSummary = {
+  approval: number;
   working: number;
   unread: number;
 };
 
 export const EMPTY_MOBILE_DRONE_STATE_SUMMARY: MobileDroneStateSummary = {
+  approval: 0,
   working: 0,
   unread: 0,
 };
 
 export function mobileDroneDisplayState(drone: MobileDroneSummary): MobileDroneDisplayState {
   const rawState = `${drone.phase ?? ''} ${drone.status ?? ''}`.toLowerCase();
+  if (drone.approvalRequired || rawState.includes('approval')) return 'approval';
   if (drone.busyChats.length > 0) return 'working';
   if (
     rawState.includes('block') ||
@@ -40,6 +44,7 @@ export function addMobileDroneToStateSummary(
   drone: MobileDroneSummary,
 ): void {
   const state = mobileDroneDisplayState(drone);
+  if (state === 'approval') summary.approval += 1;
   if (state === 'working' || state === 'starting') summary.working += 1;
   if ((drone.unreadChats?.length ?? 0) > 0) summary.unread += 1;
 }

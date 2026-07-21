@@ -1,5 +1,6 @@
 import React from 'react';
 import type { DronePortMapping, PortReachabilityByHostPort } from '../types';
+import { DroneLinksContent } from './DroneLinksDock';
 import { displayUrlForPreviewInput, normalizePreviewUrl } from './helpers';
 import {
   isPreviewFocusUserRequested,
@@ -16,6 +17,7 @@ function canRestoreFocus(element: HTMLElement | null): element is HTMLElement {
 }
 
 export function DronePreviewDock({
+  droneId,
   selectedPort,
   portRows,
   portReachabilityByHostPort,
@@ -27,7 +29,10 @@ export function DronePreviewDock({
   onSetPreviewUrlOverride,
   locked,
   onToggleLocked,
+  agentLabel,
+  chatName,
 }: {
+  droneId: string;
   selectedPort: DronePortMapping | null;
   portRows: DronePortMapping[];
   portReachabilityByHostPort: PortReachabilityByHostPort;
@@ -39,6 +44,8 @@ export function DronePreviewDock({
   onSetPreviewUrlOverride: (nextUrl: string | null) => void;
   locked: boolean;
   onToggleLocked: () => void;
+  agentLabel: string;
+  chatName: string;
 }) {
   const selectedUrl = previewUrlOverride || defaultPreviewUrl;
   const selectedOpenUrl = selectedUrl;
@@ -51,11 +58,17 @@ export function DronePreviewDock({
   const [iframeRefreshNonce, setIframeRefreshNonce] = React.useState(0);
   const [urlInput, setUrlInput] = React.useState(displayedSelectedUrl);
   const [urlError, setUrlError] = React.useState<string | null>(null);
+  const [linksExpanded, setLinksExpanded] = React.useState(false);
+  const linksPanelId = React.useId();
   const iframeWrapperRef = React.useRef<HTMLDivElement | null>(null);
   const iframeRef = React.useRef<HTMLIFrameElement | null>(null);
   const lastFocusedElementRef = React.useRef<HTMLElement | null>(null);
   const lastPreviewPointerAtRef = React.useRef(NO_PREVIEW_POINTER_TIME);
   const usingCustomUrl = Boolean(previewUrlOverride);
+  const reachableLinkCount = React.useMemo(
+    () => portRows.filter((port) => (portReachabilityByHostPort[String(port.hostPort)] ?? 'checking') === 'up').length,
+    [portReachabilityByHostPort, portRows],
+  );
   const shouldShowOfflineState = Boolean(!usingCustomUrl && selectedPort && selectedReachability === 'down');
   const showStartupPlaceholder = Boolean(startup?.waiting) && !usingCustomUrl && !selectedUrl;
   const startupLabel = startup?.hubPhase === 'seeding' ? 'Seeding' : 'Starting';
@@ -68,6 +81,10 @@ export function DronePreviewDock({
   React.useEffect(() => {
     setIframeLoadFailed(false);
   }, [selectedUrl]);
+
+  React.useEffect(() => {
+    setLinksExpanded(false);
+  }, [droneId]);
 
   React.useEffect(() => {
     setUrlInput(displayedSelectedUrl);
@@ -181,6 +198,35 @@ export function DronePreviewDock({
               <rect x="3.25" y="7.25" width="9.5" height="6" rx="1.5" />
             </svg>
           </button>
+          <button
+            type="button"
+            onClick={() => setLinksExpanded((expanded) => !expanded)}
+            aria-expanded={linksExpanded}
+            aria-controls={linksPanelId}
+            className={`inline-flex h-5 items-center gap-1 rounded border px-1.5 text-[var(--text-9)] tracking-normal transition-colors ${
+              linksExpanded
+                ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
+                : 'border-[var(--border-subtle)] bg-[var(--surface-softest)] text-[var(--muted)] hover:border-[var(--border)] hover:text-[var(--fg-secondary)]'
+            }`}
+            title={linksExpanded ? 'Hide mapped links' : 'Show mapped links'}
+          >
+            <span>Links</span>
+            <span className="font-mono text-[var(--text-9)] tabular-nums opacity-80">
+              {portsLoading ? '…' : portsError ? '!' : `${reachableLinkCount}/${portRows.length}`}
+            </span>
+            <svg
+              viewBox="0 0 12 12"
+              className={`h-2.5 w-2.5 transition-transform ${linksExpanded ? 'rotate-180' : ''}`}
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden="true"
+            >
+              <path d="m3 4.5 3 3 3-3" />
+            </svg>
+          </button>
         </div>
         <div className="min-w-0 flex items-center gap-2">
           {selectedPort ? (
@@ -281,6 +327,21 @@ export function DronePreviewDock({
           </div>
           {urlError && <div className="mt-1 text-[var(--text-10)] text-[var(--red)]">{urlError}</div>}
         </div>
+
+        {linksExpanded ? (
+          <div
+            id={linksPanelId}
+            className="max-h-[14rem] flex-shrink-0 overflow-auto border-b border-[var(--border-subtle)] bg-[var(--surface-inset-faint)]"
+          >
+            <DroneLinksContent
+              agentLabel={agentLabel}
+              chatName={chatName}
+              portRows={portRows}
+              portReachabilityByHostPort={portReachabilityByHostPort}
+              portsError={portsError}
+            />
+          </div>
+        ) : null}
 
         {!selectedUrl ? (
           <div className="flex-1 min-h-0 w-full border-y border-[var(--border-subtle)] bg-[var(--surface-inset-faint)] text-[var(--text-11)] text-[var(--muted-dim)] flex items-center justify-center text-center px-4">

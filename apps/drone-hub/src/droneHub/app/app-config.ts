@@ -51,7 +51,7 @@ export const RIGHT_PANEL_TABS: RightPanelTab[] = [
 ];
 export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   terminal: 'Terminal',
-  env: 'ENV',
+  env: 'Env',
   files: 'Files',
   editor: 'Editor',
   preview: 'Browser',
@@ -61,6 +61,9 @@ export const RIGHT_PANEL_TAB_LABELS: Record<RightPanelTab, string> = {
   canvas: 'Canvas',
   whiteboard: 'Whiteboard',
 };
+export function rightPanelHeaderTabs(tabs: readonly RightPanelTab[]): RightPanelTab[] {
+  return tabs.filter((tab) => tab !== 'editor' && tab !== 'links');
+}
 export function rightPanelTabsForRuntime(runtimeRaw: unknown): RightPanelTab[] {
   void runtimeRaw;
   return [...RIGHT_PANEL_TABS];

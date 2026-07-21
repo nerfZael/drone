@@ -284,6 +284,14 @@ function DroneStateCounts({
 }) {
   return (
     <View style={[styles.fleetStates, compact && styles.fleetStatesCompact]}>
+      {summary.approval > 0 ? (
+        <View accessibilityLabel={`${summary.approval} awaiting approval`} style={styles.fleetState}>
+          <ApprovalStatusIndicator />
+          <Text style={[styles.fleetStateText, styles.fleetStateTextApproval]}>
+            {summary.approval}
+          </Text>
+        </View>
+      ) : null}
       {summary.working > 0 ? (
         <View accessibilityLabel={`${summary.working} working`} style={styles.fleetState}>
           <WorkingStatusIndicator />
@@ -294,7 +302,7 @@ function DroneStateCounts({
       ) : null}
       {summary.unread > 0 ? (
         <View accessibilityLabel={`${summary.unread} with unread chats`} style={styles.fleetState}>
-          <MessageCircle color={colors.online} size={12} strokeWidth={2.2} />
+          <UnreadStatusIndicator />
           <Text style={[styles.fleetStateText, styles.fleetStateTextUnread]}>
             {summary.unread}
           </Text>
@@ -306,11 +314,13 @@ function DroneStateCounts({
 
 function switchStateLabel(state: SwitchDisplayState): string {
   if (state === 'offline') return 'Unavailable';
+  if (state === 'approval') return 'Approval required';
   if (state === 'idle') return 'Ready';
   return `${state[0]?.toUpperCase() ?? ''}${state.slice(1)}`;
 }
 
 function switchStateColor(state: SwitchDisplayState): string {
+  if (state === 'approval') return colors.warning;
   if (state === 'working' || state === 'archiving' || state === 'deleting')
     return colors.warning;
   if (state === 'waiting' || state === 'starting') return colors.info;
@@ -348,6 +358,8 @@ function SwitchItemState({
     >
       {state === 'working' || state === 'archiving' || state === 'deleting' ? (
         <WorkingStatusIndicator />
+      ) : state === 'approval' ? (
+        <ApprovalStatusIndicator />
       ) : (
         <View accessible={false} style={styles.switchStateIndicator}>
           <View style={[styles.switchStateDot, { backgroundColor: indicatorColor }]} />
@@ -400,6 +412,41 @@ function WorkingStatusIndicator() {
       >
         <LoaderCircle color={colors.warning} size={12} strokeWidth={2.4} />
       </Animated.View>
+    </View>
+  );
+}
+
+function ApprovalStatusIndicator() {
+  return (
+    <View accessible={false} style={styles.stateStatusIndicator}>
+      <Svg height={12} width={12} viewBox="0 0 12 12" fill="none">
+        <Line
+          x1="4"
+          y1="2.5"
+          x2="4"
+          y2="9.5"
+          stroke={colors.warning}
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
+        <Line
+          x1="8"
+          y1="2.5"
+          x2="8"
+          y2="9.5"
+          stroke={colors.warning}
+          strokeWidth="1.7"
+          strokeLinecap="round"
+        />
+      </Svg>
+    </View>
+  );
+}
+
+function UnreadStatusIndicator() {
+  return (
+    <View accessible={false} style={styles.stateStatusIndicator}>
+      <View style={styles.unreadStatusDot} />
     </View>
   );
 }
@@ -967,11 +1014,6 @@ function AppDrawerView({
                         <Text numberOfLines={1} style={styles.repoNavigationTitle}>
                           {activeRepo.label}
                         </Text>
-                        {activeRepo.repoPath ? (
-                          <Text numberOfLines={1} style={styles.repoPath}>
-                            {activeRepo.repoPath}
-                          </Text>
-                        ) : null}
                       </View>
                       <DroneStateCounts
                         summary={
@@ -1037,11 +1079,6 @@ function AppDrawerView({
                                 <Text numberOfLines={1} style={styles.repoName}>
                                   {group.label}
                                 </Text>
-                                {group.repoPath ? (
-                                  <Text numberOfLines={1} style={styles.repoPath}>
-                                    {group.repoPath}
-                                  </Text>
-                                ) : null}
                               </View>
                               <DroneStateCounts summary={stateSummary} compact />
                               <ChevronRight color={colors.muted} size={15} strokeWidth={2} />
@@ -1276,6 +1313,7 @@ const styles = StyleSheet.create({
   fleetStatesCompact: { flexShrink: 0, gap: 6 },
   fleetState: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   fleetStateText: { color: colors.muted, fontSize: 9, fontFamily: 'monospace' },
+  fleetStateTextApproval: { color: colors.warning },
   fleetStateTextWorking: { color: colors.warning },
   fleetStateTextUnread: { color: colors.online },
   droneList: { paddingHorizontal: 8, paddingBottom: 24 },
@@ -1292,9 +1330,8 @@ const styles = StyleSheet.create({
     borderRadius: 4,
   },
   repoRowActive: { backgroundColor: colors.selectionWash },
-  repoCopy: { flex: 1, minWidth: 0 },
+  repoCopy: { flex: 1, minWidth: 0, justifyContent: 'center' },
   repoName: { color: colors.textSecondary, fontSize: 12, fontWeight: '600' },
-  repoPath: { color: colors.mutedDim, fontSize: 8, fontFamily: 'monospace', marginTop: 1 },
   droneNode: { position: 'relative' },
   switchItemRow: {
     minHeight: 48,
@@ -1342,6 +1379,8 @@ const styles = StyleSheet.create({
   },
   switchStateDot: { width: 6, height: 6, borderRadius: 3 },
   workingStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
+  stateStatusIndicator: { width: 12, height: 12, alignItems: 'center', justifyContent: 'center' },
+  unreadStatusDot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.online },
   chatCount: {
     flexDirection: 'row',
     alignItems: 'center',

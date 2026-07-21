@@ -1,5 +1,6 @@
 import React from 'react';
 
+import { ChatMessageCopyAction } from './ChatMessageCopyAction';
 import { CollapsibleMarkdown } from './CollapsibleMarkdown';
 import type { MarkdownFileReference, MarkdownTextMentionLink } from './MarkdownMessage';
 
@@ -60,6 +61,9 @@ export function ChatMessageBody({
           onOpenLink={onOpenLink}
           textMentionLinks={textMentionLinks}
           onOpenTextMention={onOpenTextMention}
+          renderBlockCopyAction={(blockText) => (
+            <ChatMessageCopyAction text={blockText} position="block" copyLabel="block" />
+          )}
         />
       ) : null}
       {!hasText && normalizedError ? (

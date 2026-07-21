@@ -43,6 +43,19 @@ describe('MarkdownMessage', () => {
     expect(html).not.toContain('[!WARNING]');
   });
 
+  test('exposes the inner blockquote source to an optional copy action', () => {
+    const html = renderMarkdown(['> Create a multi-shot prompt.', '>', '> Keep **all three** shots.'].join('\n'), {
+      renderBlockCopyAction: (text) =>
+        React.createElement('button', { 'data-copy-text': text }, 'Copy block'),
+    });
+
+    expect(html).toContain('dh-markdown-copyable-block group/markdown-block');
+    expect(html).toContain(
+      'data-copy-text="Create a multi-shot prompt.\n\nKeep **all three** shots."',
+    );
+    expect(html).toContain('>Copy block</button>');
+  });
+
   test('converts single newlines to hard breaks', () => {
     const html = renderMarkdown(['line one', 'line two'].join('\n'));
     expect(html).toContain('<br');

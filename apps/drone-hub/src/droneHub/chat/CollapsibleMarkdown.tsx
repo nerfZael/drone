@@ -1,6 +1,7 @@
 import React from 'react';
 import {
   MarkdownMessage,
+  type MarkdownBlockCopyActionRenderer,
   type MarkdownFileReference,
   type MarkdownTextMentionLink,
 } from './MarkdownMessage';
@@ -101,6 +102,7 @@ export function CollapsibleMarkdown({
   onOpenLink,
   textMentionLinks,
   onOpenTextMention,
+  renderBlockCopyAction,
   maxHeightPx = 240,
   collapseAfterLines = 40,
   preserveLeadParagraph = false,
@@ -114,6 +116,7 @@ export function CollapsibleMarkdown({
   onOpenLink?: (href: string) => boolean;
   textMentionLinks?: MarkdownTextMentionLink[];
   onOpenTextMention?: (mention: MarkdownTextMentionLink) => void;
+  renderBlockCopyAction?: MarkdownBlockCopyActionRenderer;
   maxHeightPx?: number;
   collapseAfterLines?: number;
   preserveLeadParagraph?: boolean;
@@ -223,6 +226,7 @@ export function CollapsibleMarkdown({
             onOpenLink={onOpenLink}
             textMentionLinks={textMentionLinks}
             onOpenTextMention={onOpenTextMention}
+            renderBlockCopyAction={renderBlockCopyAction}
           />
           {!collapsed ? (
             <div className={`output-collapse ${collapsed ? 'collapsed' : ''}`} style={style}>
@@ -233,6 +237,7 @@ export function CollapsibleMarkdown({
                 onOpenLink={onOpenLink}
                 textMentionLinks={textMentionLinks}
                 onOpenTextMention={onOpenTextMention}
+                renderBlockCopyAction={renderBlockCopyAction}
               />
             </div>
           ) : null}
@@ -246,6 +251,7 @@ export function CollapsibleMarkdown({
             onOpenLink={onOpenLink}
             textMentionLinks={textMentionLinks}
             onOpenTextMention={onOpenTextMention}
+            renderBlockCopyAction={renderBlockCopyAction}
           />
         </div>
       ) : (
@@ -257,6 +263,7 @@ export function CollapsibleMarkdown({
             onOpenLink={onOpenLink}
             textMentionLinks={textMentionLinks}
             onOpenTextMention={onOpenTextMention}
+            renderBlockCopyAction={renderBlockCopyAction}
           />
         </div>
       )}

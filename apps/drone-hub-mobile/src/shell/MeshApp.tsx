@@ -411,9 +411,11 @@ function Shell() {
                     {dronesHeader?.title}
                   </Text>
                 </View>
-                <Text numberOfLines={1} style={styles.contextSubtitle}>
-                  {dronesHeader?.subtitle}
-                </Text>
+                {dronesHeader?.subtitle ? (
+                  <Text numberOfLines={1} style={styles.contextSubtitle}>
+                    {dronesHeader.subtitle}
+                  </Text>
+                ) : null}
               </View>
             ) : (
               <Text style={styles.title}>{title}</Text>

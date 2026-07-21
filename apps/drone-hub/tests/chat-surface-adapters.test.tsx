@@ -51,7 +51,9 @@ describe('agent chat surface adapters', () => {
     expect(loaderHtml).toContain('Loading conversation…');
     expect(loaderHtml).toContain('animate-spin');
     expect(loaderHtml).toContain('h-11 w-11');
-    expect(loaderHtml).toContain('!text-[.8125rem]');
+    expect(loaderHtml).toContain('!text-[.875rem]');
+    expect(loaderHtml).toContain('!text-[var(--fg-secondary)]');
+    expect(loaderHtml).toContain('font-medium');
     expect(loaderHtml).toContain('dh-type-status');
     expect(loaderHtml).not.toContain('uppercase');
     expect(loaderHtml).not.toContain('animate-pulse');
@@ -434,6 +436,16 @@ describe('agent chat surface adapters', () => {
 
     expect(html).toContain('<strong>Shared response</strong>');
     expect(html).toContain('Attached image');
+  });
+
+  test('quoted chat blocks expose their own hover copy action', () => {
+    const html = renderToStaticMarkup(
+      <ChatMessageBody role="assistant" text="> Create a multi-shot prompt." />,
+    );
+
+    expect(html).toContain('dh-markdown-copyable-block group/markdown-block');
+    expect(html).toContain('aria-label="Copy block"');
+    expect(html).toContain('group-hover/markdown-block:opacity-100');
   });
 
   test('native assistant messages use shared tasks, linked requests, and inline media', () => {

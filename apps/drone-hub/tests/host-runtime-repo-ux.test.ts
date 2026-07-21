@@ -1,7 +1,9 @@
 import { describe, expect, test } from 'bun:test';
 import {
+  RIGHT_PANEL_TAB_LABELS,
   RIGHT_PANEL_TABS,
   repoUnavailableReasonForRuntime,
+  rightPanelHeaderTabs,
   rightPanelTabsForRuntime,
 } from '../src/droneHub/app/app-config';
 
@@ -19,6 +21,16 @@ describe('host runtime repo UX safeguards', () => {
   test('keeps full right panel tabs for container runtime', () => {
     expect(rightPanelTabsForRuntime('container')).toEqual(RIGHT_PANEL_TABS);
     expect(rightPanelTabsForRuntime('')).toEqual(RIGHT_PANEL_TABS);
+  });
+
+  test('keeps deep-link panes internal while simplifying the workspace header', () => {
+    const headerTabs = rightPanelHeaderTabs(RIGHT_PANEL_TABS);
+
+    expect(headerTabs).not.toContain('editor');
+    expect(headerTabs).not.toContain('links');
+    expect(RIGHT_PANEL_TABS).toContain('editor');
+    expect(RIGHT_PANEL_TABS).toContain('links');
+    expect(RIGHT_PANEL_TAB_LABELS.env).toBe('Env');
   });
 
   test('does not return repo unavailable reason by runtime', () => {

@@ -48,7 +48,6 @@ import {
 } from '../drones/create-preferences-storage';
 import {
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
-  mobileRepoLabel,
   mobileDroneTurnsToAssistantMessages,
   normalizeMobileDroneCreateRepo,
   normalizeMobileDroneCreateModelCatalog,
@@ -138,7 +137,7 @@ function nativeUserMessageMatchesOptimisticPrompt(
 
 export type DronesAppHeaderState = {
   title: string;
-  subtitle: string;
+  subtitle?: string;
   draft?: boolean;
   draftDisabled?: boolean;
   onToggleDraft?(): void;
@@ -1431,6 +1430,15 @@ export function DronesScreen({
   const activeTarget = mesh.devices.find((target) => target.id === targetId);
   const displayedModel = chatModel || latestModel || 'Model';
   const visibleChats = chats;
+  const drawerDrones = React.useMemo(
+    () =>
+      drones.map((drone) =>
+        drone.id === selected?.id
+          ? { ...drone, approvalRequired: pendingApprovals.length > 0 }
+          : drone,
+      ),
+    [drones, pendingApprovals.length, selected?.id],
+  );
   React.useEffect(() => {
     const frame = requestAnimationFrame(() =>
       chatTabsRef.current?.scrollToEnd({ animated: false }),
@@ -1442,7 +1450,6 @@ export function DronesScreen({
       selected
         ? {
             title: selected.name,
-            subtitle: `${mobileRepoLabel(selected.repoPath)} · ${selected.runtime}${activeTarget ? ` · ${activeTarget.name}` : ''}`,
             onNewDrone: openNewDroneFromCurrent,
             onNewChat: () => void createNewChat(),
             onDelete: () => setDeleteCandidate(selected),
@@ -1644,7 +1651,7 @@ export function DronesScreen({
         openingGestureActive={openingGestureActive}
         navigationItems={navigationItems}
         showDrones
-        drones={drones}
+        drones={drawerDrones}
         droneSidebarOrder={droneSidebarOrder}
         activeDroneId={selected?.id ?? ''}
         activeChatName={chatName}

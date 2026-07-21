@@ -43,6 +43,29 @@ function flattenText(node: React.ReactNode): string {
   return '';
 }
 
+function blockquoteCopyText(
+  node: unknown,
+  source: string,
+  fallbackChildren: React.ReactNode,
+): string {
+  const position = (node as {
+    position?: { start?: { offset?: number }; end?: { offset?: number } };
+  } | null)?.position;
+  const start = position?.start?.offset;
+  const end = position?.end?.offset;
+  if (typeof start === 'number' && typeof end === 'number' && end > start) {
+    const quotedSource = source.slice(start, end);
+    const unquoted = quotedSource
+      .split('\n')
+      .map((line) => line.replace(/^\s{0,3}>\s?/, ''))
+      .join('\n')
+      .replace(/^\s*\[!(?:NOTE|TIP|IMPORTANT|WARNING|CAUTION)\]\s*(?:\n|$)/i, '')
+      .trim();
+    if (unquoted) return unquoted;
+  }
+  return flattenText(fallbackChildren).trim();
+}
+
 function tableIdFromNode(node: unknown, children: React.ReactNode): string {
   const pos = (node as { position?: { start?: { offset?: number }; end?: { offset?: number } } } | null)?.position;
   const start = pos?.start?.offset;
@@ -236,6 +259,8 @@ export type MarkdownTextMentionLink = {
   label: string;
   title?: string;
 };
+
+export type MarkdownBlockCopyActionRenderer = (text: string) => React.ReactNode;
 
 type PreparedTextMentionLink = MarkdownTextMentionLink & {
   lowerLabel: string;
@@ -445,6 +470,7 @@ export function MarkdownMessage({
   onOpenLink,
   textMentionLinks,
   onOpenTextMention,
+  renderBlockCopyAction,
   preferOpenLinkBeforeModifiedClick = false,
 }: {
   text: string;
@@ -453,6 +479,7 @@ export function MarkdownMessage({
   onOpenLink?: (href: string) => boolean;
   textMentionLinks?: MarkdownTextMentionLink[];
   onOpenTextMention?: (mention: MarkdownTextMentionLink) => void;
+  renderBlockCopyAction?: MarkdownBlockCopyActionRenderer;
   preferOpenLinkBeforeModifiedClick?: boolean;
 }) {
   const handleAnchorClick = React.useCallback(
@@ -594,10 +621,10 @@ export function MarkdownMessage({
                 </code>
               );
             },
-            blockquote: ({ children, ...props }) => {
+            blockquote: ({ children, node, ...props }) => {
               const kind = detectCalloutKind(children);
               const cleanedChildren = kind ? stripLeadingCalloutMarker(children) : children;
-              return (
+              const blockquote = (
                 <blockquote data-callout={kind ?? undefined} {...props}>
                   {kind ? (
                     <span className="dh-markdown-callout-label" aria-label={`${CALLOUT_LABEL[kind]} callout`}>
@@ -607,6 +634,15 @@ export function MarkdownMessage({
                   {cleanedChildren}
                 </blockquote>
               );
+              const blockText = renderBlockCopyAction
+                ? blockquoteCopyText(node, normalizedText, cleanedChildren)
+                : '';
+              return blockText ? (
+                <div className="dh-markdown-copyable-block group/markdown-block">
+                  {blockquote}
+                  {renderBlockCopyAction?.(blockText)}
+                </div>
+              ) : blockquote;
             },
             pre: ({ children, node: _node, ...props }) => (
               <div className="dh-markdown-block dh-markdown-block--wide">

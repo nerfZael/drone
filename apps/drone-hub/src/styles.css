@@ -251,9 +251,9 @@
   --toolbar-control-border: transparent;
   --toolbar-control-hover-border: rgba(69, 71, 90, .68);
   --sidebar-brand-fg: #cdd6f4;
-  --sidebar-brand-size: .9375rem;
+  --sidebar-brand-size: .875rem;
   --sidebar-brand-weight: 700;
-  --sidebar-brand-letter-spacing: .0375rem;
+  --sidebar-brand-letter-spacing: .025rem;
   --sidebar-brand-transform: uppercase;
   --sidebar-font: system-ui, -apple-system, sans-serif;
   --sidebar-heading-weight: 600;
@@ -1091,6 +1091,14 @@ code, pre {
   border-radius: 8px;
   background: var(--surface-softest);
   color: var(--fg-secondary);
+}
+.dh-markdown-copyable-block {
+  position: relative;
+  margin: .9rem 0;
+}
+.dh-markdown-copyable-block > blockquote {
+  margin: 0;
+  padding-right: 2.75rem;
 }
 .dh-markdown blockquote > :first-child { margin-top: 0; }
 .dh-markdown blockquote > :last-child { margin-bottom: 0; }

@@ -1,4 +1,5 @@
 import { describe, expect, test } from 'bun:test';
+import { readFileSync } from 'node:fs';
 import {
   sidebarChatRowTone,
   sidebarChatLabelClass,
@@ -8,6 +9,23 @@ import {
 } from '../src/droneHub/sidebar/presentation';
 
 describe('sidebar presentation', () => {
+  test('prioritizes the current device name in the desktop header', () => {
+    const sidebarSource = readFileSync(
+      new URL('../src/droneHub/app/DroneSidebar.tsx', import.meta.url),
+      'utf8',
+    );
+    const stylesSource = readFileSync(new URL('../src/styles.css', import.meta.url), 'utf8');
+
+    expect(sidebarSource).toContain('h-8 min-w-0 cursor-default');
+    expect(sidebarSource).toContain('<span className="min-w-0 truncate">{deviceName}</span>');
+    expect(sidebarSource).not.toContain('max-w-[8.5rem]');
+    expect(sidebarSource).toContain('flex-shrink-0 text-left dh-type-sidebar-brand');
+    expect(sidebarSource).toContain('rounded-[var(--radius-medium)] pl-1.5 pr-0.5');
+    expect(sidebarSource).toContain('ml-2 h-3.5 w-3.5');
+    expect(sidebarSource).toContain('bg-[var(--app-header-bg)] pl-3.5 pr-2');
+    expect(stylesSource).toContain('--sidebar-brand-size: .875rem;');
+  });
+
   test('uses one density contract for every sidebar renderer', () => {
     const compact = sidebarDensityClasses('compact');
     const normal = sidebarDensityClasses('default');

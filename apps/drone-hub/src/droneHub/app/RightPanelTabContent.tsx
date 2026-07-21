@@ -40,7 +40,7 @@ export function isRightPanelTabLazyLoaded(tab: RightPanelTab): boolean {
 
 export function RightPanelPaneLoadingFallback({ tab }: { tab: RightPanelTab }) {
   const label = RIGHT_PANEL_TAB_LABELS[tab] ?? 'Pane';
-  const loadingLabel = label === 'ENV' ? 'environment' : label.toLowerCase();
+  const loadingLabel = tab === 'env' ? 'environment' : label.toLowerCase();
   return (
     <div className="w-full h-full min-h-0 bg-[var(--panel-alt)] overflow-hidden flex items-start px-2.5 py-2">
       <div className="w-full rounded-[var(--radius-medium)] border border-[var(--border-subtle)] bg-[var(--surface-softest)] px-3 py-3 text-[var(--text-12)] text-[var(--muted)]">
@@ -487,6 +487,7 @@ export function RightPanelTabContent({
           {(DronePreviewDock) => (
             <DronePreviewDock
               key={`${paneKey}-preview`}
+              droneId={drone.id}
               selectedPort={selectedPreviewPort}
               portRows={portRows}
               portReachabilityByHostPort={currentPortReachability}
@@ -507,6 +508,8 @@ export function RightPanelTabContent({
               onSetPreviewUrlOverride={setSelectedPreviewUrlOverride}
               locked={previewLocked}
               onToggleLocked={onTogglePreviewLocked}
+              agentLabel={agentLabel}
+              chatName={chatName}
             />
           )}
         </PaneModule>
