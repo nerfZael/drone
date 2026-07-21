@@ -20,28 +20,28 @@ import {
 import {
   IconAutoMinimize,
   IconChevron,
+  IconChevronDown,
   IconChevronLeft,
   IconClock,
   IconColumns,
-  IconDrone,
   IconEye,
   IconEyeOff,
   IconFolder,
   IconFolderGit,
   IconList,
   IconMore,
-  IconNetwork,
   IconPencil,
   IconPlus,
   IconPlusDouble,
   IconSettings,
-  IconSettingsOutline,
   IconSidebarCollapse,
   IconSidebarExpand,
   IconSpinner,
   IconTrash,
   SkeletonLine,
 } from './icons';
+import { requestJson } from '../http';
+import type { MeshStatus } from './use-device-mesh';
 import { SidebarDroneTreeList, type SidebarDroneTreeListSharedProps } from './SidebarDroneTreeList';
 import { GroupedSidebarTree } from './GroupedSidebarTree';
 import { createCanvasChatNodeId } from './app-config';
@@ -196,6 +196,38 @@ function SidebarIconButton({
       tabIndex={tabIndex}
     >
       {children}
+    </button>
+  );
+}
+
+function CurrentDevicePicker() {
+  const [deviceName, setDeviceName] = React.useState('This device');
+
+  React.useEffect(() => {
+    let cancelled = false;
+    void requestJson<{ ok: true } & MeshStatus>('/api/device-mesh')
+      .then((status) => {
+        if (cancelled) return;
+        const self = status.devices.find((device) => device.id === status.selfDeviceId);
+        const nextName = String(self?.name ?? '').trim();
+        if (nextName) setDeviceName(nextName);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <button
+      type="button"
+      className="flex h-8 min-w-0 max-w-[8.5rem] cursor-default items-center gap-2 rounded-[var(--radius-medium)] px-2 text-left text-[var(--text-11)] font-semibold text-[var(--fg-secondary)] transition-colors hover:bg-[var(--hover)]"
+      title={`${deviceName} (device switching is coming soon)`}
+      aria-label={`Current device: ${deviceName}. Device switching is not available yet.`}
+    >
+      <span className="h-1.5 w-1.5 flex-shrink-0 rounded-full bg-[var(--green)]" />
+      <span className="min-w-0 flex-1 truncate">{deviceName}</span>
+      <IconChevronDown className="h-3.5 w-3.5 flex-shrink-0 text-[var(--muted)]" />
     </button>
   );
 }
@@ -1534,7 +1566,6 @@ export function DroneSidebar({
   const {
     sidebarCollapsed,
     selectedDroneIds,
-    settingsActiveTab,
     appView,
     sidebarGroupingMode,
     sidebarDensityMode,
@@ -1554,7 +1585,6 @@ export function DroneSidebar({
     sidebarChatOrderByDrone,
     hiddenSidebarGroups,
     showHiddenSidebarGroups,
-    setSettingsActiveTab,
     setAppView,
     setSidebarGroupingMode,
     setSidebarDensityMode,
@@ -2059,8 +2089,7 @@ export function DroneSidebar({
     data: { type: 'sidebar-create-group-drop' },
     disabled: !sidebarDndEnabled || isRepoGroupingMode,
   });
-  const devicesSettingsActive = appView === 'settings' && settingsActiveTab === 'devices';
-  const settingsTabActive = appView === 'settings' && settingsActiveTab !== 'devices';
+  const settingsViewActive = appView === 'settings';
   const summarizeSidebarFleet = React.useCallback((drones: readonly DroneSummary[]) => {
     let working = 0;
     let approval = 0;
@@ -2460,7 +2489,31 @@ export function DroneSidebar({
           onPointerCancel={sidebarDockDragEnabled ? onSidebarDockHeaderPointerCancel : undefined}
         >
           <div className="flex w-full items-center justify-between gap-2">
-            <span className="min-w-0 flex-1 truncate dh-type-sidebar-brand">DRONE HUB</span>
+            <button
+              type="button"
+              onClick={() => setAppView('workspace')}
+              className="min-w-0 flex-1 truncate text-left dh-type-sidebar-brand"
+              title="Open drones workspace"
+            >
+              DRONE HUB
+            </button>
+            {sidebarCapabilities.headerActions ? <CurrentDevicePicker /> : null}
+            {sidebarCapabilities.headerActions ? (
+              <button
+                type="button"
+                onClick={() => setAppView('settings')}
+                className={`inline-flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-[var(--radius-medium)] transition-colors ${
+                  settingsViewActive
+                    ? 'bg-[var(--accent-subtle)] text-[var(--accent)]'
+                    : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]'
+                }`}
+                title="Open settings"
+                aria-label="Open settings"
+                aria-pressed={settingsViewActive}
+              >
+                <IconSettings className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
             {headerAccessory ? (
               <div className="flex items-center gap-1 flex-shrink-0">{headerAccessory}</div>
             ) : null}
@@ -2469,60 +2522,6 @@ export function DroneSidebar({
 
         {sidebarCapabilities.headerActions ? (
           <>
-            <div
-              className="grid min-h-14 flex-shrink-0 grid-cols-3 border-b border-[var(--sidebar-section-border)] bg-[var(--sidebar-section-bg)]"
-              role="tablist"
-              aria-label="Drone Hub sections"
-            >
-              {[
-                {
-                  id: 'drones',
-                  label: 'Drones',
-                  active: appView === 'workspace',
-                  Icon: IconDrone,
-                  onClick: () => setAppView('workspace'),
-                },
-                {
-                  id: 'devices',
-                  label: 'Devices',
-                  active: devicesSettingsActive,
-                  Icon: IconNetwork,
-                  onClick: () => {
-                    setSettingsActiveTab('devices');
-                    setAppView('settings');
-                  },
-                },
-                {
-                  id: 'settings',
-                  label: 'Settings',
-                  active: settingsTabActive,
-                  Icon: IconSettingsOutline,
-                  onClick: () => {
-                    if (settingsActiveTab === 'devices') setSettingsActiveTab('general');
-                    setAppView('settings');
-                  },
-                },
-              ].map(({ id, label, active: tabActive, Icon, onClick }) => (
-                <button
-                  key={id}
-                  type="button"
-                  role="tab"
-                  aria-selected={tabActive}
-                  onClick={onClick}
-                  className={`relative flex min-w-0 flex-col items-center justify-center gap-[3px] px-0.5 text-[.625rem] font-medium tracking-[.00625rem] transition-colors ${
-                    tabActive
-                      ? 'bg-[var(--sidebar-tab-active-bg)] text-[var(--accent-muted)]'
-                      : 'text-[var(--muted)] hover:bg-[var(--hover)] hover:text-[var(--fg)]'
-                  }`}
-                >
-                  <Icon className={`h-[1.125rem] w-[1.125rem] ${tabActive ? 'text-[var(--accent)] [stroke-width:2.3]' : '[stroke-width:1.9]'}`} />
-                  <span className="truncate">{label}</span>
-                  {tabActive ? (
-                    <span className="absolute inset-x-0 bottom-0 h-0.5 rounded-t-sm bg-[var(--accent)]" />
-                  ) : null}
-                </button>
-              ))}
-            </div>
             {!repositoryOverviewOpen && activeRepositoryNavigationItem ? (
               <div className="flex min-h-14 w-full flex-shrink-0 items-center border-b border-[var(--border)] pr-2">
                 <button
@@ -3295,20 +3294,19 @@ export function DroneSidebar({
         {sidebarCapabilities.collapsedRailActions && sidebarCapabilities.headerActions ? (
           <SidebarIconButton
             onClick={() => {
-              setSettingsActiveTab('devices');
               setAppView('settings');
             }}
             className={`border ${
-              devicesSettingsActive
+              settingsViewActive
                 ? 'border-[var(--accent-muted)] bg-[var(--accent-subtle)] text-[var(--accent)]'
                 : 'border-[var(--border-subtle)] text-[var(--muted)] hover:text-[var(--accent)] hover:border-[var(--accent-muted)] hover:bg-[var(--accent-subtle)]'
             }`}
-            title="Open device settings"
-            ariaLabel="Open device settings"
+            title="Open settings"
+            ariaLabel="Open settings"
             disabled={!collapsedRailInteractive}
             tabIndex={collapsedRailInteractive ? 0 : -1}
           >
-            <IconNetwork className="opacity-80" />
+            <IconSettings className="opacity-80" />
           </SidebarIconButton>
         ) : null}
       </div>
