@@ -12,6 +12,7 @@ type DroneCardProps = {
   displayName?: string;
   selected: boolean;
   busy?: boolean;
+  approvalRequired?: boolean;
   disabled?: boolean;
   disabledReason?: string;
   onClick: (opts?: { toggle?: boolean; range?: boolean }) => void;
@@ -49,6 +50,7 @@ type DroneCardProps = {
 
 export type SidebarDroneDisplayState =
   | 'working'
+  | 'approval'
   | 'waiting'
   | 'starting'
   | 'blocked'
@@ -77,10 +79,12 @@ export function sidebarDroneDisplayState(
   drone: DroneSummary,
   busy = false,
   operationLabel = '',
+  approvalRequired = false,
 ): SidebarDroneDisplayState {
   const operation = operationLabel.trim().toLowerCase();
   if (operation.includes('archiv')) return 'archiving';
   if (operation.includes('delet')) return 'deleting';
+  if (approvalRequired) return 'approval';
   if (busy || drone.busy || (drone.busyChats?.length ?? 0) > 0) return 'working';
 
   return sidebarDroneInactiveDisplayState(drone);
@@ -89,7 +93,9 @@ export function sidebarDroneDisplayState(
 export function sidebarChatDisplayState(
   drone: DroneSummary,
   busy = false,
+  approvalRequired = false,
 ): SidebarDroneDisplayState {
+  if (approvalRequired) return 'approval';
   if (busy) return 'working';
   return sidebarDroneInactiveDisplayState(drone);
 }
@@ -97,6 +103,7 @@ export function sidebarChatDisplayState(
 export function sidebarDroneStateLabel(state: SidebarDroneDisplayState, unread: boolean): string {
   if (unread && state === 'idle') return 'Unread';
   if (state === 'offline') return 'Unavailable';
+  if (state === 'approval') return 'Approval required';
   if (state === 'idle') return 'Ready';
   return `${state[0]?.toUpperCase() ?? ''}${state.slice(1)}`;
 }
@@ -108,6 +115,7 @@ export function sidebarItemStateToneClass(
   if (state === 'working' || state === 'archiving' || state === 'deleting') {
     return 'text-[var(--yellow)]';
   }
+  if (state === 'approval') return 'text-[var(--yellow)]';
   if (unread && state === 'idle') return 'text-[var(--green)]';
   if (state === 'waiting' || state === 'starting') return 'text-[var(--info)]';
   if (state === 'blocked' || state === 'offline') return 'text-[var(--red)]';
@@ -122,6 +130,7 @@ export function SidebarItemStateIndicator({
   unread?: boolean;
 }) {
   const working = state === 'working' || state === 'archiving' || state === 'deleting';
+  const approvalRequired = state === 'approval';
   const indicatorToneClass =
     unread && state === 'idle'
       ? 'bg-[var(--green)]'
@@ -134,6 +143,8 @@ export function SidebarItemStateIndicator({
     <span className="inline-flex h-3 w-3 flex-shrink-0 self-center items-center justify-center leading-none" aria-hidden="true">
       {working ? (
         <SidebarWorkingStatusIndicator />
+      ) : approvalRequired ? (
+        <SidebarApprovalStatusIndicator />
       ) : (
         <span className={`h-1.5 w-1.5 rounded-full ${indicatorToneClass}`} />
       )}
@@ -154,6 +165,22 @@ export function SidebarWorkingStatusIndicator() {
       aria-hidden="true"
     >
       <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+    </svg>
+  );
+}
+
+export function SidebarApprovalStatusIndicator() {
+  return (
+    <svg
+      className="block h-3 w-3 text-[var(--yellow)]"
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M4 2.5v7M8 2.5v7" />
     </svg>
   );
 }
@@ -183,6 +210,7 @@ function areDroneCardPropsEqual(a: DroneCardProps, b: DroneCardProps): boolean {
     Boolean(a.drone.busy) === Boolean(b.drone.busy) &&
     a.selected === b.selected &&
     Boolean(a.busy) === Boolean(b.busy) &&
+    Boolean(a.approvalRequired) === Boolean(b.approvalRequired) &&
     Boolean(a.disabled) === Boolean(b.disabled) &&
     (a.disabledReason ?? '') === (b.disabledReason ?? '') &&
     a.dragNodeRef === b.dragNodeRef &&
@@ -221,6 +249,7 @@ export const DroneCard = React.memo(function DroneCard({
   displayName,
   selected,
   busy,
+  approvalRequired,
   disabled,
   disabledReason,
   onClick,
@@ -268,7 +297,12 @@ export const DroneCard = React.memo(function DroneCard({
   const [actionMenuOpen, setActionMenuOpen] = React.useState(false);
   useDropdownDismiss(actionMenuRef, actionMenuOpen, setActionMenuOpen);
   const unread = Boolean(unreadAgentMessage) || (drone.unreadChats?.length ?? 0) > 0;
-  const displayState = sidebarDroneDisplayState(drone, Boolean(busy), activeOperationLabel);
+  const displayState = sidebarDroneDisplayState(
+    drone,
+    Boolean(busy),
+    activeOperationLabel,
+    Boolean(approvalRequired),
+  );
   const stateLabel = sidebarDroneStateLabel(displayState, unread);
   const runtimeLabel = drone.runtime ?? 'container';
   const stateToneClass = sidebarItemStateToneClass(displayState, unread);

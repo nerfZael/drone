@@ -95,7 +95,7 @@ function approvalSummary(approval: AssistantApproval): {
     return {
       title: 'Execute Bash command',
       rows: [
-        ...(target ? [{ label: 'Target', value: target }] : []),
+        ...(target ? [{ label: 'Runs on', value: target }] : []),
         ...(resolved.cwd ? [{ label: 'Working directory', value: String(resolved.cwd) }] : []),
       ],
       markdownLabel: 'Command',
@@ -122,33 +122,37 @@ export function ApprovalCard({
 }) {
   const [showJson, setShowJson] = React.useState(false);
   const summary = approvalSummary(approval);
+  const titleId = `assistant-approval-${approval.id}-title`;
+  const jsonId = `assistant-approval-${approval.id}-json`;
+  const jsonDisclosure = (
+    <button
+      type="button"
+      onClick={() => setShowJson((value) => !value)}
+      className="dh-approval-json-link"
+      aria-expanded={showJson}
+      aria-controls={jsonId}
+    >
+      {showJson ? 'Hide JSON' : 'View JSON'}
+    </button>
+  );
   return (
-    <div className="mx-3 rounded border border-[var(--accent-muted)] bg-[var(--accent-subtle)] px-3 py-2">
-      <div className="flex items-center justify-between gap-2">
-        <div>
-          <div
-            className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent)]"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            Approval required
-          </div>
-          <div className="mt-0.5 text-[var(--text-12)] font-[var(--weight-semibold)] text-[var(--fg)]">{summary.title}</div>
-        </div>
-        <div className="flex items-center gap-1.5">
-          <button
-            type="button"
-            onClick={() => setShowJson((value) => !value)}
-            className="h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)]"
-            style={{ fontFamily: 'var(--display)' }}
-          >
-            {showJson ? 'Hide JSON' : 'JSON'}
-          </button>
+    <section
+      className="dh-approval"
+      role="region"
+      aria-labelledby={titleId}
+      aria-busy={busy || undefined}
+    >
+      <div className="dh-approval-header">
+        <h3 id={titleId} className="dh-approval-title">
+          <span className="sr-only">Approval required: </span>
+          {summary.title}
+        </h3>
+        <div className="dh-approval-actions">
           <button
             type="button"
             disabled={busy}
             onClick={onDeny}
-            className="h-7 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted)] hover:text-[var(--fg-secondary)] disabled:opacity-50"
-            style={{ fontFamily: 'var(--display)' }}
+            className="dh-approval-button dh-approval-button--deny"
           >
             Deny
           </button>
@@ -156,46 +160,40 @@ export function ApprovalCard({
             type="button"
             disabled={busy}
             onClick={onApprove}
-            className="h-7 rounded border border-[var(--accent-muted)] bg-[var(--accent)] px-2 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--accent-fg)] disabled:opacity-50"
-            style={{ fontFamily: 'var(--display)' }}
+            className="dh-approval-button dh-approval-button--approve"
           >
             Approve
           </button>
         </div>
       </div>
       {summary.rows.length > 0 ? (
-        <div className="mt-2 grid gap-1.5 text-[var(--text-12)]">
+        <dl className="dh-approval-metadata">
           {summary.rows.map((row) => (
-            <div key={row.label} className="grid grid-cols-[72px_minmax(0,1fr)] gap-2">
-              <div
-                className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-                style={{ fontFamily: 'var(--display)' }}
-              >
-                {row.label}
-              </div>
-              <div className="min-w-0 break-words text-[var(--fg-secondary)]">{row.value}</div>
+            <div key={row.label} className="dh-approval-metadata-row">
+              <dt>{row.label}</dt>
+              <dd>{row.value}</dd>
             </div>
           ))}
-        </div>
+        </dl>
       ) : null}
       {summary.markdown ? (
-        <div className="mt-2 rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)] px-2.5 py-2">
-          {summary.markdownLabel ? (
-            <div
-              className="mb-1 text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
-              style={{ fontFamily: 'var(--display)' }}
-            >
-              {summary.markdownLabel}
-            </div>
-          ) : null}
-          <MarkdownMessage text={summary.markdown} className="dh-markdown text-[var(--text-12)]" />
+        <div className="dh-approval-payload">
+          <div className="dh-approval-payload-header">
+            {summary.markdownLabel ? (
+              <div className="dh-approval-payload-label">{summary.markdownLabel}</div>
+            ) : (
+              <span />
+            )}
+            {jsonDisclosure}
+          </div>
+          <MarkdownMessage text={summary.markdown} className="dh-markdown dh-approval-markdown" />
         </div>
-      ) : null}
-      {showJson ? (
-        <pre className="mt-2 max-h-32 overflow-auto whitespace-pre-wrap break-words rounded bg-[var(--surface-inset)] p-2 text-[var(--text-10)] text-[var(--muted)]">
-          {JSON.stringify(approval.args, null, 2)}
-        </pre>
-      ) : null}
-    </div>
+      ) : (
+        <div className="dh-approval-utilities">{jsonDisclosure}</div>
+      )}
+      <pre id={jsonId} className="dh-approval-json" hidden={!showJson}>
+        {JSON.stringify(approval.args, null, 2)}
+      </pre>
+    </section>
   );
 }

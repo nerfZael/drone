@@ -12,6 +12,7 @@ type DroneHubRuntimePersistedState = Pick<DroneHubRuntimeState, 'lastAgentSnippe
 type DroneHubRuntimeState = {
   optimisticallyDeletedDrones: Record<string, boolean>;
   startupSeedByDrone: Record<string, StartupSeedState>;
+  approvalRequiredByChatNodeId: Record<string, boolean>;
   unreadAgentMessageByChatNodeId: Record<string, boolean>;
   lastAgentSnippetByChatNodeId: Record<string, string>;
   transcripts: TranscriptItem[] | null;
@@ -24,6 +25,7 @@ type DroneHubRuntimeState = {
   pinnedToBottom: boolean;
   setOptimisticallyDeletedDrones: (next: Updater<Record<string, boolean>>) => void;
   setStartupSeedByDrone: (next: Updater<Record<string, StartupSeedState>>) => void;
+  setApprovalRequiredByChatNodeId: (next: Updater<Record<string, boolean>>) => void;
   setUnreadAgentMessageByChatNodeId: (next: Updater<Record<string, boolean>>) => void;
   setLastAgentSnippetByChatNodeId: (next: Updater<Record<string, string>>) => void;
   setTranscripts: (next: Updater<TranscriptItem[] | null>) => void;
@@ -45,6 +47,7 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
     (set) => ({
       optimisticallyDeletedDrones: {},
       startupSeedByDrone: {},
+      approvalRequiredByChatNodeId: {},
       unreadAgentMessageByChatNodeId: {},
       lastAgentSnippetByChatNodeId: {},
       transcripts: null,
@@ -62,6 +65,10 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
       setStartupSeedByDrone: (next) =>
         set((s) => ({
           startupSeedByDrone: resolveNext(s.startupSeedByDrone, next),
+        })),
+      setApprovalRequiredByChatNodeId: (next) =>
+        set((s) => ({
+          approvalRequiredByChatNodeId: resolveNext(s.approvalRequiredByChatNodeId, next),
         })),
       setUnreadAgentMessageByChatNodeId: (next) =>
         set((s) => ({
@@ -117,6 +124,7 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
         return {
           ...currentState,
           ...persisted,
+          approvalRequiredByChatNodeId: {},
           unreadAgentMessageByChatNodeId: {},
           lastAgentSnippetByChatNodeId,
         };
@@ -125,11 +133,18 @@ export const useDroneHubRuntimeStore = create<DroneHubRuntimeState>()(
   ),
 );
 
+export function useChatApprovalRequired(chatNodeId: string): boolean {
+  return useDroneHubRuntimeStore(
+    (state) => Boolean(chatNodeId && state.approvalRequiredByChatNodeId[chatNodeId]),
+  );
+}
+
 export function useDroneHubRuntimeState() {
   return useDroneHubRuntimeStore(
     useShallow((s) => ({
       optimisticallyDeletedDrones: s.optimisticallyDeletedDrones,
       startupSeedByDrone: s.startupSeedByDrone,
+      approvalRequiredByChatNodeId: s.approvalRequiredByChatNodeId,
       unreadAgentMessageByChatNodeId: s.unreadAgentMessageByChatNodeId,
       lastAgentSnippetByChatNodeId: s.lastAgentSnippetByChatNodeId,
       transcripts: s.transcripts,
@@ -142,6 +157,7 @@ export function useDroneHubRuntimeState() {
       pinnedToBottom: s.pinnedToBottom,
       setOptimisticallyDeletedDrones: s.setOptimisticallyDeletedDrones,
       setStartupSeedByDrone: s.setStartupSeedByDrone,
+      setApprovalRequiredByChatNodeId: s.setApprovalRequiredByChatNodeId,
       setUnreadAgentMessageByChatNodeId: s.setUnreadAgentMessageByChatNodeId,
       setLastAgentSnippetByChatNodeId: s.setLastAgentSnippetByChatNodeId,
       setTranscripts: s.setTranscripts,

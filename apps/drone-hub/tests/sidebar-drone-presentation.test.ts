@@ -31,6 +31,7 @@ function drone(overrides: Partial<DroneSummary> = {}): DroneSummary {
 describe('desktop sidebar drone presentation', () => {
   test('uses the same state priority as the mobile drawer', () => {
     expect(sidebarDroneDisplayState(drone({ busyChats: ['default'] }))).toBe('working');
+    expect(sidebarDroneDisplayState(drone(), true, '', true)).toBe('approval');
     expect(sidebarDroneDisplayState(drone({ hubPhase: 'error' }))).toBe('blocked');
     expect(sidebarDroneDisplayState(drone({ statusOk: false }))).toBe('offline');
     expect(sidebarDroneDisplayState(drone({ hubMessage: 'Waiting for agent' }))).toBe('waiting');
@@ -50,14 +51,17 @@ describe('desktop sidebar drone presentation', () => {
     expect(sidebarDroneStateLabel('idle', true)).toBe('Unread');
     expect(sidebarDroneStateLabel('offline', false)).toBe('Unavailable');
     expect(sidebarDroneStateLabel('working', false)).toBe('Working');
+    expect(sidebarDroneStateLabel('approval', false)).toBe('Approval required');
   });
 
   test('derives chat state from the selected chat while preserving runtime failures', () => {
     expect(sidebarChatDisplayState(drone({ busyChats: ['other'] }), false)).toBe('idle');
     expect(sidebarChatDisplayState(drone(), true)).toBe('working');
+    expect(sidebarChatDisplayState(drone(), true, true)).toBe('approval');
     expect(sidebarChatDisplayState(drone({ hubPhase: 'error' }), false)).toBe('blocked');
     expect(sidebarItemStateToneClass('idle', true)).toContain('--green');
     expect(sidebarItemStateToneClass('blocked', true)).toContain('--red');
+    expect(sidebarItemStateToneClass('approval', false)).toContain('--yellow');
   });
 
   test('keeps runtime metadata neutral while the state changes color', () => {
@@ -81,6 +85,15 @@ describe('desktop sidebar drone presentation', () => {
     expect(html).toContain('h-3 w-3 flex-shrink-0 self-center');
     expect(html).toContain('stroke-width="2.4"');
     expect(html).toContain('M21 12a9 9 0 1 1-6.219-8.56');
+  });
+
+  test('uses a static pause mark while approval is required', () => {
+    const html = renderToStaticMarkup(
+      createElement(SidebarItemStateIndicator, { state: 'approval' }),
+    );
+
+    expect(html).toContain('M4 2.5v7M8 2.5v7');
+    expect(html).not.toContain('animate-spin');
   });
 
   test('reserves hover actions for delete and the context menu', () => {

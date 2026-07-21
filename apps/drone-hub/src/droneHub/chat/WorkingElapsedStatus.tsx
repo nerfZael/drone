@@ -5,6 +5,8 @@ import { RelativeTimeText } from './RelativeTimeText';
 type AgentRunSummaryLineProps = {
   active: boolean;
   durationMs: number;
+  label?: string;
+  tone?: 'default' | 'approval';
   at?: string;
   detail?: React.ReactNode;
   trailing?: React.ReactNode;
@@ -25,20 +27,24 @@ export function formatWorkingDuration(durationMs: number): string {
 export function AgentRunSummaryLine({
   active,
   durationMs,
+  label,
+  tone = 'default',
   at,
   detail,
   trailing,
   expanded,
   onToggle,
 }: AgentRunSummaryLineProps) {
-  const label = `${active ? 'Working' : 'Worked'} for ${formatWorkingDuration(durationMs)}`;
+  const summaryLabel = label ?? `${active ? 'Working' : 'Worked'} for ${formatWorkingDuration(durationMs)}`;
   const content = (
     <>
       <span
-        className="text-sm font-[var(--weight-semibold)]"
+        className={`text-sm font-[var(--weight-semibold)] ${
+          tone === 'approval' ? 'text-[var(--yellow)]' : ''
+        }`}
         style={{ fontFamily: 'var(--display)' }}
       >
-        {label}
+        {summaryLabel}
       </span>
       {detail ? <span className="text-xs text-[var(--muted-dim)]">{detail}</span> : null}
       {at ? (

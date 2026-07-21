@@ -5,6 +5,7 @@ import { isUngroupedGroupName } from '../../domain';
 import type { DroneSummary, RepoSummary } from '../types';
 import {
   DroneCard,
+  SidebarApprovalStatusIndicator,
   SidebarItemStateIndicator,
   SidebarWorkingStatusIndicator,
   sidebarChatDisplayState,
@@ -105,6 +106,7 @@ import {
   type FolderEditorState,
 } from './use-sidebar-interactions';
 import { useSidebarRootDnd } from './use-sidebar-root-dnd';
+import { useDroneHubRuntimeStore } from './use-drone-hub-runtime-store';
 
 const SIDEBAR_EXPANDED_WIDTH_PX = 280;
 const SIDEBAR_COLLAPSED_RAIL_WIDTH_PX = 40;
@@ -243,6 +245,9 @@ function ReadOnlySidebarGroups({
 }) {
   const lastToggleRef = React.useRef<{ groupKey: string; timestamp: number } | null>(null);
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
+  const approvalRequiredByChatNodeId = useDroneHubRuntimeStore(
+    (state) => state.approvalRequiredByChatNodeId,
+  );
   const visibleDroneOrder = React.useMemo(
     () =>
       sidebarGroups.flatMap((group) => {
@@ -298,6 +303,7 @@ function ReadOnlySidebarGroups({
                     (Array.isArray(drone?.busyChats) && drone.busyChats.length > 0);
                   const displayName = uiDroneName(drone.name) || drone.name || droneId;
                   const hasOnlyDefaultChat = chats.length === 1 && chats[0] === 'default';
+                  const defaultChatNodeId = createCanvasChatNodeId(droneId, 'default');
                   const showChatRows = chats.length > 1 && (showAllChats || selected);
                   return (
                     <div key={droneId || displayName} className="flex flex-col gap-0.5">
@@ -316,6 +322,10 @@ function ReadOnlySidebarGroups({
                         selectionTone="muted"
                         showSelectionEdge={false}
                         busy={busy && hasOnlyDefaultChat}
+                        approvalRequired={
+                          hasOnlyDefaultChat &&
+                          Boolean(approvalRequiredByChatNodeId[defaultChatNodeId])
+                        }
                         unreadAgentMessage={false}
                         onClick={(rowOpts) => {
                           if (droneId)
@@ -331,9 +341,14 @@ function ReadOnlySidebarGroups({
                         <div className={`${densityClasses.chatIndent} flex flex-col gap-0.5`}>
                           {chats.map((chatName) => {
                             const active = selectedDrone === droneId && activeChatName === chatName;
+                            const chatNodeId = createCanvasChatNodeId(droneId, chatName);
                             const chatBusy =
                               Array.isArray(drone?.busyChats) && drone.busyChats.includes(chatName);
-                            const chatState = sidebarChatDisplayState(drone, chatBusy);
+                            const chatState = sidebarChatDisplayState(
+                              drone,
+                              chatBusy,
+                              Boolean(approvalRequiredByChatNodeId[chatNodeId]),
+                            );
                             const chatStateLabel = sidebarDroneStateLabel(chatState, false);
                             const chatStateToneClass = sidebarItemStateToneClass(chatState, false);
                             return (
@@ -468,6 +483,9 @@ function StaticReadOnlySidebarTree({
   onToggleGroupCollapsed: (group: string) => void;
 }) {
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
+  const approvalRequiredByChatNodeId = useDroneHubRuntimeStore(
+    (state) => state.approvalRequiredByChatNodeId,
+  );
   const visibleDroneOrder = React.useMemo(
     () => flattenReadOnlyTreeDroneOrder(nodeTree, collapsedGroups),
     [collapsedGroups, nodeTree],
@@ -508,6 +526,10 @@ function StaticReadOnlySidebarTree({
           selectionTone="muted"
           showSelectionEdge={false}
           busy={busy && hasOnlyDefaultChat}
+          approvalRequired={
+            hasOnlyDefaultChat &&
+            Boolean(approvalRequiredByChatNodeId[defaultChatNodeId])
+          }
           statusHint={droneStatusHintById[drone.id]}
           unreadAgentMessage={
             hasOnlyDefaultChat && unreadAgentMessageByChatNodeId[defaultChatNodeId] === true
@@ -527,7 +549,11 @@ function StaticReadOnlySidebarTree({
                 (Array.isArray(drone.busyChats) && drone.busyChats.includes(chatName)) ||
                 busyChatNodeIdSet.has(chatNodeId);
               const chatUnread = !active && unreadAgentMessageByChatNodeId[chatNodeId] === true;
-              const chatState = sidebarChatDisplayState(drone, chatBusy);
+              const chatState = sidebarChatDisplayState(
+                drone,
+                chatBusy,
+                Boolean(approvalRequiredByChatNodeId[chatNodeId]),
+              );
               const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
               const chatStateToneClass = sidebarItemStateToneClass(chatState, chatUnread);
               return (
@@ -1498,6 +1524,9 @@ export function DroneSidebar({
   readOnlyDisabledDroneReasonById = {},
   readOnlyDroneStatusHintById = {},
 }: DroneSidebarProps) {
+  const approvalRequiredByChatNodeId = useDroneHubRuntimeStore(
+    (state) => state.approvalRequiredByChatNodeId,
+  );
   const sidebarCapabilities = React.useMemo(
     () => resolveDroneSidebarCapabilities(capabilities),
     [capabilities],
@@ -2034,27 +2063,34 @@ export function DroneSidebar({
   const settingsTabActive = appView === 'settings' && settingsActiveTab !== 'devices';
   const summarizeSidebarFleet = React.useCallback((drones: readonly DroneSummary[]) => {
     let working = 0;
+    let approval = 0;
     let unread = 0;
     for (const drone of drones) {
       const chats = drone.chats.length > 0 ? drone.chats : ['default'];
+      const droneApprovalRequired = chats.some((chatName) =>
+        Boolean(approvalRequiredByChatNodeId[createCanvasChatNodeId(drone.id, chatName)]),
+      );
       const droneWorking =
-        Boolean(drone.busy) ||
-        (drone.busyChats?.length ?? 0) > 0 ||
-        chats.some((chatName) => busyChatNodeIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName))) ||
-        drone.hubPhase === 'creating' ||
-        drone.hubPhase === 'starting' ||
-        drone.hubPhase === 'seeding' ||
-        Boolean(deletingDrones[drone.id]);
+        !droneApprovalRequired &&
+        (Boolean(drone.busy) ||
+          (drone.busyChats?.length ?? 0) > 0 ||
+          chats.some((chatName) => busyChatNodeIdSet.has(sidebarChatSidebarNodeId(drone.id, chatName))) ||
+          drone.hubPhase === 'creating' ||
+          drone.hubPhase === 'starting' ||
+          drone.hubPhase === 'seeding' ||
+          Boolean(deletingDrones[drone.id]));
       const droneUnread =
         (drone.unreadChats?.length ?? 0) > 0 ||
         chats.some((chatName) =>
           Boolean(unreadAgentMessageByChatNodeId[sidebarChatSidebarNodeId(drone.id, chatName)]),
         );
       if (droneWorking) working += 1;
+      if (droneApprovalRequired) approval += 1;
       if (droneUnread) unread += 1;
     }
-    return { working, unread };
+    return { working, approval, unread };
   }, [
+    approvalRequiredByChatNodeId,
     busyChatNodeIdSet,
     deletingDrones,
     unreadAgentMessageByChatNodeId,
@@ -2513,6 +2549,15 @@ export function DroneSidebar({
                     ) : null}
                   </span>
                   <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem] leading-none">
+                    {activeRepositoryNavigationItem.stateSummary.approval > 0 ? (
+                      <span
+                        className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]"
+                        title={`${activeRepositoryNavigationItem.stateSummary.approval} awaiting approval`}
+                      >
+                        <SidebarApprovalStatusIndicator />
+                        {activeRepositoryNavigationItem.stateSummary.approval}
+                      </span>
+                    ) : null}
                     {activeRepositoryNavigationItem.stateSummary.working > 0 ? (
                       <span className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]">
                         <SidebarWorkingStatusIndicator />
@@ -2744,6 +2789,15 @@ export function DroneSidebar({
                           ) : null}
                         </span>
                         <span className="inline-flex flex-shrink-0 items-center gap-1.5 font-mono text-[.5625rem] leading-none">
+                          {item.stateSummary.approval > 0 ? (
+                            <span
+                              className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]"
+                              title={`${item.stateSummary.approval} awaiting approval`}
+                            >
+                              <SidebarApprovalStatusIndicator />
+                              {item.stateSummary.approval}
+                            </span>
+                          ) : null}
                           {item.stateSummary.working > 0 ? (
                             <span className="inline-flex h-3 items-center gap-1 text-[var(--yellow)]">
                               <SidebarWorkingStatusIndicator />

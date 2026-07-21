@@ -34,6 +34,7 @@ import {
 import { sidebarInlineSectionKey, type SidebarInlineSectionKind } from './sidebar-inline-sections';
 import type { DroneSelectionClickOptions } from './drone-selection-helpers';
 import { useDroneSidebarUiState } from './use-drone-hub-ui-store';
+import { useChatApprovalRequired } from './use-drone-hub-runtime-store';
 import type { SidebarDroneTree } from './sidebar-drone-tree';
 import type { DroneDeleteMode, SidebarDensityMode } from './settings-types';
 import type { ChatEditorState } from './use-sidebar-interactions';
@@ -118,6 +119,7 @@ type SidebarDroneRowProps = {
   sidebarDndEnabled: boolean;
   sidebarOptimisticDroneIdSet: Set<string>;
   busy: boolean;
+  approvalRequired: boolean;
   unread: boolean;
   showGroup?: boolean;
   groupOrderKey?: string | null;
@@ -250,6 +252,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
   sidebarDndEnabled,
   sidebarOptimisticDroneIdSet,
   busy,
+  approvalRequired,
   unread,
   showGroup,
   groupOrderKey,
@@ -331,6 +334,7 @@ const SidebarDroneRow = React.memo(function SidebarDroneRow({
           selected={selectedDroneSet.has(drone.id)}
           highlighted={highlightedDroneIds.has(drone.id)}
           busy={busy}
+          approvalRequired={approvalRequired}
           operationLabel={
             deletingDrones[drone.id]
               ? ((deleteOperationModeById[drone.id] ?? deleteMode) === 'archive' ? 'Archiving' : 'Deleting')
@@ -425,7 +429,8 @@ const SidebarChatRow = React.memo(function SidebarChatRow({
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
   const chatKey = `${drone.id}:${chatName}`;
   const chatUnread = unread && !selected;
-  const chatState = sidebarChatDisplayState(drone, busy);
+  const approvalRequired = useChatApprovalRequired(createCanvasChatNodeId(drone.id, chatName));
+  const chatState = sidebarChatDisplayState(drone, busy, approvalRequired);
   const chatStateLabel = sidebarDroneStateLabel(chatState, chatUnread);
   const chatStateToneClass = sidebarItemStateToneClass(chatState, chatUnread);
   const chatDragData = React.useMemo(
@@ -654,6 +659,9 @@ function SidebarDroneNode({
   actionsEnabled = true,
 }: SidebarDroneNodeProps) {
   const densityClasses = sidebarDensityClasses(sidebarDensityMode);
+  const defaultChatApprovalRequired = useChatApprovalRequired(
+    createCanvasChatNodeId(droneId, 'default'),
+  );
   if (ancestorDroneIds?.has(droneId)) return null;
   const drone = droneById[droneId];
   if (!drone) return null;
@@ -720,6 +728,7 @@ function SidebarDroneNode({
         sidebarDndEnabled={sidebarDndEnabled}
         sidebarOptimisticDroneIdSet={sidebarOptimisticDroneIdSet}
         busy={showDroneBusy}
+        approvalRequired={hasOnlyDefaultChat && defaultChatApprovalRequired}
         unread={showDroneUnread}
         showGroup={showGroup}
         groupOrderKey={groupOrderKey}

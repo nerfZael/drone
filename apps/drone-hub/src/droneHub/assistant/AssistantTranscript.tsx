@@ -97,7 +97,7 @@ function ToolDisclosure({
   children,
 }: {
   title: string;
-  status?: 'pending' | 'ok' | 'error';
+  status?: 'pending' | 'blocked' | 'ok' | 'error';
   children: React.ReactNode;
 }) {
   const [open, setOpen] = React.useState(false);
@@ -117,13 +117,19 @@ function ToolDisclosure({
                 ? 'bg-[var(--red)] text-[var(--bg)]'
                 : status === 'ok'
                   ? 'bg-[var(--green)] text-[var(--bg)]'
-                  : 'text-[var(--accent)]'
+                  : status === 'blocked'
+                    ? 'text-[var(--yellow)]'
+                    : 'text-[var(--accent)]'
             }`}
+            title={status === 'blocked' ? 'Blocked pending approval' : undefined}
+            aria-label={status === 'blocked' ? 'Blocked pending approval' : undefined}
           >
             {status === 'error' ? (
               <span className="h-1.5 w-1.5 rounded-full bg-current" />
             ) : status === 'pending' ? (
               <ToolSpinnerIcon className="h-3 w-3" />
+            ) : status === 'blocked' ? (
+              <ToolPausedIcon className="h-3 w-3" />
             ) : (
               <ToolCheckIcon className="h-2.5 w-2.5" />
             )}
@@ -172,6 +178,22 @@ function ToolSpinnerIcon({ className }: { className?: string }) {
         strokeWidth="1.5"
         strokeLinecap="round"
       />
+    </svg>
+  );
+}
+
+function ToolPausedIcon({ className }: { className?: string }) {
+  return (
+    <svg
+      className={className}
+      viewBox="0 0 12 12"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinecap="round"
+      aria-hidden="true"
+    >
+      <path d="M4 2.5v7M8 2.5v7" />
     </svg>
   );
 }
@@ -226,8 +248,25 @@ function ReasoningBlock({ text }: { text: string }) {
   );
 }
 
-function ToolStatusIndicator({ result }: { result?: AssistantMessage }) {
+function ToolStatusIndicator({
+  result,
+  blocked = false,
+}: {
+  result?: AssistantMessage;
+  blocked?: boolean;
+}) {
   if (!result) {
+    if (blocked) {
+      return (
+        <span
+          data-tool-status="blocked"
+          className="inline-flex h-3 w-3 flex-shrink-0 items-center justify-center text-[var(--yellow)]"
+          title="Blocked pending approval"
+        >
+          <ToolPausedIcon className="h-3 w-3" />
+        </span>
+      );
+    }
     return (
       <span
         data-tool-status="pending"
@@ -456,7 +495,13 @@ function TransferActivityRow({
   );
 }
 
-export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderItem[] }) {
+export function RepeatedToolActivityRow({
+  items,
+  blocked = false,
+}: {
+  items: AssistantToolRenderItem[];
+  blocked?: boolean;
+}) {
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const first = items[0];
   const name = toolItemName(first);
@@ -464,7 +509,7 @@ export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderI
   const errorCount = items.filter((item) => item.result?.isError).length;
   const pendingCount = items.filter((item) => !item.result).length;
   const statusText = [
-    pendingCount > 0 ? `${pendingCount} pending` : '',
+    pendingCount > 0 && !blocked ? `${pendingCount} pending` : '',
     errorCount > 0 ? `${errorCount} failed` : '',
   ].filter(Boolean).join(', ');
   const statusResult: AssistantMessage | undefined =
@@ -483,7 +528,7 @@ export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderI
         onClick={() => setDetailsOpen((value) => !value)}
         className="flex w-full min-w-0 items-center gap-2 px-2.5 py-2 text-left hover:bg-[var(--surface-soft)]"
       >
-        <ToolStatusIndicator result={statusResult} />
+        <ToolStatusIndicator result={statusResult} blocked={blocked && pendingCount > 0} />
         <span
           className="min-w-0 truncate text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
           style={{ fontFamily: 'var(--display)' }}
@@ -510,7 +555,7 @@ export function RepeatedToolActivityRow({ items }: { items: AssistantToolRenderI
               className="overflow-hidden rounded border border-[var(--border-subtle)] bg-[var(--surface-inset)]"
             >
               <div className="flex min-w-0 items-center gap-2 border-b border-[var(--border-subtle)] px-2.5 py-1.5">
-                <ToolStatusIndicator result={item.result} />
+                <ToolStatusIndicator result={item.result} blocked={blocked && !item.result} />
                 <div
                   className="min-w-0 flex-1 truncate text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
                   style={{ fontFamily: 'var(--display)' }}
@@ -531,10 +576,12 @@ export function MessageDroneActivityRow({
   call,
   result,
   droneNameById,
+  blocked = false,
 }: {
   call: AssistantToolCall;
   result?: AssistantMessage;
   droneNameById: AssistantDroneNameMap;
+  blocked?: boolean;
 }) {
   const [detailsOpen, setDetailsOpen] = React.useState(false);
   const summary = messageDroneDetails(call.args, droneNameById);
@@ -544,7 +591,7 @@ export function MessageDroneActivityRow({
       <div className="px-2.5 py-2">
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-            <ToolStatusIndicator result={result} />
+            <ToolStatusIndicator result={result} blocked={blocked} />
             <div
               className="text-[var(--text-10)] font-[var(--weight-semibold)] uppercase tracking-wide text-[var(--muted-dim)]"
               style={{ fontFamily: 'var(--display)' }}
@@ -649,16 +696,25 @@ export function ToolActivityRow({
   call,
   result,
   droneNameById = {},
+  blocked = false,
 }: {
   call?: AssistantToolCall;
   result?: AssistantMessage;
   droneNameById?: AssistantDroneNameMap;
+  blocked?: boolean;
 }) {
   if (call?.name === 'transfer_files') {
     return <TransferActivityRow call={call} result={result} />;
   }
   if (call?.name === 'message_drone') {
-    return <MessageDroneActivityRow call={call} result={result} droneNameById={droneNameById} />;
+    return (
+      <MessageDroneActivityRow
+        call={call}
+        result={result}
+        droneNameById={droneNameById}
+        blocked={blocked}
+      />
+    );
   }
 
   if (call && isChatIdleToolName(call.name)) {
@@ -669,7 +725,10 @@ export function ToolActivityRow({
   const resultText = result ? messageText(result) : '';
   return (
     <div className="mx-3">
-      <ToolDisclosure title={title} status={result ? (result.isError ? 'error' : 'ok') : 'pending'}>
+      <ToolDisclosure
+        title={title}
+        status={result ? (result.isError ? 'error' : 'ok') : blocked ? 'blocked' : 'pending'}
+      >
         {call ? (
           <div>
             <div
@@ -707,7 +766,7 @@ export function ToolActivityRow({
                 : 'text-[var(--text-11)] text-[var(--muted-dim)]'
             }
           >
-            Waiting for result...
+            {blocked ? 'Blocked pending approval.' : 'Waiting for result...'}
           </div>
         )}
       </ToolDisclosure>
@@ -743,6 +802,8 @@ export function ToolRunActivity({
   endedAt,
   droneNameById = {},
   initiallyExpanded = active,
+  awaitingApproval = false,
+  approvalStartedAt,
 }: {
   items: AssistantToolRenderItem[];
   active: boolean;
@@ -750,20 +811,61 @@ export function ToolRunActivity({
   endedAt?: number;
   droneNameById?: AssistantDroneNameMap;
   initiallyExpanded?: boolean;
+  awaitingApproval?: boolean;
+  approvalStartedAt?: number;
 }) {
   const [expanded, setExpanded] = React.useState(initiallyExpanded);
   const fallbackStart = React.useRef(Date.now()).current;
+  const normalizedApprovalStartedAt = Number.isFinite(approvalStartedAt)
+    ? Number(approvalStartedAt)
+    : null;
   const [now, setNow] = React.useState(() => Date.now());
+  const [pauseClock, setPauseClock] = React.useState<{
+    accumulatedMs: number;
+    startedAt: number | null;
+  }>(() => ({
+    accumulatedMs: 0,
+    startedAt: awaitingApproval ? (normalizedApprovalStartedAt ?? Date.now()) : null,
+  }));
 
   React.useEffect(() => {
-    if (!active) return;
+    if (!active || awaitingApproval) return;
+    setNow(Date.now());
     const timer = window.setInterval(() => setNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
-  }, [active]);
+  }, [active, awaitingApproval]);
+
+  React.useEffect(() => {
+    const timestamp =
+      !active && Number.isFinite(endedAt) ? Number(endedAt) : Date.now();
+    setPauseClock((current) => {
+      if (awaitingApproval) {
+        const startedAt = normalizedApprovalStartedAt ?? current.startedAt ?? timestamp;
+        if (current.startedAt !== null && current.startedAt <= startedAt) return current;
+        return { ...current, startedAt };
+      }
+      if (current.startedAt === null) return current;
+      return {
+        accumulatedMs:
+          current.accumulatedMs + Math.max(0, timestamp - current.startedAt),
+        startedAt: null,
+      };
+    });
+  }, [active, awaitingApproval, endedAt, normalizedApprovalStartedAt]);
 
   if (items.length === 0) return null;
   const start = Number.isFinite(startedAt) ? Number(startedAt) : fallbackStart;
-  const end = active ? now : Number.isFinite(endedAt) ? Number(endedAt) : start;
+  const rawEnd = active ? now : Number.isFinite(endedAt) ? Number(endedAt) : start;
+  const end =
+    awaitingApproval && pauseClock.startedAt !== null ? pauseClock.startedAt : rawEnd;
+  const resumingPauseMs =
+    !awaitingApproval && pauseClock.startedAt !== null
+      ? Math.max(0, rawEnd - pauseClock.startedAt)
+      : 0;
+  const durationMs = Math.max(
+    0,
+    end - start - pauseClock.accumulatedMs - resumingPauseMs,
+  );
   const callLabel = `${items.length} tool ${items.length === 1 ? 'call' : 'calls'}`;
   const groupedItems = compactRepeatedToolItems(items);
 
@@ -771,8 +873,14 @@ export function ToolRunActivity({
     <div>
       <AgentRunSummaryLine
         active={active}
-        durationMs={Math.max(0, end - start)}
-        detail={callLabel}
+        durationMs={durationMs}
+        label={awaitingApproval ? 'Approval required' : undefined}
+        tone={awaitingApproval ? 'approval' : 'default'}
+        detail={
+          awaitingApproval
+            ? `Worked ${formatWorkingDuration(durationMs)} · ${callLabel}`
+            : callLabel
+        }
         trailing={<ToolRunChevron open={expanded} />}
         expanded={expanded}
         onToggle={() => setExpanded((value) => !value)}
@@ -781,13 +889,18 @@ export function ToolRunActivity({
         <div className="mt-1 space-y-1">
           {groupedItems.map((item) =>
             item.type === 'toolGroup' ? (
-              <RepeatedToolActivityRow key={item.key} items={item.items} />
+              <RepeatedToolActivityRow
+                key={item.key}
+                items={item.items}
+                blocked={awaitingApproval}
+              />
             ) : item.type === 'tool' ? (
               <ToolActivityRow
                 key={item.key}
                 call={item.call}
                 result={item.result}
                 droneNameById={droneNameById}
+                blocked={awaitingApproval && !item.result}
               />
             ) : null,
           )}

@@ -88,6 +88,10 @@
   --green: #65e69a;
   --green-subtle: rgba(101, 230, 154, .11);
   --green-border: rgba(101, 230, 154, .30);
+  --approval-action-bg: #216b42;
+  --approval-action-bg-hover: #2a8050;
+  --approval-action-border: #3ca968;
+  --approval-action-fg: #f5fff8;
   --red: #ff7373;
   --red-subtle: rgba(255, 115, 115, .11);
   --red-border: rgba(255, 115, 115, .32);
@@ -278,6 +282,10 @@
   --green: #a6e3a1;
   --green-subtle: rgba(166, 227, 161, .12);
   --green-border: rgba(166, 227, 161, .36);
+  --approval-action-bg: #356f48;
+  --approval-action-bg-hover: #408457;
+  --approval-action-border: #5b9a68;
+  --approval-action-fg: #f3fff2;
   --red: #f38ba8;
   --red-subtle: rgba(243, 139, 168, .10);
   --red-border: rgba(243, 139, 168, .38);
@@ -1379,8 +1387,248 @@ code, pre {
   background: var(--surface-faint);
 }
 
+/* ──────────────────────────────────────────────────────────
+   Assistant approvals
+
+   Approvals are interruptions in the transcript, not floating cards.
+   The run summary carries the approval state while the request remains
+   flush with the conversation around it.
+   ────────────────────────────────────────────────────────── */
+
+.dh-approval {
+  position: relative;
+  margin: .65rem .75rem .35rem;
+  padding: .3rem .15rem .3rem .9rem;
+}
+
+.dh-approval::before {
+  position: absolute;
+  top: .35rem;
+  bottom: .15rem;
+  left: 0;
+  width: 1px;
+  border-radius: 999px;
+  background: var(--yellow);
+  content: '';
+  opacity: .48;
+}
+
+.dh-approval-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-right: .15rem;
+}
+
+.dh-approval-title {
+  min-width: 0;
+  margin: .2rem 0 0;
+  color: var(--fg-strong);
+  font-family: var(--sans);
+  font-size: var(--text-14);
+  font-weight: var(--weight-semibold);
+  line-height: 1.35;
+}
+
+.dh-approval-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: .25rem;
+}
+
+.dh-approval-button {
+  display: inline-flex;
+  height: 1.875rem;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 0 .65rem;
+  font-family: var(--sans);
+  font-size: var(--text-11);
+  font-weight: var(--weight-semibold);
+  line-height: 1;
+  transition: background-color .14s ease, border-color .14s ease, color .14s ease, filter .14s ease;
+}
+
+.dh-approval-button:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.dh-approval-button:disabled {
+  cursor: not-allowed;
+  opacity: .42;
+}
+
+.dh-approval-button--deny {
+  color: var(--red);
+}
+
+.dh-approval-button--deny:not(:disabled):hover {
+  border-color: var(--red-border);
+  background: var(--red-subtle);
+}
+
+.dh-approval-button--approve {
+  min-width: 4.75rem;
+  border-color: var(--approval-action-border);
+  background: var(--approval-action-bg);
+  color: var(--approval-action-fg);
+  font-weight: var(--weight-bold);
+}
+
+.dh-approval-button--approve:not(:disabled):hover {
+  background: var(--approval-action-bg-hover);
+}
+
+.dh-approval-metadata {
+  display: grid;
+  max-width: 56rem;
+  gap: .3rem;
+  margin: .85rem 0 0;
+}
+
+.dh-approval-metadata-row {
+  display: grid;
+  grid-template-columns: minmax(5.5rem, auto) minmax(0, 1fr);
+  gap: 1rem;
+  align-items: baseline;
+}
+
+.dh-approval-metadata dt {
+  color: var(--muted);
+  font-size: var(--text-11);
+  line-height: 1.45;
+}
+
+.dh-approval-metadata dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+  color: var(--fg-secondary);
+  font-size: var(--text-12);
+  line-height: 1.45;
+}
+
+.dh-approval-payload,
+.dh-approval-json {
+  margin: .85rem .15rem 0 0;
+  border-top: 1px solid var(--border-subtle);
+  border-bottom: 1px solid var(--border-subtle);
+  border-radius: 0;
+  background: var(--surface-inset-faint);
+}
+
+.dh-approval-payload {
+  padding: .65rem .8rem .7rem;
+}
+
+.dh-approval-payload-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: .4rem;
+}
+
+.dh-approval-payload-label {
+  color: var(--muted);
+  font-family: var(--display);
+  font-size: var(--text-10);
+  font-weight: var(--weight-semibold);
+  letter-spacing: .08em;
+  line-height: 1.4;
+  text-transform: uppercase;
+}
+
+.dh-approval-markdown {
+  color: var(--fg-secondary);
+  font-size: var(--text-12);
+}
+
+.dh-approval-markdown pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  color: var(--fg);
+}
+
+.dh-approval-utilities {
+  display: flex;
+  justify-content: flex-end;
+  margin: .4rem .25rem 0 0;
+}
+
+.dh-approval-json-link {
+  border: 0;
+  background: transparent;
+  padding: .15rem 0;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: var(--text-10);
+  line-height: 1.35;
+  text-decoration: underline;
+  text-decoration-color: var(--border);
+  text-underline-offset: 3px;
+  transition: color .14s ease, text-decoration-color .14s ease;
+}
+
+.dh-approval-json-link:hover,
+.dh-approval-json-link[aria-expanded='true'] {
+  color: var(--fg-secondary);
+  text-decoration-color: currentColor;
+}
+
+.dh-approval-json-link:focus-visible {
+  outline: 2px solid var(--focus-ring);
+  outline-offset: 2px;
+}
+
+.dh-approval-json {
+  margin-top: .4rem;
+  max-height: 12rem;
+  overflow: auto;
+  padding: .7rem .8rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-family: var(--code);
+  font-size: var(--text-10);
+  line-height: 1.55;
+}
+
+@media (max-width: 640px) {
+  .dh-approval-header {
+    flex-direction: column;
+    gap: .7rem;
+  }
+
+  .dh-approval-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .dh-approval-metadata-row {
+    grid-template-columns: 4.75rem minmax(0, 1fr);
+    gap: .65rem;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .dh-markdown a {
+    transition: none;
+  }
+
+  .dh-approval-button {
+    transition: none;
+  }
+
+  .dh-approval-json-link {
     transition: none;
   }
 }

@@ -546,6 +546,34 @@ describe('agent chat surface adapters', () => {
     expect(html).not.toContain('overflow-y-auto');
   });
 
+  test('active tool runs identify when approval is required', () => {
+    const approvalStartedAt = Date.now() - 2_000;
+    const html = renderToStaticMarkup(
+      <ToolRunActivity
+        items={[
+          {
+            type: 'tool',
+            key: 'approval-tool',
+            call: { id: 'approval-call', name: 'bash', args: {} },
+          },
+        ]}
+        active
+        awaitingApproval
+        startedAt={approvalStartedAt - 3_000}
+        approvalStartedAt={approvalStartedAt}
+      />,
+    );
+
+    expect(html).toContain('Approval required');
+    expect(html).toContain('Worked 3s · 1 tool call');
+    expect(html).toContain('text-[var(--yellow)]');
+    expect(html).toContain('data-tool-status="blocked"');
+    expect(html).not.toContain('>Blocked</span>');
+    expect(html).not.toContain('data-tool-status="pending"');
+    expect(html).not.toContain('animate-spin');
+    expect(html).not.toContain('Working for');
+  });
+
   test('the latest native user message is expanded by default', () => {
     const html = renderToStaticMarkup(
       <AssistantMessageRow

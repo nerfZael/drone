@@ -21,6 +21,8 @@ import type { MarkdownFileReference } from '../chat/MarkdownMessage';
 import { parseDroneHubDragData, useDroneHubActiveDrag } from '../app/drone-hub-dnd';
 import { CodexConnectComposerNotice } from '../app/CodexConnectControl';
 import { assignedDroneIdsFromData } from '../app/drone-hub-dnd-utils';
+import { createCanvasChatNodeId } from '../app/app-config';
+import { useDroneHubRuntimeStore } from '../app/use-drone-hub-runtime-store';
 import {
   IconPencil,
   IconSettings,
@@ -259,6 +261,10 @@ export function AssistantDock({
   const chatSurfaceAdapter = useAgentChatSurfaceAdapter();
   const nativeDroneId = nativeChat.droneId;
   const nativeChatName = nativeChat.chatName;
+  const nativeChatNodeId = createCanvasChatNodeId(nativeDroneId, nativeChatName);
+  const setApprovalRequiredByChatNodeId = useDroneHubRuntimeStore(
+    (state) => state.setApprovalRequiredByChatNodeId,
+  );
   const [snapshot, setSnapshot] = React.useState<AssistantSnapshot | null>(null);
   const [bootstrapHistory, setBootstrapHistory] = React.useState<
     AssistantBootstrapSnapshot['initialHistory'] | null
@@ -353,6 +359,23 @@ export function AssistantDock({
     () => (snapshot?.pendingApprovals ?? []).filter((approval) => approval.threadId === activeThread?.id && approval.status === 'pending'),
     [activeThread?.id, snapshot?.pendingApprovals],
   );
+  const activeApprovalStartedAt = React.useMemo(() => {
+    const timestamps = activePendingApprovals
+      .map((approval) => Date.parse(approval.createdAt))
+      .filter((timestamp) => Number.isFinite(timestamp));
+    return timestamps.length > 0 ? Math.min(...timestamps) : undefined;
+  }, [activePendingApprovals]);
+  React.useEffect(() => {
+    if (!nativeChatNodeId) return;
+    const approvalRequired = activePendingApprovals.length > 0;
+    setApprovalRequiredByChatNodeId((current) => {
+      if (Boolean(current[nativeChatNodeId]) === approvalRequired) return current;
+      if (approvalRequired) return { ...current, [nativeChatNodeId]: true };
+      const next = { ...current };
+      delete next[nativeChatNodeId];
+      return next;
+    });
+  }, [activePendingApprovals.length, nativeChatNodeId, setApprovalRequiredByChatNodeId]);
   const visibleQueuedPrompts = React.useMemo(
     () =>
       (activeThread?.queuedPrompts ?? []).filter(
@@ -1554,7 +1577,7 @@ export function AssistantDock({
       running &&
       runEndIndex === lastToolItemIndex &&
       runEndIndex > latestUserItemIndex;
-    const runKey = `tool-run:${runItems[0]?.key ?? runStartIndex}:${runActive ? 'active' : 'complete'}`;
+    const runKey = `tool-run:${runItems[0]?.key ?? runStartIndex}:${runStartIndex}`;
     nativeTranscriptItems.push({
       key: runKey,
       kind: 'tool',
@@ -1567,6 +1590,8 @@ export function AssistantDock({
           endedAt={endedAt}
           droneNameById={droneNameById}
           initiallyExpanded={isLatestActivity}
+          awaitingApproval={runActive && activePendingApprovals.length > 0}
+          approvalStartedAt={activeApprovalStartedAt}
         />
       ),
     });
