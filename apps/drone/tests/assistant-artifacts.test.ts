@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { applyPatchHunks, parsePatch } from '@blip/tools';
 
 import {
+  createAssistantArtifactTransferAdapter,
   listAssistantArtifactFiles,
   readAssistantArtifactFile,
   runAssistantArtifactAction,
@@ -11,6 +12,37 @@ import { AssistantArtifactsTarget } from '../src/hub/assistant/targets/assistant
 import { withTempDroneDataDir } from './test-helpers';
 
 describe('assistant artifacts', () => {
+  test('captures baselines before target and transfer mutations', async () => {
+    await withTempDroneDataDir('assistant-artifact-mutation-hook-', async () => {
+      let calls = 0;
+      const beforeMutation = async () => {
+        calls += 1;
+      };
+      const target = new AssistantArtifactsTarget(
+        'thread-hooks',
+        { parse: parsePatch, applyHunks: applyPatchHunks },
+        beforeMutation,
+      );
+      await target.execute({ callId: 'list', tool: 'list_files', args: {} });
+      expect(calls).toBe(0);
+      await target.execute({
+        callId: 'write',
+        tool: 'write_file',
+        args: { path: 'note.md', content: 'hello', mode: 'create' },
+      });
+      expect(calls).toBe(1);
+
+      const transfer = createAssistantArtifactTransferAdapter('thread-transfer-hooks', beforeMutation);
+      await transfer.destination!.prepareFile({
+        path: 'copy.md',
+        transferId: 'transfer-1',
+        size: 5,
+        overwrite: false,
+      });
+      expect(calls).toBe(2);
+    });
+  });
+
   test('validates prompt image payloads before persistence', () => {
     expect(validateAssistantPromptImages([{ mime: 'image/png', dataBase64: 'aW1hZ2U=' }])).toEqual([
       { type: 'image', data: 'aW1hZ2U=', mimeType: 'image/png' },

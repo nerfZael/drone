@@ -28,6 +28,7 @@ export class AssistantArtifactsTarget implements WorkspaceTarget {
       >;
       applyHunks: (content: string, hunks: any[][], filePath: string) => string;
     },
+    private readonly beforeMutation?: () => Promise<void>,
   ) {
     this.descriptor = {
       id: `artifacts:${threadId}`,
@@ -46,10 +47,20 @@ export class AssistantArtifactsTarget implements WorkspaceTarget {
         'patch.apply',
       ],
     };
-    this.transfer = createAssistantArtifactTransferAdapter(threadId);
+    this.transfer = createAssistantArtifactTransferAdapter(threadId, beforeMutation);
   }
 
   async execute(call: WorkspaceTargetCall) {
+    if (
+      call.tool === 'write_file' ||
+      call.tool === 'delete_file' ||
+      call.tool === 'move_path' ||
+      call.tool === 'create_directory' ||
+      call.tool === 'delete_directory' ||
+      call.tool === 'apply_patch'
+    ) {
+      await this.beforeMutation?.();
+    }
     if (call.tool === 'list_files') {
       const result = await listAssistantArtifactEntries(this.threadId, call.args.path, call.args.limit);
       return textResult(result.entries.map((entry) => `${entry.type === 'directory' ? 'dir ' : 'file'} ${entry.path}`).join('\n') || '(empty)', result);

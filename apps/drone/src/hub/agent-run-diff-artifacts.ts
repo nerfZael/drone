@@ -27,7 +27,7 @@ const CLEANUP_INTERVAL_MS = 60 * 60 * 1000;
 const ORPHAN_GRACE_MS = 60 * 60 * 1000;
 
 export type AgentRunDiffArtifactOwner = {
-  droneId: string;
+  droneId?: string;
   chatName?: string;
   promptId?: string;
   threadId?: string;

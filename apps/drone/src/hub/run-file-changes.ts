@@ -13,6 +13,7 @@ import type {
 
 import { dvmExec } from '../host/dvm';
 import { normalizeDroneRuntime } from '../host/runtime';
+import { ensureAssistantArtifactsRoot } from './assistant-artifacts';
 import {
   persistAgentRunDiffArtifact,
   type AgentRunDiffArtifactOwner,
@@ -27,11 +28,16 @@ export type AgentRunFileChangesBaseline = {
   version: 1;
   capturedAt: string;
   targetId: string;
-  droneId: string;
+  droneId?: string;
   label: string;
   repoRoot: string;
   treeOid: string;
   owner: AgentRunDiffArtifactOwner;
+};
+
+export type AssistantArtifactRunFileChangesBaseline = AgentRunFileChangesBaseline & {
+  threadId: string;
+  temporaryGitDir: string;
 };
 
 function isRepoAttachedDrone(drone: any): boolean {
@@ -285,7 +291,7 @@ async function summarizeTrees(input: {
   }).catch(() => null);
   return {
     targetId: input.baseline.targetId,
-    droneId: input.baseline.droneId,
+    ...(input.baseline.droneId ? { droneId: input.baseline.droneId } : {}),
     label: input.baseline.label,
     repoRoot: input.repoRoot,
     ...(diffArtifactId ? { diffArtifactId } : {}),
@@ -365,7 +371,9 @@ export async function finalizeDroneRunFileChanges(input: {
   drone: any;
 }): Promise<AgentRunFileChanges | null> {
   if (input.baseline?.version !== 1) return null;
-  const target = droneCaptureTarget(input.baseline.droneId, input.drone);
+  const droneId = String(input.baseline.droneId ?? '').trim();
+  if (!droneId) return null;
+  const target = droneCaptureTarget(droneId, input.drone);
   if (!target) return null;
   const current = await captureTree(target.runGit, target.indexPath, target.cleanup);
   const workspace = await summarizeTrees({
@@ -375,6 +383,79 @@ export async function finalizeDroneRunFileChanges(input: {
     repoRoot: current.repoRoot,
   });
   return workspace ? combineAgentRunFileChanges([workspace]) : null;
+}
+
+function assistantArtifactGitRunner(gitDir: string, workTree: string): GitRunner {
+  return (args, env) =>
+    runHostCommand('git', ['--git-dir', gitDir, '--work-tree', workTree, ...args], env);
+}
+
+async function captureAssistantArtifactTree(runGit: GitRunner): Promise<string> {
+  await gitOrThrow(runGit, ['add', '-A', '--', ':/']);
+  const treeOid = (await gitOrThrow(runGit, ['write-tree'])).trim().toLowerCase();
+  if (!/^[0-9a-f]{40,64}$/.test(treeOid)) throw new Error('git returned an invalid tree id');
+  return treeOid;
+}
+
+export async function captureAssistantArtifactRunFileChangesBaseline(input: {
+  threadId: string;
+  turnId: string;
+}): Promise<AssistantArtifactRunFileChangesBaseline> {
+  const threadId = String(input.threadId ?? '').trim();
+  const turnId = String(input.turnId ?? '').trim();
+  if (!threadId || !turnId) throw new Error('threadId and turnId are required');
+  const repoRoot = await ensureAssistantArtifactsRoot(threadId);
+  const temporaryGitDir = await fs.mkdtemp(path.join(os.tmpdir(), 'drone-artifact-run-changes-'));
+  try {
+    await gitOrThrow((args) => runHostCommand('git', args), [
+      'init',
+      '--bare',
+      '--quiet',
+      temporaryGitDir,
+    ]);
+    await fs.writeFile(path.join(temporaryGitDir, 'info', 'exclude'), '.*\n**/.*\n', 'utf8');
+    const runGit = assistantArtifactGitRunner(temporaryGitDir, repoRoot);
+    await gitOrThrow(runGit, ['read-tree', '--empty']);
+    const treeOid = await captureAssistantArtifactTree(runGit);
+    return {
+      version: 1,
+      capturedAt: new Date().toISOString(),
+      targetId: `artifacts:${threadId}`,
+      label: 'Artifacts',
+      repoRoot,
+      treeOid,
+      owner: { threadId, turnId },
+      threadId,
+      temporaryGitDir,
+    };
+  } catch (error) {
+    await fs.rm(temporaryGitDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export async function finalizeAssistantArtifactRunFileChanges(input: {
+  baseline: AssistantArtifactRunFileChangesBaseline;
+}): Promise<AgentRunFileChangeWorkspace | null> {
+  const baseline = input.baseline;
+  try {
+    const runGit = assistantArtifactGitRunner(baseline.temporaryGitDir, baseline.repoRoot);
+    const currentTreeOid = await captureAssistantArtifactTree(runGit);
+    return await summarizeTrees({
+      baseline,
+      currentTreeOid,
+      runGit,
+      repoRoot: baseline.repoRoot,
+    });
+  } finally {
+    await fs.rm(baseline.temporaryGitDir, { recursive: true, force: true });
+  }
+}
+
+export async function discardAssistantArtifactRunFileChangesBaseline(
+  baseline: AssistantArtifactRunFileChangesBaseline,
+): Promise<void> {
+  await fs.rm(baseline.temporaryGitDir, { recursive: true, force: true });
 }
 
 export function combineAgentRunFileChanges(

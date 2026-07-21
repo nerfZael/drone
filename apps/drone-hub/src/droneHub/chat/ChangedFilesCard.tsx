@@ -292,7 +292,7 @@ export function ChangedFilesCard({
         <div className="border-t border-[var(--border-subtle)] py-1">
           {fileChanges.workspaces.map((workspace) => (
             <div key={workspace.targetId}>
-              {workspaceCount > 1 ? (
+              {workspaceCount > 1 || workspace.targetId.startsWith('artifacts:') ? (
                 <div className="px-3 pb-1 pt-2 text-[var(--text-9)] font-[var(--weight-semibold)] uppercase tracking-[0.08em] text-[var(--muted-dim)]">
                   {workspace.label}
                 </div>

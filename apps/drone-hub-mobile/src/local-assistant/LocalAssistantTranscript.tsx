@@ -175,7 +175,7 @@ function ChangedFilesSummary({
         <View style={styles.changedFilesList}>
           {summary.workspaces.map((workspace) => (
             <View key={workspace.targetId}>
-              {summary.workspaces.length > 1 ? (
+              {summary.workspaces.length > 1 || workspace.targetId.startsWith('artifacts:') ? (
                 <Text style={styles.changedFilesWorkspace}>{workspace.label}</Text>
               ) : null}
               {workspace.entries.map((entry) => {

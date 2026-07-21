@@ -12,9 +12,12 @@ const {
   resetAgentRunDiffArtifactsForTests,
 } = require('../../dist/hub/agent-run-diff-artifacts.js');
 const {
+  captureAssistantArtifactRunFileChangesBaseline,
   captureDroneRunFileChangesBaseline,
+  finalizeAssistantArtifactRunFileChanges,
   finalizeDroneRunFileChanges,
 } = require('../../dist/hub/run-file-changes.js');
+const { runAssistantArtifactAction } = require('../../dist/hub/assistant-artifacts.js');
 const { resetHubDatabaseForTests } = require('../../dist/host/hub-database.js');
 const { resetDroneRootDirForTests } = require('../../dist/host/paths.js');
 
@@ -139,6 +142,62 @@ describe('agent run diff artifacts', () => {
       chatName: 'default',
       promptId: 'prompt-1',
     });
+  });
+
+  test('captures native assistant artifact workspace changes', async () => {
+    useDroneDataDir();
+    await runAssistantArtifactAction('thread-1', {
+      action: 'write',
+      path: 'notes/existing.md',
+      content: 'before\n',
+      mode: 'create',
+    });
+    const baseline = await captureAssistantArtifactRunFileChangesBaseline({
+      threadId: 'thread-1',
+      turnId: 'turn-1',
+    });
+
+    await runAssistantArtifactAction('thread-1', {
+      action: 'write',
+      path: 'notes/existing.md',
+      content: 'after\n',
+      mode: 'overwrite',
+    });
+    await runAssistantArtifactAction('thread-1', {
+      action: 'write',
+      path: 'report.md',
+      content: '# Report\n',
+      mode: 'create',
+    });
+
+    const workspace = await finalizeAssistantArtifactRunFileChanges({ baseline });
+    assert.deepEqual(
+      {
+        targetId: workspace.targetId,
+        droneId: workspace.droneId,
+        label: workspace.label,
+        counts: workspace.counts,
+        entries: workspace.entries,
+      },
+      {
+        targetId: 'artifacts:thread-1',
+        droneId: undefined,
+        label: 'Artifacts',
+        counts: { changed: 2, additions: 2, deletions: 1 },
+        entries: [
+          { path: 'notes/existing.md', status: 'modified', additions: 1, deletions: 1 },
+          { path: 'report.md', status: 'added', additions: 1, deletions: 0 },
+        ],
+      },
+    );
+    assert.ok(workspace.diffArtifactId);
+    const historical = await readAgentRunFileDiff({
+      artifactId: workspace.diffArtifactId,
+      path: 'notes/existing.md',
+    });
+    assert.match(historical.patch, /-before[\s\S]*\+after/);
+    assert.deepEqual(historical.owner, { threadId: 'thread-1', turnId: 'turn-1' });
+    assert.equal(fs.existsSync(baseline.temporaryGitDir), false);
   });
 
   test('expires old artifacts and removes their files', async () => {

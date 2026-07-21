@@ -16,11 +16,15 @@ import {
 } from './hub-settings';
 import { fetchContent, searchWeb } from './web-search';
 import {
+  captureAssistantArtifactRunFileChangesBaseline,
   captureDroneRunFileChangesBaseline,
   combineAgentRunFileChanges,
+  discardAssistantArtifactRunFileChangesBaseline,
+  finalizeAssistantArtifactRunFileChanges,
   finalizeDroneRunFileChangesWorkspace,
   isMutatingWorkspaceTool,
   type AgentRunFileChangesBaseline,
+  type AssistantArtifactRunFileChangesBaseline,
 } from './run-file-changes';
 
 export interface AssistantRuntimeDependencies {
@@ -217,7 +221,17 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         string,
         Promise<{ baseline: AgentRunFileChangesBaseline; drone: any } | null>
       >();
+      let artifactBaseline: Promise<AssistantArtifactRunFileChangesBaseline | null> | null = null;
       const beginRunFileChanges = (turnId: string) => {
+        const staleArtifactBaseline = artifactBaseline;
+        artifactBaseline = null;
+        if (staleArtifactBaseline) {
+          void staleArtifactBaseline.then((baseline) =>
+            baseline
+              ? discardAssistantArtifactRunFileChangesBaseline(baseline).catch(() => undefined)
+              : undefined,
+          );
+        }
         activeRunTurnId = turnId;
         baselineByDroneId.clear();
       };
@@ -226,6 +240,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           await baselineByDroneId.get(droneId);
           return;
         }
+        const turnId = activeRunTurnId;
         const capture = loadRegistry()
           .then(async (registry: any) => {
             const drone = registry?.drones?.[droneId];
@@ -233,7 +248,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
             const baseline = await captureDroneRunFileChangesBaseline({
               droneId,
               drone,
-              owner: { threadId, turnId: activeRunTurnId },
+              owner: { threadId, turnId },
             });
             return baseline ? { baseline, drone } : null;
           })
@@ -248,31 +263,81 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         baselineByDroneId.set(droneId, capture);
         await capture;
       };
+      const captureRunArtifactChangesBaseline = async () => {
+        if (!activeRunTurnId || artifactBaseline) {
+          await artifactBaseline;
+          return;
+        }
+        const turnId = activeRunTurnId;
+        artifactBaseline = captureAssistantArtifactRunFileChangesBaseline({ threadId, turnId })
+          .catch((error: any) => {
+            hubLog('warn', 'failed capturing native agent artifact changes baseline', {
+              threadId,
+              error: String(error?.message ?? error ?? 'unknown error'),
+            });
+            return null;
+          });
+        await artifactBaseline;
+      };
       const finishRunFileChanges = async (turnId: string) => {
         if (!turnId || turnId !== activeRunTurnId) return null;
-        const captures = await Promise.all(baselineByDroneId.values());
-        const registry: any = await loadRegistry();
-        const workspaces = await Promise.all(
-          captures.flatMap((capture) => {
+        const pendingArtifactBaseline = artifactBaseline;
+        let artifactCleanupHandled = false;
+        try {
+          const [captures, capturedArtifactBaseline] = await Promise.all([
+            Promise.all(baselineByDroneId.values()),
+            pendingArtifactBaseline,
+          ]);
+          const registry: any = captures.some(Boolean) ? await loadRegistry() : null;
+          const workspaceCaptures = captures.flatMap((capture) => {
             if (!capture) return [];
-            const drone = registry?.drones?.[capture.baseline.droneId] ?? capture.drone;
+            const droneId = String(capture.baseline.droneId ?? '').trim();
+            if (!droneId) return [];
+            const drone = registry?.drones?.[droneId] ?? capture.drone;
             return [
               finalizeDroneRunFileChangesWorkspace({ baseline: capture.baseline, drone }).catch(
                 (error: any) => {
                   hubLog('warn', 'failed finalizing native agent run file changes', {
                     threadId,
-                    droneId: capture.baseline.droneId,
+                    droneId,
                     error: String(error?.message ?? error ?? 'unknown error'),
                   });
                   return null;
                 },
               ),
             ];
-          }),
-        );
-        activeRunTurnId = '';
-        baselineByDroneId.clear();
-        return combineAgentRunFileChanges(workspaces.filter((workspace) => workspace !== null));
+          });
+          if (capturedArtifactBaseline) {
+            artifactCleanupHandled = true;
+            workspaceCaptures.push(
+              finalizeAssistantArtifactRunFileChanges({ baseline: capturedArtifactBaseline }).catch(
+                (error: any) => {
+                  hubLog('warn', 'failed finalizing native agent artifact changes', {
+                    threadId,
+                    error: String(error?.message ?? error ?? 'unknown error'),
+                  });
+                  return null;
+                },
+              ),
+            );
+          }
+          const workspaces = await Promise.all(workspaceCaptures);
+          return combineAgentRunFileChanges(workspaces.filter((workspace) => workspace !== null));
+        } finally {
+          if (activeRunTurnId === turnId) {
+            activeRunTurnId = '';
+            baselineByDroneId.clear();
+            artifactBaseline = null;
+          }
+          if (pendingArtifactBaseline && !artifactCleanupHandled) {
+            const capturedArtifactBaseline = await pendingArtifactBaseline;
+            if (capturedArtifactBaseline) {
+              await discardAssistantArtifactRunFileChangesBaseline(
+                capturedArtifactBaseline,
+              ).catch(() => undefined);
+            }
+          }
+        }
       };
       const readableWorkspaceCapabilities = [
         'files.list',
@@ -331,7 +396,7 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
         ? new AssistantArtifactsTarget(threadId, {
             parse: blipTools.parsePatch,
             applyHunks: blipTools.applyPatchHunks,
-          })
+          }, captureRunArtifactChangesBaseline)
         : null;
       const remoteWorkspaceTargets = await deviceMesh.remoteWorkspaceTargets(threadId);
       const targets = [
