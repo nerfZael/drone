@@ -64,5 +64,8 @@
     "better-sqlite3",
     "onnxruntime-node"
   ],
+  "patchedDependencies": {
+    "react-native-drawer-layout@4.2.7": "patches/react-native-drawer-layout@4.2.7.patch"
+  },
   "packageManager": "bun@1.2.23"
 }

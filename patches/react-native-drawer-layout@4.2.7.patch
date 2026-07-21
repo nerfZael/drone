@@ -1,0 +1,142 @@
+diff --git a/src/views/Drawer.native.tsx b/src/views/Drawer.native.tsx
+--- a/src/views/Drawer.native.tsx
++++ b/src/views/Drawer.native.tsx
+@@ -159,6 +159,7 @@ export function Drawer({
+   const touchStartX = useSharedValue(0);
+   const touchX = useSharedValue(0);
+   const translationX = useSharedValue(getDrawerTranslationX(open));
++  const targetTranslationX = useSharedValue(getDrawerTranslationX(open));
+   const gestureState = useSharedValue<GestureState>(GestureState.UNDETERMINED);
+
+   const onAnimationStart = useLatestCallback((open: boolean) => {
+@@ -181,6 +182,13 @@ export function Drawer({
+
+       const translateX = getDrawerTranslationX(open);
+
++      // A gesture starts the settling spring before the controlled `open` prop catches up.
++      // Keep that velocity-aware spring instead of immediately replacing it with the same target.
++      if (velocity === undefined && targetTranslationX.value === translateX) {
++        return;
++      }
++      targetTranslationX.value = translateX;
++
+       if (velocity === undefined) {
+         runOnJS(onAnimationStart)(open);
+       }
+@@ -191,12 +199,11 @@ export function Drawer({
+         translateX,
+         {
+           velocity,
+-          stiffness: 1000,
+-          damping: 500,
+-          mass: 3,
++          stiffness: 700,
++          damping: 52,
++          mass: 1,
+           overshootClamping: true,
+-          restDisplacementThreshold: 0.01,
+-          restSpeedThreshold: 0.01,
++          energyThreshold: 1e-5,
+           reduceMotion: ReduceMotion.Never,
+         },
+         (finished) => runOnJS(onAnimationEnd)(open, finished)
+@@ -214,6 +221,7 @@ export function Drawer({
+       onAnimationStart,
+       onClose,
+       onOpen,
++      targetTranslationX,
+       touchStartX,
+       touchX,
+       translationX,
+@@ -375,15 +383,17 @@ export function Drawer({
+       // This results in pressables not getting their correct position and can't be pressed
+       // So we animate the zIndex to force the commit
+       // For 'back' type: always keep drawer behind content (-1 when open, 0 when closed/animating)
+-      // For other types: 0 when open, 1 when closed/animating
++      // Keep front drawers above the content and its overlay at every position.
+       zIndex:
+         drawerType === 'back'
+           ? translateX.value === 0
+             ? -1
+             : 0
+-          : translateX.value === 0
+-            ? 0
+-            : 1,
++          : drawerType === 'front'
++            ? 1
++            : translateX.value === 0
++              ? 0
++              : 1,
+       display: isHidden.value ? 'none' : 'flex',
+       transform:
+         drawerType === 'permanent'
+             ? -1
+             : 0
+-          : translateX.value === 0
+-            ? 0
+-            : 1,
++          : 1,
+       display: isHidden.value ? 'none' : 'flex',
+       transform:
+         drawerType === 'permanent'
+diff --git a/lib/module/views/Drawer.native.js b/lib/module/views/Drawer.native.js
+--- a/lib/module/views/Drawer.native.js
++++ b/lib/module/views/Drawer.native.js
+@@ -115,6 +115,7 @@ export function Drawer({
+   const touchStartX = useSharedValue(0);
+   const touchX = useSharedValue(0);
+   const translationX = useSharedValue(getDrawerTranslationX(open));
++  const targetTranslationX = useSharedValue(getDrawerTranslationX(open));
+   const gestureState = useSharedValue(GestureState.UNDETERMINED);
+   const onAnimationStart = useLatestCallback(open => {
+     onTransitionStart?.(!open);
+@@ -129,6 +130,12 @@ export function Drawer({
+     'worklet';
+
+     const translateX = getDrawerTranslationX(open);
++    // A gesture starts the settling spring before the controlled `open` prop catches up.
++    // Keep that velocity-aware spring instead of immediately replacing it with the same target.
++    if (velocity === undefined && targetTranslationX.value === translateX) {
++      return;
++    }
++    targetTranslationX.value = translateX;
+     if (velocity === undefined) {
+       runOnJS(onAnimationStart)(open);
+     }
+@@ -136,12 +143,11 @@ export function Drawer({
+     touchX.value = 0;
+     translationX.value = withSpring(translateX, {
+       velocity,
+-      stiffness: 1000,
+-      damping: 500,
+-      mass: 3,
++      stiffness: 700,
++      damping: 52,
++      mass: 1,
+       overshootClamping: true,
+-      restDisplacementThreshold: 0.01,
+-      restSpeedThreshold: 0.01,
++      energyThreshold: 1e-5,
+       reduceMotion: ReduceMotion.Never
+     }, finished => runOnJS(onAnimationEnd)(open, finished));
+     if (open) {
+@@ -149,7 +155,7 @@ export function Drawer({
+     } else {
+       runOnJS(onClose)();
+     }
+-  }, [getDrawerTranslationX, onAnimationEnd, onAnimationStart, onClose, onOpen, touchStartX, touchX, translationX]);
++  }, [getDrawerTranslationX, onAnimationEnd, onAnimationStart, onClose, onOpen, targetTranslationX, touchStartX, touchX, translationX]);
+   const hasDrawerWidth = drawerWidth > 0;
+   const previousHasDrawerWidthRef = React.useRef(hasDrawerWidth);
+   const isHidden = useSharedValue(!isOpen && !hasDrawerWidth);
+@@ -241,8 +247,8 @@ export function Drawer({
+       // This results in pressables not getting their correct position and can't be pressed
+       // So we animate the zIndex to force the commit
+       // For 'back' type: always keep drawer behind content (-1 when open, 0 when closed/animating)
+-      // For other types: 0 when open, 1 when closed/animating
+-      zIndex: drawerType === 'back' ? translateX.value === 0 ? -1 : 0 : translateX.value === 0 ? 0 : 1,
++      // Keep front drawers above the content and its overlay at every position.
++      zIndex: drawerType === 'back' ? translateX.value === 0 ? -1 : 0 : drawerType === 'front' ? 1 : translateX.value === 0 ? 0 : 1,
+       display: isHidden.value ? 'none' : 'flex',
+       transform: drawerType === 'permanent' ?
+       // Reanimated needs the property to be present, but it results in Browser bug

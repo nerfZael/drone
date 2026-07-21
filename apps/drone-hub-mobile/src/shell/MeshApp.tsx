@@ -1,14 +1,11 @@
 import React from 'react';
 import {
   ActivityIndicator,
-  Animated,
   Modal,
-  PanResponder,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -26,7 +23,6 @@ import { MobileChatVoiceRecorderProvider } from '../local-assistant/MobileChatVo
 import {
   AppDrawerProvider,
   AppDrawer,
-  appDrawerWidth,
   type AppDrawerNavigationItem,
   type DrawerDevicePickerItem,
 } from '../local-assistant/AppDrawer';
@@ -37,8 +33,6 @@ import { SettingsScreen, type SettingsTab } from '../screens/SettingsScreen';
 import { colors } from '../theme';
 import { resolveAvailableDeviceSelection } from './device-selection-model';
 import { loadSelectedDeviceId, saveSelectedDeviceId } from './device-selection-storage';
-
-const DRAWER_EDGE_SWIPE_WIDTH = 12;
 
 type Tab = 'drones' | 'devices' | 'settings';
 
@@ -182,53 +176,7 @@ function Shell() {
     [devicePickerItems],
   );
   React.useEffect(() => setHeaderMenuOpen(false), [activeDeviceId, pairingVisible, tab]);
-  const { width: windowWidth } = useWindowDimensions();
-  const drawerWidth = appDrawerWidth(windowWidth);
-  const drawerOffset = React.useRef(new Animated.Value(-drawerWidth)).current;
-  const drawerOpenRef = React.useRef(appDrawerOpen);
-  const drawerWidthRef = React.useRef(drawerWidth);
-  const drawerEnabledRef = React.useRef(Boolean(mesh.profile));
-  const [openingGestureActive, setOpeningGestureActive] = React.useState(false);
-  drawerOpenRef.current = appDrawerOpen;
-  drawerWidthRef.current = drawerWidth;
-  drawerEnabledRef.current = Boolean(mesh.profile);
-  const drawerPanResponder = React.useMemo(
-    () =>
-      PanResponder.create({
-        onMoveShouldSetPanResponderCapture: (_event, gesture) =>
-          drawerEnabledRef.current &&
-          !drawerOpenRef.current &&
-          gesture.x0 <= DRAWER_EDGE_SWIPE_WIDTH &&
-          gesture.dx > 3 &&
-          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15,
-        onMoveShouldSetPanResponder: (_event, gesture) =>
-          drawerEnabledRef.current &&
-          !drawerOpenRef.current &&
-          gesture.x0 <= DRAWER_EDGE_SWIPE_WIDTH &&
-          gesture.dx > 3 &&
-          Math.abs(gesture.dx) > Math.abs(gesture.dy) * 1.15,
-        onPanResponderGrant: (_event, gesture) => {
-          const width = drawerWidthRef.current;
-          drawerOffset.stopAnimation();
-          drawerOffset.setValue(Math.min(0, -width + Math.max(0, gesture.dx)));
-          setOpeningGestureActive(true);
-          setAppDrawerOpen(true);
-        },
-        onPanResponderMove: (_event, gesture) => {
-          drawerOffset.setValue(Math.min(0, -drawerWidthRef.current + Math.max(0, gesture.dx)));
-        },
-        onPanResponderRelease: (_event, gesture) => {
-          const shouldOpen = gesture.dx >= drawerWidthRef.current * 0.3 || gesture.vx >= 0.45;
-          setOpeningGestureActive(false);
-          setAppDrawerOpen(shouldOpen);
-        },
-        onPanResponderTerminate: () => {
-          setOpeningGestureActive(false);
-          setAppDrawerOpen(false);
-        },
-      }),
-    [drawerOffset],
-  );
+  const toggleAppDrawer = React.useCallback(() => setAppDrawerOpen((current) => !current), []);
 
   if (mesh.loading || !deviceSelectionLoaded) {
     return (
@@ -284,53 +232,59 @@ function Shell() {
   const headerMenuActions: HeaderMenuAction[] = !pairingVisible
     ? tab === 'drones' && dronesHeader
       ? [
-            ...(dronesHeader.onNewDrone
-              ? [
-                  {
-                    id: 'new-drone',
-                    label: 'New drone',
-                    icon: Plus,
-                    onPress: dronesHeader.onNewDrone,
-                  },
-                ]
-              : []),
-            ...(dronesHeader.onNewChat
-              ? [
-                  {
-                    id: 'new-chat',
-                    label: 'New chat',
-                    icon: MessageCircle,
-                    onPress: dronesHeader.onNewChat,
-                  },
-                ]
-              : []),
-            ...(dronesHeader.onDelete
-              ? [
-                  {
-                    id: 'delete-drone',
-                    label: 'Delete drone',
-                    destructive: true,
-                    onPress: dronesHeader.onDelete,
-                  },
-                ]
-              : []),
-            ...(dronesHeader.onToggleAccess
-              ? [{
+          ...(dronesHeader.onNewDrone
+            ? [
+                {
+                  id: 'new-drone',
+                  label: 'New drone',
+                  icon: Plus,
+                  onPress: dronesHeader.onNewDrone,
+                },
+              ]
+            : []),
+          ...(dronesHeader.onNewChat
+            ? [
+                {
+                  id: 'new-chat',
+                  label: 'New chat',
+                  icon: MessageCircle,
+                  onPress: dronesHeader.onNewChat,
+                },
+              ]
+            : []),
+          ...(dronesHeader.onDelete
+            ? [
+                {
+                  id: 'delete-drone',
+                  label: 'Delete drone',
+                  destructive: true,
+                  onPress: dronesHeader.onDelete,
+                },
+              ]
+            : []),
+          ...(dronesHeader.onToggleAccess
+            ? [
+                {
                   id: 'access',
                   label: dronesHeader.accessOpen ? 'Return to chat' : 'Edit workspace access',
                   disabled: dronesHeader.accessDisabled,
                   onPress: dronesHeader.onToggleAccess,
-                }]
-              : []),
-            ...(dronesHeader.onToggleAutoApprove
-              ? [{
+                },
+              ]
+            : []),
+          ...(dronesHeader.onToggleAutoApprove
+            ? [
+                {
                   id: 'auto-approve',
-                  label: dronesHeader.autoApprove ? 'Disable auto-approve requests' : 'Auto-approve requests',
+                  label: dronesHeader.autoApprove
+                    ? 'Disable auto-approve requests'
+                    : 'Auto-approve requests',
                   icon: Check,
                   onPress: dronesHeader.onToggleAutoApprove,
-                }]
-              : []),
-          ]
+                },
+              ]
+            : []),
+        ]
       : []
     : [];
   const content = pairingVisible ? (
@@ -355,9 +309,7 @@ function Shell() {
   ) : tab === 'drones' ? (
     <DronesScreen
       drawerOpen={appDrawerOpen}
-      drawerOffset={drawerOffset}
       navigationItems={navigationItems}
-      openingGestureActive={openingGestureActive}
       onDrawerOpenChange={setAppDrawerOpen}
       onHeaderChange={handleDronesHeaderChange}
       selectedDeviceId={activeDeviceId}
@@ -369,20 +321,15 @@ function Shell() {
   );
 
   return (
-    <SafeAreaView
-      style={styles.safe}
-      edges={['top', 'right', 'bottom', 'left']}
-      {...drawerPanResponder.panHandlers}
-    >
+    <SafeAreaView style={styles.safe} edges={['top', 'right', 'bottom', 'left']}>
       {mesh.profile && (tab !== 'drones' || pairingVisible) ? (
         <AppDrawer
           open={appDrawerOpen}
-          offset={drawerOffset}
-          openingGestureActive={openingGestureActive}
           navigationItems={navigationItems}
           devicePickerItems={devicePickerItems}
           activeDeviceId={activeDeviceId}
           onSelectDevice={selectDevice}
+          onOpen={() => setAppDrawerOpen(true)}
           onClose={() => setAppDrawerOpen(false)}
         />
       ) : null}
@@ -392,18 +339,16 @@ function Shell() {
           <Pressable
             accessibilityRole="button"
             accessibilityLabel="Toggle app menu"
-            onPress={() => setAppDrawerOpen((value) => !value)}
+            onPress={toggleAppDrawer}
             style={styles.titleButton}
           >
-            {!hasContextHeader ? (
-              <View style={[styles.menuButton, appDrawerOpen && styles.menuButtonActive]}>
-                <Menu
-                  color={appDrawerOpen ? colors.accent : colors.text}
-                  size={19}
-                  strokeWidth={2.2}
-                />
-              </View>
-            ) : null}
+            <View style={[styles.menuButton, appDrawerOpen && styles.menuButtonActive]}>
+              <Menu
+                color={appDrawerOpen ? colors.accent : colors.text}
+                size={19}
+                strokeWidth={2.2}
+              />
+            </View>
             {hasContextHeader ? (
               <View style={styles.contextTitle}>
                 <View style={styles.contextTitleRow}>

@@ -3,7 +3,6 @@ import { fromByteArray } from 'base64-js';
 import type { AssistantMessage } from '@drone/assistant-chat';
 import {
   ActivityIndicator,
-  Animated,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -114,11 +113,7 @@ function nativeUserMessageMatchesOptimisticPrompt(
   return messages.some((message: any) => {
     if (message?.role !== 'user') return false;
     const messageAt = Date.parse(String(message?.createdAt ?? message?.timestamp ?? ''));
-    if (
-      Number.isFinite(pendingAt) &&
-      Number.isFinite(messageAt) &&
-      messageAt < pendingAt - 2_000
-    )
+    if (Number.isFinite(pendingAt) && Number.isFinite(messageAt) && messageAt < pendingAt - 2_000)
       return false;
     const parts = Array.isArray(message?.content) ? message.content : [];
     const messageText = (
@@ -130,8 +125,10 @@ function nativeUserMessageMatchesOptimisticPrompt(
             .join('\n')
     ).trim();
     const imageCount = parts.filter((part: any) => part?.type === 'image').length;
-    return (pendingText && messageText === pendingText) ||
-      (!messageText && pendingImageCount > 0 && imageCount === pendingImageCount);
+    return (
+      (pendingText && messageText === pendingText) ||
+      (!messageText && pendingImageCount > 0 && imageCount === pendingImageCount)
+    );
   });
 }
 
@@ -160,9 +157,7 @@ function mobileDroneAgentId(value: unknown): MobileDroneAgentId | null {
 
 export function DronesScreen({
   drawerOpen,
-  drawerOffset,
   navigationItems,
-  openingGestureActive,
   onDrawerOpenChange,
   onHeaderChange,
   selectedDeviceId,
@@ -170,9 +165,7 @@ export function DronesScreen({
   onDeviceChange,
 }: {
   drawerOpen: boolean;
-  drawerOffset: Animated.Value;
   navigationItems: AppDrawerNavigationItem[];
-  openingGestureActive: boolean;
   onDrawerOpenChange(open: boolean): void;
   onHeaderChange(header: DronesAppHeaderState | null): void;
   selectedDeviceId: string;
@@ -854,9 +847,7 @@ export function DronesScreen({
         droneId: input.droneId,
         chatName: input.chatName,
         prompt: input.prompt,
-        ...(input.images.length > 0
-          ? { attachments: inlinePromptAttachments(input.images) }
-          : {}),
+        ...(input.images.length > 0 ? { attachments: inlinePromptAttachments(input.images) } : {}),
       });
     }
 
@@ -1004,7 +995,9 @@ export function DronesScreen({
         createPayload,
       );
       created = true;
-      const createdDroneId = String(result?.id ?? result?.droneId ?? result?.drone?.id ?? '').trim();
+      const createdDroneId = String(
+        result?.id ?? result?.droneId ?? result?.drone?.id ?? '',
+      ).trim();
       const startsWithChat = Boolean(payload.seedAgent);
       const initialPromptSummary =
         String(payload.seedPrompt ?? '').trim() ||
@@ -1043,9 +1036,7 @@ export function DronesScreen({
           setChatReasoning(String(payload.seedReasoning ?? ''));
           setChatModelProvider(String(payload.seedProvider ?? payload.seedAgent?.kind ?? 'drone'));
           setChatAgentId(
-            payload.seedAgent?.kind === 'builtin'
-              ? mobileDroneAgentId(payload.seedAgent.id)
-              : null,
+            payload.seedAgent?.kind === 'builtin' ? mobileDroneAgentId(payload.seedAgent.id) : null,
           );
           setChatAgentPermissionMode(
             payload.seedAgentPermissionMode === 'read-only' ? 'read-only' : 'full-access',
@@ -1275,8 +1266,7 @@ export function DronesScreen({
         setDeleteMode(options.deleteMode);
         setCreateRepos(
           options.createRepos.map(
-            (repo) =>
-              createRepoBranchesCache.current.get(`${destinationId}:${repo.path}`) ?? repo,
+            (repo) => createRepoBranchesCache.current.get(`${destinationId}:${repo.path}`) ?? repo,
           ),
         );
       })
@@ -1647,8 +1637,6 @@ export function DronesScreen({
     <View style={styles.screen}>
       <AppDrawer
         open={drawerOpen}
-        offset={drawerOffset}
-        openingGestureActive={openingGestureActive}
         navigationItems={navigationItems}
         showDrones
         drones={drawerDrones}
@@ -1663,6 +1651,7 @@ export function DronesScreen({
         dronesError={droneListError}
         devicePickerItems={devicePickerItems}
         activeDeviceId={targetId}
+        onOpen={() => onDrawerOpenChange(true)}
         onClose={() => onDrawerOpenChange(false)}
         onCreateDrone={
           targetSupportsDrones && meshRouteAvailable
@@ -1895,15 +1884,19 @@ export function DronesScreen({
                       onAddAttachment={() => void addPromptImages()}
                       attachmentActionsDisabled={phoneTarget && running}
                       sendBlocked={phoneTarget && running && promptImages.length > 0}
-                      footer={promptImages.length > 0 ? (
-                        <ChatImageStrip
-                          images={promptImages}
-                          disabled={busy === 'prompt'}
-                          onRemove={(id) =>
-                            setPromptImages((current) => current.filter((image) => image.id !== id))
-                          }
-                        />
-                      ) : undefined}
+                      footer={
+                        promptImages.length > 0 ? (
+                          <ChatImageStrip
+                            images={promptImages}
+                            disabled={busy === 'prompt'}
+                            onRemove={(id) =>
+                              setPromptImages((current) =>
+                                current.filter((image) => image.id !== id),
+                              )
+                            }
+                          />
+                        ) : undefined
+                      }
                     />
                     <AssistantModelPicker
                       open={modelOpen}

@@ -3,8 +3,9 @@ import * as Clipboard from 'expo-clipboard';
 import {
   ActivityIndicator,
   Animated,
+  BackHandler,
+  FlatList,
   Easing,
-  Modal,
   Platform,
   Pressable,
   ScrollView,
@@ -27,6 +28,7 @@ import Folder from 'lucide-react-native/icons/folder';
 import Square from 'lucide-react-native/icons/square';
 import X from 'lucide-react-native/icons/x';
 import Svg, { Circle, Line, Rect } from 'react-native-svg';
+import { Drawer } from 'react-native-drawer-layout';
 import { colors } from '../theme';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { RelativeMessageTimestamp } from './RelativeMessageTimestamp';
@@ -39,6 +41,7 @@ import {
   buildMobileDroneRepoGroups,
   EMPTY_MOBILE_DRONE_SIDEBAR_ORDER,
   type MobileDroneGroupFolder,
+  type MobileDroneRepoGroup,
   type MobileDroneSidebarEntry,
   type MobileDroneSidebarOrder,
   type MobileDroneSummary,
@@ -53,7 +56,7 @@ import {
 } from '../drones/drone-state-summary';
 
 export function appDrawerWidth(windowWidth: number): number {
-  return Math.min(windowWidth, 460);
+  return Math.max(0, windowWidth);
 }
 
 export type AppDrawerNavigationItem = {
@@ -72,8 +75,6 @@ export type DrawerDevicePickerItem = {
 
 export type AppDrawerProps = {
   open: boolean;
-  offset: Animated.Value;
-  openingGestureActive?: boolean;
   navigationItems: AppDrawerNavigationItem[];
   showDrones?: boolean;
   drones?: MobileDroneSummary[];
@@ -86,6 +87,7 @@ export type AppDrawerProps = {
   dronesError?: string | null;
   devicePickerItems?: DrawerDevicePickerItem[];
   activeDeviceId?: string;
+  onOpen(): void;
   onClose(): void;
   onCreateDrone?(repoPath: string): void;
   onRetryDrones?(): void;
@@ -93,20 +95,131 @@ export type AppDrawerProps = {
   onSelectDevice?(deviceId: string): void;
 };
 
-type RegisterDrawer = (props: AppDrawerProps) => void;
+type RegisterDrawer = (props: AppDrawerProps | null) => void;
 
 const AppDrawerHostContext = React.createContext<RegisterDrawer | null>(null);
+const DrawerWorkingPhaseContext = React.createContext<Animated.Value | null>(null);
 
 export function AppDrawerProvider({ children }: { children: React.ReactNode }) {
   const [drawerProps, setDrawerProps] = React.useState<AppDrawerProps | null>(null);
+  const [drawerOpen, setDrawerOpen] = React.useState(false);
+  const { width: windowWidth } = useWindowDimensions();
+  // The workspace currently resolves different @types/react versions for the app and the drawer.
+  // Keep the compatibility cast scoped to that package boundary instead of erasing the type.
+  const drawerChildren = children as React.ComponentProps<typeof Drawer>['children'];
+  const drawerPropsRef = React.useRef<AppDrawerProps | null>(null);
+  const drawerOpenRef = React.useRef(false);
+  const drawerTransitionActiveRef = React.useRef(false);
+  const drawerRefreshFrameRef = React.useRef<number | null>(null);
   const registerDrawer = React.useCallback<RegisterDrawer>((nextProps) => {
-    setDrawerProps(nextProps);
+    const wasOpen = drawerOpenRef.current;
+    drawerOpenRef.current = nextProps?.open ?? false;
+    drawerPropsRef.current = nextProps;
+    setDrawerOpen(nextProps?.open ?? false);
+    setDrawerProps((currentProps) => {
+      if (!nextProps) {
+        return wasOpen || drawerTransitionActiveRef.current ? currentProps : null;
+      }
+      if (!currentProps) return nextProps;
+
+      const visibilityChanged = currentProps.open !== nextProps.open;
+
+      // The owning screen can update several times a second while a chat is streaming. Keep the
+      // closed drawer dormant, and don't commit a new drawer tree while its surface is moving.
+      if (!nextProps.open || visibilityChanged || drawerTransitionActiveRef.current) {
+        return currentProps;
+      }
+      return nextProps;
+    });
   }, []);
+
+  const handleOpen = React.useCallback(() => {
+    drawerPropsRef.current?.onOpen();
+  }, []);
+  const handleClose = React.useCallback(() => {
+    drawerPropsRef.current?.onClose();
+  }, []);
+  const handleTransitionStart = React.useCallback(() => {
+    drawerTransitionActiveRef.current = true;
+    if (drawerRefreshFrameRef.current != null) {
+      cancelAnimationFrame(drawerRefreshFrameRef.current);
+      drawerRefreshFrameRef.current = null;
+    }
+  }, []);
+  const handleTransitionEnd = React.useCallback(() => {
+    drawerTransitionActiveRef.current = false;
+    drawerRefreshFrameRef.current = requestAnimationFrame(() => {
+      drawerRefreshFrameRef.current = null;
+      if (!drawerTransitionActiveRef.current) {
+        setDrawerProps(drawerPropsRef.current);
+      }
+    });
+  }, []);
+  const drawerContent = React.useMemo(
+    () =>
+      drawerProps ? <AppDrawerView {...drawerProps} /> : <View style={styles.drawerContent} />,
+    [drawerProps],
+  );
+  const configureGestureHandler = React.useCallback(
+    (
+      gesture: Parameters<
+        NonNullable<React.ComponentProps<typeof Drawer>['configureGestureHandler']>
+      >[0],
+    ) =>
+      gesture
+        .hitSlop({
+          left: 0,
+          width: windowWidth,
+        })
+        // Only claim a swipe in the useful direction. This lets vertical content keep scrolling,
+        // while making a closed drawer available from anywhere on the screen rather than its edge.
+        .activeOffsetX(drawerOpen ? -6 : 6)
+        .failOffsetY([-18, 18]),
+    [drawerOpen, windowWidth],
+  );
+
+  React.useEffect(() => {
+    if (!drawerOpen) return;
+    const subscription = BackHandler.addEventListener('hardwareBackPress', () => {
+      drawerPropsRef.current?.onClose();
+      return true;
+    });
+    return () => subscription.remove();
+  }, [drawerOpen]);
+  React.useEffect(
+    () => () => {
+      if (drawerRefreshFrameRef.current != null) {
+        cancelAnimationFrame(drawerRefreshFrameRef.current);
+      }
+    },
+    [],
+  );
 
   return (
     <AppDrawerHostContext.Provider value={registerDrawer}>
-      {children}
-      {drawerProps ? <AppDrawerView {...drawerProps} /> : null}
+      <Drawer
+        open={drawerOpen}
+        onOpen={handleOpen}
+        onClose={handleClose}
+        onGestureStart={handleTransitionStart}
+        onTransitionStart={handleTransitionStart}
+        onTransitionEnd={handleTransitionEnd}
+        configureGestureHandler={configureGestureHandler}
+        renderDrawerContent={() => drawerContent}
+        drawerType="front"
+        drawerPosition="left"
+        drawerStyle={[styles.drawer, { width: appDrawerWidth(windowWidth) }]}
+        overlayStyle={styles.backdrop}
+        overlayAccessibilityLabel="Close app menu"
+        swipeEnabled={Boolean(drawerProps)}
+        swipeEdgeWidth={windowWidth}
+        swipeMinDistance={24}
+        swipeMinVelocity={320}
+        keyboardDismissMode="on-drag"
+        style={styles.host}
+      >
+        {drawerChildren}
+      </Drawer>
     </AppDrawerHostContext.Provider>
   );
 }
@@ -285,7 +398,10 @@ function DroneStateCounts({
   return (
     <View style={[styles.fleetStates, compact && styles.fleetStatesCompact]}>
       {summary.approval > 0 ? (
-        <View accessibilityLabel={`${summary.approval} awaiting approval`} style={styles.fleetState}>
+        <View
+          accessibilityLabel={`${summary.approval} awaiting approval`}
+          style={styles.fleetState}
+        >
           <ApprovalStatusIndicator />
           <Text style={[styles.fleetStateText, styles.fleetStateTextApproval]}>
             {summary.approval}
@@ -303,9 +419,7 @@ function DroneStateCounts({
       {summary.unread > 0 ? (
         <View accessibilityLabel={`${summary.unread} with unread chats`} style={styles.fleetState}>
           <UnreadStatusIndicator />
-          <Text style={[styles.fleetStateText, styles.fleetStateTextUnread]}>
-            {summary.unread}
-          </Text>
+          <Text style={[styles.fleetStateText, styles.fleetStateTextUnread]}>{summary.unread}</Text>
         </View>
       ) : null}
     </View>
@@ -321,8 +435,7 @@ function switchStateLabel(state: SwitchDisplayState): string {
 
 function switchStateColor(state: SwitchDisplayState): string {
   if (state === 'approval') return colors.warning;
-  if (state === 'working' || state === 'archiving' || state === 'deleting')
-    return colors.warning;
+  if (state === 'working' || state === 'archiving' || state === 'deleting') return colors.warning;
   if (state === 'waiting' || state === 'starting') return colors.info;
   if (state === 'blocked' || state === 'offline') return colors.danger;
   if (state === 'done') return colors.online;
@@ -383,10 +496,13 @@ function SwitchItemState({
 }
 
 function WorkingStatusIndicator() {
-  const phase = React.useRef(new Animated.Value(0)).current;
+  const sharedPhase = React.useContext(DrawerWorkingPhaseContext);
+  const localPhase = React.useRef(new Animated.Value(0)).current;
+  const phase = sharedPhase ?? localPhase;
   React.useEffect(() => {
+    if (sharedPhase) return;
     const animation = Animated.loop(
-      Animated.timing(phase, {
+      Animated.timing(localPhase, {
         toValue: 1,
         duration: 900,
         easing: Easing.linear,
@@ -395,7 +511,7 @@ function WorkingStatusIndicator() {
     );
     animation.start();
     return () => animation.stop();
-  }, [phase]);
+  }, [localPhase, sharedPhase]);
   return (
     <View accessible={false} style={styles.workingStatusIndicator}>
       <Animated.View
@@ -528,19 +644,23 @@ function DrawerDroneNode({
 function DrawerDroneFolder({
   folder,
   depth,
+  collapsedFolderIds,
   activeDroneId,
   activeChatName,
   droneOperationById,
+  onToggleFolder,
   onSelect,
 }: {
   folder: MobileDroneGroupFolder;
   depth: number;
+  collapsedFolderIds: ReadonlySet<string>;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
+  onToggleFolder(folderId: string): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
-  const [collapsed, setCollapsed] = React.useState(false);
+  const collapsed = collapsedFolderIds.has(folder.id);
   const stateSummary = React.useMemo(
     () => summarizeDroneScope(folder.roots, folder.children),
     [folder],
@@ -551,7 +671,7 @@ function DrawerDroneFolder({
       <Pressable
         accessibilityRole="button"
         accessibilityState={{ expanded: !collapsed }}
-        onPress={() => setCollapsed((current) => !current)}
+        onPress={() => onToggleFolder(folder.id)}
         style={({ pressed }) => [
           styles.groupRow,
           { paddingLeft: 8 + depth * 18 },
@@ -580,9 +700,11 @@ function DrawerDroneFolder({
               }
               entry={entry}
               depth={depth + 1}
+              collapsedFolderIds={collapsedFolderIds}
               activeDroneId={activeDroneId}
               activeChatName={activeChatName}
               droneOperationById={droneOperationById}
+              onToggleFolder={onToggleFolder}
               onSelect={onSelect}
             />
           ))}
@@ -595,16 +717,20 @@ function DrawerDroneFolder({
 function DrawerDroneEntry({
   entry,
   depth,
+  collapsedFolderIds,
   activeDroneId,
   activeChatName,
   droneOperationById,
+  onToggleFolder,
   onSelect,
 }: {
   entry: MobileDroneSidebarEntry;
   depth: number;
+  collapsedFolderIds: ReadonlySet<string>;
   activeDroneId: string;
   activeChatName: string;
   droneOperationById: Record<string, 'archiving' | 'deleting'>;
+  onToggleFolder(folderId: string): void;
   onSelect(droneId: string, chatName: string): void;
 }) {
   return entry.kind === 'drone' ? (
@@ -620,9 +746,11 @@ function DrawerDroneEntry({
     <DrawerDroneFolder
       folder={entry.folder}
       depth={depth}
+      collapsedFolderIds={collapsedFolderIds}
       activeDroneId={activeDroneId}
       activeChatName={activeChatName}
       droneOperationById={droneOperationById}
+      onToggleFolder={onToggleFolder}
       onSelect={onSelect}
     />
   );
@@ -635,18 +763,20 @@ export function AppDrawer(props: AppDrawerProps) {
     registerDrawer?.(props);
   }, [props, registerDrawer]);
 
+  React.useLayoutEffect(
+    () => () => {
+      registerDrawer?.(null);
+    },
+    [registerDrawer],
+  );
+
   if (registerDrawer) return null;
   return <AppDrawerView {...props} />;
 }
 
 function DrawerVoiceRecordingIndicator() {
-  const {
-    error,
-    status,
-    durationMillis,
-    discardRecording,
-    stopRecordingForTranscript,
-  } = useSharedMobileChatVoiceRecorder();
+  const { error, status, durationMillis, discardRecording, stopRecordingForTranscript } =
+    useSharedMobileChatVoiceRecorder();
   const [copying, setCopying] = React.useState(false);
   const [copyError, setCopyError] = React.useState('');
   const actionTokenRef = React.useRef(0);
@@ -784,8 +914,6 @@ function DrawerVoiceRecordingIndicator() {
 
 function AppDrawerView({
   open,
-  offset,
-  openingGestureActive,
   navigationItems,
   showDrones = false,
   drones = [],
@@ -798,95 +926,27 @@ function AppDrawerView({
   dronesError = null,
   devicePickerItems = [],
   activeDeviceId = '',
-  onClose,
   onCreateDrone,
   onRetryDrones,
   onSelectDroneChat,
   onSelectDevice,
 }: AppDrawerProps) {
   const insets = useSafeAreaInsets();
-  const { width: windowWidth } = useWindowDimensions();
-  const drawerWidth = appDrawerWidth(windowWidth);
-  const closedX = -drawerWidth;
-  const closeSwipeDistance = Math.min(drawerWidth * 0.14, 52);
-  const [visible, setVisible] = React.useState(open);
-  const swipeRef = React.useRef({
-    startX: 0,
-    startY: 0,
-    startedAt: 0,
-    dx: 0,
-    dragging: false,
-  });
+  const workingPhase = React.useRef(new Animated.Value(0)).current;
   React.useEffect(() => {
-    if (open || openingGestureActive) {
-      setVisible(true);
-      if (openingGestureActive) return;
-      requestAnimationFrame(() =>
-        Animated.spring(offset, {
-          toValue: 0,
-          damping: 24,
-          stiffness: 260,
-          mass: 0.85,
-          useNativeDriver: true,
-        }).start(),
-      );
-      return;
-    }
-    Animated.timing(offset, {
-      toValue: closedX,
-      duration: 180,
-      useNativeDriver: true,
-    }).start(({ finished }) => {
-      if (finished) setVisible(false);
-    });
-  }, [closedX, offset, open, openingGestureActive]);
-  const settleSwipe = React.useCallback(() => {
-    const swipe = swipeRef.current;
-    if (!swipe.dragging) return;
-    const elapsedSeconds = Math.max((Date.now() - swipe.startedAt) / 1000, 0.016);
-    const velocityX = swipe.dx / elapsedSeconds;
-    swipe.dragging = false;
-    if (swipe.dx <= -closeSwipeDistance || velocityX <= -420) {
-      onClose();
-      return;
-    }
-    Animated.spring(offset, {
-      toValue: 0,
-      damping: 24,
-      stiffness: 260,
-      mass: 0.85,
-      useNativeDriver: true,
-    }).start();
-  }, [closeSwipeDistance, offset, onClose]);
-  const onDrawerTouchStart = React.useCallback(
-    (event: { nativeEvent: { pageX: number; pageY: number; touches: unknown[] } }) => {
-      if (!open || event.nativeEvent.touches.length > 1) return;
-      swipeRef.current = {
-        startX: event.nativeEvent.pageX,
-        startY: event.nativeEvent.pageY,
-        startedAt: Date.now(),
-        dx: 0,
-        dragging: false,
-      };
-    },
-    [open],
-  );
-  const onDrawerTouchMove = React.useCallback(
-    (event: { nativeEvent: { pageX: number; pageY: number; touches: unknown[] } }) => {
-      if (!open || event.nativeEvent.touches.length > 1) return;
-      const swipe = swipeRef.current;
-      const dx = event.nativeEvent.pageX - swipe.startX;
-      const dy = event.nativeEvent.pageY - swipe.startY;
-      if (!swipe.dragging) {
-        if (dx >= -5 || Math.abs(dx) <= Math.abs(dy) * 1.1) return;
-        swipe.dragging = true;
-        offset.stopAnimation();
-      }
-      swipe.dx = Math.min(0, dx);
-      offset.setValue(Math.max(closedX, swipe.dx));
-    },
-    [closedX, offset, open],
-  );
+    if (!open) return;
+    workingPhase.setValue(0);
+    const animation = Animated.loop(
+      Animated.timing(workingPhase, {
+        toValue: 1,
+        duration: 900,
+        easing: Easing.linear,
+        useNativeDriver: true,
+      }),
+    );
+    animation.start();
+    return () => animation.stop();
+  }, [open, workingPhase]);
   const droneGroups = React.useMemo(
     () => buildMobileDroneRepoGroups(drones, droneSidebarOrder),
     [droneSidebarOrder, drones],
@@ -899,6 +959,17 @@ function AppDrawerView({
     [droneGroups],
   );
   const [activeRepoId, setActiveRepoId] = React.useState<string | null>(null);
+  const [collapsedFolderIds, setCollapsedFolderIds] = React.useState<ReadonlySet<string>>(
+    () => new Set(),
+  );
+  const toggleFolder = React.useCallback((folderId: string) => {
+    setCollapsedFolderIds((current) => {
+      const next = new Set(current);
+      if (next.has(folderId)) next.delete(folderId);
+      else next.add(folderId);
+      return next;
+    });
+  }, []);
   const activeRepo = droneGroups.find((group) => group.id === activeRepoId) ?? null;
   React.useEffect(() => {
     if (activeRepoId && !droneGroups.some((group) => group.id === activeRepoId)) {
@@ -907,233 +978,217 @@ function AppDrawerView({
   }, [activeRepoId, droneGroups]);
   React.useEffect(() => {
     setActiveRepoId(null);
+    setCollapsedFolderIds(new Set());
   }, [activeDeviceId]);
-  const backdropOpacity = offset.interpolate({
-    inputRange: [closedX, 0],
-    outputRange: [0, 1],
-    extrapolate: 'clamp',
-  });
-
-  return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="none"
-      statusBarTranslucent
-      navigationBarTranslucent
-      onRequestClose={onClose}
-    >
-      <View style={styles.layer}>
-        <Animated.View style={[styles.backdrop, { opacity: backdropOpacity }]}>
+  const listStatus =
+    !dronesLoading && !dronesReachable ? (
+      <Text style={styles.empty}>
+        No mesh route is currently available. Connect any paired Hub and try again.
+      </Text>
+    ) : !dronesLoading && dronesError ? (
+      <View style={styles.drawerError}>
+        <Text style={styles.drawerErrorText}>{dronesError}</Text>
+        {onRetryDrones ? (
           <Pressable
             accessibilityRole="button"
-            accessibilityLabel="Close app menu"
-            onPress={onClose}
-            style={StyleSheet.absoluteFill}
-          />
-        </Animated.View>
-        <Animated.View
-          style={[
-            styles.drawer,
-            {
-              width: drawerWidth,
-              paddingTop: insets.top,
-              paddingBottom: insets.bottom,
-              transform: [{ translateX: offset }],
-            },
-          ]}
-        >
-          <View
-            {...({
-              onTouchStartCapture: onDrawerTouchStart,
-              onTouchMoveCapture: onDrawerTouchMove,
-              onTouchEndCapture: settleSwipe,
-              onTouchCancelCapture: settleSwipe,
-            } as any)}
-            style={styles.drawerTouchSurface}
+            onPress={onRetryDrones}
+            style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
           >
-            <View style={styles.header}>
-              <View style={styles.headerCopy}>
-                <Text style={styles.title}>Drone Hub</Text>
-              </View>
-              {devicePickerItems.length > 0 ? (
-                <DrawerDevicePicker
-                  devices={devicePickerItems}
-                  activeDeviceId={activeDeviceId}
-                  onSelect={onSelectDevice}
+            <Text style={styles.retryText}>Retry</Text>
+          </Pressable>
+        ) : null}
+      </View>
+    ) : !dronesLoading && drones.length === 0 ? (
+      <Text style={styles.empty}>No drones are available on this device.</Text>
+    ) : null;
+
+  return (
+    <DrawerWorkingPhaseContext.Provider value={workingPhase}>
+      <View
+        renderToHardwareTextureAndroid
+        style={[
+          styles.drawerContent,
+          {
+            paddingTop: insets.top,
+            paddingBottom: insets.bottom,
+          },
+        ]}
+      >
+        <View style={styles.header}>
+          <View style={styles.headerCopy}>
+            <Text style={styles.title}>Drone Hub</Text>
+          </View>
+          {devicePickerItems.length > 0 ? (
+            <DrawerDevicePicker
+              devices={devicePickerItems}
+              activeDeviceId={activeDeviceId}
+              onSelect={onSelectDevice}
+            />
+          ) : null}
+        </View>
+        <View style={styles.navigation}>
+          {navigationItems.map((item) => {
+            const Icon = navigationIcon(item.id);
+            return (
+              <Pressable
+                key={item.id}
+                accessibilityRole="button"
+                accessibilityState={{ selected: item.active }}
+                onPress={item.onPress}
+                style={({ pressed }) => [
+                  styles.navigationItem,
+                  item.active && styles.navigationItemActive,
+                  pressed && styles.pressed,
+                ]}
+              >
+                <Icon
+                  color={item.active ? colors.accent : colors.secondary}
+                  size={18}
+                  strokeWidth={item.active ? 2.3 : 1.9}
                 />
-              ) : null}
-            </View>
-            <View style={styles.navigation}>
-              {navigationItems.map((item) => {
-                const Icon = navigationIcon(item.id);
-                return (
-                  <Pressable
-                    key={item.id}
-                    accessibilityRole="button"
-                    accessibilityState={{ selected: item.active }}
-                    onPress={item.onPress}
-                    style={({ pressed }) => [
-                      styles.navigationItem,
-                      item.active && styles.navigationItemActive,
-                      pressed && styles.pressed,
-                    ]}
-                  >
-                    <Icon
-                      color={item.active ? colors.accent : colors.secondary}
-                      size={18}
-                      strokeWidth={item.active ? 2.3 : 1.9}
-                    />
-                    <Text
-                      style={[styles.navigationLabel, item.active && styles.navigationLabelActive]}
-                    >
-                      {item.label}
-                    </Text>
-                    {item.active ? <View style={styles.navigationIndicator} /> : null}
-                  </Pressable>
-                );
-              })}
-            </View>
-            {showDrones ? (
-              <>
-                {activeRepo ? (
-                  <View style={styles.repoNavigationHead}>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel="Back to repositories"
-                      onPress={() => setActiveRepoId(null)}
-                      style={({ pressed }) => [styles.repoNavigationBack, pressed && styles.pressed]}
-                    >
-                      <View style={styles.groupIcon}>
-                        <FolderGit2 color={colors.mutedDim} size={16} strokeWidth={1.9} />
-                        <View style={styles.groupChevron}>
-                          <ChevronLeft color={colors.mutedDim} size={10} strokeWidth={2.3} />
-                        </View>
-                      </View>
-                      <View style={styles.repoCopy}>
-                        <Text numberOfLines={1} style={styles.repoNavigationTitle}>
-                          {activeRepo.label}
-                        </Text>
-                      </View>
-                      <DroneStateCounts
-                        summary={
-                          repoStateSummaries.get(activeRepo.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY
-                        }
-                        compact
-                      />
-                    </Pressable>
-                    <Pressable
-                      accessibilityRole="button"
-                      accessibilityLabel={`Create drone in ${activeRepo.label}`}
-                      accessibilityState={{ disabled: !onCreateDrone }}
-                      disabled={!onCreateDrone}
-                      onPress={() => onCreateDrone?.(activeRepo.repoPath)}
-                      style={({ pressed }) => [
-                        styles.repoCreate,
-                        !onCreateDrone && styles.repoCreateDisabled,
-                        pressed && styles.pressed,
-                      ]}
-                    >
-                      <Plus color={colors.accent} size={18} strokeWidth={2.2} />
-                    </Pressable>
-                  </View>
-                ) : null}
-                <ScrollView style={styles.scroll} contentContainerStyle={styles.droneList}>
-                  {activeRepo
-                    ? activeRepo.entries.map((entry) => (
-                        <DrawerDroneEntry
-                          key={
-                            entry.kind === 'drone'
-                              ? `drone:${entry.node.drone.id}`
-                              : `folder:${entry.folder.id}`
-                          }
-                          entry={entry}
-                          depth={0}
-                          activeDroneId={activeDroneId}
-                          activeChatName={activeChatName}
-                          droneOperationById={droneOperationById}
-                          onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
-                        />
-                      ))
-                    : droneGroups.map((group) => {
-                        const stateSummary =
-                          repoStateSummaries.get(group.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY;
-                        return (
-                          <View key={group.id} style={styles.repoGroup}>
-                            <Pressable
-                              accessibilityRole="button"
-                              accessibilityLabel={`Open ${group.label} repository`}
-                              onPress={() => setActiveRepoId(group.id)}
-                              style={({ pressed }) => [
-                                styles.repoRow,
-                                (droneTreeContains(group.roots, activeDroneId) ||
-                                  group.folders.some((folder) =>
-                                    droneFolderContains(folder, activeDroneId),
-                                  )) &&
-                                  styles.repoRowActive,
-                                pressed && styles.pressed,
-                              ]}
-                            >
-                              <FolderGit2 color={colors.mutedDim} size={15} strokeWidth={1.9} />
-                              <View style={styles.repoCopy}>
-                                <Text numberOfLines={1} style={styles.repoName}>
-                                  {group.label}
-                                </Text>
-                              </View>
-                              <DroneStateCounts summary={stateSummary} compact />
-                              <ChevronRight color={colors.muted} size={15} strokeWidth={2} />
-                            </Pressable>
-                          </View>
-                        );
-                      })}
-                  {!dronesLoading && !dronesReachable ? (
-                    <Text style={styles.empty}>
-                      No mesh route is currently available. Connect any paired Hub and try again.
-                    </Text>
-                  ) : !dronesLoading && dronesError ? (
-                    <View style={styles.drawerError}>
-                      <Text style={styles.drawerErrorText}>{dronesError}</Text>
-                      {onRetryDrones ? (
-                        <Pressable
-                          accessibilityRole="button"
-                          onPress={onRetryDrones}
-                          style={({ pressed }) => [styles.retry, pressed && styles.pressed]}
-                        >
-                          <Text style={styles.retryText}>Retry</Text>
-                        </Pressable>
-                      ) : null}
+                <Text style={[styles.navigationLabel, item.active && styles.navigationLabelActive]}>
+                  {item.label}
+                </Text>
+                {item.active ? <View style={styles.navigationIndicator} /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+        {showDrones ? (
+          <>
+            {activeRepo ? (
+              <View style={styles.repoNavigationHead}>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel="Back to repositories"
+                  onPress={() => setActiveRepoId(null)}
+                  style={({ pressed }) => [styles.repoNavigationBack, pressed && styles.pressed]}
+                >
+                  <View style={styles.groupIcon}>
+                    <FolderGit2 color={colors.mutedDim} size={16} strokeWidth={1.9} />
+                    <View style={styles.groupChevron}>
+                      <ChevronLeft color={colors.mutedDim} size={10} strokeWidth={2.3} />
                     </View>
-                  ) : !dronesLoading && drones.length === 0 ? (
-                    <Text style={styles.empty}>No drones are available on this device.</Text>
-                  ) : null}
-                </ScrollView>
-              </>
+                  </View>
+                  <View style={styles.repoCopy}>
+                    <Text numberOfLines={1} style={styles.repoNavigationTitle}>
+                      {activeRepo.label}
+                    </Text>
+                  </View>
+                  <DroneStateCounts
+                    summary={
+                      repoStateSummaries.get(activeRepo.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY
+                    }
+                    compact
+                  />
+                </Pressable>
+                <Pressable
+                  accessibilityRole="button"
+                  accessibilityLabel={`Create drone in ${activeRepo.label}`}
+                  accessibilityState={{ disabled: !onCreateDrone }}
+                  disabled={!onCreateDrone}
+                  onPress={() => onCreateDrone?.(activeRepo.repoPath)}
+                  style={({ pressed }) => [
+                    styles.repoCreate,
+                    !onCreateDrone && styles.repoCreateDisabled,
+                    pressed && styles.pressed,
+                  ]}
+                >
+                  <Plus color={colors.accent} size={18} strokeWidth={2.2} />
+                </Pressable>
+              </View>
+            ) : null}
+            {activeRepo ? (
+              <FlatList<MobileDroneSidebarEntry>
+                key={`repo:${activeRepo.id}`}
+                style={styles.scroll}
+                contentContainerStyle={styles.droneList}
+                data={activeRepo.entries}
+                keyExtractor={(entry) =>
+                  entry.kind === 'drone'
+                    ? `drone:${entry.node.drone.id}`
+                    : `folder:${entry.folder.id}`
+                }
+                renderItem={({ item: entry }) => (
+                  <DrawerDroneEntry
+                    entry={entry}
+                    depth={0}
+                    collapsedFolderIds={collapsedFolderIds}
+                    activeDroneId={activeDroneId}
+                    activeChatName={activeChatName}
+                    droneOperationById={droneOperationById}
+                    onToggleFolder={toggleFolder}
+                    onSelect={(droneId, chatName) => onSelectDroneChat?.(droneId, chatName)}
+                  />
+                )}
+                ListFooterComponent={listStatus}
+                initialNumToRender={10}
+                maxToRenderPerBatch={8}
+                updateCellsBatchingPeriod={24}
+                windowSize={7}
+                removeClippedSubviews={Platform.OS === 'android'}
+                keyboardShouldPersistTaps="handled"
+              />
             ) : (
-              <View
-                onStartShouldSetResponder={() => true}
-                onResponderGrant={onDrawerTouchStart}
-                onResponderMove={onDrawerTouchMove}
-                onResponderRelease={settleSwipe}
-                onResponderTerminate={settleSwipe}
-                style={styles.drawerFill}
+              <FlatList<MobileDroneRepoGroup>
+                key="repositories"
+                style={styles.scroll}
+                contentContainerStyle={styles.droneList}
+                data={droneGroups}
+                keyExtractor={(group) => group.id}
+                renderItem={({ item: group }) => {
+                  const stateSummary =
+                    repoStateSummaries.get(group.id) ?? EMPTY_MOBILE_DRONE_STATE_SUMMARY;
+                  return (
+                    <View style={styles.repoGroup}>
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Open ${group.label} repository`}
+                        onPress={() => setActiveRepoId(group.id)}
+                        style={({ pressed }) => [
+                          styles.repoRow,
+                          (droneTreeContains(group.roots, activeDroneId) ||
+                            group.folders.some((folder) =>
+                              droneFolderContains(folder, activeDroneId),
+                            )) &&
+                            styles.repoRowActive,
+                          pressed && styles.pressed,
+                        ]}
+                      >
+                        <FolderGit2 color={colors.mutedDim} size={15} strokeWidth={1.9} />
+                        <View style={styles.repoCopy}>
+                          <Text numberOfLines={1} style={styles.repoName}>
+                            {group.label}
+                          </Text>
+                        </View>
+                        <DroneStateCounts summary={stateSummary} compact />
+                        <ChevronRight color={colors.muted} size={15} strokeWidth={2} />
+                      </Pressable>
+                    </View>
+                  );
+                }}
+                ListFooterComponent={listStatus}
+                initialNumToRender={10}
+                maxToRenderPerBatch={8}
+                updateCellsBatchingPeriod={24}
+                windowSize={7}
+                removeClippedSubviews={Platform.OS === 'android'}
+                keyboardShouldPersistTaps="handled"
               />
             )}
-            <DrawerVoiceRecordingIndicator />
-          </View>
-        </Animated.View>
+          </>
+        ) : (
+          <View style={styles.drawerFill} />
+        )}
+        <DrawerVoiceRecordingIndicator />
       </View>
-    </Modal>
+    </DrawerWorkingPhaseContext.Provider>
   );
 }
 
 const styles = StyleSheet.create({
-  layer: { flex: 1 },
+  host: { flex: 1 },
   backdrop: {
-    position: 'absolute',
-    top: 0,
-    left: 0,
-    right: 0,
-    bottom: 0,
     backgroundColor: colors.overlay,
   },
   drawer: {
@@ -1148,7 +1203,7 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 10, height: 0 },
     overflow: 'hidden',
   },
-  drawerTouchSurface: { flex: 1 },
+  drawerContent: { flex: 1, backgroundColor: colors.panel },
   header: {
     minHeight: 64,
     flexDirection: 'row',
