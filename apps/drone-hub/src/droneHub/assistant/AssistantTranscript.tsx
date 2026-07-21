@@ -703,6 +703,35 @@ export function formatAssistantRunDuration(durationMs: number): string {
   return formatWorkingDuration(durationMs);
 }
 
+export function AssistantRunActivity({
+  active,
+  startedAt,
+  endedAt,
+}: {
+  active: boolean;
+  startedAt?: number;
+  endedAt?: number;
+}) {
+  const fallbackStart = React.useRef(Date.now()).current;
+  const [now, setNow] = React.useState(() => Date.now());
+
+  React.useEffect(() => {
+    if (!active) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [active]);
+
+  const start = Number.isFinite(startedAt) ? Number(startedAt) : fallbackStart;
+  const end = active ? now : Number.isFinite(endedAt) ? Number(endedAt) : start;
+
+  return (
+    <AgentRunSummaryLine
+      active={active}
+      durationMs={Math.max(0, end - start)}
+    />
+  );
+}
+
 function ToolRunChevron({ open }: { open: boolean }) {
   return (
     <svg

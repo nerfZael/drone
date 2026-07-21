@@ -28,7 +28,6 @@ import {
   IconFolder,
   IconFolderGit,
   IconList,
-  IconMessageCircle,
   IconMore,
   IconNetwork,
   IconPencil,
@@ -2521,7 +2520,7 @@ export function DroneSidebar({
                     ) : null}
                     {activeRepositoryNavigationItem.stateSummary.unread > 0 ? (
                       <span className="inline-flex items-center gap-1 text-[var(--green)]">
-                        <IconMessageCircle className="h-3 w-3 [stroke-width:2.2]" />
+                        <SidebarItemStateIndicator state="idle" unread />
                         {activeRepositoryNavigationItem.stateSummary.unread}
                       </span>
                     ) : null}
@@ -2752,7 +2751,7 @@ export function DroneSidebar({
                           ) : null}
                           {item.stateSummary.unread > 0 ? (
                             <span className="inline-flex items-center gap-1 text-[var(--green)]">
-                              <IconMessageCircle className="h-3 w-3 [stroke-width:2.2]" />
+                              <SidebarItemStateIndicator state="idle" unread />
                               {item.stateSummary.unread}
                             </span>
                           ) : null}

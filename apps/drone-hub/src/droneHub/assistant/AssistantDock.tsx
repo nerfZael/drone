@@ -46,6 +46,7 @@ import {
 import {
   AssistantQueuedPromptRow,
   AssistantMessageRow,
+  AssistantRunActivity,
   AssistantThinkingRow,
   ToolRunActivity,
 } from './AssistantTranscript';
@@ -57,8 +58,10 @@ import {
 } from './assistant-formatters';
 import {
   assistantHasEnabledMcpGroup,
+  assistantMessageTimestampMs,
   assistantPromptHasVisibleUserMessage,
   compactPreview,
+  directAssistantRunTiming,
   isChatIdleToolName,
   lastAssistantContentBlock,
   latestThinkingText,
@@ -92,7 +95,6 @@ import type {
   AssistantDroneReference,
   AssistantMessage,
   AssistantModelOption,
-  AssistantPromptDeliveryMode,
   AssistantProviderId,
   AssistantScopeDraft,
   AssistantScopeDrone,
@@ -114,14 +116,6 @@ const ASSISTANT_SCROLL_BOTTOM_THRESHOLD_PX = 48;
 const EMPTY_ASSISTANT_MODEL_OPTIONS: AssistantModelOption[] = [];
 const EMPTY_ASSISTANT_TOOL_SUMMARIES: AssistantToolSummary[] = [];
 const EMPTY_ASSISTANT_WORKSPACES: AssistantWorkspaceSummary[] = [];
-
-function assistantMessageTimestampMs(message: AssistantMessage | undefined): number | undefined {
-  if (!message) return undefined;
-  const value = message.createdAt ?? message.timestamp;
-  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined;
-  const parsed = Date.parse(String(value ?? ''));
-  return Number.isFinite(parsed) ? parsed : undefined;
-}
 
 function readInitialFilesOpen(): boolean {
   if (typeof window === 'undefined') return false;
@@ -403,7 +397,6 @@ export function AssistantDock({
       current.scrollTop = previousTop + Math.max(0, current.scrollHeight - previousHeight);
     });
   }, [blipSession]);
-  const promptDeliveryMode: AssistantPromptDeliveryMode = activeThread?.promptDeliveryMode === 'asap' ? 'asap' : 'queue';
   const activeAccessScope: AssistantAccessScope | null = activeThread?.accessScope ?? snapshot?.accessScope ?? null;
   const activeAccessScopeDroneIdsKey = activeAccessScope?.droneIds?.join('\u0000') ?? '';
   const activePendingApprovals = React.useMemo(
@@ -1575,6 +1568,23 @@ export function AssistantDock({
           />
         ),
       });
+      if (item.message.role === 'user') {
+        const directRun = directAssistantRunTiming(visibleItems, itemIndex);
+        if (directRun) {
+          const directRunActive = running && itemIndex === latestUserItemIndex;
+          nativeTranscriptItems.push({
+            key: `direct-run:${item.key}:${directRunActive ? 'active' : 'complete'}`,
+            kind: 'status',
+            content: (
+              <AssistantRunActivity
+                active={directRunActive}
+                startedAt={directRun.startedAt}
+                endedAt={directRun.endedAt}
+              />
+            ),
+          });
+        }
+      }
       continue;
     }
 
@@ -1871,13 +1881,6 @@ export function AssistantDock({
               sending={scopeSyncBusy}
               waiting={running}
               disabled={!activeThread}
-              modeHint={
-                running
-                  ? promptDeliveryMode === 'asap'
-                    ? 'Sends at the next turn'
-                    : 'Queues after the current run'
-                  : ''
-              }
               composerContext={nativeComposerContext}
               composerControls={nativeComposerControls}
               onStop={() => stop()}
