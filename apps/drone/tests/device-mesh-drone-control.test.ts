@@ -535,6 +535,45 @@ describe('device mesh drone summaries', () => {
     }
   });
 
+  test('loads a historical file diff through the existing chat read permission', async () => {
+    const originalFetch = globalThis.fetch;
+    const requestedPaths: string[] = [];
+    globalThis.fetch = (async (input) => {
+      const url = new URL(String(input));
+      requestedPaths.push(`${url.pathname}${url.search}`);
+      return Response.json({
+        ok: true,
+        diff: {
+          path: 'src/a.ts',
+          patch: '+new line\n',
+          truncated: false,
+          owner: { droneId: 'drone-1', chatName: 'default', promptId: 'prompt-1' },
+        },
+      });
+    }) as typeof fetch;
+    try {
+      const capability = createDroneControlCapability({
+        baseUrl: () => 'http://127.0.0.1:7777',
+        apiToken: 'test',
+      });
+      await expect(
+        capability.invoke('chat.read', {
+          droneId: 'drone-1',
+          chatName: 'default',
+          diffArtifactId: '018fdce7-6e20-7d31-a78c-3f95d665cc72',
+          diffPath: 'src/a.ts',
+        }),
+      ).resolves.toMatchObject({
+        diff: { path: 'src/a.ts', patch: '+new line\n', truncated: false },
+      });
+      expect(requestedPaths).toEqual([
+        '/api/agent-run-diffs/018fdce7-6e20-7d31-a78c-3f95d665cc72/file?path=src%2Fa.ts',
+      ]);
+    } finally {
+      globalThis.fetch = originalFetch;
+    }
+  });
+
   test('forwards permission-scoped pull request reads and actions', async () => {
     const originalFetch = globalThis.fetch;
     const requests: Array<{ url: string; method: string; body: string }> = [];

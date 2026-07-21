@@ -533,6 +533,32 @@ export function createDroneControlCapability(
         return { nativeChatId, snapshot };
       };
       if (operation === 'chat.read') {
+        const diffArtifactId = optionalText(payload.diffArtifactId);
+        const diffPath = optionalText(payload.diffPath);
+        if (diffArtifactId || diffPath) {
+          if (!diffArtifactId || !diffPath) {
+            throw Object.assign(new Error('diffArtifactId and diffPath are required together'), {
+              code: 'INVALID_REQUEST',
+            });
+          }
+          const response = await localHubRequest(
+            access,
+            `/api/agent-run-diffs/${encodeURIComponent(diffArtifactId)}/file?path=${encodeURIComponent(diffPath)}`,
+          );
+          const owner = object(response?.diff?.owner);
+          const ownerThreadId = optionalText(owner.threadId);
+          if (ownerThreadId) {
+            await resolveNativeChat(ownerThreadId);
+          } else if (
+            requiredText(owner.droneId, 'artifact owner droneId') !== droneId ||
+            optionalText(owner.chatName) !== chatName
+          ) {
+            throw Object.assign(new Error('changed-files artifact does not belong to this chat'), {
+              code: 'INVALID_REQUEST',
+            });
+          }
+          return response;
+        }
         const [result, pendingResult] = await Promise.all([
           localHubRequest(access, chatPath),
           localHubRequest(access, `${chatPath}/pending`),

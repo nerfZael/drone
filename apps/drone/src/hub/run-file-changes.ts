@@ -13,6 +13,10 @@ import type {
 
 import { dvmExec } from '../host/dvm';
 import { normalizeDroneRuntime } from '../host/runtime';
+import {
+  persistAgentRunDiffArtifact,
+  type AgentRunDiffArtifactOwner,
+} from './agent-run-diff-artifacts';
 
 const MAX_PERSISTED_FILES_PER_WORKSPACE = 200;
 
@@ -27,6 +31,7 @@ export type AgentRunFileChangesBaseline = {
   label: string;
   repoRoot: string;
   treeOid: string;
+  owner: AgentRunDiffArtifactOwner;
 };
 
 function isRepoAttachedDrone(drone: any): boolean {
@@ -226,13 +231,38 @@ async function summarizeTrees(input: {
   const additions = entries.reduce((sum, entry) => sum + entry.additions, 0);
   const deletions = entries.reduce((sum, entry) => sum + entry.deletions, 0);
   const truncated = entries.length > MAX_PERSISTED_FILES_PER_WORKSPACE;
+  const persistedEntries = entries.slice(0, MAX_PERSISTED_FILES_PER_WORKSPACE);
+  const diffArtifactId = await persistAgentRunDiffArtifact({
+    owner: input.baseline.owner ?? { droneId: input.baseline.droneId },
+    targetId: input.baseline.targetId,
+    label: input.baseline.label,
+    entries: persistedEntries,
+    readPatch: async (entry) => {
+      const paths = [
+        ...new Set(
+          [entry.originalPath, entry.path].filter((value): value is string => Boolean(value)),
+        ),
+      ];
+      return await gitOrThrow(input.runGit, [
+        'diff',
+        '--no-color',
+        '--no-ext-diff',
+        '--find-renames',
+        '--unified=3',
+        ...revisionArgs,
+        '--',
+        ...paths,
+      ]);
+    },
+  }).catch(() => null);
   return {
     targetId: input.baseline.targetId,
     droneId: input.baseline.droneId,
     label: input.baseline.label,
     repoRoot: input.repoRoot,
+    ...(diffArtifactId ? { diffArtifactId } : {}),
     counts: { changed: entries.length, additions, deletions },
-    entries: entries.slice(0, MAX_PERSISTED_FILES_PER_WORKSPACE),
+    entries: persistedEntries,
     ...(truncated ? { truncated: true } : {}),
   };
 }
@@ -284,6 +314,7 @@ function droneCaptureTarget(droneId: string, drone: any): {
 export async function captureDroneRunFileChangesBaseline(input: {
   droneId: string;
   drone: any;
+  owner?: Omit<AgentRunDiffArtifactOwner, 'droneId'>;
 }): Promise<AgentRunFileChangesBaseline | null> {
   const droneId = String(input.droneId ?? '').trim();
   const target = droneId ? droneCaptureTarget(droneId, input.drone) : null;
@@ -297,6 +328,7 @@ export async function captureDroneRunFileChangesBaseline(input: {
     label: target.label,
     repoRoot: snapshot.repoRoot,
     treeOid: snapshot.treeOid,
+    owner: { droneId, ...(input.owner ?? {}) },
   };
 }
 

@@ -86,11 +86,56 @@ function TypingDots({ label = 'Assistant is working' }: { label?: string }) {
 
 function ChangedFilesSummary({
   item,
+  onLoadDiff,
 }: {
   item: Extract<AssistantRenderItem, { type: 'runSummary' }>;
+  onLoadDiff?: (input: { artifactId: string; path: string }) => Promise<{
+    patch: string;
+    truncated?: boolean;
+  }>;
 }) {
   const [expanded, setExpanded] = React.useState(false);
+  const [openDiffKey, setOpenDiffKey] = React.useState('');
+  const [diffs, setDiffs] = React.useState<
+    Record<
+      string,
+      | { status: 'loading' }
+      | { status: 'loaded'; patch: string; truncated: boolean }
+      | { status: 'error'; message: string }
+    >
+  >({});
   const summary = item.fileChanges;
+  const openDiff = (artifactId: string, filePath: string, force = false) => {
+    if (!onLoadDiff) return;
+    const key = `${artifactId}\u0000${filePath}`;
+    if (!force && openDiffKey === key) {
+      setOpenDiffKey('');
+      return;
+    }
+    setOpenDiffKey(key);
+    if (!force && diffs[key]) return;
+    setDiffs((current) => ({ ...current, [key]: { status: 'loading' } }));
+    void onLoadDiff({ artifactId, path: filePath })
+      .then((result) => {
+        setDiffs((current) => ({
+          ...current,
+          [key]: {
+            status: 'loaded',
+            patch: String(result.patch ?? ''),
+            truncated: result.truncated === true,
+          },
+        }));
+      })
+      .catch((error: any) => {
+        setDiffs((current) => ({
+          ...current,
+          [key]: {
+            status: 'error',
+            message: String(error?.message ?? error ?? 'Unable to load historical diff.'),
+          },
+        }));
+      });
+  };
   return (
     <View style={styles.changedFilesCard}>
       <Pressable
@@ -127,19 +172,97 @@ function ChangedFilesSummary({
               {summary.workspaces.length > 1 ? (
                 <Text style={styles.changedFilesWorkspace}>{workspace.label}</Text>
               ) : null}
-              {workspace.entries.map((entry) => (
-                <View key={`${entry.status}:${entry.path}`} style={styles.changedFilesRow}>
-                  <Text style={styles.changedFilesStatus}>
-                    {entry.status === 'added' ? 'A' : entry.status === 'deleted' ? 'D' : entry.status === 'renamed' ? 'R' : 'M'}
-                  </Text>
-                  <Text numberOfLines={1} style={styles.changedFilesPath}>{entry.path}</Text>
-                  {!entry.binary && (entry.additions > 0 || entry.deletions > 0) ? (
-                    <Text style={styles.changedFilesLineCounts}>
-                      {entry.additions > 0 ? `+${entry.additions}` : ''}{entry.additions > 0 && entry.deletions > 0 ? ' ' : ''}{entry.deletions > 0 ? `-${entry.deletions}` : ''}
+              {workspace.entries.map((entry) => {
+                const artifactId = workspace.diffArtifactId;
+                const diffKey = artifactId ? `${artifactId}\u0000${entry.path}` : '';
+                const open = Boolean(diffKey && openDiffKey === diffKey);
+                const diff = diffKey ? diffs[diffKey] : undefined;
+                const row = (
+                  <View style={styles.changedFilesRow}>
+                    <Text style={styles.changedFilesStatus}>
+                      {entry.status === 'added'
+                        ? 'A'
+                        : entry.status === 'deleted'
+                          ? 'D'
+                          : entry.status === 'renamed'
+                            ? 'R'
+                            : 'M'}
                     </Text>
-                  ) : null}
-                </View>
-              ))}
+                    <Text numberOfLines={1} style={styles.changedFilesPath}>
+                      {entry.path}
+                    </Text>
+                    {!entry.binary && (entry.additions > 0 || entry.deletions > 0) ? (
+                      <Text style={styles.changedFilesLineCounts}>
+                        {entry.additions > 0 ? `+${entry.additions}` : ''}
+                        {entry.additions > 0 && entry.deletions > 0 ? ' ' : ''}
+                        {entry.deletions > 0 ? `-${entry.deletions}` : ''}
+                      </Text>
+                    ) : null}
+                    {artifactId && onLoadDiff ? (
+                      open ? (
+                        <ChevronDown color={colors.muted} size={12} />
+                      ) : (
+                        <ChevronRight color={colors.muted} size={12} />
+                      )
+                    ) : null}
+                  </View>
+                );
+                return (
+                  <View key={`${entry.status}:${entry.path}`}>
+                    {artifactId && onLoadDiff ? (
+                      <Pressable
+                        accessibilityRole="button"
+                        accessibilityLabel={`Show the diff captured for ${entry.path}`}
+                        accessibilityState={{ expanded: open }}
+                        onPress={() => openDiff(artifactId, entry.path)}
+                        style={({ pressed }) => pressed && styles.changedFilesPressed}
+                      >
+                        {row}
+                      </Pressable>
+                    ) : (
+                      row
+                    )}
+                    {open && diff ? (
+                      <View style={styles.changedFilesDiffPanel}>
+                        {diff.status === 'loading' ? (
+                          <View style={styles.changedFilesDiffLoading}>
+                            <ActivityIndicator color={colors.accent} size="small" />
+                            <Text style={styles.changedFilesDiffHint}>
+                              Loading historical diff…
+                            </Text>
+                          </View>
+                        ) : diff.status === 'error' ? (
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel="Retry loading historical diff"
+                            onPress={() => openDiff(artifactId!, entry.path, true)}
+                            style={({ pressed }) => [
+                              styles.changedFilesDiffError,
+                              pressed && styles.changedFilesPressed,
+                            ]}
+                          >
+                            <Text style={styles.changedFilesDiffErrorText}>{diff.message}</Text>
+                            <Text style={styles.changedFilesDiffRetry}>Retry</Text>
+                          </Pressable>
+                        ) : (
+                          <>
+                            <ScrollView horizontal showsHorizontalScrollIndicator>
+                              <Text selectable style={styles.changedFilesDiffText}>
+                                {diff.patch.slice(0, 80_000)}
+                              </Text>
+                            </ScrollView>
+                            {diff.truncated || diff.patch.length > 80_000 ? (
+                              <Text style={styles.changedFilesDiffHint}>
+                                Diff preview was limited for performance.
+                              </Text>
+                            ) : null}
+                          </>
+                        )}
+                      </View>
+                    ) : null}
+                  </View>
+                );
+              })}
             </View>
           ))}
         </View>
@@ -780,6 +903,7 @@ export function MobileAssistantTranscript({
   fullMessageLoadingId = '',
   linkedPullRequests,
   onOpenFileReference,
+  onLoadRunFileDiff,
 }: {
   messages: AssistantMessage[];
   running?: boolean;
@@ -801,6 +925,10 @@ export function MobileAssistantTranscript({
   fullMessageLoadingId?: string;
   linkedPullRequests?: MobileLinkedPullRequestContext;
   onOpenFileReference?: (reference: MobileFileReference) => void;
+  onLoadRunFileDiff?: (input: { artifactId: string; path: string }) => Promise<{
+    patch: string;
+    truncated?: boolean;
+  }>;
 }) {
   const items = React.useMemo(
     () => compactRepeatedToolItems(renderItemsFromMessages(messages)),
@@ -843,7 +971,7 @@ export function MobileAssistantTranscript({
       return <ToolGroupRow key={item.key} item={item} />;
     }
     if (item.type === 'runSummary') {
-      return <ChangedFilesSummary key={item.key} item={item} />;
+      return <ChangedFilesSummary key={item.key} item={item} onLoadDiff={onLoadRunFileDiff} />;
     }
     const text = visibleMessageText(item.message).trim();
     const images = messageImageParts(item.message);
@@ -1142,9 +1270,47 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 5,
   },
-  changedFilesStatus: { width: 12, color: colors.accent, fontSize: 10, fontFamily: 'monospace', fontWeight: '700' },
+  changedFilesStatus: {
+    width: 12,
+    color: colors.accent,
+    fontSize: 10,
+    fontFamily: 'monospace',
+    fontWeight: '700',
+  },
   changedFilesPath: { flex: 1, color: colors.text, fontSize: 10, fontFamily: 'monospace' },
   changedFilesLineCounts: { color: colors.muted, fontSize: 9, fontFamily: 'monospace' },
+  changedFilesDiffPanel: {
+    maxHeight: 330,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+    backgroundColor: colors.surface0,
+    paddingVertical: 8,
+  },
+  changedFilesDiffLoading: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 12,
+  },
+  changedFilesDiffHint: { color: colors.muted, fontSize: 9, paddingHorizontal: 12, paddingTop: 6 },
+  changedFilesDiffError: {
+    minHeight: 42,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 12,
+    paddingHorizontal: 12,
+  },
+  changedFilesDiffErrorText: { flex: 1, color: colors.danger, fontSize: 10, lineHeight: 14 },
+  changedFilesDiffRetry: { color: colors.accent, fontSize: 10, fontWeight: '600' },
+  changedFilesDiffText: {
+    color: colors.text,
+    fontSize: 9,
+    lineHeight: 14,
+    fontFamily: 'monospace',
+    paddingHorizontal: 12,
+  },
   messages: { gap: 0 },
   runBody: { marginHorizontal: 10 },
   runSummary: {

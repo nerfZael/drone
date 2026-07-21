@@ -1595,6 +1595,7 @@ export function createChatPromptRuntime(deps: ChatPromptRuntimeDependencies) {
       const baseline = await captureDroneRunFileChangesBaseline({
         droneId: input.droneId,
         drone: input.drone,
+        owner: { chatName: input.chatName, promptId: input.promptId },
       });
       if (!baseline) return;
       await updatePendingPrompt({

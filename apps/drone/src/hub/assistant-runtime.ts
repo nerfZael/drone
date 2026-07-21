@@ -230,7 +230,11 @@ export function createAssistantRuntime(deps: AssistantRuntimeDependencies) {
           .then(async (registry: any) => {
             const drone = registry?.drones?.[droneId];
             if (!drone) return null;
-            const baseline = await captureDroneRunFileChangesBaseline({ droneId, drone });
+            const baseline = await captureDroneRunFileChangesBaseline({
+              droneId,
+              drone,
+              owner: { threadId, turnId: activeRunTurnId },
+            });
             return baseline ? { baseline, drone } : null;
           })
           .catch((error: any) => {
